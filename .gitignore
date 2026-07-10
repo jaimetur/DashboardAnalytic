@@ -3,7 +3,7 @@ __pycache__/
 *.sqlite3
 *.db
 .pytest_cache/
-.venv/
+.venv_macmini/
 .env
 .env.local
 .coverage

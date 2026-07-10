@@ -1,7 +1,7 @@
 # Evita incluir archivos innecesarios en la imagen Docker
 
 # Entornos virtuales
-.venv/
+.venv_macmini/
 .venv_mac/
 .venv_macmini/
 .venv_macbook/
