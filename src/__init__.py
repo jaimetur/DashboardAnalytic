@@ -1,0 +1,1 @@
+"""BenchAutomations application package."""

@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="dashboard-grid admin-grid">
+  <section class="panel accent-panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Administration</p>
+        <h2>Admin panel</h2>
+      </div>
+      <span class="pill">{{ user.username }} · administrator</span>
+    </div>
+    {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+    <form class="form-stack narrow-form" action="/admin/users" method="post">
+      <h3>Create user</h3>
+      <label>Username<input type="text" name="username" required></label>
+      <label>Password<input type="password" name="password" required></label>
+      <label>Role
+        <select name="role">
+          <option value="user">user</option>
+          <option value="admin">admin</option>
+        </select>
+      </label>
+      <button type="submit">Create account</button>
+    </form>
+  </section>
+
+  <section class="panel wide-panel">
+    <div class="section-head"><div><p class="eyebrow">Identity</p><h2>Users</h2></div></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Active</th><th>Created</th></tr></thead>
+        <tbody>{% for row in users %}<tr><td>{{ row['id'] }}</td><td>{{ row['username'] }}</td><td>{{ row['role'] }}</td><td>{{ row['active'] }}</td><td>{{ row['created_at'] }}</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel wide-panel">
+    <div class="section-head"><div><p class="eyebrow">Datasets</p><h2>Uploaded sources</h2></div></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>Name</th><th>Path</th><th>User</th><th>Uploaded</th></tr></thead>
+        <tbody>{% for row in datasets %}<tr><td>{{ row['id'] }}</td><td>{{ row['file_name'] }}</td><td>{{ row['stored_path'] }}</td><td>{{ row['uploaded_by'] }}</td><td>{{ row['uploaded_at'] }}</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel wide-panel">
+    <div class="section-head"><div><p class="eyebrow">Audit</p><h2>Access and actions log</h2></div></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>User</th><th>Action</th><th>Details</th><th>Date</th></tr></thead>
+        <tbody>{% for row in logs %}<tr><td>{{ row['id'] }}</td><td>{{ row['username'] }}</td><td>{{ row['action'] }}</td><td>{{ row['details'] }}</td><td>{{ row['created_at'] }}</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+  </section>
+</section>
+{% endblock %}

@@ -1,0 +1,6 @@
+Bench Automations Docker usage
+
+1. Review the existing .env file if needed.
+2. Review ports and volume paths.
+3. Start development with docker-compose-dev.yml.
+4. Start production with docker-compose.yml.

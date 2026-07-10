@@ -1,0 +1,135 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="dashboard-grid">
+  <section class="panel accent-panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Workspace</p>
+        <h2>User panel</h2>
+      </div>
+      <span class="pill">{{ user.username }} · {{ user.role }}</span>
+    </div>
+    {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+    <div class="split-grid">
+      <form class="form-stack" action="/dashboard/upload" method="post" enctype="multipart/form-data">
+        <h3>1. Upload data source</h3>
+        <label>Input file<input type="file" name="dataset_file" accept=".csv,.xlsx,.xls" required></label>
+        <button type="submit">Store dataset</button>
+      </form>
+      <form class="form-stack" action="/dashboard/analyze" method="post">
+        <h3>2. Analyse dataset</h3>
+        <label>Dataset
+          <select name="dataset_path" required>
+            <option value="">Select a stored dataset</option>
+            {% for dataset in datasets %}
+            <option value="{{ dataset['stored_path'] }}" {% if active_dataset_path == dataset['stored_path'] %}selected{% endif %}>{{ dataset['file_name'] }} · {{ dataset['uploaded_by'] }} · {{ dataset['uploaded_at'] }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Metric column<input type="text" name="metric" value="{{ analysis.selected_metric if analysis else '' }}" placeholder="score"></label>
+        <label>Market<input type="text" name="market" value="{{ analysis.filters.market if analysis else '' }}" placeholder="ES"></label>
+        <label>Period<input type="text" name="period" value="{{ analysis.filters.period if analysis else '' }}" placeholder="2026-Q2"></label>
+        <label>Aggregation column<input type="text" name="aggregation" value="{{ analysis.filters.aggregation if analysis else 'all' }}" placeholder="cluster"></label>
+        <button type="submit">Run analytics</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Delivery</p>
+        <h2>Report exports</h2>
+      </div>
+    </div>
+    <div class="inline-actions">
+      <form method="post" action="/dashboard/export/word">
+        <input type="hidden" name="dataset_path" value="{{ active_dataset_path or '' }}">
+        <input type="hidden" name="metric" value="{{ analysis.selected_metric if analysis else '' }}">
+        <input type="hidden" name="market" value="{{ analysis.filters.market if analysis else '' }}">
+        <input type="hidden" name="period" value="{{ analysis.filters.period if analysis else '' }}">
+        <input type="hidden" name="aggregation" value="{{ analysis.filters.aggregation if analysis else 'all' }}">
+        <button type="submit" {% if not analysis %}disabled{% endif %}>Export Word</button>
+      </form>
+      <form method="post" action="/dashboard/export/powerpoint">
+        <input type="hidden" name="dataset_path" value="{{ active_dataset_path or '' }}">
+        <input type="hidden" name="metric" value="{{ analysis.selected_metric if analysis else '' }}">
+        <input type="hidden" name="market" value="{{ analysis.filters.market if analysis else '' }}">
+        <input type="hidden" name="period" value="{{ analysis.filters.period if analysis else '' }}">
+        <input type="hidden" name="aggregation" value="{{ analysis.filters.aggregation if analysis else 'all' }}">
+        <button type="submit" {% if not analysis %}disabled{% endif %}>Export PowerPoint</button>
+      </form>
+    </div>
+  </section>
+
+  {% if analysis %}
+  <section class="metrics-grid">
+    {% for key, value in analysis.kpis.items() %}
+    <article class="metric-card">
+      <span>{{ key.replace('_', ' ') }}</span>
+      <strong>{{ value }}</strong>
+    </article>
+    {% endfor %}
+  </section>
+
+  <section class="panel wide-panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Visual analytics</p>
+        <h2>CDF curve</h2>
+      </div>
+      <span class="pill">Metric: {{ analysis.selected_metric }}</span>
+    </div>
+    <div class="chart-card" data-chart='{{ analysis.cdf_chart | tojson }}'>
+      <svg class="chart-svg" viewBox="0 0 600 280" preserveAspectRatio="none"></svg>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Scoring</p>
+        <h2>Percentile scorecard</h2>
+      </div>
+    </div>
+    <div class="score-grid">
+      {% for item in analysis.scorecard %}
+      <article class="score-item">
+        <span>{{ item.label }}</span>
+        <strong>{{ item.value }}</strong>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel wide-panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Operational table</p>
+        <h2>Top records</h2>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            {% for header in analysis.table_rows[0].keys() if analysis.table_rows %}
+            <th>{{ header }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in analysis.table_rows %}
+          <tr>
+            {% for value in row.values() %}
+            <td>{{ value }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+</section>
+{% endblock %}

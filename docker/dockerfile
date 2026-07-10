@@ -1,0 +1,23 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY src ./src
+COPY help ./help
+COPY README.md ./README.md
+COPY CHANGELOG.md ./CHANGELOG.md
+COPY ROADMAP.md ./ROADMAP.md
+COPY DOWNLOAD.md ./DOWNLOAD.md
+COPY CONTRIBUTING.md ./CONTRIBUTING.md
+COPY CODE_OF_CONDUCT.md ./CODE_OF_CONDUCT.md
+
+RUN mkdir -p /app/config /app/data/input /app/data/output /app/data/exports
+
+EXPOSE 7278
+CMD ["uvicorn", "src.BenchAutomations:app", "--host", "0.0.0.0", "--port", "7278"]

@@ -1,0 +1,18 @@
+services:
+  app:
+    image: ${IMAGE_NAME}:${IMAGE_TAG}
+    container_name: ${CONTAINER_NAME}
+    env_file:
+      - .env
+    ports:
+      - "${APP_PORT}:7278"
+    volumes:
+      - ${HOST_CONFIG_DIR}:/app/config
+      - ${HOST_DATA_DIR}:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7278/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
