@@ -14,7 +14,7 @@ def test_login_page_loads(client) -> None:
     assert response.status_code == 200
     assert "Sign in" in response.text
     assert "Dashboard Analytic" in response.text
-    assert "2026-07-13" in response.text
+    assert "2026-07-14" in response.text
     assert "Default Access:" in response.text
     assert "admin / admin123" in response.text
     assert "demo / demo123" in response.text
@@ -265,7 +265,7 @@ def test_top_navigation_shows_document_links(client) -> None:
     response = client.get("/dashboard")
     assert response.status_code == 200
     assert "<h1>Dashboard Analytic</h1>" in response.text
-    assert "v0.1.0 · 2026-07-13" in response.text
+    assert "v0.1.0 · 2026-07-14" in response.text
     assert 'href="/documents/view/readme"' in response.text
     assert 'href="/documents/view/changelog"' in response.text
     assert 'target="_blank"' in response.text

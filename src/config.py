@@ -16,7 +16,7 @@ def project_path(env_var: str, default: str) -> Path:
 @dataclass(frozen=True)
 class Settings:
     app_name: str = os.getenv("APP_NAME", "Dashboard Analytic")
-    app_release_date: str = os.getenv("APP_RELEASE_DATE", "2026-07-13")
+    app_release_date: str = os.getenv("APP_RELEASE_DATE", "2026-07-14")
     app_host: str = os.getenv("APP_HOST", "0.0.0.0")
     app_port: int = int(os.getenv("APP_PORT", "7278"))
     dev_port: int = int(os.getenv("APP_DEV_PORT", "7279"))
