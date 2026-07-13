@@ -27,13 +27,19 @@
 - Updated production Docker compose to pull published Docker Hub images
 - Added login hero logo placement and refined login spacing
 - Replaced the browser delete confirm with a styled confirmation modal
+- Added multi-file upload with chunked file writes for large datasets
+- Updated the queue to refresh progress live without page reloads
+- Switched the upload file picker copy to English labels
 
 #### 🐛 Bug fixes:
 - Fixed default access visibility to reflect active users with default passwords only
 - Prevented removing, deactivating, or demoting the last active admin user
+- Fixed embedded document images to resolve project `static` asset paths
+- Fixed empty-state body copy alignment in the workspace panels
+- Fixed dataset selector filtering so all datasets show when no type filter is set
+- Improved dataset kind detection for `CDR-Speech` and `CDR-Data`
 
 #### 📚 Documentation:
 - Added `Readme` and `Changelog` navigation with Markdown document viewer
 - Added the app logo at the top of the `README`
 - Fixed document links to open `Readme` and `Changelog` in a new tab
-- Fixed embedded document images to resolve project `static` asset paths

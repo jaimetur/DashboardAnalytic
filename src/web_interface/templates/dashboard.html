@@ -1,8 +1,6 @@
 {% extends 'base.html' %}
 {% block content %}
 <section class="dashboard-stack spacious-stack">
-  {% if has_processing %}<div data-autorefresh="8000"></div>{% endif %}
-
   <article class="panel hero-panel upload-panel">
     <div class="section-head tight-head">
       <div>
@@ -14,16 +12,20 @@
     <p class="lede">Upload a workbook and the platform classifies, processes and prepares it for visualization without asking for manual column mapping.</p>
     <form class="upload-dropzone" action="/dashboard/upload" method="post" enctype="multipart/form-data" data-loading-label="Uploading and processing dataset">
       <label class="dropzone-field">
-        <span class="dropzone-title">Drop workbook or browse</span>
+        <span class="dropzone-title">Drop workbooks or browse</span>
         <span class="dropzone-copy">Accepted: CSV, XLS, XLSX, XLSM</span>
-        <input type="file" name="dataset_file" accept=".csv,.xlsx,.xls,.xlsm" required>
+        <span class="file-picker-shell">
+          <span class="file-picker-button">Select files</span>
+          <span class="file-picker-text" data-file-picker-text>No files selected</span>
+        </span>
+        <input type="file" name="dataset_files" accept=".csv,.xlsx,.xls,.xlsm" multiple required data-file-picker-input>
       </label>
-      <button type="submit">Upload and Process</button>
+      <button type="submit">Upload and process</button>
     </form>
-    {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+    {% if error %}<div class="alert upload-alert">{{ error }}</div>{% endif %}
   </article>
 
-  <details class="panel collapsible-panel queue-card" open>
+  <details class="panel collapsible-panel queue-card" open data-queue-status-url="/api/datasets/status" {% if has_processing %}data-queue-poll-ms="3000"{% endif %}>
     <summary class="collapsible-summary">
       <div class="section-head tight-head">
         <div>
@@ -48,25 +50,25 @@
         </thead>
         <tbody>
           {% for dataset in datasets %}
-          <tr class="{% if selected_dataset and selected_dataset.id == dataset.id %}active-row{% endif %}">
+          <tr class="{% if selected_dataset and selected_dataset.id == dataset.id %}active-row{% endif %}" data-dataset-row data-dataset-id="{{ dataset.id }}">
             <td>
-              <div class="queue-dataset-name">{{ dataset.file_name }}</div>
-              <div class="queue-dataset-path">{{ dataset.stored_path }}</div>
+              <div class="queue-dataset-name" data-queue-file-name>{{ dataset.file_name }}</div>
+              <div class="queue-dataset-path" data-queue-file-path>{{ dataset.stored_path }}</div>
             </td>
-            <td>{{ dataset.input_kind_label }}</td>
-            <td>{{ dataset.row_count or 0 }}</td>
+            <td data-queue-kind>{{ dataset.input_kind_label }}</td>
+            <td data-queue-rows>{{ dataset.row_count or 0 }}</td>
             <td>
-              <span class="queue-status-pill queue-status-{{ dataset.status }}">{{ dataset.status_label }}</span>
+              <span class="queue-status-pill queue-status-{{ dataset.status }}" data-queue-status-pill>{{ dataset.status_label }}</span>
             </td>
             <td>
               <div class="queue-progress-cell">
                 <div class="progress-shell visual-progress-shell">
-                  <div class="progress-bar status-{{ dataset.status }}" style="width: {{ dataset.progress }}%"></div>
+                  <div class="progress-bar status-{{ dataset.status }}" data-queue-progress-bar style="width: {{ dataset.progress }}%"></div>
                 </div>
-                <span>{{ dataset.progress }}%</span>
+                <span data-queue-progress-label>{{ dataset.progress }}%</span>
               </div>
             </td>
-            <td>{{ dataset.updated_at or dataset.uploaded_at }}</td>
+            <td data-queue-updated>{{ dataset.updated_at or dataset.uploaded_at }}</td>
             <td>
               <div class="queue-actions">
                 <a class="ghost-link" href="/dashboard?dataset_id={{ dataset.id }}{% if input_kind %}&input_kind={{ input_kind }}{% endif %}">Open</a>
@@ -93,14 +95,14 @@
       <article class="panel dataset-summary-panel select-dataset-card">
         <div class="section-head tight-head">
           <div>
-            <p class="eyebrow">Select Dataset</p>
+            <p class="eyebrow">Selected Dataset</p>
             <h2>{{ selected_dataset.file_name if selected_dataset else 'No dataset yet' }}</h2>
           </div>
           {% if selected_dataset %}<span class="pill status-pill status-{{ selected_dataset.status }}">{{ selected_dataset.status_label }}</span>{% endif %}
         </div>
         <form class="dataset-selector-grid" action="/dashboard" method="get" data-loading-label="Opening dataset workspace">
           <label>Input Type
-            <select name="input_kind">
+            <select name="input_kind" data-input-kind-select>
               <option value="">All Inputs</option>
               {% for kind in input_kind_options %}
               <option value="{{ kind }}" {% if input_kind == kind %}selected{% endif %}>{{ 'CDR-' + kind.title() if kind in ['voice', 'speech', 'data'] else 'Other' }}</option>
@@ -108,11 +110,9 @@
             </select>
           </label>
           <label>Dataset
-            <select name="dataset_id">
+            <select name="dataset_id" data-dataset-select>
               {% for dataset in datasets %}
-              {% if not input_kind or dataset.dataset_kind == input_kind %}
-              <option value="{{ dataset.id }}" {% if selected_dataset and selected_dataset.id == dataset.id %}selected{% endif %}>{{ dataset.file_name }}</option>
-              {% endif %}
+              <option value="{{ dataset.id }}" data-dataset-kind="{{ dataset.dataset_kind or 'generic' }}" {% if selected_dataset and selected_dataset.id == dataset.id %}selected{% endif %}>{{ dataset.file_name }}</option>
               {% endfor %}
             </select>
           </label>
@@ -275,7 +275,7 @@
       <section class="panel empty-state-panel">
         <p class="eyebrow">Waiting</p>
         <h2>Dataset still processing</h2>
-        <p class="lede">The platform will refresh the dashboard when ingestion finishes. Current state: {{ selected_dataset.status_label }}.</p>
+        <p class="lede queue-waiting-copy">The dashboard queue is updating live. Current state: <strong>{{ selected_dataset.status_label }}</strong>.</p>
       </section>
       {% else %}
       <section class="panel empty-state-panel">

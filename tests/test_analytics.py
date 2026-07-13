@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from src.modules.analytics import build_analysis, compute_cdf
-from src.modules.ingestion import load_dataset
+from src.modules.ingestion import infer_dataset_kind, load_dataset
 
 
 def test_compute_cdf_orders_and_normalizes_values() -> None:
@@ -88,3 +88,19 @@ def test_build_analysis_returns_voice_specific_kpis_and_aggregation() -> None:
     assert analysis.kpis["avg_polqa"] == 3.8667
     assert analysis.filters["aggregation"] == "operator"
     assert analysis.table_rows[0]["operator"] == "Vodafone"
+
+
+def test_infer_dataset_kind_detects_speech_and_data_from_columns() -> None:
+    speech_df = pd.DataFrame({
+        "RTP_Jitter_Avg_A": [12.0],
+        "Receive_Delay": [80.0],
+        "Recording_Technology": ["NR"],
+    })
+    data_df = pd.DataFrame({
+        "Mean_Data_Rate": [42.0],
+        "TCP_RTT_Service_Access_Delay": [120.0],
+        "Transfer_Duration": [30.0],
+    })
+
+    assert infer_dataset_kind(speech_df, "session.xlsx") == "speech"
+    assert infer_dataset_kind(data_df, "session.xlsx") == "data"

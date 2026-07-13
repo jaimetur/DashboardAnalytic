@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Annotated
 from typing import Any
 from urllib.parse import urlencode
 
@@ -305,6 +306,16 @@ def should_load_analysis(request: Request) -> bool:
     return request.query_params.get('load') == '1'
 
 
+async def save_upload_file(upload_file: UploadFile, destination: Path) -> None:
+    with destination.open('wb') as output:
+        while True:
+            chunk = await upload_file.read(1024 * 1024)
+            if not chunk:
+                break
+            output.write(chunk)
+    await upload_file.close()
+
+
 def build_default_access_accounts() -> list[dict[str, str]]:
     defaults = [
         {'username': settings.admin_username, 'password': settings.admin_password},
@@ -345,7 +356,7 @@ def build_dashboard_payload(selected_dataset: dict[str, Any] | None, request: Re
     if not selected_dataset:
         return None, {}, None, False
     if not selected_dataset['is_ready']:
-        return None, {}, 'The selected dataset has not finished processing yet.' if selected_dataset.get('status') != 'failed' else selected_dataset.get('last_error'), False
+        return None, {}, selected_dataset.get('last_error') if selected_dataset.get('status') == 'failed' else None, False
 
     filter_options = selected_dataset.get('filter_options') or {}
     filter_options = {'input_kind': [selected_dataset.get('dataset_kind') or 'generic'], **filter_options}
@@ -470,7 +481,7 @@ def dashboard(
             'analysis': analysis,
             'analysis_loaded': analysis_loaded,
             'filter_options': filter_options,
-            'input_kind': input_kind or ((selected_dataset or {}).get('dataset_kind') if selected_dataset else None),
+            'input_kind': input_kind,
             'input_kind_options': input_kind_options,
             'filter_dimensions': [
                 dimension for dimension in FILTER_DIMENSIONS_BY_KIND.get((selected_dataset or {}).get('dataset_kind') or 'generic', FILTER_DIMENSIONS)
@@ -481,15 +492,21 @@ def dashboard(
         },
     )
 
+
+@app.get('/api/datasets/status')
+def dataset_status(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    datasets = [serialize_dataset_row(row) for row in repository.list_datasets()]
+    return {'datasets': datasets}
+
+
 @app.post('/dashboard/upload', response_class=HTMLResponse)
 async def upload_dataset(
     request: Request,
     background_tasks: BackgroundTasks,
-    dataset_file: UploadFile = File(...),
+    dataset_files: Annotated[list[UploadFile], File(...)],
     user: SessionUser = Depends(current_user),
 ) -> Response:
-    extension = Path(dataset_file.filename or '').suffix.lower()
-    if extension not in settings.allowed_extensions:
+    if not dataset_files:
         return render_template(
             request,
             'dashboard.html',
@@ -500,18 +517,49 @@ async def upload_dataset(
                 'analysis': None,
                 'filter_options': {},
                 'filter_dimensions': [],
-                'has_processing': False,
-                'error': f'Unsupported file type: {extension}',
+                'input_kind_options': sorted({(serialize_dataset_row(row).get('dataset_kind') or 'generic') for row in repository.list_datasets()}),
+                'input_kind': None,
+                'has_processing': any(serialize_dataset_row(row)['status'] in {'queued', 'processing'} for row in repository.list_datasets()),
+                'error': 'No files were provided.',
             },
             status_code=400,
         )
+    invalid_extensions = sorted({
+        Path(dataset_file.filename or '').suffix.lower()
+        for dataset_file in dataset_files
+        if Path(dataset_file.filename or '').suffix.lower() not in settings.allowed_extensions
+    })
+    if invalid_extensions:
+        return render_template(
+            request,
+            'dashboard.html',
+            {
+                'user': user,
+                'datasets': [serialize_dataset_row(row) for row in repository.list_datasets()],
+                'selected_dataset': None,
+                'analysis': None,
+                'filter_options': {},
+                'filter_dimensions': [],
+                'input_kind_options': sorted({(serialize_dataset_row(row).get('dataset_kind') or 'generic') for row in repository.list_datasets()}),
+                'input_kind': None,
+                'has_processing': any(serialize_dataset_row(row)['status'] in {'queued', 'processing'} for row in repository.list_datasets()),
+                'error': f"Unsupported file type: {', '.join(invalid_extensions)}",
+            },
+            status_code=400,
+        )
+    queued_dataset_ids: list[int] = []
+    for dataset_file in dataset_files:
+        extension = Path(dataset_file.filename or '').suffix.lower()
+        destination = safe_join(settings.input_dir, dataset_file.filename or f'upload{extension}')
+        await save_upload_file(dataset_file, destination)
+        dataset_id, created = repository.add_dataset(dataset_file.filename or destination.name, str(destination), user.username)
+        repository.add_log(user.username, 'upload_dataset' if created else 'reprocess_dataset', destination.name)
+        enqueue_dataset_processing(background_tasks, dataset_id, destination, user.username)
+        queued_dataset_ids.append(dataset_id)
 
-    destination = safe_join(settings.input_dir, dataset_file.filename or f'upload{extension}')
-    destination.write_bytes(await dataset_file.read())
-    dataset_id, created = repository.add_dataset(dataset_file.filename or destination.name, str(destination), user.username)
-    repository.add_log(user.username, 'upload_dataset' if created else 'reprocess_dataset', destination.name)
-    enqueue_dataset_processing(background_tasks, dataset_id, destination, user.username)
-    return RedirectResponse(f'/dashboard?dataset_id={dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
+    if not queued_dataset_ids:
+        return RedirectResponse('/dashboard', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(f'/dashboard?dataset_id={queued_dataset_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/dashboard/retry/{dataset_id}')

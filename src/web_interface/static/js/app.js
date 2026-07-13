@@ -74,6 +74,10 @@ const confirmTitle = document.getElementById('confirm-title');
 const confirmCopy = document.getElementById('confirm-copy');
 const confirmAccept = document.getElementById('confirm-accept');
 const confirmCancel = document.getElementById('confirm-cancel');
+const filePickerInput = document.querySelector('[data-file-picker-input]');
+const filePickerText = document.querySelector('[data-file-picker-text]');
+const inputKindSelect = document.querySelector('[data-input-kind-select]');
+const datasetSelect = document.querySelector('[data-dataset-select]');
 
 function hideLoadingOverlay() {
   if (!loadingOverlay) return;
@@ -154,10 +158,105 @@ document.querySelectorAll('form[data-confirm]').forEach((form) => {
   });
 });
 
-const autoRefreshNode = document.querySelector('[data-autorefresh]');
-if (autoRefreshNode) {
-  const delay = Number(autoRefreshNode.dataset.autorefresh || '0');
-  if (delay > 0) {
-    window.setTimeout(() => window.location.reload(), delay);
+if (filePickerInput && filePickerText) {
+  filePickerInput.addEventListener('change', () => {
+    const files = Array.from(filePickerInput.files || []);
+    if (files.length === 0) {
+      filePickerText.textContent = 'No files selected';
+      return;
+    }
+    if (files.length === 1) {
+      filePickerText.textContent = files[0].name;
+      return;
+    }
+    filePickerText.textContent = `${files.length} files selected`;
+  });
+}
+
+if (inputKindSelect && datasetSelect) {
+  const syncDatasetOptions = () => {
+    const selectedKind = String(inputKindSelect.value || '');
+    const options = Array.from(datasetSelect.options);
+    let firstVisibleValue = '';
+
+    options.forEach((option) => {
+      const optionKind = String(option.dataset.datasetKind || 'generic');
+      const visible = !selectedKind || optionKind === selectedKind;
+      option.hidden = !visible;
+      option.disabled = !visible;
+      if (visible && !firstVisibleValue) {
+        firstVisibleValue = option.value;
+      }
+    });
+
+    const selectedOption = datasetSelect.selectedOptions[0];
+    if (!selectedOption || selectedOption.hidden || selectedOption.disabled) {
+      datasetSelect.value = firstVisibleValue;
+    }
+  };
+
+  inputKindSelect.addEventListener('change', syncDatasetOptions);
+  syncDatasetOptions();
+}
+
+const queueNode = document.querySelector('[data-queue-status-url]');
+if (queueNode) {
+  const url = queueNode.dataset.queueStatusUrl || '';
+  const delay = Number(queueNode.dataset.queuePollMs || '0');
+  const selectedDatasetField = document.querySelector('input[name="dataset_id"], select[name="dataset_id"]');
+  const waitingPanel = document.querySelector('.queue-waiting-copy');
+
+  const updateQueueRow = (dataset) => {
+    const row = document.querySelector(`[data-dataset-row][data-dataset-id="${dataset.id}"]`);
+    if (!row) return;
+    const kind = row.querySelector('[data-queue-kind]');
+    const rows = row.querySelector('[data-queue-rows]');
+    const statusPill = row.querySelector('[data-queue-status-pill]');
+    const progressBar = row.querySelector('[data-queue-progress-bar]');
+    const progressLabel = row.querySelector('[data-queue-progress-label]');
+    const updated = row.querySelector('[data-queue-updated]');
+
+    if (kind) kind.textContent = dataset.input_kind_label || 'Other';
+    if (rows) rows.textContent = String(dataset.row_count || 0);
+    if (statusPill) {
+      statusPill.textContent = dataset.status_label || dataset.status || 'Queued';
+      statusPill.className = `queue-status-pill queue-status-${dataset.status}`;
+    }
+    if (progressBar) {
+      progressBar.style.width = `${dataset.progress || 0}%`;
+      progressBar.className = `progress-bar status-${dataset.status}`;
+    }
+    if (progressLabel) progressLabel.textContent = `${dataset.progress || 0}%`;
+    if (updated) updated.textContent = dataset.updated_at || dataset.uploaded_at || '';
+  };
+
+  const pollQueue = async () => {
+    try {
+      const response = await fetch(url, {headers: {'Accept': 'application/json'}});
+      if (!response.ok) return;
+      const payload = await response.json();
+      const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
+      datasets.forEach(updateQueueRow);
+      const selectedDatasetId = selectedDatasetField ? selectedDatasetField.value : '';
+      if (waitingPanel && selectedDatasetId) {
+        const selected = datasets.find((dataset) => String(dataset.id) === String(selectedDatasetId));
+        if (selected) {
+          waitingPanel.innerHTML = `The dashboard queue is updating live. Current state: <strong>${selected.status_label}</strong>.`;
+          if (selected.status === 'ready') {
+            window.location.reload();
+          }
+        }
+      }
+    } catch (_error) {
+      // Ignore transient polling errors and keep the current UI state.
+    } finally {
+      if (delay > 0) {
+        window.setTimeout(pollQueue, delay);
+      }
+    }
+  };
+
+  if (url && delay > 0) {
+    window.setTimeout(pollQueue, delay);
   }
 }

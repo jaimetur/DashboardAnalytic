@@ -78,19 +78,38 @@ def _average_columns(df: pd.DataFrame, candidates: Iterable[str]) -> pd.Series:
 
 def infer_dataset_kind(df: pd.DataFrame, file_name: str = '') -> str:
     lower_name = file_name.lower()
-    if 'speech' in lower_name:
+    normalized_name = lower_name.replace('_', ' ').replace('-', ' ')
+    if 'speech' in normalized_name:
         return 'speech'
-    if 'voice' in lower_name:
+    if 'voice' in normalized_name:
         return 'voice'
-    if 'data' in lower_name:
+    if 'data' in normalized_name:
         return 'data'
     columns = set(df.columns)
-    if 'Mean_Data_Rate' in columns or 'Test_Result' in columns:
-        return 'data'
-    if 'LQ' in columns or 'RTP_Jitter_Avg_A' in columns:
-        return 'speech'
-    if 'POLQA_LQ_Avg' in columns or 'Call_Setup_Time' in columns:
-        return 'voice'
+    voice_markers = {
+        'POLQA_LQ_Avg', 'Call_Setup_Time', 'Call_Duration', 'Call_Status',
+        'Dropped_in_first_70s', 'Disturbed_Call', 'Impaired_Call',
+    }
+    speech_markers = {
+        'LQ', 'RTP_Jitter_Avg_A', 'RTP_Jitter_Avg_B', 'RTP_Packet_Loss_A',
+        'RTP_Packet_Loss_B', 'Receive_Delay', 'Listening_Technology',
+        'Recording_Technology', 'Playing_Handovers',
+    }
+    data_markers = {
+        'Mean_Data_Rate', 'TCP_Throughput', 'Data_Throughput', 'Test_Result',
+        'Transfer_Access_Duration', 'Transfer_Duration',
+        'TCP_RTT_Service_Access_Delay', 'DNS_Service_Access_Delay',
+        'VideoStream_Time_To_Start_Buffering', 'VideoStream_Video_Stream_Duration',
+        'http_Browser_Access_Duration',
+    }
+    scores = {
+        'voice': len(columns & voice_markers),
+        'speech': len(columns & speech_markers),
+        'data': len(columns & data_markers),
+    }
+    best_kind = max(scores, key=scores.get)
+    if scores[best_kind] > 0:
+        return best_kind
     return 'generic'
 
 

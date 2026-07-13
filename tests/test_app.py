@@ -67,7 +67,7 @@ def test_admin_can_login_upload_and_see_automatic_dashboard(client) -> None:
     csv_content = b"market,period,score,gap\nES,2026-Q1,91,2.1\nES,2026-Q1,87,3.3\nDE,2026-Q2,76,5.2\n"
     upload_response = client.post(
         "/dashboard/upload",
-        files={"dataset_file": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
     assert upload_response.status_code == 303
@@ -102,7 +102,7 @@ def test_admin_can_retry_stuck_dataset(client) -> None:
     login(client)
     client.post(
         "/dashboard/upload",
-        files={"dataset_file": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
+        files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
     )
 
@@ -122,12 +122,12 @@ def test_reupload_same_file_reuses_existing_dataset_entry(client) -> None:
     payload = b"market,period,score\nES,2026-Q1,91\n"
     first_upload = client.post(
         "/dashboard/upload",
-        files={"dataset_file": ("sample.csv", BytesIO(payload), "text/csv")},
+        files={"dataset_files": ("sample.csv", BytesIO(payload), "text/csv")},
         follow_redirects=False,
     )
     second_upload = client.post(
         "/dashboard/upload",
-        files={"dataset_file": ("sample.csv", BytesIO(payload), "text/csv")},
+        files={"dataset_files": ("sample.csv", BytesIO(payload), "text/csv")},
         follow_redirects=False,
     )
     assert first_upload.status_code == 303
@@ -144,6 +144,45 @@ def test_admin_panel_is_available_for_admin(client) -> None:
     response = client.get("/admin")
     assert response.status_code == 200
     assert "Admin panel" in response.text
+
+
+def test_dashboard_upload_accepts_multiple_files(client) -> None:
+    login(client)
+
+    response = client.post(
+        "/dashboard/upload",
+        files=[
+            ("dataset_files", ("sample-a.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")),
+            ("dataset_files", ("sample-b.csv", BytesIO(b"market,period,score\nDE,2026-Q2,78\n"), "text/csv")),
+        ],
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    import src.DashboardAnalytic as app_module
+
+    datasets = app_module.repository.list_datasets()
+    assert len(datasets) == 2
+
+
+def test_dataset_selector_shows_all_datasets_when_no_input_kind_filter_is_set(client) -> None:
+    login(client)
+
+    client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("voice.csv", BytesIO(b"POLQA_LQ_Avg,market,period\n4.2,ES,2026-Q1\n"), "text/csv")},
+        follow_redirects=False,
+    )
+    client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("data.csv", BytesIO(b"Mean_Data_Rate,market,period\n25.1,DE,2026-Q2\n"), "text/csv")},
+        follow_redirects=False,
+    )
+
+    response = client.get("/dashboard?dataset_id=2")
+    assert response.status_code == 200
+    assert '<option value="1"' in response.text
+    assert '<option value="2"' in response.text
 
 
 def test_admin_can_update_user_identity_fields(client) -> None:
@@ -294,7 +333,7 @@ def test_dashboard_analysis_reuses_cached_result_on_reload(client, monkeypatch) 
     csv_content = b"market,period,score,gap\nES,2026-Q1,91,2.1\nES,2026-Q1,87,3.3\n"
     upload_response = client.post(
         "/dashboard/upload",
-        files={"dataset_file": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
     assert upload_response.status_code == 303
@@ -317,3 +356,18 @@ def test_dashboard_analysis_reuses_cached_result_on_reload(client, monkeypatch) 
     second_response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
     assert second_response.status_code == 200
     assert calls["count"] == 1
+
+
+def test_dataset_status_endpoint_returns_queue_payload(client) -> None:
+    login(client)
+    client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/datasets/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert "datasets" in payload
+    assert payload["datasets"][0]["file_name"] == "sample.csv"
