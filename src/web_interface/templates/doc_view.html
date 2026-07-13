@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="doc-page">
+  <article class="panel doc-panel">
+    <div class="doc-toolbar">
+      <div>
+        <p class="eyebrow">Documentation</p>
+        <h2>{{ doc_name }}</h2>
+      </div>
+      <a class="ghost-link" href="/dashboard">Back to Workspace</a>
+    </div>
+    <p id="doc-path" class="doc-meta">Loading document...</p>
+    <article id="doc-content" class="doc-markdown markdown-viewer"></article>
+  </article>
+</section>
+{% endblock %}
+{% block extra_scripts %}
+<script src="{{ url_for('static', path='markdown_renderer.js') }}?v={{ asset_version('markdown_renderer.js') }}"></script>
+<script>
+(function () {
+  const pathEl = document.getElementById('doc-path');
+  const contentEl = document.getElementById('doc-content');
+  if (!pathEl || !contentEl || !window.MarkdownRenderer) return;
+
+  function resolveDocUrl(rawUrl, isImage) {
+    const raw = String(rawUrl || '').trim();
+    if (!raw) return '';
+    if (/^(https?:|mailto:|#)/i.test(raw)) return raw;
+    if (raw.startsWith('/')) return raw;
+
+    const normalized = raw.replace(/\\/g, '/').replace(/^\.\//, '');
+    const lower = normalized.toLowerCase();
+    if (lower === 'readme.md' || lower.endsWith('/readme.md')) return '/documents/view/readme';
+    if (lower === 'changelog.md' || lower.endsWith('/changelog.md')) return '/documents/view/changelog';
+    return isImage ? raw : raw;
+  }
+
+  const markdownRenderer = window.MarkdownRenderer.create({
+    resolveUrl: resolveDocUrl,
+    includeHeadingIds: false,
+  });
+
+  fetch({{ doc_api_url | tojson }})
+    .then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data && data.detail ? String(data.detail) : 'Unable to load document.');
+      }
+      pathEl.textContent = data.path || '';
+      contentEl.innerHTML = markdownRenderer.render(data.content || '');
+    })
+    .catch((error) => {
+      pathEl.textContent = '';
+      contentEl.innerHTML = `<p>${window.MarkdownRenderer.escapeHtml(error.message || 'Unable to load document.')}</p>`;
+    });
+})();
+</script>
+{% endblock %}

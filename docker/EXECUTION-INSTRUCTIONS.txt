@@ -1,4 +1,4 @@
-Bench Automations Docker usage
+Dashboard Analytic Docker usage
 
 1. Review the existing .env file if needed.
 2. Review ports and volume paths.

@@ -40,12 +40,12 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           [ -n "$VERSION" ] || VERSION="manual"
           mkdir -p dist
-          zip -r "dist/BenchAutomations_${VERSION}_source.zip" src tests docker data config help README.md CHANGELOG.md ROADMAP.md DOWNLOAD.md CONTRIBUTING.md CODE_OF_CONDUCT.md requirements.txt pyproject.toml .github
+          zip -r "dist/DashboardAnalytic_${VERSION}_source.zip" src tests docker data config help README.md CHANGELOG.md ROADMAP.md DOWNLOAD.md CONTRIBUTING.md CODE_OF_CONDUCT.md requirements.txt pyproject.toml .github
 
       - name: Upload source artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BenchAutomations_source_bundle
+          name: DashboardAnalytic_source_bundle
           path: dist/*.zip
 
       - name: Publish GitHub release

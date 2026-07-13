@@ -1,4 +1,4 @@
-# Bench Automations Documentation
+# Dashboard Analytic Documentation
 
 This folder contains the project documentation for configuration, runtime usage, KPI analysis workflows, reporting, Docker deployment, and CI automation.
 

@@ -1,1 +1,1 @@
-"""BenchAutomations application package."""
+"""Dashboard Analytic application package."""

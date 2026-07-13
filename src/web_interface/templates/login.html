@@ -1,23 +1,47 @@
 {% extends 'base.html' %}
 {% block content %}
-<section class="hero hero-login">
-  <div class="hero-copy">
-    <p class="eyebrow">Multi-user web workspace</p>
-    <h2>Upload CDR and CSV sources, analyse KPIs, export reports.</h2>
-    <p class="lede">The initial MVP includes Excel/CSV ingestion, KPI cards, CDF charting, scorecards, Word export, PowerPoint export and a dedicated administration area.</p>
-    <ul class="feature-list">
-      <li>Role-based access for user and admin panels</li>
-      <li>Filters by market, period and aggregation dimensions</li>
-      <li>Operational audit log for uploads, analyses and exports</li>
-    </ul>
-  </div>
-  <form class="panel form-stack" method="post" action="/login">
-    <h3>Sign in</h3>
-    {% if error %}<div class="alert">{{ error }}</div>{% endif %}
-    <label>Username<input type="text" name="username" value="admin" required></label>
-    <label>Password<input type="password" name="password" value="admin123" required></label>
-    <button type="submit">Open workspace</button>
-    <p class="form-note">Default accounts: admin/admin123 and demo/demo123.</p>
-  </form>
+<section class="login-shell">
+  <article class="panel login-hero-card">
+    <div class="login-hero-copy">
+      <p class="eyebrow">Multi-user web workspace</p>
+      <h2>Dashboard Analytic Workspace</h2>
+      <p class="lede">Load CDR-Voice, CDR-Speech and CDR-Data datasets, process them automatically and work from dashboards built on cached metadata and on-demand analysis.</p>
+    </div>
+    <div class="login-feature-grid">
+      <article class="login-feature-card">
+        <span class="login-feature-label">Ingestion</span>
+        <strong>Automatic profiling</strong>
+        <p>Upload raw workbooks and convert them into searchable, filterable datasets.</p>
+      </article>
+      <article class="login-feature-card">
+        <span class="login-feature-label">Analytics</span>
+        <strong>Interactive KPI views</strong>
+        <p>Open datasets instantly from cache and compute charts only when the user asks for them.</p>
+      </article>
+      <article class="login-feature-card">
+        <span class="login-feature-label">Exports</span>
+        <strong>Operational reporting</strong>
+        <p>Generate Word and PowerPoint outputs from the same processed dataset context.</p>
+      </article>
+    </div>
+  </article>
+
+  <article class="panel login-auth-card">
+    <div class="login-auth-head">
+      <p class="eyebrow">Access</p>
+      <h3>Sign in</h3>
+      <p class="form-note">Use one of the workspace accounts to continue.</p>
+    </div>
+    <form class="form-stack login-form" method="post" action="/login">
+      {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+      <label>Username<input type="text" name="username" value="admin" required></label>
+      <label>Password<input type="password" name="password" value="admin123" required></label>
+      <button type="submit">Open workspace</button>
+    </form>
+    <div class="login-defaults">
+      <span class="pill">admin / admin123</span>
+      <span class="pill">demo / demo123</span>
+    </div>
+  </article>
 </section>
 {% endblock %}

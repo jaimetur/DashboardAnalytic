@@ -12,5 +12,5 @@ services:
       - ../src:/app/src
       - ${HOST_CONFIG_DIR}:/app/config
       - ${HOST_DATA_DIR}:/app/data
-    command: uvicorn src.BenchAutomations:app --host 0.0.0.0 --port 7278 --reload --reload-dir /app/src
+    command: uvicorn src.DashboardAnalytic:app --host 0.0.0.0 --port 7278 --reload --reload-dir /app/src
     restart: unless-stopped

@@ -10,7 +10,7 @@ from pptx.util import Inches
 
 def export_word_report(destination: Path, analysis: dict[str, Any]) -> Path:
     document = Document()
-    document.add_heading("Bench Automations Report", level=0)
+    document.add_heading("Dashboard Analytic Report", level=0)
     document.add_paragraph(f"Metric analysed: {analysis['selected_metric']}")
     document.add_paragraph(f"Filtered rows: {analysis['kpis']['rows']}")
 
@@ -29,7 +29,7 @@ def export_word_report(destination: Path, analysis: dict[str, Any]) -> Path:
 def export_powerpoint_report(destination: Path, analysis: dict[str, Any]) -> Path:
     presentation = Presentation()
     title_slide = presentation.slides.add_slide(presentation.slide_layouts[0])
-    title_slide.shapes.title.text = "Bench Automations"
+    title_slide.shapes.title.text = "Dashboard Analytic"
     title_slide.placeholders[1].text = f"Automatic KPI report for {analysis['selected_metric']}"
 
     kpi_slide = presentation.slides.add_slide(presentation.slide_layouts[5])

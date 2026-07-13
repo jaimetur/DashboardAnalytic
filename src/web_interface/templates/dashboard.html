@@ -1,135 +1,337 @@
 {% extends 'base.html' %}
 {% block content %}
-<section class="dashboard-grid">
-  <section class="panel accent-panel">
-    <div class="section-head">
+<section class="dashboard-stack spacious-stack">
+  {% if has_processing %}<div data-autorefresh="8000"></div>{% endif %}
+
+  <article class="panel hero-panel upload-panel">
+    <div class="section-head tight-head">
       <div>
-        <p class="eyebrow">Workspace</p>
-        <h2>User panel</h2>
+        <p class="eyebrow">Data Ingestion</p>
+        <h2>Automatic CDR Pipeline</h2>
       </div>
-      <span class="pill">{{ user.username }} · {{ user.role }}</span>
+      <span class="pill live-pill">Auto profile on upload</span>
     </div>
+    <p class="lede">Upload a workbook and the platform classifies, processes and prepares it for visualization without asking for manual column mapping.</p>
+    <form class="upload-dropzone" action="/dashboard/upload" method="post" enctype="multipart/form-data" data-loading-label="Uploading and processing dataset">
+      <label class="dropzone-field">
+        <span class="dropzone-title">Drop workbook or browse</span>
+        <span class="dropzone-copy">Accepted: CSV, XLS, XLSX, XLSM</span>
+        <input type="file" name="dataset_file" accept=".csv,.xlsx,.xls,.xlsm" required>
+      </label>
+      <button type="submit">Upload and Process</button>
+    </form>
     {% if error %}<div class="alert">{{ error }}</div>{% endif %}
-    <div class="split-grid">
-      <form class="form-stack" action="/dashboard/upload" method="post" enctype="multipart/form-data">
-        <h3>1. Upload data source</h3>
-        <label>Input file<input type="file" name="dataset_file" accept=".csv,.xlsx,.xls" required></label>
-        <button type="submit">Store dataset</button>
-      </form>
-      <form class="form-stack" action="/dashboard/analyze" method="post">
-        <h3>2. Analyse dataset</h3>
-        <label>Dataset
-          <select name="dataset_path" required>
-            <option value="">Select a stored dataset</option>
-            {% for dataset in datasets %}
-            <option value="{{ dataset['stored_path'] }}" {% if active_dataset_path == dataset['stored_path'] %}selected{% endif %}>{{ dataset['file_name'] }} · {{ dataset['uploaded_by'] }} · {{ dataset['uploaded_at'] }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label>Metric column<input type="text" name="metric" value="{{ analysis.selected_metric if analysis else '' }}" placeholder="score"></label>
-        <label>Market<input type="text" name="market" value="{{ analysis.filters.market if analysis else '' }}" placeholder="ES"></label>
-        <label>Period<input type="text" name="period" value="{{ analysis.filters.period if analysis else '' }}" placeholder="2026-Q2"></label>
-        <label>Aggregation column<input type="text" name="aggregation" value="{{ analysis.filters.aggregation if analysis else 'all' }}" placeholder="cluster"></label>
-        <button type="submit">Run analytics</button>
-      </form>
-    </div>
-  </section>
+  </article>
 
-  <section class="panel">
-    <div class="section-head">
-      <div>
-        <p class="eyebrow">Delivery</p>
-        <h2>Report exports</h2>
+  <details class="panel collapsible-panel queue-card" open>
+    <summary class="collapsible-summary">
+      <div class="section-head tight-head">
+        <div>
+          <p class="eyebrow">Data Processing Queue</p>
+          <h2>Datasets</h2>
+        </div>
+        <span class="collapse-chip">Collapse</span>
       </div>
-    </div>
-    <div class="inline-actions">
-      <form method="post" action="/dashboard/export/word">
-        <input type="hidden" name="dataset_path" value="{{ active_dataset_path or '' }}">
-        <input type="hidden" name="metric" value="{{ analysis.selected_metric if analysis else '' }}">
-        <input type="hidden" name="market" value="{{ analysis.filters.market if analysis else '' }}">
-        <input type="hidden" name="period" value="{{ analysis.filters.period if analysis else '' }}">
-        <input type="hidden" name="aggregation" value="{{ analysis.filters.aggregation if analysis else 'all' }}">
-        <button type="submit" {% if not analysis %}disabled{% endif %}>Export Word</button>
-      </form>
-      <form method="post" action="/dashboard/export/powerpoint">
-        <input type="hidden" name="dataset_path" value="{{ active_dataset_path or '' }}">
-        <input type="hidden" name="metric" value="{{ analysis.selected_metric if analysis else '' }}">
-        <input type="hidden" name="market" value="{{ analysis.filters.market if analysis else '' }}">
-        <input type="hidden" name="period" value="{{ analysis.filters.period if analysis else '' }}">
-        <input type="hidden" name="aggregation" value="{{ analysis.filters.aggregation if analysis else 'all' }}">
-        <button type="submit" {% if not analysis %}disabled{% endif %}>Export PowerPoint</button>
-      </form>
-    </div>
-  </section>
-
-  {% if analysis %}
-  <section class="metrics-grid">
-    {% for key, value in analysis.kpis.items() %}
-    <article class="metric-card">
-      <span>{{ key.replace('_', ' ') }}</span>
-      <strong>{{ value }}</strong>
-    </article>
-    {% endfor %}
-  </section>
-
-  <section class="panel wide-panel">
-    <div class="section-head">
-      <div>
-        <p class="eyebrow">Visual analytics</p>
-        <h2>CDF curve</h2>
-      </div>
-      <span class="pill">Metric: {{ analysis.selected_metric }}</span>
-    </div>
-    <div class="chart-card" data-chart='{{ analysis.cdf_chart | tojson }}'>
-      <svg class="chart-svg" viewBox="0 0 600 280" preserveAspectRatio="none"></svg>
-    </div>
-  </section>
-
-  <section class="panel">
-    <div class="section-head">
-      <div>
-        <p class="eyebrow">Scoring</p>
-        <h2>Percentile scorecard</h2>
-      </div>
-    </div>
-    <div class="score-grid">
-      {% for item in analysis.scorecard %}
-      <article class="score-item">
-        <span>{{ item.label }}</span>
-        <strong>{{ item.value }}</strong>
-      </article>
-      {% endfor %}
-    </div>
-  </section>
-
-  <section class="panel wide-panel">
-    <div class="section-head">
-      <div>
-        <p class="eyebrow">Operational table</p>
-        <h2>Top records</h2>
-      </div>
-    </div>
-    <div class="table-wrap">
-      <table>
+    </summary>
+    <div class="table-wrap queue-table-wrap">
+      <table class="queue-table">
         <thead>
           <tr>
-            {% for header in analysis.table_rows[0].keys() if analysis.table_rows %}
-            <th>{{ header }}</th>
-            {% endfor %}
+            <th>Dataset</th>
+            <th>Input Type</th>
+            <th>Rows</th>
+            <th>Status</th>
+            <th>Progress</th>
+            <th>Updated</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
-          {% for row in analysis.table_rows %}
+          {% for dataset in datasets %}
+          <tr class="{% if selected_dataset and selected_dataset.id == dataset.id %}active-row{% endif %}">
+            <td>
+              <div class="queue-dataset-name">{{ dataset.file_name }}</div>
+              <div class="queue-dataset-path">{{ dataset.stored_path }}</div>
+            </td>
+            <td>{{ dataset.input_kind_label }}</td>
+            <td>{{ dataset.row_count or 0 }}</td>
+            <td>
+              <span class="queue-status-pill queue-status-{{ dataset.status }}">{{ dataset.status_label }}</span>
+            </td>
+            <td>
+              <div class="queue-progress-cell">
+                <div class="progress-shell visual-progress-shell">
+                  <div class="progress-bar status-{{ dataset.status }}" style="width: {{ dataset.progress }}%"></div>
+                </div>
+                <span>{{ dataset.progress }}%</span>
+              </div>
+            </td>
+            <td>{{ dataset.updated_at or dataset.uploaded_at }}</td>
+            <td>
+              <div class="queue-actions">
+                <a class="ghost-link" href="/dashboard?dataset_id={{ dataset.id }}{% if input_kind %}&input_kind={{ input_kind }}{% endif %}">Open</a>
+                {% if dataset.status in ['queued', 'failed'] %}
+                <form method="post" action="/dashboard/retry/{{ dataset.id }}" data-loading-label="Retrying dataset processing">
+                  <button type="submit">Retry</button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% else %}
           <tr>
-            {% for value in row.values() %}
-            <td>{{ value }}</td>
-            {% endfor %}
+            <td colspan="7"><article class="empty-state-inline">No datasets available.</article></td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+  </details>
+
+  <section class="workspace-grid">
+    <main class="dashboard-main-stack">
+      <article class="panel dataset-summary-panel select-dataset-card">
+        <div class="section-head tight-head">
+          <div>
+            <p class="eyebrow">Select Dataset</p>
+            <h2>{{ selected_dataset.file_name if selected_dataset else 'No dataset yet' }}</h2>
+          </div>
+          {% if selected_dataset %}<span class="pill status-pill status-{{ selected_dataset.status }}">{{ selected_dataset.status_label }}</span>{% endif %}
+        </div>
+        <form class="dataset-selector-grid" action="/dashboard" method="get" data-loading-label="Opening dataset workspace">
+          <label>Input Type
+            <select name="input_kind">
+              <option value="">All Inputs</option>
+              {% for kind in input_kind_options %}
+              <option value="{{ kind }}" {% if input_kind == kind %}selected{% endif %}>{{ 'CDR-' + kind.title() if kind in ['voice', 'speech', 'data'] else 'Other' }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Dataset
+            <select name="dataset_id">
+              {% for dataset in datasets %}
+              {% if not input_kind or dataset.dataset_kind == input_kind %}
+              <option value="{{ dataset.id }}" {% if selected_dataset and selected_dataset.id == dataset.id %}selected{% endif %}>{{ dataset.file_name }}</option>
+              {% endif %}
+              {% endfor %}
+            </select>
+          </label>
+          <div class="dataset-selector-actions">
+            <button type="submit">Open Dataset</button>
+          </div>
+        </form>
+        {% if selected_dataset %}
+        {% if selected_dataset.status in ['queued', 'failed'] %}
+        <form method="post" action="/dashboard/retry/{{ selected_dataset.id }}" class="retry-form" data-loading-label="Retrying dataset processing">
+          <button type="submit">Retry Processing</button>
+        </form>
+        {% endif %}
+        <div class="summary-grid compact-summary">
+          <article><span>Input Type</span><strong>{{ selected_dataset.input_kind_label }}</strong></article>
+          <article><span>Rows</span><strong>{{ selected_dataset.row_count or 0 }}</strong></article>
+          <article><span>Columns</span><strong>{{ selected_dataset.column_count or 0 }}</strong></article>
+          <article><span>Default metric</span><strong>{{ selected_dataset.default_metric or 'Auto' }}</strong></article>
+        </div>
+        <p class="form-note">Uploaded by {{ selected_dataset.uploaded_by }} on {{ selected_dataset.uploaded_at }}</p>
+        {% else %}
+        <p class="form-note">No processed datasets are available yet.</p>
+        {% endif %}
+      </article>
+
+      {% if selected_dataset and selected_dataset.is_ready %}
+      <details class="panel collapsible-panel" open>
+        <summary class="collapsible-summary">
+          <div>
+            <p class="eyebrow">Executive Snapshot</p>
+            <h2>{% if analysis_loaded %}Core KPIs{% else %}Cached Dataset Snapshot{% endif %}</h2>
+          </div>
+          <span class="collapse-chip">Collapse</span>
+        </summary>
+        <section class="metrics-grid refined-metrics-grid">
+          {% for key, value in (analysis.kpis if analysis_loaded and analysis else selected_dataset.kpis_snapshot).items() %}
+          <article class="metric-card premium-metric-card">
+            <span>{{ key.replace('_', ' ') }}</span>
+            <strong>{{ value }}</strong>
+          </article>
+          {% endfor %}
+        </section>
+      </details>
+
+      {% if analysis_loaded and analysis %}
+      <details class="panel collapsible-panel" open>
+        <summary class="collapsible-summary">
+          <div>
+            <p class="eyebrow">Visual Analytics</p>
+            <h2>Charts</h2>
+          </div>
+          <span class="collapse-chip">Collapse</span>
+        </summary>
+        <section class="viz-grid">
+          <article class="wide-visual">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Distribution</p>
+                <h2>CDF Curve</h2>
+              </div>
+              <span class="pill">{{ analysis.selected_metric }}</span>
+            </div>
+            <div class="chart-card" data-chart='{{ analysis.cdf_chart | tojson }}'>
+              <svg class="chart-svg" viewBox="0 0 600 280" preserveAspectRatio="none"></svg>
+            </div>
+          </article>
+          <article class="wide-visual">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Comparison</p>
+                <h2>Group Benchmark</h2>
+              </div>
+              <span class="pill">{{ analysis.filters.aggregation }}</span>
+            </div>
+            <div class="chart-card" data-chart='{{ analysis.comparison_chart | tojson }}'>
+              <svg class="chart-svg" viewBox="0 0 600 280" preserveAspectRatio="none"></svg>
+            </div>
+          </article>
+        </section>
+      </details>
+
+      <details class="panel collapsible-panel" open>
+        <summary class="collapsible-summary">
+          <div>
+            <p class="eyebrow">Percentiles</p>
+            <h2>Scorecard</h2>
+          </div>
+          <span class="collapse-chip">Collapse</span>
+        </summary>
+        <div class="score-grid">
+          {% for item in analysis.scorecard %}
+          <article class="score-item">
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+          </article>
+          {% endfor %}
+        </div>
+      </details>
+
+      <details class="panel collapsible-panel" open>
+        <summary class="collapsible-summary">
+          <div>
+            <p class="eyebrow">Data Table</p>
+            <h2>Processed Metrics</h2>
+          </div>
+          <span class="collapse-chip">Collapse</span>
+        </summary>
+        <div class="section-head compact-toolbar">
+          <div></div>
+          <div class="inline-actions">
+            <form method="post" action="/dashboard/export/word" data-loading-label="Exporting Word report">
+              <input type="hidden" name="dataset_id" value="{{ selected_dataset.id }}">
+              <input type="hidden" name="metric" value="{{ analysis.selected_metric }}">
+              <input type="hidden" name="market" value="{{ analysis.filters.market or '' }}">
+              <input type="hidden" name="period" value="{{ analysis.filters.period or '' }}">
+              <input type="hidden" name="aggregation" value="{{ analysis.filters.aggregation or 'all' }}">
+              <input type="hidden" name="extra_filters" value="{{ format_extra_filters(analysis.filters.extra_filters) }}">
+              <button type="submit">Export Word</button>
+            </form>
+            <form method="post" action="/dashboard/export/powerpoint" data-loading-label="Exporting PowerPoint report">
+              <input type="hidden" name="dataset_id" value="{{ selected_dataset.id }}">
+              <input type="hidden" name="metric" value="{{ analysis.selected_metric }}">
+              <input type="hidden" name="market" value="{{ analysis.filters.market or '' }}">
+              <input type="hidden" name="period" value="{{ analysis.filters.period or '' }}">
+              <input type="hidden" name="aggregation" value="{{ analysis.filters.aggregation or 'all' }}">
+              <input type="hidden" name="extra_filters" value="{{ format_extra_filters(analysis.filters.extra_filters) }}">
+              <button type="submit">Export PowerPoint</button>
+            </form>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                {% for header in analysis.table_rows[0].keys() if analysis.table_rows %}
+                <th>{{ header }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in analysis.table_rows %}
+              <tr>
+                {% for value in row.values() %}
+                <td>{{ value }}</td>
+                {% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+      {% else %}
+      <section class="panel empty-state-panel">
+        <p class="eyebrow">Lazy Load</p>
+        <h2>Workspace opened from cache</h2>
+        <p class="lede">The workspace is available immediately from cache. Choose filters and press <strong>Update Dashboard</strong> to load charts and tables for the selected dataset.</p>
+      </section>
+      {% endif %}
+      {% elif selected_dataset and not selected_dataset.is_ready %}
+      <section class="panel empty-state-panel">
+        <p class="eyebrow">Waiting</p>
+        <h2>Dataset still processing</h2>
+        <p class="lede">The platform will refresh the dashboard when ingestion finishes. Current state: {{ selected_dataset.status_label }}.</p>
+      </section>
+      {% else %}
+      <section class="panel empty-state-panel">
+        <p class="eyebrow">Start Here</p>
+        <h2>Upload a dataset to generate the dashboard</h2>
+        <p class="lede">Once uploaded, the system automatically detects the CDR type, extracts metrics and prepares the analysis workspace.</p>
+      </section>
+      {% endif %}
+    </main>
+
+    <aside class="dashboard-sidebar">
+      <details class="panel collapsible-panel sticky-panel" open>
+        <summary class="collapsible-summary sidebar-summary">
+          <div>
+            <p class="eyebrow">Adaptive Filters</p>
+            <h2>Dashboard Controls</h2>
+          </div>
+          <span class="collapse-chip">Collapse</span>
+        </summary>
+        <form class="sidebar-filters" action="/dashboard" method="get" data-loading-label="Updating dashboard analytics">
+          {% if selected_dataset %}<input type="hidden" name="dataset_id" value="{{ selected_dataset.id }}">{% endif %}
+          <input type="hidden" name="load" value="1">
+          {% if selected_dataset and selected_dataset.is_ready %}
+          <label>Metric
+            <select name="metric">
+              {% for item in selected_dataset.available_metrics %}
+              <option value="{{ item }}" {% if (analysis and item == analysis.selected_metric) or (not analysis and item == selected_dataset.default_metric) %}selected{% endif %}>{{ item }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Aggregation
+            <select name="aggregation">
+              <option value="all" {% if (analysis and analysis.filters.aggregation == 'all') or (not analysis and selected_dataset.default_aggregation == 'all') %}selected{% endif %}>Auto / raw view</option>
+              {% for item in selected_dataset.available_aggregations %}
+              <option value="{{ item }}" {% if (analysis and item == analysis.filters.aggregation) or (not analysis and item == selected_dataset.default_aggregation) %}selected{% endif %}>{{ item }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          {% for dimension in filter_dimensions %}
+          <label>{{ dimension.replace('_', ' ').title() }}
+            <select name="{{ dimension }}">
+              <option value="">All</option>
+              {% for value in filter_options[dimension] %}
+              <option value="{{ value }}" {% if analysis and ((dimension in ['market', 'period'] and analysis.filters[dimension] == value) or (dimension not in ['market', 'period'] and analysis.filters.extra_filters.get(dimension) == value)) %}selected{% endif %}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          {% endfor %}
+          {% endif %}
+          <div class="sidebar-actions">
+            <button type="submit">Update Dashboard</button>
+            {% if selected_dataset %}<a class="ghost-link" href="/dashboard?dataset_id={{ selected_dataset.id }}{% if input_kind %}&input_kind={{ input_kind }}{% endif %}">Reset</a>{% endif %}
+          </div>
+        </form>
+      </details>
+    </aside>
   </section>
-  {% endif %}
 </section>
 {% endblock %}

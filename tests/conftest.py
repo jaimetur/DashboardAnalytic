@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-import src.BenchAutomations as app_module
+import src.DashboardAnalytic as app_module
 from src.config import settings
 
 

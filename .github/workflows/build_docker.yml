@@ -56,7 +56,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/bench-automations
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/dashboard-analytic
           tags: |
             type=ref,event=branch
             type=ref,event=tag
@@ -73,18 +73,18 @@ jobs:
 
       - name: Prepare Docker package
         run: |
-          mkdir -p dist/BenchAutomations/docker
-          cp docker/docker-compose.yml dist/BenchAutomations/docker/
-          cp docker/docker-compose-dev.yml dist/BenchAutomations/docker/
-          cp docker/.env dist/BenchAutomations/docker/.env
-          cp docker/EXECUTION-INSTRUCTIONS.txt dist/BenchAutomations/docker/
-          cp docker/run-docker-dev.sh dist/BenchAutomations/docker/
-          cp README.md CHANGELOG.md ROADMAP.md DOWNLOAD.md CONTRIBUTING.md CODE_OF_CONDUCT.md dist/BenchAutomations/
-          cp -R help dist/BenchAutomations/help
-          cd dist && zip -r BenchAutomations_docker_bundle.zip BenchAutomations
+          mkdir -p dist/DashboardAnalytic/docker
+          cp docker/docker-compose.yml dist/DashboardAnalytic/docker/
+          cp docker/docker-compose-dev.yml dist/DashboardAnalytic/docker/
+          cp docker/.env dist/DashboardAnalytic/docker/.env
+          cp docker/EXECUTION-INSTRUCTIONS.txt dist/DashboardAnalytic/docker/
+          cp docker/run-docker-dev.sh dist/DashboardAnalytic/docker/
+          cp README.md CHANGELOG.md ROADMAP.md DOWNLOAD.md CONTRIBUTING.md CODE_OF_CONDUCT.md dist/DashboardAnalytic/
+          cp -R help dist/DashboardAnalytic/help
+          cd dist && zip -r DashboardAnalytic_docker_bundle.zip DashboardAnalytic
 
       - name: Upload Docker package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BenchAutomations_docker_bundle
-          path: dist/BenchAutomations_docker_bundle.zip
+          name: DashboardAnalytic_docker_bundle
+          path: dist/DashboardAnalytic_docker_bundle.zip

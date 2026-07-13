@@ -1,6 +1,6 @@
 # Configuration File
 
-Bench Automations reads runtime settings from environment variables.
+Dashboard Analytic reads runtime settings from environment variables.
 
 Important variables:
 

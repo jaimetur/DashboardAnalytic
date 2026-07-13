@@ -1,6 +1,7 @@
 services:
   app:
-    image: ${IMAGE_NAME}:${IMAGE_TAG}
+    image: ${IMAGE_REPOSITORY}:${IMAGE_TAG}
+    pull_policy: always
     container_name: ${CONTAINER_NAME}
     env_file:
       - .env
