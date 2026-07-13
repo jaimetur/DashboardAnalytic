@@ -42,6 +42,9 @@ jobs:
 
       - name: Resolve image metadata
         id: image
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
         shell: bash
         run: |
           APP_VERSION=$(python - <<'PY'
@@ -49,7 +52,11 @@ jobs:
           print(__version__)
           PY
           )
-          IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/dashboard-analytic"
+          USERNAME_VALUE="${DOCKERHUB_USERNAME}"
+          if [ -z "${USERNAME_VALUE}" ]; then
+            USERNAME_VALUE="${GITHUB_REPOSITORY_OWNER}"
+          fi
+          IMAGE_NAME="${USERNAME_VALUE}/dashboard-analytic"
           RAW_REF="${GITHUB_REF_NAME}"
 
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
@@ -68,24 +75,12 @@ jobs:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
         shell: bash
         run: |
-          if [ -n "${DOCKERHUB_USERNAME}" ]; then
-            echo "DOCKERHUB_USERNAME present"
-          else
-            echo "DOCKERHUB_USERNAME missing"
-          fi
-
-          if [ -n "${DOCKERHUB_PASSWORD}" ]; then
-            echo "DOCKERHUB_PASSWORD present"
-          else
-            echo "DOCKERHUB_PASSWORD missing"
-          fi
-
-          if [ -n "${DOCKERHUB_TOKEN}" ]; then
-            echo "DOCKERHUB_TOKEN present"
-          else
-            echo "DOCKERHUB_TOKEN missing"
+          USERNAME_VALUE="${DOCKERHUB_USERNAME}"
+          if [ -z "${USERNAME_VALUE}" ]; then
+            USERNAME_VALUE="${GITHUB_REPOSITORY_OWNER}"
           fi
 
           PASSWORD_VALUE="${DOCKERHUB_TOKEN}"
@@ -93,13 +88,13 @@ jobs:
             PASSWORD_VALUE="${DOCKERHUB_PASSWORD}"
           fi
 
-          if [ -z "${DOCKERHUB_USERNAME}" ] || [ -z "${PASSWORD_VALUE}" ]; then
+          if [ -z "${USERNAME_VALUE}" ] || [ -z "${PASSWORD_VALUE}" ]; then
             echo "Docker Hub credentials are missing. Define DOCKERHUB_USERNAME and DOCKERHUB_TOKEN or DOCKERHUB_PASSWORD." >&2
             exit 1
           fi
 
           echo "::add-mask::${PASSWORD_VALUE}"
-          echo "username=${DOCKERHUB_USERNAME}" >> "${GITHUB_OUTPUT}"
+          echo "username=${USERNAME_VALUE}" >> "${GITHUB_OUTPUT}"
           echo "password=${PASSWORD_VALUE}" >> "${GITHUB_OUTPUT}"
 
       - name: Log in to Docker Hub
