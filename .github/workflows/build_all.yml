@@ -67,6 +67,36 @@ jobs:
           name: DashboardAnalytic_source_bundle
           path: dist/*.zip
 
+      - name: Build release notes from changelog
+        id: release_notes
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.app_version }}"
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+          import sys
+
+          version = os.environ["VERSION"]
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          pattern = re.compile(
+              rf"^##\s+{re.escape(version)}\s*-\s*.+?(?=^##\s+|\Z)",
+              re.MULTILINE | re.DOTALL,
+          )
+          match = pattern.search(changelog)
+          if not match:
+              print(f"Release notes for version {version} were not found in CHANGELOG.md", file=sys.stderr)
+              sys.exit(1)
+
+          release_notes = match.group(0).strip() + "\n"
+          output_path = Path("dist/release_notes.md")
+          output_path.write_text(release_notes, encoding="utf-8")
+          print(output_path)
+          PY
+        env:
+          VERSION: ${{ steps.version.outputs.app_version }}
+
       - name: Publish GitHub release
         if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.create_release == true)
         uses: softprops/action-gh-release@v2
@@ -74,4 +104,4 @@ jobs:
           tag_name: ${{ steps.version.outputs.release_tag }}
           name: ${{ steps.version.outputs.release_tag }}
           files: dist/*.zip
-          generate_release_notes: true
+          body_path: dist/release_notes.md
