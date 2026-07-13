@@ -69,6 +69,11 @@ document.querySelectorAll('.collapsible-panel').forEach((panel) => {
 const loadingOverlay = document.getElementById('loading-overlay');
 const loadingTitle = document.getElementById('loading-title');
 const loadingCopy = document.getElementById('loading-copy');
+const confirmOverlay = document.getElementById('confirm-overlay');
+const confirmTitle = document.getElementById('confirm-title');
+const confirmCopy = document.getElementById('confirm-copy');
+const confirmAccept = document.getElementById('confirm-accept');
+const confirmCancel = document.getElementById('confirm-cancel');
 
 function hideLoadingOverlay() {
   if (!loadingOverlay) return;
@@ -90,6 +95,62 @@ window.addEventListener('pageshow', hideLoadingOverlay);
 document.querySelectorAll('form[data-loading-label]').forEach((form) => {
   form.addEventListener('submit', () => {
     showLoadingOverlay(form.dataset.loadingLabel);
+  });
+});
+
+function showConfirmDialog(message, options = {}) {
+  if (!confirmOverlay || !confirmTitle || !confirmCopy || !confirmAccept || !confirmCancel) {
+    return Promise.resolve(window.confirm(message || 'Are you sure?'));
+  }
+
+  confirmTitle.textContent = options.title || 'Confirm action';
+  confirmCopy.textContent = message || options.copy || 'Are you sure you want to continue?';
+  confirmAccept.textContent = options.confirmLabel || 'Confirm';
+  confirmOverlay.hidden = false;
+  document.body.classList.add('loading-active');
+
+  return new Promise((resolve) => {
+    const close = (accepted) => {
+      confirmOverlay.hidden = true;
+      document.body.classList.remove('loading-active');
+      confirmAccept.removeEventListener('click', handleAccept);
+      confirmCancel.removeEventListener('click', handleCancel);
+      confirmOverlay.removeEventListener('click', handleBackdrop);
+      window.removeEventListener('keydown', handleKeydown);
+      resolve(accepted);
+    };
+
+    const handleAccept = () => close(true);
+    const handleCancel = () => close(false);
+    const handleBackdrop = (event) => {
+      if (event.target === confirmOverlay) {
+        close(false);
+      }
+    };
+    const handleKeydown = (event) => {
+      if (event.key === 'Escape') {
+        close(false);
+      }
+    };
+
+    confirmAccept.addEventListener('click', handleAccept);
+    confirmCancel.addEventListener('click', handleCancel);
+    confirmOverlay.addEventListener('click', handleBackdrop);
+    window.addEventListener('keydown', handleKeydown);
+    confirmAccept.focus();
+  });
+}
+
+document.querySelectorAll('form[data-confirm]').forEach((form) => {
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const accepted = await showConfirmDialog(form.dataset.confirm, {
+      title: 'Delete user',
+      confirmLabel: 'Delete user',
+    });
+    if (accepted) {
+      form.submit();
+    }
   });
 });
 

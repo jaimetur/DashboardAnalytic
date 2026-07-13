@@ -1,14 +1,15 @@
 {% extends 'base.html' %}
 {% block content %}
-<section class="dashboard-grid admin-grid">
-  <section class="panel accent-panel">
-    <div class="section-head">
+<section class="dashboard-stack spacious-stack">
+  <article class="panel hero-panel dataset-summary-panel">
+    <div class="section-head tight-head">
       <div>
         <p class="eyebrow">Administration</p>
         <h2>Admin panel</h2>
       </div>
       <span class="pill">{{ user.username }} · administrator</span>
     </div>
+    <p class="lede">Manage workspace identities, inspect uploaded sources and review the audit trail from a single control surface.</p>
     {% if error %}<div class="alert">{{ error }}</div>{% endif %}
     <form class="form-stack narrow-form" action="/admin/users" method="post">
       <h3>Create user</h3>
@@ -22,36 +23,88 @@
       </label>
       <button type="submit">Create account</button>
     </form>
-  </section>
+  </article>
 
-  <section class="panel wide-panel">
-    <div class="section-head"><div><p class="eyebrow">Identity</p><h2>Users</h2></div></div>
+  <details class="panel collapsible-panel" open>
+    <summary class="collapsible-summary">
+      <div>
+        <p class="eyebrow">Identity</p>
+        <h2>Users</h2>
+      </div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Active</th><th>Created</th></tr></thead>
-        <tbody>{% for row in users %}<tr><td>{{ row['id'] }}</td><td>{{ row['username'] }}</td><td>{{ row['role'] }}</td><td>{{ row['active'] }}</td><td>{{ row['created_at'] }}</td></tr>{% endfor %}</tbody>
+        <thead><tr><th>ID</th><th>Username</th><th>Password</th><th>Role</th><th>Active</th><th>Created</th><th>Actions</th></tr></thead>
+        <tbody>
+          {% for row in users %}
+          <tr>
+            <td>
+              {{ row['id'] }}
+              <form id="user-update-{{ row['id'] }}" action="/admin/users/{{ row['id'] }}/update" method="post"></form>
+              <form id="user-delete-{{ row['id'] }}" action="/admin/users/{{ row['id'] }}/delete" method="post" data-confirm="Delete user {{ row['username'] }}? This action cannot be undone."></form>
+            </td>
+            <td><input class="table-input" type="text" name="username" value="{{ row['username'] }}" form="user-update-{{ row['id'] }}" required></td>
+            <td>
+              <input class="table-input" type="password" name="password" value="" placeholder="Keep current" form="user-update-{{ row['id'] }}">
+              <div class="table-help">Leave blank to keep current password</div>
+            </td>
+            <td>
+              <select class="table-select" name="role" form="user-update-{{ row['id'] }}">
+                <option value="user" {% if row['role'] == 'user' %}selected{% endif %}>user</option>
+                <option value="admin" {% if row['role'] == 'admin' %}selected{% endif %}>admin</option>
+              </select>
+            </td>
+            <td>
+              <label class="toggle-switch" aria-label="Toggle active state for {{ row['username'] }}">
+                <input type="checkbox" name="active" value="1" form="user-update-{{ row['id'] }}" {% if row['active'] %}checked{% endif %}>
+                <span class="toggle-slider"></span>
+              </label>
+            </td>
+            <td>{{ row['created_at'] }}</td>
+            <td>
+              <div class="table-actions">
+                <button type="submit" form="user-update-{{ row['id'] }}">Save</button>
+                <button type="submit" form="user-delete-{{ row['id'] }}" class="danger-button" {% if row['username'] == user.username %}disabled title="You cannot delete the current signed-in admin user"{% endif %}>Delete</button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
       </table>
     </div>
-  </section>
+  </details>
 
-  <section class="panel wide-panel">
-    <div class="section-head"><div><p class="eyebrow">Datasets</p><h2>Uploaded sources</h2></div></div>
+  <details class="panel collapsible-panel" open>
+    <summary class="collapsible-summary">
+      <div>
+        <p class="eyebrow">Datasets</p>
+        <h2>Uploaded sources</h2>
+      </div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
     <div class="table-wrap">
       <table>
         <thead><tr><th>ID</th><th>Name</th><th>Path</th><th>User</th><th>Uploaded</th></tr></thead>
         <tbody>{% for row in datasets %}<tr><td>{{ row['id'] }}</td><td>{{ row['file_name'] }}</td><td>{{ row['stored_path'] }}</td><td>{{ row['uploaded_by'] }}</td><td>{{ row['uploaded_at'] }}</td></tr>{% endfor %}</tbody>
       </table>
     </div>
-  </section>
+  </details>
 
-  <section class="panel wide-panel">
-    <div class="section-head"><div><p class="eyebrow">Audit</p><h2>Access and actions log</h2></div></div>
+  <details class="panel collapsible-panel" open>
+    <summary class="collapsible-summary">
+      <div>
+        <p class="eyebrow">Audit</p>
+        <h2>Access and actions log</h2>
+      </div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
     <div class="table-wrap">
       <table>
         <thead><tr><th>ID</th><th>User</th><th>Action</th><th>Details</th><th>Date</th></tr></thead>
         <tbody>{% for row in logs %}<tr><td>{{ row['id'] }}</td><td>{{ row['username'] }}</td><td>{{ row['action'] }}</td><td>{{ row['details'] }}</td><td>{{ row['created_at'] }}</td></tr>{% endfor %}</tbody>
       </table>
     </div>
-  </section>
+  </details>
 </section>
 {% endblock %}

@@ -4,6 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ app_name }}</title>
+  <link rel="icon" type="image/x-icon" href="{{ static_path('img/favicon.ico') }}?v={{ asset_version('img/favicon.ico') }}">
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ static_path('img/favicon-32x32.png') }}?v={{ asset_version('img/favicon-32x32.png') }}">
+  <link rel="icon" type="image/png" sizes="16x16" href="{{ static_path('img/favicon-16x16.png') }}?v={{ asset_version('img/favicon-16x16.png') }}">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ static_path('img/apple-touch-icon.png') }}?v={{ asset_version('img/apple-touch-icon.png') }}">
   <link rel="stylesheet" href="{{ static_path('css/app.css') }}?v={{ asset_version('css/app.css') }}">
 </head>
 <body>
@@ -12,8 +16,12 @@
       <div class="title-block">
         <p class="eyebrow">NetCheck / Smart Orchestrator Analytics</p>
         <div class="title-row">
-          <h1>{{ app_name }}</h1>
+          <div class="brand-lockup">
+            <img class="brand-mark" src="{{ static_path('img/brand-mark-192.png') }}?v={{ asset_version('img/brand-mark-192.png') }}" alt="{{ app_name }} logo" width="56" height="56">
+            <h1>{{ app_name }}</h1>
+          </div>
           <span class="title-badge">v{{ app_version }} · {{ app_release_date }}</span>
+          {% if user %}<span class="title-badge title-user-badge title-user-badge-{{ user.role }}">{{ user.username }}</span>{% endif %}
         </div>
       </div>
       {% if user %}
@@ -37,6 +45,18 @@
       <p id="loading-copy">Please wait while the workspace updates the selected dataset and dashboard.</p>
       <div class="loading-progress-shell">
         <div class="loading-progress-bar"></div>
+      </div>
+    </div>
+  </div>
+  <div id="confirm-overlay" class="confirm-overlay" hidden>
+    <div class="confirm-panel" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-copy">
+      <div class="confirm-icon" aria-hidden="true">!</div>
+      <p class="eyebrow">Confirmation required</p>
+      <h3 id="confirm-title">Delete user</h3>
+      <p id="confirm-copy">This action cannot be undone.</p>
+      <div class="confirm-actions">
+        <button id="confirm-cancel" type="button" class="ghost-link confirm-cancel">Cancel</button>
+        <button id="confirm-accept" type="button" class="danger-button">Delete user</button>
       </div>
     </div>
   </div>

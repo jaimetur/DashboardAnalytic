@@ -135,6 +135,13 @@ class Repository:
             return None
         return UserRecord(row['username'], row['password_hash'], row['role'], bool(row['active']))
 
+    def get_user_by_id(self, user_id: int) -> sqlite3.Row | None:
+        with self.connection() as conn:
+            return conn.execute(
+                "SELECT id, username, role, active, created_at FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+
     def create_user(self, username: str, password: str, role: str) -> None:
         with self.connection() as conn:
             conn.execute(
@@ -142,9 +149,51 @@ class Repository:
                 (username, hash_password(password), role),
             )
 
+    def update_user(self, user_id: int, username: str, role: str, active: bool, password: str | None = None) -> None:
+        with self.connection() as conn:
+            existing = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+            if not existing:
+                raise ValueError("User not found")
+            if password:
+                conn.execute(
+                    "UPDATE users SET username = ?, password_hash = ?, role = ?, active = ? WHERE id = ?",
+                    (username, hash_password(password), role, int(active), user_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE users SET username = ?, role = ?, active = ? WHERE id = ?",
+                    (username, role, int(active), user_id),
+                )
+
+    def delete_user(self, user_id: int) -> None:
+        with self.connection() as conn:
+            cursor = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            if cursor.rowcount == 0:
+                raise ValueError("User not found")
+
     def list_users(self) -> list[sqlite3.Row]:
         with self.connection() as conn:
             return list(conn.execute("SELECT id, username, role, active, created_at FROM users ORDER BY id ASC").fetchall())
+
+    def count_active_admin_users(self) -> int:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total FROM users WHERE role = 'admin' AND active = 1",
+            ).fetchone()
+        return int(row['total']) if row else 0
+
+    def list_active_users_by_usernames(self, usernames: list[str]) -> list[str]:
+        normalized = [username.strip() for username in usernames if username and username.strip()]
+        if not normalized:
+            return []
+        placeholders = ','.join('?' for _ in normalized)
+        with self.connection() as conn:
+            rows = conn.execute(
+                f"SELECT username FROM users WHERE active = 1 AND username IN ({placeholders})",
+                normalized,
+            ).fetchall()
+        existing = {row['username'] for row in rows}
+        return [username for username in normalized if username in existing]
 
     def add_dataset(self, file_name: str, stored_path: str, uploaded_by: str) -> tuple[int, bool]:
         with self.connection() as conn:

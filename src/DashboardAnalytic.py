@@ -305,6 +305,42 @@ def should_load_analysis(request: Request) -> bool:
     return request.query_params.get('load') == '1'
 
 
+def build_default_access_accounts() -> list[dict[str, str]]:
+    defaults = [
+        {'username': settings.admin_username, 'password': settings.admin_password},
+        {'username': 'demo', 'password': 'demo123'},
+    ]
+    available_accounts: list[dict[str, str]] = []
+    for item in defaults:
+        record = repository.get_user(item['username'])
+        if record and record.active and verify_password(item['password'], record.password_hash):
+            available_accounts.append(item)
+    return available_accounts
+
+
+def would_remove_last_active_admin(target_user, normalized_role: str, will_be_active: bool) -> bool:
+    if target_user['role'] != 'admin' or not target_user['active']:
+        return False
+    if normalized_role == 'admin' and will_be_active:
+        return False
+    return repository.count_active_admin_users() <= 1
+
+
+def render_admin_template(request: Request, user: SessionUser, error: str | None = None, status_code: int = 200) -> HTMLResponse:
+    return render_template(
+        request,
+        'admin.html',
+        {
+            'user': user,
+            'users': repository.list_users(),
+            'datasets': repository.list_datasets(),
+            'logs': repository.list_logs(),
+            'error': error,
+        },
+        status_code=status_code,
+    )
+
+
 def build_dashboard_payload(selected_dataset: dict[str, Any] | None, request: Request) -> tuple[dict[str, Any] | None, dict[str, Any], str | None, bool]:
     if not selected_dataset:
         return None, {}, None, False
@@ -353,14 +389,19 @@ def index(request: Request) -> HTMLResponse:
 
 @app.get('/login', response_class=HTMLResponse)
 def login_page(request: Request) -> HTMLResponse:
-    return render_template(request, 'login.html', {'error': None})
+    return render_template(request, 'login.html', {'error': None, 'default_access_accounts': build_default_access_accounts()})
 
 
 @app.post('/login', response_class=HTMLResponse)
 def login(request: Request, username: str = Form(...), password: str = Form(...)) -> Response:
     record = repository.get_user(username)
     if not record or not record.active or not verify_password(password, record.password_hash):
-        return render_template(request, 'login.html', {'error': 'Invalid credentials'}, status_code=401)
+        return render_template(
+            request,
+            'login.html',
+            {'error': 'Invalid credentials', 'default_access_accounts': build_default_access_accounts()},
+            status_code=401,
+        )
 
     user = SessionUser(username=record.username, role=record.role)
     response = RedirectResponse('/dashboard', status_code=status.HTTP_303_SEE_OTHER)
@@ -552,17 +593,7 @@ def export_report(
 
 @app.get('/admin', response_class=HTMLResponse)
 def admin_panel(request: Request, user: SessionUser = Depends(admin_user)) -> HTMLResponse:
-    return render_template(
-        request,
-        'admin.html',
-        {
-            'user': user,
-            'users': repository.list_users(),
-            'datasets': repository.list_datasets(),
-            'logs': repository.list_logs(),
-            'error': None,
-        },
-    )
+    return render_admin_template(request, user)
 
 
 @app.post('/admin/users', response_class=HTMLResponse)
@@ -578,18 +609,82 @@ def create_user(
         repository.add_log(user.username, 'create_user', username)
         return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
     except Exception as exc:
-        return render_template(
+        return render_admin_template(request, user, error=str(exc), status_code=400)
+
+
+@app.post('/admin/users/{target_user_id}/update', response_class=HTMLResponse)
+def update_user_account(
+    request: Request,
+    target_user_id: int,
+    username: str = Form(...),
+    password: str = Form(''),
+    role: str = Form(...),
+    active: str | None = Form(default=None),
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    normalized_username = username.strip()
+    normalized_role = role.strip().lower()
+    if not normalized_username:
+        return render_admin_template(request, user, error='Username cannot be empty', status_code=400)
+    if normalized_role not in {'admin', 'user'}:
+        return render_admin_template(request, user, error='Unsupported role', status_code=400)
+    target_user = repository.get_user_by_id(target_user_id)
+    if not target_user:
+        return render_admin_template(request, user, error='User not found', status_code=404)
+    will_be_active = active == '1'
+    if would_remove_last_active_admin(target_user, normalized_role, will_be_active):
+        return render_admin_template(
             request,
-            'admin.html',
-            {
-                'user': user,
-                'users': repository.list_users(),
-                'datasets': repository.list_datasets(),
-                'logs': repository.list_logs(),
-                'error': str(exc),
-            },
+            user,
+            error='At least one active admin user must remain. You cannot demote or deactivate the last active admin.',
             status_code=400,
         )
+    try:
+        repository.update_user(
+            target_user_id,
+            normalized_username,
+            normalized_role,
+            will_be_active,
+            password.strip() or None,
+        )
+        repository.add_log(
+            user.username,
+            'update_user',
+            json.dumps({'user_id': target_user_id, 'username': normalized_username, 'role': normalized_role, 'active': will_be_active}),
+        )
+        return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+    except Exception as exc:
+        return render_admin_template(request, user, error=str(exc), status_code=400)
+
+
+@app.post('/admin/users/{target_user_id}/delete', response_class=HTMLResponse)
+def delete_user_account(
+    request: Request,
+    target_user_id: int,
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    target_user = repository.get_user_by_id(target_user_id)
+    if not target_user:
+        return render_admin_template(request, user, error='User not found', status_code=404)
+    if target_user['username'] == user.username:
+        return render_admin_template(request, user, error='You cannot delete the current signed-in admin user', status_code=400)
+    if target_user['role'] == 'admin' and target_user['active'] and repository.count_active_admin_users() <= 1:
+        return render_admin_template(
+            request,
+            user,
+            error='At least one active admin user must remain. You cannot delete the last active admin.',
+            status_code=400,
+        )
+    try:
+        repository.delete_user(target_user_id)
+        repository.add_log(
+            user.username,
+            'delete_user',
+            json.dumps({'user_id': target_user_id, 'username': target_user['username']}),
+        )
+        return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+    except Exception as exc:
+        return render_admin_template(request, user, error=str(exc), status_code=400)
 
 
 templates.env.globals['format_extra_filters'] = format_extra_filters

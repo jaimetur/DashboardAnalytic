@@ -1,12 +1,10 @@
+<p align="center">
+  <img src="src/web_interface/static/img/brand-mark.png" alt="Dashboard Analytic logo" width="660">
+</p>
+
 # Dashboard Analytic
 
 Dashboard Analytic is a multi-user web workspace for ingesting CDR-style datasets, profiling them automatically, extracting KPI-ready metrics, visualizing distributions and comparisons, and exporting the resulting analysis to Word or PowerPoint.
-
-Current release:
-
-- `Dashboard Analytic`
-- `v0.1.0`
-- `2026-07-13`
 
 ## What the tool does today
 
