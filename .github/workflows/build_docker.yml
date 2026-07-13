@@ -1,4 +1,4 @@
-name: Build Docker
+name: 🐳 Build Docker
 
 on:
   workflow_dispatch:
@@ -60,9 +60,9 @@ jobs:
           RAW_REF="${GITHUB_REF_NAME}"
 
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            VERSION_TAG="${RAW_REF}"
+            VERSION_TAG="${RAW_REF#v}"
           else
-            VERSION_TAG="v${APP_VERSION}"
+            VERSION_TAG="${APP_VERSION}"
           fi
 
           echo "app_version=${APP_VERSION}" >> "${GITHUB_OUTPUT}"
