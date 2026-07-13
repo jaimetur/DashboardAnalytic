@@ -1,6 +1,13 @@
-# Changelog
+# 🗓️ CHANGELOG
+[Planned Roadmap](/ROADMAP.md) for the following releases
+[Changelog](/CHANGELOG.md) for the past releases
 
-## 0.1.0 - 2026-07-13
+---
+
+## Release: v0.1.0
+### Release Date: 2026-07-13
+
+#### 🌟 New Features:
 - Initial Dashboard Analytic MVP for KPI analytics
 - FastAPI multi-user web interface
 - CSV/XLSX ingestion, KPI scoring, CDF chart, and report exports
