@@ -3,9 +3,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 import pandas as pd
+from openpyxl import load_workbook
 
 
 CDR_IGNORED_SHEETS = {
@@ -74,6 +75,50 @@ def _average_columns(df: pd.DataFrame, candidates: Iterable[str]) -> pd.Series:
         return pd.Series([pd.NA] * len(df), index=df.index, dtype='Float64')
     numeric_frame = df[numeric_columns].apply(pd.to_numeric, errors='coerce')
     return numeric_frame.mean(axis=1).astype('Float64')
+
+
+def _sheet_has_only_empty_values(values: tuple[object, ...]) -> bool:
+    return all(value is None or str(value).strip() == '' for value in values)
+
+
+def _read_openxml_sheet(worksheet, progress_callback: Callable[[int], None] | None, progress_state: dict[str, int], total_rows: int) -> pd.DataFrame:
+    rows_iter = worksheet.iter_rows(values_only=True)
+    header: list[str] | None = None
+    records: list[dict[str, object]] = []
+
+    def advance_progress() -> None:
+        progress_state['processed_rows'] += 1
+        if not progress_callback or total_rows <= 0:
+            return
+        progress = min(55, 14 + int((progress_state['processed_rows'] / total_rows) * 41))
+        if progress > progress_state['last_progress']:
+            progress_state['last_progress'] = progress
+            progress_callback(progress)
+
+    for row in rows_iter:
+        advance_progress()
+        values = tuple(row or ())
+        if _sheet_has_only_empty_values(values):
+            continue
+        header = [str(value).strip() if value is not None else '' for value in values]
+        break
+
+    if not header:
+        return pd.DataFrame()
+
+    for row in rows_iter:
+        advance_progress()
+        values = tuple(row or ())
+        if _sheet_has_only_empty_values(values):
+            continue
+        padded = list(values[:len(header)])
+        if len(padded) < len(header):
+            padded.extend([None] * (len(header) - len(padded)))
+        records.append(dict(zip(header, padded, strict=False)))
+
+    if not records:
+        return pd.DataFrame(columns=header)
+    return pd.DataFrame.from_records(records, columns=header)
 
 
 def infer_dataset_kind(df: pd.DataFrame, file_name: str = '') -> str:
@@ -204,13 +249,18 @@ def _normalise_dataset(df: pd.DataFrame, file_path: Path) -> pd.DataFrame:
     return dataset
 
 
-def _load_excel_dataset(file_path: Path) -> pd.DataFrame:
-    workbook = pd.ExcelFile(file_path)
-    candidate_sheets = [sheet for sheet in workbook.sheet_names if sheet not in CDR_IGNORED_SHEETS]
+def _load_excel_dataset(file_path: Path, progress_callback: Callable[[int], None] | None = None) -> pd.DataFrame:
+    workbook = load_workbook(filename=file_path, read_only=True, data_only=True)
+    candidate_sheets = [sheet_name for sheet_name in workbook.sheetnames if sheet_name not in CDR_IGNORED_SHEETS]
+    total_rows = sum(max(workbook[sheet_name].max_row or 0, 1) for sheet_name in candidate_sheets) or 1
+
+    if progress_callback:
+        progress_callback(14)
 
     data_frames: list[pd.DataFrame] = []
+    progress_state = {'processed_rows': 0, 'last_progress': 14}
     for sheet_name in candidate_sheets:
-        sheet = pd.read_excel(file_path, sheet_name=sheet_name)
+        sheet = _read_openxml_sheet(workbook[sheet_name], progress_callback, progress_state, total_rows)
         sheet = sheet.dropna(axis=0, how='all').dropna(axis=1, how='all')
         if sheet.empty:
             continue
@@ -220,7 +270,10 @@ def _load_excel_dataset(file_path: Path) -> pd.DataFrame:
         data_frames.append(sheet)
 
     if not data_frames:
-        return pd.read_excel(file_path)
+        df = pd.read_excel(file_path)
+        if progress_callback:
+            progress_callback(55)
+        return df
 
     if len(data_frames) == 1 and data_frames[0]['source_sheet'].nunique() == 1 and data_frames[0]['source_sheet'].iat[0] not in {
         'Vodafone',
@@ -228,18 +281,32 @@ def _load_excel_dataset(file_path: Path) -> pd.DataFrame:
         'Operator4',
         'Operator5',
     }:
-        return _normalise_dataset(data_frames[0], file_path)
+        dataset = _normalise_dataset(data_frames[0], file_path)
+        if progress_callback:
+            progress_callback(55)
+        return dataset
 
     combined = pd.concat(data_frames, ignore_index=True, sort=False)
-    return _normalise_dataset(combined, file_path)
+    dataset = _normalise_dataset(combined, file_path)
+    if progress_callback:
+        progress_callback(55)
+    return dataset
 
 
-def load_dataset(file_path: Path) -> pd.DataFrame:
+def load_dataset(file_path: Path, progress_callback: Callable[[int], None] | None = None) -> pd.DataFrame:
     suffix = file_path.suffix.lower()
     if suffix == '.csv':
-        return _normalise_dataset(pd.read_csv(file_path), file_path)
-    if suffix in {'.xlsx', '.xls', '.xlsm'}:
-        return _load_excel_dataset(file_path)
+        df = _normalise_dataset(pd.read_csv(file_path), file_path)
+        if progress_callback:
+            progress_callback(55)
+        return df
+    if suffix in {'.xlsx', '.xlsm'}:
+        return _load_excel_dataset(file_path, progress_callback=progress_callback)
+    if suffix == '.xls':
+        df = _normalise_dataset(pd.read_excel(file_path), file_path)
+        if progress_callback:
+            progress_callback(55)
+        return df
     raise ValueError(f'Unsupported file type: {suffix}')
 
 

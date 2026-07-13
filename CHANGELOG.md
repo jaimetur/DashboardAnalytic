@@ -30,6 +30,9 @@
 - Added multi-file upload with chunked file writes for large datasets
 - Updated the queue to refresh progress live without page reloads
 - Switched the upload file picker copy to English labels
+- Added finer-grained dataset processing progress updates for large files
+- Refined the workspace selector layout and queue action button styling
+- Renamed the dataset summary panel to `Selected Dataset`
 
 #### 🐛 Bug fixes:
 - Fixed default access visibility to reflect active users with default passwords only
@@ -38,6 +41,8 @@
 - Fixed empty-state body copy alignment in the workspace panels
 - Fixed dataset selector filtering so all datasets show when no type filter is set
 - Improved dataset kind detection for `CDR-Speech` and `CDR-Data`
+- Fixed the dataset picker to react immediately when `Input Type` changes
+- Fixed the upload file input overlay so `Upload and process` submits directly
 
 #### 📚 Documentation:
 - Added `Readme` and `Changelog` navigation with Markdown document viewer

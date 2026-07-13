@@ -149,8 +149,8 @@ document.querySelectorAll('form[data-confirm]').forEach((form) => {
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const accepted = await showConfirmDialog(form.dataset.confirm, {
-      title: 'Delete user',
-      confirmLabel: 'Delete user',
+      title: form.dataset.confirmTitle || 'Confirm action',
+      confirmLabel: form.dataset.confirmLabel || 'Confirm',
     });
     if (accepted) {
       form.submit();
@@ -215,6 +215,7 @@ if (queueNode) {
     const progressBar = row.querySelector('[data-queue-progress-bar]');
     const progressLabel = row.querySelector('[data-queue-progress-label]');
     const updated = row.querySelector('[data-queue-updated]');
+    const actions = row.querySelector('.queue-actions');
 
     if (kind) kind.textContent = dataset.input_kind_label || 'Other';
     if (rows) rows.textContent = String(dataset.row_count || 0);
@@ -228,6 +229,52 @@ if (queueNode) {
     }
     if (progressLabel) progressLabel.textContent = `${dataset.progress || 0}%`;
     if (updated) updated.textContent = dataset.updated_at || dataset.uploaded_at || '';
+    if (actions) {
+      const openHref = `/dashboard?dataset_id=${dataset.id}`;
+      if (dataset.status === 'ready') {
+        actions.innerHTML = `
+          <a class="ghost-link action-link-primary" href="${openHref}">Open</a>
+          <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
+            <button type="submit" class="danger-button">Delete</button>
+          </form>
+        `;
+      } else if (dataset.status === 'processing') {
+        actions.innerHTML = `
+          <span class="ghost-link action-link-disabled" aria-disabled="true">Open</span>
+          <form method="post" action="/dashboard/stop/${dataset.id}" data-confirm="Stop processing for '${dataset.file_name}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
+            <button type="submit" class="danger-button">Stop</button>
+          </form>
+        `;
+      } else if (dataset.status === 'queued') {
+        actions.innerHTML = `
+          <span class="ghost-link action-link-disabled" aria-disabled="true">Open</span>
+          <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete queued dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
+            <button type="submit" class="danger-button">Delete</button>
+          </form>
+        `;
+      } else if (dataset.status === 'failed' || dataset.status === 'stopped') {
+        actions.innerHTML = `
+          <form method="post" action="/dashboard/retry/${dataset.id}" data-loading-label="Retrying dataset processing">
+            <button type="submit" class="warning-button">Retry</button>
+          </form>
+          <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
+            <button type="submit" class="danger-button">Delete</button>
+          </form>
+        `;
+      }
+      actions.querySelectorAll('form[data-confirm]').forEach((form) => {
+        form.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const accepted = await showConfirmDialog(form.dataset.confirm, {
+            title: form.dataset.confirmTitle || 'Confirm action',
+            confirmLabel: form.dataset.confirmLabel || 'Confirm',
+          });
+          if (accepted) {
+            form.submit();
+          }
+        });
+      });
+    }
   };
 
   const pollQueue = async () => {

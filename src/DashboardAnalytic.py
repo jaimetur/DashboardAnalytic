@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Annotated
 from typing import Any
 from urllib.parse import urlencode
@@ -29,6 +30,9 @@ from src.utils.filesystem import ensure_directories, safe_join
 SESSION_COOKIE = 'bench_automations_session'
 SESSIONS: dict[str, SessionUser] = {}
 ANALYSIS_CACHE: dict[str, dict[str, Any]] = {}
+DATAFRAME_CACHE: dict[str, pd.DataFrame] = {}
+STOP_REQUESTS: set[int] = set()
+STOP_REQUESTS_LOCK = Lock()
 repository = Repository(settings.database_path)
 FILTER_DIMENSIONS = ['market', 'period', 'operator', 'region', 'vendor', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet']
 FILTER_DIMENSIONS_BY_KIND = {
@@ -37,11 +41,21 @@ FILTER_DIMENSIONS_BY_KIND = {
     'data': ['market', 'period', 'operator', 'region', 'vendor', 'test_name', 'direction', 'technology_primary', 'source_sheet'],
     'generic': ['market', 'period', 'operator', 'region', 'vendor', 'source_sheet'],
 }
+ANALYSIS_SUPPORT_COLUMNS = [
+    'dataset_kind', 'source_file', 'market', 'period', 'operator', 'region', 'vendor', 'session_type', 'test_name',
+    'direction', 'technology_primary', 'source_sheet', 'status', 'success', 'failure', 'dropped', 'disturbed',
+    'impaired', 'setup_time_seconds', 'duration_seconds', 'throughput_mbps', 'quality_score', 'latency_ms',
+    'jitter_ms', 'packet_loss_pct', 'handovers', 'POLQA_LQ_Avg', 'LQ', 'Receive_Delay', 'Mean_Data_Rate',
+    'TCP_RTT_Service_Access_Delay', 'DNS_Resolution_Success_Ratio', 'DNS_Resolution_Success',
+    'DNS_Resolution_Attempts', 'VideoStream_Freezing_Time_Sum', 'Call_Setup_Time', 'Call_Duration',
+    'TCP_Throughput', 'Test_Duration', 'Playing_Technology', 'Type_of_Test',
+]
 STATUS_LABELS = {
     'queued': 'Queued',
     'processing': 'Processing',
     'ready': 'Processed',
     'failed': 'Failed',
+    'stopped': 'Stopped',
 }
 INPUT_KIND_LABELS = {
     'voice': 'CDR-Voice',
@@ -163,6 +177,33 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class ProcessingStopped(Exception):
+    pass
+
+
+def request_stop(dataset_id: int) -> None:
+    with STOP_REQUESTS_LOCK:
+        STOP_REQUESTS.add(dataset_id)
+
+
+def clear_stop_request(dataset_id: int) -> None:
+    with STOP_REQUESTS_LOCK:
+        STOP_REQUESTS.discard(dataset_id)
+
+
+def stop_requested(dataset_id: int) -> bool:
+    with STOP_REQUESTS_LOCK:
+        return dataset_id in STOP_REQUESTS
+
+
+def ensure_not_stopped(dataset_id: int) -> None:
+    if stop_requested(dataset_id):
+        raise ProcessingStopped('Processing stopped by user.')
+    dataset = repository.get_dataset(dataset_id)
+    if dataset and (dataset['status'] or '') == 'stopped':
+        raise ProcessingStopped('Processing stopped by user.')
+
+
 def build_analysis_cache_key(dataset_path: Path, filters: dict[str, Any], metric: str) -> str:
     stat = dataset_path.stat()
     payload = {
@@ -171,6 +212,16 @@ def build_analysis_cache_key(dataset_path: Path, filters: dict[str, Any], metric
         'size': stat.st_size,
         'metric': metric or '',
         'filters': filters,
+    }
+    return json.dumps(payload, sort_keys=True, default=str)
+
+
+def build_dataset_cache_key(dataset_path: Path) -> str:
+    stat = dataset_path.stat()
+    payload = {
+        'path': str(dataset_path.resolve()),
+        'mtime_ns': stat.st_mtime_ns,
+        'size': stat.st_size,
     }
     return json.dumps(payload, sort_keys=True, default=str)
 
@@ -187,20 +238,67 @@ def store_cached_analysis(dataset_path: Path, filters: dict[str, Any], metric: s
     return analysis
 
 
+def get_cached_dataset_frame(dataset_path: Path) -> pd.DataFrame | None:
+    if not dataset_path.exists():
+        return None
+    return DATAFRAME_CACHE.get(build_dataset_cache_key(dataset_path))
+
+
+def store_cached_dataset_frame(dataset_path: Path, df: pd.DataFrame) -> pd.DataFrame:
+    if not dataset_path.exists():
+        return df
+    DATAFRAME_CACHE[build_dataset_cache_key(dataset_path)] = df
+    if len(DATAFRAME_CACHE) > 16:
+        oldest_key = next(iter(DATAFRAME_CACHE))
+        DATAFRAME_CACHE.pop(oldest_key, None)
+    return df
+
+
+def load_cached_dataset(dataset_path: Path) -> pd.DataFrame:
+    if not dataset_path.exists():
+        raise FileNotFoundError(f'Dataset source file is missing: {dataset_path}')
+    cached = get_cached_dataset_frame(dataset_path)
+    if cached is not None:
+        return cached
+    return store_cached_dataset_frame(dataset_path, load_dataset(dataset_path))
+
+
+def build_analysis_query_columns(selected_dataset: dict[str, Any], selected_metrics: list[str]) -> list[str]:
+    requested = set(ANALYSIS_SUPPORT_COLUMNS)
+    requested.update(selected_metrics)
+    return sorted(requested)
+
+
 def process_dataset(dataset_id: int, dataset_path: Path, username: str) -> None:
+    if not repository.get_dataset(dataset_id) or not dataset_path.exists():
+        clear_stop_request(dataset_id)
+        return
+    clear_stop_request(dataset_id)
     repository.update_dataset_profile(dataset_id, status='processing', progress=10, last_error=None)
     try:
-        df = load_dataset(dataset_path)
-        repository.update_dataset_profile(dataset_id, progress=45, dataset_kind=infer_dataset_kind(df, dataset_path.name))
+        def progress_update(value: int) -> None:
+            ensure_not_stopped(dataset_id)
+            repository.update_dataset_profile(dataset_id, progress=max(10, min(95, int(value))))
+
+        df = load_dataset(dataset_path, progress_callback=progress_update)
+        store_cached_dataset_frame(dataset_path, df)
+        repository.replace_dataset_rows(dataset_id, df)
+        ensure_not_stopped(dataset_id)
+        repository.update_dataset_profile(dataset_id, progress=62, dataset_kind=infer_dataset_kind(df, dataset_path.name))
         summary = summarise_dataset(df)
+        ensure_not_stopped(dataset_id)
+        repository.update_dataset_profile(dataset_id, progress=72)
         available_metrics = derive_available_metrics(df)
         analysis = build_analysis(df, {'aggregation': 'all', 'extra_filters': {}}, '')
+        ensure_not_stopped(dataset_id)
+        repository.update_dataset_profile(dataset_id, progress=84)
         profile_df = restrict_frame_to_metric(df, analysis.selected_metric)
         filter_options = derive_filter_options(profile_df)
         available_aggregations = derive_available_aggregations(filter_options)
         default_aggregation = analysis.filters.get('aggregation')
         if default_aggregation == 'all' and available_aggregations:
             default_aggregation = available_aggregations[0]
+        repository.update_dataset_profile(dataset_id, progress=94)
         repository.update_dataset_profile(
             dataset_id,
             status='ready',
@@ -219,15 +317,31 @@ def process_dataset(dataset_id: int, dataset_path: Path, username: str) -> None:
             last_error=None,
         )
         repository.add_log(username, 'process_dataset', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name, 'status': 'ready'}))
+    except ProcessingStopped as exc:
+        progress = int((repository.get_dataset(dataset_id) or {}).get('progress') or 0)
+        repository.update_dataset_profile(
+            dataset_id,
+            status='stopped',
+            progress=max(0, min(99, progress)),
+            last_error=str(exc),
+            processed_at=now_iso(),
+        )
+        repository.add_log(username, 'stop_dataset', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name}))
     except Exception as exc:
         repository.update_dataset_profile(dataset_id, status='failed', progress=100, last_error=str(exc), processed_at=now_iso())
         repository.add_log(username, 'process_dataset_failed', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name, 'error': str(exc)}))
+    finally:
+        clear_stop_request(dataset_id)
 
 
 def enqueue_dataset_processing(background_tasks: BackgroundTasks, dataset_id: int, dataset_path: Path, username: str) -> None:
+    clear_stop_request(dataset_id)
     stale_keys = [key for key in ANALYSIS_CACHE if str(dataset_path.resolve()) in key]
     for key in stale_keys:
         ANALYSIS_CACHE.pop(key, None)
+    stale_dataset_keys = [key for key in DATAFRAME_CACHE if str(dataset_path.resolve()) in key]
+    for key in stale_dataset_keys:
+        DATAFRAME_CACHE.pop(key, None)
     repository.update_dataset_profile(dataset_id, status='queued', progress=0, last_error=None, processed_at=None)
     background_tasks.add_task(process_dataset, dataset_id, dataset_path, username)
 
@@ -281,15 +395,13 @@ def resolve_doc_path(doc_name: str) -> Path:
 
 
 def choose_selected_dataset(datasets: list[dict[str, Any]], dataset_id: int | None, input_kind: str | None) -> dict[str, Any] | None:
-    filtered_datasets = [dataset for dataset in datasets if not input_kind or dataset.get('dataset_kind') == input_kind]
-    candidate_datasets = filtered_datasets or datasets
+    ready_datasets = [dataset for dataset in datasets if dataset.get('is_ready')]
+    filtered_datasets = [dataset for dataset in ready_datasets if not input_kind or dataset.get('dataset_kind') == input_kind]
+    candidate_datasets = filtered_datasets or ready_datasets
     if dataset_id is not None:
         for dataset in candidate_datasets:
             if dataset['id'] == dataset_id:
                 return dataset
-    for dataset in candidate_datasets:
-        if dataset['is_ready']:
-            return dataset
     return candidate_datasets[0] if candidate_datasets else None
 
 
@@ -352,20 +464,29 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
     )
 
 
-def build_dashboard_payload(selected_dataset: dict[str, Any] | None, request: Request) -> tuple[dict[str, Any] | None, dict[str, Any], str | None, bool]:
+def build_dashboard_payload(selected_dataset: dict[str, Any] | None, request: Request) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[str], dict[str, Any], str | None, bool]:
     if not selected_dataset:
-        return None, {}, None, False
+        return None, [], [], {}, None, False
     if not selected_dataset['is_ready']:
-        return None, {}, selected_dataset.get('last_error') if selected_dataset.get('status') == 'failed' else None, False
+        return None, [], [], {}, selected_dataset.get('last_error') if selected_dataset.get('status') == 'failed' else None, False
 
     filter_options = selected_dataset.get('filter_options') or {}
     filter_options = {'input_kind': [selected_dataset.get('dataset_kind') or 'generic'], **filter_options}
     if not should_load_analysis(request):
-        return None, filter_options, None, False
+        return None, [], [], filter_options, None, False
 
     dataset_path = Path(selected_dataset['stored_path'])
-    metric = request.query_params.get('metric') or selected_dataset.get('default_metric') or ''
     aggregation = request.query_params.get('aggregation') or selected_dataset.get('default_aggregation') or 'all'
+    requested_metrics = [value for value in request.query_params.getlist('metric') if value]
+    if not requested_metrics:
+        fallback_metric = request.query_params.get('metric') or selected_dataset.get('default_metric') or ''
+        if fallback_metric:
+            requested_metrics = [fallback_metric]
+    available_metrics = selected_dataset.get('available_metrics') or []
+    selected_metrics = [metric for metric in requested_metrics if metric in available_metrics]
+    if not selected_metrics:
+        default_metric = selected_dataset.get('default_metric') or (available_metrics[0] if available_metrics else '')
+        selected_metrics = [default_metric] if default_metric else []
     filters = {
         'market': choose_filter_value(request.query_params.get('market'), filter_options, 'market'),
         'period': choose_filter_value(request.query_params.get('period'), filter_options, 'period'),
@@ -379,11 +500,29 @@ def build_dashboard_payload(selected_dataset: dict[str, Any] | None, request: Re
         if selected_value and selected_value in filter_options.get(dimension, []):
             filters['extra_filters'][dimension] = selected_value
 
-    analysis = get_cached_analysis(dataset_path, filters, metric)
-    if analysis is None:
-        df = load_dataset(dataset_path)
-        analysis = store_cached_analysis(dataset_path, filters, metric, build_analysis(df, filters, metric))
-    return analysis, filter_options, None, True
+    query_columns = build_analysis_query_columns(selected_dataset, selected_metrics)
+    if repository.dataset_rows_table_exists(selected_dataset['id']):
+        df = repository.load_dataset_rows(selected_dataset['id'], query_columns, filters)
+    else:
+        if not dataset_path.exists():
+            return None, [], selected_metrics, filter_options, 'The processed dataset is registered, but its source file is missing and no materialized query table exists. Reupload or retry processing this dataset.', False
+        df = load_cached_dataset(dataset_path)
+        repository.replace_dataset_rows(selected_dataset['id'], df)
+    analyses: list[dict[str, Any]] = []
+    for metric in selected_metrics:
+        try:
+            analysis = get_cached_analysis(dataset_path, filters, metric)
+            if analysis is None:
+                analysis = store_cached_analysis(dataset_path, filters, metric, build_analysis(df, filters, metric))
+            analyses.append({'metric': metric, 'result': analysis})
+        except ValueError as exc:
+            if analyses:
+                continue
+            return None, [], selected_metrics, filter_options, str(exc), False
+
+    primary_analysis = analyses[0]['result'] if analyses else None
+    resolved_metrics = [entry['result'].selected_metric for entry in analyses]
+    return primary_analysis, analyses, resolved_metrics, filter_options, None, True
 
 
 @app.get('/healthz')
@@ -466,9 +605,10 @@ def dashboard(
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
     datasets = [serialize_dataset_row(row) for row in repository.list_datasets()]
+    ready_datasets = [dataset for dataset in datasets if dataset['is_ready']]
     input_kind_options = sorted({dataset.get('dataset_kind') or 'generic' for dataset in datasets})
     selected_dataset = choose_selected_dataset(datasets, dataset_id, input_kind)
-    analysis, filter_options, analysis_error, analysis_loaded = build_dashboard_payload(selected_dataset, request)
+    analysis, analyses, selected_metrics, filter_options, analysis_error, analysis_loaded = build_dashboard_payload(selected_dataset, request)
     has_processing = any(dataset['status'] in {'queued', 'processing'} for dataset in datasets)
 
     return render_template(
@@ -477,9 +617,12 @@ def dashboard(
         {
             'user': user,
             'datasets': datasets,
+            'ready_datasets': ready_datasets,
             'selected_dataset': selected_dataset,
             'analysis': analysis,
+            'analyses': analyses,
             'analysis_loaded': analysis_loaded,
+            'selected_metrics': selected_metrics,
             'filter_options': filter_options,
             'input_kind': input_kind,
             'input_kind_options': input_kind_options,
@@ -568,9 +711,56 @@ def retry_dataset(dataset_id: int, background_tasks: BackgroundTasks, user: Sess
     if not dataset:
         raise HTTPException(status_code=404, detail='Dataset not found')
     dataset_payload = serialize_dataset_row(dataset)
+    if dataset_payload['status'] not in {'failed', 'stopped'}:
+        raise HTTPException(status_code=400, detail='Only failed or stopped datasets can be retried')
     enqueue_dataset_processing(background_tasks, dataset_id, Path(dataset_payload['stored_path']), user.username)
     repository.add_log(user.username, 'retry_dataset', json.dumps({'dataset_id': dataset_id, 'file': dataset_payload['file_name']}))
     return RedirectResponse(f'/dashboard?dataset_id={dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/dashboard/stop/{dataset_id}')
+def stop_dataset(dataset_id: int, user: SessionUser = Depends(current_user)) -> Response:
+    dataset = repository.get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail='Dataset not found')
+    dataset_payload = serialize_dataset_row(dataset)
+    if dataset_payload['status'] != 'processing':
+        raise HTTPException(status_code=400, detail='Only processing datasets can be stopped')
+    request_stop(dataset_id)
+    repository.update_dataset_profile(
+        dataset_id,
+        status='stopped',
+        last_error='Processing stopped by user.',
+        processed_at=now_iso(),
+    )
+    repository.add_log(user.username, 'stop_dataset_requested', json.dumps({'dataset_id': dataset_id, 'file': dataset_payload['file_name']}))
+    return RedirectResponse(f'/dashboard?dataset_id={dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/dashboard/delete/{dataset_id}')
+def delete_dataset(dataset_id: int, user: SessionUser = Depends(current_user)) -> Response:
+    dataset = repository.get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail='Dataset not found')
+    dataset_payload = serialize_dataset_row(dataset)
+    if dataset_payload['status'] == 'processing':
+        raise HTTPException(status_code=400, detail='Processing datasets must be stopped before deletion')
+    request_stop(dataset_id)
+    deleted = repository.delete_dataset(dataset_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail='Dataset not found')
+    dataset_path = Path(deleted['stored_path'])
+    if dataset_path.exists():
+        dataset_path.unlink()
+    repository.drop_dataset_rows(dataset_id)
+    stale_keys = [key for key in ANALYSIS_CACHE if str(dataset_path.resolve()) in key]
+    for key in stale_keys:
+        ANALYSIS_CACHE.pop(key, None)
+    stale_dataset_keys = [key for key in DATAFRAME_CACHE if str(dataset_path.resolve()) in key]
+    for key in stale_dataset_keys:
+        DATAFRAME_CACHE.pop(key, None)
+    repository.add_log(user.username, 'delete_dataset', json.dumps({'dataset_id': dataset_id, 'file': deleted['file_name']}))
+    return RedirectResponse('/dashboard', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/dashboard/analyze', response_class=HTMLResponse)
@@ -623,7 +813,7 @@ def export_report(
     dataset_path = Path(selected_dataset['stored_path'])
     analysis = get_cached_analysis(dataset_path, filters, metric)
     if analysis is None:
-        analysis = store_cached_analysis(dataset_path, filters, metric, build_analysis(load_dataset(dataset_path), filters, metric))
+        analysis = store_cached_analysis(dataset_path, filters, metric, build_analysis(load_cached_dataset(dataset_path), filters, metric))
     file_stem = Path(selected_dataset['stored_path']).stem
 
     if export_kind == 'word':

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+from pathlib import Path
 
 from src.modules.auth import hash_password
 
@@ -108,13 +109,65 @@ def test_admin_can_retry_stuck_dataset(client) -> None:
 
     import src.DashboardAnalytic as app_module
 
-    app_module.repository.update_dataset_profile(1, status="queued", progress=0, dataset_kind=None, row_count=None, column_count=None, default_metric=None)
+    app_module.repository.update_dataset_profile(1, status="failed", progress=100, dataset_kind=None, row_count=None, column_count=None, default_metric=None)
     retry_response = client.post("/dashboard/retry/1", follow_redirects=False)
     assert retry_response.status_code == 303
 
     dashboard_response = client.get(retry_response.headers["location"])
     assert dashboard_response.status_code == 200
     assert "Workspace opened from cache" in dashboard_response.text
+
+
+def test_admin_cannot_retry_queued_dataset(client) -> None:
+    login(client)
+    client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
+        follow_redirects=False,
+    )
+
+    response = client.post("/dashboard/retry/1")
+    assert response.status_code == 400
+    assert "Only failed or stopped datasets can be retried" in response.text
+
+
+def test_admin_can_delete_queued_dataset(client) -> None:
+    login(client)
+    client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
+        follow_redirects=False,
+    )
+
+    import src.DashboardAnalytic as app_module
+
+    dataset = app_module.repository.get_dataset(1)
+    assert dataset is not None
+    dataset_path = Path(dataset["stored_path"])
+    assert dataset_path.exists()
+    response = client.post("/dashboard/delete/1", follow_redirects=False)
+    assert response.status_code == 303
+    assert app_module.repository.get_dataset(1) is None
+    assert not dataset_path.exists()
+
+
+def test_admin_can_stop_processing_dataset(client) -> None:
+    login(client)
+    client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
+        follow_redirects=False,
+    )
+
+    import src.DashboardAnalytic as app_module
+
+    app_module.repository.update_dataset_profile(1, status="processing", progress=33)
+    response = client.post("/dashboard/stop/1", follow_redirects=False)
+    assert response.status_code == 303
+
+    dataset = app_module.repository.get_dataset(1)
+    assert dataset is not None
+    assert dataset["status"] == "stopped"
 
 
 def test_reupload_same_file_reuses_existing_dataset_entry(client) -> None:
@@ -183,6 +236,58 @@ def test_dataset_selector_shows_all_datasets_when_no_input_kind_filter_is_set(cl
     assert response.status_code == 200
     assert '<option value="1"' in response.text
     assert '<option value="2"' in response.text
+
+
+def test_dataset_selector_only_lists_ready_datasets(client) -> None:
+    login(client)
+
+    client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("ready.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
+        follow_redirects=False,
+    )
+    client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("stopped.csv", BytesIO(b"market,period,score\nDE,2026-Q2,78\n"), "text/csv")},
+        follow_redirects=False,
+    )
+
+    import src.DashboardAnalytic as app_module
+
+    app_module.repository.update_dataset_profile(2, status="stopped", progress=50)
+
+    response = client.get("/dashboard")
+    selector_fragment = response.text.split('data-dataset-select', 1)[1].split('</select>', 1)[0]
+    assert response.status_code == 200
+    assert 'value="1"' in selector_fragment
+    assert 'ready.csv' in selector_fragment
+    assert 'value="2"' not in selector_fragment
+    assert 'stopped.csv' not in selector_fragment
+
+
+def test_dashboard_ignores_non_ready_dataset_id_in_selector_flow(client) -> None:
+    login(client)
+
+    client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("ready.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
+        follow_redirects=False,
+    )
+    client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("failed.csv", BytesIO(b"market,period,score\nDE,2026-Q2,78\n"), "text/csv")},
+        follow_redirects=False,
+    )
+
+    import src.DashboardAnalytic as app_module
+
+    app_module.repository.update_dataset_profile(2, status="failed", progress=100, last_error="broken")
+
+    response = client.get("/dashboard?dataset_id=2")
+    selector_fragment = response.text.split('data-dataset-select', 1)[1].split('</select>', 1)[0]
+    assert response.status_code == 200
+    assert 'option value="1"' in selector_fragment
+    assert 'option value="2"' not in selector_fragment
 
 
 def test_admin_can_update_user_identity_fields(client) -> None:
@@ -342,6 +447,9 @@ def test_dashboard_analysis_reuses_cached_result_on_reload(client, monkeypatch) 
 
     calls = {"count": 0}
     original_load_dataset = app_module.load_dataset
+    app_module.ANALYSIS_CACHE.clear()
+    app_module.DATAFRAME_CACHE.clear()
+    assert app_module.repository.dataset_rows_table_exists(1)
 
     def counting_load_dataset(path):
         calls["count"] += 1
@@ -351,11 +459,98 @@ def test_dashboard_analysis_reuses_cached_result_on_reload(client, monkeypatch) 
 
     first_response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
     assert first_response.status_code == 200
-    assert calls["count"] == 1
+    assert calls["count"] == 0
 
     second_response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
     assert second_response.status_code == 200
-    assert calls["count"] == 1
+    assert calls["count"] == 0
+
+
+def test_dashboard_analysis_reuses_cached_dataset_frame_across_metric_changes(client, monkeypatch) -> None:
+    login(client)
+    csv_content = b"market,period,score,gap\nES,2026-Q1,91,2.1\nES,2026-Q1,87,3.3\n"
+    upload_response = client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    import src.DashboardAnalytic as app_module
+
+    calls = {"count": 0}
+    original_load_dataset = app_module.load_dataset
+    app_module.ANALYSIS_CACHE.clear()
+    app_module.DATAFRAME_CACHE.clear()
+    assert app_module.repository.dataset_rows_table_exists(1)
+
+    def counting_load_dataset(path):
+        calls["count"] += 1
+        return original_load_dataset(path)
+
+    monkeypatch.setattr(app_module, "load_dataset", counting_load_dataset)
+
+    first_response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
+    assert first_response.status_code == 200
+    assert calls["count"] == 0
+
+    second_response = client.get("/dashboard?dataset_id=1&metric=gap&aggregation=all&load=1")
+    assert second_response.status_code == 200
+    assert calls["count"] == 0
+
+
+def test_dashboard_renders_multiple_selected_metrics(client) -> None:
+    login(client)
+    csv_content = b"market,period,score,gap\nES,2026-Q1,91,2.1\nES,2026-Q1,87,3.3\n"
+    upload_response = client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    response = client.get("/dashboard?dataset_id=1&metric=score&metric=gap&aggregation=all&load=1")
+    assert response.status_code == 200
+    assert "Hold Cmd/Ctrl to select multiple KPIs." in response.text
+    assert response.text.count("Metric View") >= 2
+    assert "score" in response.text
+    assert "gap" in response.text
+
+
+def test_dashboard_handles_empty_table_rows_without_template_failure(client) -> None:
+    login(client)
+    csv_content = b"market,period,operator,score\nES,2026-Q1,VDF,91\nES,2026-Q1,VDF,87\n"
+    upload_response = client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=operator&market=DE&load=1")
+    assert response.status_code == 200
+    assert "No rows match the selected filters" in response.text or "No tabular rows match the selected filters" in response.text
+
+
+def test_dashboard_materializes_legacy_ready_dataset_on_first_analysis(client) -> None:
+    login(client)
+    csv_content = b"market,period,operator,score\nES,2026-Q1,VDF,91\nES,2026-Q1,VDF,87\n"
+    upload_response = client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    import src.DashboardAnalytic as app_module
+
+    app_module.repository.drop_dataset_rows(1)
+    assert not app_module.repository.dataset_rows_table_exists(1)
+
+    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=operator&load=1")
+    assert response.status_code == 200
+    assert "Charts and Scorecards" in response.text
+    assert app_module.repository.dataset_rows_table_exists(1)
 
 
 def test_dataset_status_endpoint_returns_queue_payload(client) -> None:
@@ -371,3 +566,28 @@ def test_dataset_status_endpoint_returns_queue_payload(client) -> None:
     payload = response.json()
     assert "datasets" in payload
     assert payload["datasets"][0]["file_name"] == "sample.csv"
+
+
+def test_dashboard_handles_missing_source_file_without_500(client) -> None:
+    login(client)
+
+    import src.DashboardAnalytic as app_module
+
+    with app_module.repository.connection() as conn:
+        conn.execute(
+            "INSERT INTO datasets (id, file_name, stored_path, uploaded_by) VALUES (?, ?, ?, ?)",
+            (99, "missing.xlsx", "/tmp/does-not-exist.xlsx", "admin"),
+        )
+        conn.execute(
+            """
+            INSERT INTO dataset_profiles (
+                dataset_id, status, progress, dataset_kind, default_metric, default_aggregation,
+                available_metrics_json, available_aggregations_json, filter_options_json, summary_json, kpis_json
+            ) VALUES (?, 'ready', 100, 'data', 'throughput_mbps', 'operator', '["throughput_mbps"]', '["operator"]', '{}', '{}', '{}')
+            """,
+            (99,),
+        )
+
+    response = client.get("/dashboard?dataset_id=99&metric=throughput_mbps&aggregation=operator&load=1")
+    assert response.status_code == 200
+    assert "source file is missing" in response.text

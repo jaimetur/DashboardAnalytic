@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
+import pandas as pd
+
 from src.modules.auth import hash_password
 
 
@@ -100,6 +102,12 @@ class Repository:
                     "INSERT INTO users (username, password_hash, role, active) VALUES (?, ?, 'user', 1)",
                     ('demo', hash_password('demo123')),
                 )
+
+    def dataset_rows_table_name(self, dataset_id: int) -> str:
+        return f'dataset_rows_{int(dataset_id)}'
+
+    def _quote_identifier(self, identifier: str) -> str:
+        return '"' + str(identifier).replace('"', '""') + '"'
 
     def _cleanup_duplicate_datasets(self, conn: sqlite3.Connection) -> None:
         duplicate_groups = conn.execute(
@@ -229,6 +237,61 @@ class Repository:
             )
             return dataset_id, True
 
+    def replace_dataset_rows(self, dataset_id: int, df: pd.DataFrame) -> None:
+        table_name = self.dataset_rows_table_name(dataset_id)
+        with self.connection() as conn:
+            conn.execute(f"DROP TABLE IF EXISTS {self._quote_identifier(table_name)}")
+            df.to_sql(table_name, conn, index=False)
+
+    def drop_dataset_rows(self, dataset_id: int) -> None:
+        table_name = self.dataset_rows_table_name(dataset_id)
+        with self.connection() as conn:
+            conn.execute(f"DROP TABLE IF EXISTS {self._quote_identifier(table_name)}")
+
+    def dataset_rows_table_exists(self, dataset_id: int) -> bool:
+        table_name = self.dataset_rows_table_name(dataset_id)
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table_name,),
+            ).fetchone()
+        return row is not None
+
+    def list_dataset_row_columns(self, dataset_id: int) -> list[str]:
+        table_name = self.dataset_rows_table_name(dataset_id)
+        with self.connection() as conn:
+            rows = conn.execute(f"PRAGMA table_info({self._quote_identifier(table_name)})").fetchall()
+        return [row['name'] for row in rows]
+
+    def load_dataset_rows(self, dataset_id: int, columns: list[str], filters: dict[str, Any]) -> pd.DataFrame:
+        table_name = self.dataset_rows_table_name(dataset_id)
+        existing_columns = set(self.list_dataset_row_columns(dataset_id))
+        selected_columns = [column for column in columns if column in existing_columns]
+        if not selected_columns:
+            return pd.DataFrame()
+
+        where_clauses: list[str] = []
+        params: list[Any] = []
+        for key, value in filters.items():
+            if key in {'aggregation', 'extra_filters'} or value in (None, '') or key not in existing_columns:
+                continue
+            where_clauses.append(f"LOWER(TRIM(CAST({self._quote_identifier(key)} AS TEXT))) = ?")
+            params.append(str(value).strip().lower())
+
+        for key, value in (filters.get('extra_filters') or {}).items():
+            if value in (None, '') or key not in existing_columns:
+                continue
+            where_clauses.append(f"LOWER(TRIM(CAST({self._quote_identifier(key)} AS TEXT))) = ?")
+            params.append(str(value).strip().lower())
+
+        select_clause = ', '.join(self._quote_identifier(column) for column in selected_columns)
+        query = f"SELECT {select_clause} FROM {self._quote_identifier(table_name)}"
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+
+        with self.connection() as conn:
+            return pd.read_sql_query(query, conn, params=params)
+
     def update_dataset_profile(self, dataset_id: int, **fields: Any) -> None:
         if not fields:
             return
@@ -272,6 +335,17 @@ class Repository:
                     """
                 ).fetchall()
             )
+
+    def delete_dataset(self, dataset_id: int) -> sqlite3.Row | None:
+        with self.connection() as conn:
+            dataset = conn.execute(
+                "SELECT id, file_name, stored_path, uploaded_by, uploaded_at FROM datasets WHERE id = ?",
+                (dataset_id,),
+            ).fetchone()
+            if not dataset:
+                return None
+            conn.execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
+            return dataset
 
     def add_log(self, username: str, action: str, details: str) -> None:
         with self.connection() as conn:
