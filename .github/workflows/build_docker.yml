@@ -21,9 +21,9 @@ on:
         default: false
     secrets:
       DOCKERHUB_USERNAME:
-        required: false
+        required: true
       DOCKERHUB_TOKEN:
-        required: false
+        required: true
   push:
     branches: [main]
     tags: ['v*']
@@ -31,59 +31,68 @@ on:
 jobs:
   docker:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Detect Docker Hub publishing configuration
-        id: dockerhub
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Resolve image metadata
+        id: image
+        shell: bash
         run: |
-          if [ -n "${DOCKERHUB_USERNAME}" ] && [ -n "${DOCKERHUB_TOKEN}" ]; then
-            echo "enabled=true" >> "${GITHUB_OUTPUT}"
-            echo "image=${DOCKERHUB_USERNAME}/dashboard-analytic" >> "${GITHUB_OUTPUT}"
+          APP_VERSION=$(python - <<'PY'
+          from src.version import __version__
+          print(__version__)
+          PY
+          )
+          IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/dashboard-analytic"
+          RAW_REF="${GITHUB_REF_NAME}"
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION_TAG="${RAW_REF}"
           else
-            echo "enabled=false" >> "${GITHUB_OUTPUT}"
-            echo "image=dashboard-analytic" >> "${GITHUB_OUTPUT}"
+            VERSION_TAG="v${APP_VERSION}"
           fi
 
+          echo "app_version=${APP_VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "image_name=${IMAGE_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "version_tag=${VERSION_TAG}" >> "${GITHUB_OUTPUT}"
+
       - name: Log in to Docker Hub
-        if: ${{ steps.dockerhub.outputs.enabled == 'true' }}
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ steps.dockerhub.outputs.image }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Build Docker image
+        shell: bash
+        run: |
+          docker build --pull --no-cache \
+            -t "${{ steps.image.outputs.image_name }}:${{ steps.image.outputs.version_tag }}" \
+            -f docker/dockerfile .
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/dockerfile
-          push: ${{ steps.dockerhub.outputs.enabled == 'true' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+      - name: Push release or version tag
+        shell: bash
+        run: |
+          docker push "${{ steps.image.outputs.image_name }}:${{ steps.image.outputs.version_tag }}"
+
+      - name: Push latest and main tags
+        if: ${{ github.ref == 'refs/heads/main' }}
+        shell: bash
+        run: |
+          docker tag "${{ steps.image.outputs.image_name }}:${{ steps.image.outputs.version_tag }}" "${{ steps.image.outputs.image_name }}:main"
+          docker push "${{ steps.image.outputs.image_name }}:main"
+          docker tag "${{ steps.image.outputs.image_name }}:${{ steps.image.outputs.version_tag }}" "${{ steps.image.outputs.image_name }}:latest"
+          docker push "${{ steps.image.outputs.image_name }}:latest"
+
+      - name: Push latest tag for versioned release
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        shell: bash
+        run: |
+          docker tag "${{ steps.image.outputs.image_name }}:${{ steps.image.outputs.version_tag }}" "${{ steps.image.outputs.image_name }}:latest"
+          docker push "${{ steps.image.outputs.image_name }}:latest"
 
       - name: Prepare Docker package
         run: |
@@ -98,7 +107,7 @@ jobs:
           cd dist && zip -r DashboardAnalytic_docker_bundle.zip DashboardAnalytic
 
       - name: Upload Docker package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: DashboardAnalytic_docker_bundle
           path: dist/DashboardAnalytic_docker_bundle.zip
