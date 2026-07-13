@@ -202,7 +202,7 @@ Docker image publication behavior:
 Required GitHub repository secrets:
 
 - `DOCKERHUB_USERNAME`
-- `DOCKERHUB_TOKEN`
+- `DOCKERHUB_TOKEN` or `DOCKERHUB_PASSWORD`
 
 Current Docker image naming:
 
