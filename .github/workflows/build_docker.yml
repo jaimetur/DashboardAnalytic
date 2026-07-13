@@ -70,6 +70,24 @@ jobs:
           DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
         shell: bash
         run: |
+          if [ -n "${DOCKERHUB_USERNAME}" ]; then
+            echo "DOCKERHUB_USERNAME present"
+          else
+            echo "DOCKERHUB_USERNAME missing"
+          fi
+
+          if [ -n "${DOCKERHUB_PASSWORD}" ]; then
+            echo "DOCKERHUB_PASSWORD present"
+          else
+            echo "DOCKERHUB_PASSWORD missing"
+          fi
+
+          if [ -n "${DOCKERHUB_TOKEN}" ]; then
+            echo "DOCKERHUB_TOKEN present"
+          else
+            echo "DOCKERHUB_TOKEN missing"
+          fi
+
           PASSWORD_VALUE="${DOCKERHUB_TOKEN}"
           if [ -z "${PASSWORD_VALUE}" ]; then
             PASSWORD_VALUE="${DOCKERHUB_PASSWORD}"
