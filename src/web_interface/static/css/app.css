@@ -69,7 +69,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .dropzone-field input[data-file-picker-input] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .dropzone-title { font-family: "Space Grotesk", "Segoe UI", sans-serif; font-size: 1.2rem; }
 .dropzone-copy { color: rgba(255,255,255,0.72); font-size: 0.95rem; }
-.file-picker-shell { position: relative; display: flex; align-items: center; gap: 0.85rem; flex-wrap: wrap; min-height: 52px; }
+.file-picker-shell { position: relative; display: inline-flex; align-items: center; gap: 0.85rem; flex-wrap: wrap; min-height: 52px; align-self: start; }
 .file-picker-button { display: inline-flex; align-items: center; justify-content: center; min-width: 144px; padding: 0.8rem 1rem; border-radius: 999px; background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.26); color: white; font-weight: 700; box-shadow: 0 10px 24px rgba(8, 19, 28, 0.16); }
 .file-picker-text { color: rgba(255,255,255,0.8); font-size: 0.95rem; }
 .upload-alert { background: rgba(255, 244, 230, 0.18); color: rgba(255,255,255,0.96); border: 1px solid rgba(255, 214, 168, 0.32); backdrop-filter: blur(10px); }
