@@ -258,6 +258,7 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'app_version': __version__,
         'app_release_date': __release_date__,
         'asset_version': asset_version,
+        'static_path': lambda asset_path: str(request.app.url_path_for('static', path=asset_path)),
         **context,
     }
     return templates.TemplateResponse(request, template_name, payload, status_code=status_code)

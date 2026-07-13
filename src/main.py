@@ -17,4 +17,10 @@ from src.config import settings
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=settings.app_host, port=settings.app_port)
+    uvicorn.run(
+        app,
+        host=settings.app_host,
+        port=settings.app_port,
+        proxy_headers=True,
+        forwarded_allow_ips="*",
+    )

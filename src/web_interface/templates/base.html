@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ app_name }}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}?v={{ asset_version('css/app.css') }}">
+  <link rel="stylesheet" href="{{ static_path('css/app.css') }}?v={{ asset_version('css/app.css') }}">
 </head>
 <body>
   <div class="shell">
@@ -40,7 +40,7 @@
       </div>
     </div>
   </div>
-  <script src="{{ url_for('static', path='js/app.js') }}?v={{ asset_version('js/app.js') }}"></script>
+  <script src="{{ static_path('js/app.js') }}?v={{ asset_version('js/app.js') }}"></script>
   {% block extra_scripts %}{% endblock %}
 </body>
 </html>
