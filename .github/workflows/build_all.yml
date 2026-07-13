@@ -18,6 +18,9 @@ jobs:
 
   build-docker:
     needs: unit-tests
+    permissions:
+      contents: read
+      packages: write
     uses: ./.github/workflows/build_docker.yml
     with:
       final_release: ${{ github.event_name == 'workflow_dispatch' && inputs.final_release || false }}
