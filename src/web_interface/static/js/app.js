@@ -226,6 +226,7 @@ const datasetSelect = document.querySelector('[data-dataset-select]');
 const logTypeFilter = document.querySelector('[data-log-type-filter]');
 const persistencePathnames = new Set(['/dashboard', '/admin']);
 const dashboardStateKey = 'dashboard-analytic:/dashboard:last-query';
+const dashboardStateKeyPrefix = 'dashboard-analytic:/dashboard:last-query:dataset:';
 const activeDatasetStateKey = 'dashboard-analytic:active-dataset';
 let hasPendingLocationRestore = false;
 
@@ -249,11 +250,31 @@ function sanitizeDashboardState(params) {
   return sanitized;
 }
 
+function buildDashboardStateKey(datasetId) {
+  const normalizedDatasetId = String(datasetId || '').trim();
+  return normalizedDatasetId ? `${dashboardStateKeyPrefix}${normalizedDatasetId}` : dashboardStateKey;
+}
+
+function getDashboardStateKeyForParams(params) {
+  return buildDashboardStateKey(params?.get?.('dataset_id'));
+}
+
+function getPersistedDashboardQuery(params) {
+  const stateKey = getDashboardStateKeyForParams(params || new URLSearchParams());
+  let persistedQuery = window.localStorage.getItem(stateKey);
+  if (!persistedQuery && stateKey !== dashboardStateKey) {
+    persistedQuery = window.localStorage.getItem(dashboardStateKey);
+  }
+  return persistedQuery;
+}
+
 function persistDashboardState(params) {
   if (!hasMeaningfulDashboardState(params)) return;
   try {
     const sanitized = sanitizeDashboardState(params);
-    window.localStorage.setItem(dashboardStateKey, sanitized.toString());
+    const serialized = sanitized.toString();
+    window.localStorage.setItem(getDashboardStateKeyForParams(params), serialized);
+    window.localStorage.setItem(dashboardStateKey, serialized);
   } catch (_error) {
     // Ignore storage failures.
   }
@@ -705,7 +726,7 @@ async function submitDownloadForm(form) {
 
 if (window.location.pathname === '/dashboard') {
   const params = new URLSearchParams(window.location.search);
-  const persistedDashboardQuery = window.localStorage.getItem(dashboardStateKey);
+  const persistedDashboardQuery = getPersistedDashboardQuery(params);
   if (params.get('dataset_id')) {
     persistActiveDatasetState(params);
   }
