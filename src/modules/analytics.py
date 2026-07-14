@@ -38,7 +38,7 @@ AGGREGATION_CANDIDATES: dict[str, list[str]] = {
     'generic': ['operator', 'region', 'city', 'market', 'period', 'source_sheet'],
 }
 CDF_COMPARISON_CANDIDATES = ['vendor', 'market', 'operator', 'region', 'city']
-MAX_CDF_POINTS = 320
+MAX_CDF_POINTS = 960
 METRIC_AXIS_TITLES = {
     'polqa_lq_avg': 'POLQA LQ Avg',
     'lq': 'LQ',

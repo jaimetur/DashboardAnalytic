@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 
 from src.modules.analytics import MAX_CDF_POINTS, _top_records, build_analysis, compute_cdf
-from src.modules.ingestion import infer_dataset_kind, load_dataset
+from src.modules.ingestion import _normalise_dataset, infer_dataset_kind, load_dataset
 from src.DashboardAnalytic import derive_available_metrics
 
 
@@ -17,6 +19,7 @@ def test_compute_cdf_caps_large_series_to_fixed_resolution() -> None:
     series = pd.Series(range(5000))
     result = compute_cdf(series)
     assert len(result) <= MAX_CDF_POINTS + 1
+    assert len(result) >= MAX_CDF_POINTS - 1
     assert result[0][0] == 0.0
     assert result[-1] == (4999.0, 1.0)
 
@@ -71,6 +74,21 @@ def test_load_dataset_combines_cdr_workbook_operator_sheets(tmp_path) -> None:
     assert set(dataset["market"]) == {"DE"}
     assert set(dataset["period"]) == {"2025-Q3"}
     assert set(dataset["dataset_kind"]) == {"voice"}
+
+
+def test_normalise_dataset_uses_rat_as_primary_technology_for_data() -> None:
+    source = pd.DataFrame({
+        "RAT": ["5G NSA"],
+        "RAT_A": ["LTE"],
+        "L2_call_Mode_A": ["NR"],
+        "Playing_Technology": ["Fallback"],
+        "PCell_RAT_Timeline": ["NR->LTE->NR"],
+        "Mean_Data_Rate": [120.0],
+    })
+
+    normalized = _normalise_dataset(source, Path("sample_data.xlsx"))
+
+    assert normalized["technology_primary"].iloc[0] == "5G NSA"
 
 
 def test_build_analysis_returns_voice_specific_kpis_and_aggregation() -> None:

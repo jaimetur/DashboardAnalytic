@@ -73,7 +73,8 @@
 - Fixed `Global CDF Comparison` and `Global Aggregation` to persist their last selected values across dashboard returns
 - Fixed dashboard relaunch and dataset reopen flows so persisted global CDF and aggregation selections are restored even when `/dashboard` loads with only `dataset_id`
 - Fixed legacy materialized dashboard tables to stop rebuilding on every refresh when structural columns only differ by case
-- Optimized large-dashboard CDF rendering by capping chart payload resolution so very large datasets no longer serialize every point
+- Refined normalized `Technology Primary` for data datasets to prioritize `RAT` and stop deriving it from `PCell_RAT_Timeline`
+- Optimized large-dashboard CDF rendering by capping chart payload resolution while increasing the visual sample density so large curves keep their shape
 - Added CDF axis labels and metric units in dashboard and export charts so the plotted values are identifiable at a glance
 - Fixed PowerPoint metric KPI strips so all six KPI cards render instead of only `Max`
 - Fixed data filter ordering so `Test Name` appears between `Vendor` and `Region`

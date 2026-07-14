@@ -246,7 +246,7 @@ def _normalise_dataset(df: pd.DataFrame, file_path: Path) -> pd.DataFrame:
 
     dataset['technology_primary'] = _first_available_series(
         dataset,
-        ['L2_call_Mode_A', 'RAT_A', 'Playing_Technology', 'PCell_RAT_Timeline', 'RAT'],
+        ['RAT', 'RAT_A', 'L2_call_Mode_A', 'Playing_Technology'],
     )
     dataset['technology_secondary'] = _first_available_series(
         dataset,
