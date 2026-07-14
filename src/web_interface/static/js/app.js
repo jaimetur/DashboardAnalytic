@@ -158,6 +158,23 @@ function persistActiveDatasetState(params) {
   }
 }
 
+function buildRestoredDashboardUrl(currentParams, persistedDashboardQuery) {
+  const persistedParams = sanitizeDashboardState(new URLSearchParams(persistedDashboardQuery || ''));
+  const merged = new URLSearchParams(persistedParams.toString());
+  const currentDatasetId = String(currentParams.get('dataset_id') || '').trim();
+  const currentInputKind = String(currentParams.get('input_kind') || '').trim();
+  if (currentDatasetId) {
+    merged.set('dataset_id', currentDatasetId);
+  }
+  if (currentInputKind) {
+    merged.set('input_kind', currentInputKind);
+  } else {
+    merged.delete('input_kind');
+  }
+  const query = merged.toString();
+  return query ? `/dashboard?${query}` : '/dashboard';
+}
+
 function restoreActiveDatasetState() {
   try {
     const rawValue = window.localStorage.getItem(activeDatasetStateKey);
@@ -554,17 +571,14 @@ async function submitDownloadForm(form) {
 
 if (window.location.pathname === '/dashboard') {
   const params = new URLSearchParams(window.location.search);
+  const persistedDashboardQuery = window.localStorage.getItem(dashboardStateKey);
   if (params.get('dataset_id')) {
     persistActiveDatasetState(params);
   }
   if (hasMeaningfulDashboardState(params)) {
     persistDashboardState(params);
-  } else if (!params.has('dataset_id')) {
-    const persistedDashboardQuery = window.localStorage.getItem(dashboardStateKey);
-    if (persistedDashboardQuery) {
-      const sanitizedQuery = sanitizeDashboardState(new URLSearchParams(persistedDashboardQuery)).toString();
-      replaceLocation(`/dashboard?${sanitizedQuery}`);
-    }
+  } else if (persistedDashboardQuery) {
+    replaceLocation(buildRestoredDashboardUrl(params, persistedDashboardQuery));
   }
 }
 
