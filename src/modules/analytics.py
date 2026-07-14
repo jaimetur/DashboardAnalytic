@@ -38,7 +38,10 @@ AGGREGATION_CANDIDATES: dict[str, list[str]] = {
     'generic': ['operator', 'region', 'city', 'market', 'period', 'source_sheet'],
 }
 CDF_COMPARISON_CANDIDATES = ['vendor', 'market', 'operator', 'region', 'city']
-MAX_CDF_POINTS = 2048
+MAX_CDF_POINTS = 1024
+MAX_TOTAL_CDF_POINTS_PER_CHART = 1536
+MIN_CDF_POINTS_PER_SERIES = 192
+CDF_DEFAULT_Y_THRESHOLD = 0.95
 METRIC_AXIS_TITLES = {
     'polqa_lq_avg': 'POLQA LQ Avg',
     'lq': 'LQ',
@@ -132,12 +135,13 @@ def apply_filters(df: pd.DataFrame, filters: dict[str, Any]) -> pd.DataFrame:
     return filtered
 
 
-def compute_cdf(series: pd.Series) -> list[tuple[float, float]]:
+def compute_cdf(series: pd.Series, max_points: int = MAX_CDF_POINTS) -> list[tuple[float, float]]:
     cleaned = series.dropna().astype(float).sort_values().to_numpy()
     if cleaned.size == 0:
         return []
-    if cleaned.size > MAX_CDF_POINTS:
-        sample_indexes = np.linspace(0, cleaned.size - 1, MAX_CDF_POINTS, dtype=int)
+    limit = max(2, int(max_points or MAX_CDF_POINTS))
+    if cleaned.size > limit:
+        sample_indexes = np.linspace(0, cleaned.size - 1, limit, dtype=int)
         sample_indexes = np.unique(sample_indexes)
         sampled = cleaned[sample_indexes]
         cumulative = (sample_indexes + 1) / cleaned.size
@@ -147,6 +151,12 @@ def compute_cdf(series: pd.Series) -> list[tuple[float, float]]:
         return list(zip(sampled.tolist(), cumulative.tolist(), strict=False))
     cumulative = np.arange(1, cleaned.size + 1) / cleaned.size
     return list(zip(cleaned.tolist(), cumulative.tolist(), strict=False))
+
+
+def _resolve_cdf_point_budget(series_count: int) -> int:
+    if series_count <= 1:
+        return MAX_CDF_POINTS
+    return max(MIN_CDF_POINTS_PER_SERIES, min(MAX_CDF_POINTS, MAX_TOTAL_CDF_POINTS_PER_CHART // series_count))
 
 
 def compute_scorecard(df: pd.DataFrame, metric: str) -> list[dict[str, Any]]:
@@ -257,6 +267,22 @@ def _format_metric_axis_label(metric: str) -> str:
     return f'{pretty} ({unit})' if unit else pretty
 
 
+def _resolve_cdf_threshold_cutoff(value_arrays: list[np.ndarray], threshold: float = CDF_DEFAULT_Y_THRESHOLD) -> float | None:
+    if len(value_arrays) < 2:
+        return None
+    threshold_crossings: list[float] = []
+    for values in value_arrays:
+        if values.size == 0:
+            continue
+        index = int(np.ceil(values.size * float(threshold))) - 1
+        index = max(0, min(index, values.size - 1))
+        threshold_crossings.append(float(values[index]))
+    if len(threshold_crossings) != len(value_arrays):
+        return None
+    threshold_crossings.sort()
+    return threshold_crossings[-1]
+
+
 def _build_cdf_view_window(single_series_pairs: list[tuple[float, float]] | None = None, series_collection: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     if series_collection:
         maxima = sorted(
@@ -268,7 +294,12 @@ def _build_cdf_view_window(single_series_pairs: list[tuple[float, float]] | None
             return {}
         overall_max = maxima[-1]
         overall_min = min(float(item['labels'][0]) for item in series_collection if item.get('labels'))
-        default_max = maxima[-2] if len(maxima) >= 2 else overall_max
+        shared_max = maxima[-2] if len(maxima) >= 2 else overall_max
+        threshold_max = None
+        if isinstance(series_collection[0].get('_raw_values'), np.ndarray):
+            raw_arrays = [item.get('_raw_values') for item in series_collection if isinstance(item.get('_raw_values'), np.ndarray)]
+            threshold_max = _resolve_cdf_threshold_cutoff(raw_arrays)
+        default_max = min(shared_max, threshold_max) if threshold_max is not None else shared_max
         return {
             'x_min': round(overall_min, 4),
             'x_max': round(overall_max, 4),
@@ -451,18 +482,20 @@ def _build_cdf_chart(df: pd.DataFrame, metric: str, filters: dict[str, Any], cdf
     else:
         ordered_keys = list(grouped_values.keys())
 
+    point_budget = _resolve_cdf_point_budget(len(ordered_keys[:8]))
     series_collection: list[dict[str, Any]] = []
     for group_key in ordered_keys[:8]:
         item = grouped_values.get(group_key)
         if not item:
             continue
-        pairs = compute_cdf(item['values'])
+        pairs = compute_cdf(item['values'], max_points=point_budget)
         if not pairs:
             continue
         series_collection.append({
             'name': item['name'],
             'labels': [pair[0] for pair in pairs],
             'series': [pair[1] for pair in pairs],
+            '_raw_values': np.sort(item['values'].astype(float).to_numpy()),
         })
 
     if not series_collection:
@@ -540,6 +573,7 @@ def _build_comparison_chart(table_rows: list[dict[str, Any]], aggregation: str |
         'labels': [str(row.get(aggregation, 'n/a')) for row in compact_rows],
         'series': [round(float(row.get('mean_metric', 0.0)), 4) for row in compact_rows],
         'type': 'bar',
+        'y_axis_label': 'Mean metric',
     }
 
 

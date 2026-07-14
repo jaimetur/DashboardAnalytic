@@ -540,10 +540,30 @@ def refresh_selected_dataset_if_stale(selected_dataset: dict[str, Any] | None) -
         return selected_dataset
     if int(selected_dataset.get('normalization_version') or 1) >= DATASET_NORMALIZATION_VERSION:
         return selected_dataset
-    dataset_path = Path(selected_dataset.get('stored_path') or '')
-    if not dataset_path.exists():
-        return selected_dataset
-    rebuild_dataset_artifacts(int(selected_dataset['id']), dataset_path)
+
+    dataset_id = int(selected_dataset['id'])
+    if repository.dataset_rows_table_exists(dataset_id) and repository.refresh_dataset_row_technology_primary(dataset_id):
+        filter_options = dict(selected_dataset.get('filter_options') or {})
+        technology_values = repository.list_distinct_dataset_row_values(dataset_id, 'technology_primary')
+        if technology_values:
+            filter_options['technology_primary'] = technology_values
+        else:
+            filter_options.pop('technology_primary', None)
+
+        available_aggregations = [
+            item for item in (selected_dataset.get('available_aggregations') or [])
+            if item != 'technology_primary'
+        ]
+        if len(technology_values) > 1:
+            available_aggregations.append('technology_primary')
+
+        repository.update_dataset_profile(
+            dataset_id,
+            normalization_version=DATASET_NORMALIZATION_VERSION,
+            filter_options_json=json.dumps(filter_options),
+            available_aggregations_json=json.dumps(available_aggregations),
+        )
+
     refreshed = repository.get_dataset(int(selected_dataset['id']))
     return serialize_dataset_row(refreshed) if refreshed else selected_dataset
 

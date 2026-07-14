@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.modules.analytics import MAX_CDF_POINTS, _top_records, build_analysis, compute_cdf
+from src.modules.analytics import CDF_DEFAULT_Y_THRESHOLD, MAX_CDF_POINTS, MIN_CDF_POINTS_PER_SERIES, _top_records, build_analysis, compute_cdf
 from src.modules.ingestion import _normalise_dataset, infer_dataset_kind, load_dataset
 from src.DashboardAnalytic import derive_available_metrics
 
@@ -121,6 +121,7 @@ def test_build_analysis_returns_voice_specific_kpis_and_aggregation() -> None:
     assert analysis.metric_kpis["p90_metric"] == 4.4
     assert analysis.filters["aggregation"] == "operator"
     assert analysis.table_rows[0]["operator"] == "Vodafone"
+    assert analysis.comparison_chart["y_axis_label"] == "Mean metric"
     assert len(analysis.scorecard_groups) == 2
     assert analysis.scorecard_groups[0]["group"] == "Vodafone"
     assert [item["label"] for item in analysis.scorecard_groups[0]["items"]] == ["P10", "P25", "P50", "P75", "P90"]
@@ -201,11 +202,11 @@ def test_build_analysis_builds_multi_series_cdf_when_cdf_grouping_is_selected() 
 
 def test_build_analysis_cdf_comparison_keeps_all_selected_operator_series() -> None:
     df = pd.DataFrame({
-        "dataset_kind": ["voice", "voice", "voice", "voice", "voice", "voice"],
-        "market": ["DE"] * 6,
-        "period": ["2025-Q3"] * 6,
-        "operator": ["Telekom", "Telekom", "Vodafone", "Vodafone", "o2 - de", "o2 - de"],
-        "quality_score": [4.5, 4.2, 3.9, 3.6, 3.3, 3.1],
+        "dataset_kind": ["voice"] * 9000,
+        "market": ["DE"] * 9000,
+        "period": ["2025-Q3"] * 9000,
+        "operator": (["Telekom"] * 3000) + (["Vodafone"] * 3000) + (["o2 - de"] * 3000),
+        "quality_score": list(range(3000, 6000)) + list(range(2000, 5000)) + list(range(1000, 4000)),
     })
 
     analysis = build_analysis(
@@ -217,8 +218,10 @@ def test_build_analysis_cdf_comparison_keeps_all_selected_operator_series() -> N
     assert "series_collection" in analysis.cdf_chart
     assert len(analysis.cdf_chart["series_collection"]) == 3
     assert [item["name"] for item in analysis.cdf_chart["series_collection"]] == ["Telekom", "Vodafone", "o2 - de"]
-    assert analysis.cdf_chart["x_view_max_recommended"] == 3.9
-    assert analysis.cdf_chart["x_max"] == 4.5
+    assert analysis.cdf_chart["x_view_max_recommended"] == 4999.0
+    assert analysis.cdf_chart["x_max"] == 5999.0
+    assert all(len(item["labels"]) >= MIN_CDF_POINTS_PER_SERIES for item in analysis.cdf_chart["series_collection"])
+    assert all(len(item["labels"]) < MAX_CDF_POINTS for item in analysis.cdf_chart["series_collection"])
 
 
 def test_build_analysis_cdf_axis_label_includes_metric_units_when_known() -> None:
@@ -234,6 +237,50 @@ def test_build_analysis_cdf_axis_label_includes_metric_units_when_known() -> Non
     assert analysis.cdf_chart["x_axis_label"] == "Throughput (Mbps)"
     assert analysis.cdf_chart["x_view_max_recommended"] is None
     assert analysis.cdf_chart["x_view_max_default"] == 120.0
+
+
+def test_build_analysis_cdf_recommended_cutoff_uses_lower_of_shared_range_and_y_threshold() -> None:
+    df = pd.DataFrame({
+        "dataset_kind": ["voice"] * 8,
+        "market": ["DE"] * 8,
+        "period": ["2025-Q3"] * 8,
+        "operator": ["A", "A", "A", "A", "B", "B", "B", "B"],
+        "quality_score": [1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 2.1, 4.0],
+    })
+
+    analysis = build_analysis(
+        df,
+        {"aggregation": "all", "cdf_grouping": "operator", "extra_filters": {"operator": ["A", "B"]}},
+        "quality_score",
+    )
+
+    assert analysis.cdf_chart["x_view_max_recommended"] == 4.0
+    assert analysis.cdf_chart["x_view_max_default"] == 4.0
+
+
+def test_build_analysis_cdf_recommended_cutoff_uses_y_threshold_when_lower_than_shared_range() -> None:
+    left = list(range(1, 101))
+    right = list(range(1, 151))
+    df = pd.DataFrame({
+        "dataset_kind": ["voice"] * (len(left) + len(right)),
+        "market": ["DE"] * (len(left) + len(right)),
+        "period": ["2025-Q3"] * (len(left) + len(right)),
+        "operator": (["A"] * len(left)) + (["B"] * len(right)),
+        "quality_score": left + right,
+    })
+
+    analysis = build_analysis(
+        df,
+        {"aggregation": "all", "cdf_grouping": "operator", "extra_filters": {"operator": ["A", "B"]}},
+        "quality_score",
+    )
+
+    expected_left = left[int(len(left) * CDF_DEFAULT_Y_THRESHOLD) - 1]
+    expected_right = right[int(len(right) * CDF_DEFAULT_Y_THRESHOLD) - 1]
+    expected_shared_max = sorted([max(left), max(right)])[-2]
+    expected_threshold_max = max(expected_left, expected_right)
+    assert analysis.cdf_chart["x_view_max_recommended"] == min(expected_shared_max, expected_threshold_max)
+    assert analysis.cdf_chart["x_view_max_default"] == analysis.cdf_chart["x_view_max_recommended"]
 
 
 def test_global_kpis_reflect_selected_dimension_counts_when_filters_are_active() -> None:

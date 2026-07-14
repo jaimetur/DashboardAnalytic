@@ -363,6 +363,56 @@ class Repository:
             return None
         return self._resolve_dataset_row_column_name(existing_columns, requested)
 
+    def list_distinct_dataset_row_values(self, dataset_id: int, column: str, limit: int = 200) -> list[str]:
+        table_name = self.dataset_rows_table_name(dataset_id)
+        existing_columns = set(self.list_dataset_row_columns(dataset_id))
+        resolved = self._resolve_dataset_row_column_name(existing_columns, column)
+        if not resolved:
+            return []
+        quoted_table = self._quote_identifier(table_name)
+        quoted_column = self._quote_identifier(resolved)
+        query = f"""
+            SELECT DISTINCT TRIM(CAST({quoted_column} AS TEXT)) AS value
+            FROM {quoted_table}
+            WHERE {quoted_column} IS NOT NULL AND TRIM(CAST({quoted_column} AS TEXT)) <> ''
+            ORDER BY LOWER(TRIM(CAST({quoted_column} AS TEXT)))
+            LIMIT ?
+        """
+        with self.connection() as conn:
+            rows = conn.execute(query, (int(limit),)).fetchall()
+        return [str(row['value']).strip() for row in rows if str(row['value']).strip()]
+
+    def refresh_dataset_row_technology_primary(self, dataset_id: int) -> bool:
+        table_name = self.dataset_rows_table_name(dataset_id)
+        existing_columns = set(self.list_dataset_row_columns(dataset_id))
+        target_column = self._resolve_dataset_row_column_name(existing_columns, 'technology_primary')
+        if not target_column:
+            return False
+
+        source_candidates = ['RAT', 'RAT_A', 'L2_call_Mode_A', 'Playing_Technology']
+        resolved_sources = [
+            self._resolve_dataset_row_column_name(existing_columns, candidate)
+            for candidate in source_candidates
+        ]
+        resolved_sources = [column for column in resolved_sources if column]
+        if not resolved_sources:
+            return False
+
+        coalesce_expression = ', '.join(
+            f"NULLIF(TRIM(CAST({self._quote_identifier(column)} AS TEXT)), '')"
+            for column in resolved_sources
+        )
+        quoted_table = self._quote_identifier(table_name)
+        quoted_target = self._quote_identifier(target_column)
+        with self.connection() as conn:
+            conn.execute(
+                f"""
+                UPDATE {quoted_table}
+                SET {quoted_target} = COALESCE({coalesce_expression}, {quoted_target})
+                """
+            )
+        return True
+
     def load_dataset_rows(self, dataset_id: int, columns: list[str], filters: dict[str, Any]) -> pd.DataFrame:
         table_name = self.dataset_rows_table_name(dataset_id)
         existing_columns = set(self.list_dataset_row_columns(dataset_id))

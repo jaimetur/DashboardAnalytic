@@ -23,7 +23,7 @@ function limitSeriesCollectionByX(seriesCollection, xMaxOverride) {
     .filter((item) => item.labels.length > 0 && item.series.length > 0);
 }
 
-function drawLineChart(svg, labels, series, width, height, padding, axisLabels = {}, xMaxOverride = null) {
+function drawLineChart(svg, labels, series, width, height, padding, axisLabels = {}, xMaxOverride = null, xMinOverride = null) {
   const palette = ['#0b7a75', '#dd653e', '#245a96', '#b84d3a', '#6d46a8', '#228a5d', '#c78b1d', '#4d6a88'];
   const rawSeriesCollection = Array.isArray(series) && series.length > 0 && typeof series[0] === 'object' && Array.isArray(series[0].series)
     ? series
@@ -35,8 +35,10 @@ function drawLineChart(svg, labels, series, width, height, padding, axisLabels =
   }
   const flatLabels = seriesCollection.flatMap((item) => item.labels || []);
   const flatSeries = seriesCollection.flatMap((item) => item.series || []);
-  const minX = Math.min(...flatLabels);
-  const maxX = Math.max(...flatLabels);
+  const dataMinX = Math.min(...flatLabels);
+  const dataMaxX = Math.max(...flatLabels);
+  const minX = Number.isFinite(Number(xMinOverride)) ? Number(xMinOverride) : dataMinX;
+  const maxX = Number.isFinite(Number(xMaxOverride)) ? Number(xMaxOverride) : dataMaxX;
   const maxY = Math.max(...flatSeries, 1);
   const legendHeight = seriesCollection.length > 1 ? 28 : 0;
   const xAxisLabel = String(axisLabels.x || 'Metric value');
@@ -47,9 +49,11 @@ function drawLineChart(svg, labels, series, width, height, padding, axisLabels =
   const innerTop = padding + legendHeight;
   const innerWidth = width - leftPadding - rightPadding;
   const innerHeight = height - bottomPadding - innerTop;
-  const scaleX = (value) => leftPadding + ((value - minX) / ((maxX - minX) || 1)) * innerWidth;
+  const domainMinX = Math.min(minX, maxX);
+  const domainMaxX = Math.max(minX, maxX);
+  const scaleX = (value) => leftPadding + ((value - domainMinX) / ((domainMaxX - domainMinX) || 1)) * innerWidth;
   const scaleY = (value) => height - bottomPadding - (value / maxY) * innerHeight;
-  const xTicks = [minX, (minX + maxX) / 2, maxX];
+  const xTicks = [domainMinX, (domainMinX + domainMaxX) / 2, domainMaxX];
   const yTicks = [0, 0.5, 1.0];
   const xTickLabels = xTicks.map((value) => `
     <line x1="${scaleX(value)}" y1="${height - bottomPadding}" x2="${scaleX(value)}" y2="${height - bottomPadding + 6}" stroke="#9ab0bc" />
@@ -87,17 +91,24 @@ function drawLineChart(svg, labels, series, width, height, padding, axisLabels =
   `;
 }
 
-function drawBarChart(svg, labels, series, width, height, padding) {
-  const maxValue = Math.max(...series, 1);
-  const barWidth = (width - padding * 2) / labels.length;
+function drawBarChart(svg, labels, series, width, height, padding, axisLabels = {}) {
+  const numericSeries = series.map((value) => Number(value)).filter((value) => Number.isFinite(value));
+  const maxValue = numericSeries.length > 0 ? Math.max(...numericSeries) : 1;
+  const yAxisLabel = String(axisLabels.y || 'Mean metric');
+  const leftPadding = padding + 26;
+  const bottomPadding = padding + 18;
+  const topPadding = padding;
+  const innerWidth = width - leftPadding - padding;
+  const innerHeight = height - topPadding - bottomPadding;
+  const barWidth = innerWidth / labels.length;
   const bars = labels.map((label, index) => {
     const value = series[index];
-    const scaledHeight = ((value || 0) / maxValue) * (height - padding * 2);
-    const x = padding + index * barWidth + 8;
-    const y = height - padding - scaledHeight;
+    const scaledHeight = ((Number(value) || 0) / (maxValue || 1)) * innerHeight;
+    const x = leftPadding + index * barWidth + 8;
+    const y = height - bottomPadding - scaledHeight;
     const textX = x + Math.max(barWidth - 16, 24) / 2;
     const valueLabel = Number.isFinite(Number(value)) ? Number(value).toFixed(Math.abs(Number(value)) >= 100 ? 0 : 2).replace(/\.00$/, '') : String(value);
-    const valueY = scaledHeight > 28 ? y + 18 : Math.max(y - 8, padding + 12);
+    const valueY = scaledHeight > 28 ? y + 18 : Math.max(y - 8, topPadding + 12);
     const valueFill = scaledHeight > 28 ? 'rgba(255,255,255,0.96)' : '#334550';
     return `
       <rect x="${x}" y="${y}" width="${Math.max(barWidth - 16, 24)}" height="${scaledHeight}" rx="10" fill="#dd653e"></rect>
@@ -106,9 +117,10 @@ function drawBarChart(svg, labels, series, width, height, padding) {
     `;
   }).join('');
   svg.innerHTML = `
-    <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" stroke="#9ab0bc" />
-    <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}" stroke="#9ab0bc" />
+    <line x1="${leftPadding}" y1="${height - bottomPadding}" x2="${width - padding}" y2="${height - bottomPadding}" stroke="#9ab0bc" />
+    <line x1="${leftPadding}" y1="${topPadding}" x2="${leftPadding}" y2="${height - bottomPadding}" stroke="#9ab0bc" />
     ${bars}
+    <text x="16" y="${topPadding + innerHeight / 2}" text-anchor="middle" fill="#526371" font-size="12" font-weight="600" transform="rotate(-90 16 ${topPadding + innerHeight / 2})">${yAxisLabel}</text>
   `;
 }
 
@@ -126,10 +138,12 @@ function drawChart(container) {
     return;
   }
   const width = 600;
-  const height = 280;
+  const isCdfChart = container.dataset.chartKind === 'cdf';
+  const height = isCdfChart ? 280 : Math.max(Math.round(svg.getBoundingClientRect().height || 280), 280);
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   const padding = 34;
   if (payload.type === 'bar') {
-    drawBarChart(svg, labels, series, width, height, padding);
+    drawBarChart(svg, labels, series, width, height, padding, {y: payload.y_axis_label});
     return;
   }
   const activeXMax = Number(container.dataset.cdfXMax || payload.x_view_max_default || payload.x_max);
@@ -142,6 +156,7 @@ function drawChart(container) {
     padding,
     {x: payload.x_axis_label, y: payload.y_axis_label},
     activeXMax,
+    0,
   );
 }
 
@@ -151,7 +166,6 @@ function setupCdfRangeControls() {
     const control = container.querySelector('[data-cdf-range-control]');
     const slider = container.querySelector('[data-cdf-range-slider]');
     const valueNode = container.querySelector('[data-cdf-range-value]');
-    const hintNode = container.querySelector('[data-cdf-range-hint]');
     const xMin = Number(payload.x_min);
     const xMax = Number(payload.x_max);
     const defaultXMax = Number(payload.x_view_max_default);
@@ -173,11 +187,6 @@ function setupCdfRangeControls() {
       container.dataset.cdfXMax = String(currentValue);
       if (valueNode) {
         valueNode.textContent = `${formatAxisValue(xMin)} -> ${formatAxisValue(currentValue)}`;
-      }
-      if (hintNode) {
-        hintNode.textContent = Number.isFinite(recommendedXMax)
-          ? `Recommended comparison cutoff: ${formatAxisValue(recommendedXMax)}. Move right to include the full tail.`
-          : 'Showing the full X range for this single CDF.';
       }
       drawChart(container);
     };
@@ -222,9 +231,9 @@ let hasPendingLocationRestore = false;
 
 function hasMeaningfulDashboardState(params) {
   if (!params) return false;
-  if (String(params.get('load') || '') === '1') return true;
   for (const [key, value] of params.entries()) {
-    if (key === 'dataset_id' || key === 'input_kind') continue;
+    if (key === 'dataset_id' || key === 'input_kind' || key === 'load') continue;
+    if ((key === 'aggregation' || key === 'cdf_grouping') && String(value || '').trim().toLowerCase() === 'all') continue;
     if (String(value || '').trim()) {
       return true;
     }
@@ -438,7 +447,26 @@ function restoreControlValue(control, rawValue) {
 function queryAlreadyControlsValue(control) {
   if (window.location.pathname !== '/dashboard') return false;
   const params = new URLSearchParams(window.location.search);
+  if (
+    control &&
+    (control.name === 'aggregation' || control.name === 'cdf_grouping') &&
+    String(params.get(control.name) || '').trim().toLowerCase() === 'all'
+  ) {
+    return false;
+  }
   return params.has(control.name);
+}
+
+function getPersistedControlValue(control) {
+  if (!canPersistControl(control)) return null;
+  const rawValue = window.localStorage.getItem(buildPersistenceKey(control));
+  if (rawValue == null) return null;
+  try {
+    const parsed = JSON.parse(rawValue);
+    return parsed == null ? null : String(parsed);
+  } catch (_error) {
+    return null;
+  }
 }
 
 function setupPersistentControls() {
@@ -707,6 +735,46 @@ if (window.location.pathname === '/workspace') {
 setupPersistentControls();
 setupPersistentPanelState();
 setupCustomMultiSelects();
+
+function maybeSyncPersistedGlobalDashboardSelectors() {
+  if (window.location.pathname !== '/dashboard' || hasPendingLocationRestore) return;
+  const aggregationSelect = document.querySelector('[data-global-aggregation-select]');
+  const cdfSelect = document.querySelector('[data-global-cdf-grouping-select]');
+  if (!aggregationSelect && !cdfSelect) return;
+
+  const params = new URLSearchParams(window.location.search);
+  let shouldReplace = false;
+
+  const persistedAggregation = aggregationSelect ? getPersistedControlValue(aggregationSelect) : null;
+  if (
+    aggregationSelect &&
+    persistedAggregation &&
+    persistedAggregation !== 'all' &&
+    String(params.get('aggregation') || '').trim().toLowerCase() === 'all'
+  ) {
+    params.set('aggregation', persistedAggregation);
+    shouldReplace = true;
+  }
+
+  const persistedCdfGrouping = cdfSelect ? getPersistedControlValue(cdfSelect) : null;
+  if (
+    cdfSelect &&
+    persistedCdfGrouping &&
+    persistedCdfGrouping !== 'all' &&
+    String(params.get('cdf_grouping') || '').trim().toLowerCase() === 'all'
+  ) {
+    params.set('cdf_grouping', persistedCdfGrouping);
+    shouldReplace = true;
+  }
+
+  if (!shouldReplace) return;
+  if (!params.get('load')) {
+    params.set('load', '1');
+  }
+  replaceLocation(`/dashboard?${params.toString()}`);
+}
+
+maybeSyncPersistedGlobalDashboardSelectors();
 
 document.querySelectorAll('form[data-loading-label]').forEach((form) => {
   form.addEventListener('submit', (event) => {
