@@ -319,7 +319,7 @@ def _draw_bar_chart(chart: dict[str, Any]) -> BytesIO:
         draw.text((x0 + (bar_width - text_width) / 2, bottom + 10), short_label, font=axis_font, fill=MUTED)
 
     y_axis_label = str(chart.get("y_axis_label") or "Mean metric")
-    _draw_rotated_text(image, (18, top + max(0, (bottom - top - 120) // 2)), y_axis_label, axis_font)
+    _draw_rotated_text(image, (34, top + max(0, (bottom - top - 120) // 2)), y_axis_label, axis_font)
 
     buffer = BytesIO()
     image.convert("RGB").save(buffer, format="PNG")
@@ -412,7 +412,7 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
 
     axis_font = _load_font(13)
     draw.text((left + ((right - left) / 2) - (draw.textlength(x_axis_label, font=axis_font) / 2), bottom + 26), x_axis_label, font=axis_font, fill=MUTED)
-    _draw_rotated_text(image, (18, top + max(0, (bottom - top - 180) // 2)), y_axis_label, axis_font)
+    _draw_rotated_text(image, (34, top + max(0, (bottom - top - 180) // 2)), y_axis_label, axis_font)
 
     legend_x = 48
     legend_y = SLIDE_HEIGHT - 64
