@@ -92,6 +92,7 @@
 - Fixed bar-chart normalization so the highest bar always reaches the top of the Y axis even when every value is below `1`
 - Added CDF axis labels and metric units in dashboard and export charts so the plotted values are identifiable at a glance
 - Updated PowerPoint chart exports to honor each CDF chart's default horizontal X range and to render vertical Y-axis labels for both CDF and bar charts
+- Added CDF axis ticks/grid lines to PowerPoint exports and moved PowerPoint vertical axis labels closer to the plotted Y axes for both CDF and bar charts
 - Fixed PowerPoint metric KPI strips so all six KPI cards render instead of only `Max`
 - Fixed data filter ordering so `Test Name` appears between `Vendor` and `Region`
 

@@ -248,6 +248,15 @@ def _draw_rotated_text(image: Image.Image, position: tuple[int, int], text: str,
     image.alpha_composite(rotated, dest=position)
 
 
+def _format_axis_tick(value: float) -> str:
+    numeric = float(value)
+    if abs(numeric) >= 100:
+        return f"{numeric:.0f}"
+    if abs(numeric) >= 10:
+        return f"{numeric:.1f}".rstrip("0").rstrip(".")
+    return f"{numeric:.2f}".rstrip("0").rstrip(".")
+
+
 def _empty_chart_image(title: str, message: str) -> BytesIO:
     image = Image.new("RGB", (SLIDE_WIDTH, SLIDE_HEIGHT), BG)
     draw = ImageDraw.Draw(image)
@@ -319,7 +328,7 @@ def _draw_bar_chart(chart: dict[str, Any]) -> BytesIO:
         draw.text((x0 + (bar_width - text_width) / 2, bottom + 10), short_label, font=axis_font, fill=MUTED)
 
     y_axis_label = str(chart.get("y_axis_label") or "Mean metric")
-    _draw_rotated_text(image, (34, top + max(0, (bottom - top - 120) // 2)), y_axis_label, axis_font)
+    _draw_rotated_text(image, (left - 26, top + max(0, (bottom - top - 120) // 2)), y_axis_label, axis_font)
 
     buffer = BytesIO()
     image.convert("RGB").save(buffer, format="PNG")
@@ -398,6 +407,26 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
     if max_y == min_y:
         max_y = min_y + 1.0
 
+    axis_font = _load_font(13)
+    x_ticks = [min_x, (min_x + max_x) / 2, max_x]
+    y_ticks = [0.0, 0.5, 1.0]
+
+    for tick in x_ticks:
+        px = left + ((tick - min_x) / (max_x - min_x)) * (right - left)
+        draw.line((px, top, px, bottom), fill=LINE, width=1)
+        draw.line((px, bottom, px, bottom + 6), fill=MUTED, width=2)
+        tick_label = _format_axis_tick(tick)
+        tick_width = draw.textlength(tick_label, font=axis_font)
+        draw.text((px - tick_width / 2, bottom + 10), tick_label, font=axis_font, fill=MUTED)
+
+    for tick in y_ticks:
+        py = bottom - ((tick - 0.0) / (1.0 - 0.0)) * (bottom - top)
+        draw.line((left, py, right, py), fill=LINE, width=1)
+        draw.line((left - 6, py, left, py), fill=MUTED, width=2)
+        tick_label = _format_axis_tick(tick)
+        tick_width = draw.textlength(tick_label, font=axis_font)
+        draw.text((left - 14 - tick_width, py - 8), tick_label, font=axis_font, fill=MUTED)
+
     for index, s in enumerate(series_collection[:8]):
         color = SERIES_COLORS[index % len(SERIES_COLORS)]
         points: list[tuple[float, float]] = []
@@ -410,9 +439,8 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
         for point in points[::max(1, len(points) // 10 or 1)]:
             draw.ellipse((point[0] - 3, point[1] - 3, point[0] + 3, point[1] + 3), fill=color)
 
-    axis_font = _load_font(13)
     draw.text((left + ((right - left) / 2) - (draw.textlength(x_axis_label, font=axis_font) / 2), bottom + 26), x_axis_label, font=axis_font, fill=MUTED)
-    _draw_rotated_text(image, (34, top + max(0, (bottom - top - 180) // 2)), y_axis_label, axis_font)
+    _draw_rotated_text(image, (left - 26, top + max(0, (bottom - top - 180) // 2)), y_axis_label, axis_font)
 
     legend_x = 48
     legend_y = SLIDE_HEIGHT - 64
