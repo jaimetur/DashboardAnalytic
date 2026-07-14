@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS dataset_profiles (
     dataset_id INTEGER PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'queued',
     progress INTEGER NOT NULL DEFAULT 0,
+    normalization_version INTEGER NOT NULL DEFAULT 1,
     dataset_kind TEXT,
     row_count INTEGER,
     column_count INTEGER,
@@ -90,6 +91,7 @@ class Repository:
     def initialize(self, admin_username: str, admin_password: str) -> None:
         with self.connection() as conn:
             conn.executescript(SCHEMA)
+            self._ensure_dataset_profile_columns(conn)
             self._cleanup_duplicate_datasets(conn)
             conn.execute(
                 """
@@ -107,6 +109,11 @@ class Repository:
                     "INSERT INTO users (username, password_hash, role, active) VALUES (?, ?, 'user', 1)",
                     ('demo', hash_password('demo123')),
                 )
+
+    def _ensure_dataset_profile_columns(self, conn: sqlite3.Connection) -> None:
+        existing_columns = {row['name'] for row in conn.execute("PRAGMA table_info(dataset_profiles)").fetchall()}
+        if 'normalization_version' not in existing_columns:
+            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN normalization_version INTEGER NOT NULL DEFAULT 1")
 
     def dataset_rows_table_name(self, dataset_id: int) -> str:
         return f'dataset_rows_{int(dataset_id)}'
@@ -454,7 +461,7 @@ class Repository:
             return conn.execute(
                 """
                 SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                       p.status, p.progress, p.dataset_kind, p.row_count, p.column_count,
+                       p.status, p.progress, p.normalization_version, p.dataset_kind, p.row_count, p.column_count,
                        p.default_metric, p.default_aggregation, p.available_metrics_json,
                        p.available_aggregations_json, p.filter_options_json, p.summary_json,
                        p.kpis_json, p.last_error, p.processed_at, p.updated_at
@@ -471,7 +478,7 @@ class Repository:
                 conn.execute(
                     """
                     SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                           p.status, p.progress, p.dataset_kind, p.row_count, p.column_count,
+                           p.status, p.progress, p.normalization_version, p.dataset_kind, p.row_count, p.column_count,
                            p.default_metric, p.default_aggregation, p.available_metrics_json,
                            p.available_aggregations_json, p.filter_options_json, p.summary_json,
                            p.kpis_json, p.last_error, p.processed_at, p.updated_at

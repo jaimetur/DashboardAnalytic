@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from io import BytesIO
 from pathlib import Path
 import warnings
@@ -835,6 +836,44 @@ def test_dashboard_reuses_materialized_table_when_legacy_columns_only_differ_by_
     assert response.status_code == 200
     assert "Charts and Scorecards" in response.text
     assert calls["count"] == 0
+
+
+def test_dashboard_refreshes_stale_dataset_normalization_before_render(client) -> None:
+    login(client)
+    csv_content = b"market,period,score,RAT,PCell_RAT_Timeline\nES,2026-Q1,91,5G NSA,NR->LTE\nES,2026-Q1,87,LTE,LTE->NR\n"
+    upload_response = client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    import src.DashboardAnalytic as app_module
+
+    with app_module.repository.connection() as conn:
+        conn.execute(
+            """
+            UPDATE dataset_profiles
+            SET normalization_version = 1,
+                filter_options_json = ?,
+                available_aggregations_json = ?
+            WHERE dataset_id = 1
+            """,
+            (
+                json.dumps({"technology_primary": ["NR->LTE", "LTE->NR"]}),
+                json.dumps(["technology_primary"]),
+            ),
+        )
+
+    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
+    assert response.status_code == 200
+    assert ">5G NSA<" in response.text
+    assert ">LTE<" in response.text
+    assert "NR-&gt;LTE" not in response.text
+
+    refreshed = app_module.repository.get_dataset(1)
+    assert refreshed is not None
+    assert int(refreshed["normalization_version"]) == app_module.DATASET_NORMALIZATION_VERSION
 
 
 def test_dataset_status_endpoint_returns_queue_payload(client) -> None:

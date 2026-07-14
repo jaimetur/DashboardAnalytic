@@ -11,6 +11,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Annotated
 from typing import Any
+from typing import Callable
 from urllib.parse import urlencode
 
 import pandas as pd
@@ -68,6 +69,7 @@ INPUT_KIND_LABELS = {
     'data': 'CDR-Data',
     'generic': 'Other',
 }
+DATASET_NORMALIZATION_VERSION = 2
 
 
 @asynccontextmanager
@@ -259,6 +261,7 @@ def serialize_dataset_row(row) -> dict[str, Any]:
     item['status_label'] = STATUS_LABELS.get(item.get('status') or 'queued', 'Queued')
     item['input_kind_label'] = INPUT_KIND_LABELS.get(item.get('dataset_kind') or 'generic', 'Other')
     item['progress'] = int(item.get('progress') or 0)
+    item['normalization_version'] = int(item.get('normalization_version') or 1)
     item['is_ready'] = item.get('status') == 'ready'
     dataset_path = Path(item.get('stored_path') or '')
     size_bytes = dataset_path.stat().st_size if dataset_path.exists() else 0
@@ -450,42 +453,7 @@ def process_dataset(dataset_id: int, dataset_path: Path, username: str) -> None:
             ensure_not_stopped(dataset_id)
             repository.update_dataset_profile(dataset_id, progress=max(10, min(95, int(value))))
 
-        df = load_dataset(dataset_path, progress_callback=progress_update)
-        store_cached_dataset_frame(dataset_path, df)
-        repository.replace_dataset_rows(dataset_id, df)
-        ensure_not_stopped(dataset_id)
-        repository.update_dataset_profile(dataset_id, progress=62, dataset_kind=infer_dataset_kind(df, dataset_path.name))
-        summary = summarise_dataset(df)
-        ensure_not_stopped(dataset_id)
-        repository.update_dataset_profile(dataset_id, progress=72)
-        available_metrics = derive_available_metrics(df)
-        analysis = build_analysis(df, {'aggregation': 'all', 'extra_filters': {}}, '')
-        ensure_not_stopped(dataset_id)
-        repository.update_dataset_profile(dataset_id, progress=84)
-        profile_df = restrict_frame_to_metric(df, analysis.selected_metric)
-        filter_options = derive_filter_options(profile_df)
-        available_aggregations = derive_available_aggregations(filter_options)
-        default_aggregation = analysis.filters.get('aggregation')
-        if default_aggregation == 'all' and available_aggregations:
-            default_aggregation = available_aggregations[0]
-        repository.update_dataset_profile(dataset_id, progress=94)
-        repository.update_dataset_profile(
-            dataset_id,
-            status='ready',
-            progress=100,
-            dataset_kind=df['dataset_kind'].iloc[0] if 'dataset_kind' in df.columns and not df.empty else infer_dataset_kind(df, dataset_path.name),
-            row_count=summary.rows,
-            column_count=len(summary.columns),
-            default_metric=analysis.selected_metric,
-            default_aggregation=default_aggregation or 'all',
-            available_metrics_json=json.dumps(available_metrics),
-            available_aggregations_json=json.dumps(available_aggregations),
-            filter_options_json=json.dumps(filter_options),
-            summary_json=json.dumps(asdict(summary)),
-            kpis_json=json.dumps(analysis.kpis),
-            processed_at=now_iso(),
-            last_error=None,
-        )
+        rebuild_dataset_artifacts(dataset_id, dataset_path, progress_callback=progress_update)
         repository.add_log(username, 'process_dataset', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name, 'status': 'ready'}))
     except ProcessingStopped as exc:
         progress = int((repository.get_dataset(dataset_id) or {}).get('progress') or 0)
@@ -514,6 +482,70 @@ def enqueue_dataset_processing(background_tasks: BackgroundTasks, dataset_id: in
         DATAFRAME_CACHE.pop(key, None)
     repository.update_dataset_profile(dataset_id, status='queued', progress=0, last_error=None, processed_at=None)
     background_tasks.add_task(process_dataset, dataset_id, dataset_path, username)
+
+
+def rebuild_dataset_artifacts(dataset_id: int, dataset_path: Path, progress_callback: Callable[[int], None] | None = None) -> dict[str, Any]:
+    df = load_dataset(dataset_path, progress_callback=progress_callback)
+    store_cached_dataset_frame(dataset_path, df)
+    repository.replace_dataset_rows(dataset_id, df)
+    if progress_callback:
+        progress_callback(62)
+    dataset_kind = df['dataset_kind'].iloc[0] if 'dataset_kind' in df.columns and not df.empty else infer_dataset_kind(df, dataset_path.name)
+    repository.update_dataset_profile(dataset_id, progress=62, dataset_kind=dataset_kind)
+    summary = summarise_dataset(df)
+    if progress_callback:
+        progress_callback(72)
+    repository.update_dataset_profile(dataset_id, progress=72)
+    available_metrics = derive_available_metrics(df)
+    analysis = build_analysis(df, {'aggregation': 'all', 'extra_filters': {}}, '')
+    if progress_callback:
+        progress_callback(84)
+    repository.update_dataset_profile(dataset_id, progress=84)
+    profile_df = restrict_frame_to_metric(df, analysis.selected_metric)
+    filter_options = derive_filter_options(profile_df)
+    available_aggregations = derive_available_aggregations(filter_options)
+    default_aggregation = analysis.filters.get('aggregation')
+    if default_aggregation == 'all' and available_aggregations:
+        default_aggregation = available_aggregations[0]
+    if progress_callback:
+        progress_callback(94)
+    repository.update_dataset_profile(
+        dataset_id,
+        status='ready',
+        progress=100,
+        normalization_version=DATASET_NORMALIZATION_VERSION,
+        dataset_kind=dataset_kind,
+        row_count=summary.rows,
+        column_count=len(summary.columns),
+        default_metric=analysis.selected_metric,
+        default_aggregation=default_aggregation or 'all',
+        available_metrics_json=json.dumps(available_metrics),
+        available_aggregations_json=json.dumps(available_aggregations),
+        filter_options_json=json.dumps(filter_options),
+        summary_json=json.dumps(asdict(summary)),
+        kpis_json=json.dumps(analysis.kpis),
+        processed_at=now_iso(),
+        last_error=None,
+    )
+    return {
+        'df': df,
+        'summary': summary,
+        'analysis': analysis,
+        'filter_options': filter_options,
+    }
+
+
+def refresh_selected_dataset_if_stale(selected_dataset: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not selected_dataset or not selected_dataset.get('is_ready'):
+        return selected_dataset
+    if int(selected_dataset.get('normalization_version') or 1) >= DATASET_NORMALIZATION_VERSION:
+        return selected_dataset
+    dataset_path = Path(selected_dataset.get('stored_path') or '')
+    if not dataset_path.exists():
+        return selected_dataset
+    rebuild_dataset_artifacts(int(selected_dataset['id']), dataset_path)
+    refreshed = repository.get_dataset(int(selected_dataset['id']))
+    return serialize_dataset_row(refreshed) if refreshed else selected_dataset
 
 
 def create_session(response: Response, user: SessionUser) -> None:
@@ -966,6 +998,7 @@ def dashboard(
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
     datasets, ready_datasets, input_kind_options, selected_dataset = build_dataset_view_state(dataset_id, input_kind)
+    selected_dataset = refresh_selected_dataset_if_stale(selected_dataset)
     selected_dataset = enrich_selected_dataset_for_dashboard(selected_dataset)
     analysis, analyses, selected_metrics, filter_options, analysis_error, analysis_loaded = build_dashboard_payload(selected_dataset, request, user.username)
 

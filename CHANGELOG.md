@@ -75,6 +75,7 @@
 - Fixed legacy materialized dashboard tables to stop rebuilding on every refresh when structural columns only differ by case
 - Refined normalized `Technology Primary` for data datasets to prioritize `RAT` and stop deriving it from `PCell_RAT_Timeline`
 - Renamed the dashboard-facing `Technology Primary` label to `Technology` while keeping the normalized field key stable
+- Added automatic stale-dataset normalization refresh on dashboard open so cached filter options and materialized rows pick up normalization rule changes
 - Optimized large-dashboard CDF rendering by increasing chart sample density and rebuilding grouped comparisons from the actual filtered series so multi-operator CDF views keep all visible curves
 - Added CDF axis labels and metric units in dashboard and export charts so the plotted values are identifiable at a glance
 - Fixed PowerPoint metric KPI strips so all six KPI cards render instead of only `Max`
