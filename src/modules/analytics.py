@@ -257,6 +257,34 @@ def _format_metric_axis_label(metric: str) -> str:
     return f'{pretty} ({unit})' if unit else pretty
 
 
+def _build_cdf_view_window(single_series_pairs: list[tuple[float, float]] | None = None, series_collection: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    if series_collection:
+        maxima = sorted(
+            float(item['labels'][-1])
+            for item in series_collection
+            if item.get('labels')
+        )
+        if not maxima:
+            return {}
+        overall_max = maxima[-1]
+        overall_min = min(float(item['labels'][0]) for item in series_collection if item.get('labels'))
+        default_max = maxima[-2] if len(maxima) >= 2 else overall_max
+        return {
+            'x_min': round(overall_min, 4),
+            'x_max': round(overall_max, 4),
+            'x_view_max_default': round(default_max, 4),
+            'x_view_max_recommended': round(default_max, 4) if len(maxima) >= 2 else None,
+        }
+    if single_series_pairs:
+        return {
+            'x_min': round(float(single_series_pairs[0][0]), 4),
+            'x_max': round(float(single_series_pairs[-1][0]), 4),
+            'x_view_max_default': round(float(single_series_pairs[-1][0]), 4),
+            'x_view_max_recommended': None,
+        }
+    return {}
+
+
 def _round(value: Any, digits: int = 4) -> float | int:
     if pd.isna(value):
         return 0.0
@@ -385,7 +413,8 @@ def _build_cdf_chart(df: pd.DataFrame, metric: str, filters: dict[str, Any], cdf
 
     grouping_column = _infer_cdf_grouping(df, cdf_grouping)
     if not grouping_column:
-        chart = build_chart_payload(compute_cdf(metric_values))
+        pairs = compute_cdf(metric_values)
+        chart = build_chart_payload(pairs, **_build_cdf_view_window(single_series_pairs=pairs))
         chart['x_axis_label'] = x_axis_label
         chart['y_axis_label'] = y_axis_label
         return chart
@@ -437,7 +466,8 @@ def _build_cdf_chart(df: pd.DataFrame, metric: str, filters: dict[str, Any], cdf
         })
 
     if not series_collection:
-        chart = build_chart_payload(compute_cdf(metric_values))
+        pairs = compute_cdf(metric_values)
+        chart = build_chart_payload(pairs, **_build_cdf_view_window(single_series_pairs=pairs))
         chart['x_axis_label'] = x_axis_label
         chart['y_axis_label'] = y_axis_label
         return chart
@@ -450,8 +480,9 @@ def _build_cdf_chart(df: pd.DataFrame, metric: str, filters: dict[str, Any], cdf
             'legend': [only['name']],
             'x_axis_label': x_axis_label,
             'y_axis_label': y_axis_label,
+            **_build_cdf_view_window(single_series_pairs=list(zip(only['labels'], only['series'], strict=False))),
         }
-    chart = build_multi_series_chart_payload(series_collection)
+    chart = build_multi_series_chart_payload(series_collection, **_build_cdf_view_window(series_collection=series_collection))
     chart['x_axis_label'] = x_axis_label
     chart['y_axis_label'] = y_axis_label
     return chart

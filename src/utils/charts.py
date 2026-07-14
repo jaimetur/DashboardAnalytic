@@ -3,16 +3,18 @@ from __future__ import annotations
 from typing import Any
 
 
-def build_chart_payload(sorted_pairs: list[tuple[float, float]]) -> dict[str, Any]:
-    return {
+def build_chart_payload(sorted_pairs: list[tuple[float, float]], **extra: Any) -> dict[str, Any]:
+    payload = {
         "labels": [round(pair[0], 4) for pair in sorted_pairs],
         "series": [round(pair[1], 4) for pair in sorted_pairs],
         "type": "line",
     }
+    payload.update(extra)
+    return payload
 
 
-def build_multi_series_chart_payload(series_collection: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
+def build_multi_series_chart_payload(series_collection: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
+    payload = {
         "type": "line",
         "series_collection": [
             {
@@ -24,3 +26,5 @@ def build_multi_series_chart_payload(series_collection: list[dict[str, Any]]) ->
             if item.get("labels") and item.get("series")
         ],
     }
+    payload.update(extra)
+    return payload

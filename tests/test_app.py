@@ -679,6 +679,7 @@ def test_dashboard_exposes_global_and_per_metric_cdf_comparison_controls(client)
     assert "Global CDF Comparison" in response.text
     assert 'data-global-cdf-grouping-select' in response.text
     assert 'data-chart-cdf-grouping-select' in response.text
+    assert 'data-cdf-range-control' in response.text
     assert 'Compare CDF by' in response.text
     assert 'input type="hidden" name="cdf_grouping" value="vendor"' in response.text
 

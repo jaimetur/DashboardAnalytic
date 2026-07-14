@@ -217,6 +217,8 @@ def test_build_analysis_cdf_comparison_keeps_all_selected_operator_series() -> N
     assert "series_collection" in analysis.cdf_chart
     assert len(analysis.cdf_chart["series_collection"]) == 3
     assert [item["name"] for item in analysis.cdf_chart["series_collection"]] == ["Telekom", "Vodafone", "o2 - de"]
+    assert analysis.cdf_chart["x_view_max_recommended"] == 3.9
+    assert analysis.cdf_chart["x_max"] == 4.5
 
 
 def test_build_analysis_cdf_axis_label_includes_metric_units_when_known() -> None:
@@ -230,6 +232,8 @@ def test_build_analysis_cdf_axis_label_includes_metric_units_when_known() -> Non
     analysis = build_analysis(df, {"aggregation": "all"}, "throughput_mbps")
 
     assert analysis.cdf_chart["x_axis_label"] == "Throughput (Mbps)"
+    assert analysis.cdf_chart["x_view_max_recommended"] is None
+    assert analysis.cdf_chart["x_view_max_default"] == 120.0
 
 
 def test_global_kpis_reflect_selected_dimension_counts_when_filters_are_active() -> None:

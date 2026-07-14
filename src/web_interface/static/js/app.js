@@ -6,11 +6,33 @@ function formatAxisValue(value) {
   return numeric.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
 }
 
-function drawLineChart(svg, labels, series, width, height, padding, axisLabels = {}) {
+function limitSeriesCollectionByX(seriesCollection, xMaxOverride) {
+  if (!Number.isFinite(Number(xMaxOverride))) return seriesCollection;
+  return seriesCollection
+    .map((item) => {
+      const filteredLabels = [];
+      const filteredSeries = [];
+      (item.labels || []).forEach((label, index) => {
+        if (Number(label) <= Number(xMaxOverride)) {
+          filteredLabels.push(label);
+          filteredSeries.push((item.series || [])[index]);
+        }
+      });
+      return {...item, labels: filteredLabels, series: filteredSeries};
+    })
+    .filter((item) => item.labels.length > 0 && item.series.length > 0);
+}
+
+function drawLineChart(svg, labels, series, width, height, padding, axisLabels = {}, xMaxOverride = null) {
   const palette = ['#0b7a75', '#dd653e', '#245a96', '#b84d3a', '#6d46a8', '#228a5d', '#c78b1d', '#4d6a88'];
-  const seriesCollection = Array.isArray(series) && series.length > 0 && typeof series[0] === 'object' && Array.isArray(series[0].series)
+  const rawSeriesCollection = Array.isArray(series) && series.length > 0 && typeof series[0] === 'object' && Array.isArray(series[0].series)
     ? series
     : [{name: 'CDF', labels, series}];
+  const seriesCollection = limitSeriesCollectionByX(rawSeriesCollection, xMaxOverride);
+  if (seriesCollection.length === 0) {
+    svg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="#526371">No chart data available</text>';
+    return;
+  }
   const flatLabels = seriesCollection.flatMap((item) => item.labels || []);
   const flatSeries = seriesCollection.flatMap((item) => item.series || []);
   const minX = Math.min(...flatLabels);
@@ -110,6 +132,7 @@ function drawChart(container) {
     drawBarChart(svg, labels, series, width, height, padding);
     return;
   }
+  const activeXMax = Number(container.dataset.cdfXMax || payload.x_view_max_default || payload.x_max);
   drawLineChart(
     svg,
     labels,
@@ -118,10 +141,56 @@ function drawChart(container) {
     height,
     padding,
     {x: payload.x_axis_label, y: payload.y_axis_label},
+    activeXMax,
   );
 }
 
+function setupCdfRangeControls() {
+  document.querySelectorAll('.chart-card[data-chart-kind="cdf"]').forEach((container) => {
+    const payload = JSON.parse(container.dataset.chart || '{"labels":[],"series":[],"type":"line"}');
+    const control = container.querySelector('[data-cdf-range-control]');
+    const slider = container.querySelector('[data-cdf-range-slider]');
+    const valueNode = container.querySelector('[data-cdf-range-value]');
+    const hintNode = container.querySelector('[data-cdf-range-hint]');
+    const xMin = Number(payload.x_min);
+    const xMax = Number(payload.x_max);
+    const defaultXMax = Number(payload.x_view_max_default);
+    const recommendedXMax = Number(payload.x_view_max_recommended);
+
+    if (!control || !slider || !Number.isFinite(xMin) || !Number.isFinite(xMax) || xMax <= xMin) {
+      if (control) control.hidden = true;
+      return;
+    }
+
+    slider.min = String(xMin);
+    slider.max = String(xMax);
+    slider.step = String(Math.max((xMax - xMin) / 400, 0.0001));
+    slider.value = String(Number.isFinite(defaultXMax) ? defaultXMax : xMax);
+    container.dataset.cdfXMax = slider.value;
+
+    const updateRangeUi = () => {
+      const currentValue = Number(slider.value);
+      container.dataset.cdfXMax = String(currentValue);
+      if (valueNode) {
+        valueNode.textContent = `${formatAxisValue(xMin)} -> ${formatAxisValue(currentValue)}`;
+      }
+      if (hintNode) {
+        hintNode.textContent = Number.isFinite(recommendedXMax)
+          ? `Recommended comparison cutoff: ${formatAxisValue(recommendedXMax)}. Move right to include the full tail.`
+          : 'Showing the full X range for this single CDF.';
+      }
+      drawChart(container);
+    };
+
+    control.hidden = false;
+    slider.addEventListener('input', updateRangeUi);
+    slider.addEventListener('change', updateRangeUi);
+    updateRangeUi();
+  });
+}
+
 document.querySelectorAll('[data-chart]').forEach(drawChart);
+setupCdfRangeControls();
 
 document.querySelectorAll('.collapsible-panel').forEach((panel) => {
   const chip = panel.querySelector('.collapse-chip');

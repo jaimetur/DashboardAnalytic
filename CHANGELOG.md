@@ -77,6 +77,7 @@
 - Renamed the dashboard-facing `Technology Primary` label to `Technology` while keeping the normalized field key stable
 - Added automatic stale-dataset normalization refresh on dashboard open so cached filter options and materialized rows pick up normalization rule changes
 - Optimized large-dashboard CDF rendering by increasing chart sample density and rebuilding grouped comparisons from the actual filtered series so multi-operator CDF views keep all visible curves
+- Added per-chart horizontal CDF range sliders with an automatic multi-series default cutoff based on the highest X value shared by at least two curves
 - Added CDF axis labels and metric units in dashboard and export charts so the plotted values are identifiable at a glance
 - Fixed PowerPoint metric KPI strips so all six KPI cards render instead of only `Max`
 - Fixed data filter ordering so `Test Name` appears between `Vendor` and `Region`
