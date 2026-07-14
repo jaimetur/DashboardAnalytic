@@ -158,6 +158,8 @@ def format_aggregation_label(value: str | None) -> str:
     normalized = str(value or 'all').strip()
     if not normalized or normalized == 'all':
         return 'Auto / raw view'
+    if normalized.lower() == 'technology_primary':
+        return 'Technology'
     return normalized.replace('_', ' ').title()
 
 
