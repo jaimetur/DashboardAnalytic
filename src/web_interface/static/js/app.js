@@ -112,6 +112,7 @@ const logTypeFilter = document.querySelector('[data-log-type-filter]');
 const persistencePathnames = new Set(['/dashboard', '/admin']);
 const dashboardStateKey = 'dashboard-analytic:/dashboard:last-query';
 const activeDatasetStateKey = 'dashboard-analytic:active-dataset';
+let hasPendingLocationRestore = false;
 
 function hasMeaningfulDashboardState(params) {
   if (!params) return false;
@@ -125,10 +126,19 @@ function hasMeaningfulDashboardState(params) {
   return false;
 }
 
+function sanitizeDashboardState(params) {
+  const source = params instanceof URLSearchParams ? params : new URLSearchParams(params || '');
+  const sanitized = new URLSearchParams(source.toString());
+  sanitized.delete('aggregation_overrides');
+  sanitized.delete('cdf_overrides');
+  return sanitized;
+}
+
 function persistDashboardState(params) {
   if (!hasMeaningfulDashboardState(params)) return;
   try {
-    window.localStorage.setItem(dashboardStateKey, params.toString());
+    const sanitized = sanitizeDashboardState(params);
+    window.localStorage.setItem(dashboardStateKey, sanitized.toString());
   } catch (_error) {
     // Ignore storage failures.
   }
@@ -163,6 +173,11 @@ function restoreActiveDatasetState() {
   }
 }
 
+function replaceLocation(url) {
+  hasPendingLocationRestore = true;
+  window.location.replace(url);
+}
+
 function buildDashboardParamsFromForm(form) {
   const params = new URLSearchParams();
   const formData = new FormData(form);
@@ -179,7 +194,42 @@ function buildDashboardParamsFromForm(form) {
       params.append('__empty_filter', select.name);
     }
   });
+  document.querySelectorAll(`[form="${form.id}"][name]`).forEach((control) => {
+    if (form.contains(control)) return;
+    const tagName = String(control.tagName || '').toLowerCase();
+    if (tagName !== 'select' && tagName !== 'input' && tagName !== 'textarea') return;
+    if (control.disabled) return;
+    if (tagName === 'select' && control.multiple) {
+      params.delete(control.name);
+      const enabledOptions = Array.from(control.options).filter((option) => !option.disabled);
+      const selectedOptions = enabledOptions.filter((option) => option.selected);
+      selectedOptions.forEach((option) => params.append(control.name, String(option.value)));
+      if (enabledOptions.length > 0 && selectedOptions.length === 0) {
+        params.append('__empty_filter', control.name);
+      }
+      return;
+    }
+    if ((tagName === 'input') && String(control.type || '').toLowerCase() === 'checkbox') {
+      params.delete(control.name);
+      if (control.checked) params.append(control.name, String(control.value || 'on'));
+      return;
+    }
+    params.delete(control.name);
+    const value = String(control.value || '').trim();
+    if (value) {
+      params.append(control.name, value);
+    }
+  });
   return params;
+}
+
+function syncDashboardHiddenControl(name, value) {
+  const form = document.getElementById('dashboard-filters-form');
+  if (!form) return;
+  const control = form.querySelector(`input[type="hidden"][name="${name}"]`);
+  if (control) {
+    control.value = String(value || 'all').trim() || 'all';
+  }
 }
 
 function parseAggregationOverrides(rawValue) {
@@ -457,6 +507,51 @@ function showLoadingOverlay(label) {
 hideLoadingOverlay();
 window.addEventListener('pageshow', hideLoadingOverlay);
 
+function resolveDownloadFilename(response, fallbackName) {
+  const disposition = response.headers.get('content-disposition') || '';
+  const utf8Match = disposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+  if (utf8Match) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch (_error) {
+      return utf8Match[1];
+    }
+  }
+  const match = disposition.match(/filename=\"?([^\";]+)\"?/i);
+  return match ? match[1] : fallbackName;
+}
+
+async function submitDownloadForm(form) {
+  showLoadingOverlay(form.dataset.loadingLabel);
+  try {
+    const response = await fetch(form.action, {
+      method: String(form.method || 'post').toUpperCase(),
+      body: new FormData(form),
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      hideLoadingOverlay();
+      alert(`Download failed with status ${response.status}.`);
+      return;
+    }
+    const blob = await response.blob();
+    const fallbackName = form.action.includes('/powerpoint') ? 'report.pptx' : 'report.docx';
+    const filename = resolveDownloadFilename(response, fallbackName);
+    const blobUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+  } catch (_error) {
+    alert('Download failed. Please try again.');
+  } finally {
+    hideLoadingOverlay();
+  }
+}
+
 if (window.location.pathname === '/dashboard') {
   const params = new URLSearchParams(window.location.search);
   if (params.get('dataset_id')) {
@@ -467,7 +562,8 @@ if (window.location.pathname === '/dashboard') {
   } else if (!params.has('dataset_id')) {
     const persistedDashboardQuery = window.localStorage.getItem(dashboardStateKey);
     if (persistedDashboardQuery) {
-      window.location.replace(`/dashboard?${persistedDashboardQuery}`);
+      const sanitizedQuery = sanitizeDashboardState(new URLSearchParams(persistedDashboardQuery)).toString();
+      replaceLocation(`/dashboard?${sanitizedQuery}`);
     }
   }
 }
@@ -483,7 +579,7 @@ if (window.location.pathname === '/workspace') {
       if (activeDataset.input_kind) {
         params.set('input_kind', activeDataset.input_kind);
       }
-      window.location.replace(`/workspace?${params.toString()}`);
+      replaceLocation(`/workspace?${params.toString()}`);
     }
   }
 }
@@ -493,7 +589,27 @@ setupPersistentPanelState();
 setupCustomMultiSelects();
 
 document.querySelectorAll('form[data-loading-label]').forEach((form) => {
-  form.addEventListener('submit', () => {
+  form.addEventListener('submit', (event) => {
+    if (form.dataset.downloadForm === '1') {
+      event.preventDefault();
+      submitDownloadForm(form);
+      return;
+    }
+    if (window.location.pathname === '/dashboard' && form.id === 'dashboard-filters-form') {
+      event.preventDefault();
+      const globalCdfSelect = document.querySelector('[data-global-cdf-grouping-select]');
+      const globalAggregationSelect = document.querySelector('[data-global-aggregation-select]');
+      syncDashboardHiddenControl('cdf_grouping', globalCdfSelect?.value || 'all');
+      syncDashboardHiddenControl('aggregation', globalAggregationSelect?.value || 'all');
+      const params = buildDashboardParamsFromForm(form);
+      params.set('load', '1');
+      params.delete('cdf_overrides');
+      persistDashboardState(params);
+      persistActiveDatasetState(params);
+      showLoadingOverlay(form.dataset.loadingLabel);
+      window.location.search = params.toString();
+      return;
+    }
     showLoadingOverlay(form.dataset.loadingLabel);
   });
 });
@@ -624,7 +740,7 @@ if (inputKindSelect && datasetSelect) {
   };
 
   const maybeRestoreLastDataset = () => {
-    if (window.location.pathname !== '/dashboard') return;
+    if (window.location.pathname !== '/dashboard' || hasPendingLocationRestore) return;
     const params = new URLSearchParams(window.location.search);
     if (params.has('dataset_id')) {
       persistActiveDatasetContext();
@@ -651,7 +767,7 @@ if (inputKindSelect && datasetSelect) {
     } else if (inputKindSelect.value) {
       params.set('input_kind', String(inputKindSelect.value));
     }
-    window.location.replace(`/dashboard?${params.toString()}`);
+    replaceLocation(`/dashboard?${params.toString()}`);
   };
 
   persistActiveDatasetContext();
@@ -692,6 +808,8 @@ document.querySelectorAll('[data-chart-aggregation-select]').forEach((select) =>
       params.delete('aggregation_overrides');
     }
     params.set('load', '1');
+    persistDashboardState(params);
+    persistActiveDatasetState(params);
     showLoadingOverlay(`Updating ${metric} comparison`);
     window.location.search = params.toString();
   });
@@ -709,6 +827,7 @@ document.querySelectorAll('[data-global-aggregation-select]').forEach((select) =
   select.addEventListener('change', () => {
     const form = select.form || document.getElementById('dashboard-filters-form');
     if (!form) return;
+    syncDashboardHiddenControl('aggregation', select.value || 'all');
     const params = buildDashboardParamsFromForm(form);
     params.set('aggregation', String(select.value || 'all'));
     params.set('load', '1');
@@ -723,6 +842,7 @@ document.querySelectorAll('[data-global-cdf-grouping-select]').forEach((select) 
   select.addEventListener('change', () => {
     const form = select.form || document.getElementById('dashboard-filters-form');
     if (!form) return;
+    syncDashboardHiddenControl('cdf_grouping', select.value || 'all');
     const params = buildDashboardParamsFromForm(form);
     params.set('cdf_grouping', String(select.value || 'all'));
     params.set('load', '1');
@@ -753,6 +873,8 @@ document.querySelectorAll('[data-chart-cdf-grouping-select]').forEach((select) =
       params.delete('cdf_overrides');
     }
     params.set('load', '1');
+    persistDashboardState(params);
+    persistActiveDatasetState(params);
     showLoadingOverlay(`Updating ${metric} CDF comparison`);
     window.location.search = params.toString();
   });
@@ -770,6 +892,7 @@ if (queueNode) {
     if (!row) return;
     const kind = row.querySelector('[data-queue-kind]');
     const rows = row.querySelector('[data-queue-rows]');
+    const size = row.querySelector('[data-queue-size]');
     const statusPill = row.querySelector('[data-queue-status-pill]');
     const progressBar = row.querySelector('[data-queue-progress-bar]');
     const progressLabel = row.querySelector('[data-queue-progress-label]');
@@ -779,6 +902,7 @@ if (queueNode) {
 
     if (kind) kind.textContent = dataset.input_kind_label || 'Other';
     if (rows) rows.textContent = String(dataset.row_count || 0);
+    if (size) size.textContent = dataset.size_mb_label || '0.00 MB';
     if (statusPill) {
       statusPill.textContent = dataset.status_label || dataset.status || 'Queued';
       statusPill.className = `queue-status-pill queue-status-${dataset.status}`;
@@ -803,7 +927,12 @@ if (queueNode) {
       errorNode.remove();
     }
     if (actions) {
-      const openHref = `/dashboard?dataset_id=${dataset.id}`;
+      const openParams = new URLSearchParams();
+      openParams.set('dataset_id', String(dataset.id));
+      if (dataset.dataset_kind) {
+        openParams.set('input_kind', String(dataset.dataset_kind));
+      }
+      const openHref = `/dashboard?${openParams.toString()}`;
       if (dataset.status === 'ready') {
         actions.innerHTML = `
           <a class="ghost-link action-link-primary" href="${openHref}">Open</a>

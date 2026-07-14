@@ -46,7 +46,7 @@
         <p class="form-note">Uploaded by {{ selected_dataset.uploaded_by }} on {{ selected_dataset.uploaded_at }}</p>
         {% if analysis_loaded and analysis %}
         <div class="dataset-export-actions inline-actions">
-          <form method="post" action="/dashboard/export/word" data-loading-label="Exporting Word report">
+          <form method="post" action="/dashboard/export/word" data-loading-label="Exporting Word report" data-download-form="1">
             <input type="hidden" name="dataset_id" value="{{ selected_dataset.id }}">
             {% for metric_name in selected_metrics %}
             <input type="hidden" name="metric" value="{{ metric_name }}">
@@ -69,7 +69,7 @@
             {% endfor %}
             <button type="submit">Export Word</button>
           </form>
-          <form method="post" action="/dashboard/export/powerpoint" data-loading-label="Exporting PowerPoint report">
+          <form method="post" action="/dashboard/export/powerpoint" data-loading-label="Exporting PowerPoint report" data-download-form="1">
             <input type="hidden" name="dataset_id" value="{{ selected_dataset.id }}">
             {% for metric_name in selected_metrics %}
             <input type="hidden" name="metric" value="{{ metric_name }}">
@@ -194,16 +194,16 @@
           <div class="summary-inline-actions">
             <label class="chart-aggregation-control panel-aggregation-control" data-summary-control>
               <span>Global CDF Comparison</span>
-              <select name="cdf_grouping" form="dashboard-filters-form" data-global-cdf-grouping-select>
-                <option value="all" {% if selected_cdf_grouping == 'all' %}selected{% endif %}>Single CDF</option>
+              <select data-global-cdf-grouping-select>
+                <option value="all" {% if (selected_cdf_grouping or 'all')|lower == 'all' %}selected{% endif %}>Single CDF</option>
                 {% for item in ['vendor', 'market', 'operator', 'region', 'city'] %}
-                <option value="{{ item }}" {% if item == selected_cdf_grouping %}selected{% endif %} {% if item not in selected_dataset.available_cdf_groupings %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
+                <option value="{{ item }}" {% if item == ((selected_cdf_grouping or 'all')|lower) %}selected{% endif %} {% if item not in selected_dataset.available_cdf_groupings %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
                 {% endfor %}
               </select>
             </label>
             <label class="chart-aggregation-control panel-aggregation-control" data-summary-control>
               <span>Global Aggregation</span>
-              <select name="aggregation" form="dashboard-filters-form" data-global-aggregation-select>
+              <select data-global-aggregation-select>
                 <option value="all" {% if selected_aggregation == 'all' %}selected{% endif %}>Auto / raw view</option>
                 {% for item in ['operator', 'vendor', 'region', 'city', 'market', 'period', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet'] %}
                 <option value="{{ item }}" {% if item == selected_aggregation %}selected{% endif %} {% if item not in selected_dataset.available_aggregations %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
@@ -239,9 +239,9 @@
                       data-current-overrides="{{ format_cdf_overrides(cdf_overrides) }}"
                       data-global-cdf-grouping="{{ selected_cdf_grouping or 'all' }}"
                     >
-                      <option value="all" {% if current_analysis.filters.cdf_grouping == 'all' %}selected{% endif %}>Single CDF</option>
+                      <option value="all" {% if (current_analysis.filters.cdf_grouping or 'all')|lower == 'all' %}selected{% endif %}>Single CDF</option>
                       {% for item in ['vendor', 'market', 'operator', 'region', 'city'] %}
-                      <option value="{{ item }}" {% if item == current_analysis.filters.cdf_grouping %}selected{% endif %} {% if item not in selected_dataset.available_cdf_groupings %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
+                      <option value="{{ item }}" {% if item == ((current_analysis.filters.cdf_grouping or 'all')|lower) %}selected{% endif %} {% if item not in selected_dataset.available_cdf_groupings %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
                       {% endfor %}
                     </select>
                   </label>
@@ -264,9 +264,9 @@
                       data-current-overrides="{{ format_aggregation_overrides(aggregation_overrides) }}"
                       data-global-aggregation="{{ selected_aggregation or 'all' }}"
                     >
-                      <option value="all" {% if current_analysis.filters.aggregation == 'all' %}selected{% endif %}>Auto / raw view</option>
+                      <option value="all" {% if (current_analysis.filters.aggregation or 'all')|lower == 'all' %}selected{% endif %}>Auto / raw view</option>
                       {% for item in ['operator', 'vendor', 'region', 'city', 'market', 'period', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet'] %}
-                      <option value="{{ item }}" {% if item == current_analysis.filters.aggregation %}selected{% endif %} {% if item not in selected_dataset.available_aggregations %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
+                      <option value="{{ item }}" {% if item == ((current_analysis.filters.aggregation or 'all')|lower) %}selected{% endif %} {% if item not in selected_dataset.available_aggregations %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
                       {% endfor %}
                     </select>
                   </label>
@@ -382,6 +382,8 @@
         </div>
         <form id="dashboard-filters-form" class="sidebar-filters" action="/dashboard" method="get" data-loading-label="Updating dashboard analytics">
           <input type="hidden" name="aggregation_overrides" value="">
+          <input type="hidden" name="aggregation" value="{{ selected_aggregation or 'all' }}">
+          <input type="hidden" name="cdf_grouping" value="{{ selected_cdf_grouping or 'all' }}">
           {% if selected_dataset %}<input type="hidden" name="dataset_id" value="{{ selected_dataset.id }}">{% endif %}
           <input type="hidden" name="load" value="1">
           {% if selected_dataset and selected_dataset.is_ready %}

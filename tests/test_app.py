@@ -313,6 +313,43 @@ def test_dashboard_ignores_non_ready_dataset_id_in_selector_flow(client) -> None
     assert 'option value="2"' not in selector_fragment
 
 
+def test_dashboard_explicit_dataset_id_overrides_mismatched_input_kind_filter(client) -> None:
+    login(client)
+
+    client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("voice.csv", BytesIO(b"POLQA_LQ_Avg,market,period\n4.2,ES,2026-Q1\n"), "text/csv")},
+        follow_redirects=False,
+    )
+    client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("data.csv", BytesIO(b"Mean_Data_Rate,market,period,test_name,vendor,region\n25.1,DE,2026-Q2,Speed,Nokia,North\n"), "text/csv")},
+        follow_redirects=False,
+    )
+
+    response = client.get("/dashboard?dataset_id=2&input_kind=voice")
+    assert response.status_code == 200
+    assert "<h2>data.csv</h2>" in response.text
+    assert 'option value="2" data-dataset-kind="data" selected' in response.text
+
+
+def test_dashboard_data_filters_show_test_name_between_vendor_and_region(client) -> None:
+    login(client)
+
+    client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("data.csv", BytesIO(b"Mean_Data_Rate,market,period,test_name,vendor,region\n25.1,DE,2026-Q2,Speed,Nokia,North\n"), "text/csv")},
+        follow_redirects=False,
+    )
+
+    response = client.get("/dashboard?dataset_id=1")
+    assert response.status_code == 200
+    vendor_pos = response.text.index("Vendor")
+    test_name_pos = response.text.index("Test Name")
+    region_pos = response.text.index("Region")
+    assert vendor_pos < test_name_pos < region_pos
+
+
 def test_admin_can_update_user_identity_fields(client) -> None:
     login(client)
 
@@ -624,6 +661,7 @@ def test_dashboard_exposes_global_and_per_metric_cdf_comparison_controls(client)
     assert 'data-global-cdf-grouping-select' in response.text
     assert 'data-chart-cdf-grouping-select' in response.text
     assert 'Compare CDF by' in response.text
+    assert 'input type="hidden" name="cdf_grouping" value="vendor"' in response.text
 
 
 def test_dashboard_powerpoint_export_includes_visual_analytics_payload(client) -> None:
@@ -667,9 +705,15 @@ def test_dashboard_powerpoint_export_includes_visual_analytics_payload(client) -
         if hasattr(shape, "text")
     )
     assert "sample.csv" in slide_text
-    assert "Visual Analytics - score" in slide_text
-    assert "Visual Analytics - gap" in slide_text
+    assert "Visual Analytics · score" in slide_text
+    assert "Visual Analytics · gap" in slide_text
     assert "Date From: 2026-07-10" in slide_text
+    assert "Mean" in slide_text
+    assert "Avg" in slide_text
+    assert "P10" in slide_text
+    assert "P90" in slide_text
+    assert "Min" in slide_text
+    assert "Max" in slide_text
 
 
 def test_workspace_logs_capture_analysis_warnings(client, monkeypatch) -> None:
@@ -749,6 +793,7 @@ def test_dataset_status_endpoint_returns_queue_payload(client) -> None:
     payload = response.json()
     assert "datasets" in payload
     assert payload["datasets"][0]["file_name"] == "sample.csv"
+    assert payload["datasets"][0]["size_mb_label"].endswith("MB")
 
 
 def test_dashboard_handles_missing_source_file_without_500(client) -> None:
@@ -817,6 +862,20 @@ def test_failed_dataset_shows_last_error_in_queue(client) -> None:
     response = client.get("/workspace")
     assert response.status_code == 200
     assert "duplicate column name: campaign" in response.text
+
+
+def test_workspace_queue_shows_dataset_size_column(client) -> None:
+    login(client)
+    client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
+        follow_redirects=False,
+    )
+
+    response = client.get("/workspace")
+    assert response.status_code == 200
+    assert "<th>Size</th>" in response.text
+    assert "MB" in response.text
 
 
 def test_workspace_shows_operational_logs_panel(client) -> None:

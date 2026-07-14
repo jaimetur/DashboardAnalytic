@@ -23,7 +23,7 @@ from starlette.datastructures import QueryParams
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.exports import export_powerpoint_report, export_word_report
+from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
 from src.version import __app_name__, __release_date__, __version__
@@ -37,22 +37,24 @@ DATAFRAME_CACHE: dict[str, pd.DataFrame] = {}
 STOP_REQUESTS: set[int] = set()
 STOP_REQUESTS_LOCK = Lock()
 repository = Repository(settings.database_path)
-FILTER_DIMENSIONS = ['market', 'period', 'operator', 'vendor', 'region', 'city', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet']
+FILTER_DIMENSIONS = ['market', 'period', 'operator', 'vendor', 'test_name', 'region', 'city', 'session_type', 'direction', 'technology_primary', 'source_sheet']
 FILTER_DIMENSIONS_BY_KIND = {
     'voice': ['market', 'operator', 'vendor', 'region', 'city', 'session_type', 'technology_primary', 'source_sheet'],
     'speech': ['market', 'operator', 'vendor', 'region', 'city', 'session_type', 'technology_primary', 'source_sheet'],
-    'data': ['market', 'operator', 'vendor', 'region', 'city', 'test_name', 'direction', 'technology_primary', 'source_sheet'],
+    'data': ['market', 'operator', 'vendor', 'test_name', 'region', 'city', 'direction', 'technology_primary', 'source_sheet'],
     'generic': ['market', 'operator', 'vendor', 'region', 'city', 'source_sheet'],
 }
-ANALYSIS_SUPPORT_COLUMNS = [
-    'dataset_kind', 'source_file', 'market', 'period', 'operator', 'region', 'city', 'vendor', 'session_type', 'test_name',
-    'direction', 'technology_primary', 'source_sheet', 'event_start_time', 'status', 'success', 'failure', 'dropped', 'disturbed',
-    'impaired', 'setup_time_seconds', 'duration_seconds', 'throughput_mbps', 'quality_score', 'latency_ms',
-    'jitter_ms', 'packet_loss_pct', 'handovers', 'POLQA_LQ_Avg', 'LQ', 'Receive_Delay', 'Mean_Data_Rate',
-    'TCP_RTT_Service_Access_Delay', 'DNS_Resolution_Success_Ratio', 'DNS_Resolution_Success',
-    'DNS_Resolution_Attempts', 'VideoStream_Freezing_Time_Sum', 'Call_Setup_Time', 'Call_Duration',
-    'TCP_Throughput', 'Test_Duration', 'Playing_Technology', 'Type_of_Test',
+COMMON_ANALYSIS_COLUMNS = [
+    'dataset_kind', 'source_file', 'market', 'period', 'operator', 'vendor', 'test_name', 'region', 'city',
+    'session_type', 'direction', 'technology_primary', 'source_sheet', 'event_start_time', 'status',
+    'success', 'failure', 'dropped',
 ]
+KIND_ANALYSIS_COLUMNS = {
+    'voice': ['disturbed', 'impaired', 'setup_time_seconds', 'duration_seconds', 'quality_score', 'handovers'],
+    'speech': ['disturbed', 'impaired', 'quality_score', 'latency_ms', 'jitter_ms', 'packet_loss_pct', 'handovers', 'LQ'],
+    'data': ['setup_time_seconds', 'duration_seconds', 'throughput_mbps', 'latency_ms', 'handovers', 'DNS_Resolution_Success_Ratio', 'DNS_Resolution_Success', 'DNS_Resolution_Attempts'],
+    'generic': ['quality_score'],
+}
 STATUS_LABELS = {
     'queued': 'Queued',
     'processing': 'Processing',
@@ -256,6 +258,11 @@ def serialize_dataset_row(row) -> dict[str, Any]:
     item['input_kind_label'] = INPUT_KIND_LABELS.get(item.get('dataset_kind') or 'generic', 'Other')
     item['progress'] = int(item.get('progress') or 0)
     item['is_ready'] = item.get('status') == 'ready'
+    dataset_path = Path(item.get('stored_path') or '')
+    size_bytes = dataset_path.stat().st_size if dataset_path.exists() else 0
+    item['size_bytes'] = int(size_bytes)
+    item['size_mb'] = round(size_bytes / (1024 * 1024), 2) if size_bytes else 0.0
+    item['size_mb_label'] = f"{item['size_mb']:.2f} MB"
     return item
 
 
@@ -373,10 +380,27 @@ def load_cached_dataset(dataset_path: Path) -> pd.DataFrame:
     return store_cached_dataset_frame(dataset_path, load_dataset(dataset_path))
 
 
-def build_analysis_query_columns(selected_dataset: dict[str, Any], selected_metrics: list[str]) -> list[str]:
-    requested = set(ANALYSIS_SUPPORT_COLUMNS)
+def build_analysis_query_columns(
+    selected_dataset: dict[str, Any],
+    selected_metrics: list[str],
+    filters: dict[str, Any],
+    aggregation_overrides: dict[str, str],
+    cdf_overrides: dict[str, str],
+) -> list[str]:
+    dataset_kind = str(selected_dataset.get('dataset_kind') or 'generic')
+    requested = set(COMMON_ANALYSIS_COLUMNS)
+    requested.update(KIND_ANALYSIS_COLUMNS.get(dataset_kind, KIND_ANALYSIS_COLUMNS['generic']))
     requested.update(selected_metrics)
-    return sorted(requested)
+    requested.update({'market', 'period'})
+    requested.update((filters.get('extra_filters') or {}).keys())
+    requested_groupings = {
+        str(filters.get('aggregation') or '').strip(),
+        str(filters.get('cdf_grouping') or '').strip(),
+        *(str(value).strip() for value in aggregation_overrides.values()),
+        *(str(value).strip() for value in cdf_overrides.values()),
+    }
+    requested.update(grouping for grouping in requested_groupings if grouping and grouping != 'all')
+    return sorted(column for column in requested if column)
 
 
 def ensure_dataset_query_table(dataset: dict[str, Any], required_columns: list[str], filters: dict[str, Any] | None = None) -> None:
@@ -399,6 +423,7 @@ def ensure_dataset_query_table(dataset: dict[str, Any], required_columns: list[s
         repository.replace_dataset_rows(dataset_id, df)
         return
 
+    repository.ensure_dataset_row_indexes(dataset_id)
     existing_columns = set(repository.list_dataset_row_columns(dataset_id))
     missing_columns = [column for column in structural_columns if column not in existing_columns]
     if not missing_columns or not dataset_path.exists():
@@ -537,12 +562,12 @@ def resolve_doc_path(doc_name: str) -> Path:
 
 def choose_selected_dataset(datasets: list[dict[str, Any]], dataset_id: int | None, input_kind: str | None) -> dict[str, Any] | None:
     ready_datasets = [dataset for dataset in datasets if dataset.get('is_ready')]
-    filtered_datasets = [dataset for dataset in ready_datasets if not input_kind or dataset.get('dataset_kind') == input_kind]
-    candidate_datasets = filtered_datasets or ready_datasets
     if dataset_id is not None:
-        for dataset in candidate_datasets:
+        for dataset in ready_datasets:
             if dataset['id'] == dataset_id:
                 return dataset
+    filtered_datasets = [dataset for dataset in ready_datasets if not input_kind or dataset.get('dataset_kind') == input_kind]
+    candidate_datasets = filtered_datasets or ready_datasets
     return candidate_datasets[0] if candidate_datasets else None
 
 
@@ -753,7 +778,7 @@ def build_dashboard_payload(selected_dataset: dict[str, Any] | None, request: Re
         elif selected_values:
             filters['extra_filters'][dimension] = selected_values
 
-    query_columns = build_analysis_query_columns(selected_dataset, selected_metrics)
+    query_columns = build_analysis_query_columns(selected_dataset, selected_metrics, filters, aggregation_overrides, cdf_overrides)
     ensure_dataset_query_table(selected_dataset, query_columns, filters)
     if repository.dataset_rows_table_exists(selected_dataset['id']):
         df = repository.load_dataset_rows(selected_dataset['id'], query_columns, filters)
@@ -775,7 +800,7 @@ def build_dashboard_payload(selected_dataset: dict[str, Any] | None, request: Re
             if analysis is None:
                 with warnings.catch_warnings(record=True) as captured_warnings:
                     warnings.simplefilter('always')
-                    analysis = store_cached_analysis(dataset_path, metric_filters, metric, build_analysis(df, metric_filters, metric))
+                    analysis = store_cached_analysis(dataset_path, metric_filters, metric, build_analysis(df, metric_filters, metric, prefiltered=True))
                 if username:
                     for captured in captured_warnings:
                         repository.add_log(
@@ -1200,14 +1225,25 @@ def export_report(
         export_word_report(destination, asdict(analysis))
         media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     else:
-        report_hash = hashlib.sha1(json.dumps(report_payload, sort_keys=True, default=str).encode('utf-8')).hexdigest()[:10]
+        report_hash = hashlib.sha1(
+            json.dumps(
+                {
+                    'version': POWERPOINT_EXPORT_VERSION,
+                    'payload': report_payload,
+                },
+                sort_keys=True,
+                default=str,
+            ).encode('utf-8')
+        ).hexdigest()[:10]
         destination = safe_join(settings.export_dir, f'{file_stem}_report_{report_hash}.pptx')
         if not destination.exists():
             export_powerpoint_report(destination, report_payload)
         media_type = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
 
     repository.add_log(user.username, f'export_{export_kind}', destination.name)
-    download_name = f'{file_stem}_report.docx' if export_kind == 'word' else f'{file_stem}_report.pptx'
+    original_name = Path(selected_dataset['file_name']).name
+    original_stem = Path(original_name).stem
+    download_name = f'{original_stem}.docx' if export_kind == 'word' else f'{original_stem}.pptx'
     return FileResponse(destination, filename=download_name, media_type=media_type)
 
 

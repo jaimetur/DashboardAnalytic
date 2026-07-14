@@ -45,6 +45,7 @@
             <th>Dataset</th>
             <th>Input Type</th>
             <th>Rows</th>
+            <th>Size</th>
             <th>Status</th>
             <th>Progress</th>
             <th>Updated</th>
@@ -60,6 +61,7 @@
             </td>
             <td data-queue-kind>{{ dataset.input_kind_label }}</td>
             <td data-queue-rows>{{ dataset.row_count or 0 }}</td>
+            <td data-queue-size>{{ dataset.size_mb_label }}</td>
             <td>
               <span class="queue-status-pill queue-status-{{ dataset.status }}" data-queue-status-pill>{{ dataset.status_label }}</span>
             </td>
@@ -78,7 +80,7 @@
             <td>
               <div class="queue-actions">
                 {% if dataset.status == 'ready' %}
-                <a class="ghost-link action-link-primary" href="/dashboard?dataset_id={{ dataset.id }}{% if input_kind %}&input_kind={{ input_kind }}{% endif %}">Open</a>
+                <a class="ghost-link action-link-primary" href="/dashboard?dataset_id={{ dataset.id }}{% if dataset.dataset_kind %}&input_kind={{ dataset.dataset_kind }}{% endif %}">Open</a>
                 <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
                   <button type="submit" class="danger-button">Delete</button>
                 </form>
@@ -105,7 +107,7 @@
           </tr>
           {% else %}
           <tr>
-            <td colspan="7"><article class="empty-state-inline">No datasets available.</article></td>
+            <td colspan="8"><article class="empty-state-inline">No datasets available.</article></td>
           </tr>
           {% endfor %}
         </tbody>

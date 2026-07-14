@@ -114,6 +114,9 @@ class Repository:
     def _quote_identifier(self, identifier: str) -> str:
         return '"' + str(identifier).replace('"', '""') + '"'
 
+    def _index_name(self, table_name: str, column_name: str, suffix: str) -> str:
+        return f'idx_{table_name}_{column_name}_{suffix}'
+
     def _sqlite_safe_frame(self, df: pd.DataFrame) -> pd.DataFrame:
         renamed_columns: list[str] = []
         seen: dict[str, int] = {}
@@ -266,6 +269,47 @@ class Repository:
         with self.connection() as conn:
             conn.execute(f"DROP TABLE IF EXISTS {self._quote_identifier(table_name)}")
             safe_df.to_sql(table_name, conn, index=False)
+            self._create_dataset_row_indexes(conn, table_name, safe_df.columns.tolist())
+
+    def _create_dataset_row_indexes(self, conn: sqlite3.Connection, table_name: str, columns: list[str]) -> None:
+        normalized_columns = {str(column).strip().lower(): column for column in columns}
+        indexed_dimensions = [
+            'market', 'period', 'operator', 'vendor', 'test_name', 'region', 'city',
+            'session_type', 'direction', 'technology_primary', 'source_sheet', 'status',
+        ]
+        for requested_name in indexed_dimensions:
+            actual_name = normalized_columns.get(requested_name)
+            if not actual_name:
+                continue
+            quoted_table = self._quote_identifier(table_name)
+            quoted_column = self._quote_identifier(actual_name)
+            quoted_index = self._quote_identifier(self._index_name(table_name, requested_name, 'norm'))
+            conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS {quoted_index}
+                ON {quoted_table} (LOWER(TRIM(CAST({quoted_column} AS TEXT))))
+                """
+            )
+
+        event_time_column = normalized_columns.get('event_start_time')
+        if event_time_column:
+            quoted_table = self._quote_identifier(table_name)
+            quoted_column = self._quote_identifier(event_time_column)
+            quoted_index = self._quote_identifier(self._index_name(table_name, 'event_start_time', 'date'))
+            conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS {quoted_index}
+                ON {quoted_table} (date(CAST({quoted_column} AS TEXT)))
+                """
+            )
+
+    def ensure_dataset_row_indexes(self, dataset_id: int) -> None:
+        table_name = self.dataset_rows_table_name(dataset_id)
+        columns = self.list_dataset_row_columns(dataset_id)
+        if not columns:
+            return
+        with self.connection() as conn:
+            self._create_dataset_row_indexes(conn, table_name, columns)
 
     def drop_dataset_rows(self, dataset_id: int) -> None:
         table_name = self.dataset_rows_table_name(dataset_id)

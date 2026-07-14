@@ -436,8 +436,8 @@ def _build_comparison_chart(table_rows: list[dict[str, Any]], aggregation: str |
     }
 
 
-def build_analysis(df: pd.DataFrame, filters: dict[str, Any], metric: str) -> AnalysisResult:
-    filtered = apply_filters(df, filters)
+def build_analysis(df: pd.DataFrame, filters: dict[str, Any], metric: str, *, prefiltered: bool = False) -> AnalysisResult:
+    filtered = df if prefiltered else apply_filters(df, filters)
     if filtered.empty:
         raise ValueError('No rows match the selected filters')
 
@@ -454,18 +454,25 @@ def build_analysis(df: pd.DataFrame, filters: dict[str, Any], metric: str) -> An
     if metric_series.empty:
         raise ValueError(f'Metric {selected_metric} does not contain numeric values after filtering')
 
-    aggregation = _infer_aggregation(analysis_frame, str(filters.get('aggregation') or ''), dataset_kind)
-    cdf_grouping = _infer_cdf_grouping(analysis_frame, str(filters.get('cdf_grouping') or ''))
-    normalized_filters = {**filters, 'aggregation': aggregation or 'all'}
-    normalized_filters['cdf_grouping'] = cdf_grouping or 'all'
+    requested_aggregation = str(filters.get('aggregation') or '').strip().lower()
+    requested_cdf_grouping = str(filters.get('cdf_grouping') or '').strip().lower()
+    aggregation = _infer_aggregation(analysis_frame, requested_aggregation, dataset_kind)
+    cdf_grouping = _infer_cdf_grouping(analysis_frame, requested_cdf_grouping)
+    normalized_filters = {
+        **filters,
+        'aggregation': requested_aggregation if aggregation else 'all',
+        'cdf_grouping': requested_cdf_grouping if cdf_grouping else 'all',
+    }
     table_rows = _aggregate_table(analysis_frame, aggregation, selected_metric, dataset_kind) if aggregation else _top_records(analysis_frame, selected_metric)
+
+    global_kpis = _build_global_kpis(filtered, dataset_kind, normalized_filters)
 
     return AnalysisResult(
         summary=summary,
         selected_metric=selected_metric,
         filters=normalized_filters,
-        kpis=_build_global_kpis(filtered, dataset_kind, normalized_filters),
-        global_kpis=_build_global_kpis(filtered, dataset_kind, normalized_filters),
+        kpis=global_kpis,
+        global_kpis=global_kpis,
         metric_kpis=_build_metric_kpis(analysis_frame, selected_metric),
         cdf_chart=_build_cdf_chart(analysis_frame, selected_metric, normalized_filters, cdf_grouping),
         comparison_chart=_build_comparison_chart(table_rows, aggregation),

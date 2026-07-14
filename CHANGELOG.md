@@ -49,6 +49,8 @@
 - Refined executive metric cards into visual subpanels grouped inside `Executive Dashboard`
 - Improved dataset kind detection for `CDR-Speech` and `CDR-Data`
 - Reduced PowerPoint export time by reusing cached export files and condensing metric output into fewer slides
+- Added dataset size visibility in the `Data Processing` queue with MB labels
+- Accelerated dashboard refreshes on large datasets by reducing analysis query columns and indexing materialized filter dimensions
 
 #### 🐛 Bug fixes:
 - Fixed default access visibility to reflect active users with default passwords only
@@ -66,6 +68,10 @@
 - Fixed the dashboard global aggregation selector to stay independent from per-chart overrides
 - Fixed lowercase CSV dimensions like `operator` and `region` so chart aggregations work
 - Fixed grouped percentiles to fall back gracefully when the chosen comparison has no usable grouped rows
+- Fixed `Workspace -> Open` so the clicked dataset stays authoritative even when a stale `input_kind` is present
+- Fixed global CDF comparison updates to apply on the first dashboard refresh
+- Fixed PowerPoint metric KPI strips so all six KPI cards render instead of only `Max`
+- Fixed data filter ordering so `Test Name` appears between `Vendor` and `Region`
 
 #### 📚 Documentation:
 - Added `Readme` and `Changelog` navigation with Markdown document viewer
