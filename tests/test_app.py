@@ -4,6 +4,8 @@ from io import BytesIO
 from pathlib import Path
 import warnings
 
+import pandas as pd
+
 from src.modules.auth import hash_password
 
 def login(client) -> None:
@@ -778,6 +780,45 @@ def test_dashboard_materializes_legacy_ready_dataset_on_first_analysis(client) -
     assert response.status_code == 200
     assert "Charts and Scorecards" in response.text
     assert app_module.repository.dataset_rows_table_exists(1)
+
+
+def test_dashboard_reuses_materialized_table_when_legacy_columns_only_differ_by_case(client, monkeypatch) -> None:
+    login(client)
+    csv_content = b"market,period,operator,score\nES,2026-Q1,VDF,91\nES,2026-Q1,ORG,87\n"
+    upload_response = client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    import src.DashboardAnalytic as app_module
+
+    legacy_frame = pd.DataFrame({
+        "Market": ["ES", "ES"],
+        "Period": ["2026-Q1", "2026-Q1"],
+        "Operator": ["VDF", "ORG"],
+        "score": [91, 87],
+        "dataset_kind": ["generic", "generic"],
+        "source_file": ["sample.csv", "sample.csv"],
+    })
+    app_module.repository.replace_dataset_rows(1, legacy_frame)
+    app_module.DATAFRAME_CACHE.clear()
+    app_module.ANALYSIS_CACHE.clear()
+
+    calls = {"count": 0}
+    original_load_dataset = app_module.load_dataset
+
+    def counting_load_dataset(path):
+        calls["count"] += 1
+        return original_load_dataset(path)
+
+    monkeypatch.setattr(app_module, "load_dataset", counting_load_dataset)
+
+    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=operator&load=1")
+    assert response.status_code == 200
+    assert "Charts and Scorecards" in response.text
+    assert calls["count"] == 0
 
 
 def test_dataset_status_endpoint_returns_queue_payload(client) -> None:

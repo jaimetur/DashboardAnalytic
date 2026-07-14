@@ -350,6 +350,12 @@ class Repository:
             return exact_lowercase or suffixed_matches[0]
         return None
 
+    def resolve_dataset_row_column_name(self, dataset_id: int, requested: str) -> str | None:
+        existing_columns = set(self.list_dataset_row_columns(dataset_id))
+        if not existing_columns:
+            return None
+        return self._resolve_dataset_row_column_name(existing_columns, requested)
+
     def load_dataset_rows(self, dataset_id: int, columns: list[str], filters: dict[str, Any]) -> pd.DataFrame:
         table_name = self.dataset_rows_table_name(dataset_id)
         existing_columns = set(self.list_dataset_row_columns(dataset_id))

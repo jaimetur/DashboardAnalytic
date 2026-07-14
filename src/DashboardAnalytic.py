@@ -424,8 +424,10 @@ def ensure_dataset_query_table(dataset: dict[str, Any], required_columns: list[s
         return
 
     repository.ensure_dataset_row_indexes(dataset_id)
-    existing_columns = set(repository.list_dataset_row_columns(dataset_id))
-    missing_columns = [column for column in structural_columns if column not in existing_columns]
+    missing_columns = [
+        column for column in structural_columns
+        if repository.resolve_dataset_row_column_name(dataset_id, column) is None
+    ]
     if not missing_columns or not dataset_path.exists():
         return
 
