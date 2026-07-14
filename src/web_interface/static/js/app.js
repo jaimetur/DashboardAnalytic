@@ -311,6 +311,15 @@ function buildRestoredDashboardUrl(currentParams, persistedDashboardQuery) {
   return query ? `/dashboard?${query}` : '/dashboard';
 }
 
+function buildDatasetDashboardUrl(params) {
+  const persistedDashboardQuery = getPersistedDashboardQuery(params);
+  if (persistedDashboardQuery) {
+    return buildRestoredDashboardUrl(params, persistedDashboardQuery);
+  }
+  const query = params.toString();
+  return query ? `/dashboard?${query}` : '/dashboard';
+}
+
 function restoreActiveDatasetState() {
   try {
     const rawValue = window.localStorage.getItem(activeDatasetStateKey);
@@ -802,6 +811,14 @@ document.querySelectorAll('form[data-loading-label]').forEach((form) => {
     if (form.dataset.downloadForm === '1') {
       event.preventDefault();
       submitDownloadForm(form);
+      return;
+    }
+    if (window.location.pathname === '/dashboard' && form.id === 'dashboard-dataset-form') {
+      event.preventDefault();
+      const params = buildDashboardParamsFromForm(form);
+      const targetUrl = buildDatasetDashboardUrl(params);
+      showLoadingOverlay(form.dataset.loadingLabel);
+      replaceLocation(targetUrl);
       return;
     }
     if (window.location.pathname === '/dashboard' && form.id === 'dashboard-filters-form') {

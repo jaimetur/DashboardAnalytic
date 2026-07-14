@@ -11,7 +11,7 @@
           </div>
           {% if selected_dataset %}<span class="pill status-pill status-{{ selected_dataset.status }}">{{ selected_dataset.status_label }}</span>{% endif %}
         </div>
-        <form class="dataset-selector-grid" action="/dashboard" method="get" data-loading-label="Opening dataset dashboard">
+        <form id="dashboard-dataset-form" class="dataset-selector-grid" action="/dashboard" method="get" data-loading-label="Opening dataset dashboard">
           <label>Input Type
             <select name="input_kind" data-input-kind-select>
               <option value="">All Inputs</option>
