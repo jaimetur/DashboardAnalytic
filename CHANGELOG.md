@@ -91,6 +91,7 @@
 - Refined the default CDF slider cutoff to use the lower of the shared multi-curve X limit and the point where all visible curves have already reached 0.95 on the Y axis
 - Fixed bar-chart normalization so the highest bar always reaches the top of the Y axis even when every value is below `1`
 - Added CDF axis labels and metric units in dashboard and export charts so the plotted values are identifiable at a glance
+- Updated PowerPoint chart exports to honor each CDF chart's default horizontal X range and to render vertical Y-axis labels for both CDF and bar charts
 - Fixed PowerPoint metric KPI strips so all six KPI cards render instead of only `Max`
 - Fixed data filter ordering so `Test Name` appears between `Vendor` and `Region`
 

@@ -12,7 +12,7 @@ from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
-POWERPOINT_EXPORT_VERSION = "2026-07-14-v6"
+POWERPOINT_EXPORT_VERSION = "2026-07-14-v7"
 PPT_WIDTH_IN = 13.333
 PPT_HEIGHT_IN = 7.5
 SLIDE_WIDTH = 1280
@@ -232,6 +232,22 @@ def _draw_wrapped_text(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int]
             break
 
 
+def _draw_rotated_text(image: Image.Image, position: tuple[int, int], text: str, font: ImageFont.ImageFont, *,
+                       fill: str = MUTED, angle: int = 90) -> None:
+    if not text:
+        return
+    dummy = Image.new("RGBA", (1, 1), (255, 255, 255, 0))
+    dummy_draw = ImageDraw.Draw(dummy)
+    text_box = dummy_draw.textbbox((0, 0), text, font=font)
+    text_width = max(1, text_box[2] - text_box[0] + 4)
+    text_height = max(1, text_box[3] - text_box[1] + 4)
+    text_image = Image.new("RGBA", (text_width, text_height), (255, 255, 255, 0))
+    text_draw = ImageDraw.Draw(text_image)
+    text_draw.text((2 - text_box[0], 2 - text_box[1]), text, font=font, fill=fill)
+    rotated = text_image.rotate(angle, expand=True)
+    image.alpha_composite(rotated, dest=position)
+
+
 def _empty_chart_image(title: str, message: str) -> BytesIO:
     image = Image.new("RGB", (SLIDE_WIDTH, SLIDE_HEIGHT), BG)
     draw = ImageDraw.Draw(image)
@@ -265,7 +281,7 @@ def _draw_bar_chart(chart: dict[str, Any]) -> BytesIO:
     if not labels or not values:
         return _empty_chart_image("Group Benchmark", "The selected comparison does not contain grouped values for this metric.")
 
-    image = Image.new("RGB", (SLIDE_WIDTH, SLIDE_HEIGHT), BG)
+    image = Image.new("RGBA", (SLIDE_WIDTH, SLIDE_HEIGHT), BG)
     draw = ImageDraw.Draw(image)
     title_font = _load_font(22, bold=True)
     axis_font = _load_font(15)
@@ -302,8 +318,11 @@ def _draw_bar_chart(chart: dict[str, Any]) -> BytesIO:
         text_width = draw.textlength(short_label, font=axis_font)
         draw.text((x0 + (bar_width - text_width) / 2, bottom + 10), short_label, font=axis_font, fill=MUTED)
 
+    y_axis_label = str(chart.get("y_axis_label") or "Mean metric")
+    _draw_rotated_text(image, (18, top + max(0, (bottom - top - 120) // 2)), y_axis_label, axis_font)
+
     buffer = BytesIO()
-    image.save(buffer, format="PNG")
+    image.convert("RGB").save(buffer, format="PNG")
     buffer.seek(0)
     return buffer
 
@@ -314,9 +333,21 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
         for item in chart.get("series_collection", []):
             if not item.get("labels") or not item.get("series"):
                 continue
+            x_limit = chart.get("x_view_max_default")
+            raw_labels = [float(value) for value in item.get("labels", [])]
+            raw_series = [float(value) for value in item.get("series", [])]
+            if x_limit is not None:
+                filtered_pairs = [
+                    (label, value)
+                    for label, value in zip(raw_labels, raw_series, strict=False)
+                    if label <= float(x_limit)
+                ]
+                if filtered_pairs:
+                    raw_labels = [pair[0] for pair in filtered_pairs]
+                    raw_series = [pair[1] for pair in filtered_pairs]
             sampled_labels, sampled_series = _downsample_series(
-                [float(value) for value in item.get("labels", [])],
-                [float(value) for value in item.get("series", [])],
+                raw_labels,
+                raw_series,
             )
             series_collection.append({
                 "name": str(item.get("name") or "Series"),
@@ -324,16 +355,28 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
                 "series": sampled_series,
             })
     else:
+        x_limit = chart.get("x_view_max_default")
+        raw_labels = [float(value) for value in chart.get("labels", [])]
+        raw_series = [float(value) for value in chart.get("series", [])]
+        if x_limit is not None:
+            filtered_pairs = [
+                (label, value)
+                for label, value in zip(raw_labels, raw_series, strict=False)
+                if label <= float(x_limit)
+            ]
+            if filtered_pairs:
+                raw_labels = [pair[0] for pair in filtered_pairs]
+                raw_series = [pair[1] for pair in filtered_pairs]
         labels, series = _downsample_series(
-            [float(value) for value in chart.get("labels", [])],
-            [float(value) for value in chart.get("series", [])],
+            raw_labels,
+            raw_series,
         )
         series_collection = [{"name": "CDF", "labels": labels, "series": series}] if labels and series else []
 
     if not series_collection:
         return _empty_chart_image("CDF Curve", "The selected CDF comparison does not contain numeric values for this metric.")
 
-    image = Image.new("RGB", (SLIDE_WIDTH, SLIDE_HEIGHT), BG)
+    image = Image.new("RGBA", (SLIDE_WIDTH, SLIDE_HEIGHT), BG)
     draw = ImageDraw.Draw(image)
     title_font = _load_font(22, bold=True)
     legend_font = _load_font(14)
@@ -369,7 +412,7 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
 
     axis_font = _load_font(13)
     draw.text((left + ((right - left) / 2) - (draw.textlength(x_axis_label, font=axis_font) / 2), bottom + 26), x_axis_label, font=axis_font, fill=MUTED)
-    draw.text((24, top - 2), y_axis_label, font=axis_font, fill=MUTED)
+    _draw_rotated_text(image, (18, top + max(0, (bottom - top - 180) // 2)), y_axis_label, axis_font)
 
     legend_x = 48
     legend_y = SLIDE_HEIGHT - 64
@@ -383,7 +426,7 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
             legend_y += 22
 
     buffer = BytesIO()
-    image.save(buffer, format="PNG")
+    image.convert("RGB").save(buffer, format="PNG")
     buffer.seek(0)
     return buffer
 
