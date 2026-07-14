@@ -38,7 +38,7 @@ AGGREGATION_CANDIDATES: dict[str, list[str]] = {
     'generic': ['operator', 'region', 'city', 'market', 'period', 'source_sheet'],
 }
 CDF_COMPARISON_CANDIDATES = ['vendor', 'market', 'operator', 'region', 'city']
-MAX_CDF_POINTS = 960
+MAX_CDF_POINTS = 2048
 METRIC_AXIS_TITLES = {
     'polqa_lq_avg': 'POLQA LQ Avg',
     'lq': 'LQ',
@@ -395,35 +395,43 @@ def _build_cdf_chart(df: pd.DataFrame, metric: str, filters: dict[str, Any], cdf
     else:
         selected_groups = _coerce_filter_values((filters.get('extra_filters') or {}).get(grouping_column))
 
-    if selected_groups:
-        requested_group_order = [value for value in selected_groups if value]
-    else:
-        requested_group_order = [
-            str(value).strip()
-            for value in df[grouping_column].dropna().tolist()
-            if str(value).strip()
-        ]
-
-    seen: set[str] = set()
-    group_order: list[str] = []
-    for value in requested_group_order:
-        normalized = value.lower()
-        if normalized in seen:
+    grouped_values: dict[str, dict[str, Any]] = {}
+    for raw_group_value, group_frame in df.dropna(subset=[grouping_column]).groupby(grouping_column, dropna=False):
+        display_name = str(raw_group_value).strip()
+        normalized_name = display_name.lower()
+        if not display_name or normalized_name in grouped_values:
             continue
-        seen.add(normalized)
-        group_order.append(value)
-
-    series_collection: list[dict[str, Any]] = []
-    for group_value in group_order[:8]:
-        group_frame = df[df[grouping_column].astype(str).str.strip().str.lower() == str(group_value).strip().lower()]
         values = pd.to_numeric(group_frame[metric], errors='coerce').dropna() if metric in group_frame.columns else pd.Series(dtype='float64')
         if values.empty:
             continue
-        pairs = compute_cdf(values)
+        grouped_values[normalized_name] = {
+            'name': display_name,
+            'values': values,
+        }
+
+    if selected_groups:
+        preferred_keys: list[str] = []
+        seen_selected: set[str] = set()
+        for value in selected_groups:
+            normalized = str(value).strip().lower()
+            if not normalized or normalized in seen_selected or normalized not in grouped_values:
+                continue
+            seen_selected.add(normalized)
+            preferred_keys.append(normalized)
+        ordered_keys = preferred_keys
+    else:
+        ordered_keys = list(grouped_values.keys())
+
+    series_collection: list[dict[str, Any]] = []
+    for group_key in ordered_keys[:8]:
+        item = grouped_values.get(group_key)
+        if not item:
+            continue
+        pairs = compute_cdf(item['values'])
         if not pairs:
             continue
         series_collection.append({
-            'name': group_value,
+            'name': item['name'],
             'labels': [pair[0] for pair in pairs],
             'series': [pair[1] for pair in pairs],
         })

@@ -626,6 +626,22 @@ def test_dashboard_adaptive_filters_include_city_and_multi_select_fields(client)
     assert "All values are selected by default. Clearing all values applies an empty filter." in response.text
 
 
+def test_dashboard_adaptive_filters_label_technology_without_primary(client) -> None:
+    login(client)
+    csv_content = b"market,period,score,RAT\nES,2026-Q1,91,5G\nES,2026-Q1,87,LTE\n"
+    upload_response = client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
+    assert response.status_code == 200
+    assert ">Technology<" in response.text
+    assert "Technology Primary" not in response.text
+
+
 def test_dashboard_comparison_chart_exposes_per_metric_aggregation_override_control(client) -> None:
     login(client)
     csv_content = b"market,period,score,gap,operator,region\nES,2026-Q1,91,2.1,Vodafone,North\nES,2026-Q1,87,3.3,o2,South\n"

@@ -199,6 +199,26 @@ def test_build_analysis_builds_multi_series_cdf_when_cdf_grouping_is_selected() 
     assert analysis.cdf_chart["y_axis_label"] == "Cumulative probability"
 
 
+def test_build_analysis_cdf_comparison_keeps_all_selected_operator_series() -> None:
+    df = pd.DataFrame({
+        "dataset_kind": ["voice", "voice", "voice", "voice", "voice", "voice"],
+        "market": ["DE"] * 6,
+        "period": ["2025-Q3"] * 6,
+        "operator": ["Telekom", "Telekom", "Vodafone", "Vodafone", "o2 - de", "o2 - de"],
+        "quality_score": [4.5, 4.2, 3.9, 3.6, 3.3, 3.1],
+    })
+
+    analysis = build_analysis(
+        df,
+        {"aggregation": "all", "cdf_grouping": "operator", "extra_filters": {"operator": ["Telekom", "Vodafone", "o2 - de"]}},
+        "quality_score",
+    )
+
+    assert "series_collection" in analysis.cdf_chart
+    assert len(analysis.cdf_chart["series_collection"]) == 3
+    assert [item["name"] for item in analysis.cdf_chart["series_collection"]] == ["Telekom", "Vodafone", "o2 - de"]
+
+
 def test_build_analysis_cdf_axis_label_includes_metric_units_when_known() -> None:
     df = pd.DataFrame({
         "dataset_kind": ["data", "data", "data"],

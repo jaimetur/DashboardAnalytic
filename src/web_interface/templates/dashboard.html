@@ -404,7 +404,7 @@
           </label>
           {% for dimension in filter_dimensions %}
           {% set options = filter_options.get(dimension, []) %}
-          <label>{{ dimension.replace('_', ' ').title() }}
+          <label>{{ format_aggregation_label(dimension) }}
             <select name="{{ dimension }}" multiple size="{{ [options|length, 6]|min if options|length > 0 else 1 }}" {% if not options %}disabled{% endif %}>
               {% for value in options %}
               <option value="{{ value }}" {% if analysis %}{% if (dimension in ['market', 'period'] and value in (analysis.filters[dimension] or [])) or (dimension not in ['market', 'period'] and value in (analysis.filters.extra_filters.get(dimension) or [])) %}selected{% endif %}{% else %}selected{% endif %}>{{ value }}</option>
