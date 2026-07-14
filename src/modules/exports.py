@@ -12,7 +12,7 @@ from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
-POWERPOINT_EXPORT_VERSION = "2026-07-14-v7"
+POWERPOINT_EXPORT_VERSION = "2026-07-14-v8"
 PPT_WIDTH_IN = 13.333
 PPT_HEIGHT_IN = 7.5
 SLIDE_WIDTH = 1280
@@ -28,6 +28,7 @@ TEAL = "#0B7A75"
 ORANGE = "#DD653E"
 BLUE = "#245A96"
 LINE = "#D9E4E8"
+GRID = "#C3D2D9"
 DARK_BG = "#143048"
 SERIES_COLORS = ["#0B7A75", "#DD653E", "#245A96", "#B84D3A", "#6D46A8", "#228A5D", "#C78B1D", "#4D6A88"]
 
@@ -299,8 +300,8 @@ def _draw_bar_chart(chart: dict[str, Any]) -> BytesIO:
     draw.text((36, 28), "Group Benchmark", font=title_font, fill=TEXT)
 
     left, top, right, bottom = 70, 90, SLIDE_WIDTH - 40, SLIDE_HEIGHT - 70
-    draw.line((left, top, left, bottom), fill=MUTED, width=2)
-    draw.line((left, bottom, right, bottom), fill=MUTED, width=2)
+    draw.line((left, top, left, bottom), fill=MUTED, width=3)
+    draw.line((left, bottom, right, bottom), fill=MUTED, width=3)
 
     compact_labels = labels[:8]
     compact_values = values[:8]
@@ -328,7 +329,7 @@ def _draw_bar_chart(chart: dict[str, Any]) -> BytesIO:
         draw.text((x0 + (bar_width - text_width) / 2, bottom + 10), short_label, font=axis_font, fill=MUTED)
 
     y_axis_label = str(chart.get("y_axis_label") or "Mean metric")
-    _draw_rotated_text(image, (left - 26, top + max(0, (bottom - top - 120) // 2)), y_axis_label, axis_font)
+    _draw_rotated_text(image, (left - 18, top + max(0, (bottom - top - 120) // 2)), y_axis_label, axis_font)
 
     buffer = BytesIO()
     image.convert("RGB").save(buffer, format="PNG")
@@ -395,8 +396,8 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
     y_axis_label = str(chart.get("y_axis_label") or "Cumulative probability")
 
     left, top, right, bottom = 70, 90, SLIDE_WIDTH - 40, SLIDE_HEIGHT - 110
-    draw.line((left, top, left, bottom), fill=MUTED, width=2)
-    draw.line((left, bottom, right, bottom), fill=MUTED, width=2)
+    draw.line((left, top, left, bottom), fill=MUTED, width=3)
+    draw.line((left, bottom, right, bottom), fill=MUTED, width=3)
 
     all_x = [value for s in series_collection for value in s["labels"]]
     all_y = [value for s in series_collection for value in s["series"]]
@@ -413,19 +414,19 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
 
     for tick in x_ticks:
         px = left + ((tick - min_x) / (max_x - min_x)) * (right - left)
-        draw.line((px, top, px, bottom), fill=LINE, width=1)
-        draw.line((px, bottom, px, bottom + 6), fill=MUTED, width=2)
+        draw.line((px, top, px, bottom), fill=GRID, width=2)
+        draw.line((px, bottom, px, bottom + 8), fill=MUTED, width=3)
         tick_label = _format_axis_tick(tick)
         tick_width = draw.textlength(tick_label, font=axis_font)
-        draw.text((px - tick_width / 2, bottom + 10), tick_label, font=axis_font, fill=MUTED)
+        draw.text((px - tick_width / 2, bottom + 12), tick_label, font=axis_font, fill=MUTED)
 
     for tick in y_ticks:
         py = bottom - ((tick - 0.0) / (1.0 - 0.0)) * (bottom - top)
-        draw.line((left, py, right, py), fill=LINE, width=1)
-        draw.line((left - 6, py, left, py), fill=MUTED, width=2)
+        draw.line((left, py, right, py), fill=GRID, width=2)
+        draw.line((left - 8, py, left, py), fill=MUTED, width=3)
         tick_label = _format_axis_tick(tick)
         tick_width = draw.textlength(tick_label, font=axis_font)
-        draw.text((left - 14 - tick_width, py - 8), tick_label, font=axis_font, fill=MUTED)
+        draw.text((left - 18 - tick_width, py - 8), tick_label, font=axis_font, fill=MUTED)
 
     for index, s in enumerate(series_collection[:8]):
         color = SERIES_COLORS[index % len(SERIES_COLORS)]
@@ -440,7 +441,7 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
             draw.ellipse((point[0] - 3, point[1] - 3, point[0] + 3, point[1] + 3), fill=color)
 
     draw.text((left + ((right - left) / 2) - (draw.textlength(x_axis_label, font=axis_font) / 2), bottom + 26), x_axis_label, font=axis_font, fill=MUTED)
-    _draw_rotated_text(image, (left - 26, top + max(0, (bottom - top - 180) // 2)), y_axis_label, axis_font)
+    _draw_rotated_text(image, (left - 18, top + max(0, (bottom - top - 180) // 2)), y_axis_label, axis_font)
 
     legend_x = 48
     legend_y = SLIDE_HEIGHT - 64
