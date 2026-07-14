@@ -201,6 +201,19 @@ function setupCdfRangeControls() {
 document.querySelectorAll('[data-chart]').forEach(drawChart);
 setupCdfRangeControls();
 
+document.addEventListener('click', (event) => {
+  const openLink = event.target.closest('[data-dashboard-open-link]');
+  if (!openLink) return;
+  const datasetId = openLink.dataset.datasetId;
+  if (!datasetId) return;
+  event.preventDefault();
+  navigateToPersistedDatasetDashboard(
+    datasetId,
+    openLink.dataset.inputKind,
+    openLink.dataset.loadingLabel || 'Opening dataset dashboard',
+  );
+});
+
 document.querySelectorAll('.collapsible-panel').forEach((panel) => {
   const chip = panel.querySelector('.collapse-chip');
   const updateChip = () => {
@@ -318,6 +331,20 @@ function buildDatasetDashboardUrl(params) {
   }
   const query = params.toString();
   return query ? `/dashboard?${query}` : '/dashboard';
+}
+
+function navigateToPersistedDatasetDashboard(datasetId, inputKind, loadingLabel = 'Opening dataset dashboard') {
+  const params = new URLSearchParams();
+  const normalizedDatasetId = String(datasetId || '').trim();
+  const normalizedInputKind = String(inputKind || '').trim();
+  if (!normalizedDatasetId) return false;
+  params.set('dataset_id', normalizedDatasetId);
+  if (normalizedInputKind) {
+    params.set('input_kind', normalizedInputKind);
+  }
+  showLoadingOverlay(loadingLabel);
+  replaceLocation(buildDatasetDashboardUrl(params));
+  return true;
 }
 
 function restoreActiveDatasetState() {
@@ -816,9 +843,14 @@ document.querySelectorAll('form[data-loading-label]').forEach((form) => {
     if (window.location.pathname === '/dashboard' && form.id === 'dashboard-dataset-form') {
       event.preventDefault();
       const params = buildDashboardParamsFromForm(form);
-      const targetUrl = buildDatasetDashboardUrl(params);
-      showLoadingOverlay(form.dataset.loadingLabel);
-      replaceLocation(targetUrl);
+      if (!navigateToPersistedDatasetDashboard(
+        params.get('dataset_id'),
+        params.get('input_kind'),
+        form.dataset.loadingLabel,
+      )) {
+        showLoadingOverlay(form.dataset.loadingLabel);
+        replaceLocation(buildDatasetDashboardUrl(params));
+      }
       return;
     }
     if (window.location.pathname === '/dashboard' && form.id === 'dashboard-filters-form') {
@@ -1161,7 +1193,7 @@ if (queueNode) {
       const openHref = `/dashboard?${openParams.toString()}`;
       if (dataset.status === 'ready') {
         actions.innerHTML = `
-          <a class="ghost-link action-link-primary" href="${openHref}">Open</a>
+          <a class="ghost-link action-link-primary" href="${openHref}" data-dashboard-open-link data-dataset-id="${dataset.id}"${dataset.dataset_kind ? ` data-input-kind="${String(dataset.dataset_kind)}"` : ''}>Open</a>
           <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
             <button type="submit" class="danger-button">Delete</button>
           </form>
