@@ -72,6 +72,7 @@
 - Fixed global CDF comparison updates to apply on the first dashboard refresh
 - Fixed `Global CDF Comparison` and `Global Aggregation` to persist their last selected values across dashboard returns
 - Fixed legacy materialized dashboard tables to stop rebuilding on every refresh when structural columns only differ by case
+- Optimized large-dashboard CDF rendering by capping chart payload resolution so very large datasets no longer serialize every point
 - Fixed PowerPoint metric KPI strips so all six KPI cards render instead of only `Max`
 - Fixed data filter ordering so `Test Name` appears between `Vendor` and `Region`
 

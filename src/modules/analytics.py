@@ -38,6 +38,7 @@ AGGREGATION_CANDIDATES: dict[str, list[str]] = {
     'generic': ['operator', 'region', 'city', 'market', 'period', 'source_sheet'],
 }
 CDF_COMPARISON_CANDIDATES = ['vendor', 'market', 'operator', 'region', 'city']
+MAX_CDF_POINTS = 320
 
 
 def _resolve_column(df: pd.DataFrame, requested: str) -> str | None:
@@ -101,6 +102,15 @@ def compute_cdf(series: pd.Series) -> list[tuple[float, float]]:
     cleaned = series.dropna().astype(float).sort_values().to_numpy()
     if cleaned.size == 0:
         return []
+    if cleaned.size > MAX_CDF_POINTS:
+        sample_indexes = np.linspace(0, cleaned.size - 1, MAX_CDF_POINTS, dtype=int)
+        sample_indexes = np.unique(sample_indexes)
+        sampled = cleaned[sample_indexes]
+        cumulative = (sample_indexes + 1) / cleaned.size
+        if sample_indexes[-1] != cleaned.size - 1:
+            sampled = np.append(sampled, cleaned[-1])
+            cumulative = np.append(cumulative, 1.0)
+        return list(zip(sampled.tolist(), cumulative.tolist(), strict=False))
     cumulative = np.arange(1, cleaned.size + 1) / cleaned.size
     return list(zip(cleaned.tolist(), cumulative.tolist(), strict=False))
 

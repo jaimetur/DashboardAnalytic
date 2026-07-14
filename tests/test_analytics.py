@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from src.modules.analytics import _top_records, build_analysis, compute_cdf
+from src.modules.analytics import MAX_CDF_POINTS, _top_records, build_analysis, compute_cdf
 from src.modules.ingestion import infer_dataset_kind, load_dataset
 from src.DashboardAnalytic import derive_available_metrics
 
@@ -11,6 +11,14 @@ def test_compute_cdf_orders_and_normalizes_values() -> None:
     series = pd.Series([5, 1, 3])
     result = compute_cdf(series)
     assert result == [(1.0, 1 / 3), (3.0, 2 / 3), (5.0, 1.0)]
+
+
+def test_compute_cdf_caps_large_series_to_fixed_resolution() -> None:
+    series = pd.Series(range(5000))
+    result = compute_cdf(series)
+    assert len(result) <= MAX_CDF_POINTS + 1
+    assert result[0][0] == 0.0
+    assert result[-1] == (4999.0, 1.0)
 
 
 def test_build_analysis_returns_kpis_and_scorecard() -> None:
