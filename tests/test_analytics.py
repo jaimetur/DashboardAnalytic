@@ -93,6 +93,9 @@ def test_build_analysis_returns_voice_specific_kpis_and_aggregation() -> None:
     assert analysis.metric_kpis["p90_metric"] == 4.4
     assert analysis.filters["aggregation"] == "operator"
     assert analysis.table_rows[0]["operator"] == "Vodafone"
+    assert len(analysis.scorecard_groups) == 2
+    assert analysis.scorecard_groups[0]["group"] == "Vodafone"
+    assert [item["label"] for item in analysis.scorecard_groups[0]["items"]] == ["P10", "P25", "P50", "P75", "P90"]
 
 
 def test_build_analysis_applies_date_range_filters_from_event_start_time() -> None:

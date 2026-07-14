@@ -226,14 +226,26 @@
                 </div>
               </article>
             </section>
-            <div class="score-grid">
-              {% for item in current_analysis.scorecard %}
-              <article class="score-item">
-                <span>{{ item.label }}</span>
-                <strong>{{ item.value }}</strong>
+            <section class="grouped-scorecard-stack">
+              {% for group in current_analysis.scorecard_groups %}
+              <article class="score-group-card">
+                <div class="section-head compact-toolbar score-group-head">
+                  <div>
+                    <p class="eyebrow">Percentiles</p>
+                    <h3>{{ group['group'] }}</h3>
+                  </div>
+                </div>
+                <div class="score-grid">
+                  {% for item in group['items'] %}
+                  <article class="score-item">
+                    <span>{{ item.label }}</span>
+                    <strong>{{ item.value }}</strong>
+                  </article>
+                  {% endfor %}
+                </div>
               </article>
               {% endfor %}
-            </div>
+            </section>
           </article>
           {% endfor %}
         </section>

@@ -22,6 +22,7 @@ class AnalysisResult:
     comparison_chart: dict[str, Any]
     table_rows: list[dict[str, Any]]
     scorecard: list[dict[str, Any]]
+    scorecard_groups: list[dict[str, Any]]
 
 
 DEFAULT_METRICS: dict[str, list[str]] = {
@@ -113,6 +114,52 @@ def compute_scorecard(df: pd.DataFrame, metric: str) -> list[dict[str, Any]]:
     percentiles = np.percentile(values, [10, 25, 50, 75, 90])
     labels = ['P10', 'P25', 'P50', 'P75', 'P90']
     return [{'label': label, 'value': round(float(value), 4)} for label, value in zip(labels, percentiles, strict=False)]
+
+
+def compute_grouped_scorecards(df: pd.DataFrame, metric: str, aggregation: str | None, table_rows: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    if metric not in df.columns:
+        return []
+    if not aggregation:
+        return [{
+            'group': 'Overall',
+            'items': compute_scorecard(df, metric),
+        }]
+
+    resolved_aggregation = _resolve_column(df, aggregation)
+    if not resolved_aggregation:
+        return [{
+            'group': 'Overall',
+            'items': compute_scorecard(df, metric),
+        }]
+
+    if table_rows:
+        group_order = [str(row.get(aggregation, '')).strip() for row in table_rows if str(row.get(aggregation, '')).strip()]
+    else:
+        group_order = [
+            str(value).strip() for value in df[resolved_aggregation].dropna().tolist()
+            if str(value).strip()
+        ]
+
+    seen: set[str] = set()
+    ordered_groups: list[str] = []
+    for group_name in group_order:
+        normalized = group_name.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered_groups.append(group_name)
+
+    grouped_scorecards: list[dict[str, Any]] = []
+    for group_name in ordered_groups[:8]:
+        group_df = df[df[resolved_aggregation].astype(str).str.strip().str.lower() == group_name.lower()]
+        items = compute_scorecard(group_df, metric)
+        if not items:
+            continue
+        grouped_scorecards.append({
+            'group': group_name,
+            'items': items,
+        })
+    return grouped_scorecards
 
 
 def _infer_metric(df: pd.DataFrame, requested_metric: str, dataset_kind: str) -> str:
@@ -419,4 +466,5 @@ def build_analysis(df: pd.DataFrame, filters: dict[str, Any], metric: str) -> An
         comparison_chart=_build_comparison_chart(table_rows, aggregation),
         table_rows=table_rows,
         scorecard=compute_scorecard(analysis_frame, selected_metric),
+        scorecard_groups=compute_grouped_scorecards(analysis_frame, selected_metric, aggregation, table_rows),
     )
