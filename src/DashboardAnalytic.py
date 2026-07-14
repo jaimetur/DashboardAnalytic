@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import hashlib
 import warnings
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -17,6 +18,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.datastructures import QueryParams
 
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
@@ -155,6 +157,26 @@ def format_aggregation_label(value: str | None) -> str:
     if not normalized or normalized == 'all':
         return 'Auto / raw view'
     return normalized.replace('_', ' ').title()
+
+
+def _summarize_export_filters(filters: dict[str, Any] | None) -> str:
+    if not filters:
+        return 'No filters selected'
+    fragments: list[str] = []
+    for key in ['market', 'period']:
+        values = filters.get(key) or []
+        if values:
+            fragments.append(f"{format_aggregation_label(key)}: {', '.join(str(item) for item in values)}")
+    for key, value in (filters.get('extra_filters') or {}).items():
+        if not value or value == ['__none__']:
+            continue
+        values = value if isinstance(value, list) else [value]
+        fragments.append(f"{format_aggregation_label(key)}: {', '.join(str(item) for item in values)}")
+    if filters.get('date_from'):
+        fragments.append(f"Date From: {filters['date_from']}")
+    if filters.get('date_to'):
+        fragments.append(f"Date To: {filters['date_to']}")
+    return ' | '.join(fragments) if fragments else 'No filters selected'
 
 
 def parse_json_field(value: Any, fallback: Any) -> Any:
@@ -534,7 +556,53 @@ def enrich_selected_dataset_for_dashboard(selected_dataset: dict[str, Any] | Non
     ]
     if selected_dataset.get('default_metric') not in selected_dataset['selectable_metrics']:
         selected_dataset['default_metric'] = selected_dataset['selectable_metrics'][0] if selected_dataset['selectable_metrics'] else None
+    filter_options = selected_dataset.get('filter_options') or {}
+    selected_dataset['available_cdf_groupings'] = [
+        item for item in ['vendor', 'market', 'operator', 'region', 'city']
+        if len(filter_options.get(item, []) or []) > 1
+    ]
     return selected_dataset
+
+
+def build_dashboard_table_rows(df: pd.DataFrame, selected_metrics: list[str], aggregation: str | None) -> list[dict[str, Any]]:
+    if df.empty:
+        return []
+
+    usable_metrics = [
+        metric for metric in selected_metrics
+        if metric in df.columns and pd.to_numeric(df[metric], errors='coerce').notna().any()
+    ]
+    if not usable_metrics:
+        return []
+
+    if aggregation and aggregation != 'all' and aggregation in df.columns:
+        grouped_rows: list[dict[str, Any]] = []
+        grouped = df.dropna(subset=[aggregation]).groupby(aggregation, dropna=False)
+        for group_name, group in grouped:
+            row: dict[str, Any] = {
+                aggregation: group_name,
+                'samples': int(len(group.index)),
+            }
+            if 'success' in group.columns:
+                row['success_rate_pct'] = round(float(group['success'].fillna(False).astype(bool).mean() * 100), 2)
+            for metric in usable_metrics:
+                values = pd.to_numeric(group[metric], errors='coerce').dropna()
+                row[metric] = round(float(values.mean()), 4) if not values.empty else None
+            grouped_rows.append(row)
+        return sorted(grouped_rows, key=lambda item: -int(item.get('samples') or 0))[:50]
+
+    preferred_columns: list[str] = []
+    for column in ['market', 'operator', 'vendor', 'region', 'city', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet', 'event_start_time', 'status']:
+        if column in df.columns and column not in preferred_columns:
+            preferred_columns.append(column)
+    preferred_columns.extend(metric for metric in usable_metrics if metric not in preferred_columns)
+    rows = df.copy()
+    if 'event_start_time' in rows.columns:
+        rows = rows.sort_values('event_start_time', ascending=False)
+    elif usable_metrics:
+        rows = rows.sort_values(usable_metrics[0], ascending=False)
+    rows = rows.head(50)
+    return rows[preferred_columns].to_dict(orient='records')
 
 
 def build_dataset_view_state(dataset_id: int | None, input_kind: str | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], dict[str, Any] | None]:
@@ -753,6 +821,8 @@ def build_dashboard_payload(selected_dataset: dict[str, Any] | None, request: Re
             return None, [], selected_metrics, filter_options, str(exc), False
 
     primary_analysis = analyses[0]['result'] if analyses else None
+    if primary_analysis is not None:
+        primary_analysis.table_rows = build_dashboard_table_rows(df, selected_metrics, primary_analysis.filters.get('aggregation'))
     return primary_analysis, analyses, selected_metrics, filter_options, None, True
 
 
@@ -1053,11 +1123,17 @@ def analyze_dataset(
 def export_report(
     export_kind: str,
     dataset_id: int = Form(...),
-    metric: str = Form(''),
-    market: str = Form(''),
-    period: str = Form(''),
+    metric: list[str] | None = Form(default=None),
+    market: list[str] | None = Form(default=None),
+    period: list[str] | None = Form(default=None),
+    date_from: str = Form(''),
+    date_to: str = Form(''),
     aggregation: str = Form('all'),
+    cdf_grouping: str = Form('all'),
     extra_filters: str = Form(''),
+    aggregation_overrides: str = Form(''),
+    cdf_overrides: str = Form(''),
+    empty_filters: list[str] | None = Form(default=None, alias='__empty_filter'),
     user: SessionUser = Depends(current_user),
 ) -> FileResponse:
     if export_kind not in {'word', 'powerpoint'}:
@@ -1066,30 +1142,73 @@ def export_report(
     dataset = repository.get_dataset(dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail='Dataset not found')
-    selected_dataset = serialize_dataset_row(dataset)
-    filters = {
-        'market': market or None,
-        'period': period or None,
-        'aggregation': aggregation or 'all',
-        'extra_filters': parse_extra_filters(extra_filters),
-    }
-    dataset_path = Path(selected_dataset['stored_path'])
-    analysis = get_cached_analysis(dataset_path, filters, metric)
-    if analysis is None:
-        analysis = store_cached_analysis(dataset_path, filters, metric, build_analysis(load_cached_dataset(dataset_path), filters, metric))
+    selected_dataset = enrich_selected_dataset_for_dashboard(serialize_dataset_row(dataset))
+    if not selected_dataset or not selected_dataset['is_ready']:
+        raise HTTPException(status_code=400, detail='Dataset is not ready for export')
+
+    query_items: list[tuple[str, str]] = [
+        ('dataset_id', str(dataset_id)),
+        ('load', '1'),
+        ('aggregation', aggregation or 'all'),
+        ('cdf_grouping', cdf_grouping or 'all'),
+    ]
+    for metric_name in metric or []:
+        if metric_name:
+            query_items.append(('metric', metric_name))
+    for value in market or []:
+        if value:
+            query_items.append(('market', value))
+    for value in period or []:
+        if value:
+            query_items.append(('period', value))
+    if date_from:
+        query_items.append(('date_from', date_from))
+    if date_to:
+        query_items.append(('date_to', date_to))
+    if aggregation_overrides:
+        query_items.append(('aggregation_overrides', aggregation_overrides))
+    if cdf_overrides:
+        query_items.append(('cdf_overrides', cdf_overrides))
+    for filter_name in empty_filters or []:
+        if filter_name:
+            query_items.append(('__empty_filter', filter_name))
+    for key, value in parse_extra_filters(extra_filters).items():
+        if isinstance(value, list):
+            for item in value:
+                if item:
+                    query_items.append((key, str(item)))
+        elif value:
+            query_items.append((key, str(value)))
+
+    export_request = type('ExportRequest', (), {'query_params': QueryParams(query_items)})()
+    analysis, analyses, selected_metrics, _, analysis_error, analysis_loaded = build_dashboard_payload(selected_dataset, export_request, user.username)
+    if not analysis_loaded or not analysis or not analyses:
+        raise HTTPException(status_code=400, detail=analysis_error or 'Dashboard state is not ready for export')
+
     file_stem = Path(selected_dataset['stored_path']).stem
+    filters_text = _summarize_export_filters(analysis.filters)
+    report_payload = {
+        'dataset_name': selected_dataset['file_name'],
+        'dataset_type': selected_dataset.get('input_kind_label') or 'Other',
+        'filters_text': filters_text,
+        'selected_metrics': selected_metrics,
+        'analyses': [{'metric': item['metric'], 'result': asdict(item['result'])} for item in analyses],
+    }
 
     if export_kind == 'word':
         destination = safe_join(settings.export_dir, f'{file_stem}_report.docx')
         export_word_report(destination, asdict(analysis))
         media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     else:
-        destination = safe_join(settings.export_dir, f'{file_stem}_report.pptx')
-        export_powerpoint_report(destination, asdict(analysis))
+        report_hash = hashlib.sha1(json.dumps(report_payload, sort_keys=True, default=str).encode('utf-8')).hexdigest()[:10]
+        destination = safe_join(settings.export_dir, f'{file_stem}_report_{report_hash}.pptx')
+        if not destination.exists():
+            export_powerpoint_report(destination, report_payload)
         media_type = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
 
     repository.add_log(user.username, f'export_{export_kind}', destination.name)
-    return FileResponse(destination, filename=destination.name, media_type=media_type)
+    download_name = f'{file_stem}_report.docx' if export_kind == 'word' else f'{file_stem}_report.pptx'
+    return FileResponse(destination, filename=download_name, media_type=media_type)
 
 
 @app.get('/admin', response_class=HTMLResponse)

@@ -626,6 +626,52 @@ def test_dashboard_exposes_global_and_per_metric_cdf_comparison_controls(client)
     assert 'Compare CDF by' in response.text
 
 
+def test_dashboard_powerpoint_export_includes_visual_analytics_payload(client) -> None:
+    login(client)
+    csv_content = (
+        b"market,period,score,gap,vendor,operator,region,city,Call Start Time\n"
+        b"ES,2026-Q1,91,2.1,Nokia,Vodafone,North,Madrid,2026-07-10 10:00:00\n"
+        b"ES,2026-Q1,87,3.3,Huawei,Orange,South,Barcelona,2026-07-11 11:00:00\n"
+    )
+    upload_response = client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    response = client.post(
+        "/dashboard/export/powerpoint",
+        data={
+            "dataset_id": "1",
+            "metric": ["score", "gap"],
+            "market": ["ES"],
+            "aggregation": "operator",
+            "cdf_grouping": "vendor",
+            "date_from": "2026-07-10",
+            "date_to": "2026-07-11",
+            "extra_filters": "vendor=Nokia,Huawei; region=North,South",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+    from pptx import Presentation
+
+    presentation = Presentation(BytesIO(response.content))
+    assert len(presentation.slides) >= 4
+    slide_text = "\n".join(
+        shape.text
+        for slide in presentation.slides
+        for shape in slide.shapes
+        if hasattr(shape, "text")
+    )
+    assert "sample.csv" in slide_text
+    assert "Visual Analytics - score" in slide_text
+    assert "Visual Analytics - gap" in slide_text
+    assert "Date From: 2026-07-10" in slide_text
+
+
 def test_workspace_logs_capture_analysis_warnings(client, monkeypatch) -> None:
     login(client)
     csv_content = b"market,period,score,gap\nES,2026-Q1,91,2.1\nES,2026-Q1,87,3.3\n"

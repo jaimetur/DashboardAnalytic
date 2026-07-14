@@ -44,6 +44,56 @@
           <article><span>Number of processed sheets</span><strong>{{ (selected_dataset.filter_options.get('source_sheet', []) | length) if selected_dataset.filter_options else 0 }}</strong></article>
         </div>
         <p class="form-note">Uploaded by {{ selected_dataset.uploaded_by }} on {{ selected_dataset.uploaded_at }}</p>
+        {% if analysis_loaded and analysis %}
+        <div class="dataset-export-actions inline-actions">
+          <form method="post" action="/dashboard/export/word" data-loading-label="Exporting Word report">
+            <input type="hidden" name="dataset_id" value="{{ selected_dataset.id }}">
+            {% for metric_name in selected_metrics %}
+            <input type="hidden" name="metric" value="{{ metric_name }}">
+            {% endfor %}
+            {% for value in (analysis.filters.market or []) %}
+            <input type="hidden" name="market" value="{{ value }}">
+            {% endfor %}
+            {% for value in (analysis.filters.period or []) %}
+            <input type="hidden" name="period" value="{{ value }}">
+            {% endfor %}
+            <input type="hidden" name="date_from" value="{{ analysis.filters.date_from or '' }}">
+            <input type="hidden" name="date_to" value="{{ analysis.filters.date_to or '' }}">
+            <input type="hidden" name="aggregation" value="{{ analysis.filters.aggregation or 'all' }}">
+            <input type="hidden" name="cdf_grouping" value="{{ selected_cdf_grouping or 'all' }}">
+            <input type="hidden" name="extra_filters" value="{{ format_extra_filters(analysis.filters.extra_filters) }}">
+            <input type="hidden" name="aggregation_overrides" value="{{ format_aggregation_overrides(aggregation_overrides) }}">
+            <input type="hidden" name="cdf_overrides" value="{{ format_cdf_overrides(cdf_overrides) }}">
+            {% for empty_filter in (analysis.filters.explicit_empty_filters or []) %}
+            <input type="hidden" name="__empty_filter" value="{{ empty_filter }}">
+            {% endfor %}
+            <button type="submit">Export Word</button>
+          </form>
+          <form method="post" action="/dashboard/export/powerpoint" data-loading-label="Exporting PowerPoint report">
+            <input type="hidden" name="dataset_id" value="{{ selected_dataset.id }}">
+            {% for metric_name in selected_metrics %}
+            <input type="hidden" name="metric" value="{{ metric_name }}">
+            {% endfor %}
+            {% for value in (analysis.filters.market or []) %}
+            <input type="hidden" name="market" value="{{ value }}">
+            {% endfor %}
+            {% for value in (analysis.filters.period or []) %}
+            <input type="hidden" name="period" value="{{ value }}">
+            {% endfor %}
+            <input type="hidden" name="date_from" value="{{ analysis.filters.date_from or '' }}">
+            <input type="hidden" name="date_to" value="{{ analysis.filters.date_to or '' }}">
+            <input type="hidden" name="aggregation" value="{{ analysis.filters.aggregation or 'all' }}">
+            <input type="hidden" name="cdf_grouping" value="{{ selected_cdf_grouping or 'all' }}">
+            <input type="hidden" name="extra_filters" value="{{ format_extra_filters(analysis.filters.extra_filters) }}">
+            <input type="hidden" name="aggregation_overrides" value="{{ format_aggregation_overrides(aggregation_overrides) }}">
+            <input type="hidden" name="cdf_overrides" value="{{ format_cdf_overrides(cdf_overrides) }}">
+            {% for empty_filter in (analysis.filters.explicit_empty_filters or []) %}
+            <input type="hidden" name="__empty_filter" value="{{ empty_filter }}">
+            {% endfor %}
+            <button type="submit">Export PowerPoint</button>
+          </form>
+        </div>
+        {% endif %}
         {% else %}
         <p class="form-note">No processed datasets are available yet.</p>
         {% endif %}
@@ -147,7 +197,7 @@
               <select name="cdf_grouping" form="dashboard-filters-form" data-global-cdf-grouping-select>
                 <option value="all" {% if selected_cdf_grouping == 'all' %}selected{% endif %}>Single CDF</option>
                 {% for item in ['vendor', 'market', 'operator', 'region', 'city'] %}
-                <option value="{{ item }}" {% if item == selected_cdf_grouping %}selected{% endif %}>{{ format_aggregation_label(item) }}</option>
+                <option value="{{ item }}" {% if item == selected_cdf_grouping %}selected{% endif %} {% if item not in selected_dataset.available_cdf_groupings %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
                 {% endfor %}
               </select>
             </label>
@@ -191,7 +241,7 @@
                     >
                       <option value="all" {% if current_analysis.filters.cdf_grouping == 'all' %}selected{% endif %}>Single CDF</option>
                       {% for item in ['vendor', 'market', 'operator', 'region', 'city'] %}
-                      <option value="{{ item }}" {% if item == current_analysis.filters.cdf_grouping %}selected{% endif %}>{{ format_aggregation_label(item) }}</option>
+                      <option value="{{ item }}" {% if item == current_analysis.filters.cdf_grouping %}selected{% endif %} {% if item not in selected_dataset.available_cdf_groupings %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
                       {% endfor %}
                     </select>
                   </label>
@@ -227,24 +277,46 @@
               </article>
             </section>
             <section class="grouped-scorecard-stack">
-              {% for group in current_analysis.scorecard_groups %}
-              <article class="score-group-card">
-                <div class="section-head compact-toolbar score-group-head">
-                  <div>
-                    <p class="eyebrow">Percentiles</p>
-                    <h3>{{ group['group'] }}</h3>
-                  </div>
+              <div class="section-head compact-toolbar score-group-head">
+                <div>
+                  <p class="eyebrow">Grouped Percentiles</p>
+                  <h3>By {{ format_aggregation_label(current_analysis.filters.aggregation) }}</h3>
                 </div>
-                <div class="score-grid">
-                  {% for item in group['items'] %}
-                  <article class="score-item">
-                    <span>{{ item.label }}</span>
-                    <strong>{{ item.value }}</strong>
-                  </article>
-                  {% endfor %}
-                </div>
-              </article>
-              {% endfor %}
+              </div>
+              {% if current_analysis.scorecard_groups %}
+              <div class="table-wrap grouped-scorecard-table-wrap">
+                <table class="grouped-scorecard-table">
+                  <thead>
+                    <tr>
+                      <th>Group</th>
+                      <th>P10</th>
+                      <th>P25</th>
+                      <th>P50</th>
+                      <th>P75</th>
+                      <th>P90</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for group in current_analysis.scorecard_groups %}
+                    <tr>
+                      <td>{{ group['group'] }}</td>
+                      {% for percentile in ['P10', 'P25', 'P50', 'P75', 'P90'] %}
+                      {% set ns = namespace(value='-') %}
+                      {% for item in group['items'] %}
+                      {% if item.label == percentile %}
+                      {% set ns.value = item.value %}
+                      {% endif %}
+                      {% endfor %}
+                      <td>{{ ns.value }}</td>
+                      {% endfor %}
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% else %}
+              <article class="empty-state-inline">No percentile groups are available for the current comparison.</article>
+              {% endif %}
             </section>
           </article>
           {% endfor %}
@@ -259,33 +331,6 @@
           </div>
           <span class="collapse-chip">Collapse</span>
         </summary>
-        <div class="section-head compact-toolbar">
-          <div></div>
-          <div class="inline-actions">
-            <form method="post" action="/dashboard/export/word" data-loading-label="Exporting Word report">
-              <input type="hidden" name="dataset_id" value="{{ selected_dataset.id }}">
-              <input type="hidden" name="metric" value="{{ analysis.selected_metric }}">
-              <input type="hidden" name="market" value="{{ analysis.filters.market or '' }}">
-              <input type="hidden" name="period" value="{{ analysis.filters.period or '' }}">
-              <input type="hidden" name="date_from" value="{{ analysis.filters.date_from or '' }}">
-              <input type="hidden" name="date_to" value="{{ analysis.filters.date_to or '' }}">
-              <input type="hidden" name="aggregation" value="{{ analysis.filters.aggregation or 'all' }}">
-              <input type="hidden" name="extra_filters" value="{{ format_extra_filters(analysis.filters.extra_filters) }}">
-              <button type="submit">Export Word</button>
-            </form>
-            <form method="post" action="/dashboard/export/powerpoint" data-loading-label="Exporting PowerPoint report">
-              <input type="hidden" name="dataset_id" value="{{ selected_dataset.id }}">
-              <input type="hidden" name="metric" value="{{ analysis.selected_metric }}">
-              <input type="hidden" name="market" value="{{ analysis.filters.market or '' }}">
-              <input type="hidden" name="period" value="{{ analysis.filters.period or '' }}">
-              <input type="hidden" name="date_from" value="{{ analysis.filters.date_from or '' }}">
-              <input type="hidden" name="date_to" value="{{ analysis.filters.date_to or '' }}">
-              <input type="hidden" name="aggregation" value="{{ analysis.filters.aggregation or 'all' }}">
-              <input type="hidden" name="extra_filters" value="{{ format_extra_filters(analysis.filters.extra_filters) }}">
-              <button type="submit">Export PowerPoint</button>
-            </form>
-          </div>
-        </div>
         <div class="table-wrap data-table-wrap">
           {% if analysis.table_rows %}
           <table>
@@ -373,7 +418,7 @@
           {% endif %}
           <div class="sidebar-actions">
             <button type="submit">Update Dashboard</button>
-            {% if selected_dataset %}<a class="ghost-link" href="/dashboard?dataset_id={{ selected_dataset.id }}{% if input_kind %}&input_kind={{ input_kind }}{% endif %}">Reset</a>{% endif %}
+            {% if selected_dataset %}<a class="ghost-link reset-link" href="/dashboard?dataset_id={{ selected_dataset.id }}{% if input_kind %}&input_kind={{ input_kind }}{% endif %}">Reset</a>{% endif %}
           </div>
         </form>
       </article>

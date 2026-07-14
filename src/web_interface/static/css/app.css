@@ -85,6 +85,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .upload-panel .eyebrow, .upload-panel .lede, .upload-panel .form-note { color: rgba(255,255,255,0.8); }
 .dataset-summary-panel { background: linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(237, 244, 249, 0.94)); }
 .retry-form { margin-bottom: 1rem; }
+.dataset-export-actions { justify-content: flex-end; margin-top: 1rem; }
 .upload-dropzone { display: grid; gap: 1rem; margin-top: 1.25rem; }
 .dropzone-field { display: grid; gap: 0.45rem; padding: 1.2rem; border-radius: 20px; border: 1px dashed rgba(255,255,255,0.45); background: rgba(255,255,255,0.08); color: white; }
 .dropzone-field input[data-file-picker-input] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
@@ -173,6 +174,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .score-group-card { padding: 1rem; border-radius: 18px; background: rgba(255,255,255,0.82); border: 1px solid rgba(16,49,74,0.10); }
 .score-group-head { margin-bottom: 0.5rem; }
 .score-group-head h3 { margin: 0; font-size: 1.05rem; }
+.grouped-scorecard-table-wrap { border: 1px solid rgba(16, 49, 74, 0.12); border-radius: 16px; background: rgba(255,255,255,0.84); }
+.grouped-scorecard-table { min-width: 720px; }
 .table-wrap { overflow: auto; scrollbar-width: auto; scrollbar-color: rgba(16, 49, 74, 0.42) rgba(16, 49, 74, 0.10); scrollbar-gutter: stable both-edges; }
 .table-wrap::-webkit-scrollbar { width: 12px; height: 12px; }
 .table-wrap::-webkit-scrollbar-track { background: rgba(16, 49, 74, 0.10); border-radius: 999px; }
@@ -197,6 +200,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .table-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
 .danger-button { background: linear-gradient(135deg, #c65544, #df7758); }
 .warning-button { background: linear-gradient(135deg, #d58f1f, #e9ac39); color: #fffef9; }
+.reset-link { background: linear-gradient(135deg, #ffcf70, #f59e0b); border-color: rgba(211, 137, 19, 0.35); color: #6a4200; font-weight: 700; box-shadow: 0 10px 22px rgba(245, 158, 11, 0.18); }
 .log-type-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 68px; padding: 0.34rem 0.6rem; border-radius: 999px; font-size: 0.78rem; font-weight: 700; }
 .log-type-info { background: linear-gradient(135deg, rgba(11, 122, 117, 0.14), rgba(11, 122, 117, 0.08)); color: var(--brand); border: 1px solid rgba(11, 122, 117, 0.18); }
 .log-type-error { background: linear-gradient(135deg, rgba(184, 77, 58, 0.16), rgba(223, 119, 88, 0.16)); color: var(--danger); border: 1px solid rgba(184, 77, 58, 0.2); }

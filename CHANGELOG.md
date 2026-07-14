@@ -17,6 +17,7 @@
 - Added a global processing overlay for uploads, retries, dashboard updates, and exports
 - Added app branding assets, favicon support, and header user badges by role
 - Expanded the admin `Identity` panel with inline edit, toggle active, and delete actions
+- Added PowerPoint export for the full `Visual Analytics` dashboard state
 
 #### 🚀 Enhancements:
 - Redesigned the dashboard with a queue table, right-side filters, and collapsible panels
@@ -46,6 +47,8 @@
 - Persisted collapse state for workspace and admin panels
 - Replaced native multi-select boxes with dropdown multi-select controls and `Select All / None`
 - Refined executive metric cards into visual subpanels grouped inside `Executive Dashboard`
+- Improved dataset kind detection for `CDR-Speech` and `CDR-Data`
+- Reduced PowerPoint export time by reusing cached export files and condensing metric output into fewer slides
 
 #### 🐛 Bug fixes:
 - Fixed default access visibility to reflect active users with default passwords only
@@ -53,7 +56,6 @@
 - Fixed embedded document images to resolve project `static` asset paths
 - Fixed empty-state body copy alignment in the workspace panels
 - Fixed dataset selector filtering so all datasets show when no type filter is set
-- Improved dataset kind detection for `CDR-Speech` and `CDR-Data`
 - Fixed the dataset picker to react immediately when `Input Type` changes
 - Fixed the upload file input overlay so `Upload and process` submits directly
 - Fixed failed processing caused by duplicate column names like `Campaign/campaign`
@@ -63,6 +65,7 @@
 - Fixed date filtering for datasets using spaced headers like `Call Start Time`
 - Fixed the dashboard global aggregation selector to stay independent from per-chart overrides
 - Fixed lowercase CSV dimensions like `operator` and `region` so chart aggregations work
+- Fixed grouped percentiles to fall back gracefully when the chosen comparison has no usable grouped rows
 
 #### 📚 Documentation:
 - Added `Readme` and `Changelog` navigation with Markdown document viewer

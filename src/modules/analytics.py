@@ -159,7 +159,12 @@ def compute_grouped_scorecards(df: pd.DataFrame, metric: str, aggregation: str |
             'group': group_name,
             'items': items,
         })
-    return grouped_scorecards
+    if grouped_scorecards:
+        return grouped_scorecards
+    return [{
+        'group': 'Overall',
+        'items': compute_scorecard(df, metric),
+    }]
 
 
 def _infer_metric(df: pd.DataFrame, requested_metric: str, dataset_kind: str) -> str:
