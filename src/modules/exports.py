@@ -339,6 +339,8 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
     legend_font = _load_font(14)
     draw.rounded_rectangle((20, 20, SLIDE_WIDTH - 20, SLIDE_HEIGHT - 20), radius=18, fill=PANEL, outline=LINE, width=2)
     draw.text((36, 28), "CDF Curve", font=title_font, fill=TEXT)
+    x_axis_label = str(chart.get("x_axis_label") or "Metric value")
+    y_axis_label = str(chart.get("y_axis_label") or "Cumulative probability")
 
     left, top, right, bottom = 70, 90, SLIDE_WIDTH - 40, SLIDE_HEIGHT - 110
     draw.line((left, top, left, bottom), fill=MUTED, width=2)
@@ -364,6 +366,10 @@ def _draw_line_chart(chart: dict[str, Any]) -> BytesIO:
             draw.line(points, fill=color, width=4)
         for point in points[::max(1, len(points) // 10 or 1)]:
             draw.ellipse((point[0] - 3, point[1] - 3, point[0] + 3, point[1] + 3), fill=color)
+
+    axis_font = _load_font(13)
+    draw.text((left + ((right - left) / 2) - (draw.textlength(x_axis_label, font=axis_font) / 2), bottom + 26), x_axis_label, font=axis_font, fill=MUTED)
+    draw.text((24, top - 2), y_axis_label, font=axis_font, fill=MUTED)
 
     legend_x = 48
     legend_y = SLIDE_HEIGHT - 64

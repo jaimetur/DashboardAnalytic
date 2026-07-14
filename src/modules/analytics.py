@@ -39,6 +39,40 @@ AGGREGATION_CANDIDATES: dict[str, list[str]] = {
 }
 CDF_COMPARISON_CANDIDATES = ['vendor', 'market', 'operator', 'region', 'city']
 MAX_CDF_POINTS = 320
+METRIC_AXIS_TITLES = {
+    'polqa_lq_avg': 'POLQA LQ Avg',
+    'lq': 'LQ',
+    'quality_score': 'Quality Score',
+    'throughput_mbps': 'Throughput',
+    'mean_data_rate': 'Mean Data Rate',
+    'tcp_throughput': 'TCP Throughput',
+    'latency_ms': 'Latency',
+    'receive_delay': 'Receive Delay',
+    'jitter_ms': 'Jitter',
+    'packet_loss_pct': 'Packet Loss',
+    'setup_time_seconds': 'Setup Time',
+    'call_setup_time': 'Call Setup Time',
+    'duration_seconds': 'Duration',
+    'call_duration': 'Call Duration',
+    'test_duration': 'Test Duration',
+}
+METRIC_AXIS_UNITS = {
+    'polqa_lq_avg': '',
+    'lq': '',
+    'quality_score': '',
+    'throughput_mbps': 'Mbps',
+    'mean_data_rate': 'Mbps',
+    'tcp_throughput': 'Mbps',
+    'latency_ms': 'ms',
+    'receive_delay': 'ms',
+    'jitter_ms': 'ms',
+    'packet_loss_pct': '%',
+    'setup_time_seconds': 's',
+    'call_setup_time': 's',
+    'duration_seconds': 's',
+    'call_duration': 's',
+    'test_duration': 's',
+}
 
 
 def _resolve_column(df: pd.DataFrame, requested: str) -> str | None:
@@ -213,6 +247,16 @@ def _infer_cdf_grouping(df: pd.DataFrame, requested: str | None) -> str | None:
     return _resolve_column(df, normalized)
 
 
+def _format_metric_axis_label(metric: str) -> str:
+    normalized = str(metric or '').strip()
+    if not normalized:
+        return 'Metric value'
+    key = normalized.lower()
+    unit = METRIC_AXIS_UNITS.get(key, '')
+    pretty = METRIC_AXIS_TITLES.get(key, normalized.replace('_', ' '))
+    return f'{pretty} ({unit})' if unit else pretty
+
+
 def _round(value: Any, digits: int = 4) -> float | int:
     if pd.isna(value):
         return 0.0
@@ -336,9 +380,15 @@ def _build_cdf_chart(df: pd.DataFrame, metric: str, filters: dict[str, Any], cdf
     if metric_values.empty:
         return {'labels': [], 'series': [], 'type': 'line'}
 
+    x_axis_label = _format_metric_axis_label(metric)
+    y_axis_label = 'Cumulative probability'
+
     grouping_column = _infer_cdf_grouping(df, cdf_grouping)
     if not grouping_column:
-        return build_chart_payload(compute_cdf(metric_values))
+        chart = build_chart_payload(compute_cdf(metric_values))
+        chart['x_axis_label'] = x_axis_label
+        chart['y_axis_label'] = y_axis_label
+        return chart
 
     if grouping_column in {'market', 'period'}:
         selected_groups = _coerce_filter_values(filters.get(grouping_column))
@@ -379,7 +429,10 @@ def _build_cdf_chart(df: pd.DataFrame, metric: str, filters: dict[str, Any], cdf
         })
 
     if not series_collection:
-        return build_chart_payload(compute_cdf(metric_values))
+        chart = build_chart_payload(compute_cdf(metric_values))
+        chart['x_axis_label'] = x_axis_label
+        chart['y_axis_label'] = y_axis_label
+        return chart
     if len(series_collection) == 1:
         only = series_collection[0]
         return {
@@ -387,8 +440,13 @@ def _build_cdf_chart(df: pd.DataFrame, metric: str, filters: dict[str, Any], cdf
             'series': [round(float(value), 4) for value in only['series']],
             'type': 'line',
             'legend': [only['name']],
+            'x_axis_label': x_axis_label,
+            'y_axis_label': y_axis_label,
         }
-    return build_multi_series_chart_payload(series_collection)
+    chart = build_multi_series_chart_payload(series_collection)
+    chart['x_axis_label'] = x_axis_label
+    chart['y_axis_label'] = y_axis_label
+    return chart
 
 
 def _aggregate_table(df: pd.DataFrame, aggregation: str, metric: str, dataset_kind: str) -> list[dict[str, Any]]:

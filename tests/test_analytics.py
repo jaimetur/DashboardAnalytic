@@ -33,6 +33,8 @@ def test_build_analysis_returns_kpis_and_scorecard() -> None:
     assert analysis.selected_metric == "score"
     assert len(analysis.scorecard) == 5
     assert analysis.cdf_chart["series"][-1] == 1.0
+    assert analysis.cdf_chart["x_axis_label"] == "score"
+    assert analysis.cdf_chart["y_axis_label"] == "Cumulative probability"
 
 
 def test_load_dataset_combines_cdr_workbook_operator_sheets(tmp_path) -> None:
@@ -175,6 +177,21 @@ def test_build_analysis_builds_multi_series_cdf_when_cdf_grouping_is_selected() 
     assert "series_collection" in analysis.cdf_chart
     assert len(analysis.cdf_chart["series_collection"]) == 2
     assert {item["name"] for item in analysis.cdf_chart["series_collection"]} == {"Nokia", "Huawei"}
+    assert analysis.cdf_chart["x_axis_label"] == "Quality Score"
+    assert analysis.cdf_chart["y_axis_label"] == "Cumulative probability"
+
+
+def test_build_analysis_cdf_axis_label_includes_metric_units_when_known() -> None:
+    df = pd.DataFrame({
+        "dataset_kind": ["data", "data", "data"],
+        "market": ["DE", "DE", "DE"],
+        "period": ["2025-Q3", "2025-Q3", "2025-Q3"],
+        "throughput_mbps": [120.0, 90.0, 70.0],
+    })
+
+    analysis = build_analysis(df, {"aggregation": "all"}, "throughput_mbps")
+
+    assert analysis.cdf_chart["x_axis_label"] == "Throughput (Mbps)"
 
 
 def test_global_kpis_reflect_selected_dimension_counts_when_filters_are_active() -> None:

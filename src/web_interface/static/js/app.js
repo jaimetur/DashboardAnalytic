@@ -1,4 +1,12 @@
-function drawLineChart(svg, labels, series, width, height, padding) {
+function formatAxisValue(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return String(value);
+  if (Math.abs(numeric) >= 100) return numeric.toFixed(0);
+  if (Math.abs(numeric) >= 10) return numeric.toFixed(1).replace(/\.0$/, '');
+  return numeric.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+}
+
+function drawLineChart(svg, labels, series, width, height, padding, axisLabels = {}) {
   const palette = ['#0b7a75', '#dd653e', '#245a96', '#b84d3a', '#6d46a8', '#228a5d', '#c78b1d', '#4d6a88'];
   const seriesCollection = Array.isArray(series) && series.length > 0 && typeof series[0] === 'object' && Array.isArray(series[0].series)
     ? series
@@ -9,9 +17,26 @@ function drawLineChart(svg, labels, series, width, height, padding) {
   const maxX = Math.max(...flatLabels);
   const maxY = Math.max(...flatSeries, 1);
   const legendHeight = seriesCollection.length > 1 ? 28 : 0;
+  const xAxisLabel = String(axisLabels.x || 'Metric value');
+  const yAxisLabel = String(axisLabels.y || 'Cumulative probability');
+  const leftPadding = padding + 26;
+  const rightPadding = padding;
+  const bottomPadding = padding + 30;
   const innerTop = padding + legendHeight;
-  const scaleX = (value) => padding + ((value - minX) / ((maxX - minX) || 1)) * (width - padding * 2);
-  const scaleY = (value) => height - padding - (value / maxY) * (height - padding - innerTop);
+  const innerWidth = width - leftPadding - rightPadding;
+  const innerHeight = height - bottomPadding - innerTop;
+  const scaleX = (value) => leftPadding + ((value - minX) / ((maxX - minX) || 1)) * innerWidth;
+  const scaleY = (value) => height - bottomPadding - (value / maxY) * innerHeight;
+  const xTicks = [minX, (minX + maxX) / 2, maxX];
+  const yTicks = [0, 0.5, 1.0];
+  const xTickLabels = xTicks.map((value) => `
+    <line x1="${scaleX(value)}" y1="${height - bottomPadding}" x2="${scaleX(value)}" y2="${height - bottomPadding + 6}" stroke="#9ab0bc" />
+    <text x="${scaleX(value)}" y="${height - bottomPadding + 18}" text-anchor="middle" fill="#526371" font-size="11">${formatAxisValue(value)}</text>
+  `).join('');
+  const yTickLabels = yTicks.map((value) => `
+    <line x1="${leftPadding - 6}" y1="${scaleY(value)}" x2="${leftPadding}" y2="${scaleY(value)}" stroke="#9ab0bc" />
+    <text x="${leftPadding - 10}" y="${scaleY(value) + 4}" text-anchor="end" fill="#526371" font-size="11">${formatAxisValue(value)}</text>
+  `).join('');
   const lines = seriesCollection.map((item, index) => {
     const color = palette[index % palette.length];
     const points = (item.labels || []).map((label, pointIndex) => `${scaleX(label)},${scaleY((item.series || [])[pointIndex])}`).join(' ');
@@ -29,10 +54,14 @@ function drawLineChart(svg, labels, series, width, height, padding) {
       }).join('')
     : `<text x="${padding}" y="18" fill="#526371">CDF</text>`;
   svg.innerHTML = `
-    <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" stroke="#9ab0bc" />
-    <line x1="${padding}" y1="${innerTop}" x2="${padding}" y2="${height - padding}" stroke="#9ab0bc" />
+    <line x1="${leftPadding}" y1="${height - bottomPadding}" x2="${width - rightPadding}" y2="${height - bottomPadding}" stroke="#9ab0bc" />
+    <line x1="${leftPadding}" y1="${innerTop}" x2="${leftPadding}" y2="${height - bottomPadding}" stroke="#9ab0bc" />
+    ${xTickLabels}
+    ${yTickLabels}
     ${legend}
     ${lines}
+    <text x="${leftPadding + innerWidth / 2}" y="${height - 4}" text-anchor="middle" fill="#526371" font-size="12" font-weight="600">${xAxisLabel}</text>
+    <text x="16" y="${innerTop + innerHeight / 2}" text-anchor="middle" fill="#526371" font-size="12" font-weight="600" transform="rotate(-90 16 ${innerTop + innerHeight / 2})">${yAxisLabel}</text>
   `;
 }
 
@@ -81,7 +110,15 @@ function drawChart(container) {
     drawBarChart(svg, labels, series, width, height, padding);
     return;
   }
-  drawLineChart(svg, labels, seriesCollection.length > 0 ? seriesCollection : series, width, height, padding);
+  drawLineChart(
+    svg,
+    labels,
+    seriesCollection.length > 0 ? seriesCollection : series,
+    width,
+    height,
+    padding,
+    {x: payload.x_axis_label, y: payload.y_axis_label},
+  );
 }
 
 document.querySelectorAll('[data-chart]').forEach(drawChart);
