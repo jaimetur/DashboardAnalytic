@@ -194,7 +194,7 @@
           <div class="summary-inline-actions">
             <label class="chart-aggregation-control panel-aggregation-control" data-summary-control>
               <span>Global CDF Comparison</span>
-              <select data-global-cdf-grouping-select>
+              <select name="cdf_grouping" form="dashboard-filters-form" data-global-cdf-grouping-select>
                 <option value="all" {% if (selected_cdf_grouping or 'all')|lower == 'all' %}selected{% endif %}>Single CDF</option>
                 {% for item in ['vendor', 'market', 'operator', 'region', 'city'] %}
                 <option value="{{ item }}" {% if item == ((selected_cdf_grouping or 'all')|lower) %}selected{% endif %} {% if item not in selected_dataset.available_cdf_groupings %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
@@ -203,7 +203,7 @@
             </label>
             <label class="chart-aggregation-control panel-aggregation-control" data-summary-control>
               <span>Global Aggregation</span>
-              <select data-global-aggregation-select>
+              <select name="aggregation" form="dashboard-filters-form" data-global-aggregation-select>
                 <option value="all" {% if selected_aggregation == 'all' %}selected{% endif %}>Auto / raw view</option>
                 {% for item in ['operator', 'vendor', 'region', 'city', 'market', 'period', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet'] %}
                 <option value="{{ item }}" {% if item == selected_aggregation %}selected{% endif %} {% if item not in selected_dataset.available_aggregations %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
