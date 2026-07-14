@@ -33,6 +33,19 @@
 - Added finer-grained dataset processing progress updates for large files
 - Refined the workspace selector layout and queue action button styling
 - Renamed the dataset summary panel to `Selected Dataset`
+- Added multi-KPI dashboard rendering from the adaptive filters panel
+- Moved workspace queries to materialized dataset tables in SQLite
+- Added a workspace logs panel with `Info` and `Error` filtering
+- Renamed `Data Processing Queue` to `Data Processing`
+- Expanded the executive dashboard with global KPIs and per-metric KPI cards
+- Added date-range filtering based on `Call Start Time`
+- Added `City` filters and multi-select adaptive filters across the workspace
+- Added per-chart aggregation overrides for individual comparison charts
+- Persisted editable `Workspace` and `Admin` form state in browser storage
+- Restored the last opened workspace dataset automatically on return
+- Persisted collapse state for workspace and admin panels
+- Replaced native multi-select boxes with dropdown multi-select controls and `Select All / None`
+- Refined executive metric cards into visual subpanels grouped inside `Executive Dashboard`
 
 #### 🐛 Bug fixes:
 - Fixed default access visibility to reflect active users with default passwords only
@@ -43,6 +56,13 @@
 - Improved dataset kind detection for `CDR-Speech` and `CDR-Data`
 - Fixed the dataset picker to react immediately when `Input Type` changes
 - Fixed the upload file input overlay so `Upload and process` submits directly
+- Fixed failed processing caused by duplicate column names like `Campaign/campaign`
+- Fixed dashboard fallback for legacy `ready` datasets without materialized tables
+- Fixed workspace dataset selection to exclude non-ready datasets
+- Fixed queue rows to show the dataset `last_error` directly in the workspace
+- Fixed date filtering for datasets using spaced headers like `Call Start Time`
+- Fixed the dashboard global aggregation selector to stay independent from per-chart overrides
+- Fixed lowercase CSV dimensions like `operator` and `region` so chart aggregations work
 
 #### 📚 Documentation:
 - Added `Readme` and `Changelog` navigation with Markdown document viewer

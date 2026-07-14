@@ -174,13 +174,14 @@ def _normalise_dataset(df: pd.DataFrame, file_path: Path) -> pd.DataFrame:
     dataset['campaign_year'] = dataset['campaign'].map(lambda value: _parse_campaign_dimension(value, 'year'))
     dataset['campaign_quarter'] = dataset['campaign'].map(lambda value: _parse_campaign_dimension(value, 'quarter'))
 
-    dataset['operator'] = _first_available_series(dataset, ['Operator', 'Home_Operator', 'Home_Operator_A'])
-    dataset['session_type'] = _first_available_series(dataset, ['Session_Type', 'Type_of_Test'])
-    dataset['test_name'] = _first_available_series(dataset, ['Test_Name', 'Session_Type'])
-    dataset['direction'] = _first_available_series(dataset, ['Direction', 'Call_Direction'])
-    dataset['region'] = _first_available_series(dataset, ['Region'])
-    dataset['vendor'] = _first_available_series(dataset, ['Vendor'])
-    dataset['status'] = _first_available_series(dataset, ['Call_Status', 'Test_Result', 'Test_Status'])
+    dataset['operator'] = _first_available_series(dataset, ['operator', 'Operator', 'Home_Operator', 'Home_Operator_A'])
+    dataset['session_type'] = _first_available_series(dataset, ['session_type', 'Session_Type', 'Type_of_Test', 'type_of_test'])
+    dataset['test_name'] = _first_available_series(dataset, ['test_name', 'Test_Name', 'Session_Type', 'session_type'])
+    dataset['direction'] = _first_available_series(dataset, ['direction', 'Direction', 'Call_Direction', 'call_direction'])
+    dataset['region'] = _first_available_series(dataset, ['region', 'Region'])
+    dataset['city'] = _first_available_series(dataset, ['city', 'City'])
+    dataset['vendor'] = _first_available_series(dataset, ['vendor', 'Vendor'])
+    dataset['status'] = _first_available_series(dataset, ['status', 'Call_Status', 'Test_Result', 'Test_Status'])
 
     dataset['disturbed'] = _first_available_series(dataset, ['Disturbed_Call']).astype(str).str.lower().eq('yes')
     dataset['impaired'] = _first_available_series(dataset, ['Impaired_Call']).astype(str).str.lower().eq('yes')
@@ -197,11 +198,17 @@ def _normalise_dataset(df: pd.DataFrame, file_path: Path) -> pd.DataFrame:
     dataset['failure'] = dataset['status'].notna() & ~dataset['success']
 
     dataset['event_start_time'] = pd.to_datetime(
-        _first_available_series(dataset, ['Call_Start_Time', 'Test_Start_Time', 'Data_Start_Time']),
+        _first_available_series(
+            dataset,
+            ['Call_Start_Time', 'Call Start Time', 'Test_Start_Time', 'Test Start Time', 'Data_Start_Time', 'Data Start Time'],
+        ),
         errors='coerce',
     )
     dataset['event_end_time'] = pd.to_datetime(
-        _first_available_series(dataset, ['Call_End_Time', 'Test_End_Time', 'Data_End_Time']),
+        _first_available_series(
+            dataset,
+            ['Call_End_Time', 'Call End Time', 'Test_End_Time', 'Test End Time', 'Data_End_Time', 'Data End Time'],
+        ),
         errors='coerce',
     )
     dataset['hour_bucket'] = dataset['event_start_time'].dt.hour

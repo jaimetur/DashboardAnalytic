@@ -1,112 +1,6 @@
 {% extends 'base.html' %}
 {% block content %}
 <section class="dashboard-stack spacious-stack">
-  <article class="panel hero-panel upload-panel">
-    <div class="section-head tight-head">
-      <div>
-        <p class="eyebrow">Data Ingestion</p>
-        <h2>Automatic CDR Pipeline</h2>
-      </div>
-      <span class="pill live-pill">Auto profile on upload</span>
-    </div>
-    <p class="lede">Upload a workbook and the platform classifies, processes and prepares it for visualization without asking for manual column mapping.</p>
-    <form class="upload-dropzone" action="/dashboard/upload" method="post" enctype="multipart/form-data" data-loading-label="Uploading and processing dataset">
-      <label class="dropzone-field">
-        <span class="dropzone-title">Drop workbooks or browse</span>
-        <span class="dropzone-copy">Accepted: CSV, XLS, XLSX, XLSM</span>
-        <span class="file-picker-shell">
-          <span class="file-picker-button">Select files</span>
-          <span class="file-picker-text" data-file-picker-text>No files selected</span>
-          <input type="file" name="dataset_files" accept=".csv,.xlsx,.xls,.xlsm" multiple required data-file-picker-input>
-        </span>
-      </label>
-      <button type="submit">Upload and process</button>
-    </form>
-    {% if error %}<div class="alert upload-alert">{{ error }}</div>{% endif %}
-  </article>
-
-  <details class="panel collapsible-panel queue-card" open data-queue-status-url="/api/datasets/status" {% if has_processing %}data-queue-poll-ms="3000"{% endif %}>
-    <summary class="collapsible-summary">
-      <div class="section-head tight-head">
-        <div>
-          <p class="eyebrow">Data Processing Queue</p>
-          <h2>Datasets</h2>
-        </div>
-        <span class="collapse-chip">Collapse</span>
-      </div>
-    </summary>
-    <div class="table-wrap queue-table-wrap">
-      <table class="queue-table">
-        <thead>
-          <tr>
-            <th>Dataset</th>
-            <th>Input Type</th>
-            <th>Rows</th>
-            <th>Status</th>
-            <th>Progress</th>
-            <th>Updated</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for dataset in datasets %}
-          <tr class="{% if selected_dataset and selected_dataset.id == dataset.id %}active-row{% endif %}" data-dataset-row data-dataset-id="{{ dataset.id }}">
-            <td>
-              <div class="queue-dataset-name" data-queue-file-name>{{ dataset.file_name }}</div>
-              <div class="queue-dataset-path" data-queue-file-path>{{ dataset.stored_path }}</div>
-            </td>
-            <td data-queue-kind>{{ dataset.input_kind_label }}</td>
-            <td data-queue-rows>{{ dataset.row_count or 0 }}</td>
-            <td>
-              <span class="queue-status-pill queue-status-{{ dataset.status }}" data-queue-status-pill>{{ dataset.status_label }}</span>
-            </td>
-            <td>
-              <div class="queue-progress-cell">
-                <div class="progress-shell visual-progress-shell">
-                  <div class="progress-bar status-{{ dataset.status }}" data-queue-progress-bar style="width: {{ dataset.progress }}%"></div>
-                </div>
-                <span data-queue-progress-label>{{ dataset.progress }}%</span>
-              </div>
-            </td>
-            <td data-queue-updated>{{ dataset.updated_at or dataset.uploaded_at }}</td>
-            <td>
-              <div class="queue-actions">
-                {% if dataset.status == 'ready' %}
-                <a class="ghost-link action-link-primary" href="/dashboard?dataset_id={{ dataset.id }}{% if input_kind %}&input_kind={{ input_kind }}{% endif %}">Open</a>
-                <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
-                  <button type="submit" class="danger-button">Delete</button>
-                </form>
-                {% elif dataset.status == 'processing' %}
-                <span class="ghost-link action-link-disabled" aria-disabled="true">Open</span>
-                <form method="post" action="/dashboard/stop/{{ dataset.id }}" data-confirm="Stop processing for '{{ dataset.file_name }}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
-                  <button type="submit" class="danger-button">Stop</button>
-                </form>
-                {% elif dataset.status == 'queued' %}
-                <span class="ghost-link action-link-disabled" aria-disabled="true">Open</span>
-                <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete queued dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
-                  <button type="submit" class="danger-button">Delete</button>
-                </form>
-                {% elif dataset.status in ['failed', 'stopped'] %}
-                <form method="post" action="/dashboard/retry/{{ dataset.id }}" data-loading-label="Retrying dataset processing">
-                  <button type="submit" class="warning-button">Retry</button>
-                </form>
-                <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
-                  <button type="submit" class="danger-button">Delete</button>
-                </form>
-                {% endif %}
-              </div>
-            </td>
-          </tr>
-          {% else %}
-          <tr>
-            <td colspan="7"><article class="empty-state-inline">No datasets available.</article></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </details>
-
   <section class="workspace-grid">
     <main class="dashboard-main-stack">
       <article class="panel dataset-summary-panel select-dataset-card">
@@ -117,7 +11,7 @@
           </div>
           {% if selected_dataset %}<span class="pill status-pill status-{{ selected_dataset.status }}">{{ selected_dataset.status_label }}</span>{% endif %}
         </div>
-        <form class="dataset-selector-grid" action="/dashboard" method="get" data-loading-label="Opening dataset workspace">
+        <form class="dataset-selector-grid" action="/dashboard" method="get" data-loading-label="Opening dataset dashboard">
           <label>Input Type
             <select name="input_kind" data-input-kind-select>
               <option value="">All Inputs</option>
@@ -147,7 +41,7 @@
           <article><span>Input Type</span><strong>{{ selected_dataset.input_kind_label }}</strong></article>
           <article><span>Rows</span><strong>{{ selected_dataset.row_count or 0 }}</strong></article>
           <article><span>Columns</span><strong>{{ selected_dataset.column_count or 0 }}</strong></article>
-          <article><span>Default metric</span><strong>{{ selected_dataset.default_metric or 'Auto' }}</strong></article>
+          <article><span>Number of processed sheets</span><strong>{{ (selected_dataset.filter_options.get('source_sheet', []) | length) if selected_dataset.filter_options else 0 }}</strong></article>
         </div>
         <p class="form-note">Uploaded by {{ selected_dataset.uploaded_by }} on {{ selected_dataset.uploaded_at }}</p>
         {% else %}
@@ -156,22 +50,82 @@
       </article>
 
       {% if selected_dataset and selected_dataset.is_ready %}
-      <details class="panel collapsible-panel" open>
+      <details class="panel collapsible-panel" open data-panel-state-key="dashboard:executive-dashboard">
         <summary class="collapsible-summary">
           <div>
-            <p class="eyebrow">{% if analysis_loaded %}Core KPIs{% else %}Cached Dataset Snapshot{% endif %}</p>
+            <p class="eyebrow">Global and Metric KPIs</p>
             <h2>Executive Dashboard</h2>
           </div>
           <span class="collapse-chip">Collapse</span>
         </summary>
+        <div class="section-head compact-toolbar">
+          <div>
+            <p class="eyebrow">Global Metrics</p>
+          </div>
+          <div class="inline-actions">
+            {% if analysis_loaded and analysis and analysis.global_kpis.date_from %}
+            <span class="pill">From {{ analysis.global_kpis.date_from }}</span>
+            {% endif %}
+            {% if analysis_loaded and analysis and analysis.global_kpis.date_to %}
+            <span class="pill">To {{ analysis.global_kpis.date_to }}</span>
+            {% endif %}
+          </div>
+        </div>
+        {% if analysis_loaded and analysis %}
         <section class="metrics-grid refined-metrics-grid">
-          {% for key, value in (analysis.kpis if analysis_loaded and analysis else selected_dataset.kpis_snapshot).items() %}
+          {% for key, value in analysis.global_kpis.items() %}
+          {% if key not in ['date_from', 'date_to'] %}
           <article class="metric-card premium-metric-card">
-            <span>{{ key.replace('_', ' ') }}</span>
+            <span>{{ 'Dataset Type' if key == 'dataset_kind' else key.replace('_', ' ') }}</span>
             <strong>{{ value }}</strong>
+          </article>
+          {% endif %}
+          {% endfor %}
+        </section>
+        {% endif %}
+        {% if analysis_loaded and analyses %}
+        <div class="section-head compact-toolbar">
+          <div>
+            <p class="eyebrow">Metric KPIs</p>
+          </div>
+        </div>
+        <section class="multi-metric-stack executive-metric-stack">
+          {% for analysis_item in analyses %}
+          {% set current_analysis = analysis_item.result %}
+          <article class="executive-metric-subpanel">
+            <div class="section-head executive-subpanel-head">
+              <div>
+                <p class="eyebrow">Selected Metric</p>
+                <h3>{{ current_analysis.selected_metric }}</h3>
+              </div>
+              <span class="pill">{{ current_analysis.metric_kpis.samples }} samples</span>
+            </div>
+            <section class="metric-detail-grid">
+              {% for key, value in current_analysis.metric_kpis.items() %}
+              {% if key not in ['metric', 'samples'] %}
+              <article class="metric-stat-card">
+                <span>{{ key.replace('_', ' ') }}</span>
+                <strong>{{ value }}</strong>
+              </article>
+              {% endif %}
+              {% endfor %}
+            </section>
           </article>
           {% endfor %}
         </section>
+        {% elif error %}
+        <section class="empty-state-panel">
+          <p class="eyebrow">Analysis State</p>
+          <h2>Dashboard update unavailable</h2>
+          <p class="lede">{{ error }}</p>
+        </section>
+        {% else %}
+        <section class="empty-state-panel">
+          <p class="eyebrow">Lazy Load</p>
+          <h2>Dashboard opened from cache</h2>
+          <p class="lede">Choose filters and press <strong>Update Dashboard</strong> to load KPIs, charts and tables for the selected dataset.</p>
+        </section>
+        {% endif %}
       </details>
 
       {% if error %}
@@ -181,13 +135,33 @@
         <p class="lede">{{ error }}</p>
       </section>
       {% elif analysis_loaded and analysis %}
-      <details class="panel collapsible-panel" open>
+      <details class="panel collapsible-panel" open data-panel-state-key="dashboard:charts-scorecards">
         <summary class="collapsible-summary">
           <div>
             <p class="eyebrow">Visual Analytics</p>
             <h2>Charts and Scorecards</h2>
           </div>
-          <span class="collapse-chip">Collapse</span>
+          <div class="summary-inline-actions">
+            <label class="chart-aggregation-control panel-aggregation-control" data-summary-control>
+              <span>Global CDF Comparison</span>
+              <select name="cdf_grouping" form="dashboard-filters-form" data-global-cdf-grouping-select>
+                <option value="all" {% if selected_cdf_grouping == 'all' %}selected{% endif %}>Single CDF</option>
+                {% for item in ['vendor', 'market', 'operator', 'region', 'city'] %}
+                <option value="{{ item }}" {% if item == selected_cdf_grouping %}selected{% endif %}>{{ format_aggregation_label(item) }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="chart-aggregation-control panel-aggregation-control" data-summary-control>
+              <span>Global Aggregation</span>
+              <select name="aggregation" form="dashboard-filters-form" data-global-aggregation-select>
+                <option value="all" {% if selected_aggregation == 'all' %}selected{% endif %}>Auto / raw view</option>
+                {% for item in ['operator', 'vendor', 'region', 'city', 'market', 'period', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet'] %}
+                <option value="{{ item }}" {% if item == selected_aggregation %}selected{% endif %} {% if item not in selected_dataset.available_aggregations %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <span class="collapse-chip">Collapse</span>
+          </div>
         </summary>
         <section class="multi-metric-stack">
           {% for analysis_item in analyses %}
@@ -198,7 +172,7 @@
                 <p class="eyebrow">Metric View</p>
                 <h2>{{ current_analysis.selected_metric }}</h2>
               </div>
-              <span class="pill">{{ current_analysis.filters.aggregation }}</span>
+              <span class="table-help">Current comparison: {{ format_aggregation_label(current_analysis.filters.aggregation) }}</span>
             </div>
             <section class="viz-grid">
               <article class="wide-visual">
@@ -207,7 +181,20 @@
                     <p class="eyebrow">Distribution</p>
                     <h2>CDF Curve</h2>
                   </div>
-                  <span class="pill">{{ current_analysis.selected_metric }}</span>
+                  <label class="chart-aggregation-control">
+                    <span>Compare CDF by</span>
+                    <select
+                      data-chart-cdf-grouping-select
+                      data-metric="{{ current_analysis.selected_metric }}"
+                      data-current-overrides="{{ format_cdf_overrides(cdf_overrides) }}"
+                      data-global-cdf-grouping="{{ selected_cdf_grouping or 'all' }}"
+                    >
+                      <option value="all" {% if current_analysis.filters.cdf_grouping == 'all' %}selected{% endif %}>Single CDF</option>
+                      {% for item in ['vendor', 'market', 'operator', 'region', 'city'] %}
+                      <option value="{{ item }}" {% if item == current_analysis.filters.cdf_grouping %}selected{% endif %}>{{ format_aggregation_label(item) }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
                 </div>
                 <div class="chart-card" data-chart='{{ current_analysis.cdf_chart | tojson }}'>
                   <svg class="chart-svg" viewBox="0 0 600 280" preserveAspectRatio="none"></svg>
@@ -219,7 +206,20 @@
                     <p class="eyebrow">Comparison</p>
                     <h2>Group Benchmark</h2>
                   </div>
-                  <span class="pill">{{ current_analysis.filters.aggregation }}</span>
+                  <label class="chart-aggregation-control">
+                    <span>Compare by</span>
+                    <select
+                      data-chart-aggregation-select
+                      data-metric="{{ current_analysis.selected_metric }}"
+                      data-current-overrides="{{ format_aggregation_overrides(aggregation_overrides) }}"
+                      data-global-aggregation="{{ selected_aggregation or 'all' }}"
+                    >
+                      <option value="all" {% if current_analysis.filters.aggregation == 'all' %}selected{% endif %}>Auto / raw view</option>
+                      {% for item in ['operator', 'vendor', 'region', 'city', 'market', 'period', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet'] %}
+                      <option value="{{ item }}" {% if item == current_analysis.filters.aggregation %}selected{% endif %} {% if item not in selected_dataset.available_aggregations %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
                 </div>
                 <div class="chart-card" data-chart='{{ current_analysis.comparison_chart | tojson }}'>
                   <svg class="chart-svg" viewBox="0 0 600 280" preserveAspectRatio="none"></svg>
@@ -239,7 +239,7 @@
         </section>
       </details>
 
-      <details class="panel collapsible-panel" open>
+      <details class="panel collapsible-panel" open data-panel-state-key="dashboard:data-table">
         <summary class="collapsible-summary">
           <div>
             <p class="eyebrow">Data Table</p>
@@ -255,6 +255,8 @@
               <input type="hidden" name="metric" value="{{ analysis.selected_metric }}">
               <input type="hidden" name="market" value="{{ analysis.filters.market or '' }}">
               <input type="hidden" name="period" value="{{ analysis.filters.period or '' }}">
+              <input type="hidden" name="date_from" value="{{ analysis.filters.date_from or '' }}">
+              <input type="hidden" name="date_to" value="{{ analysis.filters.date_to or '' }}">
               <input type="hidden" name="aggregation" value="{{ analysis.filters.aggregation or 'all' }}">
               <input type="hidden" name="extra_filters" value="{{ format_extra_filters(analysis.filters.extra_filters) }}">
               <button type="submit">Export Word</button>
@@ -264,13 +266,15 @@
               <input type="hidden" name="metric" value="{{ analysis.selected_metric }}">
               <input type="hidden" name="market" value="{{ analysis.filters.market or '' }}">
               <input type="hidden" name="period" value="{{ analysis.filters.period or '' }}">
+              <input type="hidden" name="date_from" value="{{ analysis.filters.date_from or '' }}">
+              <input type="hidden" name="date_to" value="{{ analysis.filters.date_to or '' }}">
               <input type="hidden" name="aggregation" value="{{ analysis.filters.aggregation or 'all' }}">
               <input type="hidden" name="extra_filters" value="{{ format_extra_filters(analysis.filters.extra_filters) }}">
               <button type="submit">Export PowerPoint</button>
             </form>
           </div>
         </div>
-        <div class="table-wrap">
+        <div class="table-wrap data-table-wrap">
           {% if analysis.table_rows %}
           <table>
             <thead>
@@ -295,65 +299,63 @@
           {% endif %}
         </div>
       </details>
-      {% else %}
-      <section class="panel empty-state-panel">
-        <p class="eyebrow">Lazy Load</p>
-        <h2>Workspace opened from cache</h2>
-        <p class="lede">The workspace is available immediately from cache. Choose filters and press <strong>Update Dashboard</strong> to load charts and tables for the selected dataset.</p>
-      </section>
       {% endif %}
       {% elif selected_dataset and not selected_dataset.is_ready %}
       <section class="panel empty-state-panel">
         <p class="eyebrow">Waiting</p>
         <h2>Dataset still processing</h2>
-        <p class="lede queue-waiting-copy">The dashboard queue is updating live. Current state: <strong>{{ selected_dataset.status_label }}</strong>.</p>
+        <p class="lede">This dataset is not ready for dashboard analysis yet. Open the Workspace view to monitor processing progress.</p>
       </section>
       {% else %}
       <section class="panel empty-state-panel">
         <p class="eyebrow">Start Here</p>
-        <h2>Upload a dataset to generate the dashboard</h2>
-        <p class="lede">Once uploaded, the system automatically detects the CDR type, extracts metrics and prepares the analysis workspace.</p>
+        <h2>Open a processed dataset to build the dashboard</h2>
+        <p class="lede">Use the selector above to open any processed dataset and work with KPIs, charts and filtered tables.</p>
       </section>
       {% endif %}
     </main>
 
     <aside class="dashboard-sidebar">
-      <details class="panel collapsible-panel sticky-panel" open>
-        <summary class="collapsible-summary sidebar-summary">
+      <article class="panel dataset-summary-panel sticky-panel adaptive-filters-panel">
+        <div class="section-head tight-head">
           <div>
             <p class="eyebrow">Adaptive Filters</p>
             <h2>Dashboard Controls</h2>
           </div>
-          <span class="collapse-chip">Collapse</span>
-        </summary>
-        <form class="sidebar-filters" action="/dashboard" method="get" data-loading-label="Updating dashboard analytics">
+        </div>
+        <form id="dashboard-filters-form" class="sidebar-filters" action="/dashboard" method="get" data-loading-label="Updating dashboard analytics">
+          <input type="hidden" name="aggregation_overrides" value="">
           {% if selected_dataset %}<input type="hidden" name="dataset_id" value="{{ selected_dataset.id }}">{% endif %}
           <input type="hidden" name="load" value="1">
           {% if selected_dataset and selected_dataset.is_ready %}
-          <label>Metrics
+          {% set metric_availability = selected_dataset.metric_availability or {} %}
+          <label class="sidebar-field-full">Metrics
             <select name="metric" multiple size="{{ [selected_dataset.available_metrics|length, 8]|min }}">
               {% for item in selected_dataset.available_metrics %}
-              <option value="{{ item }}" {% if (item in selected_metrics) or (not selected_metrics and item == selected_dataset.default_metric) %}selected{% endif %}>{{ item }}</option>
+              <option value="{{ item }}" {% if not metric_availability.get(item, True) %}disabled{% endif %} {% if ((item in selected_metrics) or (not selected_metrics and item == selected_dataset.default_metric)) and metric_availability.get(item, True) %}selected{% endif %}>{{ item }}</option>
               {% endfor %}
             </select>
-            <span class="table-help">Hold Cmd/Ctrl to select multiple KPIs.</span>
+            <span class="table-help">Use the dropdown to select one, several, or all KPIs.</span>
           </label>
-          <label>Aggregation
-            <select name="aggregation">
-              <option value="all" {% if (analysis and analysis.filters.aggregation == 'all') or (not analysis and selected_dataset.default_aggregation == 'all') %}selected{% endif %}>Auto / raw view</option>
-              {% for item in selected_dataset.available_aggregations %}
-              <option value="{{ item }}" {% if (analysis and item == analysis.filters.aggregation) or (not analysis and item == selected_dataset.default_aggregation) %}selected{% endif %}>{{ item }}</option>
-              {% endfor %}
-            </select>
+          <label class="sidebar-date-field">Date From
+            <input type="date" name="date_from" value="{{ (analysis.filters.date_from if analysis else selected_date_from) or '' }}">
+          </label>
+          <label class="sidebar-date-field">Date To
+            <input type="date" name="date_to" value="{{ (analysis.filters.date_to if analysis else selected_date_to) or '' }}">
           </label>
           {% for dimension in filter_dimensions %}
+          {% set options = filter_options.get(dimension, []) %}
           <label>{{ dimension.replace('_', ' ').title() }}
-            <select name="{{ dimension }}">
-              <option value="">All</option>
-              {% for value in filter_options[dimension] %}
-              <option value="{{ value }}" {% if analysis and ((dimension in ['market', 'period'] and analysis.filters[dimension] == value) or (dimension not in ['market', 'period'] and analysis.filters.extra_filters.get(dimension) == value)) %}selected{% endif %}>{{ value }}</option>
+            <select name="{{ dimension }}" multiple size="{{ [options|length, 6]|min if options|length > 0 else 1 }}" {% if not options %}disabled{% endif %}>
+              {% for value in options %}
+              <option value="{{ value }}" {% if analysis %}{% if (dimension in ['market', 'period'] and value in (analysis.filters[dimension] or [])) or (dimension not in ['market', 'period'] and value in (analysis.filters.extra_filters.get(dimension) or [])) %}selected{% endif %}{% else %}selected{% endif %}>{{ value }}</option>
               {% endfor %}
             </select>
+            {% if options %}
+            <span class="table-help">All values are selected by default. Clearing all values applies an empty filter.</span>
+            {% else %}
+            <span class="table-help">No values available for this filter in the selected dataset.</span>
+            {% endif %}
           </label>
           {% endfor %}
           {% endif %}
@@ -362,7 +364,7 @@
             {% if selected_dataset %}<a class="ghost-link" href="/dashboard?dataset_id={{ selected_dataset.id }}{% if input_kind %}&input_kind={{ input_kind }}{% endif %}">Reset</a>{% endif %}
           </div>
         </form>
-      </details>
+      </article>
     </aside>
   </section>
 </section>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import warnings
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -34,16 +35,16 @@ DATAFRAME_CACHE: dict[str, pd.DataFrame] = {}
 STOP_REQUESTS: set[int] = set()
 STOP_REQUESTS_LOCK = Lock()
 repository = Repository(settings.database_path)
-FILTER_DIMENSIONS = ['market', 'period', 'operator', 'region', 'vendor', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet']
+FILTER_DIMENSIONS = ['market', 'period', 'operator', 'vendor', 'region', 'city', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet']
 FILTER_DIMENSIONS_BY_KIND = {
-    'voice': ['market', 'period', 'operator', 'region', 'vendor', 'session_type', 'technology_primary', 'source_sheet'],
-    'speech': ['market', 'period', 'operator', 'region', 'vendor', 'session_type', 'technology_primary', 'source_sheet'],
-    'data': ['market', 'period', 'operator', 'region', 'vendor', 'test_name', 'direction', 'technology_primary', 'source_sheet'],
-    'generic': ['market', 'period', 'operator', 'region', 'vendor', 'source_sheet'],
+    'voice': ['market', 'operator', 'vendor', 'region', 'city', 'session_type', 'technology_primary', 'source_sheet'],
+    'speech': ['market', 'operator', 'vendor', 'region', 'city', 'session_type', 'technology_primary', 'source_sheet'],
+    'data': ['market', 'operator', 'vendor', 'region', 'city', 'test_name', 'direction', 'technology_primary', 'source_sheet'],
+    'generic': ['market', 'operator', 'vendor', 'region', 'city', 'source_sheet'],
 }
 ANALYSIS_SUPPORT_COLUMNS = [
-    'dataset_kind', 'source_file', 'market', 'period', 'operator', 'region', 'vendor', 'session_type', 'test_name',
-    'direction', 'technology_primary', 'source_sheet', 'status', 'success', 'failure', 'dropped', 'disturbed',
+    'dataset_kind', 'source_file', 'market', 'period', 'operator', 'region', 'city', 'vendor', 'session_type', 'test_name',
+    'direction', 'technology_primary', 'source_sheet', 'event_start_time', 'status', 'success', 'failure', 'dropped', 'disturbed',
     'impaired', 'setup_time_seconds', 'duration_seconds', 'throughput_mbps', 'quality_score', 'latency_ms',
     'jitter_ms', 'packet_loss_pct', 'handovers', 'POLQA_LQ_Avg', 'LQ', 'Receive_Delay', 'Mean_Data_Rate',
     'TCP_RTT_Service_Access_Delay', 'DNS_Resolution_Success_Ratio', 'DNS_Resolution_Success',
@@ -91,8 +92,8 @@ def asset_version(relative_path: str) -> str:
     return str(int(asset_path.stat().st_mtime))
 
 
-def parse_extra_filters(raw_filters: str) -> dict[str, str]:
-    filters: dict[str, str] = {}
+def parse_extra_filters(raw_filters: str) -> dict[str, Any]:
+    filters: dict[str, Any] = {}
     for chunk in raw_filters.split(';'):
         entry = chunk.strip()
         if not entry or '=' not in entry:
@@ -101,14 +102,59 @@ def parse_extra_filters(raw_filters: str) -> dict[str, str]:
         key = key.strip()
         value = value.strip()
         if key and value:
-            filters[key] = value
+            values = [item.strip() for item in value.split(',') if item.strip()]
+            filters[key] = values if len(values) > 1 else values[0]
     return filters
 
 
 def format_extra_filters(filters: dict[str, Any] | None) -> str:
     if not filters:
         return ''
-    return '; '.join(f'{key}={value}' for key, value in filters.items())
+    fragments: list[str] = []
+    for key, value in filters.items():
+        if isinstance(value, (list, tuple, set)):
+            joined = ','.join(str(item).strip() for item in value if str(item).strip())
+            if joined:
+                fragments.append(f'{key}={joined}')
+            continue
+        if value not in (None, ''):
+            fragments.append(f'{key}={value}')
+    return '; '.join(fragments)
+
+
+def parse_aggregation_overrides(raw_overrides: str) -> dict[str, str]:
+    overrides: dict[str, str] = {}
+    for chunk in (raw_overrides or '').split(';'):
+        entry = chunk.strip()
+        if not entry or '=' not in entry:
+            continue
+        metric, aggregation = entry.split('=', 1)
+        metric = metric.strip()
+        aggregation = aggregation.strip()
+        if metric and aggregation:
+            overrides[metric] = aggregation
+    return overrides
+
+
+def format_aggregation_overrides(overrides: dict[str, str] | None) -> str:
+    if not overrides:
+        return ''
+    return '; '.join(f'{metric}={aggregation}' for metric, aggregation in overrides.items() if metric and aggregation)
+
+
+def parse_cdf_overrides(raw_overrides: str) -> dict[str, str]:
+    return parse_aggregation_overrides(raw_overrides)
+
+
+def format_cdf_overrides(overrides: dict[str, str] | None) -> str:
+    return format_aggregation_overrides(overrides)
+
+
+def format_aggregation_label(value: str | None) -> str:
+    normalized = str(value or 'all').strip()
+    if not normalized or normalized == 'all':
+        return 'Auto / raw view'
+    return normalized.replace('_', ' ').title()
 
 
 def parse_json_field(value: Any, fallback: Any) -> Any:
@@ -144,14 +190,32 @@ def derive_filter_options(df) -> dict[str, list[str]]:
     return options
 
 
+def is_metric_candidate(column: str) -> bool:
+    normalized = str(column).strip()
+    lowered = normalized.lower()
+    excluded_exact = {
+        'year', 'week', 'month', 'day', 'hour',
+        'campaign_year', 'campaign_quarter', 'hour_bucket', 'day_bucket',
+        'dataset_id', 'user_id', 'row_id', 'record_id', 'session_id', 'call_id', 'test_id', 'campaign_id',
+    }
+    excluded_fragments = (
+        '_id', ' id', 'uuid', 'guid',
+    )
+    if lowered in excluded_exact:
+        return False
+    if any(fragment in lowered for fragment in excluded_fragments):
+        return False
+    return not normalized.startswith('_')
+
+
 def derive_available_metrics(df) -> list[str]:
     preferred = [
         'POLQA_LQ_Avg', 'LQ', 'Mean_Data_Rate', 'quality_score', 'throughput_mbps', 'setup_time_seconds', 'duration_seconds',
         'jitter_ms', 'packet_loss_pct', 'latency_ms', 'Call_Setup_Time', 'Call_Duration', 'Receive_Delay', 'TCP_RTT_Service_Access_Delay',
     ]
     numeric_columns = df.select_dtypes(include=['number']).columns.tolist()
-    ordered = [column for column in preferred if column in numeric_columns]
-    ordered.extend(column for column in numeric_columns if column not in ordered and not str(column).startswith('_'))
+    ordered = [column for column in preferred if column in numeric_columns and is_metric_candidate(column)]
+    ordered.extend(column for column in numeric_columns if column not in ordered and is_metric_candidate(column))
     return ordered[:20]
 
 
@@ -171,6 +235,33 @@ def serialize_dataset_row(row) -> dict[str, Any]:
     item['progress'] = int(item.get('progress') or 0)
     item['is_ready'] = item.get('status') == 'ready'
     return item
+
+
+def derive_runtime_available_metrics(dataset: dict[str, Any]) -> list[str]:
+    available_metrics = [metric for metric in (dataset.get('available_metrics') or []) if is_metric_candidate(metric)]
+    if not available_metrics or not dataset.get('is_ready'):
+        return available_metrics
+
+    dataset_id = int(dataset['id'])
+    if repository.dataset_rows_table_exists(dataset_id):
+        return repository.list_metrics_with_non_null_data(dataset_id, available_metrics)
+
+    dataset_path = Path(dataset['stored_path'])
+    if not dataset_path.exists():
+        return available_metrics
+
+    df = load_cached_dataset(dataset_path)
+    numeric_with_data = {
+        column for column in df.columns
+        if column in available_metrics and pd.to_numeric(df[column], errors='coerce').notna().any()
+    }
+    return [metric for metric in available_metrics if metric in numeric_with_data]
+
+
+def derive_runtime_metric_availability(dataset: dict[str, Any]) -> dict[str, bool]:
+    available_metrics = [metric for metric in (dataset.get('available_metrics') or []) if is_metric_candidate(metric)]
+    selectable_metrics = set(derive_runtime_available_metrics(dataset))
+    return {metric: metric in selectable_metrics for metric in available_metrics}
 
 
 def now_iso() -> str:
@@ -198,9 +289,6 @@ def stop_requested(dataset_id: int) -> bool:
 
 def ensure_not_stopped(dataset_id: int) -> None:
     if stop_requested(dataset_id):
-        raise ProcessingStopped('Processing stopped by user.')
-    dataset = repository.get_dataset(dataset_id)
-    if dataset and (dataset['status'] or '') == 'stopped':
         raise ProcessingStopped('Processing stopped by user.')
 
 
@@ -267,6 +355,37 @@ def build_analysis_query_columns(selected_dataset: dict[str, Any], selected_metr
     requested = set(ANALYSIS_SUPPORT_COLUMNS)
     requested.update(selected_metrics)
     return sorted(requested)
+
+
+def ensure_dataset_query_table(dataset: dict[str, Any], required_columns: list[str], filters: dict[str, Any] | None = None) -> None:
+    dataset_id = int(dataset['id'])
+    dataset_path = Path(dataset['stored_path'])
+    filters = filters or {}
+    structural_candidates = {
+        'market',
+        'period',
+    }
+    requested_aggregation = str(filters.get('aggregation') or '').strip()
+    if requested_aggregation and requested_aggregation != 'all':
+        structural_candidates.add(requested_aggregation)
+    structural_candidates.update((filters.get('extra_filters') or {}).keys())
+    structural_columns = [column for column in required_columns if column in structural_candidates]
+    if not repository.dataset_rows_table_exists(dataset_id):
+        if not dataset_path.exists():
+            return
+        df = load_cached_dataset(dataset_path)
+        repository.replace_dataset_rows(dataset_id, df)
+        return
+
+    existing_columns = set(repository.list_dataset_row_columns(dataset_id))
+    missing_columns = [column for column in structural_columns if column not in existing_columns]
+    if not missing_columns or not dataset_path.exists():
+        return
+
+    # Legacy materialized tables may be missing normalized dimensions such as
+    # operator/region/vendor. Rebuild them from source so aggregations work.
+    df = load_cached_dataset(dataset_path)
+    repository.replace_dataset_rows(dataset_id, df)
 
 
 def process_dataset(dataset_id: int, dataset_path: Path, username: str) -> None:
@@ -405,13 +524,37 @@ def choose_selected_dataset(datasets: list[dict[str, Any]], dataset_id: int | No
     return candidate_datasets[0] if candidate_datasets else None
 
 
-def choose_filter_value(query_value: str | None, options: dict[str, list[str]], key: str) -> str | None:
+def enrich_selected_dataset_for_dashboard(selected_dataset: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not selected_dataset or not selected_dataset['is_ready']:
+        return selected_dataset
+    selected_dataset['metric_availability'] = derive_runtime_metric_availability(selected_dataset)
+    selected_dataset['available_metrics'] = list(selected_dataset['metric_availability'].keys())
+    selected_dataset['selectable_metrics'] = [
+        metric for metric, enabled in selected_dataset['metric_availability'].items() if enabled
+    ]
+    if selected_dataset.get('default_metric') not in selected_dataset['selectable_metrics']:
+        selected_dataset['default_metric'] = selected_dataset['selectable_metrics'][0] if selected_dataset['selectable_metrics'] else None
+    return selected_dataset
+
+
+def build_dataset_view_state(dataset_id: int | None, input_kind: str | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], dict[str, Any] | None]:
+    datasets = [serialize_dataset_row(row) for row in repository.list_datasets()]
+    ready_datasets = [dataset for dataset in datasets if dataset['is_ready']]
+    input_kind_options = sorted({dataset.get('dataset_kind') or 'generic' for dataset in datasets})
+    selected_dataset = choose_selected_dataset(datasets, dataset_id, input_kind)
+    return datasets, ready_datasets, input_kind_options, selected_dataset
+
+
+def choose_filter_values(query_values: list[str], options: dict[str, list[str]], key: str) -> list[str]:
     values = options.get(key, [])
-    if query_value and query_value in values:
-        return query_value
+    selected = [value for value in query_values if value in values]
+    if selected:
+        return selected
+    if query_values:
+        return [value for value in query_values if value]
     if len(values) == 1:
-        return values[0]
-    return None
+        return [values[0]]
+    return []
 
 
 def should_load_analysis(request: Request) -> bool:
@@ -464,7 +607,35 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
     )
 
 
-def build_dashboard_payload(selected_dataset: dict[str, Any] | None, request: Request) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[str], dict[str, Any], str | None, bool]:
+def describe_workspace_log_entry(log: dict[str, Any]) -> str:
+    details = log.get('details')
+    if isinstance(details, dict):
+        if log['action'] == 'process_dataset_failed':
+            return f"Dataset {details.get('dataset_id')}: {details.get('error', 'Processing failed')}"
+        if log['action'] == 'analyze_dataset_failed':
+            return f"Analysis failed for dataset {details.get('dataset_id')}: {details.get('error', 'Unknown analysis error')}"
+        if log['action'] == 'analyze_dataset_warning':
+            return f"Analysis warning for dataset {details.get('dataset_id')}: {details.get('warning', 'Warning emitted during analysis')}"
+        if log['action'] == 'process_dataset':
+            return f"Dataset {details.get('dataset_id')} processed successfully."
+        if log['action'] == 'retry_dataset':
+            return f"Retry requested for dataset {details.get('dataset_id')}."
+        if log['action'] in {'stop_dataset', 'stop_dataset_requested'}:
+            return f"Stop requested for dataset {details.get('dataset_id')}."
+        if log['action'] == 'delete_dataset':
+            return f"Dataset {details.get('dataset_id')} deleted."
+        if log['action'] == 'analyze_dataset':
+            return f"Analysis requested for dataset {details.get('dataset_id')}."
+    return str(log.get('details_text') or log.get('details') or '')
+
+
+def classify_workspace_log_entry(log: dict[str, Any]) -> str:
+    if log.get('action') in {'process_dataset_failed', 'analyze_dataset_failed', 'analyze_dataset_warning'}:
+        return 'Error'
+    return 'Info'
+
+
+def build_dashboard_payload(selected_dataset: dict[str, Any] | None, request: Request, username: str | None = None) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[str], dict[str, Any], str | None, bool]:
     if not selected_dataset:
         return None, [], [], {}, None, False
     if not selected_dataset['is_ready']:
@@ -483,24 +654,39 @@ def build_dashboard_payload(selected_dataset: dict[str, Any] | None, request: Re
         if fallback_metric:
             requested_metrics = [fallback_metric]
     available_metrics = selected_dataset.get('available_metrics') or []
-    selected_metrics = [metric for metric in requested_metrics if metric in available_metrics]
+    selectable_metrics = selected_dataset.get('selectable_metrics') or available_metrics
+    selected_metrics = [metric for metric in requested_metrics if metric in selectable_metrics]
     if not selected_metrics:
-        default_metric = selected_dataset.get('default_metric') or (available_metrics[0] if available_metrics else '')
+        default_metric = selected_dataset.get('default_metric') or (selectable_metrics[0] if selectable_metrics else '')
         selected_metrics = [default_metric] if default_metric else []
+    aggregation_overrides = parse_aggregation_overrides(request.query_params.get('aggregation_overrides') or '')
+    cdf_overrides = parse_cdf_overrides(request.query_params.get('cdf_overrides') or '')
+    cdf_grouping = request.query_params.get('cdf_grouping') or 'all'
     filters = {
-        'market': choose_filter_value(request.query_params.get('market'), filter_options, 'market'),
-        'period': choose_filter_value(request.query_params.get('period'), filter_options, 'period'),
+        'market': choose_filter_values(request.query_params.getlist('market'), filter_options, 'market'),
+        'period': choose_filter_values(request.query_params.getlist('period'), filter_options, 'period'),
+        'date_from': request.query_params.get('date_from') or None,
+        'date_to': request.query_params.get('date_to') or None,
         'aggregation': aggregation,
+        'cdf_grouping': cdf_grouping,
         'extra_filters': {},
+        'explicit_empty_filters': set(),
     }
+    explicit_empty_filters = set(value for value in request.query_params.getlist('__empty_filter') if value)
+    filters['explicit_empty_filters'] = explicit_empty_filters
     for dimension in FILTER_DIMENSIONS:
         if dimension in {'market', 'period'}:
+            if dimension in explicit_empty_filters:
+                filters[dimension] = ['__none__']
             continue
-        selected_value = request.query_params.get(dimension)
-        if selected_value and selected_value in filter_options.get(dimension, []):
-            filters['extra_filters'][dimension] = selected_value
+        selected_values = choose_filter_values(request.query_params.getlist(dimension), filter_options, dimension)
+        if dimension in explicit_empty_filters:
+            filters['extra_filters'][dimension] = ['__none__']
+        elif selected_values:
+            filters['extra_filters'][dimension] = selected_values
 
     query_columns = build_analysis_query_columns(selected_dataset, selected_metrics)
+    ensure_dataset_query_table(selected_dataset, query_columns, filters)
     if repository.dataset_rows_table_exists(selected_dataset['id']):
         df = repository.load_dataset_rows(selected_dataset['id'], query_columns, filters)
     else:
@@ -511,18 +697,63 @@ def build_dashboard_payload(selected_dataset: dict[str, Any] | None, request: Re
     analyses: list[dict[str, Any]] = []
     for metric in selected_metrics:
         try:
-            analysis = get_cached_analysis(dataset_path, filters, metric)
+            metric_filters = {
+                **filters,
+                'aggregation': aggregation_overrides.get(metric, aggregation),
+                'cdf_grouping': cdf_overrides.get(metric, cdf_grouping),
+                'extra_filters': dict(filters.get('extra_filters') or {}),
+            }
+            analysis = get_cached_analysis(dataset_path, metric_filters, metric)
             if analysis is None:
-                analysis = store_cached_analysis(dataset_path, filters, metric, build_analysis(df, filters, metric))
+                with warnings.catch_warnings(record=True) as captured_warnings:
+                    warnings.simplefilter('always')
+                    analysis = store_cached_analysis(dataset_path, metric_filters, metric, build_analysis(df, metric_filters, metric))
+                if username:
+                    for captured in captured_warnings:
+                        repository.add_log(
+                            username,
+                            'analyze_dataset_warning',
+                            json.dumps({
+                                'dataset_id': selected_dataset['id'],
+                                'metric': metric,
+                                'aggregation': metric_filters.get('aggregation') or 'all',
+                                'warning': str(captured.message),
+                            }),
+                        )
             analyses.append({'metric': metric, 'result': analysis})
         except ValueError as exc:
+            if username:
+                repository.add_log(
+                    username,
+                    'analyze_dataset_failed',
+                    json.dumps({
+                        'dataset_id': selected_dataset['id'],
+                        'metric': metric,
+                        'aggregation': metric_filters.get('aggregation') or 'all',
+                        'error': str(exc),
+                    }),
+                )
+            if analyses:
+                continue
+            return None, [], selected_metrics, filter_options, str(exc), False
+        except Exception as exc:
+            if username:
+                repository.add_log(
+                    username,
+                    'analyze_dataset_failed',
+                    json.dumps({
+                        'dataset_id': selected_dataset['id'],
+                        'metric': metric,
+                        'aggregation': metric_filters.get('aggregation') or 'all',
+                        'error': str(exc),
+                    }),
+                )
             if analyses:
                 continue
             return None, [], selected_metrics, filter_options, str(exc), False
 
     primary_analysis = analyses[0]['result'] if analyses else None
-    resolved_metrics = [entry['result'].selected_metric for entry in analyses]
-    return primary_analysis, analyses, resolved_metrics, filter_options, None, True
+    return primary_analysis, analyses, selected_metrics, filter_options, None, True
 
 
 @app.get('/healthz')
@@ -533,7 +764,7 @@ def healthz() -> dict[str, str]:
 @app.get('/', response_class=HTMLResponse)
 def index(request: Request) -> HTMLResponse:
     if request.cookies.get(SESSION_COOKIE) in SESSIONS:
-        return RedirectResponse('/dashboard', status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse('/workspace', status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse('/login', status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -554,7 +785,7 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
         )
 
     user = SessionUser(username=record.username, role=record.role)
-    response = RedirectResponse('/dashboard', status_code=status.HTTP_303_SEE_OTHER)
+    response = RedirectResponse('/workspace', status_code=status.HTTP_303_SEE_OTHER)
     create_session(response, user)
     repository.add_log(username, 'login', 'User logged in')
     return response
@@ -597,6 +828,37 @@ def get_markdown_document(doc_name: str, user: SessionUser = Depends(current_use
     }
 
 
+@app.get('/workspace', response_class=HTMLResponse)
+def workspace(
+    request: Request,
+    dataset_id: int | None = Query(default=None),
+    input_kind: str | None = Query(default=None),
+    user: SessionUser = Depends(current_user),
+) -> HTMLResponse:
+    datasets, ready_datasets, input_kind_options, selected_dataset = build_dataset_view_state(dataset_id, input_kind)
+    has_processing = any(dataset['status'] in {'queued', 'processing'} for dataset in datasets)
+    workspace_logs = repository.list_workspace_logs(selected_dataset['id'] if selected_dataset else None)
+    for log in workspace_logs:
+        log['summary'] = describe_workspace_log_entry(log)
+        log['log_type'] = classify_workspace_log_entry(log)
+
+    return render_template(
+        request,
+        'workspace.html',
+        {
+            'user': user,
+            'datasets': datasets,
+            'ready_datasets': ready_datasets,
+            'selected_dataset': selected_dataset,
+            'input_kind': input_kind,
+            'input_kind_options': input_kind_options,
+            'workspace_logs': workspace_logs,
+            'error': None,
+            'has_processing': has_processing,
+        },
+    )
+
+
 @app.get('/dashboard', response_class=HTMLResponse)
 def dashboard(
     request: Request,
@@ -604,12 +866,9 @@ def dashboard(
     input_kind: str | None = Query(default=None),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
-    datasets = [serialize_dataset_row(row) for row in repository.list_datasets()]
-    ready_datasets = [dataset for dataset in datasets if dataset['is_ready']]
-    input_kind_options = sorted({dataset.get('dataset_kind') or 'generic' for dataset in datasets})
-    selected_dataset = choose_selected_dataset(datasets, dataset_id, input_kind)
-    analysis, analyses, selected_metrics, filter_options, analysis_error, analysis_loaded = build_dashboard_payload(selected_dataset, request)
-    has_processing = any(dataset['status'] in {'queued', 'processing'} for dataset in datasets)
+    datasets, ready_datasets, input_kind_options, selected_dataset = build_dataset_view_state(dataset_id, input_kind)
+    selected_dataset = enrich_selected_dataset_for_dashboard(selected_dataset)
+    analysis, analyses, selected_metrics, filter_options, analysis_error, analysis_loaded = build_dashboard_payload(selected_dataset, request, user.username)
 
     return render_template(
         request,
@@ -623,15 +882,19 @@ def dashboard(
             'analyses': analyses,
             'analysis_loaded': analysis_loaded,
             'selected_metrics': selected_metrics,
+            'selected_date_from': request.query_params.get('date_from') or '',
+            'selected_date_to': request.query_params.get('date_to') or '',
+            'selected_aggregation': request.query_params.get('aggregation') or (selected_dataset.get('default_aggregation') if selected_dataset else 'all') or 'all',
+            'aggregation_overrides': parse_aggregation_overrides(request.query_params.get('aggregation_overrides') or ''),
+            'selected_cdf_grouping': request.query_params.get('cdf_grouping') or 'all',
+            'cdf_overrides': parse_cdf_overrides(request.query_params.get('cdf_overrides') or ''),
             'filter_options': filter_options,
             'input_kind': input_kind,
             'input_kind_options': input_kind_options,
             'filter_dimensions': [
                 dimension for dimension in FILTER_DIMENSIONS_BY_KIND.get((selected_dataset or {}).get('dataset_kind') or 'generic', FILTER_DIMENSIONS)
-                if filter_options.get(dimension)
             ],
             'error': analysis_error,
-            'has_processing': has_processing,
         },
     )
 
@@ -650,19 +913,19 @@ async def upload_dataset(
     user: SessionUser = Depends(current_user),
 ) -> Response:
     if not dataset_files:
+        datasets = [serialize_dataset_row(row) for row in repository.list_datasets()]
         return render_template(
             request,
-            'dashboard.html',
+            'workspace.html',
             {
                 'user': user,
-                'datasets': [serialize_dataset_row(row) for row in repository.list_datasets()],
+                'datasets': datasets,
+                'ready_datasets': [dataset for dataset in datasets if dataset['is_ready']],
                 'selected_dataset': None,
-                'analysis': None,
-                'filter_options': {},
-                'filter_dimensions': [],
-                'input_kind_options': sorted({(serialize_dataset_row(row).get('dataset_kind') or 'generic') for row in repository.list_datasets()}),
+                'workspace_logs': repository.list_workspace_logs(),
+                'input_kind_options': sorted({(dataset.get('dataset_kind') or 'generic') for dataset in datasets}),
                 'input_kind': None,
-                'has_processing': any(serialize_dataset_row(row)['status'] in {'queued', 'processing'} for row in repository.list_datasets()),
+                'has_processing': any(dataset['status'] in {'queued', 'processing'} for dataset in datasets),
                 'error': 'No files were provided.',
             },
             status_code=400,
@@ -673,19 +936,19 @@ async def upload_dataset(
         if Path(dataset_file.filename or '').suffix.lower() not in settings.allowed_extensions
     })
     if invalid_extensions:
+        datasets = [serialize_dataset_row(row) for row in repository.list_datasets()]
         return render_template(
             request,
-            'dashboard.html',
+            'workspace.html',
             {
                 'user': user,
-                'datasets': [serialize_dataset_row(row) for row in repository.list_datasets()],
+                'datasets': datasets,
+                'ready_datasets': [dataset for dataset in datasets if dataset['is_ready']],
                 'selected_dataset': None,
-                'analysis': None,
-                'filter_options': {},
-                'filter_dimensions': [],
-                'input_kind_options': sorted({(serialize_dataset_row(row).get('dataset_kind') or 'generic') for row in repository.list_datasets()}),
+                'workspace_logs': repository.list_workspace_logs(),
+                'input_kind_options': sorted({(dataset.get('dataset_kind') or 'generic') for dataset in datasets}),
                 'input_kind': None,
-                'has_processing': any(serialize_dataset_row(row)['status'] in {'queued', 'processing'} for row in repository.list_datasets()),
+                'has_processing': any(dataset['status'] in {'queued', 'processing'} for dataset in datasets),
                 'error': f"Unsupported file type: {', '.join(invalid_extensions)}",
             },
             status_code=400,
@@ -701,8 +964,8 @@ async def upload_dataset(
         queued_dataset_ids.append(dataset_id)
 
     if not queued_dataset_ids:
-        return RedirectResponse('/dashboard', status_code=status.HTTP_303_SEE_OTHER)
-    return RedirectResponse(f'/dashboard?dataset_id={queued_dataset_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse('/workspace', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(f'/workspace?dataset_id={queued_dataset_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/dashboard/retry/{dataset_id}')
@@ -715,7 +978,7 @@ def retry_dataset(dataset_id: int, background_tasks: BackgroundTasks, user: Sess
         raise HTTPException(status_code=400, detail='Only failed or stopped datasets can be retried')
     enqueue_dataset_processing(background_tasks, dataset_id, Path(dataset_payload['stored_path']), user.username)
     repository.add_log(user.username, 'retry_dataset', json.dumps({'dataset_id': dataset_id, 'file': dataset_payload['file_name']}))
-    return RedirectResponse(f'/dashboard?dataset_id={dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(f'/workspace?dataset_id={dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/dashboard/stop/{dataset_id}')
@@ -734,7 +997,7 @@ def stop_dataset(dataset_id: int, user: SessionUser = Depends(current_user)) -> 
         processed_at=now_iso(),
     )
     repository.add_log(user.username, 'stop_dataset_requested', json.dumps({'dataset_id': dataset_id, 'file': dataset_payload['file_name']}))
-    return RedirectResponse(f'/dashboard?dataset_id={dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(f'/workspace?dataset_id={dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/dashboard/delete/{dataset_id}')
@@ -760,7 +1023,7 @@ def delete_dataset(dataset_id: int, user: SessionUser = Depends(current_user)) -
     for key in stale_dataset_keys:
         DATAFRAME_CACHE.pop(key, None)
     repository.add_log(user.username, 'delete_dataset', json.dumps({'dataset_id': dataset_id, 'file': deleted['file_name']}))
-    return RedirectResponse('/dashboard', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse('/workspace', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/dashboard/analyze', response_class=HTMLResponse)
@@ -926,3 +1189,6 @@ def delete_user_account(
 
 
 templates.env.globals['format_extra_filters'] = format_extra_filters
+templates.env.globals['format_aggregation_overrides'] = format_aggregation_overrides
+templates.env.globals['format_cdf_overrides'] = format_cdf_overrides
+templates.env.globals['format_aggregation_label'] = format_aggregation_label

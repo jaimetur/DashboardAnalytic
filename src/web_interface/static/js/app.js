@@ -1,14 +1,38 @@
 function drawLineChart(svg, labels, series, width, height, padding) {
-  const minX = Math.min(...labels);
-  const maxX = Math.max(...labels);
+  const palette = ['#0b7a75', '#dd653e', '#245a96', '#b84d3a', '#6d46a8', '#228a5d', '#c78b1d', '#4d6a88'];
+  const seriesCollection = Array.isArray(series) && series.length > 0 && typeof series[0] === 'object' && Array.isArray(series[0].series)
+    ? series
+    : [{name: 'CDF', labels, series}];
+  const flatLabels = seriesCollection.flatMap((item) => item.labels || []);
+  const flatSeries = seriesCollection.flatMap((item) => item.series || []);
+  const minX = Math.min(...flatLabels);
+  const maxX = Math.max(...flatLabels);
+  const maxY = Math.max(...flatSeries, 1);
+  const legendHeight = seriesCollection.length > 1 ? 28 : 0;
+  const innerTop = padding + legendHeight;
   const scaleX = (value) => padding + ((value - minX) / ((maxX - minX) || 1)) * (width - padding * 2);
-  const scaleY = (value) => height - padding - value * (height - padding * 2);
-  const points = labels.map((label, index) => `${scaleX(label)},${scaleY(series[index])}`).join(' ');
+  const scaleY = (value) => height - padding - (value / maxY) * (height - padding - innerTop);
+  const lines = seriesCollection.map((item, index) => {
+    const color = palette[index % palette.length];
+    const points = (item.labels || []).map((label, pointIndex) => `${scaleX(label)},${scaleY((item.series || [])[pointIndex])}`).join(' ');
+    return `<polyline fill="none" stroke="${color}" stroke-width="3" points="${points}" />`;
+  }).join('');
+  const legend = seriesCollection.length > 1
+    ? seriesCollection.map((item, index) => {
+        const color = palette[index % palette.length];
+        const x = padding + (index % 3) * 170;
+        const y = 18 + Math.floor(index / 3) * 18;
+        return `
+          <circle cx="${x}" cy="${y}" r="5" fill="${color}"></circle>
+          <text x="${x + 10}" y="${y + 4}" fill="#526371" font-size="11">${String(item.name).slice(0, 20)}</text>
+        `;
+      }).join('')
+    : `<text x="${padding}" y="18" fill="#526371">CDF</text>`;
   svg.innerHTML = `
     <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" stroke="#9ab0bc" />
-    <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}" stroke="#9ab0bc" />
-    <polyline fill="none" stroke="#0b7a75" stroke-width="3" points="${points}" />
-    <text x="${padding}" y="18" fill="#526371">CDF</text>
+    <line x1="${padding}" y1="${innerTop}" x2="${padding}" y2="${height - padding}" stroke="#9ab0bc" />
+    ${legend}
+    ${lines}
   `;
 }
 
@@ -21,8 +45,12 @@ function drawBarChart(svg, labels, series, width, height, padding) {
     const x = padding + index * barWidth + 8;
     const y = height - padding - scaledHeight;
     const textX = x + Math.max(barWidth - 16, 24) / 2;
+    const valueLabel = Number.isFinite(Number(value)) ? Number(value).toFixed(Math.abs(Number(value)) >= 100 ? 0 : 2).replace(/\.00$/, '') : String(value);
+    const valueY = scaledHeight > 28 ? y + 18 : Math.max(y - 8, padding + 12);
+    const valueFill = scaledHeight > 28 ? 'rgba(255,255,255,0.96)' : '#334550';
     return `
       <rect x="${x}" y="${y}" width="${Math.max(barWidth - 16, 24)}" height="${scaledHeight}" rx="10" fill="#dd653e"></rect>
+      <text x="${textX}" y="${valueY}" text-anchor="middle" fill="${valueFill}" font-size="11" font-weight="700">${valueLabel}</text>
       <text x="${textX}" y="${height - 10}" text-anchor="middle" fill="#526371" font-size="11">${String(label).slice(0, 12)}</text>
     `;
   }).join('');
@@ -38,7 +66,9 @@ function drawChart(container) {
   const svg = container.querySelector('.chart-svg');
   const labels = payload.labels || [];
   const series = payload.series || [];
-  if (!svg || labels.length === 0 || series.length === 0) {
+  const seriesCollection = payload.series_collection || [];
+  const hasLineData = (labels.length > 0 && series.length > 0) || seriesCollection.length > 0;
+  if (!svg || (payload.type === 'line' ? !hasLineData : (labels.length === 0 || series.length === 0))) {
     if (svg) {
       svg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="#526371">No chart data available</text>';
     }
@@ -51,7 +81,7 @@ function drawChart(container) {
     drawBarChart(svg, labels, series, width, height, padding);
     return;
   }
-  drawLineChart(svg, labels, series, width, height, padding);
+  drawLineChart(svg, labels, seriesCollection.length > 0 ? seriesCollection : series, width, height, padding);
 }
 
 document.querySelectorAll('[data-chart]').forEach(drawChart);
@@ -78,6 +108,337 @@ const filePickerInput = document.querySelector('[data-file-picker-input]');
 const filePickerText = document.querySelector('[data-file-picker-text]');
 const inputKindSelect = document.querySelector('[data-input-kind-select]');
 const datasetSelect = document.querySelector('[data-dataset-select]');
+const logTypeFilter = document.querySelector('[data-log-type-filter]');
+const persistencePathnames = new Set(['/dashboard', '/admin']);
+const dashboardStateKey = 'dashboard-analytic:/dashboard:last-query';
+const activeDatasetStateKey = 'dashboard-analytic:active-dataset';
+
+function hasMeaningfulDashboardState(params) {
+  if (!params) return false;
+  if (String(params.get('load') || '') === '1') return true;
+  for (const [key, value] of params.entries()) {
+    if (key === 'dataset_id' || key === 'input_kind') continue;
+    if (String(value || '').trim()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function persistDashboardState(params) {
+  if (!hasMeaningfulDashboardState(params)) return;
+  try {
+    window.localStorage.setItem(dashboardStateKey, params.toString());
+  } catch (_error) {
+    // Ignore storage failures.
+  }
+}
+
+function persistActiveDatasetState(params) {
+  const datasetId = String(params.get('dataset_id') || '').trim();
+  if (!datasetId) return;
+  const inputKind = String(params.get('input_kind') || '').trim();
+  try {
+    window.localStorage.setItem(activeDatasetStateKey, JSON.stringify({
+      dataset_id: datasetId,
+      input_kind: inputKind,
+    }));
+  } catch (_error) {
+    // Ignore storage failures.
+  }
+}
+
+function restoreActiveDatasetState() {
+  try {
+    const rawValue = window.localStorage.getItem(activeDatasetStateKey);
+    if (!rawValue) return null;
+    const parsed = JSON.parse(rawValue);
+    if (!parsed || !parsed.dataset_id) return null;
+    return {
+      dataset_id: String(parsed.dataset_id),
+      input_kind: String(parsed.input_kind || ''),
+    };
+  } catch (_error) {
+    return null;
+  }
+}
+
+function buildDashboardParamsFromForm(form) {
+  const params = new URLSearchParams();
+  const formData = new FormData(form);
+  for (const [key, value] of formData.entries()) {
+    if (value == null) continue;
+    const normalized = String(value);
+    if (!normalized.trim()) continue;
+    params.append(key, normalized);
+  }
+  form.querySelectorAll('select[multiple][name]').forEach((select) => {
+    const enabledOptions = Array.from(select.options).filter((option) => !option.disabled);
+    const selectedCount = enabledOptions.filter((option) => option.selected).length;
+    if (enabledOptions.length > 0 && selectedCount === 0) {
+      params.append('__empty_filter', select.name);
+    }
+  });
+  return params;
+}
+
+function parseAggregationOverrides(rawValue) {
+  const overrides = new Map();
+  String(rawValue || '')
+    .split(';')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .forEach((entry) => {
+      const separator = entry.indexOf('=');
+      if (separator <= 0) return;
+      const metric = entry.slice(0, separator).trim();
+      const aggregation = entry.slice(separator + 1).trim();
+      if (metric && aggregation) {
+        overrides.set(metric, aggregation);
+      }
+    });
+  return overrides;
+}
+
+function formatAggregationOverrides(overrides) {
+  return Array.from(overrides.entries())
+    .filter(([metric, aggregation]) => metric && aggregation)
+    .map(([metric, aggregation]) => `${metric}=${aggregation}`)
+    .join(';');
+}
+
+function canPersistControl(control) {
+  if (!control || !persistencePathnames.has(window.location.pathname)) return false;
+  if (!control.name || control.disabled) return false;
+  const tagName = String(control.tagName || '').toLowerCase();
+  const type = String(control.type || '').toLowerCase();
+  if (tagName === 'input' && ['hidden', 'file', 'submit', 'button', 'image', 'reset'].includes(type)) return false;
+  return ['input', 'select', 'textarea'].includes(tagName);
+}
+
+function buildPersistenceKey(control) {
+  const explicitForm = control.getAttribute('form');
+  const ownerForm = control.form;
+  const formKey = explicitForm || ownerForm?.id || ownerForm?.getAttribute('action') || 'standalone';
+  return `dashboard-analytic:${window.location.pathname}:${formKey}:${control.name}`;
+}
+
+function serializeControlValue(control) {
+  if (control.tagName === 'SELECT' && control.multiple) {
+    return JSON.stringify(Array.from(control.selectedOptions).map((option) => option.value));
+  }
+  if (String(control.type || '').toLowerCase() === 'checkbox') {
+    return JSON.stringify(Boolean(control.checked));
+  }
+  if (String(control.type || '').toLowerCase() === 'radio') {
+    return JSON.stringify(control.checked ? control.value : null);
+  }
+  return JSON.stringify(control.value);
+}
+
+function restoreControlValue(control, rawValue) {
+  let parsedValue;
+  try {
+    parsedValue = JSON.parse(rawValue);
+  } catch (_error) {
+    return;
+  }
+
+  if (control.tagName === 'SELECT' && control.multiple) {
+    const selectedValues = new Set(Array.isArray(parsedValue) ? parsedValue.map(String) : []);
+    Array.from(control.options).forEach((option) => {
+      option.selected = selectedValues.has(String(option.value));
+    });
+    return;
+  }
+  if (String(control.type || '').toLowerCase() === 'checkbox') {
+    control.checked = Boolean(parsedValue);
+    return;
+  }
+  if (String(control.type || '').toLowerCase() === 'radio') {
+    control.checked = parsedValue !== null && String(control.value) === String(parsedValue);
+    return;
+  }
+  control.value = parsedValue == null ? '' : String(parsedValue);
+}
+
+function queryAlreadyControlsValue(control) {
+  if (window.location.pathname !== '/dashboard') return false;
+  const params = new URLSearchParams(window.location.search);
+  return params.has(control.name);
+}
+
+function setupPersistentControls() {
+  document.querySelectorAll('input[name], select[name], textarea[name]').forEach((control) => {
+    if (!canPersistControl(control)) return;
+    const key = buildPersistenceKey(control);
+    const storedValue = window.localStorage.getItem(key);
+    if (storedValue !== null && !queryAlreadyControlsValue(control)) {
+      restoreControlValue(control, storedValue);
+    }
+
+    const persist = () => {
+      try {
+        window.localStorage.setItem(key, serializeControlValue(control));
+      } catch (_error) {
+        // Ignore storage quota / privacy mode failures.
+      }
+    };
+
+    control.addEventListener('change', persist);
+    control.addEventListener('input', persist);
+  });
+}
+
+function setupPersistentPanelState() {
+  document.querySelectorAll('details[data-panel-state-key]').forEach((panel) => {
+    const stateKey = `dashboard-analytic:panel:${panel.dataset.panelStateKey}`;
+    const storedValue = window.localStorage.getItem(stateKey);
+    if (storedValue !== null) {
+      panel.open = storedValue === 'open';
+    }
+
+    panel.addEventListener('toggle', () => {
+      try {
+        window.localStorage.setItem(stateKey, panel.open ? 'open' : 'closed');
+      } catch (_error) {
+        // Ignore storage failures.
+      }
+    });
+  });
+}
+
+function setupCustomMultiSelects() {
+  document.querySelectorAll('select[multiple]').forEach((select) => {
+    if (select.dataset.multiselectReady === '1') return;
+    select.dataset.multiselectReady = '1';
+    select.classList.add('multiselect-native');
+
+    const shell = document.createElement('div');
+    shell.className = 'multiselect-shell';
+
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'multiselect-trigger';
+    trigger.setAttribute('aria-expanded', 'false');
+
+    const triggerLabel = document.createElement('span');
+    triggerLabel.className = 'multiselect-trigger-label';
+
+    const triggerChip = document.createElement('span');
+    triggerChip.className = 'multiselect-trigger-chip';
+
+    trigger.appendChild(triggerLabel);
+    trigger.appendChild(triggerChip);
+
+    const menu = document.createElement('div');
+    menu.className = 'multiselect-menu';
+    menu.hidden = true;
+
+    const actionButton = document.createElement('button');
+    actionButton.type = 'button';
+    actionButton.className = 'multiselect-action';
+    actionButton.textContent = 'Select All / None';
+    menu.appendChild(actionButton);
+
+    const syncTrigger = () => {
+      const enabledOptions = Array.from(select.options).filter((option) => !option.disabled);
+      const selectedOptions = enabledOptions.filter((option) => option.selected).map((option) => option.textContent?.trim()).filter(Boolean);
+      const totalEnabled = enabledOptions.length;
+      if (totalEnabled === 0) {
+        triggerLabel.textContent = 'No values';
+      } else if (selectedOptions.length === 0) {
+        triggerLabel.textContent = 'No values selected';
+      } else if (totalEnabled > 0 && selectedOptions.length === totalEnabled) {
+        triggerLabel.textContent = 'All values';
+      } else if (selectedOptions.length === 1) {
+        triggerLabel.textContent = selectedOptions[0];
+      } else {
+        triggerLabel.textContent = `${selectedOptions.length}/${totalEnabled} selected`;
+      }
+      trigger.setAttribute('aria-expanded', String(!menu.hidden));
+    };
+
+    const dispatchNativeChange = () => {
+      select.dispatchEvent(new Event('change', {bubbles: true}));
+      select.dispatchEvent(new Event('input', {bubbles: true}));
+      syncTrigger();
+    };
+
+    const selectAllOrNone = () => {
+      const options = Array.from(select.options).filter((option) => !option.disabled);
+      const shouldSelectAll = options.some((option) => !option.selected);
+      options.forEach((option) => {
+        option.selected = shouldSelectAll;
+      });
+      Array.from(menu.querySelectorAll('input[type="checkbox"][data-option-value]')).forEach((checkbox) => {
+        if (!checkbox.disabled) {
+          checkbox.checked = shouldSelectAll;
+        }
+      });
+      dispatchNativeChange();
+    };
+
+    actionButton.addEventListener('click', selectAllOrNone);
+
+    Array.from(select.options).forEach((option) => {
+      const optionLabel = document.createElement('label');
+      optionLabel.className = 'multiselect-option';
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = option.selected;
+      checkbox.setAttribute('data-option-value', option.value);
+      checkbox.disabled = option.disabled;
+
+      const text = document.createElement('span');
+      text.textContent = option.textContent || option.value;
+
+      checkbox.addEventListener('change', () => {
+        if (option.disabled) return;
+        option.selected = checkbox.checked;
+        dispatchNativeChange();
+      });
+
+      if (option.disabled) {
+        optionLabel.classList.add('is-disabled');
+        optionLabel.title = 'This metric is not selectable because the dataset has no numeric values for it.';
+      }
+
+      optionLabel.appendChild(checkbox);
+      optionLabel.appendChild(text);
+      menu.appendChild(optionLabel);
+    });
+
+    const syncCheckboxes = () => {
+      Array.from(menu.querySelectorAll('input[type="checkbox"][data-option-value]')).forEach((checkbox) => {
+        const option = Array.from(select.options).find((item) => item.value === checkbox.getAttribute('data-option-value'));
+        if (option) {
+          checkbox.checked = option.selected;
+        }
+      });
+      syncTrigger();
+    };
+
+    trigger.addEventListener('click', () => {
+      menu.hidden = !menu.hidden;
+      syncTrigger();
+    });
+
+    document.addEventListener('click', (event) => {
+      if (!shell.contains(event.target)) {
+        menu.hidden = true;
+        syncTrigger();
+      }
+    });
+
+    select.addEventListener('change', syncCheckboxes);
+    select.after(shell);
+    shell.appendChild(trigger);
+    shell.appendChild(menu);
+    syncCheckboxes();
+  });
+}
 
 function hideLoadingOverlay() {
   if (!loadingOverlay) return;
@@ -95,6 +456,41 @@ function showLoadingOverlay(label) {
 
 hideLoadingOverlay();
 window.addEventListener('pageshow', hideLoadingOverlay);
+
+if (window.location.pathname === '/dashboard') {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('dataset_id')) {
+    persistActiveDatasetState(params);
+  }
+  if (hasMeaningfulDashboardState(params)) {
+    persistDashboardState(params);
+  } else if (!params.has('dataset_id')) {
+    const persistedDashboardQuery = window.localStorage.getItem(dashboardStateKey);
+    if (persistedDashboardQuery) {
+      window.location.replace(`/dashboard?${persistedDashboardQuery}`);
+    }
+  }
+}
+
+if (window.location.pathname === '/workspace') {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('dataset_id')) {
+    persistActiveDatasetState(params);
+  } else {
+    const activeDataset = restoreActiveDatasetState();
+    if (activeDataset?.dataset_id) {
+      params.set('dataset_id', activeDataset.dataset_id);
+      if (activeDataset.input_kind) {
+        params.set('input_kind', activeDataset.input_kind);
+      }
+      window.location.replace(`/workspace?${params.toString()}`);
+    }
+  }
+}
+
+setupPersistentControls();
+setupPersistentPanelState();
+setupCustomMultiSelects();
 
 document.querySelectorAll('form[data-loading-label]').forEach((form) => {
   form.addEventListener('submit', () => {
@@ -174,6 +570,14 @@ if (filePickerInput && filePickerText) {
 }
 
 if (inputKindSelect && datasetSelect) {
+  const persistControlValue = (control, value) => {
+    try {
+      window.localStorage.setItem(buildPersistenceKey(control), JSON.stringify(value));
+    } catch (_error) {
+      // Ignore storage failures.
+    }
+  };
+
   const syncDatasetOptions = () => {
     const selectedKind = String(inputKindSelect.value || '');
     const options = Array.from(datasetSelect.options);
@@ -197,7 +601,162 @@ if (inputKindSelect && datasetSelect) {
 
   inputKindSelect.addEventListener('change', syncDatasetOptions);
   syncDatasetOptions();
+
+  const persistActiveDatasetContext = () => {
+    const params = new URLSearchParams(window.location.search);
+    const currentDatasetId = params.get('dataset_id') || datasetSelect.value;
+    if (!currentDatasetId) return;
+
+    const matchingOption = Array.from(datasetSelect.options).find((option) => String(option.value) === String(currentDatasetId));
+    if (!matchingOption) return;
+
+    persistControlValue(datasetSelect, String(currentDatasetId));
+    const datasetKind = String(matchingOption.dataset.datasetKind || '');
+    if (datasetKind) {
+      persistControlValue(inputKindSelect, datasetKind);
+    }
+    const datasetParams = new URLSearchParams();
+    datasetParams.set('dataset_id', String(currentDatasetId));
+    if (datasetKind) {
+      datasetParams.set('input_kind', datasetKind);
+    }
+    persistActiveDatasetState(datasetParams);
+  };
+
+  const maybeRestoreLastDataset = () => {
+    if (window.location.pathname !== '/dashboard') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('dataset_id')) {
+      persistActiveDatasetContext();
+      return;
+    }
+    const persistedDatasetId = window.localStorage.getItem(buildPersistenceKey(datasetSelect));
+    if (!persistedDatasetId) return;
+
+    let restoredValue;
+    try {
+      restoredValue = JSON.parse(persistedDatasetId);
+    } catch (_error) {
+      return;
+    }
+    if (!restoredValue) return;
+
+    const matchingOption = Array.from(datasetSelect.options).find((option) => String(option.value) === String(restoredValue));
+    if (!matchingOption) return;
+
+    params.set('dataset_id', String(restoredValue));
+    const matchingKind = String(matchingOption.dataset.datasetKind || '');
+    if (matchingKind) {
+      params.set('input_kind', matchingKind);
+    } else if (inputKindSelect.value) {
+      params.set('input_kind', String(inputKindSelect.value));
+    }
+    window.location.replace(`/dashboard?${params.toString()}`);
+  };
+
+  persistActiveDatasetContext();
+  maybeRestoreLastDataset();
 }
+
+if (logTypeFilter) {
+  const syncLogRows = () => {
+    const selectedType = String(logTypeFilter.value || 'Error');
+    document.querySelectorAll('[data-log-row]').forEach((row) => {
+      const rowType = String(row.getAttribute('data-log-type') || 'Info');
+      row.hidden = selectedType !== 'all' && rowType !== selectedType;
+    });
+  };
+
+  logTypeFilter.addEventListener('change', syncLogRows);
+  syncLogRows();
+}
+
+document.querySelectorAll('[data-chart-aggregation-select]').forEach((select) => {
+  select.addEventListener('change', () => {
+    const metric = String(select.dataset.metric || '').trim();
+    if (!metric) return;
+    const selectedAggregation = String(select.value || 'all').trim();
+    const globalAggregation = String(select.dataset.globalAggregation || 'all').trim();
+    const overrides = parseAggregationOverrides(select.dataset.currentOverrides || '');
+    if (!selectedAggregation || selectedAggregation === 'all' || selectedAggregation === globalAggregation) {
+      overrides.delete(metric);
+    } else {
+      overrides.set(metric, selectedAggregation);
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const serialized = formatAggregationOverrides(overrides);
+    if (serialized) {
+      params.set('aggregation_overrides', serialized);
+    } else {
+      params.delete('aggregation_overrides');
+    }
+    params.set('load', '1');
+    showLoadingOverlay(`Updating ${metric} comparison`);
+    window.location.search = params.toString();
+  });
+});
+
+document.querySelectorAll('[data-summary-control]').forEach((node) => {
+  ['click', 'mousedown', 'mouseup', 'keydown'].forEach((eventName) => {
+    node.addEventListener(eventName, (event) => {
+      event.stopPropagation();
+    });
+  });
+});
+
+document.querySelectorAll('[data-global-aggregation-select]').forEach((select) => {
+  select.addEventListener('change', () => {
+    const form = select.form || document.getElementById('dashboard-filters-form');
+    if (!form) return;
+    const params = buildDashboardParamsFromForm(form);
+    params.set('aggregation', String(select.value || 'all'));
+    params.set('load', '1');
+    params.delete('aggregation_overrides');
+    persistDashboardState(params);
+    showLoadingOverlay('Updating all chart aggregations');
+    window.location.search = params.toString();
+  });
+});
+
+document.querySelectorAll('[data-global-cdf-grouping-select]').forEach((select) => {
+  select.addEventListener('change', () => {
+    const form = select.form || document.getElementById('dashboard-filters-form');
+    if (!form) return;
+    const params = buildDashboardParamsFromForm(form);
+    params.set('cdf_grouping', String(select.value || 'all'));
+    params.set('load', '1');
+    params.delete('cdf_overrides');
+    persistDashboardState(params);
+    showLoadingOverlay('Updating all CDF comparisons');
+    window.location.search = params.toString();
+  });
+});
+
+document.querySelectorAll('[data-chart-cdf-grouping-select]').forEach((select) => {
+  select.addEventListener('change', () => {
+    const metric = String(select.dataset.metric || '').trim();
+    if (!metric) return;
+    const selectedGrouping = String(select.value || 'all').trim();
+    const globalGrouping = String(select.dataset.globalCdfGrouping || 'all').trim();
+    const overrides = parseAggregationOverrides(select.dataset.currentOverrides || '');
+    if (!selectedGrouping || selectedGrouping === 'all' || selectedGrouping === globalGrouping) {
+      overrides.delete(metric);
+    } else {
+      overrides.set(metric, selectedGrouping);
+    }
+    const params = new URLSearchParams(window.location.search);
+    const serialized = formatAggregationOverrides(overrides);
+    if (serialized) {
+      params.set('cdf_overrides', serialized);
+    } else {
+      params.delete('cdf_overrides');
+    }
+    params.set('load', '1');
+    showLoadingOverlay(`Updating ${metric} CDF comparison`);
+    window.location.search = params.toString();
+  });
+});
 
 const queueNode = document.querySelector('[data-queue-status-url]');
 if (queueNode) {
@@ -216,6 +775,7 @@ if (queueNode) {
     const progressLabel = row.querySelector('[data-queue-progress-label]');
     const updated = row.querySelector('[data-queue-updated]');
     const actions = row.querySelector('.queue-actions');
+    let errorNode = row.querySelector('[data-queue-error]');
 
     if (kind) kind.textContent = dataset.input_kind_label || 'Other';
     if (rows) rows.textContent = String(dataset.row_count || 0);
@@ -229,6 +789,19 @@ if (queueNode) {
     }
     if (progressLabel) progressLabel.textContent = `${dataset.progress || 0}%`;
     if (updated) updated.textContent = dataset.updated_at || dataset.uploaded_at || '';
+    if (dataset.last_error && (dataset.status === 'failed' || dataset.status === 'stopped')) {
+      if (!errorNode && progressLabel && progressLabel.parentElement) {
+        errorNode = document.createElement('p');
+        errorNode.className = 'dataset-error';
+        errorNode.setAttribute('data-queue-error', '');
+        progressLabel.parentElement.appendChild(errorNode);
+      }
+      if (errorNode) {
+        errorNode.textContent = dataset.last_error;
+      }
+    } else if (errorNode) {
+      errorNode.remove();
+    }
     if (actions) {
       const openHref = `/dashboard?dataset_id=${dataset.id}`;
       if (dataset.status === 'ready') {

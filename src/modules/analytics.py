@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from src.modules.ingestion import DatasetSummary, infer_dataset_kind
-from src.utils.charts import build_chart_payload
+from src.utils.charts import build_chart_payload, build_multi_series_chart_payload
 
 
 @dataclass(slots=True)
@@ -16,6 +16,8 @@ class AnalysisResult:
     selected_metric: str
     filters: dict[str, Any]
     kpis: dict[str, Any]
+    global_kpis: dict[str, Any]
+    metric_kpis: dict[str, Any]
     cdf_chart: dict[str, Any]
     comparison_chart: dict[str, Any]
     table_rows: list[dict[str, Any]]
@@ -29,11 +31,12 @@ DEFAULT_METRICS: dict[str, list[str]] = {
     'generic': ['quality_score'],
 }
 AGGREGATION_CANDIDATES: dict[str, list[str]] = {
-    'voice': ['operator', 'session_type', 'region', 'vendor', 'technology_primary', 'source_sheet', 'market', 'period'],
-    'speech': ['operator', 'session_type', 'region', 'vendor', 'Playing_Technology', 'source_sheet', 'market', 'period'],
-    'data': ['operator', 'test_name', 'direction', 'region', 'vendor', 'Type_of_Test', 'source_sheet', 'market', 'period'],
-    'generic': ['operator', 'market', 'period', 'source_sheet'],
+    'voice': ['operator', 'session_type', 'region', 'city', 'vendor', 'technology_primary', 'source_sheet', 'market', 'period'],
+    'speech': ['operator', 'session_type', 'region', 'city', 'vendor', 'Playing_Technology', 'source_sheet', 'market', 'period'],
+    'data': ['operator', 'test_name', 'direction', 'region', 'city', 'vendor', 'Type_of_Test', 'source_sheet', 'market', 'period'],
+    'generic': ['operator', 'region', 'city', 'market', 'period', 'source_sheet'],
 }
+CDF_COMPARISON_CANDIDATES = ['vendor', 'market', 'operator', 'region', 'city']
 
 
 def _resolve_column(df: pd.DataFrame, requested: str) -> str | None:
@@ -58,8 +61,18 @@ def _coerce_filter_values(raw_value: Any) -> list[str]:
 
 def apply_filters(df: pd.DataFrame, filters: dict[str, Any]) -> pd.DataFrame:
     filtered = df.copy()
+    date_from = filters.get('date_from')
+    date_to = filters.get('date_to')
+    if 'event_start_time' in filtered.columns and (date_from or date_to):
+        event_times = pd.to_datetime(filtered['event_start_time'], errors='coerce')
+        if date_from:
+            filtered = filtered[event_times.dt.date >= pd.to_datetime(date_from).date()]
+            event_times = pd.to_datetime(filtered['event_start_time'], errors='coerce')
+        if date_to:
+            filtered = filtered[event_times.dt.date <= pd.to_datetime(date_to).date()]
+
     for key, raw_value in filters.items():
-        if key in {'aggregation', 'extra_filters'} or raw_value in (None, '', []):
+        if key in {'aggregation', 'extra_filters', 'date_from', 'date_to'} or raw_value in (None, '', []):
             continue
         column = _resolve_column(filtered, key)
         if not column:
@@ -104,7 +117,7 @@ def compute_scorecard(df: pd.DataFrame, metric: str) -> list[dict[str, Any]]:
 
 def _infer_metric(df: pd.DataFrame, requested_metric: str, dataset_kind: str) -> str:
     candidate = _resolve_column(df, requested_metric)
-    if candidate and pd.api.types.is_numeric_dtype(df[candidate]) and pd.to_numeric(df[candidate], errors='coerce').notna().any():
+    if candidate:
         return candidate
     for metric in DEFAULT_METRICS.get(dataset_kind, []) + DEFAULT_METRICS['generic']:
         column = _resolve_column(df, metric)
@@ -127,6 +140,15 @@ def _infer_aggregation(df: pd.DataFrame, requested: str, dataset_kind: str) -> s
         if column and df[column].dropna().nunique() > 1:
             return column
     return None
+
+
+def _infer_cdf_grouping(df: pd.DataFrame, requested: str | None) -> str | None:
+    normalized = str(requested or '').strip()
+    if not normalized or normalized == 'all':
+        return None
+    if normalized not in CDF_COMPARISON_CANDIDATES:
+        return None
+    return _resolve_column(df, normalized)
 
 
 def _round(value: Any, digits: int = 4) -> float | int:
@@ -159,40 +181,51 @@ def _rate(series: pd.Series) -> float:
     return _round(series.fillna(False).astype(bool).mean() * 100, 2)
 
 
-def _build_common_kpis(df: pd.DataFrame, selected_metric: str, dataset_kind: str) -> dict[str, Any]:
+def _selected_count(filters: dict[str, Any], key: str) -> int | None:
+    if key in {'market', 'period'}:
+        selected = filters.get(key)
+    else:
+        selected = (filters.get('extra_filters') or {}).get(key)
+    values = _coerce_filter_values(selected)
+    return len(values) if values else None
+
+
+def _build_global_kpis(df: pd.DataFrame, dataset_kind: str, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+    filters = filters or {}
     kpis: dict[str, Any] = {
         'dataset_kind': dataset_kind,
         'rows': int(len(df.index)),
-        'metric': selected_metric,
-        'operators': int(df['operator'].dropna().nunique()) if 'operator' in df.columns else 0,
-        'regions': int(df['region'].dropna().nunique()) if 'region' in df.columns else 0,
-        'vendors': int(df['vendor'].dropna().nunique()) if 'vendor' in df.columns else 0,
+        'operators': _selected_count(filters, 'operator') if _selected_count(filters, 'operator') is not None else (int(df['operator'].dropna().nunique()) if 'operator' in df.columns else 0),
+        'regions': _selected_count(filters, 'region') if _selected_count(filters, 'region') is not None else (int(df['region'].dropna().nunique()) if 'region' in df.columns else 0),
+        'cities': _selected_count(filters, 'city') if _selected_count(filters, 'city') is not None else (int(df['city'].dropna().nunique()) if 'city' in df.columns else 0),
+        'vendors': _selected_count(filters, 'vendor') if _selected_count(filters, 'vendor') is not None else (int(df['vendor'].dropna().nunique()) if 'vendor' in df.columns else 0),
         'success_rate_pct': _rate(df['success']) if 'success' in df.columns else 0.0,
         'failure_rate_pct': _rate(df['failure']) if 'failure' in df.columns else 0.0,
-        'mean_metric': _series_mean(df, selected_metric),
-        'p90_metric': _series_percentile(df, selected_metric, 90),
     }
+    if 'dropped' in df.columns:
+        kpis['dropped_calls'] = int(df['dropped'].fillna(False).astype(bool).sum())
+        kpis['drop_call_rate_pct'] = _rate(df['dropped'])
+    if 'event_start_time' in df.columns:
+        event_times = pd.to_datetime(df['event_start_time'], errors='coerce').dropna()
+        if not event_times.empty:
+            kpis['date_from'] = event_times.min().date().isoformat()
+            kpis['date_to'] = event_times.max().date().isoformat()
 
     if dataset_kind == 'voice':
         kpis.update({
             'completed_calls': int(df['success'].sum()) if 'success' in df.columns else 0,
-            'dropped_calls': int(df['dropped'].sum()) if 'dropped' in df.columns else 0,
             'disturbed_rate_pct': _rate(df['disturbed']) if 'disturbed' in df.columns else 0.0,
             'impaired_rate_pct': _rate(df['impaired']) if 'impaired' in df.columns else 0.0,
             'avg_setup_time_s': _series_mean(df, 'setup_time_seconds'),
-            'p90_setup_time_s': _series_percentile(df, 'setup_time_seconds', 90),
             'avg_call_duration_s': _series_mean(df, 'duration_seconds'),
-            'avg_polqa': _series_mean(df, 'POLQA_LQ_Avg'),
         })
     elif dataset_kind == 'speech':
         kpis.update({
             'completed_calls': int(df['success'].sum()) if 'success' in df.columns else 0,
             'disturbed_rate_pct': _rate(df['disturbed']) if 'disturbed' in df.columns else 0.0,
             'impaired_rate_pct': _rate(df['impaired']) if 'impaired' in df.columns else 0.0,
-            'avg_lq': _series_mean(df, 'LQ'),
             'avg_jitter_ms': _series_mean(df, 'jitter_ms'),
             'avg_packet_loss_pct': _series_mean(df, 'packet_loss_pct'),
-            'avg_receive_delay_ms': _series_mean(df, 'Receive_Delay'),
             'poor_lq_rate_pct': _round((pd.to_numeric(df.get('LQ'), errors='coerce') < 3.5).fillna(False).mean() * 100, 2) if 'LQ' in df.columns else 0.0,
         })
     elif dataset_kind == 'data':
@@ -203,16 +236,97 @@ def _build_common_kpis(df: pd.DataFrame, selected_metric: str, dataset_kind: str
             dns_success = (success / attempts.replace(0, np.nan)) * 100
         kpis.update({
             'completed_tests': int(df['success'].sum()) if 'success' in df.columns else 0,
-            'avg_mean_data_rate_mbps': _series_mean(df, 'Mean_Data_Rate'),
-            'p90_mean_data_rate_mbps': _series_percentile(df, 'Mean_Data_Rate', 90),
             'avg_access_time_s': _series_mean(df, 'setup_time_seconds'),
             'avg_test_duration_s': _series_mean(df, 'duration_seconds'),
             'avg_dns_success_pct': _round(dns_success.dropna().mean(), 2) if not dns_success.empty else 0.0,
-            'avg_tcp_rtt_ms': _series_mean(df, 'TCP_RTT_Service_Access_Delay'),
-            'avg_video_freezing_s': _series_mean(df, 'VideoStream_Freezing_Time_Sum'),
         })
 
     return kpis
+
+
+def _build_metric_kpis(df: pd.DataFrame, selected_metric: str) -> dict[str, Any]:
+    values = pd.to_numeric(df[selected_metric], errors='coerce').dropna() if selected_metric in df.columns else pd.Series(dtype='float64')
+    if values.empty:
+        return {
+            'metric': selected_metric,
+            'samples': 0,
+            'mean_metric': 0.0,
+            'avg_metric': 0.0,
+            'p10_metric': 0.0,
+            'p90_metric': 0.0,
+            'min_metric': 0.0,
+            'max_metric': 0.0,
+        }
+    return {
+        'metric': selected_metric,
+        'samples': int(values.shape[0]),
+        'mean_metric': _round(values.mean()),
+        'avg_metric': _round(values.mean()),
+        'p10_metric': _round(np.percentile(values, 10)),
+        'p90_metric': _round(np.percentile(values, 90)),
+        'min_metric': _round(values.min()),
+        'max_metric': _round(values.max()),
+    }
+
+
+def _build_cdf_chart(df: pd.DataFrame, metric: str, filters: dict[str, Any], cdf_grouping: str | None) -> dict[str, Any]:
+    metric_values = pd.to_numeric(df[metric], errors='coerce').dropna() if metric in df.columns else pd.Series(dtype='float64')
+    if metric_values.empty:
+        return {'labels': [], 'series': [], 'type': 'line'}
+
+    grouping_column = _infer_cdf_grouping(df, cdf_grouping)
+    if not grouping_column:
+        return build_chart_payload(compute_cdf(metric_values))
+
+    if grouping_column in {'market', 'period'}:
+        selected_groups = _coerce_filter_values(filters.get(grouping_column))
+    else:
+        selected_groups = _coerce_filter_values((filters.get('extra_filters') or {}).get(grouping_column))
+
+    if selected_groups:
+        requested_group_order = [value for value in selected_groups if value]
+    else:
+        requested_group_order = [
+            str(value).strip()
+            for value in df[grouping_column].dropna().tolist()
+            if str(value).strip()
+        ]
+
+    seen: set[str] = set()
+    group_order: list[str] = []
+    for value in requested_group_order:
+        normalized = value.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        group_order.append(value)
+
+    series_collection: list[dict[str, Any]] = []
+    for group_value in group_order[:8]:
+        group_frame = df[df[grouping_column].astype(str).str.strip().str.lower() == str(group_value).strip().lower()]
+        values = pd.to_numeric(group_frame[metric], errors='coerce').dropna() if metric in group_frame.columns else pd.Series(dtype='float64')
+        if values.empty:
+            continue
+        pairs = compute_cdf(values)
+        if not pairs:
+            continue
+        series_collection.append({
+            'name': group_value,
+            'labels': [pair[0] for pair in pairs],
+            'series': [pair[1] for pair in pairs],
+        })
+
+    if not series_collection:
+        return build_chart_payload(compute_cdf(metric_values))
+    if len(series_collection) == 1:
+        only = series_collection[0]
+        return {
+            'labels': [round(float(value), 4) for value in only['labels']],
+            'series': [round(float(value), 4) for value in only['series']],
+            'type': 'line',
+            'legend': [only['name']],
+        }
+    return build_multi_series_chart_payload(series_collection)
 
 
 def _aggregate_table(df: pd.DataFrame, aggregation: str, metric: str, dataset_kind: str) -> list[dict[str, Any]]:
@@ -243,12 +357,16 @@ def _aggregate_table(df: pd.DataFrame, aggregation: str, metric: str, dataset_ki
 
 
 def _top_records(df: pd.DataFrame, metric: str) -> list[dict[str, Any]]:
-    preferred_columns = [
-        column for column in [
-            'operator', 'session_type', 'test_name', 'direction', 'status', 'market', 'period', 'region', 'vendor', metric,
-            'setup_time_seconds', 'duration_seconds', 'throughput_mbps', 'quality_score', 'technology_primary', 'source_sheet',
-        ] if column in df.columns
-    ]
+    preferred_columns: list[str] = []
+    seen: set[str] = set()
+    for column in [
+        'operator', 'session_type', 'test_name', 'direction', 'status', 'market', 'period', 'region', 'vendor', metric,
+        'city',
+        'setup_time_seconds', 'duration_seconds', 'throughput_mbps', 'quality_score', 'technology_primary', 'source_sheet',
+    ]:
+        if column in df.columns and column not in seen:
+            preferred_columns.append(column)
+            seen.add(column)
     rows = df.sort_values(metric, ascending=False).head(25)
     if preferred_columns:
         rows = rows[preferred_columns]
@@ -285,16 +403,19 @@ def build_analysis(df: pd.DataFrame, filters: dict[str, Any], metric: str) -> An
         raise ValueError(f'Metric {selected_metric} does not contain numeric values after filtering')
 
     aggregation = _infer_aggregation(analysis_frame, str(filters.get('aggregation') or ''), dataset_kind)
+    cdf_grouping = _infer_cdf_grouping(analysis_frame, str(filters.get('cdf_grouping') or ''))
     normalized_filters = {**filters, 'aggregation': aggregation or 'all'}
-    cdf_pairs = compute_cdf(metric_series)
+    normalized_filters['cdf_grouping'] = cdf_grouping or 'all'
     table_rows = _aggregate_table(analysis_frame, aggregation, selected_metric, dataset_kind) if aggregation else _top_records(analysis_frame, selected_metric)
 
     return AnalysisResult(
         summary=summary,
         selected_metric=selected_metric,
         filters=normalized_filters,
-        kpis=_build_common_kpis(analysis_frame, selected_metric, dataset_kind),
-        cdf_chart=build_chart_payload(cdf_pairs),
+        kpis=_build_global_kpis(filtered, dataset_kind, normalized_filters),
+        global_kpis=_build_global_kpis(filtered, dataset_kind, normalized_filters),
+        metric_kpis=_build_metric_kpis(analysis_frame, selected_metric),
+        cdf_chart=_build_cdf_chart(analysis_frame, selected_metric, normalized_filters, cdf_grouping),
         comparison_chart=_build_comparison_chart(table_rows, aggregation),
         table_rows=table_rows,
         scorecard=compute_scorecard(analysis_frame, selected_metric),

@@ -1,0 +1,168 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="dashboard-stack spacious-stack">
+  <article class="panel hero-panel upload-panel">
+    <div class="section-head tight-head">
+      <div>
+        <p class="eyebrow">Data Ingestion</p>
+        <h2>Automatic CDR Pipeline</h2>
+      </div>
+      <span class="pill live-pill">Auto profile on upload</span>
+    </div>
+    <p class="lede">Upload a workbook and the platform classifies, processes and prepares it for visualization without asking for manual column mapping.</p>
+    <form class="upload-dropzone" action="/dashboard/upload" method="post" enctype="multipart/form-data" data-loading-label="Uploading and processing dataset">
+      <label class="dropzone-field">
+        <span class="dropzone-title">Drop workbooks or browse</span>
+        <span class="dropzone-copy">Accepted: CSV, XLS, XLSX, XLSM</span>
+        <span class="file-picker-shell">
+          <span class="file-picker-button">Select files</span>
+          <span class="file-picker-text" data-file-picker-text>No files selected</span>
+          <input type="file" name="dataset_files" accept=".csv,.xlsx,.xls,.xlsm" multiple required data-file-picker-input>
+        </span>
+      </label>
+      <button type="submit">Upload and process</button>
+    </form>
+    {% if selected_dataset and selected_dataset.is_ready %}
+    <p class="form-note">Workspace opened from cache. Open the processed dataset in <strong>Dashboard</strong> to work with filters, KPIs and charts.</p>
+    {% endif %}
+    {% if error %}<div class="alert upload-alert">{{ error }}</div>{% endif %}
+  </article>
+
+  <details class="panel collapsible-panel queue-card" open data-panel-state-key="workspace:data-processing" data-queue-status-url="/api/datasets/status" {% if has_processing %}data-queue-poll-ms="3000"{% endif %}>
+    <summary class="collapsible-summary">
+      <div class="section-head tight-head">
+        <div>
+          <p class="eyebrow">Data Processing</p>
+          <h2>Queue and Status</h2>
+        </div>
+        <span class="collapse-chip">Collapse</span>
+      </div>
+    </summary>
+    <div class="table-wrap queue-table-wrap">
+      <table class="queue-table">
+        <thead>
+          <tr>
+            <th>Dataset</th>
+            <th>Input Type</th>
+            <th>Rows</th>
+            <th>Status</th>
+            <th>Progress</th>
+            <th>Updated</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for dataset in datasets %}
+          <tr class="{% if selected_dataset and selected_dataset.id == dataset.id %}active-row{% endif %}" data-dataset-row data-dataset-id="{{ dataset.id }}">
+            <td>
+              <div class="queue-dataset-name" data-queue-file-name>{{ dataset.file_name }}</div>
+              <div class="queue-dataset-path" data-queue-file-path>{{ dataset.stored_path }}</div>
+            </td>
+            <td data-queue-kind>{{ dataset.input_kind_label }}</td>
+            <td data-queue-rows>{{ dataset.row_count or 0 }}</td>
+            <td>
+              <span class="queue-status-pill queue-status-{{ dataset.status }}" data-queue-status-pill>{{ dataset.status_label }}</span>
+            </td>
+            <td>
+              <div class="queue-progress-cell">
+                <div class="progress-shell visual-progress-shell">
+                  <div class="progress-bar status-{{ dataset.status }}" data-queue-progress-bar style="width: {{ dataset.progress }}%"></div>
+                </div>
+                <span data-queue-progress-label>{{ dataset.progress }}%</span>
+                {% if dataset.last_error and dataset.status in ['failed', 'stopped'] %}
+                <p class="dataset-error" data-queue-error>{{ dataset.last_error }}</p>
+                {% endif %}
+              </div>
+            </td>
+            <td data-queue-updated>{{ dataset.updated_at or dataset.uploaded_at }}</td>
+            <td>
+              <div class="queue-actions">
+                {% if dataset.status == 'ready' %}
+                <a class="ghost-link action-link-primary" href="/dashboard?dataset_id={{ dataset.id }}{% if input_kind %}&input_kind={{ input_kind }}{% endif %}">Open</a>
+                <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
+                  <button type="submit" class="danger-button">Delete</button>
+                </form>
+                {% elif dataset.status == 'processing' %}
+                <span class="ghost-link action-link-disabled" aria-disabled="true">Open</span>
+                <form method="post" action="/dashboard/stop/{{ dataset.id }}" data-confirm="Stop processing for '{{ dataset.file_name }}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
+                  <button type="submit" class="danger-button">Stop</button>
+                </form>
+                {% elif dataset.status == 'queued' %}
+                <span class="ghost-link action-link-disabled" aria-disabled="true">Open</span>
+                <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete queued dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
+                  <button type="submit" class="danger-button">Delete</button>
+                </form>
+                {% elif dataset.status in ['failed', 'stopped'] %}
+                <form method="post" action="/dashboard/retry/{{ dataset.id }}" data-loading-label="Retrying dataset processing">
+                  <button type="submit" class="warning-button">Retry</button>
+                </form>
+                <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
+                  <button type="submit" class="danger-button">Delete</button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="7"><article class="empty-state-inline">No datasets available.</article></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel" open data-panel-state-key="workspace:logs">
+    <summary class="collapsible-summary">
+      <div>
+        <p class="eyebrow">Workspace Logs</p>
+        <h2>Execution and Error Trail</h2>
+      </div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <div class="section-head compact-toolbar">
+      <div></div>
+      <label class="logs-filter-control">Type
+        <select data-log-type-filter>
+          <option value="all">All events</option>
+          <option value="Info">Info only</option>
+          <option value="Error" selected>Error only</option>
+        </select>
+      </label>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Date</th>
+            <th>User</th>
+            <th>Type</th>
+            <th>Action</th>
+            <th>Summary</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in workspace_logs %}
+          <tr data-log-row data-log-type="{{ row['log_type'] }}">
+            <td>{{ row['id'] }}</td>
+            <td>{{ row['created_at'] }}</td>
+            <td>{{ row['username'] }}</td>
+            <td><span class="log-type-badge log-type-{{ row['log_type']|lower }}">{{ row['log_type'] }}</span></td>
+            <td>{{ row['action'] }}</td>
+            <td>{{ row['summary'] }}</td>
+            <td><code>{{ row['details_text'] }}</code></td>
+          </tr>
+          {% else %}
+          <tr data-log-empty-row>
+            <td colspan="7"><article class="empty-state-inline">No workspace log entries yet.</article></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+</section>
+{% endblock %}

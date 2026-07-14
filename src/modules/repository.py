@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -74,8 +75,12 @@ class Repository:
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
         try:
             yield conn
             conn.commit()
@@ -108,6 +113,24 @@ class Repository:
 
     def _quote_identifier(self, identifier: str) -> str:
         return '"' + str(identifier).replace('"', '""') + '"'
+
+    def _sqlite_safe_frame(self, df: pd.DataFrame) -> pd.DataFrame:
+        renamed_columns: list[str] = []
+        seen: dict[str, int] = {}
+        for column in df.columns:
+            base = str(column).strip() or 'column'
+            normalized = base.lower()
+            occurrence = seen.get(normalized, 0)
+            if occurrence == 0:
+                renamed_columns.append(base)
+            else:
+                renamed_columns.append(f'{base}__{occurrence + 1}')
+            seen[normalized] = occurrence + 1
+        if renamed_columns == list(df.columns):
+            return df
+        safe_df = df.copy()
+        safe_df.columns = renamed_columns
+        return safe_df
 
     def _cleanup_duplicate_datasets(self, conn: sqlite3.Connection) -> None:
         duplicate_groups = conn.execute(
@@ -239,9 +262,10 @@ class Repository:
 
     def replace_dataset_rows(self, dataset_id: int, df: pd.DataFrame) -> None:
         table_name = self.dataset_rows_table_name(dataset_id)
+        safe_df = self._sqlite_safe_frame(df)
         with self.connection() as conn:
             conn.execute(f"DROP TABLE IF EXISTS {self._quote_identifier(table_name)}")
-            df.to_sql(table_name, conn, index=False)
+            safe_df.to_sql(table_name, conn, index=False)
 
     def drop_dataset_rows(self, dataset_id: int) -> None:
         table_name = self.dataset_rows_table_name(dataset_id)
@@ -263,34 +287,106 @@ class Repository:
             rows = conn.execute(f"PRAGMA table_info({self._quote_identifier(table_name)})").fetchall()
         return [row['name'] for row in rows]
 
+    def _resolve_dataset_row_column_name(self, existing_columns: set[str], requested: str) -> str | None:
+        if requested in existing_columns:
+            return requested
+
+        lowered = str(requested).strip().lower()
+        case_matches = [column for column in existing_columns if str(column).strip().lower() == lowered]
+        if case_matches:
+            exact_lowercase = next((column for column in case_matches if column == lowered), None)
+            return exact_lowercase or case_matches[0]
+
+        suffixed_matches = [
+            column for column in existing_columns
+            if str(column).strip().lower().startswith(f'{lowered}__')
+        ]
+        if suffixed_matches:
+            exact_lowercase = next((column for column in suffixed_matches if str(column).startswith(f'{lowered}__')), None)
+            return exact_lowercase or suffixed_matches[0]
+        return None
+
     def load_dataset_rows(self, dataset_id: int, columns: list[str], filters: dict[str, Any]) -> pd.DataFrame:
         table_name = self.dataset_rows_table_name(dataset_id)
         existing_columns = set(self.list_dataset_row_columns(dataset_id))
-        selected_columns = [column for column in columns if column in existing_columns]
+        selected_columns: list[tuple[str, str]] = []
+        for column in columns:
+            resolved = self._resolve_dataset_row_column_name(existing_columns, column)
+            if resolved:
+                selected_columns.append((column, resolved))
         if not selected_columns:
             return pd.DataFrame()
 
         where_clauses: list[str] = []
         params: list[Any] = []
         for key, value in filters.items():
-            if key in {'aggregation', 'extra_filters'} or value in (None, '') or key not in existing_columns:
+            resolved_key = self._resolve_dataset_row_column_name(existing_columns, key)
+            if key in {'aggregation', 'extra_filters', 'date_from', 'date_to'} or value in (None, '') or not resolved_key:
                 continue
-            where_clauses.append(f"LOWER(TRIM(CAST({self._quote_identifier(key)} AS TEXT))) = ?")
-            params.append(str(value).strip().lower())
+            values = value if isinstance(value, (list, tuple, set)) else [value]
+            normalized_values = [str(item).strip().lower() for item in values if str(item).strip()]
+            if not normalized_values:
+                continue
+            placeholders = ', '.join('?' for _ in normalized_values)
+            where_clauses.append(f"LOWER(TRIM(CAST({self._quote_identifier(resolved_key)} AS TEXT))) IN ({placeholders})")
+            params.extend(normalized_values)
+
+        resolved_event_time = self._resolve_dataset_row_column_name(existing_columns, 'event_start_time')
+        if resolved_event_time:
+            date_from = filters.get('date_from')
+            date_to = filters.get('date_to')
+            if date_from:
+                where_clauses.append(f"date(CAST({self._quote_identifier(resolved_event_time)} AS TEXT)) >= date(?)")
+                params.append(str(date_from))
+            if date_to:
+                where_clauses.append(f"date(CAST({self._quote_identifier(resolved_event_time)} AS TEXT)) <= date(?)")
+                params.append(str(date_to))
 
         for key, value in (filters.get('extra_filters') or {}).items():
-            if value in (None, '') or key not in existing_columns:
+            resolved_key = self._resolve_dataset_row_column_name(existing_columns, key)
+            if value in (None, '') or not resolved_key:
                 continue
-            where_clauses.append(f"LOWER(TRIM(CAST({self._quote_identifier(key)} AS TEXT))) = ?")
-            params.append(str(value).strip().lower())
+            values = value if isinstance(value, (list, tuple, set)) else [value]
+            normalized_values = [str(item).strip().lower() for item in values if str(item).strip()]
+            if not normalized_values:
+                continue
+            placeholders = ', '.join('?' for _ in normalized_values)
+            where_clauses.append(f"LOWER(TRIM(CAST({self._quote_identifier(resolved_key)} AS TEXT))) IN ({placeholders})")
+            params.extend(normalized_values)
 
-        select_clause = ', '.join(self._quote_identifier(column) for column in selected_columns)
+        select_clause = ', '.join(
+            f"{self._quote_identifier(actual_column)} AS {self._quote_identifier(requested_column)}"
+            if actual_column != requested_column else self._quote_identifier(actual_column)
+            for requested_column, actual_column in selected_columns
+        )
         query = f"SELECT {select_clause} FROM {self._quote_identifier(table_name)}"
         if where_clauses:
             query += " WHERE " + " AND ".join(where_clauses)
 
         with self.connection() as conn:
             return pd.read_sql_query(query, conn, params=params)
+
+    def list_metrics_with_non_null_data(self, dataset_id: int, metrics: list[str]) -> list[str]:
+        table_name = self.dataset_rows_table_name(dataset_id)
+        existing_columns = set(self.list_dataset_row_columns(dataset_id))
+        selected_metrics = [metric for metric in metrics if metric in existing_columns]
+        if not selected_metrics:
+            return []
+
+        aliases = [f"metric_count_{index}" for index, _ in enumerate(selected_metrics)]
+        count_expressions = ", ".join(
+            f"SUM(CASE WHEN {self._quote_identifier(metric)} IS NOT NULL THEN 1 ELSE 0 END) AS {self._quote_identifier(alias)}"
+            for metric, alias in zip(selected_metrics, aliases, strict=False)
+        )
+        query = f"SELECT {count_expressions} FROM {self._quote_identifier(table_name)}"
+        with self.connection() as conn:
+            row = conn.execute(query).fetchone()
+        if not row:
+            return []
+        return [
+            metric for metric, alias in zip(selected_metrics, aliases, strict=False)
+            if int(row[alias] or 0) > 0
+        ]
 
     def update_dataset_profile(self, dataset_id: int, **fields: Any) -> None:
         if not fields:
@@ -357,3 +453,59 @@ class Repository:
     def list_logs(self) -> list[sqlite3.Row]:
         with self.connection() as conn:
             return list(conn.execute("SELECT id, username, action, details, created_at FROM audit_logs ORDER BY id DESC LIMIT 250").fetchall())
+
+    def list_workspace_logs(self, dataset_id: int | None = None, limit: int = 120) -> list[dict[str, Any]]:
+        workspace_actions = {
+            'upload_dataset',
+            'reprocess_dataset',
+            'process_dataset',
+            'process_dataset_failed',
+            'analyze_dataset_warning',
+            'analyze_dataset_failed',
+            'retry_dataset',
+            'stop_dataset',
+            'stop_dataset_requested',
+            'delete_dataset',
+            'analyze_dataset',
+            'export_word',
+            'export_powerpoint',
+        }
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT id, username, action, details, created_at FROM audit_logs ORDER BY id DESC LIMIT ?",
+                (max(limit * 3, limit),),
+            ).fetchall()
+
+        logs: list[dict[str, Any]] = []
+        for row in rows:
+            action = row['action']
+            if action not in workspace_actions:
+                continue
+            details_raw = row['details']
+            parsed_details: Any = details_raw
+            related_dataset_id: int | None = None
+            try:
+                parsed_details = json.loads(details_raw)
+                if isinstance(parsed_details, dict):
+                    raw_dataset_id = parsed_details.get('dataset_id')
+                    if raw_dataset_id not in (None, ''):
+                        related_dataset_id = int(raw_dataset_id)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                parsed_details = details_raw
+
+            if dataset_id is not None and related_dataset_id not in {None, dataset_id}:
+                continue
+
+            logs.append({
+                'id': row['id'],
+                'username': row['username'],
+                'action': action,
+                'details': parsed_details,
+                'details_text': details_raw,
+                'created_at': row['created_at'],
+                'dataset_id': related_dataset_id,
+            })
+            if len(logs) >= limit:
+                break
+
+        return logs

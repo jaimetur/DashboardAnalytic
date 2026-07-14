@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
+import warnings
 
 from src.modules.auth import hash_password
 
@@ -97,6 +98,28 @@ def test_admin_can_login_upload_and_see_automatic_dashboard(client) -> None:
     assert "Processed Metrics" in filtered_dashboard.text
     assert "CDF Curve" in filtered_dashboard.text
     assert "89" in filtered_dashboard.text
+
+
+def test_dashboard_disables_metrics_without_non_null_values(client) -> None:
+    login(client)
+    csv_content = (
+        b"market,period,operator,region,latency_ms,score\n"
+        b"ES,2026-Q1,Vodafone,North,,91\n"
+        b"ES,2026-Q1,Orange,South,,87\n"
+    )
+    upload_response = client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
+    assert response.status_code == 200
+    assert 'value="score"' in response.text
+    assert 'value="latency_ms" disabled' in response.text
+    assert "data-table-wrap" in response.text
+    assert "Global Aggregation" in response.text
 
 
 def test_admin_can_retry_stuck_dataset(client) -> None:
@@ -406,7 +429,7 @@ def test_admin_cannot_delete_last_active_admin_even_if_not_current_user(client) 
 
 def test_top_navigation_shows_document_links(client) -> None:
     login(client)
-    response = client.get("/dashboard")
+    response = client.get("/workspace")
     assert response.status_code == 200
     assert "<h1>Dashboard Analytic</h1>" in response.text
     assert "v0.1.0 · 2026-07-14" in response.text
@@ -511,10 +534,124 @@ def test_dashboard_renders_multiple_selected_metrics(client) -> None:
 
     response = client.get("/dashboard?dataset_id=1&metric=score&metric=gap&aggregation=all&load=1")
     assert response.status_code == 200
-    assert "Hold Cmd/Ctrl to select multiple KPIs." in response.text
+    assert "Use the dropdown to select one, several, or all KPIs." in response.text
     assert response.text.count("Metric View") >= 2
+    assert response.text.count("Selected Metric") >= 2
+    assert "mean metric" in response.text.lower()
     assert "score" in response.text
     assert "gap" in response.text
+
+
+def test_dashboard_shows_date_range_filters_and_applies_them(client) -> None:
+    login(client)
+    csv_content = (
+        b"market,period,score,Call Start Time\n"
+        b"ES,2026-Q1,91,2026-07-10 10:00:00\n"
+        b"ES,2026-Q1,87,2026-07-11 12:00:00\n"
+    )
+    upload_response = client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&date_from=2026-07-11&load=1")
+    assert response.status_code == 200
+    assert 'name="date_from"' in response.text
+    assert 'name="date_to"' in response.text
+    assert 'value="2026-07-11"' in response.text
+    assert "2026-07-10" not in response.text
+
+
+def test_dashboard_adaptive_filters_include_city_and_multi_select_fields(client) -> None:
+    login(client)
+    csv_content = (
+        b"market,period,score,City,Region\n"
+        b"ES,2026-Q1,91,Madrid,Central\n"
+        b"ES,2026-Q1,87,Barcelona,East\n"
+    )
+    upload_response = client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
+    assert response.status_code == 200
+    assert 'select name="city" multiple' in response.text
+    assert 'select name="region" multiple' in response.text
+    assert ">Madrid<" in response.text
+    assert ">Barcelona<" in response.text
+    assert "All values are selected by default. Clearing all values applies an empty filter." in response.text
+
+
+def test_dashboard_comparison_chart_exposes_per_metric_aggregation_override_control(client) -> None:
+    login(client)
+    csv_content = b"market,period,score,gap,operator,region\nES,2026-Q1,91,2.1,Vodafone,North\nES,2026-Q1,87,3.3,o2,South\n"
+    upload_response = client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    response = client.get("/dashboard?dataset_id=1&metric=score&metric=gap&aggregation=region&aggregation_overrides=score=operator&load=1")
+    assert response.status_code == 200
+    assert 'data-chart-aggregation-select' in response.text
+    assert 'data-metric="score"' in response.text
+    assert 'data-current-overrides="score=operator"' in response.text
+
+
+def test_dashboard_exposes_global_and_per_metric_cdf_comparison_controls(client) -> None:
+    login(client)
+    csv_content = (
+        b"market,period,score,vendor,region,operator,city\n"
+        b"ES,2026-Q1,91,Nokia,North,Vodafone,Madrid\n"
+        b"ES,2026-Q1,87,Huawei,South,Vodafone,Barcelona\n"
+    )
+    upload_response = client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    response = client.get("/dashboard?dataset_id=1&metric=score&load=1&cdf_grouping=vendor")
+    assert response.status_code == 200
+    assert "Global CDF Comparison" in response.text
+    assert 'data-global-cdf-grouping-select' in response.text
+    assert 'data-chart-cdf-grouping-select' in response.text
+    assert 'Compare CDF by' in response.text
+
+
+def test_workspace_logs_capture_analysis_warnings(client, monkeypatch) -> None:
+    login(client)
+    csv_content = b"market,period,score,gap\nES,2026-Q1,91,2.1\nES,2026-Q1,87,3.3\n"
+    client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        follow_redirects=False,
+    )
+
+    import src.DashboardAnalytic as app_module
+
+    original_build_analysis = app_module.build_analysis
+
+    def warned_build_analysis(*args, **kwargs):
+        warnings.warn("Synthetic analysis warning for workspace logs", UserWarning)
+        return original_build_analysis(*args, **kwargs)
+
+    monkeypatch.setattr(app_module, "build_analysis", warned_build_analysis)
+
+    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
+    assert response.status_code == 200
+
+    logs = app_module.repository.list_workspace_logs(1)
+    warning_logs = [log for log in logs if log["action"] == "analyze_dataset_warning"]
+    assert warning_logs
+    assert "Synthetic analysis warning for workspace logs" in warning_logs[0]["details_text"]
 
 
 def test_dashboard_handles_empty_table_rows_without_template_failure(client) -> None:
@@ -591,3 +728,69 @@ def test_dashboard_handles_missing_source_file_without_500(client) -> None:
     response = client.get("/dashboard?dataset_id=99&metric=throughput_mbps&aggregation=operator&load=1")
     assert response.status_code == 200
     assert "source file is missing" in response.text
+
+
+def test_materialized_dataset_handles_case_insensitive_duplicate_columns(client) -> None:
+    login(client)
+    csv_content = b"Campaign,campaign,score\nES_Q1_2026,manual-campaign,91\n"
+    upload_response = client.post(
+        "/dashboard/upload",
+        files={"dataset_files": ("duplicate-columns.csv", BytesIO(csv_content), "text/csv")},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    import src.DashboardAnalytic as app_module
+
+    dataset = app_module.repository.get_dataset(1)
+    assert dataset is not None
+    assert dataset["status"] == "ready"
+    assert dataset["last_error"] in (None, "")
+
+
+def test_failed_dataset_shows_last_error_in_queue(client) -> None:
+    login(client)
+
+    import src.DashboardAnalytic as app_module
+
+    with app_module.repository.connection() as conn:
+        conn.execute(
+            "INSERT INTO datasets (id, file_name, stored_path, uploaded_by) VALUES (?, ?, ?, ?)",
+            (50, "broken.csv", "/tmp/broken.csv", "admin"),
+        )
+        conn.execute(
+            """
+            INSERT INTO dataset_profiles (
+                dataset_id, status, progress, dataset_kind, last_error, available_metrics_json,
+                available_aggregations_json, filter_options_json, summary_json, kpis_json
+            ) VALUES (?, 'failed', 100, 'generic', 'duplicate column name: campaign', '[]', '[]', '{}', '{}', '{}')
+            """,
+            (50,),
+        )
+
+    response = client.get("/workspace")
+    assert response.status_code == 200
+    assert "duplicate column name: campaign" in response.text
+
+
+def test_workspace_shows_operational_logs_panel(client) -> None:
+    login(client)
+
+    import src.DashboardAnalytic as app_module
+
+    app_module.repository.add_log(
+        "admin",
+        "process_dataset_failed",
+        '{"dataset_id": 1, "file": "sample.csv", "error": "Synthetic processing failure"}',
+    )
+
+    response = client.get("/workspace")
+    assert response.status_code == 200
+    assert "Workspace Logs" in response.text
+    assert "Execution and Error Trail" in response.text
+    assert "All events" in response.text
+    assert "Info only" in response.text
+    assert "Error only" in response.text
+    assert "Type" in response.text
+    assert "Error" in response.text
+    assert "Synthetic processing failure" in response.text
