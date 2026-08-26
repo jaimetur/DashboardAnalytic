@@ -316,6 +316,16 @@ def test_vfuk_preview_limits_mapping_sheets_and_displays_materialised_gcid(clien
     )
     assert response.status_code == 303
 
+    # Simulate a mapping that was processed before the GCID materialisation
+    # was introduced; opening its preview must upgrade the stored rows.
+    import src.DashboardAnalytic as app_module
+    stored_rows = app_module.repository.load_dataset_rows(
+        1,
+        app_module.repository.list_dataset_row_columns(1),
+        {},
+    ).drop(columns=['GCID'])
+    app_module.repository.replace_dataset_rows(1, stored_rows)
+
     default_preview = client.get('/workspace/preview/1')
     assert default_preview.status_code == 200
     assert 'name="source_sheet"' in default_preview.text
@@ -328,6 +338,25 @@ def test_vfuk_preview_limits_mapping_sheets_and_displays_materialised_gcid(clien
     assert five_g_preview.status_code == 200
     assert '<option value="5G" selected>5G</option>' in five_g_preview.text
     assert '221126958' in five_g_preview.text
+
+
+def test_three_mapping_preview_excludes_empty_normalized_columns(client) -> None:
+    login(client)
+    response = client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'mapping_three'},
+        files={'dataset_files': ('Multivendor_Mapping_3UK.csv', BytesIO(b'MBNL_ID,Vendor,Site_Name,Cid__ECI\nAAB013,Ericsson,United Reformed Church,123\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    preview = client.get('/workspace/preview/1')
+    assert preview.status_code == 200
+    assert 'MBNL_ID' in preview.text
+    assert 'Cid__ECI' in preview.text
+    assert 'Vendor' in preview.text
+    assert '>operator<' not in preview.text
+    assert '>technology_primary<' not in preview.text
 
 
 def test_workspace_queue_type_filter_lists_all_supported_types_in_order(client) -> None:

@@ -74,7 +74,15 @@ INPUT_KIND_LABELS = {
     'generic': 'Other',
 }
 UPLOAD_DATASET_KINDS = frozenset({'data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'smart_orchestrator_logs', 'generic'})
-DATASET_NORMALIZATION_VERSION = 2
+DATASET_NORMALIZATION_VERSION = 3
+MAPPING_PREVIEW_NORMALIZED_COLUMNS = frozenset({
+    'dataset_kind', 'source_file', 'campaign', 'market', 'period', 'campaign_year', 'campaign_quarter',
+    'operator', 'session_type', 'test_name', 'direction', 'region', 'city', 'vendor', 'status',
+    'disturbed', 'impaired', 'dropped', 'unsustainable_call', 'success', 'failure',
+    'event_start_time', 'event_end_time', 'hour_bucket', 'day_bucket', 'setup_time_seconds',
+    'duration_seconds', 'quality_score', 'throughput_mbps', 'latency_ms', 'packet_loss_pct',
+    'jitter_ms', 'handovers', 'technology_primary', 'technology_secondary',
+})
 HELP_HOME_DOCUMENT = '00-help.md'
 HELP_NAVIGATION_DOCUMENTS = (
     HELP_HOME_DOCUMENT,
@@ -564,6 +572,22 @@ def rebuild_dataset_artifacts(
         'analysis': analysis,
         'filter_options': filter_options,
     }
+
+
+def ensure_vfuk_mapping_gcid(dataset: dict[str, Any]) -> dict[str, Any]:
+    """Backfill GCID for mappings processed before the column was introduced."""
+    if dataset.get('dataset_kind') != 'mapping_vodafone' or not dataset.get('is_ready'):
+        return dataset
+    dataset_id = int(dataset['id'])
+    if repository.resolve_dataset_row_column_name(dataset_id, 'GCID'):
+        return dataset
+
+    dataset_path = Path(dataset.get('stored_path') or '')
+    if not dataset_path.exists():
+        return dataset
+    rebuild_dataset_artifacts(dataset_id, dataset_path, forced_dataset_kind='mapping_vodafone')
+    refreshed = repository.get_dataset(dataset_id)
+    return serialize_dataset_row(refreshed) if refreshed else dataset
 
 
 def refresh_selected_dataset_if_stale(selected_dataset: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1113,6 +1137,7 @@ def preview_dataset(
     dataset = serialize_dataset_row(dataset_row)
     if not dataset['is_ready']:
         raise HTTPException(status_code=400, detail='Only processed datasets can be previewed.')
+    dataset = ensure_vfuk_mapping_gcid(dataset)
 
     available_columns = repository.list_dataset_row_columns(dataset_id)
     preview_sheet_options: list[str] = []
@@ -1129,12 +1154,24 @@ def preview_dataset(
             )
             preview_filters['source_sheet'] = preview_source_sheet
 
-    priority_columns = [
-        'source_sheet', 'GCID', 'operator', 'vendor', 'market', 'period', 'region', 'city', 'technology_primary',
-        'session_type', 'test_name', 'direction', 'event_start_time', 'status',
-    ]
-    preview_columns = [column for column in priority_columns if column in available_columns]
-    preview_columns.extend(column for column in available_columns if column not in preview_columns)
+    if dataset['dataset_kind'] == 'mapping_vodafone':
+        preview_columns = [column for column in ('source_sheet', 'GCID') if column in available_columns]
+        preview_columns.extend(
+            column for column in available_columns
+            if column not in preview_columns and column not in MAPPING_PREVIEW_NORMALIZED_COLUMNS
+        )
+    elif dataset['dataset_kind'] == 'mapping_three':
+        preview_columns = [
+            column for column in available_columns
+            if column not in MAPPING_PREVIEW_NORMALIZED_COLUMNS
+        ]
+    else:
+        priority_columns = [
+            'source_sheet', 'GCID', 'operator', 'vendor', 'market', 'period', 'region', 'city', 'technology_primary',
+            'session_type', 'test_name', 'direction', 'event_start_time', 'status',
+        ]
+        preview_columns = [column for column in priority_columns if column in available_columns]
+        preview_columns.extend(column for column in available_columns if column not in preview_columns)
     preview_columns = preview_columns[:24]
     preview_frame = repository.load_dataset_rows(dataset_id, preview_columns, preview_filters).head(row_limit)
     preview_rows = preview_frame.astype(object).where(pd.notna(preview_frame), '').to_dict(orient='records')
