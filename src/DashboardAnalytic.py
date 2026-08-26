@@ -609,6 +609,7 @@ def resolve_doc_path(doc_name: str) -> Path:
     allowed = {
         'readme': 'README.md',
         'changelog': 'CHANGELOG.md',
+        'help': 'help/help.md',
     }
     relative_path = allowed.get(normalized)
     if not relative_path:
@@ -958,9 +959,9 @@ def logout(request: Request) -> Response:
 @app.get('/documents/view/{doc_name}', response_class=HTMLResponse)
 def documents_view(request: Request, doc_name: str, user: SessionUser = Depends(current_user)) -> HTMLResponse:
     normalized = str(doc_name or '').strip().lower()
-    if normalized not in {'readme', 'changelog'}:
+    if normalized not in {'readme', 'changelog', 'help'}:
         raise HTTPException(status_code=404, detail='Document not found')
-    pretty_title = 'README.md' if normalized == 'readme' else 'CHANGELOG.md'
+    pretty_title = {'readme': 'README.md', 'changelog': 'CHANGELOG.md', 'help': 'Help'}[normalized]
     return render_template(
         request,
         'doc_view.html',

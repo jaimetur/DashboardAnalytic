@@ -475,13 +475,14 @@ def test_top_navigation_shows_document_links(client) -> None:
     assert "v0.1.0 · 2026-07-14" in response.text
     assert 'href="/documents/view/readme"' in response.text
     assert 'href="/documents/view/changelog"' in response.text
+    assert 'href="/documents/view/help"' in response.text
     assert 'target="_blank"' in response.text
     assert 'href="/dashboard"' in response.text
     assert 'href="/logout"' in response.text
     assert '<span class="title-badge title-user-badge title-user-badge-admin">admin</span>' in response.text
 
 
-def test_docs_routes_expose_readme_and_changelog(client) -> None:
+def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     login(client)
 
     readme_view = client.get("/documents/view/readme")
@@ -494,6 +495,14 @@ def test_docs_routes_expose_readme_and_changelog(client) -> None:
     payload = changelog_api.json()
     assert payload["name"] == "CHANGELOG.md"
     assert "0.1.0" in payload["content"]
+
+    help_view = client.get("/documents/view/help")
+    assert help_view.status_code == 200
+    assert "/api/documents/help" in help_view.text
+
+    help_api = client.get("/api/documents/help")
+    assert help_api.status_code == 200
+    assert help_api.json()["name"] == "help.md"
 
 
 def test_dashboard_analysis_reuses_cached_result_on_reload(client, monkeypatch) -> None:

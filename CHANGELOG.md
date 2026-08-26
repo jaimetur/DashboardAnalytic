@@ -8,6 +8,7 @@
 ### Release Date: 2026-08-26
 
 #### 🌟 New Features:
+- Added a `Help` navigation button that opens the embedded documentation index in a new browser tab.
 - Added the top-level `E2E Bench Dashboard` and `E2E Bench Reporting` product split.
 - Added `NetCheck CDR Reports`, allowing users to select previously processed Data, Voice and Speech CDRs and generate an NSA or SA PowerPoint report.
 - Added template-backed PowerPoint generation using the bundled NSA and SA NetCheck CDR templates.
@@ -30,6 +31,7 @@
 - Versioned CDR report output generation so a report requested again after a renderer change is regenerated instead of serving a stale cached PPTX.
 
 #### 📚 Documentation:
+- Added the Help index to the embedded Markdown document viewer.
 - Documented the E2E Bench module structure, the CDR reporting workflow and multivendor prerequisites in the README.
 - Updated the web-interface, ingestion and PowerPoint reporting help pages with the Reporting workflow and template configuration.
 
