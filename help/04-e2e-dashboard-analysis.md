@@ -1,10 +1,10 @@
-# KPI analysis
+# 4. E2E Dashboard
 
-E2E Bench Dashboard is the interactive layer for a processed workspace dataset. It adapts to the columns present in the source, so the available filters and metrics may differ between datasets.
+E2E Dashboard is the interactive layer for a processed workspace dataset. It adapts to the columns present in the source, so the available filters and metrics may differ between datasets.
 
 ## Typical analysis flow
 
-1. Open **E2E Bench Dashboard**.
+1. Open **E2E Dashboard**.
 2. Select a processed dataset from the workspace.
 3. Filter by market, operator, period, technology, vendor or other categorical fields available in the source.
 4. Select one or more numeric KPIs and, where available, choose the CDF and comparison aggregation.

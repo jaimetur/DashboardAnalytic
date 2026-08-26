@@ -20,9 +20,9 @@ Dashboard Analytic is a multi-user web workspace for ingesting CDR-style dataset
 - Exports the active dashboard context to Word or PowerPoint
 - Exposes embedded `Readme` and `Changelog` viewers rendered from Markdown
 
-## E2E Bench Reporting
+## E2E PowerPoint Reporting
 
-The top navigation separates the existing **E2E Bench Dashboard** from **E2E Bench Reporting**.
+The top navigation separates the existing **E2E Dashboard** from **E2E PowerPoint Reporting**.
 
 ### Modules
 
@@ -35,7 +35,7 @@ Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone
 
 1. Upload the three NetCheck workbooks (Data, Voice and Speech) in **Workspace** and wait until each one is marked `Processed`.
 2. Upload both Multivendor Mapping workbooks (one **VFUK** file for Vodafone UK and one **3UK** file for Three UK) when a multivendor report is required.
-3. Open **E2E Bench Reporting → NetCheck CDR Reports**.
+3. Open **E2E PowerPoint Reporting → NetCheck CDR Reports**.
 4. Select exactly one processed CDR for each required input type.
 5. Choose `NSA` or `SA`. NSA sessions are selected when the available RAT field contains `ENDC`; SA sessions are selected when it contains `NR`.
 6. Choose `Single-vendor` or `Multivendor`. The mapping selectors are shown only for multivendor; select one processed VFUK mapping for Vodafone UK and another processed 3UK mapping for Three UK.
@@ -60,7 +60,7 @@ For Vodafone UK and Three, the report takes the first and last Global CI from th
 6. The dashboard opens instantly from cached metadata
 7. Use `Adaptive Filters` and press `Update Dashboard` to compute the full analysis
 8. Review KPI cards, scorecards, charts, and aggregated tables
-9. Export the current dashboard analysis to Word or PowerPoint if needed, or open **E2E Bench Reporting** to create a template-backed CDR report
+9. Export the current dashboard analysis to Word or PowerPoint if needed, or open **E2E PowerPoint Reporting** to create a template-backed CDR report
 
 ## Supported dataset behavior
 

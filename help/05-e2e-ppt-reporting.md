@@ -1,13 +1,13 @@
-# PowerPoint reporting
+# 5. E2E PowerPoint Reporting
 
-Dashboard Analytic supports a generic dashboard export and a template-backed NetCheck CDR report. The latter is available from **E2E Bench Reporting → NetCheck CDR Reports**.
+Dashboard Analytic supports a generic dashboard export and a template-backed NetCheck CDR report. The latter is available from **E2E PowerPoint Reporting → NetCheck CDR Reports**.
 
 ## Before generating a NetCheck report
 
 Upload and process the required files in Workspace first:
 
 - one `CDR-Data` workbook;
-- one `CDR-Voice` workbook; and
+- one `CDR-Voice` workbook;
 - one `CDR-Speech` workbook.
 
 For a Multivendor report, also process one **VFUK Vodafone UK** mapping and one **3UK Three UK** mapping. The report page lists each mapping only in its corresponding operator selector, so an input that has not finished processing or has the wrong mapping type will not be selectable. The mapping controls remain hidden for a Single-vendor run.
@@ -19,7 +19,7 @@ Choose the technology according to the required session scope:
 | Technology | CDR session filter |
 | --- | --- |
 | **NSA** | `RAT`, `RAT_A` or `Sample_RAT_A` contains `ENDC`. |
-| **SA** | The same field contains `NR`. |
+| **SA** | `RAT`, `RAT_A` or `Sample_RAT_A` contains `NR`. |
 
 Then choose a report scope:
 

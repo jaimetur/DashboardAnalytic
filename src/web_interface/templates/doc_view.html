@@ -112,8 +112,9 @@
           const link = document.createElement('a');
           link.href = helpDocument.url;
           const position = data.documents.indexOf(helpDocument);
-          const label = position === 0 ? '🏠 Help Home' : formatHelpLabel(helpDocument.relative_path);
-          link.textContent = `${position}. ${label}`;
+          const number = helpDocument.number || String(position).padStart(2, '0');
+          const label = position === 0 ? 'Help Home' : (helpDocument.label || formatHelpLabel(helpDocument.relative_path));
+          link.textContent = position === 0 ? `${number}. ${label} 🏠` : `${number}. ${label}`;
           if (link.pathname === window.location.pathname) link.classList.add('active');
           item.appendChild(link);
           helpNavEl.appendChild(item);

@@ -2,7 +2,7 @@
 
 ## Current scope
 
-Dashboard Analytic currently provides a Workspace for processed datasets, the E2E Bench Dashboard for interactive KPI inspection and E2E Bench Reporting for NetCheck CDR PowerPoint generation.
+Dashboard Analytic currently provides a Workspace for processed datasets, the E2E Dashboard for interactive KPI inspection and E2E PowerPoint Reporting for NetCheck CDR PowerPoint generation.
 
 NetCheck reporting supports Data, Voice and Speech CDR inputs, NSA/SA selection, single-vendor reports and multivendor reports with separate Vodafone and Three mappings. The output uses the project templates and leaves analyst comment areas available for manual conclusions.
 

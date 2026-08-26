@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import hashlib
 import warnings
@@ -116,13 +117,27 @@ HELP_NAVIGATION_DOCUMENTS = (
     '01-configuration-file.md',
     '02-web-interface.md',
     '03-data-ingestion.md',
-    '04-kpi-analysis.md',
-    '05-powerpoint-reporting.md',
+    '04-e2e-dashboard-analysis.md',
+    '05-e2e-ppt-reporting.md',
     '06-admin-panel.md',
     '07-docker-deployment.md',
     '08-project-structure.md',
     '09-roadmap.md',
 )
+HELP_DOCUMENT_LABELS = {
+    '04-e2e-dashboard-analysis.md': 'E2E Dashboard',
+    '05-e2e-ppt-reporting.md': 'E2E PowerPoint Reporting',
+}
+
+
+def help_document_number(relative_path: str) -> str | None:
+    match = re.match(r'^(\d+)[-_]', Path(relative_path).name)
+    return match.group(1) if match else None
+
+
+def help_document_label(relative_path: str) -> str:
+    stem = re.sub(r'^\d+[-_\s]*', '', Path(relative_path).stem)
+    return stem.replace('-', ' ').replace('_', ' ').title()
 
 
 @asynccontextmanager
@@ -1082,7 +1097,10 @@ def help_document_view(request: Request, doc_file: str, user: SessionUser = Depe
         'doc_view.html',
         {
             'user': user,
-            'doc_name': path.stem.replace('-', ' ').replace('_', ' ').title(),
+            'doc_name': HELP_DOCUMENT_LABELS.get(
+                doc_file,
+                help_document_label(doc_file),
+            ),
             'doc_api_url': f'/api/documents/help/{doc_file}',
             'help_navigation': True,
         },
@@ -1100,6 +1118,11 @@ def get_help_documents_index(user: SessionUser = Depends(current_user)) -> dict[
         documents.append({
             'name': file_path.name,
             'relative_path': relative_path,
+            'number': help_document_number(relative_path),
+            'label': HELP_DOCUMENT_LABELS.get(
+                relative_path,
+                help_document_label(relative_path),
+            ),
             'url': '/documents/view/help' if relative_path == HELP_HOME_DOCUMENT else f'/documents/view/help/{relative_path}',
         })
     return {'root': str(help_root), 'documents': documents}
