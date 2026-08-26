@@ -504,6 +504,15 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     assert help_api.status_code == 200
     assert help_api.json()["name"] == "help.md"
 
+    help_index = client.get("/api/documents/help-index")
+    assert help_index.status_code == 200
+    assert any(item["relative_path"] == "01-web-interface.md" for item in help_index.json()["documents"])
+
+    help_article = client.get("/documents/view/help/01-web-interface.md")
+    assert help_article.status_code == 200
+    assert 'id="help-nav-list"' in help_article.text
+    assert "/api/documents/help/01-web-interface.md" in help_article.text
+
 
 def test_dashboard_analysis_reuses_cached_result_on_reload(client, monkeypatch) -> None:
     login(client)

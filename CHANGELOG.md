@@ -30,6 +30,7 @@
 - Fixed template-backed CDR reports to remove inherited example chart pictures/groups before placing the generated chart in the same chart area.
 - Versioned CDR report output generation so a report requested again after a renderer change is regenerated instead of serving a stale cached PPTX.
 - Fixed the NetCheck CDR report loading dialog to close after the downloaded PPTX response completes.
+- Fixed embedded Help navigation by adding a sidebar index and routes for opening individual Markdown help articles.
 
 #### 📚 Documentation:
 - Added the Help index to the embedded Markdown document viewer.

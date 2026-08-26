@@ -620,6 +620,21 @@ def resolve_doc_path(doc_name: str) -> Path:
     return target
 
 
+def resolve_help_doc_path(doc_file: str) -> Path:
+    requested = str(doc_file or '').strip().replace('\\', '/')
+    if not requested.lower().endswith('.md'):
+        raise HTTPException(status_code=400, detail='Only Markdown help documents are allowed.')
+    help_root = (PROJECT_ROOT / 'help').resolve()
+    target = (help_root / requested).resolve()
+    try:
+        target.relative_to(help_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail='Invalid help document path.') from exc
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail=f'Help document not found: {requested}')
+    return target
+
+
 def choose_selected_dataset(datasets: list[dict[str, Any]], dataset_id: int | None, input_kind: str | None) -> dict[str, Any] | None:
     ready_datasets = [dataset for dataset in datasets if dataset.get('is_ready')]
     if dataset_id is not None:
@@ -969,8 +984,49 @@ def documents_view(request: Request, doc_name: str, user: SessionUser = Depends(
             'user': user,
             'doc_name': pretty_title,
             'doc_api_url': f'/api/documents/{normalized}',
+            'help_navigation': normalized == 'help',
         },
     )
+
+
+@app.get('/documents/view/help/{doc_file:path}', response_class=HTMLResponse)
+def help_document_view(request: Request, doc_file: str, user: SessionUser = Depends(current_user)) -> HTMLResponse:
+    path = resolve_help_doc_path(doc_file)
+    return render_template(
+        request,
+        'doc_view.html',
+        {
+            'user': user,
+            'doc_name': path.stem.replace('-', ' ').replace('_', ' ').title(),
+            'doc_api_url': f'/api/documents/help/{doc_file}',
+            'help_navigation': True,
+        },
+    )
+
+
+@app.get('/api/documents/help-index')
+def get_help_documents_index(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    help_root = (PROJECT_ROOT / 'help').resolve()
+    documents: list[dict[str, str]] = []
+    if help_root.exists():
+        for file_path in sorted(help_root.rglob('*.md'), key=lambda item: item.as_posix().lower()):
+            relative_path = file_path.resolve().relative_to(help_root).as_posix()
+            documents.append({
+                'name': file_path.name,
+                'relative_path': relative_path,
+                'url': '/documents/view/help' if relative_path == 'help.md' else f'/documents/view/help/{relative_path}',
+            })
+    return {'root': str(help_root), 'documents': documents}
+
+
+@app.get('/api/documents/help/{doc_file:path}')
+def get_help_markdown_document(doc_file: str, user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    path = resolve_help_doc_path(doc_file)
+    return {
+        'name': path.name,
+        'path': str(path),
+        'content': path.read_text(encoding='utf-8', errors='replace'),
+    }
 
 
 @app.get('/api/documents/{doc_name}')
