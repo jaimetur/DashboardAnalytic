@@ -31,8 +31,8 @@ def test_session_classification_and_multivendor_enrichment() -> None:
 
     assert len(nsa) == 1
     assert len(sa) == 1
-    assert enrich_multivendor(nsa, mapping)['report_vendor'].tolist() == ['Vodafone_Ericsson']
-    assert enrich_multivendor(sa, mapping)['report_vendor'].tolist() == ['3_Mixed Vendor']
+    assert enrich_multivendor(nsa, mapping, mapping)['report_vendor'].tolist() == ['Vodafone_Ericsson']
+    assert enrich_multivendor(sa, mapping, mapping)['report_vendor'].tolist() == ['3_Mixed Vendor']
 
 
 def test_reporting_module_is_available_to_authenticated_users(client) -> None:
@@ -45,6 +45,9 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert 'NetCheck CDR Reports' in page.text
     assert 'Smart Orchestrator Logs Reports' in page.text
     assert 'Generate PowerPoint report' in page.text
+    assert 'data-mapping-selector hidden' in page.text
+    assert 'name="vodafone_mapping_dataset_id"' in page.text
+    assert 'name="three_mapping_dataset_id"' in page.text
 
 
 def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:

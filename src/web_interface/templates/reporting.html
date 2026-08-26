@@ -41,9 +41,14 @@
       <label>Report scope
         <select name="report_scope" data-report-scope><option value="single">Single-vendor</option><option value="multivendor">Multivendor</option></select>
       </label>
-      <label data-mapping-selector hidden>Multivendor Mapping
-        <select name="mapping_dataset_id"><option value="">Select processed mapping</option>{% for dataset in mapping_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }}</option>{% endfor %}</select>
-      </label>
+      <div data-mapping-selector hidden>
+        <label>Vodafone Vendor Mapping
+          <select name="vodafone_mapping_dataset_id"><option value="">Select processed Vodafone mapping</option>{% for dataset in mapping_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }}</option>{% endfor %}</select>
+        </label>
+        <label>Three Vendor Mapping
+          <select name="three_mapping_dataset_id"><option value="">Select processed Three mapping</option>{% for dataset in mapping_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }}</option>{% endfor %}</select>
+        </label>
+      </div>
       <div class="form-actions"><button type="submit">Generate PowerPoint report</button></div>
     </form>
     <p class="form-note">The template layout is preserved. Scoring and Gap Analysis slides are retained but are not populated in this release; commentary boxes are intentionally blank.</p>
@@ -59,10 +64,10 @@
 <script>
   document.querySelector('[data-report-scope]')?.addEventListener('change', function () {
     const selector = document.querySelector('[data-mapping-selector]');
-    const input = selector?.querySelector('select');
+    const inputs = selector?.querySelectorAll('select') || [];
     const enabled = this.value === 'multivendor';
     if (selector) selector.hidden = !enabled;
-    if (input) input.required = enabled;
+    inputs.forEach((input) => { input.required = enabled; });
   });
 </script>
 {% endblock %}

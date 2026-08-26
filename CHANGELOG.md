@@ -12,11 +12,13 @@
 - Added `NetCheck CDR Reports`, allowing users to select previously processed Data, Voice and Speech CDRs and generate an NSA or SA PowerPoint report.
 - Added template-backed PowerPoint generation using the bundled NSA and SA NetCheck CDR templates.
 - Added multivendor reporting with a selectable, processed `Multivendor_Mapping` dataset.
+- Added separate Vodafone and Three Vendor Mapping selections for multivendor reports.
 - Added persistent report-run records with source dataset IDs, selected mapping, report scope, template and output filename for traceability.
 - Added the visible `Smart Orchestrator Logs Reports` module as a future-ready entry point.
 
 #### 🚀 Enhancements:
 - Added automatic recognition of `Multivendor_Mapping` uploads as a dedicated dataset type.
+- Limited Vendor Mapping controls to the `Multivendor` report scope and required both operator-specific mappings before generation.
 - Added NSA/SA session filtering from `RAT`, `RAT_A` or `Sample_RAT_A` (`ENDC` for NSA and `NR` for SA).
 - Added Vodafone and Three vendor classification from the first and last Global CI in the session, including the Vodafone Ericsson/null exception defined by the business formula.
 - Added report chart selection by CDR domain and KPI title, using the processed CDR rows rather than reopening source workbooks.

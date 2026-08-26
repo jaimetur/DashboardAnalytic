@@ -13,6 +13,6 @@ The UI is served by FastAPI and uses Jinja templates with a small static CSS and
 
 ## E2E Bench Reporting
 
-`NetCheck CDR Reports` requires one processed Data CDR, one Voice CDR and one Speech CDR. The user chooses NSA or SA and can generate either a single-vendor or multivendor report. Multivendor reports additionally require a previously processed `Multivendor_Mapping` upload.
+`NetCheck CDR Reports` requires one processed Data CDR, one Voice CDR and one Speech CDR. The user chooses NSA or SA and can generate either a single-vendor or multivendor report. The Vodafone and Three Vendor Mapping selectors are displayed only for multivendor reports, which require both previously processed mapping files.
 
 `Smart Orchestrator Logs Reports` is intentionally visible but not yet implemented.

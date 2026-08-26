@@ -32,7 +32,8 @@ class ReportSelection:
     speech_id: int
     technology: str
     multivendor: bool
-    mapping_id: int | None = None
+    vodafone_mapping_id: int | None = None
+    three_mapping_id: int | None = None
 
 
 def _normalise_operator(value: object) -> str:
@@ -117,14 +118,22 @@ def build_vendor_lookup(mapping: pd.DataFrame) -> dict[str, str]:
     return lookup
 
 
-def enrich_multivendor(df: pd.DataFrame, mapping: pd.DataFrame) -> pd.DataFrame:
+def enrich_multivendor(df: pd.DataFrame, vodafone_mapping: pd.DataFrame, three_mapping: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
     operator_column = _first_existing(result, ["operator", "Operator"])
     cell_column = _first_existing(result, ["Cell_ID_A", "Cell_IDs_A", "Cell_ID", "cell_id"])
     if not operator_column or not cell_column:
         raise ValueError("The selected CDR does not contain the Operator and Cell_ID_A/Cell_IDs_A columns required for multivendor reporting.")
-    lookup = build_vendor_lookup(mapping)
-    result["report_vendor"] = [vendor_from_cells(operator, cells, lookup) for operator, cells in result[[operator_column, cell_column]].itertuples(index=False)]
+    vodafone_lookup = build_vendor_lookup(vodafone_mapping)
+    three_lookup = build_vendor_lookup(three_mapping)
+    result["report_vendor"] = [
+        vendor_from_cells(
+            operator,
+            cells,
+            vodafone_lookup if _normalise_operator(operator) == "Vodafone UK" else three_lookup,
+        )
+        for operator, cells in result[[operator_column, cell_column]].itertuples(index=False)
+    ]
     return result
 
 

@@ -1093,7 +1093,8 @@ def generate_netcheck_cdr_report(
     speech_dataset_id: int = Form(...),
     technology: str = Form(...),
     report_scope: str = Form('single'),
-    mapping_dataset_id: int | None = Form(default=None),
+    vodafone_mapping_dataset_id: int | None = Form(default=None),
+    three_mapping_dataset_id: int | None = Form(default=None),
     user: SessionUser = Depends(current_user),
 ) -> FileResponse:
     technology = technology.strip().lower()
@@ -1110,11 +1111,16 @@ def generate_netcheck_cdr_report(
     try:
         frames = {kind: classify_sessions(_reporting_frame(dataset['id']), technology) for kind, dataset in selected.items()}
         if multivendor:
-            if not mapping_dataset_id:
-                raise ValueError('Select a processed Multivendor Mapping file for a multivendor report.')
-            mapping_dataset = _reporting_dataset(mapping_dataset_id, 'mapping')
-            mapping_frame = _reporting_frame(mapping_dataset['id'])
-            frames = {kind: enrich_multivendor(frame, mapping_frame) for kind, frame in frames.items()}
+            if not vodafone_mapping_dataset_id or not three_mapping_dataset_id:
+                raise ValueError('Select processed Vendor Mapping files for both Vodafone and Three for a multivendor report.')
+            vodafone_mapping = _reporting_dataset(vodafone_mapping_dataset_id, 'mapping')
+            three_mapping = _reporting_dataset(three_mapping_dataset_id, 'mapping')
+            vodafone_mapping_frame = _reporting_frame(vodafone_mapping['id'])
+            three_mapping_frame = _reporting_frame(three_mapping['id'])
+            frames = {
+                kind: enrich_multivendor(frame, vodafone_mapping_frame, three_mapping_frame)
+                for kind, frame in frames.items()
+            }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1125,7 +1131,8 @@ def generate_netcheck_cdr_report(
             'technology': technology,
             'scope': report_scope,
             'datasets': {kind: dataset['id'] for kind, dataset in selected.items()},
-            'mapping': mapping_dataset_id,
+            'vodafone_mapping': vodafone_mapping_dataset_id,
+            'three_mapping': three_mapping_dataset_id,
             'template': template.name,
         }, sort_keys=True).encode('utf-8')
     ).hexdigest()[:10]
@@ -1140,13 +1147,15 @@ def generate_netcheck_cdr_report(
         'datasets': {kind: dataset['id'] for kind, dataset in selected.items()},
         'technology': technology,
         'scope': report_scope,
-        'mapping_dataset_id': mapping_dataset_id,
+        'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
+        'three_mapping_dataset_id': three_mapping_dataset_id,
         'file': destination.name,
     }))
     repository.add_report_run(
         report_type='netcheck_cdr', technology=technology, scope=report_scope,
         data_dataset_id=data_dataset_id, voice_dataset_id=voice_dataset_id, speech_dataset_id=speech_dataset_id,
-        mapping_dataset_id=mapping_dataset_id, template_name=template.name, output_file=destination.name,
+        vodafone_mapping_dataset_id=vodafone_mapping_dataset_id, three_mapping_dataset_id=three_mapping_dataset_id,
+        template_name=template.name, output_file=destination.name,
         created_by=user.username,
     )
     return FileResponse(destination, filename=file_name, media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation')

@@ -124,7 +124,7 @@ def _read_openxml_sheet(worksheet, progress_callback: Callable[[int], None] | No
 def infer_dataset_kind(df: pd.DataFrame, file_name: str = '') -> str:
     lower_name = file_name.lower()
     normalized_name = lower_name.replace('_', ' ').replace('-', ' ')
-    if 'multivendor' in normalized_name and 'mapping' in normalized_name:
+    if 'mapping' in normalized_name:
         return 'mapping'
     if 'speech' in normalized_name:
         return 'speech'

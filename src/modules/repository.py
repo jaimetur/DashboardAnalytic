@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS report_runs (
     voice_dataset_id INTEGER NOT NULL,
     speech_dataset_id INTEGER NOT NULL,
     mapping_dataset_id INTEGER,
+    vodafone_mapping_dataset_id INTEGER,
+    three_mapping_dataset_id INTEGER,
     template_name TEXT NOT NULL,
     output_file TEXT NOT NULL,
     created_by TEXT NOT NULL,
@@ -107,6 +109,7 @@ class Repository:
         with self.connection() as conn:
             conn.executescript(SCHEMA)
             self._ensure_dataset_profile_columns(conn)
+            self._ensure_report_run_columns(conn)
             self._cleanup_duplicate_datasets(conn)
             conn.execute(
                 """
@@ -129,6 +132,13 @@ class Repository:
         existing_columns = {row['name'] for row in conn.execute("PRAGMA table_info(dataset_profiles)").fetchall()}
         if 'normalization_version' not in existing_columns:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN normalization_version INTEGER NOT NULL DEFAULT 1")
+
+    def _ensure_report_run_columns(self, conn: sqlite3.Connection) -> None:
+        existing_columns = {row['name'] for row in conn.execute("PRAGMA table_info(report_runs)").fetchall()}
+        if 'vodafone_mapping_dataset_id' not in existing_columns:
+            conn.execute("ALTER TABLE report_runs ADD COLUMN vodafone_mapping_dataset_id INTEGER")
+        if 'three_mapping_dataset_id' not in existing_columns:
+            conn.execute("ALTER TABLE report_runs ADD COLUMN three_mapping_dataset_id INTEGER")
 
     def dataset_rows_table_name(self, dataset_id: int) -> str:
         return f'dataset_rows_{int(dataset_id)}'
@@ -573,18 +583,19 @@ class Repository:
             )
 
     def add_report_run(self, *, report_type: str, technology: str, scope: str, data_dataset_id: int,
-                       voice_dataset_id: int, speech_dataset_id: int, mapping_dataset_id: int | None,
+                       voice_dataset_id: int, speech_dataset_id: int, vodafone_mapping_dataset_id: int | None,
+                       three_mapping_dataset_id: int | None,
                        template_name: str, output_file: str, created_by: str) -> None:
         with self.connection() as conn:
             conn.execute(
                 """
                 INSERT INTO report_runs (
                     report_type, technology, scope, data_dataset_id, voice_dataset_id, speech_dataset_id,
-                    mapping_dataset_id, template_name, output_file, created_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    mapping_dataset_id, vodafone_mapping_dataset_id, three_mapping_dataset_id, template_name, output_file, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (report_type, technology, scope, data_dataset_id, voice_dataset_id, speech_dataset_id,
-                 mapping_dataset_id, template_name, output_file, created_by),
+                 None, vodafone_mapping_dataset_id, three_mapping_dataset_id, template_name, output_file, created_by),
             )
 
     def list_report_runs(self, limit: int = 50) -> list[sqlite3.Row]:

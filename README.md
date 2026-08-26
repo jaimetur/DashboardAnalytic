@@ -29,23 +29,23 @@ The top navigation separates the existing **E2E Bench Dashboard** from **E2E Ben
 - **NetCheck CDR Reports**: select one processed Data, Voice and Speech CDR, choose NSA or SA, and generate a PowerPoint from the matching template.
 - **Smart Orchestrator Logs Reports**: visible as a future module; processing is not implemented yet.
 
-For a multivendor report, upload `Multivendor_Mapping` through Data Ingestion first. It is recognized as a dedicated mapping dataset and becomes selectable in Reporting. Vendor assignment follows the provided Vodafone/Three formula, including Vodafone's Ericsson/null mixed-vendor exception. PPT templates are shipped in `assets/templates/` and can be overridden with `APP_REPORTING_TEMPLATE_DIR`.
+For a multivendor report, upload separate Vodafone and Three Vendor Mapping files through Data Ingestion first. They are recognized as dedicated mapping datasets and become selectable in Reporting only when the report scope is `Multivendor`. Vendor assignment follows the provided Vodafone/Three formula, including Vodafone's Ericsson/null mixed-vendor exception. PPT templates are shipped in `assets/templates/` and can be overridden with `APP_REPORTING_TEMPLATE_DIR`.
 
 ### NetCheck CDR Reports workflow
 
 1. Upload the three NetCheck workbooks (Data, Voice and Speech) in **Workspace** and wait until each one is marked `Processed`.
-2. Upload the `Multivendor_Mapping` workbook as well when a multivendor report is required.
+2. Upload both Vendor Mapping workbooks (one for Vodafone and one for Three) when a multivendor report is required.
 3. Open **E2E Bench Reporting → NetCheck CDR Reports**.
 4. Select exactly one processed CDR for each required input type.
 5. Choose `NSA` or `SA`. NSA sessions are selected when the available RAT field contains `ENDC`; SA sessions are selected when it contains `NR`.
-6. Choose `Single-vendor` or `Multivendor`. For multivendor, select the processed mapping file.
+6. Choose `Single-vendor` or `Multivendor`. The mapping selectors are shown only for multivendor; select one processed mapping for Vodafone and another for Three.
 7. Generate the PowerPoint report. The run stores its selected datasets, technology, scope, mapping and template in SQLite for auditability.
 
 The report starts from `Template_CDR_NSA_analysis.pptx` or `Template_CDR_SA_analysis.pptx`. Its layout and non-automated scoring/gap slides are retained. Automated CDR slides receive charts calculated from the persisted CDR rows, while commentary text boxes are cleared for analyst input.
 
 ### Multivendor calculation
 
-For Vodafone UK and Three, the report takes the first and last Global CI from `Cell_ID_A`, `Cell_IDs_A` or `Cell_ID` and resolves each against the selected mapping. O2 and EE retain the operator label because they have no multivendor segmentation in this workflow.
+For Vodafone UK and Three, the report takes the first and last Global CI from `Cell_ID_A`, `Cell_IDs_A` or `Cell_ID`. Vodafone values are resolved only with the Vodafone mapping and Three values only with the Three mapping. O2 and EE retain the operator label because they have no multivendor segmentation in this workflow.
 
 - Vodafone: identical first/last vendor produces `Vodafone_<vendor>`; the Ericsson/null and differing-vendor cases follow the supplied formula and resolve to `Vodafone_Mixed Vendor` or `Vodafone_Other Vendor`.
 - Three: identical first/last vendor produces `3_<vendor>`; all other combinations produce `3_Mixed Vendor`.
