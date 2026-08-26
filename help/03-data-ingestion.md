@@ -14,7 +14,7 @@ If a status shows an error, correct the source and upload it again. Do not creat
 
 ## Queue, preview and dashboard
 
-The **Data Processing** queue starts with **All Types** selected and can be narrowed to any supported input type. After successful processing, select **View** to inspect a read-only sample of up to 100 rows from the persisted dataset. For CDR Data, Voice and Speech inputs, **Show Dashboard** is displayed to open the KPI analysis directly; mappings and Smart Orchestrator Logs remain available for their dedicated workflows without being sent to the CDR dashboard.
+The **Data Processing** queue starts with **All Types** selected and can be narrowed to any supported input type. After successful processing, select **Preview** to inspect a read-only sample of up to 100 rows (or customized value) from the persisted dataset. For CDR Data, Voice and Speech inputs, **Show Dashboard** is displayed to open the KPI analysis directly; mappings and Smart Orchestrator Logs remain available for their dedicated workflows without being sent to the CDR dashboard.
 
 ## Excel workbooks
 
@@ -25,7 +25,7 @@ For Excel inputs, each readable worksheet is inspected. The application records 
 A NetCheck report requires three separately processed CDR workbooks:
 
 - **Data**;
-- **Voice**; and
+- **Voice**;
 - **Speech**.
 
 When files are selected, Workspace derives a proposed type from each filename and preselects it. Names containing `Data`, `Voice` or `Speech` are proposed as the corresponding CDR domain; names containing `VFUK`/`Vodafone` or `3UK`/`Three` are proposed as the corresponding mapping; Smart Orchestrator/log names are proposed as log inputs. For multiple files, it presents a confirmation panel so every proposed classification can be reviewed individually. The selected type is persisted before processing, so the reporting form can offer the appropriate selector. NSA sessions are identified from `RAT`, `RAT_A` or `Sample_RAT_A` values containing an ENDC spelling; SA sessions use values containing `NR`. The generator validates the selected combination before starting.

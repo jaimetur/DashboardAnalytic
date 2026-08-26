@@ -14,6 +14,7 @@
 - Added a read-only processed-dataset preview from the Workspace queue, with a direct CDR-only **Show Dashboard** action.
 
 #### 🚀 Enhancements:
+- Reworked template-backed CDR rendering into an explicit NSA/SA slide contract: each automated slide now selects its CDR source, technology/session/test/direction filters, KPI and template chart grammar (100% stacked columns, failure counts, CDF-plus-summary or scatter) rather than reusing one generic bar chart; documented the complete NSA/SA slide catalogue and data contract.
 - Refined the tabbed interface: product and documentation/admin tabs align with the primary panel, have distinct active colours and matching gradients, and respect Admin visibility.
 - Unified the Workspace, Dashboard, Reporting and Admin visual palettes, including action buttons, labels, toggles, readable Adaptive Filters and dark Dashboard KPI subcards.
 - Completed the reporting workflow with RAT-based NSA/SA filtering, CDR Cell ID endpoints, 3UK `Cid__ECI` and VFUK 4G GCID lookups, the agreed vendor formula, multivendor-only VFUK/3UK selectors populated only from matching processed Workspace mappings, persisted-row charts, blank analyst commentary areas and `APP_REPORTING_TEMPLATE_DIR` overrides.
