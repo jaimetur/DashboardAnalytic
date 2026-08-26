@@ -48,6 +48,7 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert 'data-mapping-selector hidden' in page.text
     assert 'name="vodafone_mapping_dataset_id"' in page.text
     assert 'name="three_mapping_dataset_id"' in page.text
+    assert 'data-download-form="1"' in page.text
 
 
 def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
