@@ -64,10 +64,11 @@ a.topnav-link-workspace { background: linear-gradient(135deg, #d7f2ec, #bde8df);
 a.topnav-link-dashboard { background: linear-gradient(135deg, #cfe9ff, #b8dcff); border-color: rgba(94, 154, 223, 0.38); color: #245a96; }
 a.topnav-link-admin { background: linear-gradient(135deg, #e8d9ff, #d8c2ff); border-color: rgba(141, 104, 197, 0.34); color: #6d46a8; }
 a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); border-color: rgba(200, 109, 109, 0.34); color: #a04343; }
-.module-tabs { display: flex; gap: 0.45rem; align-items: end; margin: 0 0 1.35rem; padding: 0 0.5rem; border-bottom: 1px solid var(--line-strong); overflow-x: auto; }
+.module-tabs { position: relative; z-index: 0; display: flex; gap: 0.45rem; align-items: end; margin: 0 0 -0.3rem; padding: 0; border-bottom: 1px solid var(--line-strong); overflow-x: auto; }
+.module-tabs + .dashboard-stack { position: relative; z-index: 1; }
 .module-tab { flex: 0 0 auto; padding: 0.75rem 1.15rem; border: 1px solid var(--line); border-bottom: 0; border-radius: 15px 15px 0 0; background: rgba(255,255,255,0.56); color: #48606f; font-weight: 700; box-shadow: 0 8px 18px rgba(18, 32, 43, 0.05); }
 .module-tab:hover { background: rgba(11, 122, 117, 0.08); color: #075d59; }
-.module-tab.active { position: relative; margin-bottom: -1px; background: linear-gradient(135deg, #d7f2ec, #bde8df); border-color: rgba(32, 144, 124, 0.4); color: #075d59; box-shadow: 0 10px 24px rgba(11, 122, 117, 0.14); }
+.module-tab.active { position: relative; margin-bottom: -2px; background: linear-gradient(135deg, #d7f2ec, #bde8df); border-color: rgba(32, 144, 124, 0.4); color: #075d59; box-shadow: 0 10px 24px rgba(11, 122, 117, 0.14); }
 .ghost-link { display: inline-flex; align-items: center; justify-content: center; }
 .action-link-primary { background: linear-gradient(135deg, var(--brand), #149d94); border-color: rgba(11, 122, 117, 0.24); color: rgba(255, 255, 255, 0.96); font-weight: 600; box-shadow: 0 12px 28px rgba(11, 122, 117, 0.22); }
 .action-link-disabled { background: linear-gradient(135deg, #e3e8ec, #d5dde4); border-color: rgba(126, 139, 152, 0.24); color: #7a8792; cursor: not-allowed; font-weight: 600; box-shadow: none; }
@@ -313,7 +314,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
   .topbar { flex-direction: column; align-items: flex-start; }
   .brand-mark { width: 48px; height: 48px; }
   .topnav { justify-content: flex-start; margin-top: 0; }
-  .module-tabs { padding: 0; }
+  .module-tabs { margin-bottom: -0.2rem; }
   .summary-grid { grid-template-columns: 1fr 1fr; }
   .dataset-selector-grid { grid-template-columns: 1fr; }
   .sidebar-filters { grid-template-columns: 1fr; }
