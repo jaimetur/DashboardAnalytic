@@ -25,7 +25,7 @@ from starlette.datastructures import QueryParams
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import CDR_REPORT_VERSION, TEMPLATE_NAMES, active_catalog_path, classify_sessions, enrich_multivendor, load_catalog_csv, parse_catalog_csv, render_cdr_report, update_catalogue_document
+from src.modules.cdr_reporting import TEMPLATE_NAMES, active_catalog_path, classify_sessions, enrich_multivendor, load_catalog_csv, parse_catalog_csv, render_cdr_report, update_catalogue_document
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
@@ -1422,25 +1422,13 @@ def generate_netcheck_cdr_report(
         catalog_entries = load_catalog_csv(catalog_path, technology)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f'Unable to load the active {technology.upper()} report catalogue: {exc}') from exc
-    report_hash = hashlib.sha1(
-        json.dumps({
-            'report_version': CDR_REPORT_VERSION,
-            'technology': technology,
-            'scope': report_scope,
-            'datasets': {kind: dataset['id'] for kind, dataset in selected.items()},
-            'vodafone_mapping': vodafone_mapping_dataset_id,
-            'three_mapping': three_mapping_dataset_id,
-            'template': template.name,
-            'catalogue': hashlib.sha1(catalog_path.read_bytes()).hexdigest(),
-        }, sort_keys=True).encode('utf-8')
-    ).hexdigest()[:10]
-    file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{report_hash}.pptx"
+    generated_at = datetime.now().strftime('%Y%m%d-%H%M')
+    file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{generated_at}.pptx"
     destination = safe_join(settings.export_dir, file_name)
-    if not destination.exists():
-        try:
-            render_cdr_report(destination, template, frames, technology, multivendor, catalog_entries)
-        except (ValueError, FileNotFoundError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        render_cdr_report(destination, template, frames, technology, multivendor, catalog_entries)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     repository.add_log(user.username, 'export_netcheck_cdr_report', json.dumps({
         'datasets': {kind: dataset['id'] for kind, dataset in selected.items()},
         'technology': technology,

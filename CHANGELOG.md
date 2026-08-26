@@ -4,8 +4,7 @@
 ---
 
 ## Release: v0.2.0
-### Release Date: 2026-08-26
-
+### Release Date: 2026-08-27
 #### 🌟 New Features:
 - Split the product into the top-level **Workspace**, **E2E Dashboard** and **E2E PowerPoint Reporting** modules, with a future-ready **Smart Orchestrator Logs Reports** entry point.
 - Added per-file Workspace classification for NetCheck CDR Data, Voice and Speech, Smart Orchestrator Logs, VFUK Vodafone and 3UK Three Multivendor Mappings, including filename-based preselection and batch review.
@@ -24,6 +23,7 @@
 - Improved Workspace data access with an alphabetical **All Types** queue filter, disabled unavailable types, ordered **Preview**/**Show Dashboard** actions, two-axis preview scrolling, all dataset columns and configurable preview rows (100 by default). Opening or refreshing a preview displays the generation dialog. VFUK and 3UK mappings materialize a yellow highlighted first-column `GCID` (from the VFUK calculation or 3UK ECI respectively) and highlight their Vendor field in soft blue; mapping previews support Vendor and exact-GCID filters, show source fields rather than empty normalization or unnamed duplicate fields, format GCID as an integer identifier, and VFUK shows exactly the columns of the selected `4G`/`5G` source sheet without exposing its technical `source_sheet` column. Preview column counters now match the rendered table. Older mappings are upgraded automatically when opened.
 - Refined operational navigation with the username beside Logout, `00. Help Home 🏠` first and Help articles numbered directly from their filenames (`00` to `09`).
 - Expanded module descriptions, README and Help guides to document the current operational workflow; standardized the **Generate PowerPoint Report** and **Refresh Preview** controls.
+- Named generated NetCheck CDR PowerPoint reports with their generation timestamp (`yyyymmdd-hhmm`) instead of an opaque content-hash suffix.
 - Created `UpdateAll.py` as a Dashboard Analytic utility for synchronizing `src/version.py` and the current `CHANGELOG.md` release header.
 
 #### 🐛 Bug fixes:

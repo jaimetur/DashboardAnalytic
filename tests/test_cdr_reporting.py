@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import pandas as pd
 from io import BytesIO
 from pathlib import Path
@@ -188,3 +189,4 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
     assert report.status_code == 200
     assert report.headers['content-type'].startswith('application/vnd.openxmlformats-officedocument.presentationml.presentation')
     assert report.content[:2] == b'PK'
+    assert re.search(r'NetCheck_CDR_NSA_single_vendor_\d{8}-\d{4}\.pptx', report.headers['content-disposition'])
