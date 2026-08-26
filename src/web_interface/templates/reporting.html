@@ -1,0 +1,68 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="dashboard-stack spacious-stack">
+  <article class="panel hero-panel">
+    <div class="section-head tight-head">
+      <div>
+        <p class="eyebrow">E2E Bench Reporting</p>
+        <h2>Choose a reporting module</h2>
+      </div>
+    </div>
+    <p class="lede">Generate template-backed reports from CDRs that have already been processed in the workspace.</p>
+  </article>
+
+  <article class="panel">
+    <div class="section-head tight-head">
+      <div><p class="eyebrow">NetCheck CDR Reports</p><h2>NSA and SA CDR analysis</h2></div>
+      <span class="pill live-pill">Available</span>
+    </div>
+    <form action="/reporting/netcheck-cdr" method="post" class="form-grid" data-loading-label="Generating NetCheck CDR report">
+      <label>CDR Data
+        <select name="data_dataset_id" required>
+          <option value="">Select processed Data CDR</option>
+          {% for dataset in data_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
+        </select>
+      </label>
+      <label>CDR Voice
+        <select name="voice_dataset_id" required>
+          <option value="">Select processed Voice CDR</option>
+          {% for dataset in voice_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
+        </select>
+      </label>
+      <label>CDR Speech
+        <select name="speech_dataset_id" required>
+          <option value="">Select processed Speech CDR</option>
+          {% for dataset in speech_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
+        </select>
+      </label>
+      <label>Technology
+        <select name="technology" required><option value="nsa">NSA (Non-Standalone)</option><option value="sa">SA (Standalone)</option></select>
+      </label>
+      <label>Report scope
+        <select name="report_scope" data-report-scope><option value="single">Single-vendor</option><option value="multivendor">Multivendor</option></select>
+      </label>
+      <label data-mapping-selector hidden>Multivendor Mapping
+        <select name="mapping_dataset_id"><option value="">Select processed mapping</option>{% for dataset in mapping_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }}</option>{% endfor %}</select>
+      </label>
+      <div class="form-actions"><button type="submit">Generate PowerPoint report</button></div>
+    </form>
+    <p class="form-note">The template layout is preserved. Scoring and Gap Analysis slides are retained but are not populated in this release; commentary boxes are intentionally blank.</p>
+  </article>
+
+  <article class="panel">
+    <div class="section-head tight-head"><div><p class="eyebrow">Smart Orchestrator Logs Reports</p><h2>Log reporting</h2></div><span class="pill">Coming soon</span></div>
+    <p class="lede">This module is visible for the future Smart Orchestrator implementation.</p>
+  </article>
+</section>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+  document.querySelector('[data-report-scope]')?.addEventListener('change', function () {
+    const selector = document.querySelector('[data-mapping-selector]');
+    const input = selector?.querySelector('select');
+    const enabled = this.value === 'multivendor';
+    if (selector) selector.hidden = !enabled;
+    if (input) input.required = enabled;
+  });
+</script>
+{% endblock %}

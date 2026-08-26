@@ -10,7 +10,7 @@ Dashboard Analytic is a multi-user web workspace for ingesting CDR-style dataset
 
 - Uploads `CSV`, `XLS`, `XLSX`, and `XLSM` datasets from the web UI
 - Detects CDR workbook structure automatically, including multi-sheet operator workbooks
-- Classifies imported datasets as `CDR-Voice`, `CDR-Speech`, `CDR-Data`, or `Other`
+- Classifies imported datasets as `CDR-Voice`, `CDR-Speech`, `CDR-Data`, `Multivendor Mapping`, or `Other`
 - Normalizes common dimensions such as market, period, operator, region, vendor, session type, direction, technology, and source sheet
 - Extracts reusable base metrics such as setup time, duration, quality score, throughput, latency, jitter, packet loss, and handovers
 - Builds dataset profiles and stores their status, progress, filter options, default metrics, and KPI snapshot in SQLite
@@ -19,6 +19,36 @@ Dashboard Analytic is a multi-user web workspace for ingesting CDR-style dataset
 - Applies adaptive filters and loads charts or tables only when the user requests `Update Dashboard`
 - Exports the active dashboard context to Word or PowerPoint
 - Exposes embedded `Readme` and `Changelog` viewers rendered from Markdown
+
+## E2E Bench Reporting
+
+The top navigation separates the existing **E2E Bench Dashboard** from **E2E Bench Reporting**.
+
+### Modules
+
+- **NetCheck CDR Reports**: select one processed Data, Voice and Speech CDR, choose NSA or SA, and generate a PowerPoint from the matching template.
+- **Smart Orchestrator Logs Reports**: visible as a future module; processing is not implemented yet.
+
+For a multivendor report, upload `Multivendor_Mapping` through Data Ingestion first. It is recognized as a dedicated mapping dataset and becomes selectable in Reporting. Vendor assignment follows the provided Vodafone/Three formula, including Vodafone's Ericsson/null mixed-vendor exception. PPT templates are shipped in `assets/templates/` and can be overridden with `APP_REPORTING_TEMPLATE_DIR`.
+
+### NetCheck CDR Reports workflow
+
+1. Upload the three NetCheck workbooks (Data, Voice and Speech) in **Workspace** and wait until each one is marked `Processed`.
+2. Upload the `Multivendor_Mapping` workbook as well when a multivendor report is required.
+3. Open **E2E Bench Reporting → NetCheck CDR Reports**.
+4. Select exactly one processed CDR for each required input type.
+5. Choose `NSA` or `SA`. NSA sessions are selected when the available RAT field contains `ENDC`; SA sessions are selected when it contains `NR`.
+6. Choose `Single-vendor` or `Multivendor`. For multivendor, select the processed mapping file.
+7. Generate the PowerPoint report. The run stores its selected datasets, technology, scope, mapping and template in SQLite for auditability.
+
+The report starts from `Template_CDR_NSA_analysis.pptx` or `Template_CDR_SA_analysis.pptx`. Its layout and non-automated scoring/gap slides are retained. Automated CDR slides receive charts calculated from the persisted CDR rows, while commentary text boxes are cleared for analyst input.
+
+### Multivendor calculation
+
+For Vodafone UK and Three, the report takes the first and last Global CI from `Cell_ID_A`, `Cell_IDs_A` or `Cell_ID` and resolves each against the selected mapping. O2 and EE retain the operator label because they have no multivendor segmentation in this workflow.
+
+- Vodafone: identical first/last vendor produces `Vodafone_<vendor>`; the Ericsson/null and differing-vendor cases follow the supplied formula and resolve to `Vodafone_Mixed Vendor` or `Vodafone_Other Vendor`.
+- Three: identical first/last vendor produces `3_<vendor>`; all other combinations produce `3_Mixed Vendor`.
 
 ## Current UI workflow
 
@@ -30,13 +60,14 @@ Dashboard Analytic is a multi-user web workspace for ingesting CDR-style dataset
 6. The dashboard opens instantly from cached metadata
 7. Use `Adaptive Filters` and press `Update Dashboard` to compute the full analysis
 8. Review KPI cards, scorecards, charts, and aggregated tables
-9. Export the current analysis to Word or PowerPoint if needed
+9. Export the current dashboard analysis to Word or PowerPoint if needed, or open **E2E Bench Reporting** to create a template-backed CDR report
 
 ## Supported dataset behavior
 
 ### Automatic ingestion
 
 - `XLSM` CDR workbooks are supported directly
+- `Multivendor_Mapping` workbooks are recognized and retained as selectable mapping datasets for reporting
 - Known summary sheets such as `MASTER`, `RANKING`, and similar non-data tabs are ignored
 - Operator sheets are concatenated when needed
 - Duplicate uploads of the same stored file are reused instead of creating a new dataset row
@@ -151,6 +182,7 @@ Important runtime variables:
 - `APP_INPUT_DIR`
 - `APP_OUTPUT_DIR`
 - `APP_EXPORT_DIR`
+- `APP_REPORTING_TEMPLATE_DIR`
 - `HOST_CONFIG_DIR`
 - `HOST_DATA_DIR`
 - `IMAGE_REPOSITORY`

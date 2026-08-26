@@ -24,6 +24,7 @@ from starlette.datastructures import QueryParams
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
+from src.modules.cdr_reporting import TEMPLATE_NAMES, classify_sessions, enrich_multivendor, render_cdr_report
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
@@ -67,6 +68,7 @@ INPUT_KIND_LABELS = {
     'voice': 'CDR-Voice',
     'speech': 'CDR-Speech',
     'data': 'CDR-Data',
+    'mapping': 'Multivendor Mapping',
     'generic': 'Other',
 }
 DATASET_NORMALIZATION_VERSION = 2
@@ -80,6 +82,7 @@ async def lifespan(_: FastAPI):
         settings.output_dir,
         settings.export_dir,
         settings.template_dir,
+        settings.reporting_template_dir,
         settings.static_dir,
     ])
     repository.initialize(settings.admin_username, settings.admin_password)
@@ -1049,6 +1052,103 @@ def dashboard(
             'error': analysis_error,
         },
     )
+
+
+def _reporting_dataset(dataset_id: int, expected_kind: str) -> dict[str, Any]:
+    dataset = repository.get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=400, detail=f'Selected {expected_kind} CDR was not found.')
+    payload = serialize_dataset_row(dataset)
+    if not payload['is_ready']:
+        raise HTTPException(status_code=400, detail=f"{payload['file_name']} has not finished processing.")
+    if payload.get('dataset_kind') != expected_kind:
+        raise HTTPException(status_code=400, detail=f"{payload['file_name']} is not a {expected_kind.title()} CDR.")
+    return payload
+
+
+def _reporting_frame(dataset_id: int) -> pd.DataFrame:
+    return repository.load_dataset_rows(dataset_id, repository.list_dataset_row_columns(dataset_id), {})
+
+
+@app.get('/reporting', response_class=HTMLResponse)
+def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HTMLResponse:
+    ready_datasets = [serialize_dataset_row(row) for row in repository.list_datasets() if row['status'] == 'ready']
+    return render_template(
+        request,
+        'reporting.html',
+        {
+            'user': user,
+            'data_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'data'],
+            'voice_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'voice'],
+            'speech_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'speech'],
+            'mapping_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping'],
+        },
+    )
+
+
+@app.post('/reporting/netcheck-cdr')
+def generate_netcheck_cdr_report(
+    data_dataset_id: int = Form(...),
+    voice_dataset_id: int = Form(...),
+    speech_dataset_id: int = Form(...),
+    technology: str = Form(...),
+    report_scope: str = Form('single'),
+    mapping_dataset_id: int | None = Form(default=None),
+    user: SessionUser = Depends(current_user),
+) -> FileResponse:
+    technology = technology.strip().lower()
+    if technology not in TEMPLATE_NAMES:
+        raise HTTPException(status_code=400, detail='Choose NSA or SA for the CDR report.')
+    if report_scope not in {'single', 'multivendor'}:
+        raise HTTPException(status_code=400, detail='Choose a valid report scope.')
+    multivendor = report_scope == 'multivendor'
+    selected = {
+        'data': _reporting_dataset(data_dataset_id, 'data'),
+        'voice': _reporting_dataset(voice_dataset_id, 'voice'),
+        'speech': _reporting_dataset(speech_dataset_id, 'speech'),
+    }
+    try:
+        frames = {kind: classify_sessions(_reporting_frame(dataset['id']), technology) for kind, dataset in selected.items()}
+        if multivendor:
+            if not mapping_dataset_id:
+                raise ValueError('Select a processed Multivendor Mapping file for a multivendor report.')
+            mapping_dataset = _reporting_dataset(mapping_dataset_id, 'mapping')
+            mapping_frame = _reporting_frame(mapping_dataset['id'])
+            frames = {kind: enrich_multivendor(frame, mapping_frame) for kind, frame in frames.items()}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    template = settings.reporting_template_dir / TEMPLATE_NAMES[technology]
+    report_hash = hashlib.sha1(
+        json.dumps({
+            'technology': technology,
+            'scope': report_scope,
+            'datasets': {kind: dataset['id'] for kind, dataset in selected.items()},
+            'mapping': mapping_dataset_id,
+            'template': template.name,
+        }, sort_keys=True).encode('utf-8')
+    ).hexdigest()[:10]
+    file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{report_hash}.pptx"
+    destination = safe_join(settings.export_dir, file_name)
+    if not destination.exists():
+        try:
+            render_cdr_report(destination, template, frames, technology, multivendor)
+        except (ValueError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    repository.add_log(user.username, 'export_netcheck_cdr_report', json.dumps({
+        'datasets': {kind: dataset['id'] for kind, dataset in selected.items()},
+        'technology': technology,
+        'scope': report_scope,
+        'mapping_dataset_id': mapping_dataset_id,
+        'file': destination.name,
+    }))
+    repository.add_report_run(
+        report_type='netcheck_cdr', technology=technology, scope=report_scope,
+        data_dataset_id=data_dataset_id, voice_dataset_id=voice_dataset_id, speech_dataset_id=speech_dataset_id,
+        mapping_dataset_id=mapping_dataset_id, template_name=template.name, output_file=destination.name,
+        created_by=user.username,
+    )
+    return FileResponse(destination, filename=file_name, media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation')
 
 
 @app.get('/api/datasets/status')

@@ -1,0 +1,71 @@
+from __future__ import annotations
+
+import pandas as pd
+from io import BytesIO
+
+from src.modules.cdr_reporting import classify_sessions, enrich_multivendor, vendor_from_cells
+
+
+def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> None:
+    lookup = {'first': 'Ericsson'}
+
+    assert vendor_from_cells('Vodafone UK', 'first -> unknown', lookup) == 'Vodafone_Mixed Vendor'
+    assert vendor_from_cells('Vodafone UK', 'first -> first', lookup) == 'Vodafone_Ericsson'
+    assert vendor_from_cells('3', 'first -> unknown', lookup) == '3_Mixed Vendor'
+    assert vendor_from_cells('O2', 'first -> unknown', lookup) == 'O2'
+
+
+def test_session_classification_and_multivendor_enrichment() -> None:
+    cdr = pd.DataFrame({
+        'Operator': ['Vodafone UK', '3'],
+        'RAT_A': ['LTE ENDC', 'NR'],
+        'Cell_ID_A': ['100 -> 100', '200 -> 201'],
+    })
+    mapping = pd.DataFrame({
+        'Cell ID': [100, 200, 201],
+        'Vendor': ['Ericsson', 'Nokia', 'Ericsson'],
+    })
+
+    nsa = classify_sessions(cdr, 'nsa')
+    sa = classify_sessions(cdr, 'sa')
+
+    assert len(nsa) == 1
+    assert len(sa) == 1
+    assert enrich_multivendor(nsa, mapping)['report_vendor'].tolist() == ['Vodafone_Ericsson']
+    assert enrich_multivendor(sa, mapping)['report_vendor'].tolist() == ['3_Mixed Vendor']
+
+
+def test_reporting_module_is_available_to_authenticated_users(client) -> None:
+    response = client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    assert response.status_code == 303
+
+    page = client.get('/reporting')
+
+    assert page.status_code == 200
+    assert 'NetCheck CDR Reports' in page.text
+    assert 'Smart Orchestrator Logs Reports' in page.text
+    assert 'Generate PowerPoint report' in page.text
+
+
+def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    uploads = [
+        ('NetCheck_CDR_Data.csv', b'RAT,Operator,Mean_Data_Rate,Test_Result\nENDC,Vodafone UK,42,Success\n', 'text/csv'),
+        ('NetCheck_CDR_Voice.csv', b'RAT_A,Operator,Call_Status,Call_Duration\nENDC,Vodafone UK,Completed,60\n', 'text/csv'),
+        ('NetCheck_CDR_Speech.csv', b'Sample_RAT_A,Operator,LQ\nENDC,Vodafone UK,3.8\n', 'text/csv'),
+    ]
+    for filename, content, media_type in uploads:
+        response = client.post('/dashboard/upload', files={'dataset_files': (filename, BytesIO(content), media_type)})
+        assert response.status_code == 200
+
+    report = client.post('/reporting/netcheck-cdr', data={
+        'data_dataset_id': 1,
+        'voice_dataset_id': 2,
+        'speech_dataset_id': 3,
+        'technology': 'nsa',
+        'report_scope': 'single',
+    })
+
+    assert report.status_code == 200
+    assert report.headers['content-type'].startswith('application/vnd.openxmlformats-officedocument.presentationml.presentation')
+    assert report.content[:2] == b'PK'

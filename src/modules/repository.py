@@ -58,6 +58,21 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     details TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS report_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_type TEXT NOT NULL,
+    technology TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    data_dataset_id INTEGER NOT NULL,
+    voice_dataset_id INTEGER NOT NULL,
+    speech_dataset_id INTEGER NOT NULL,
+    mapping_dataset_id INTEGER,
+    template_name TEXT NOT NULL,
+    output_file TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -556,6 +571,27 @@ class Repository:
                 "INSERT INTO audit_logs (username, action, details) VALUES (?, ?, ?)",
                 (username, action, details),
             )
+
+    def add_report_run(self, *, report_type: str, technology: str, scope: str, data_dataset_id: int,
+                       voice_dataset_id: int, speech_dataset_id: int, mapping_dataset_id: int | None,
+                       template_name: str, output_file: str, created_by: str) -> None:
+        with self.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO report_runs (
+                    report_type, technology, scope, data_dataset_id, voice_dataset_id, speech_dataset_id,
+                    mapping_dataset_id, template_name, output_file, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (report_type, technology, scope, data_dataset_id, voice_dataset_id, speech_dataset_id,
+                 mapping_dataset_id, template_name, output_file, created_by),
+            )
+
+    def list_report_runs(self, limit: int = 50) -> list[sqlite3.Row]:
+        with self.connection() as conn:
+            return list(conn.execute(
+                "SELECT * FROM report_runs ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall())
 
     def list_logs(self) -> list[sqlite3.Row]:
         with self.connection() as conn:
