@@ -334,7 +334,7 @@ def _include_extrafiles_and_zip(input_file, output_file):
         },
         {
             'subdir': 'docs',  # These files go to the 'docs' subdirectory
-            'files': ["./README.md", "./CHANGELOG.md", "./DOWNLOAD.md", "./CONTRIBUTING.md", "./CODE_OF_CONDUCT.md", "./LICENSE"]
+            'files': ["./README.md", "./CHANGELOG.md", "./CONTRIBUTING.md", "./CODE_OF_CONDUCT.md", "./LICENSE"]
         },
         {
             'subdir': 'help',  # These files go to the 'help' subdirectory
@@ -412,8 +412,8 @@ def _get_clean_version(version: str):
     return clean_version
 
 
-def _extract_release_body(input_file, output_file, download_file):
-    """Extracts two specific sections from the changelog file, modifies a header, and appends them along with additional content from another file."""
+def _extract_release_body(input_file, output_file):
+    """Writes the current release section from the changelog to the release notes file."""
     # Open the file and read its content into a list
     with open(input_file, 'r', encoding='utf-8') as infile:
         lines = infile.readlines()
@@ -440,16 +440,9 @@ def _extract_release_body(input_file, output_file, download_file):
         release_section = lines[changelog_index:second_release_index]
     else:
         release_section = lines[changelog_index:]
-    # Read content of download_file
-    with open(download_file, 'r', encoding='utf-8') as df:
-        download_content = df.readlines()
-    # Append both the download file content and the release section to the output file
-    # If the file already exists, delete it
-    if os.path.exists(output_file):
-        os.remove(output_file)
-    with open(output_file, 'a', encoding='utf-8') as outfile:
+    # Replace the release notes with the current changelog section.
+    with open(output_file, 'w', encoding='utf-8') as outfile:
         outfile.writelines(release_section)
-        outfile.writelines(download_content)
 
 
 # ------------------------ END OF HELPERS ---------------------------------
@@ -520,13 +513,12 @@ def main(compiler='pyinstaller', compile_in_one_file=COMPILE_IN_ONE_FILE):
     print("Extracting body of RELEASE-NOTES...")
 
     # Paths for CHANGELOG.md, RELEASE-NOTES.md and README.md
-    download_filepath = os.path.join(root_dir, 'DOWNLOAD.md')
     changelog_filepath = os.path.join(root_dir, 'CHANGELOG.md')
     current_release_filepath = os.path.join(root_dir, 'RELEASE-NOTES.md')
     readme_filepath = os.path.join(root_dir, 'README.md')
 
     # Extract the body of the current Release from CHANGELOG.md
-    _extract_release_body(input_file=changelog_filepath, output_file=current_release_filepath, download_file=download_filepath)
+    _extract_release_body(input_file=changelog_filepath, output_file=current_release_filepath)
     print(f"File '{current_release_filepath}' created successfully!.")
 
     # Save build_info.txt into a text file

@@ -1,178 +1,131 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+"""Update Dashboard Analytic's application version and release date.
+
+This small desktop utility keeps the runtime metadata in ``src/version.py`` and
+the current release header in ``CHANGELOG.md`` in sync. GitHub workflows read
+the version module directly, so no download-link maintenance is required.
+"""
 
 from __future__ import annotations
 
-import os
 import re
-import subprocess
-import sys
-from pathlib import Path
 import tkinter as tk
+from pathlib import Path
 from tkinter import messagebox
 
+
 ROOT = Path(__file__).resolve().parents[1]
-GLOBAL_VARS_PATH = ROOT / "src" / "Core" / "GlobalVariables.py"
-DOWNLOAD_SCRIPT = ROOT / "tools" / "UpdateDownloadLinks.py"
-CLI_DOC_PATH = ROOT / "help" / "01-command-line-interface.md"
+VERSION_PATH = ROOT / 'src' / 'version.py'
+CHANGELOG_PATH = ROOT / 'CHANGELOG.md'
+VERSION_PATTERN = r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?'
+DATE_PATTERN = r'\d{4}-\d{2}-\d{2}'
 
 
-def read_version_date() -> tuple[str, str, str]:
-    content = GLOBAL_VARS_PATH.read_text(encoding="utf-8")
-    version_match = re.search(r'^(TOOL_VERSION_WITHOUT_V\s*=\s*")([^"]+)(")', content, flags=re.MULTILINE)
-    date_match = re.search(r'^(TOOL_DATE\s*=\s*")([^"]+)(")', content, flags=re.MULTILINE)
+def read_release_metadata() -> tuple[str, str]:
+    """Return the current application version and release date."""
+    if not VERSION_PATH.exists():
+        raise FileNotFoundError(f'Missing version module: {VERSION_PATH}')
+
+    content = VERSION_PATH.read_text(encoding='utf-8')
+    version_match = re.search(r'^__version__\s*=\s*"([^"]+)"\s*$', content, flags=re.MULTILINE)
+    date_match = re.search(r'^__release_date__\s*=\s*"([^"]+)"\s*$', content, flags=re.MULTILINE)
     if not version_match or not date_match:
-        raise RuntimeError("Unable to find TOOL_VERSION_WITHOUT_V and/or TOOL_DATE in src/Core/GlobalVariables.py")
-    return version_match.group(2), date_match.group(2), content
+        raise RuntimeError('Unable to find __version__ and __release_date__ in src/version.py.')
+    return version_match.group(1), date_match.group(1)
 
 
-def write_version_date(content: str, new_version: str, new_date: str) -> str:
-    updated = re.sub(
-        r'^(TOOL_VERSION_WITHOUT_V\s*=\s*")[^"]+(")',
-        rf'\g<1>{new_version}\2',
-        content,
+def update_release_metadata(version: str, release_date: str) -> None:
+    """Update the runtime version module and the first changelog release header."""
+    version_content = VERSION_PATH.read_text(encoding='utf-8')
+    version_content, version_count = re.subn(
+        r'^(__version__\s*=\s*")[^"]+("\s*)$',
+        rf'\g<1>{version}\g<2>',
+        version_content,
+        count=1,
         flags=re.MULTILINE,
     )
-    updated = re.sub(
-        r'^(TOOL_DATE\s*=\s*")[^"]+(")',
-        rf'\g<1>{new_date}\2',
-        updated,
+    version_content, date_count = re.subn(
+        r'^(__release_date__\s*=\s*")[^"]+("\s*)$',
+        rf'\g<1>{release_date}\g<2>',
+        version_content,
+        count=1,
         flags=re.MULTILINE,
     )
-    GLOBAL_VARS_PATH.write_text(updated, encoding="utf-8")
-    return updated
+    if version_count != 1 or date_count != 1:
+        raise RuntimeError('Unable to update version metadata in src/version.py.')
 
-
-def write_cli_doc_version_date(new_version: str, new_date: str) -> None:
-    content = CLI_DOC_PATH.read_text(encoding="utf-8")
-    updated, count = re.subn(
-        r"^PhotoMigrator v\d+\.\d+\.\d+ - \d{4}-\d{2}-\d{2}$",
-        f"PhotoMigrator v{new_version} - {new_date}",
-        content,
+    if not CHANGELOG_PATH.exists():
+        raise FileNotFoundError(f'Missing changelog: {CHANGELOG_PATH}')
+    changelog_content = CHANGELOG_PATH.read_text(encoding='utf-8')
+    changelog_content, release_count = re.subn(
+        r'^## Release: v[^\s]+\s*$',
+        f'## Release: v{version}',
+        changelog_content,
+        count=1,
         flags=re.MULTILINE,
     )
-    if count != 1:
-        raise RuntimeError(
-            "Unable to update version/date in help/01-command-line-interface.md"
-        )
-    CLI_DOC_PATH.write_text(updated, encoding="utf-8")
-
-
-def center_window(win: tk.Tk) -> None:
-    win.update_idletasks()
-    w = win.winfo_width()
-    h = win.winfo_height()
-    sw = win.winfo_screenwidth()
-    sh = win.winfo_screenheight()
-    x = max((sw - w) // 2, 0)
-    y = max((sh - h) // 2, 0)
-    win.geometry(f"{w}x{h}+{x}+{y}")
-
-
-def clear_console() -> None:
-    try:
-        if sys.stdout.isatty():
-            os.system("cls" if os.name == "nt" else "clear")
-    except Exception:
-        pass
-
-
-def run_script(path: Path, *args: str) -> None:
-    result = subprocess.run(
-        [sys.executable, str(path), *args],
-        cwd=str(ROOT),
-        text=True,
-        encoding="utf-8",
-        errors="replace",
+    changelog_content, changelog_date_count = re.subn(
+        r'^### Release Date: \d{4}-\d{2}-\d{2}\s*$',
+        f'### Release Date: {release_date}',
+        changelog_content,
+        count=1,
+        flags=re.MULTILINE,
     )
-    if result.returncode != 0:
-        raise RuntimeError(f"{path.name} failed (exit code {result.returncode}). Check console output above.")
+    if release_count != 1 or changelog_date_count != 1:
+        raise RuntimeError('Unable to update the current release header in CHANGELOG.md.')
+
+    VERSION_PATH.write_text(version_content, encoding='utf-8')
+    CHANGELOG_PATH.write_text(changelog_content, encoding='utf-8')
+
+
+def validate_inputs(version: str, release_date: str) -> str | None:
+    if not re.fullmatch(VERSION_PATTERN, version):
+        return 'Version must use X.Y.Z or X.Y.Z-prerelease format.'
+    if not re.fullmatch(DATE_PATTERN, release_date):
+        return 'Release date must use YYYY-MM-DD format.'
+    return None
 
 
 def main() -> None:
-    current_version, current_date, _ = read_version_date()
-
+    current_version, current_date = read_release_metadata()
     root = tk.Tk()
-    root.title("Update PhotoMigrator (Version/Date, Download Links)")
-    dialog_width = 760 if sys.platform == "darwin" else 640
-    dialog_height = 240 if sys.platform == "darwin" else 220
-    root.geometry(f"{dialog_width}x{dialog_height}")
+    root.title('Update Dashboard Analytic release metadata')
+    root.geometry('580x250')
     root.resizable(False, False)
 
-    frame = tk.Frame(root, padx=16, pady=16)
-    frame.pack(fill="both", expand=True)
+    frame = tk.Frame(root, padx=18, pady=18)
+    frame.pack(fill='both', expand=True)
+    tk.Label(frame, text=f'Current version: {current_version}', anchor='w').pack(fill='x')
+    tk.Label(frame, text=f'Current release date: {current_date}', anchor='w').pack(fill='x', pady=(0, 14))
 
-    tk.Label(frame, text=f"Current TOOL_VERSION_WITHOUT_V: {current_version}", anchor="w").pack(fill="x")
-    tk.Label(frame, text=f"Current TOOL_DATE: {current_date}", anchor="w").pack(fill="x", pady=(0, 12))
-
-    tk.Label(frame, text="New TOOL_VERSION_WITHOUT_V (X.Y.Z):", anchor="w").pack(fill="x")
     version_var = tk.StringVar(value=current_version)
-    tk.Entry(frame, textvariable=version_var).pack(fill="x", pady=(0, 10))
-
-    tk.Label(frame, text="New TOOL_DATE (YYYY-MM-DD):", anchor="w").pack(fill="x")
     date_var = tk.StringVar(value=current_date)
-    tk.Entry(frame, textvariable=date_var).pack(fill="x", pady=(0, 12))
+    tk.Label(frame, text='New version (X.Y.Z):', anchor='w').pack(fill='x')
+    tk.Entry(frame, textvariable=version_var).pack(fill='x', pady=(0, 10))
+    tk.Label(frame, text='New release date (YYYY-MM-DD):', anchor='w').pack(fill='x')
+    tk.Entry(frame, textvariable=date_var).pack(fill='x', pady=(0, 18))
 
-    def validate_inputs() -> tuple[str, str] | None:
-        new_version = version_var.get().strip()
-        new_date = date_var.get().strip()
-        if not re.fullmatch(r"\d+\.\d+\.\d+", new_version):
-            messagebox.showerror("Invalid version", "TOOL_VERSION_WITHOUT_V must match X.Y.Z", parent=root)
-            return None
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", new_date):
-            messagebox.showerror("Invalid date", "TOOL_DATE must match YYYY-MM-DD", parent=root)
-            return None
-        return new_version, new_date
-
-    def apply_version_date_from_inputs() -> tuple[str, str] | None:
-        validated = validate_inputs()
-        if not validated:
-            return None
-        new_version, new_date = validated
-        print(f"Updating TOOL_VERSION_WITHOUT_V and TOOL_DATE to: {new_version} - {new_date}...")
-        fresh = GLOBAL_VARS_PATH.read_text(encoding="utf-8")
-        write_version_date(fresh, new_version, new_date)
-        write_cli_doc_version_date(new_version, new_date)
-        return new_version, new_date
-
-    def on_update_version_date() -> None:
-        clear_console()
-        applied = apply_version_date_from_inputs()
-        if not applied:
-            return
-        root.destroy()
-
-    def on_update_download_links() -> None:
-        clear_console()
-        try:
-            run_script(DOWNLOAD_SCRIPT)
-        except Exception as exc:
-            messagebox.showerror("Script execution error", str(exc), parent=root)
-            return
-        root.destroy()
-
-    def on_update_all() -> None:
-        clear_console()
-        applied = apply_version_date_from_inputs()
-        if not applied:
+    def apply_update() -> None:
+        version = version_var.get().strip()
+        release_date = date_var.get().strip()
+        error = validate_inputs(version, release_date)
+        if error:
+            messagebox.showerror('Invalid release metadata', error, parent=root)
             return
         try:
-            run_script(DOWNLOAD_SCRIPT)
+            update_release_metadata(version, release_date)
         except Exception as exc:
-            messagebox.showerror("Script execution error", str(exc), parent=root)
+            messagebox.showerror('Update failed', str(exc), parent=root)
             return
+        messagebox.showinfo('Release metadata updated', 'src/version.py and CHANGELOG.md were updated.', parent=root)
         root.destroy()
 
-    buttons = tk.Frame(frame)
-    buttons.pack(fill="x")
-    tk.Button(buttons, text="Cancel", command=root.destroy).pack(side="right", padx=(8, 0))
-    tk.Button(buttons, text="Update Version/Date", command=on_update_version_date).pack(side="left")
-    tk.Button(buttons, text="Update Download Links", command=on_update_download_links).pack(side="left", padx=(8, 0))
-    tk.Button(buttons, text="Update All", command=on_update_all).pack(side="right")
-
-    center_window(root)
+    actions = tk.Frame(frame)
+    actions.pack(fill='x')
+    tk.Button(actions, text='Cancel', command=root.destroy).pack(side='right')
+    tk.Button(actions, text='Update Version and Date', command=apply_update).pack(side='right', padx=(0, 8))
     root.mainloop()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

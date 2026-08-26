@@ -20,8 +20,11 @@
 - Improved Workspace data access with an alphabetical **All Types** queue filter, disabled unavailable types, ordered preview/dashboard actions, two-axis preview scrolling and configurable preview rows (100 by default).
 - Refined operational navigation with the username beside Logout, `0. 🏠 Help Home` first and Help articles numbered `00` to `09`.
 - Expanded module descriptions, README and Help guides to document the current operational workflow; standardized the **Generate PowerPoint Report** and **Refresh Preview** controls.
+- Created `UpdateAll.py` as a Dashboard Analytic utility for synchronizing `src/version.py` and the current `CHANGELOG.md` release header.
 
 #### 🐛 Bug fixes:
+- Removed the obsolete `DOWNLOAD.md` dependency from `BuildBinary.py`; binary release notes now come directly from `CHANGELOG.md`.
+- Removed the obsolete PhotoMigrator-only `UpdateDownloadLinks.py` utility, which referenced unavailable documentation and release links.
 - Improved contrast for Workspace status and Dashboard summary cards, user identity and Logout controls.
 - Fixed Data Ingestion drag-and-drop and cache versioning so new static styles are reliably applied.
 - Accepted the NetCheck `EN-DC`, `EN DC` and `ENDC` NSA RAT spellings.
