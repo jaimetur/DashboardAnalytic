@@ -63,7 +63,7 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert page.status_code == 200
     assert 'NetCheck CDR Reports' in page.text
     assert 'Smart Orchestrator Logs Reports' in page.text
-    assert 'Generate PowerPoint report' in page.text
+    assert 'Generate PowerPoint Report' in page.text
     assert 'data-mapping-selector hidden' in page.text
     assert 'name="vodafone_mapping_dataset_id"' in page.text
     assert 'name="three_mapping_dataset_id"' in page.text

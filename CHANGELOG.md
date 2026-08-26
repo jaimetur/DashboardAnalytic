@@ -23,6 +23,7 @@
 - Created `UpdateAll.py` as a Dashboard Analytic utility for synchronizing `src/version.py` and the current `CHANGELOG.md` release header.
 
 #### 🐛 Bug fixes:
+- Added Windows-1252 and Latin-1 CSV decoding fallbacks after UTF-8, allowing 3UK Multivendor Mapping files with legacy characters to process correctly.
 - Removed the obsolete `DOWNLOAD.md` dependency from `BuildBinary.py`; binary release notes now come directly from `CHANGELOG.md`.
 - Removed the obsolete PhotoMigrator-only `UpdateDownloadLinks.py` utility, which referenced unavailable documentation and release links.
 - Improved contrast for Workspace status and Dashboard summary cards, user identity and Logout controls.

@@ -302,10 +302,23 @@ def _load_excel_dataset(file_path: Path, progress_callback: Callable[[int], None
     return dataset
 
 
+def _read_csv_dataset(file_path: Path) -> pd.DataFrame:
+    """Read CSV sources using UTF-8 first, then common Windows legacy encodings."""
+    decode_error: UnicodeDecodeError | None = None
+    for encoding in ('utf-8-sig', 'cp1252', 'latin-1'):
+        try:
+            return pd.read_csv(file_path, encoding=encoding)
+        except UnicodeDecodeError as exc:
+            decode_error = exc
+    if decode_error:
+        raise decode_error
+    raise ValueError(f'Unable to read CSV file: {file_path.name}')
+
+
 def load_dataset(file_path: Path, progress_callback: Callable[[int], None] | None = None) -> pd.DataFrame:
     suffix = file_path.suffix.lower()
     if suffix == '.csv':
-        df = _normalise_dataset(pd.read_csv(file_path), file_path)
+        df = _normalise_dataset(_read_csv_dataset(file_path), file_path)
         if progress_callback:
             progress_callback(55)
         return df

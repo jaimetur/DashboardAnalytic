@@ -76,6 +76,17 @@ def test_load_dataset_combines_cdr_workbook_operator_sheets(tmp_path) -> None:
     assert set(dataset["dataset_kind"]) == {"voice"}
 
 
+def test_load_dataset_reads_cp1252_three_mapping_csv(tmp_path) -> None:
+    mapping = tmp_path / "Multivendor_Mapping_3UK.csv"
+    mapping.write_bytes("CId___ECI,Vendor,Site_Name\n123,Ericsson,Leeds ° North\n".encode("cp1252"))
+
+    dataset = load_dataset(mapping)
+
+    assert len(dataset) == 1
+    assert dataset["Vendor"].iloc[0] == "Ericsson"
+    assert dataset["Site_Name"].iloc[0] == "Leeds ° North"
+
+
 def test_normalise_dataset_uses_rat_as_primary_technology_for_data() -> None:
     source = pd.DataFrame({
         "RAT": ["5G NSA"],
