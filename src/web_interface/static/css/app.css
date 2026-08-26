@@ -134,6 +134,13 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .admin-stack label:not(.toggle-switch) { color: #8b2429; font-weight: 700; }
 .admin-stack input:not([type="checkbox"]), .admin-stack select { border-color: rgba(139, 29, 36, 0.30); background: linear-gradient(135deg, #fffafa, #fff0ef); }
 .admin-create-user-panel { background: linear-gradient(135deg, rgba(255, 224, 223, 0.82), rgba(255, 244, 243, 0.96)); border-color: rgba(139, 29, 36, 0.20); }
+.catalogue-management-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.15rem; }
+.catalogue-management-section { padding: 1.2rem; border: 1px solid var(--line); border-radius: calc(var(--radius) - 5px); background: var(--panel); }
+.catalogue-management-section h3 { margin: 0; color: #5b1c22; font-size: 1.08rem; }
+.catalogue-management-actions { display: flex; gap: 0.7rem; align-items: center; margin-top: 0.55rem; }
+.catalogue-management-actions > * { flex: 1; }
+.catalogue-export-button { display: inline-flex; align-items: center; justify-content: center; min-height: 2.65rem; padding: 0.55rem 0.9rem; border-radius: 10px; background: linear-gradient(145deg, #10314a, #08736d); border: 1px solid rgba(7, 93, 89, 0.72); color: #fff; font-weight: 700; box-shadow: 0 8px 18px rgba(11, 122, 117, 0.22); }
+.catalogue-export-button:hover { background: linear-gradient(145deg, #0b293e, #065e59); color: #fff; }
 .admin-stack .toggle-slider { background: linear-gradient(135deg, #d8a0a1, #bf6d70); box-shadow: inset 0 2px 6px rgba(95, 16, 21, 0.22); }
 .admin-stack .toggle-switch input:checked + .toggle-slider { background: linear-gradient(135deg, #861919, #e15e5e); }
 .admin-stack .toggle-switch input:focus-visible + .toggle-slider { outline-color: rgba(134, 25, 25, 0.62); }

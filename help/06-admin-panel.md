@@ -12,6 +12,12 @@ The **Users** table is the authoritative operational view: submit the row action
 
 The Administration view also exposes the datasets recorded by Workspace. Use it to verify the source filename, assigned input type, processing state and ownership when investigating a missing Dashboard or Reporting input. Dataset analysis itself remains in the normal Workspace and Dashboard workflow; the Admin view is for oversight and traceability.
 
+## PowerPoint slide catalogue importer
+
+The **Slide catalogue importer** accepts a separate UTF-8 CSV for **NSA** and **SA**. The active files are stored under `assets/ppt-slides-catalog/` and can be exported from the matching Admin panel before editing. The required columns are `Slide`, `Slide tittle`, `Slide Subtittle`, `CDR source`, `KPI`, `Chart type`, `Filters` and `Grouping`; each row that has a CDR source represents one chart image. `Slide tittle` and `Slide Subtittle` are taken from the supplied PowerPoint templates; a non-empty subtitle is rendered beneath the title. Where the source header has multiple lines, the exported CSV uses the literal `\n` sequence, which the importer restores as a line break. Validate edits in the exported CSV, then import it into the matching technology panel.
+
+The imported catalogue becomes the active reference for subsequent reports. For every automated slide, the renderer counts its CDR rows and uses the matching PowerPoint master layout: one row uses the one-column image placeholder, two rows use two image placeholders, and so on through four columns. The existing analyst commentary area is retained and cleared. The importer also rewrites the NSA/SA Slide Catalogue tables in the PowerPoint Reporting help page from the active catalogues. The audit log records each successful import.
+
 ## Audit activity
 
 The audit view records significant application actions, including account changes, uploads, processing actions and report generation. Use it to investigate an unexpected upload, report generation or configuration-related operation. Record the time window, account and affected dataset or report before escalating an issue.

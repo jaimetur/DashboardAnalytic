@@ -27,6 +27,7 @@ class Settings:
     input_dir: Path = project_path("APP_INPUT_DIR", "data/input")
     output_dir: Path = project_path("APP_OUTPUT_DIR", "data/output")
     export_dir: Path = project_path("APP_EXPORT_DIR", "data/exports")
+    report_catalog_dir: Path = project_path("APP_REPORT_CATALOG_DIR", "assets/ppt-slides-catalog")
     reporting_template_dir: Path = project_path("APP_REPORTING_TEMPLATE_DIR", "assets/templates")
     template_dir: Path = project_path("APP_TEMPLATE_DIR", "src/web_interface/templates")
     static_dir: Path = project_path("APP_STATIC_DIR", "src/web_interface/static")

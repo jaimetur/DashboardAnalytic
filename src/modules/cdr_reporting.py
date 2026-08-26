@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import re
 import shutil
+from collections import defaultdict
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -13,7 +16,7 @@ import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
-from pptx.util import Inches
+from pptx.util import Inches, Pt
 
 
 TEMPLATE_NAMES = {
@@ -23,6 +26,96 @@ TEMPLATE_NAMES = {
 CDR_REPORT_VERSION = "2026-08-26-v5"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
+CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "CDR source", "KPI", "Chart type", "Filters", "Grouping")
+CATALOG_SOURCE_KINDS = {"cdr-data": "data", "cdr-voice": "voice", "cdr-speech": "speech"}
+
+
+@dataclass(frozen=True)
+class CatalogEntry:
+    slide: int
+    slide_title: str
+    slide_subtitle: str
+    cdr_source: str
+    kpi: str
+    chart_type: str
+    filters: str
+    grouping: str
+
+    @property
+    def source_kind(self) -> str | None:
+        return CATALOG_SOURCE_KINDS.get(self.cdr_source.strip().casefold())
+
+
+def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntry]:
+    """Validate the editable report-catalogue CSV and return its chart rows."""
+    if technology not in TEMPLATE_NAMES:
+        raise ValueError("Catalog technology must be NSA or SA.")
+    if isinstance(content, bytes):
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ValueError("The report catalogue must be a UTF-8 CSV file.") from exc
+    else:
+        text = content
+    reader = csv.DictReader(io.StringIO(text))
+    if tuple(reader.fieldnames or ()) != CATALOG_HEADERS:
+        raise ValueError("The report catalogue must use exactly these columns: " + ", ".join(CATALOG_HEADERS))
+    entries: list[CatalogEntry] = []
+    for line_number, row in enumerate(reader, start=2):
+        try:
+            slide = int((row.get("Slide") or "").strip())
+        except ValueError as exc:
+            raise ValueError(f"Catalog row {line_number} has an invalid Slide value.") from exc
+        if slide < 1:
+            raise ValueError(f"Catalog row {line_number} must use a positive slide number.")
+        entry = CatalogEntry(
+            slide=slide,
+            slide_title=(row.get("Slide tittle") or "").strip().replace("\\n", "\n"),
+            slide_subtitle=(row.get("Slide Subtittle") or "").strip().replace("\\n", "\n"),
+            cdr_source=(row.get("CDR source") or "").strip(),
+            kpi=(row.get("KPI") or "").strip(),
+            chart_type=(row.get("Chart type") or "").strip(),
+            filters=(row.get("Filters") or "").strip(),
+            grouping=(row.get("Grouping") or "").strip(),
+        )
+        if entry.source_kind and not entry.slide_title:
+            raise ValueError(f"Catalog row {line_number} requires Slide tittle for a CDR source.")
+        if entry.cdr_source and entry.cdr_source.casefold() not in CATALOG_SOURCE_KINDS:
+            raise ValueError(f"Catalog row {line_number} has unsupported CDR source '{entry.cdr_source}'.")
+        if entry.source_kind and (not entry.kpi or not entry.chart_type):
+            raise ValueError(f"Catalog row {line_number} requires KPI and Chart type for a CDR source.")
+        entries.append(entry)
+    if not entries:
+        raise ValueError("The report catalogue does not contain any rows.")
+    return entries
+
+
+def load_catalog_csv(path: Path, technology: str) -> list[CatalogEntry]:
+    return parse_catalog_csv(path.read_bytes(), technology)
+
+
+def active_catalog_path(catalog_dir: Path, fallback_catalog: Path, technology: str) -> Path:
+    imported = catalog_dir / f"{technology}-slide-catalogue.csv"
+    return imported if imported.exists() else fallback_catalog
+
+
+def catalogue_markdown(entries: list[CatalogEntry], technology: str) -> str:
+    heading = "NSA" if technology == "nsa" else "SA"
+    lines = [f"### {heading} template", "", "| " + " | ".join(CATALOG_HEADERS) + " |", "| --- | --- | --- | --- | --- | --- | --- |"]
+    for entry in entries:
+        values = (str(entry.slide), entry.slide_title, entry.slide_subtitle or "—", entry.cdr_source or "—", entry.kpi or "—", entry.chart_type or "—", entry.filters or "—", entry.grouping or "—")
+        lines.append("| " + " | ".join(value.replace("|", "\\|").replace("\n", "<br>") for value in values) + " |")
+    return "\n".join(lines)
+
+
+def update_catalogue_document(document: Path, nsa_entries: list[CatalogEntry], sa_entries: list[CatalogEntry]) -> None:
+    start = "<!-- SLIDE_CATALOGUE:START -->"
+    end = "<!-- SLIDE_CATALOGUE:END -->"
+    content = document.read_text(encoding="utf-8")
+    if start not in content or end not in content:
+        raise ValueError("The PowerPoint reporting help document is missing its slide-catalogue markers.")
+    block = "\n".join((start, "", "Export the active NSA or SA catalogue from Admin before editing it. The tables below always reflect the active CSV files under `assets/ppt-slides-catalog/`.", "", catalogue_markdown(nsa_entries, "nsa"), "", catalogue_markdown(sa_entries, "sa"), "", end))
+    document.write_text(re.sub(re.escape(start) + r".*?" + re.escape(end), block, content, flags=re.S), encoding="utf-8")
 
 # The PPT templates contain rasterised Tableau charts.  These rules are the
 # source-of-truth replacement contract captured from every automated KPI slide:
@@ -418,6 +511,89 @@ def _render_scatter(title: str, frame: pd.DataFrame, group: str | None, metric: 
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
+def _render_mean_column(title: str, frame: pd.DataFrame, group: str | None, metric: str | None) -> BytesIO:
+    if frame.empty or not group or not metric:
+        return _empty_chart(title)
+    data = frame[[group, metric]].copy()
+    data[metric] = pd.to_numeric(data[metric], errors="coerce")
+    means = data.dropna().groupby(group)[metric].mean().sort_values()
+    if means.empty:
+        return _empty_chart(title)
+    image, draw = _canvas(title)
+    left, baseline, maximum = 120, 730, max(float(means.max()), 1.0)
+    width = min(150, max(54, 1000 // len(means)))
+    for index, (label, value) in enumerate(means.items()):
+        height = 520 * float(value) / maximum
+        x = left + index * (width + 55)
+        draw.rectangle((x, baseline - height, x + width, baseline), fill=_colour(label, index))
+        draw.text((x, baseline - height - 28), f"{float(value):.2f}", fill="#34495A", font=_font(15))
+        draw.text((x, baseline + 12), str(label)[:16], fill="#62727E", font=_font(14))
+    draw.text((left, 780), metric.replace("_", " "), fill="#62727E", font=_font(16))
+    output = BytesIO(); image.save(output, format="PNG"); output.seek(0)
+    return output
+
+
+def _catalog_tokens(filters: str, keyword: str) -> tuple[str, ...]:
+    text = filters.casefold()
+    if keyword == "session":
+        return tuple(token for token in ("volte", "multirab", "whatsapp", "classic", "call") if token in text)
+    if keyword == "test":
+        return tuple(token for token in ("fdfs", "fdtt", "interactivity", "brows", "http", "youtube", "video") if token in text)
+    if keyword == "direction":
+        return tuple(token for token in ("dl", "ul") if re.search(rf"\b{token}\b", text))
+    return ()
+
+
+def _catalog_spec(entry: CatalogEntry) -> dict:
+    filters = entry.filters.casefold()
+    chart_type = entry.chart_type.casefold()
+    metric_parts = tuple(part.strip(" `") for part in re.split(r"\s+vs\s+", entry.kpi, flags=re.I) if part.strip())
+    spec: dict = {"source": entry.source_kind, "metric": metric_parts[:1] or (entry.kpi,)}
+    sessions, tests, directions = _catalog_tokens(entry.filters, "session"), _catalog_tokens(entry.filters, "test"), _catalog_tokens(entry.filters, "direction")
+    if sessions:
+        spec["sessions"] = sessions
+    if tests:
+        spec["tests"] = tests
+    if directions:
+        spec["directions"] = directions
+    if "vodafone" in filters:
+        spec["operators"] = ("vodafone",)
+    elif "three uk" in filters or "3uk" in filters:
+        spec["operators"] = ("three", "3 uk", "3")
+    if "london" in filters:
+        spec["city_scope"] = "london"
+    if "scatter" in chart_type:
+        spec["kind"] = "scatter"
+        spec["x_metric"] = metric_parts[1:] or ("Playing_RSRP_NR_Avg", "NR_RSRP_Avg")
+    elif "failed" in filters or "failure" in entry.slide_title.casefold():
+        spec["kind"] = "failure_count"
+    elif "100%" in chart_type:
+        spec["kind"] = "quality_100" if any(token in entry.kpi.casefold() for token in ("lq", "polqa")) else "status_100"
+        if spec["kind"] == "quality_100":
+            spec["threshold"] = 1.6
+    else:
+        spec["kind"] = "cdf_mean"
+    return spec
+
+
+def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame], multivendor: bool) -> BytesIO:
+    spec = _catalog_spec(entry)
+    frame, group, period = _source_for_spec(frames, spec, multivendor)
+    metric = _metric_column(frame, spec)
+    chart_type = entry.chart_type.casefold()
+    if spec["kind"] == "status_100":
+        return _render_status_100(entry.slide_title, frame, group, period)
+    if spec["kind"] == "quality_100":
+        return _render_status_100(entry.slide_title, frame, group, period, True, 1.6, metric)
+    if spec["kind"] == "failure_count":
+        return _render_failure_count(entry.slide_title, frame, group, period)
+    if spec["kind"] == "scatter":
+        return _render_scatter(entry.slide_title, frame, group, metric, _column(frame, spec.get("x_metric", ())))
+    if "column" in chart_type or "distribution" in chart_type:
+        return _render_mean_column(entry.slide_title, frame, group, metric)
+    return _render_cdf_mean(entry.slide_title, frame, group, period, metric)
+
+
 def _chart_for_spec(title: str, frames: dict[str, pd.DataFrame], spec: dict, multivendor: bool) -> BytesIO:
     frame, group, period = _source_for_spec(frames, spec, multivendor); metric = _metric_column(frame, spec)
     if spec["kind"] == "status_100": return _render_status_100(title, frame, group, period)
@@ -459,6 +635,36 @@ def _clear_commentary(slide) -> None:
             shape.text_frame.clear()
 
 
+def _set_slide_header(slide, title: str, subtitle: str) -> None:
+    title_shape = next(
+        (
+            shape for shape in slide.shapes
+            if getattr(shape, "has_text_frame", False)
+            and getattr(shape, "is_placeholder", False)
+            and shape.placeholder_format.type in {1, 3}
+        ),
+        None,
+    )
+    if title_shape is None:
+        title_shape = next(
+            (shape for shape in slide.shapes if getattr(shape, "has_text_frame", False) and shape.top < Inches(1.2)),
+            None,
+        )
+    if title_shape is not None and title:
+        title_shape.text = title
+    existing_subtitle = next((shape for shape in slide.shapes if shape.name == "catalogue-subtitle"), None)
+    if existing_subtitle is not None:
+        existing_subtitle._element.getparent().remove(existing_subtitle._element)
+    if subtitle:
+        top = (title_shape.top + title_shape.height) if title_shape is not None else Inches(0.8)
+        text_box = slide.shapes.add_textbox(Inches(0.55), top, Inches(11.6), Inches(0.36))
+        text_box.name = "catalogue-subtitle"
+        paragraph = text_box.text_frame.paragraphs[0]
+        paragraph.text = subtitle
+        paragraph.font.size = Pt(13)
+        paragraph.font.italic = True
+
+
 def _chart_frames(slide) -> list[tuple[int, int, int, int]]:
     """Remove example chart images/groups and return their occupied areas.
 
@@ -488,14 +694,52 @@ def _combined_frame(frames: list[tuple[int, int, int, int]]) -> tuple[int, int, 
     return left, top, right - left, bottom - top
 
 
-def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.DataFrame], technology: str, multivendor: bool) -> Path:
+def _master_placeholder_frames(presentation: Presentation, chart_count: int) -> list[tuple[int, int, int, int]]:
+    """Read the bundled master layouts as the placement contract for chart images."""
+    if not 1 <= chart_count <= 4:
+        return []
+    expected = f"title and {chart_count} {'column' if chart_count == 1 else 'columns'}"
+    for layout in presentation.slide_layouts:
+        if layout.name.strip().casefold() != expected:
+            continue
+        frames = [
+            (shape.left, shape.top, shape.width, shape.height)
+            for shape in layout.placeholders
+            if shape.placeholder_format.type == 7  # PP_PLACEHOLDER_TYPE.OBJECT
+        ]
+        if len(frames) >= chart_count:
+            return sorted(frames, key=lambda frame: (frame[1], frame[0]))[:chart_count]
+    return []
+
+
+def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.DataFrame], technology: str,
+                      multivendor: bool, catalog: list[CatalogEntry] | None = None) -> Path:
     if not template.exists():
         raise FileNotFoundError(f"Reporting template not found: {template.name}")
     shutil.copyfile(template, destination)
     presentation = Presentation(destination)
     chart_specs = REPORT_CHART_SPECS[technology]
+    catalog_by_slide: dict[int, list[CatalogEntry]] = defaultdict(list)
+    catalog_headers: dict[int, CatalogEntry] = {}
+    for entry in catalog or []:
+        catalog_headers.setdefault(entry.slide, entry)
+        if entry.source_kind:
+            catalog_by_slide[entry.slide].append(entry)
     for number, slide in enumerate(presentation.slides, start=1):
         _clear_commentary(slide)
+        if number in catalog_headers:
+            header = catalog_headers[number]
+            _set_slide_header(slide, header.slide_title, header.slide_subtitle)
+        catalog_entries = catalog_by_slide.get(number, [])
+        if catalog_entries:
+            removed_frames = _chart_frames(slide)
+            placement_frames = _master_placeholder_frames(presentation, len(catalog_entries)) or removed_frames
+            if len(placement_frames) < len(catalog_entries):
+                combined = _combined_frame(removed_frames) or (Inches(0.55), Inches(1.65), Inches(6.15), Inches(3.75))
+                placement_frames = [combined] * len(catalog_entries)
+            for entry, placement in zip(catalog_entries, placement_frames, strict=True):
+                slide.shapes.add_picture(_chart_for_catalog_entry(entry, frames, multivendor), *placement)
+            continue
         spec = chart_specs.get(number)
         if not spec:
             continue

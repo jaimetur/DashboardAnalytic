@@ -16,14 +16,16 @@ def client(tmp_path: Path) -> TestClient:
     input_dir = data_dir / "input"
     output_dir = data_dir / "output"
     export_dir = data_dir / "exports"
+    report_catalog_dir = data_dir / "report_catalogs"
 
-    for directory in (config_dir, input_dir, output_dir, export_dir):
+    for directory in (config_dir, input_dir, output_dir, export_dir, report_catalog_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
     object.__setattr__(settings, "database_path", config_dir / "app.db")
     object.__setattr__(settings, "input_dir", input_dir)
     object.__setattr__(settings, "output_dir", output_dir)
     object.__setattr__(settings, "export_dir", export_dir)
+    object.__setattr__(settings, "report_catalog_dir", report_catalog_dir)
     app_module.repository.db_path = settings.database_path
     app_module.SESSIONS.clear()
 

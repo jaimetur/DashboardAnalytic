@@ -83,6 +83,34 @@
     </div>
   </details>
 
+  <article class="panel report-catalogue-panel">
+    <div class="section-head tight-head">
+      <div>
+        <p class="eyebrow">PowerPoint reporting</p>
+        <h2>Slide Catalogue Management</h2>
+      </div>
+    </div>
+    <p class="lede">Manage the active NSA and SA CSV slide catalogues. An imported catalogue becomes the report-generation reference and synchronises the Slide Catalogue section of the PowerPoint Reporting help page.</p>
+    <div class="catalogue-management-grid">
+      {% for technology, catalogue in report_catalogs.items() %}
+      <section class="catalogue-management-section">
+        <div class="section-head tight-head">
+          <div><p class="eyebrow">{{ technology | upper }}</p><h3>{{ technology | upper }} Slide Catalog</h3></div>
+        </div>
+        <p class="table-help">Active source: {{ catalogue.source }} · {{ catalogue.path.name }}</p>
+        <form class="form-stack" action="/admin/report-catalogues/{{ technology }}" method="post" enctype="multipart/form-data">
+          <label>Catalogue CSV<input type="file" name="catalogue_file" accept=".csv,text/csv" required></label>
+          <div class="catalogue-management-actions">
+            <a class="catalogue-export-button" href="/admin/report-catalogues/{{ technology }}/export">Export</a>
+            <button type="submit">Import</button>
+          </div>
+        </form>
+      </section>
+      {% endfor %}
+    </div>
+    <p class="form-note">Required columns: Slide, Slide tittle, Slide Subtittle, CDR source, KPI, Chart type, Filters and Grouping. A non-empty Slide Subtittle is added to the slide header. One CDR row is rendered into one image placeholder; slides with two, three or four CDR rows use the corresponding template master layout.</p>
+  </article>
+
   <details class="panel collapsible-panel" open data-panel-state-key="admin:datasets">
     <summary class="collapsible-summary">
       <div>

@@ -776,6 +776,37 @@ def test_non_admin_navigation_hides_admin_tab(client) -> None:
     assert 'User: demo' in workspace.text
 
 
+def test_admin_imports_report_catalogue_and_synchronizes_help(client, tmp_path, monkeypatch) -> None:
+    from src.modules.cdr_reporting import CATALOG_HEADERS
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    help_document = tmp_path / 'powerpoint-reporting.md'
+    help_document.write_text(
+        '# Reporting\n\n<!-- SLIDE_CATALOGUE:START -->\nold\n<!-- SLIDE_CATALOGUE:END -->\n',
+        encoding='utf-8',
+    )
+    monkeypatch.setattr(app_module, 'REPORT_CATALOGUE_DOCUMENT', help_document)
+    content = (
+        ','.join(CATALOG_HEADERS)
+        + '\n8,Completed Call Ratio,Voice quality,CDR-Voice,Call_Status,100% stacked column,VoLTE,Operator × Campaign\n'
+    ).encode('utf-8')
+
+    response = client.post(
+        '/admin/report-catalogues/nsa',
+        files={'catalogue_file': ('nsa-slide-catalogue.csv', BytesIO(content), 'text/csv')},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert app_module.reporting_catalog_path('nsa').read_bytes() == content
+    assert 'Completed Call Ratio' in help_document.read_text(encoding='utf-8')
+
+    exported = client.get('/admin/report-catalogues/nsa/export')
+    assert exported.status_code == 200
+    assert exported.content == content
+
+
 def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     login(client)
 

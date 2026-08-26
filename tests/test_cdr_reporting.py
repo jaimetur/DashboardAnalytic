@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import pandas as pd
 from io import BytesIO
+from pathlib import Path
+from pptx import Presentation
 
-from src.modules.cdr_reporting import classify_sessions, enrich_multivendor, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, classify_sessions, enrich_multivendor, parse_catalog_csv, render_cdr_report, vendor_from_cells
 
 
 def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> None:
@@ -52,6 +54,51 @@ def test_vodafone_mapping_derives_gcid_from_4g_enodeb_and_local_cell() -> None:
     three_mapping = pd.DataFrame({'Cid__ECI': [1], 'Vendor': ['Nokia']})
 
     assert enrich_multivendor(cdr, vodafone_mapping, three_mapping)['report_vendor'].tolist() == ['Vodafone_Samsung']
+
+
+def test_catalogue_csv_requires_the_report_chart_contract_columns() -> None:
+    catalogue = (
+        ','.join(CATALOG_HEADERS)
+        + '\n8,Completed Call Ratio,Voice quality,CDR-Voice,Call_Status,100% stacked column,VoLTE,Operator × Campaign\n'
+    ).encode('utf-8')
+
+    entries = parse_catalog_csv(catalogue, 'nsa')
+
+    assert entries[0].slide == 8
+    assert entries[0].slide_title == 'Completed Call Ratio'
+    assert entries[0].slide_subtitle == 'Voice quality'
+    assert entries[0].source_kind == 'voice'
+    assert entries[0].chart_type == '100% stacked column'
+
+
+def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None:
+    catalogue = (
+        ','.join(CATALOG_HEADERS)
+        + '\n8,Completed Call Ratio,Voice quality,CDR-Voice,Call_Status,100% stacked column,VoLTE,Operator × Campaign'
+        + '\n8,Completed Call Ratio,Voice quality,CDR-Voice,Call_Setup_Time,Average column,VoLTE,Operator × Campaign\n'
+    ).encode('utf-8')
+    frames = {
+        'data': pd.DataFrame(),
+        'speech': pd.DataFrame(),
+        'voice': pd.DataFrame({
+            'Campaign': ['Q1'], 'Operator': ['EE'], 'Session_Type': ['VoLTE'],
+            'Call_Status': ['Completed'], 'Call_Setup_Time': [1.2],
+        }),
+    }
+    destination = tmp_path / 'catalogue-layout.pptx'
+
+    render_cdr_report(
+        destination,
+        Path('assets/templates/Template_CDR_NSA_analysis.pptx'),
+        frames,
+        'nsa',
+        False,
+        parse_catalog_csv(catalogue, 'nsa'),
+    )
+
+    slide = Presentation(destination).slides[7]
+    assert sum(1 for shape in slide.shapes if hasattr(shape, 'image')) >= 2
+    assert any(getattr(shape, 'text', '') == 'Voice quality' for shape in slide.shapes)
 
 
 def test_reporting_module_is_available_to_authenticated_users(client) -> None:

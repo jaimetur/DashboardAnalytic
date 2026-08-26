@@ -25,7 +25,7 @@ from starlette.datastructures import QueryParams
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import CDR_REPORT_VERSION, TEMPLATE_NAMES, classify_sessions, enrich_multivendor, render_cdr_report
+from src.modules.cdr_reporting import CDR_REPORT_VERSION, TEMPLATE_NAMES, active_catalog_path, classify_sessions, enrich_multivendor, load_catalog_csv, parse_catalog_csv, render_cdr_report, update_catalogue_document
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
@@ -128,6 +128,11 @@ HELP_DOCUMENT_LABELS = {
     '04-e2e-dashboard-analysis.md': 'E2E Dashboard',
     '05-e2e-ppt-reporting.md': 'E2E PowerPoint Reporting',
 }
+REPORT_CATALOGUE_DOCUMENT = PROJECT_ROOT / 'help' / '05-e2e-ppt-reporting.md'
+DEFAULT_REPORT_CATALOGS = {
+    'nsa': PROJECT_ROOT / 'assets' / 'ppt-slides-catalog' / 'nsa-slide-catalogue.csv',
+    'sa': PROJECT_ROOT / 'assets' / 'ppt-slides-catalog' / 'sa-slide-catalogue.csv',
+}
 
 
 def help_document_number(relative_path: str) -> str | None:
@@ -140,6 +145,22 @@ def help_document_label(relative_path: str) -> str:
     return stem.replace('-', ' ').replace('_', ' ').title()
 
 
+def reporting_catalog_path(technology: str) -> Path:
+    return active_catalog_path(settings.report_catalog_dir, DEFAULT_REPORT_CATALOGS[technology], technology)
+
+
+def reporting_catalog_entries(technology: str):
+    return load_catalog_csv(reporting_catalog_path(technology), technology)
+
+
+def synchronize_reporting_catalogue_document() -> None:
+    update_catalogue_document(
+        REPORT_CATALOGUE_DOCUMENT,
+        reporting_catalog_entries('nsa'),
+        reporting_catalog_entries('sa'),
+    )
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     ensure_directories([
@@ -147,6 +168,7 @@ async def lifespan(_: FastAPI):
         settings.input_dir,
         settings.output_dir,
         settings.export_dir,
+        settings.report_catalog_dir,
         settings.template_dir,
         settings.reporting_template_dir,
         settings.static_dir,
@@ -869,6 +891,13 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             'users': repository.list_users(),
             'datasets': repository.list_datasets(),
             'logs': repository.list_logs(),
+            'report_catalogs': {
+                technology: {
+                    'path': reporting_catalog_path(technology),
+                    'source': 'Active catalogue',
+                }
+                for technology in TEMPLATE_NAMES
+            },
             'error': error,
         },
         status_code=status_code,
@@ -1388,6 +1417,11 @@ def generate_netcheck_cdr_report(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     template = settings.reporting_template_dir / TEMPLATE_NAMES[technology]
+    catalog_path = reporting_catalog_path(technology)
+    try:
+        catalog_entries = load_catalog_csv(catalog_path, technology)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f'Unable to load the active {technology.upper()} report catalogue: {exc}') from exc
     report_hash = hashlib.sha1(
         json.dumps({
             'report_version': CDR_REPORT_VERSION,
@@ -1397,13 +1431,14 @@ def generate_netcheck_cdr_report(
             'vodafone_mapping': vodafone_mapping_dataset_id,
             'three_mapping': three_mapping_dataset_id,
             'template': template.name,
+            'catalogue': hashlib.sha1(catalog_path.read_bytes()).hexdigest(),
         }, sort_keys=True).encode('utf-8')
     ).hexdigest()[:10]
     file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{report_hash}.pptx"
     destination = safe_join(settings.export_dir, file_name)
     if not destination.exists():
         try:
-            render_cdr_report(destination, template, frames, technology, multivendor)
+            render_cdr_report(destination, template, frames, technology, multivendor, catalog_entries)
         except (ValueError, FileNotFoundError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     repository.add_log(user.username, 'export_netcheck_cdr_report', json.dumps({
@@ -1690,6 +1725,44 @@ def export_report(
 @app.get('/admin', response_class=HTMLResponse)
 def admin_panel(request: Request, user: SessionUser = Depends(admin_user)) -> HTMLResponse:
     return render_admin_template(request, user)
+
+
+@app.post('/admin/report-catalogues/{technology}', response_class=HTMLResponse)
+def import_report_catalogue(
+    request: Request,
+    technology: str,
+    catalogue_file: UploadFile = File(...),
+    user: SessionUser = Depends(admin_user),
+) -> HTMLResponse:
+    technology = technology.strip().lower()
+    if technology not in TEMPLATE_NAMES:
+        raise HTTPException(status_code=404, detail='Report technology not found')
+    if not catalogue_file.filename or Path(catalogue_file.filename).suffix.lower() != '.csv':
+        return render_admin_template(request, user, error='Select a CSV slide catalogue.', status_code=400)
+    try:
+        content = catalogue_file.file.read()
+        entries = parse_catalog_csv(content, technology)
+        destination = settings.report_catalog_dir / f'{technology}-slide-catalogue.csv'
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+        synchronize_reporting_catalogue_document()
+    except ValueError as exc:
+        return render_admin_template(request, user, error=str(exc), status_code=400)
+    repository.add_log(user.username, 'import_report_catalogue', json.dumps({
+        'technology': technology,
+        'file': catalogue_file.filename,
+        'chart_rows': sum(1 for entry in entries if entry.source_kind),
+    }))
+    return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get('/admin/report-catalogues/{technology}/export')
+def export_report_catalogue(technology: str, user: SessionUser = Depends(admin_user)) -> FileResponse:
+    technology = technology.strip().lower()
+    if technology not in TEMPLATE_NAMES:
+        raise HTTPException(status_code=404, detail='Report technology not found')
+    catalogue = reporting_catalog_path(technology)
+    return FileResponse(catalogue, filename=f'{technology}-slide-catalogue.csv', media_type='text/csv; charset=utf-8')
 
 
 @app.post('/admin/users', response_class=HTMLResponse)

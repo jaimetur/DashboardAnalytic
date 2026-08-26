@@ -1,0 +1,37 @@
+Slide,Slide tittle,Slide Subtittle,CDR source,KPI,Chart type,Filters,Grouping
+1,2025 Q4 Net check UK,"NSA CDR analysis\nBelfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield",,,Preserved cover,,
+2,Executive Summary,,,,Preserved summary,,
+3,Netcheck Q4 scoring “Best network”. Drive city,,,,Not automated,,
+4,Score breakdown,,,,Not automated,,
+5,KPIs prioritization: gap Vodafone vs EE,,,,Not automated,,
+6,KPIs prioritization: gap Three vs EE,,,,Not automated,,
+7,7 cities analysis,"Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield",,,Preserved section divider,,
+8,Completed Call Ratio,,CDR-Voice,Call_Status,100% stacked column,"Session_Type: VoLTE, MultiRAB, WhatsApp",Call family × Operator × Campaign
+9,Voice failures per Q/city,,CDR-Voice,Call_Status,Stacked horizontal count bar,"Failed/Dropped; VoLTE, MultiRAB, WhatsApp",Call family × City × Operator × Campaign
+10,Data failure,,CDR-Data,Test_Result,100% stacked column,"HTTP, Browsing, Video and YouTube tests",Test family × Operator × Campaign
+11,Data failures - FDFS test,,CDR-Data,Test_Result,100% stacked column,Test_Name contains FDFS,Test name × Direction × Operator × Campaign
+12,POLQA AVG MOS (Multirab&volte),,CDR-Voice,POLQA_LQ_Avg,CDF line,Session_Type: VoLTE or MultiRAB,Operator × Campaign
+12,POLQA AVG MOS (Multirab&volte),,CDR-Voice,POLQA_LQ_Avg,Average-MOS column,Session_Type: VoLTE or MultiRAB,Operator × Campaign
+13,POLQA AVG MOS (WhatsApp),,CDR-Speech,LQ,CDF line,Session_Type contains WhatsApp,Operator × Campaign
+13,POLQA AVG MOS (WhatsApp),,CDR-Speech,LQ,Average-MOS column,Session_Type contains WhatsApp,Operator × Campaign
+14,POLQA <1.6,,CDR-Speech,LQ,100% stacked column,WhatsApp; LQ < 1.6 vs ≥ 1.6,Operator × Campaign
+14,POLQA <1.6,,CDR-Voice,POLQA_LQ_Avg,100% stacked column,VoLTE; POLQA < 1.6 vs ≥ 1.6,Operator × Campaign
+15,CST,,CDR-Voice,Call_Setup_Time,CDF line,Session_Type: VoLTE or MultiRAB,Operator × Campaign
+15,CST,,CDR-Voice,Call_Setup_Time,Average call-setup-time column,Session_Type: VoLTE or MultiRAB,Operator × Campaign
+16,FDTT DL (7s),,CDR-Data,FDTT_Sustainable_MDR,CDF line,FDTT; Direction DL,Operator × Campaign
+16,FDTT DL (7s),,CDR-Data,FDTT_Sustainable_MDR,Stacked low-rate distribution,FDTT; Direction DL; template rate buckets,Operator × Campaign × Rate bucket
+17,FDTT UL (7s),,CDR-Data,FDTT_Sustainable_MDR,CDF line,FDTT; Direction UL,Operator × Campaign
+17,FDTT UL (7s),,CDR-Data,FDTT_Sustainable_MDR,Stacked low-rate distribution,FDTT; Direction UL; template rate buckets,Operator × Campaign × Rate bucket
+18,FDFS DL,,CDR-Data,Mean_Data_Rate,CDF line,FDFS; Direction DL,Operator × Campaign
+18,FDFS DL,,CDR-Data,Data_Test_Duration,CDF line,FDFS; Direction DL,Operator × Campaign
+18,FDFS DL,,CDR-Data,Data_Test_Duration,Average transfer-time column,FDFS; Direction DL,Operator × Campaign
+19,FDFS UL,,CDR-Data,Mean_Data_Rate,CDF line,FDFS; Direction UL,Operator × Campaign
+19,FDFS UL,,CDR-Data,Data_Test_Duration,CDF line,FDFS; Direction UL,Operator × Campaign
+19,FDFS UL,,CDR-Data,Data_Test_Duration,Average transfer-time column,FDFS; Direction UL,Operator × Campaign
+20,Interactivity,,CDR-Data,Interactivity_RTT_Median,CDF line,Interactivity tests,Operator × Campaign
+20,Interactivity,,CDR-Data,Interactivity_RTT_Median,Median RTT column,Interactivity tests,Operator × Campaign
+20,Interactivity,,CDR-Data,Interactivity_Packet_Error_Ratio,CDF line,Interactivity tests,Operator × Campaign
+20,Interactivity,,CDR-Data,Interactivity_Packet_Error_Ratio,Average packet-error-ratio column,Interactivity tests,Operator × Campaign
+21,Browsing,,CDR-Data,http_Browser_1MB_Reached_Duration,CDF line,Browsing/HTTP tests,Operator × Campaign
+21,Browsing,,CDR-Data,http_Browser_1MB_Reached_Duration,Average time-to-1MB column,Browsing/HTTP tests,Operator × Campaign
+22,Conclusions,,,,Preserved conclusions,,
