@@ -37,6 +37,60 @@ def _first_available_series(df: pd.DataFrame, candidates: Iterable[str], default
     return pd.Series([default] * len(df), index=df.index, dtype='object')
 
 
+def _numeric_column(df: pd.DataFrame, candidates: Iterable[str]) -> pd.Series:
+    """Return the first matching column as numeric values, preserving row alignment."""
+    return pd.to_numeric(_first_available_series(df, candidates), errors='coerce')
+
+
+def add_vfuk_gcid_column(df: pd.DataFrame) -> pd.DataFrame:
+    """Materialise the VFUK mapping GCID for the 4G and 5G source worksheets.
+
+    The 4G value follows the supplied Excel calculation exactly:
+    ``HEX2DEC(DEC2HEX(eNodeB ID, 5) & DEC2HEX(Local Cell ID, 2))``.
+    The existing 5G mapping convention remains ``gNodeB ID * 4096 + Local Cell ID``.
+    """
+    dataset = df.copy()
+    source_sheet = _first_available_series(dataset, ['source_sheet']).astype(str).str.strip().str.casefold()
+    local_cell_id = _numeric_column(dataset, ['Local Cell ID', 'Local_Cell_ID', 'Cell ID'])
+    gcid = pd.Series(pd.NA, index=dataset.index, dtype='Int64')
+
+    enodeb_id = _numeric_column(dataset, ['eNodeB ID', 'eNodeB_ID', 'eNB ID'])
+    valid_4g = (
+        source_sheet.eq('4g')
+        & enodeb_id.notna()
+        & local_cell_id.notna()
+        & enodeb_id.ge(0)
+        & enodeb_id.le(0xFFFFF)
+        & local_cell_id.ge(0)
+        & local_cell_id.le(0xFF)
+        & enodeb_id.eq(enodeb_id.round())
+        & local_cell_id.eq(local_cell_id.round())
+    )
+    gcid.loc[valid_4g] = (
+        enodeb_id.loc[valid_4g].astype('int64') * 256
+        + local_cell_id.loc[valid_4g].astype('int64')
+    )
+
+    gnodeb_id = _numeric_column(dataset, ['gNodeB ID', 'gNodeB_ID', 'gNB ID'])
+    valid_5g = (
+        source_sheet.eq('5g')
+        & gnodeb_id.notna()
+        & local_cell_id.notna()
+        & gnodeb_id.ge(0)
+        & local_cell_id.ge(0)
+        & local_cell_id.le(0xFFF)
+        & gnodeb_id.eq(gnodeb_id.round())
+        & local_cell_id.eq(local_cell_id.round())
+    )
+    gcid.loc[valid_5g] = (
+        gnodeb_id.loc[valid_5g].astype('int64') * 4096
+        + local_cell_id.loc[valid_5g].astype('int64')
+    )
+
+    dataset['GCID'] = gcid
+    return dataset
+
+
 def _parse_campaign_dimension(value: object, part: str) -> object:
     if pd.isna(value):
         return pd.NA

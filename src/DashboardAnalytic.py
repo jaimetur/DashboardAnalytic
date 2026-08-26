@@ -26,7 +26,7 @@ from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
 from src.modules.cdr_reporting import CDR_REPORT_VERSION, TEMPLATE_NAMES, classify_sessions, enrich_multivendor, render_cdr_report
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
-from src.modules.ingestion import infer_dataset_kind, load_dataset, summarise_dataset
+from src.modules.ingestion import add_vfuk_gcid_column, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
 from src.version import __app_name__, __release_date__, __version__
 from src.utils.filesystem import ensure_directories, safe_join
@@ -515,6 +515,8 @@ def rebuild_dataset_artifacts(
     df = load_dataset(dataset_path, progress_callback=progress_callback)
     if forced_dataset_kind in UPLOAD_DATASET_KINDS:
         df['dataset_kind'] = forced_dataset_kind
+    if forced_dataset_kind == 'mapping_vodafone':
+        df = add_vfuk_gcid_column(df)
     store_cached_dataset_frame(dataset_path, df)
     repository.replace_dataset_rows(dataset_id, df)
     if progress_callback:
@@ -1102,6 +1104,7 @@ def preview_dataset(
     dataset_id: int,
     request: Request,
     row_limit: int = Query(default=100, ge=1, le=5000),
+    source_sheet: str | None = Query(default=None),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
     dataset_row = repository.get_dataset(dataset_id)
@@ -1112,14 +1115,28 @@ def preview_dataset(
         raise HTTPException(status_code=400, detail='Only processed datasets can be previewed.')
 
     available_columns = repository.list_dataset_row_columns(dataset_id)
+    preview_sheet_options: list[str] = []
+    preview_source_sheet: str | None = None
+    preview_filters: dict[str, str] = {}
+    if dataset['dataset_kind'] == 'mapping_vodafone':
+        available_sheets = {sheet.casefold(): sheet for sheet in repository.list_distinct_dataset_row_values(dataset_id, 'source_sheet')}
+        preview_sheet_options = [available_sheets[name] for name in ('4g', '5g') if name in available_sheets]
+        if preview_sheet_options:
+            requested_sheet = (source_sheet or '').casefold()
+            preview_source_sheet = next(
+                (sheet for sheet in preview_sheet_options if sheet.casefold() == requested_sheet),
+                preview_sheet_options[0],
+            )
+            preview_filters['source_sheet'] = preview_source_sheet
+
     priority_columns = [
-        'source_sheet', 'operator', 'vendor', 'market', 'period', 'region', 'city', 'technology_primary',
+        'source_sheet', 'GCID', 'operator', 'vendor', 'market', 'period', 'region', 'city', 'technology_primary',
         'session_type', 'test_name', 'direction', 'event_start_time', 'status',
     ]
     preview_columns = [column for column in priority_columns if column in available_columns]
     preview_columns.extend(column for column in available_columns if column not in preview_columns)
     preview_columns = preview_columns[:24]
-    preview_frame = repository.load_dataset_rows(dataset_id, preview_columns, {}).head(row_limit)
+    preview_frame = repository.load_dataset_rows(dataset_id, preview_columns, preview_filters).head(row_limit)
     preview_rows = preview_frame.astype(object).where(pd.notna(preview_frame), '').to_dict(orient='records')
 
     return render_template(
@@ -1131,6 +1148,8 @@ def preview_dataset(
             'preview_columns': preview_columns,
             'preview_rows': preview_rows,
             'preview_row_limit': row_limit,
+            'preview_sheet_options': preview_sheet_options,
+            'preview_source_sheet': preview_source_sheet,
             'total_columns': len(available_columns),
         },
     )

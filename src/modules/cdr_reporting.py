@@ -20,7 +20,7 @@ TEMPLATE_NAMES = {
     "nsa": "Template_CDR_NSA_analysis.pptx",
     "sa": "Template_CDR_SA_analysis.pptx",
 }
-CDR_REPORT_VERSION = "2026-08-26-v3"
+CDR_REPORT_VERSION = "2026-08-26-v4"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
 
@@ -129,31 +129,34 @@ def build_three_vendor_lookup(mapping: pd.DataFrame) -> dict[str, str]:
 
 def build_vodafone_vendor_lookup(mapping: pd.DataFrame) -> dict[str, str]:
     source_sheet = _first_existing(mapping, ["source_sheet"])
-    five_g_mapping = mapping
+    four_g_mapping = mapping
     if source_sheet:
-        five_g_mapping = mapping[mapping[source_sheet].astype(str).str.strip().str.casefold() == "5g"].copy()
-    gnodeb_column = _first_existing(five_g_mapping, ["gNodeB ID", "gNodeB_ID"])
-    local_cell_column = _first_existing(five_g_mapping, ["Local Cell ID", "Local_Cell_ID"])
-    vendor_column = _first_existing(five_g_mapping, ["OP/ Vendor", "OP_Vendor", "Vendor"])
-    if five_g_mapping.empty or not gnodeb_column or not local_cell_column or not vendor_column:
-        raise ValueError("The selected VFUK mapping must contain the 5G sheet with gNodeB ID, Local Cell ID and OP/ Vendor columns.")
+        four_g_mapping = mapping[mapping[source_sheet].astype(str).str.strip().str.casefold() == "4g"].copy()
+    enodeb_column = _first_existing(four_g_mapping, ["eNodeB ID", "eNodeB_ID"])
+    local_cell_column = _first_existing(four_g_mapping, ["Local Cell ID", "Local_Cell_ID"])
+    vendor_column = _first_existing(four_g_mapping, ["OP/ Vendor", "OP_Vendor", "Vendor"])
+    if four_g_mapping.empty or not enodeb_column or not local_cell_column or not vendor_column:
+        raise ValueError("The selected VFUK mapping must contain the 4G sheet with eNodeB ID, Local Cell ID and OP/ Vendor columns.")
     lookup: dict[str, str] = {}
-    for gnodeb, local_cell, vendor in five_g_mapping[[gnodeb_column, local_cell_column, vendor_column]].itertuples(index=False):
-        gnodeb_id = _integer_cell_component(gnodeb)
+    for enodeb, local_cell, vendor in four_g_mapping[[enodeb_column, local_cell_column, vendor_column]].itertuples(index=False):
+        enodeb_id = _integer_cell_component(enodeb)
         local_cell_id = _integer_cell_component(local_cell)
         vendor_text = str(vendor).strip()
-        if gnodeb_id is None or local_cell_id is None or not vendor_text or vendor_text.lower() == "nan":
+        if enodeb_id is None or local_cell_id is None or not vendor_text or vendor_text.lower() == "nan":
             continue
-        lookup[str(gnodeb_id * 4096 + local_cell_id)] = vendor_text
+        # Equivalent to Excel: HEX2DEC(DEC2HEX(eNodeB ID, 5) & DEC2HEX(Local Cell ID, 2)).
+        if not 0 <= enodeb_id <= 0xFFFFF or not 0 <= local_cell_id <= 0xFF:
+            continue
+        lookup[str((enodeb_id << 8) | local_cell_id)] = vendor_text
     return lookup
 
 
 def enrich_multivendor(df: pd.DataFrame, vodafone_mapping: pd.DataFrame, three_mapping: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
     operator_column = _first_existing(result, ["operator", "Operator"])
-    cell_column = _first_existing(result, ["Cell_ID_A"])
+    cell_column = _first_existing(result, ["Cell_ID_A", "Cell_IDs_A", "Cell_ID"])
     if not operator_column or not cell_column:
-        raise ValueError("The selected CDR must contain Operator and Cell_ID_A for multivendor reporting.")
+        raise ValueError("The selected CDR must contain Operator and one of Cell_ID_A, Cell_IDs_A or Cell_ID for multivendor reporting.")
     vodafone_lookup = build_vodafone_vendor_lookup(vodafone_mapping)
     three_lookup = build_three_vendor_lookup(three_mapping)
     result["report_vendor"] = [

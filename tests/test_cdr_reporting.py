@@ -22,8 +22,8 @@ def test_session_classification_and_multivendor_enrichment() -> None:
         'Cell_ID_A': ['100 -> 100', '200 -> 201'],
     })
     vodafone_mapping = pd.DataFrame({
-        'source_sheet': ['5G'],
-        'gNodeB ID': [0],
+        'source_sheet': ['4G'],
+        'eNodeB ID': [0],
         'Local Cell ID': [100],
         'OP/ Vendor': ['Ericsson'],
     })
@@ -41,17 +41,17 @@ def test_session_classification_and_multivendor_enrichment() -> None:
     assert enrich_multivendor(sa, vodafone_mapping, three_mapping)['report_vendor'].tolist() == ['3_Mixed Vendor']
 
 
-def test_vodafone_mapping_derives_gcid_from_5g_node_and_local_cell() -> None:
-    cdr = pd.DataFrame({'Operator': ['Vodafone UK'], 'Cell_ID_A': ['221126958']})
+def test_vodafone_mapping_derives_gcid_from_4g_enodeb_and_local_cell() -> None:
+    cdr = pd.DataFrame({'Operator': ['Vodafone UK'], 'Cell_IDs_A': ['3330049']})
     vodafone_mapping = pd.DataFrame({
-        'source_sheet': ['5G'],
-        'gNodeB ID': [53986],
-        'Local Cell ID': [302],
-        'OP/ Vendor': ['Ericsson'],
+        'source_sheet': ['4G'],
+        'eNodeB ID': [13008],
+        'Local Cell ID': [1],
+        'OP/ Vendor': ['Samsung'],
     })
     three_mapping = pd.DataFrame({'Cid__ECI': [1], 'Vendor': ['Nokia']})
 
-    assert enrich_multivendor(cdr, vodafone_mapping, three_mapping)['report_vendor'].tolist() == ['Vodafone_Ericsson']
+    assert enrich_multivendor(cdr, vodafone_mapping, three_mapping)['report_vendor'].tolist() == ['Vodafone_Samsung']
 
 
 def test_reporting_module_is_available_to_authenticated_users(client) -> None:
@@ -73,7 +73,7 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
 def test_reporting_mapping_selectors_show_only_matching_workspace_mapping_types(client) -> None:
     client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
     uploads = [
-        ('Multivendor_Mapping_VFUK.csv', 'mapping_vodafone', b'gNodeB ID,Local Cell ID,OP/ Vendor\n0,100,Ericsson\n'),
+        ('Multivendor_Mapping_VFUK.csv', 'mapping_vodafone', b'eNodeB ID,Local Cell ID,OP/ Vendor\n0,100,Ericsson\n'),
         ('Multivendor_Mapping_3UK.csv', 'mapping_three', b'Cid__ECI,Vendor\n100,Nokia\n'),
     ]
     for filename, dataset_kind, content in uploads:

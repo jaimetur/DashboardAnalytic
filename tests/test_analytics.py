@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.modules.analytics import CDF_DEFAULT_Y_THRESHOLD, MAX_CDF_POINTS, MIN_CDF_POINTS_PER_SERIES, _top_records, build_analysis, compute_cdf
-from src.modules.ingestion import _normalise_dataset, infer_dataset_kind, load_dataset
+from src.modules.ingestion import _normalise_dataset, add_vfuk_gcid_column, infer_dataset_kind, load_dataset
 from src.DashboardAnalytic import derive_available_metrics
 
 
@@ -101,6 +101,21 @@ def test_load_dataset_makes_duplicate_excel_headers_unique(tmp_path) -> None:
     assert dataset.columns.is_unique
     assert dataset["Cell Name"].iloc[0] == "Cell A"
     assert dataset["Cell Name__2"].iloc[0] == "Cell A copy"
+
+
+def test_vfuk_processing_materialises_gcid_for_4g_and_5g_rows() -> None:
+    mapping = pd.DataFrame({
+        'source_sheet': ['4G', '5G', '2G'],
+        'eNodeB ID': [13008, pd.NA, pd.NA],
+        'gNodeB ID': [pd.NA, 53986, pd.NA],
+        'Local Cell ID': [1, 302, 7],
+    })
+
+    processed = add_vfuk_gcid_column(mapping)
+
+    assert processed['GCID'].iloc[0] == 3330049
+    assert processed['GCID'].iloc[1] == 221126958
+    assert pd.isna(processed['GCID'].iloc[2])
 
 
 def test_normalise_dataset_uses_rat_as_primary_technology_for_data() -> None:

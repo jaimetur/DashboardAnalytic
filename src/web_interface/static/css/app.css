@@ -259,7 +259,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .preview-summary-grid strong { color: #fff; }
 .preview-row-limit-form { display: flex; align-items: end; gap: 0.8rem; flex-wrap: wrap; margin: 1rem 0 1.8rem; }
 .preview-row-limit-form label { min-width: 180px; color: rgba(255,255,255,0.88); font-weight: 700; }
-.preview-row-limit-form input { border-color: rgba(255,255,255,0.45); background: rgba(255,255,255,0.94); color: #10314a; }
+.preview-row-limit-form input, .preview-row-limit-form select { border-color: rgba(255,255,255,0.45); background: rgba(255,255,255,0.94); color: #10314a; }
 .preview-row-limit-form button { background: linear-gradient(135deg, #e7fff7, #bcebdc); border: 1px solid rgba(255,255,255,0.55); color: #075d59; box-shadow: 0 8px 18px rgba(3, 43, 54, 0.18); }
 .preview-row-limit-form button:hover:not(:disabled) { background: linear-gradient(135deg, #d2f8ea, #9fdcc8); }
 .preview-actions { margin-top: 1rem; }

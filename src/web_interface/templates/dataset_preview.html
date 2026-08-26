@@ -9,11 +9,20 @@
       </div>
       <span class="pill status-pill status-{{ dataset.status }}">{{ dataset.status_label }}</span>
     </div>
-    <p class="lede">Read-only sample of the processed dataset. The preview shows the first {{ preview_rows | length }} rows and up to {{ preview_columns | length }} of {{ total_columns }} available columns.</p>
+    <p class="lede">Read-only sample of the processed dataset. The preview shows the first {{ preview_rows | length }} rows and up to {{ preview_columns | length }} of {{ total_columns }} available columns.{% if preview_sheet_options %} VFUK mapping previews are limited to the 4G and 5G source sheets.{% endif %}</p>
     <form class="preview-row-limit-form" action="/workspace/preview/{{ dataset.id }}" method="get" data-loading-label="Refreshing dataset preview">
       <label>Rows to preview
         <input type="number" name="row_limit" value="{{ preview_row_limit }}" min="1" max="5000" step="1" required>
       </label>
+      {% if preview_sheet_options %}
+      <label>Source sheet
+        <select name="source_sheet" aria-label="VFUK mapping source sheet">
+          {% for sheet in preview_sheet_options %}
+          <option value="{{ sheet }}"{% if sheet == preview_source_sheet %} selected{% endif %}>{{ sheet }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
       <button type="submit">Refresh Preview</button>
     </form>
     <section class="summary-grid compact-summary preview-summary-grid">
@@ -36,7 +45,7 @@
         <p class="eyebrow">Processed rows</p>
         <h2>Sample data</h2>
       </div>
-      <span class="pill">{{ preview_rows | length }} rows shown</span>
+      <span class="pill">{% if preview_source_sheet %}{{ preview_source_sheet }} · {% endif %}{{ preview_rows | length }} rows shown</span>
     </div>
     {% if preview_columns and preview_rows %}
     <div class="table-wrap data-table-wrap dataset-preview-table-wrap" data-horizontal-wheel-scroll tabindex="0" aria-label="Dataset preview table; use Shift and the mouse wheel to scroll horizontally">

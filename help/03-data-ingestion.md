@@ -40,8 +40,8 @@ Multivendor reporting requires two processed mapping files: **VFUK** for Vodafon
 
 | Source | Required input | How the lookup is built |
 | --- | --- | --- |
-| CDR Data, Voice or Speech | `Cell_ID_A` | The reporting flow extracts the first and last Global Cell ID available for each session. |
+| CDR Data, Voice or Speech | `Cell_ID_A`, `Cell_IDs_A` or `Cell_ID` | The reporting flow extracts the first and last Global Cell ID available for each session. |
 | 3UK mapping | `Cid__ECI` (the source variant `CId___ECI` is also accepted) and Vendor | The value is matched directly to the CDR endpoint GCID. |
-| VFUK mapping | `5G` worksheet with `gNodeB ID`, `Local Cell ID` and Vendor | The GCID is calculated as `gNodeB ID × 4096 + Local Cell ID` before matching. |
+| VFUK mapping | `4G` worksheet with `eNodeB ID`, `Local Cell ID` and Vendor; optionally `5G` with `gNodeB ID` and `Local Cell ID` | Processing materialises a `GCID` column for `4G` as `eNodeB ID × 256 + Local Cell ID`, equivalent to the supplied hexadecimal Excel formula. It also materialises the existing `5G` calculation, `gNodeB ID × 4096 + Local Cell ID`. The mapping preview is limited to these two sheets and provides a selector between them. |
 
 Keep the Vendor field populated and verify that the mapping has been processed successfully before opening Reporting. A mapping with an incorrect assigned type will not appear in its Vodafone or Three selector.

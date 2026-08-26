@@ -8,6 +8,7 @@ import warnings
 import pandas as pd
 
 from src.modules.auth import hash_password
+from src.version import __release_date__
 
 def login(client) -> None:
     response = client.post("/login", data={"username": "admin", "password": "admin123"}, follow_redirects=False)
@@ -19,7 +20,7 @@ def test_login_page_loads(client) -> None:
     assert response.status_code == 200
     assert "Sign in" in response.text
     assert "Dashboard Analytic" in response.text
-    assert "2026-07-14" in response.text
+    assert __release_date__ in response.text
     assert "Default Access:" in response.text
     assert "admin / admin123" in response.text
     assert "demo / demo123" in response.text
@@ -288,6 +289,45 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     limited_preview_response = client.get("/workspace/preview/1?row_limit=25")
     assert limited_preview_response.status_code == 200
     assert 'name="row_limit" value="25"' in limited_preview_response.text
+
+
+def test_vfuk_preview_limits_mapping_sheets_and_displays_materialised_gcid(client) -> None:
+    login(client)
+    workbook = BytesIO()
+    with pd.ExcelWriter(workbook, engine='openpyxl') as writer:
+        pd.DataFrame({
+            'eNodeB ID': [13008],
+            'Local Cell ID': [1],
+            'OP/ Vendor': ['Samsung'],
+        }).to_excel(writer, sheet_name='4G', index=False)
+        pd.DataFrame({
+            'gNodeB ID': [53986],
+            'Local Cell ID': [302],
+            'OP/ Vendor': ['Samsung'],
+        }).to_excel(writer, sheet_name='5G', index=False)
+        pd.DataFrame({'Cell ID': [1]}).to_excel(writer, sheet_name='2G', index=False)
+    workbook.seek(0)
+
+    response = client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'mapping_vodafone'},
+        files={'dataset_files': ('Multivendor_Mapping_VFUK.xlsx', workbook, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    default_preview = client.get('/workspace/preview/1')
+    assert default_preview.status_code == 200
+    assert 'name="source_sheet"' in default_preview.text
+    assert '<option value="4G" selected>4G</option>' in default_preview.text
+    assert '<option value="5G">5G</option>' in default_preview.text
+    assert '2G' not in default_preview.text
+    assert '3330049' in default_preview.text
+
+    five_g_preview = client.get('/workspace/preview/1?source_sheet=5G')
+    assert five_g_preview.status_code == 200
+    assert '<option value="5G" selected>5G</option>' in five_g_preview.text
+    assert '221126958' in five_g_preview.text
 
 
 def test_workspace_queue_type_filter_lists_all_supported_types_in_order(client) -> None:

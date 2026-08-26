@@ -28,7 +28,7 @@ Then choose a report scope:
 
 ## Vendor calculation
 
-For Vodafone and Three, the report derives vendor from the first and last CDR `Cell_ID_A` value of the session and the corresponding mapping. Three uses `Cid__ECI` from the 3UK mapping. Vodafone uses the `5G` worksheet and derives its GCID as `gNodeB ID × 4096 + Local Cell ID`. The agreed business formula is authoritative: matching mapped endpoints yield that vendor; Vodafone explicitly distinguishes Ericsson-related mixed cases, other mixed cases and missing endpoints; Three uses a mixed-vendor result for non-matching endpoints. O2 and EE remain represented as the operator.
+For Vodafone and Three, the report derives vendor from the first and last value available in CDR `Cell_ID_A`, `Cell_IDs_A` or `Cell_ID` and the corresponding mapping. Three uses `Cid__ECI` from the 3UK mapping. During VFUK processing, Workspace materialises the 4G GCID as `eNodeB ID × 256 + Local Cell ID`; this is equivalent to `HEX2DEC(DEC2HEX(eNodeB ID, 5) & DEC2HEX(Local Cell ID, 2))` in Excel. It also materialises the existing 5G convention, `gNodeB ID × 4096 + Local Cell ID`, for inspection in the mapping preview. The report's Vodafone lookup remains based on the agreed 4G mapping formula. The agreed business formula is authoritative: matching mapped endpoints yield that vendor; Vodafone explicitly distinguishes Ericsson-related mixed cases, other mixed cases and missing endpoints; Three uses a mixed-vendor result for non-matching endpoints. O2 and EE remain represented as the operator.
 
 ## Generated presentation
 
