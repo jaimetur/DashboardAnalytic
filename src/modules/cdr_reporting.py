@@ -12,6 +12,7 @@ from typing import Iterable
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.util import Inches
 
 
@@ -19,6 +20,7 @@ TEMPLATE_NAMES = {
     "nsa": "Template_CDR_NSA_analysis.pptx",
     "sa": "Template_CDR_SA_analysis.pptx",
 }
+CDR_REPORT_VERSION = "2026-08-26-v2"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
 
@@ -96,8 +98,10 @@ def classify_sessions(df: pd.DataFrame, technology: str) -> pd.DataFrame:
     rat_column = _first_existing(df, ["RAT", "RAT_A", "Sample_RAT_A", "technology_primary"])
     if not rat_column:
         raise ValueError("The selected CDR does not contain RAT, RAT_A or Sample_RAT_A, required to separate NSA and SA sessions.")
-    marker = "ENDC" if technology == "nsa" else "NR"
-    return df[df[rat_column].astype(str).str.contains(marker, case=False, na=False)].copy()
+    # NetCheck exports use both ENDC and EN-DC (sometimes EN DC) for NSA.
+    # The business filter is the technology concept, not one file spelling.
+    marker = r"EN[- ]?DC" if technology == "nsa" else r"NR"
+    return df[df[rat_column].astype(str).str.contains(marker, case=False, na=False, regex=True)].copy()
 
 
 def build_vendor_lookup(mapping: pd.DataFrame) -> dict[str, str]:
@@ -199,6 +203,35 @@ def _clear_commentary(slide) -> None:
             shape.text_frame.clear()
 
 
+def _chart_frames(slide) -> list[tuple[int, int, int, int]]:
+    """Remove example chart images/groups and return their occupied areas.
+
+    Logos and small decorative images remain untouched. The new report chart is
+    placed in the exact bounding area of the removed template chart(s).
+    """
+    removable_types = {MSO_SHAPE_TYPE.PICTURE, MSO_SHAPE_TYPE.CHART, MSO_SHAPE_TYPE.GROUP}
+    frames: list[tuple[int, int, int, int]] = []
+    for shape in list(slide.shapes):
+        if shape.shape_type not in removable_types:
+            continue
+        area = shape.width * shape.height
+        if shape.top < Inches(0.9) or area < Inches(1.5) * Inches(1.5):
+            continue
+        frames.append((shape.left, shape.top, shape.width, shape.height))
+        shape._element.getparent().remove(shape._element)
+    return frames
+
+
+def _combined_frame(frames: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int] | None:
+    if not frames:
+        return None
+    left = min(frame[0] for frame in frames)
+    top = min(frame[1] for frame in frames)
+    right = max(frame[0] + frame[2] for frame in frames)
+    bottom = max(frame[1] + frame[3] for frame in frames)
+    return left, top, right - left, bottom - top
+
+
 def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.DataFrame], technology: str, multivendor: bool) -> Path:
     if not template.exists():
         raise FileNotFoundError(f"Reporting template not found: {template.name}")
@@ -214,6 +247,9 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
             continue
         summary = _summary_for_slide(frames, title, multivendor)
         chart = _bar_chart(title, summary)
-        slide.shapes.add_picture(chart, Inches(0.55), Inches(1.65), width=Inches(6.15), height=Inches(3.75))
+        chart_frame = _combined_frame(_chart_frames(slide))
+        if not chart_frame:
+            chart_frame = (Inches(0.55), Inches(1.65), Inches(6.15), Inches(3.75))
+        slide.shapes.add_picture(chart, *chart_frame)
     presentation.save(destination)
     return destination

@@ -23,6 +23,9 @@
 - Bundled the reporting templates under `assets/templates/` and added `APP_REPORTING_TEMPLATE_DIR` for deployment overrides.
 
 #### 🐛 Bug fixes:
+- Fixed NSA report filtering to accept NetCheck's `EN-DC`, `EN DC` and `ENDC` RAT spellings, preventing valid NSA sessions from being discarded.
+- Fixed template-backed CDR reports to remove inherited example chart pictures/groups before placing the generated chart in the same chart area.
+- Versioned CDR report output generation so a report requested again after a renderer change is regenerated instead of serving a stale cached PPTX.
 
 #### 📚 Documentation:
 - Documented the E2E Bench module structure, the CDR reporting workflow and multivendor prerequisites in the README.

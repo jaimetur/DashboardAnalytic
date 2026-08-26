@@ -24,7 +24,7 @@ from starlette.datastructures import QueryParams
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import TEMPLATE_NAMES, classify_sessions, enrich_multivendor, render_cdr_report
+from src.modules.cdr_reporting import CDR_REPORT_VERSION, TEMPLATE_NAMES, classify_sessions, enrich_multivendor, render_cdr_report
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
@@ -1121,6 +1121,7 @@ def generate_netcheck_cdr_report(
     template = settings.reporting_template_dir / TEMPLATE_NAMES[technology]
     report_hash = hashlib.sha1(
         json.dumps({
+            'report_version': CDR_REPORT_VERSION,
             'technology': technology,
             'scope': report_scope,
             'datasets': {kind: dataset['id'] for kind, dataset in selected.items()},

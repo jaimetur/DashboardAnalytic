@@ -18,7 +18,7 @@ def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> Non
 def test_session_classification_and_multivendor_enrichment() -> None:
     cdr = pd.DataFrame({
         'Operator': ['Vodafone UK', '3'],
-        'RAT_A': ['LTE ENDC', 'NR'],
+        'RAT_A': ['LTE EN-DC', 'NR'],
         'Cell_ID_A': ['100 -> 100', '200 -> 201'],
     })
     mapping = pd.DataFrame({
