@@ -10,40 +10,40 @@ Slide,Slide tittle,Slide Subtittle,CDR source,KPI,Chart type,Filters,Grouping
 9,Netcheck 5G SA Most Reliable Network Scoring,London,,,Not automated,,
 10,Q2 2026 vs SA Campaign – Delta Scoring,London,,,Not automated,,
 11,Netcheck CDR Voice and Speech Analysis,2026 Q2 NSA vs SA Campaign\n7 Cities and London,,,Preserved section divider,,
-12,Voice Failures,7 Cities,CDR-Voice,Call_Status,Stacked horizontal count bar,"Failed/Dropped; Classic call, MultiRAB, WhatsApp",Call family × Operator × Campaign
-12,Voice Failures,7 Cities,CDR-Voice,Failure_Technology,Stacked horizontal count bar,"Failed/Dropped; Classic call, MultiRAB, WhatsApp",Call family × Failure technology × Operator × Campaign
-13,Voice Failures (Vodafone UK),7 Cities,CDR-Voice,Call_Status,Stacked horizontal count bar,Failed/Dropped; Operator Vodafone UK,Call family × City × Campaign
-13,Voice Failures (Vodafone UK),7 Cities,CDR-Voice,Failure_Technology,Stacked horizontal count bar,Failed/Dropped; Operator Vodafone UK,Call family × Failure technology × Campaign
-13,Voice Failures (Vodafone UK),7 Cities,CDR-Voice,Failure_Category,Stacked horizontal count bar,Failed/Dropped; Operator Vodafone UK,Call family × Failure category × Campaign
-14,Completed Call Ratio,7 cities,CDR-Voice,Call_Status,100% stacked column,"Classic call, MultiRAB, WhatsApp",Call family × Operator × Campaign
-15,POLQA <1.6 Rate,7 cities,CDR-Speech,LQ,100% stacked column,LQ < 1.6 vs ≥ 1.6,Call family × Operator × Campaign
-16,POLQA <1.6 Rate Vodafone (Whatsapp),7 cities,CDR-Speech,LQ,Stacked quality-rate column,Operator Vodafone UK; WhatsApp; LQ < 1.6; NR band,NR band
+12,Voice Failures,7 Cities,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,"Failed/Dropped; Classic call, MultiRAB, WhatsApp",Call family × Operator × Campaign
+12,Voice Failures,7 Cities,CDR-Voice,Failure_Technology,Count Stacked Horizontal Bars,"Failed/Dropped; Classic call, MultiRAB, WhatsApp",Call family × Failure technology × Operator × Campaign
+13,Voice Failures (Vodafone UK),7 Cities,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,Failed/Dropped; Operator Vodafone UK,Call family × City × Campaign
+13,Voice Failures (Vodafone UK),7 Cities,CDR-Voice,Failure_Technology,Count Stacked Horizontal Bars,Failed/Dropped; Operator Vodafone UK,Call family × Failure technology × Campaign
+13,Voice Failures (Vodafone UK),7 Cities,CDR-Voice,Failure_Category,Count Stacked Horizontal Bars,Failed/Dropped; Operator Vodafone UK,Call family × Failure category × Campaign
+14,Completed Call Ratio,7 cities,CDR-Voice,Call_Status,100% Stacked Vertical Bars,"Classic call, MultiRAB, WhatsApp",Call family × Operator × Campaign
+15,POLQA <1.6 Rate,7 cities,CDR-Speech,LQ,100% Stacked Vertical Bars,LQ < 1.6 vs ≥ 1.6,Call family × Operator × Campaign
+16,POLQA <1.6 Rate Vodafone (Whatsapp),7 cities,CDR-Speech,LQ,Threshold Stacked Vertical Bars,Operator Vodafone UK; WhatsApp; LQ < 1.6; NR band,NR band
 16,POLQA <1.6 Rate Vodafone (Whatsapp),7 cities,CDR-Speech,LQ vs Playing_RSRP_NR_Avg,Scatter,Operator Vodafone UK; WhatsApp; NR samples,Radio strength × LQ state
 16,POLQA <1.6 Rate Vodafone (Whatsapp),7 cities,CDR-Speech,LQ vs 4G_RSRP_Avg_A,Scatter,Operator Vodafone UK; WhatsApp; LTE samples,Radio strength × LQ state
-17,POLQA <1.6 Rate Three UK (Whatsapp),7 cities,CDR-Speech,LQ,100% stacked column,Operator Three UK; WhatsApp; LQ < 1.6 vs ≥ 1.6,Campaign
-17,POLQA <1.6 Rate Three UK (Whatsapp),7 cities,CDR-Speech,LQ,CDF line,Operator Three UK; WhatsApp,Campaign
-18,POLQA Avg MOS,7 cities,CDR-Voice,POLQA_LQ_Avg,CDF line,Classic call or MultiRAB,Operator × Campaign
-18,POLQA Avg MOS,7 cities,CDR-Voice,POLQA_LQ_Avg,Average-MOS column,Classic call or MultiRAB,Operator × Campaign
-18,POLQA Avg MOS,7 cities,CDR-Speech,LQ,CDF line,WhatsApp,Operator × Campaign
-18,POLQA Avg MOS,7 cities,CDR-Speech,LQ,Average-MOS column,WhatsApp,Operator × Campaign
-19,POLQA Avg MOS,London,CDR-Voice,POLQA_LQ_Avg,CDF line,Classic call or MultiRAB; location London,Operator × Campaign
-19,POLQA Avg MOS,London,CDR-Voice,POLQA_LQ_Avg,Average-MOS column,Classic call or MultiRAB; location London,Operator × Campaign
-19,POLQA Avg MOS,London,CDR-Speech,LQ,CDF line,WhatsApp; location London,Operator × Campaign
-19,POLQA Avg MOS,London,CDR-Speech,LQ,Average-MOS column,WhatsApp; location London,Operator × Campaign
+17,POLQA <1.6 Rate Three UK (Whatsapp),7 cities,CDR-Speech,LQ,100% Stacked Vertical Bars,Operator Three UK; WhatsApp; LQ < 1.6 vs ≥ 1.6,Campaign
+17,POLQA <1.6 Rate Three UK (Whatsapp),7 cities,CDR-Speech,LQ,CDF Line,Operator Three UK; WhatsApp,Campaign
+18,POLQA Avg MOS,7 cities,CDR-Voice,POLQA_LQ_Avg,CDF Line,Classic call or MultiRAB,Operator × Campaign
+18,POLQA Avg MOS,7 cities,CDR-Voice,POLQA_LQ_Avg,Average Vertical Bars,Classic call or MultiRAB,Operator × Campaign
+18,POLQA Avg MOS,7 cities,CDR-Speech,LQ,CDF Line,WhatsApp,Operator × Campaign
+18,POLQA Avg MOS,7 cities,CDR-Speech,LQ,Average Vertical Bars,WhatsApp,Operator × Campaign
+19,POLQA Avg MOS,London,CDR-Voice,POLQA_LQ_Avg,CDF Line,Classic call or MultiRAB; location London,Operator × Campaign
+19,POLQA Avg MOS,London,CDR-Voice,POLQA_LQ_Avg,Average Vertical Bars,Classic call or MultiRAB; location London,Operator × Campaign
+19,POLQA Avg MOS,London,CDR-Speech,LQ,CDF Line,WhatsApp; location London,Operator × Campaign
+19,POLQA Avg MOS,London,CDR-Speech,LQ,Average Vertical Bars,WhatsApp; location London,Operator × Campaign
 20,Netcheck CDR Data Analysis,2026 Q2 NSA vs SA Campaign\n7 Cities and London,,,Preserved section divider,,
-21,FDFS Success Ratio,,CDR-Data,Test_Result,100% stacked column,FDFS; Direction DL; 7 cities,Operator × Campaign
-21,FDFS Success Ratio,,CDR-Data,Test_Result,100% stacked column,FDFS; Direction UL; London,Operator × Campaign
-22,FDFS DL Throughput,7 Cities,CDR-Data,Mean_Data_Rate,CDF line,FDFS; Direction DL,Operator × Campaign
-22,FDFS DL Throughput,7 Cities,CDR-Data,Data_Test_Duration,Average transfer-time column,FDFS; Direction DL,Operator × Campaign
-23,FDFS UL Throughput,7 Cities,CDR-Data,Mean_Data_Rate,CDF line,FDFS; Direction UL,Operator × Campaign
-23,FDFS UL Throughput,7 Cities,CDR-Data,Data_Test_Duration,Average transfer-time column,FDFS; Direction UL,Operator × Campaign
-24,FDTT DL and UL Throughput,7 Cities,CDR-Data,FDTT_Sustainable_MDR,CDF line,FDTT; Directions DL and UL,Operator × Campaign
-24,FDTT DL and UL Throughput,7 Cities,CDR-Data,FDTT_Sustainable_MDR,Stacked low-rate distribution,FDTT; Directions DL and UL; template rate buckets,Operator × Campaign × Rate bucket
-25,Interactivity KPIs,7 Cities,CDR-Data,Interactivity_RTT_Median,CDF line,Interactivity tests,Operator × Campaign
-25,Interactivity KPIs,7 Cities,CDR-Data,Interactivity_RTT_Median,Median RTT column,Interactivity tests,Operator × Campaign
-25,Interactivity KPIs,7 Cities,CDR-Data,Interactivity_Packet_Error_Ratio,CDF line,Interactivity tests,Operator × Campaign
-25,Interactivity KPIs,7 Cities,CDR-Data,Interactivity_Packet_Error_Ratio,Average packet-error-ratio column,Interactivity tests,Operator × Campaign
-26,Browsing Time to 1MB,7 cities,CDR-Data,http_Browser_1MB_Reached_Duration,CDF line,Browsing/HTTP tests,Operator × Campaign
-26,Browsing Time to 1MB,7 cities,CDR-Data,http_Browser_1MB_Reached_Duration,Average time-to-1MB column,Browsing/HTTP tests,Operator × Campaign
+21,FDFS Success Ratio,,CDR-Data,Test_Result,100% Stacked Vertical Bars,FDFS; Direction DL; 7 cities,Operator × Campaign
+21,FDFS Success Ratio,,CDR-Data,Test_Result,100% Stacked Vertical Bars,FDFS; Direction UL; London,Operator × Campaign
+22,FDFS DL Throughput,7 Cities,CDR-Data,Mean_Data_Rate,CDF Line,FDFS; Direction DL,Operator × Campaign
+22,FDFS DL Throughput,7 Cities,CDR-Data,Data_Test_Duration,Average Vertical Bars,FDFS; Direction DL,Operator × Campaign
+23,FDFS UL Throughput,7 Cities,CDR-Data,Mean_Data_Rate,CDF Line,FDFS; Direction UL,Operator × Campaign
+23,FDFS UL Throughput,7 Cities,CDR-Data,Data_Test_Duration,Average Vertical Bars,FDFS; Direction UL,Operator × Campaign
+24,FDTT DL and UL Throughput,7 Cities,CDR-Data,FDTT_Sustainable_MDR,CDF Line,FDTT; Directions DL and UL,Operator × Campaign
+24,FDTT DL and UL Throughput,7 Cities,CDR-Data,FDTT_Sustainable_MDR,Distribution Stacked Vertical Bars,FDTT; Directions DL and UL; template rate buckets,Operator × Campaign × Rate bucket
+25,Interactivity KPIs,7 Cities,CDR-Data,Interactivity_RTT_Median,CDF Line,Interactivity tests,Operator × Campaign
+25,Interactivity KPIs,7 Cities,CDR-Data,Interactivity_RTT_Median,Median Vertical Bars,Interactivity tests,Operator × Campaign
+25,Interactivity KPIs,7 Cities,CDR-Data,Interactivity_Packet_Error_Ratio,CDF Line,Interactivity tests,Operator × Campaign
+25,Interactivity KPIs,7 Cities,CDR-Data,Interactivity_Packet_Error_Ratio,Average Vertical Bars,Interactivity tests,Operator × Campaign
+26,Browsing Time to 1MB,7 cities,CDR-Data,http_Browser_1MB_Reached_Duration,CDF Line,Browsing/HTTP tests,Operator × Campaign
+26,Browsing Time to 1MB,7 cities,CDR-Data,http_Browser_1MB_Reached_Duration,Average Vertical Bars,Browsing/HTTP tests,Operator × Campaign
 27,Conclusions,,,,Preserved conclusions,,
 28,,,,,Preserved closing slide,,

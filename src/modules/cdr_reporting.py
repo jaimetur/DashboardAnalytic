@@ -23,11 +23,32 @@ TEMPLATE_NAMES = {
     "nsa": "Template_CDR_NSA_analysis.pptx",
     "sa": "Template_CDR_SA_analysis.pptx",
 }
-CDR_REPORT_VERSION = "2026-08-26-v5"
+CDR_REPORT_VERSION = "2026-08-26-v6"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
 CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "CDR source", "KPI", "Chart type", "Filters", "Grouping")
 CATALOG_SOURCE_KINDS = {"cdr-data": "data", "cdr-voice": "voice", "cdr-speech": "speech"}
+CHART_TYPES = {
+    "100% stacked vertical bars", "count stacked horizontal bars", "cdf line", "scatter", "table",
+    "distribution stacked vertical bars", "threshold stacked vertical bars", "average vertical bars", "median vertical bars",
+}
+PRESERVED_CHART_TYPES = {
+    "preserved cover", "preserved agenda", "preserved section divider", "preserved summary",
+    "preserved tracker", "preserved conclusions", "preserved closing slide", "not automated",
+}
+FILTER_OPERATORS = ("CONTAINS", "IN", ">=", "<=", "!=", "=", ">", "<")
+
+
+@dataclass(frozen=True)
+class FilterCondition:
+    column: str
+    operator: str
+    values: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class GroupingSpec:
+    dimensions: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -44,6 +65,44 @@ class CatalogEntry:
     @property
     def source_kind(self) -> str | None:
         return CATALOG_SOURCE_KINDS.get(self.cdr_source.strip().casefold())
+
+
+def parse_catalog_filters(value: str) -> tuple[FilterCondition, ...]:
+    """Parse `Column OP value; ...` syntax without needing a particular CDR schema."""
+    if not value.strip():
+        return ()
+    conditions: list[FilterCondition] = []
+    for clause in (part.strip() for part in value.split(";") if part.strip()):
+        match = re.fullmatch(r"(.+?)\s+(CONTAINS|IN|>=|<=|!=|=|>|<)\s+(.+)", clause, flags=re.I)
+        if not match:
+            # Compatibility for the initial supplied catalogues. New catalogues must use the syntax above.
+            continue
+        column, operator, raw_values = (part.strip() for part in match.groups())
+        # Existing quality-ratio rows describe both output states as "LQ < 1.6 vs ≥ 1.6".
+        # That is chart metadata, not a source-row filter.
+        if operator in {">", ">=", "<", "<="} and re.search(r"\bvs\b", raw_values, flags=re.I):
+            continue
+        if not column:
+            raise ValueError(f"Invalid filter '{clause}': a column name is required.")
+        if operator.upper() == "IN":
+            if not raw_values.startswith("(") or not raw_values.endswith(")"):
+                raise ValueError(f"Invalid filter '{clause}': IN values must use parentheses.")
+            values = tuple(item.strip() for item in raw_values[1:-1].split(",") if item.strip())
+        else:
+            values = (raw_values,)
+        if not values:
+            raise ValueError(f"Invalid filter '{clause}': a value is required.")
+        conditions.append(FilterCondition(column, operator.upper(), values))
+    return tuple(conditions)
+
+
+def parse_catalog_grouping(value: str) -> GroupingSpec:
+    if not value.strip():
+        return GroupingSpec(())
+    dimensions = tuple(part.strip() for part in re.split(r"\s*(?:×|x)\s*", value, flags=re.I) if part.strip())
+    if not dimensions:
+        raise ValueError("Grouping must contain at least one dimension.")
+    return GroupingSpec(dimensions)
 
 
 def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntry]:
@@ -84,6 +143,15 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
             raise ValueError(f"Catalog row {line_number} has unsupported CDR source '{entry.cdr_source}'.")
         if entry.source_kind and (not entry.kpi or not entry.chart_type):
             raise ValueError(f"Catalog row {line_number} requires KPI and Chart type for a CDR source.")
+        if entry.source_kind and entry.chart_type.casefold() not in CHART_TYPES:
+            raise ValueError(f"Catalog row {line_number} has unsupported Chart type '{entry.chart_type}'.")
+        if entry.source_kind and not entry.grouping:
+            raise ValueError(f"Catalog row {line_number} requires Grouping for a CDR source.")
+        try:
+            parse_catalog_filters(entry.filters)
+            parse_catalog_grouping(entry.grouping)
+        except ValueError as exc:
+            raise ValueError(f"Catalog row {line_number}: {exc}") from exc
         entries.append(entry)
     if not entries:
         raise ValueError("The report catalogue does not contain any rows.")
@@ -324,6 +392,119 @@ def _group_column(frame: pd.DataFrame, multivendor: bool) -> str | None:
     return "report_vendor" if multivendor and "report_vendor" in frame.columns else _column(frame, ("Operator", "operator"))
 
 
+def _normalise_catalog_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", value.casefold())
+
+
+def _catalog_column(frame: pd.DataFrame, name: str, multivendor: bool, metric: str | None = None, bucket_edges: list[float] | None = None) -> str | None:
+    """Resolve a catalogue field name against a source column or supported semantic dimension."""
+    normalized = _normalise_catalog_name(name)
+    if normalized == "operator":
+        return _group_column(frame, multivendor)
+    aliases = {
+        "campaign": ("Campaign", "period", "Period", "Quarter"),
+        "city": ("City", "city", "G_Level_1", "G_Level_2"),
+        "callfamily": ("Call_Family", "Session_Type", "Test_Name", "Test_Type"),
+        "testfamily": ("Test_Family", "Test_Name", "Test_Type", "Type_of_Test"),
+        "failuretechnology": ("Failure_Technology",),
+        "failurecategory": ("Failure_Category",),
+        "n rband": ("NR_Band", "NR band", "Band_NR"),
+        "nrband": ("NR_Band", "NR band", "Band_NR"),
+        "lteband": ("LTE_Band", "4G_Band", "Band_LTE"),
+        "radioband": ("NR_Band", "LTE_Band", "Band", "Radio_Band"),
+    }
+    if normalized in {"ratebucket", "valuebucket"}:
+        if not metric:
+            return None
+        numeric = pd.to_numeric(frame[metric], errors="coerce")
+        edges = bucket_edges or [1, 5, 10, 25, 50]
+        labels = [f"<{edges[0]:g}"] + [f"{low:g}-{high:g}" for low, high in zip(edges, edges[1:])] + [f"{edges[-1]:g}+"]
+        frame["__catalog_rate_bucket"] = pd.cut(numeric, bins=[float("-inf"), *edges, float("inf")], labels=labels, right=False).astype("string")
+        return "__catalog_rate_bucket"
+    candidate = _column(frame, aliases.get(normalized, (name,)))
+    if candidate:
+        return candidate
+    for column in frame.columns:
+        if _normalise_catalog_name(str(column)) == normalized:
+            return str(column)
+    return None
+
+
+def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor: bool, metric: str | None) -> pd.DataFrame:
+    result = frame.copy()
+    for condition in parse_catalog_filters(entry.filters):
+        if _normalise_catalog_name(condition.column) in {"threshold", "buckets"}:
+            continue
+        column = _catalog_column(result, condition.column, multivendor, metric)
+        if not column:
+            raise ValueError(f"Slide {entry.slide}: filter column '{condition.column}' does not exist in {entry.cdr_source}.")
+        series = result[column]
+        if condition.operator in {">", ">=", "<", "<=", "=", "!="}:
+            target = condition.values[0]
+            numeric = pd.to_numeric(series, errors="coerce")
+            target_number = pd.to_numeric(pd.Series([target]), errors="coerce").iloc[0]
+            if pd.notna(target_number):
+                comparison = {">": numeric > target_number, ">=": numeric >= target_number, "<": numeric < target_number, "<=": numeric <= target_number, "=": numeric == target_number, "!=": numeric != target_number}[condition.operator]
+            else:
+                comparison = {"=": series.astype(str).str.casefold() == target.casefold(), "!=": series.astype(str).str.casefold() != target.casefold()}.get(condition.operator)
+                if comparison is None:
+                    raise ValueError(f"Slide {entry.slide}: '{condition.operator}' requires a numeric value for '{condition.column}'.")
+        elif condition.operator == "CONTAINS":
+            comparison = series.astype(str).str.contains(condition.values[0], case=False, na=False, regex=False)
+        else:  # IN
+            accepted = {item.casefold() for item in condition.values}
+            comparison = series.astype(str).str.casefold().isin(accepted)
+        result = result.loc[comparison].copy()
+    return result
+
+
+def _catalog_threshold(entry: CatalogEntry) -> float:
+    for condition in parse_catalog_filters(entry.filters):
+        if _normalise_catalog_name(condition.column) == "threshold":
+            try:
+                return float(condition.values[0])
+            except ValueError as exc:
+                raise ValueError(f"Slide {entry.slide}: Threshold must be numeric.") from exc
+    legacy = re.search(r"(?:<|<=)\s*([0-9]+(?:\.[0-9]+)?)\s+vs", entry.filters, flags=re.I)
+    return float(legacy.group(1)) if legacy else 1.6
+
+
+def _catalog_bucket_edges(entry: CatalogEntry) -> list[float] | None:
+    for condition in parse_catalog_filters(entry.filters):
+        if _normalise_catalog_name(condition.column) == "buckets":
+            try:
+                edges = [float(value.strip()) for value in condition.values[0].split(",")]
+            except ValueError as exc:
+                raise ValueError(f"Slide {entry.slide}: Buckets must be a comma-separated numeric list.") from exc
+            if len(edges) < 1 or edges != sorted(set(edges)):
+                raise ValueError(f"Slide {entry.slide}: Buckets must be unique ascending values.")
+            return edges
+    return None
+
+
+def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendor: bool, metric: str | None) -> tuple[pd.DataFrame, str, str]:
+    spec = parse_catalog_grouping(entry.grouping)
+    resolved: list[str] = []
+    bucket_edges = _catalog_bucket_edges(entry)
+    for dimension in spec.dimensions:
+        column = _catalog_column(frame, dimension, multivendor, metric, bucket_edges)
+        if not column:
+            raise ValueError(f"Slide {entry.slide}: grouping dimension '{dimension}' does not exist in {entry.cdr_source}.")
+        resolved.append(column)
+    # The first level is the category axis; all following levels form the comparison series.
+    primary = "__catalog_primary"
+    series = "__catalog_series"
+    frame[primary] = frame[resolved[0]].fillna("(blank)").astype(str)
+    if len(resolved) == 1:
+        frame[series] = frame[primary]
+    else:
+        series_columns = resolved[1:-1] if len(resolved) >= 3 else resolved[1:]
+        frame[series] = frame[series_columns].fillna("(blank)").astype(str).agg(" · ".join, axis=1)
+    if len(resolved) >= 3:
+        frame["__catalog_stack"] = frame[resolved[-1]].fillna("(blank)").astype(str)
+    return frame, primary, series
+
+
 def _matches(frame: pd.DataFrame, column: str | None, tokens: tuple[str, ...] | None) -> pd.Series:
     if not column or not tokens:
         return pd.Series(True, index=frame.index)
@@ -424,7 +605,7 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
     if not status: return _empty_chart(title)
     failed = frame[~frame[status].astype(str).str.contains("complete|success|pass|ok", case=False, na=False)].copy()
     if failed.empty: return _empty_chart(title)
-    label = session or group
+    label = period or session or group
     fields = [group] if label == group else [group, label]
     counts = failed.groupby(fields, dropna=False).size().reset_index(name="count").head(18)
     image, draw = _canvas(title); maximum = max(int(counts["count"].max()), 1)
@@ -434,6 +615,30 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
         draw.rectangle((370, y, 370 + width, y + 24), fill=_colour(row[group], index))
         draw.text((380 + width, y + 4), str(int(row["count"])), fill="#34495A", font=_font(15, True))
     draw.text((370, 820), "# of failed / dropped sessions", fill="#62727E", font=_font(16))
+    output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
+
+
+def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | None, series: str | None, stack: str) -> BytesIO:
+    if frame.empty or not group or not series or stack not in frame.columns:
+        return _empty_chart(title)
+    data = frame[[group, series, stack]].dropna()
+    combinations = list(data[[group, series]].drop_duplicates().itertuples(index=False, name=None))
+    buckets = list(data[stack].drop_duplicates())
+    if not combinations or not buckets:
+        return _empty_chart(title)
+    image, draw = _canvas(title); left, top, width, height = 125, 125, 1260, 610
+    bar_width = max(20, min(70, width // max(len(combinations) * 2, 1)))
+    for index, (category, series_value) in enumerate(combinations):
+        subset = data[(data[group] == category) & (data[series] == series_value)]
+        total = max(len(subset), 1); x = left + index * (width / len(combinations)) + 10; running = 0
+        for bucket_index, bucket in enumerate(buckets):
+            value = len(subset[subset[stack] == bucket]) / total; segment = value * height; y = top + height - running - segment
+            draw.rectangle((x, y, x + bar_width, y + segment), fill=_colour(bucket, bucket_index))
+            running += segment
+        draw.text((x - 4, top + height + 10), str(series_value)[:12], fill="#5A6B78", font=_font(12))
+    for index, bucket in enumerate(buckets[:8]):
+        x = left + index * 150
+        draw.rectangle((x, 82, x + 20, 100), fill=_colour(bucket, index)); draw.text((x + 27, 82), str(bucket), fill="#34495A", font=_font(13))
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
@@ -511,12 +716,13 @@ def _render_scatter(title: str, frame: pd.DataFrame, group: str | None, metric: 
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
-def _render_mean_column(title: str, frame: pd.DataFrame, group: str | None, metric: str | None) -> BytesIO:
+def _render_mean_column(title: str, frame: pd.DataFrame, group: str | None, metric: str | None, aggregation: str = "mean") -> BytesIO:
     if frame.empty or not group or not metric:
         return _empty_chart(title)
     data = frame[[group, metric]].copy()
     data[metric] = pd.to_numeric(data[metric], errors="coerce")
-    means = data.dropna().groupby(group)[metric].mean().sort_values()
+    aggregate = data.dropna().groupby(group)[metric]
+    means = (aggregate.median() if aggregation == "median" else aggregate.mean()).sort_values()
     if means.empty:
         return _empty_chart(title)
     image, draw = _canvas(title)
@@ -529,6 +735,38 @@ def _render_mean_column(title: str, frame: pd.DataFrame, group: str | None, metr
         draw.text((x, baseline - height - 28), f"{float(value):.2f}", fill="#34495A", font=_font(15))
         draw.text((x, baseline + 12), str(label)[:16], fill="#62727E", font=_font(14))
     draw.text((left, 780), metric.replace("_", " "), fill="#62727E", font=_font(16))
+    output = BytesIO(); image.save(output, format="PNG"); output.seek(0)
+    return output
+
+
+def _render_table(title: str, frame: pd.DataFrame, group: str | None, series: str | None, metric: str | None) -> BytesIO:
+    """Render a compact mean-value table grouped exactly as declared in the catalogue."""
+    if frame.empty or not group or not metric:
+        return _empty_chart(title)
+    data = frame[[group, series, metric]].copy() if series else frame[[group, metric]].copy()
+    data[metric] = pd.to_numeric(data[metric], errors="coerce")
+    data = data.dropna(subset=[metric])
+    if data.empty:
+        return _empty_chart(title)
+    if series and series != group:
+        table = data.pivot_table(index=group, columns=series, values=metric, aggfunc="mean")
+    else:
+        table = data.groupby(group)[metric].mean().to_frame("Value")
+    image, draw = _canvas(title)
+    headers = [str(table.index.name or "Category")] + [str(value) for value in table.columns]
+    rows = [(str(index), *["" if pd.isna(value) else f"{float(value):.2f}" for value in values]) for index, values in table.head(18).iterrows()]
+    col_width = min(310, 1450 // max(len(headers), 1)); row_height = 34; left, top = 55, 115
+    for col, header in enumerate(headers):
+        x = left + col * col_width
+        draw.rectangle((x, top, x + col_width, top + row_height), fill="#23384A")
+        draw.text((x + 8, top + 8), header[:28], fill="white", font=_font(14, True))
+    for row_index, row in enumerate(rows):
+        y = top + (row_index + 1) * row_height
+        fill = "#F4F7F9" if row_index % 2 == 0 else "#FFFFFF"
+        for col, value in enumerate(row):
+            x = left + col * col_width
+            draw.rectangle((x, y, x + col_width, y + row_height), fill=fill, outline="#D9E1E6")
+            draw.text((x + 8, y + 8), str(value)[:28], fill="#34495A", font=_font(13))
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0)
     return output
 
@@ -567,10 +805,10 @@ def _catalog_spec(entry: CatalogEntry) -> dict:
         spec["x_metric"] = metric_parts[1:] or ("Playing_RSRP_NR_Avg", "NR_RSRP_Avg")
     elif "failed" in filters or "failure" in entry.slide_title.casefold():
         spec["kind"] = "failure_count"
-    elif "100%" in chart_type:
-        spec["kind"] = "quality_100" if any(token in entry.kpi.casefold() for token in ("lq", "polqa")) else "status_100"
+    elif "100%" in chart_type or chart_type == "threshold stacked vertical bars":
+        spec["kind"] = "quality_100" if chart_type == "threshold stacked vertical bars" or any(token in entry.kpi.casefold() for token in ("lq", "polqa")) else "status_100"
         if spec["kind"] == "quality_100":
-            spec["threshold"] = 1.6
+            spec["threshold"] = _catalog_threshold(entry)
     else:
         spec["kind"] = "cdf_mean"
     return spec
@@ -580,17 +818,31 @@ def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame
     spec = _catalog_spec(entry)
     frame, group, period = _source_for_spec(frames, spec, multivendor)
     metric = _metric_column(frame, spec)
+    try:
+        frame = _apply_catalog_filters(frame, entry, multivendor, metric)
+        frame, group, period = _apply_catalog_grouping(frame, entry, multivendor, metric)
+    except ValueError:
+        # A partial CDR upload should leave only the affected chart empty, not fail the report.
+        return _empty_chart(entry.slide_title)
     chart_type = entry.chart_type.casefold()
+    if chart_type != "distribution stacked vertical bars" and "__catalog_stack" in frame.columns:
+        frame[period] = frame[period].astype(str) + " · " + frame["__catalog_stack"].astype(str)
     if spec["kind"] == "status_100":
         return _render_status_100(entry.slide_title, frame, group, period)
     if spec["kind"] == "quality_100":
-        return _render_status_100(entry.slide_title, frame, group, period, True, 1.6, metric)
+        return _render_status_100(entry.slide_title, frame, group, period, True, spec.get("threshold", 1.6), metric)
     if spec["kind"] == "failure_count":
         return _render_failure_count(entry.slide_title, frame, group, period)
+    if chart_type == "distribution stacked vertical bars":
+        return _render_stacked_distribution(entry.slide_title, frame, group, period, "__catalog_stack")
+    # Non-stacked visuals have one visual series per complete grouping combination.
+    frame["__catalog_label"] = frame[group].fillna("(blank)").astype(str) + " · " + frame[period].fillna("(blank)").astype(str)
     if spec["kind"] == "scatter":
-        return _render_scatter(entry.slide_title, frame, group, metric, _column(frame, spec.get("x_metric", ())))
-    if "column" in chart_type or "distribution" in chart_type:
-        return _render_mean_column(entry.slide_title, frame, group, metric)
+        return _render_scatter(entry.slide_title, frame, "__catalog_label", metric, _column(frame, spec.get("x_metric", ())))
+    if chart_type == "table":
+        return _render_table(entry.slide_title, frame, group, period, metric)
+    if "vertical bars" in chart_type:
+        return _render_mean_column(entry.slide_title, frame, "__catalog_label", metric, aggregation="median" if chart_type == "median vertical bars" else "mean")
     return _render_cdf_mean(entry.slide_title, frame, group, period, metric)
 
 

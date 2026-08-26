@@ -44,6 +44,8 @@ The renderer follows the visual grammar of the supplied template for every autom
 
 The technology condition below is always applied before the slide-level filters: NSA contains an ENDC spelling in `RAT`, `RAT_A` or `Sample_RAT_A`; SA contains `NR` in the same fields.
 
+For automated rows, `Chart type` is validated and `Filters` plus `Grouping` are executable catalogue fields. Write filters as semicolon-separated expressions such as `Session_Type IN (VoLTE, MultiRAB); Direction = DL; LQ >= 1.6`; supported operators are `IN (...)`, `CONTAINS`, `=`, `!=`, `<`, `<=`, `>` and `>=`. Use processed CDR column names (case-insensitive matching is supported). `Threshold = 1.6` configures `Threshold Stacked Vertical Bars`, while `Buckets = 1,5,10,25,50` configures a `Value Bucket`/`Rate Bucket` grouping for `Distribution Stacked Vertical Bars`. Write grouping dimensions with `×`, for example `City × Operator × Campaign`: the first dimension becomes the primary category, remaining dimensions define comparison series, stack/bucket breakdowns and table columns. `Operator` resolves to the calculated operator-vendor series in multivendor reports. The valid automated chart types are `100% Stacked Vertical Bars`, `Count Stacked Horizontal Bars`, `CDF Line`, `Scatter`, `Table`, `Average Vertical Bars`, `Median Vertical Bars`, `Distribution Stacked Vertical Bars` and `Threshold Stacked Vertical Bars`.
+
 <!-- SLIDE_CATALOGUE:START -->
 
 Export the active NSA or SA catalogue from Admin before editing it. The tables below always reflect the active CSV files under `assets/ppt-slides-catalog/`.
@@ -59,34 +61,34 @@ Export the active NSA or SA catalogue from Admin before editing it. The tables b
 | 5 | KPIs prioritization: gap Vodafone vs EE | — | — | — | Not automated | — | — |
 | 6 | KPIs prioritization: gap Three vs EE | — | — | — | Not automated | — | — |
 | 7 | 7 cities analysis | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | — | — | Preserved section divider | — | — |
-| 8 | Completed Call Ratio | — | CDR-Voice | Call_Status | 100% stacked column | Session_Type: VoLTE, MultiRAB, WhatsApp | Call family × Operator × Campaign |
-| 9 | Voice failures per Q/city | — | CDR-Voice | Call_Status | Stacked horizontal count bar | Failed/Dropped; VoLTE, MultiRAB, WhatsApp | Call family × City × Operator × Campaign |
-| 10 | Data failure | — | CDR-Data | Test_Result | 100% stacked column | HTTP, Browsing, Video and YouTube tests | Test family × Operator × Campaign |
-| 11 | Data failures - FDFS test | — | CDR-Data | Test_Result | 100% stacked column | Test_Name contains FDFS | Test name × Direction × Operator × Campaign |
-| 12 | POLQA AVG MOS (Multirab&volte) | — | CDR-Voice | POLQA_LQ_Avg | CDF line | Session_Type: VoLTE or MultiRAB | Operator × Campaign |
-| 12 | POLQA AVG MOS (Multirab&volte) | — | CDR-Voice | POLQA_LQ_Avg | Average-MOS column | Session_Type: VoLTE or MultiRAB | Operator × Campaign |
-| 13 | POLQA AVG MOS (WhatsApp) | — | CDR-Speech | LQ | CDF line | Session_Type contains WhatsApp | Operator × Campaign |
-| 13 | POLQA AVG MOS (WhatsApp) | — | CDR-Speech | LQ | Average-MOS column | Session_Type contains WhatsApp | Operator × Campaign |
-| 14 | POLQA <1.6 | — | CDR-Speech | LQ | 100% stacked column | WhatsApp; LQ < 1.6 vs ≥ 1.6 | Operator × Campaign |
-| 14 | POLQA <1.6 | — | CDR-Voice | POLQA_LQ_Avg | 100% stacked column | VoLTE; POLQA < 1.6 vs ≥ 1.6 | Operator × Campaign |
-| 15 | CST | — | CDR-Voice | Call_Setup_Time | CDF line | Session_Type: VoLTE or MultiRAB | Operator × Campaign |
-| 15 | CST | — | CDR-Voice | Call_Setup_Time | Average call-setup-time column | Session_Type: VoLTE or MultiRAB | Operator × Campaign |
-| 16 | FDTT DL (7s) | — | CDR-Data | FDTT_Sustainable_MDR | CDF line | FDTT; Direction DL | Operator × Campaign |
-| 16 | FDTT DL (7s) | — | CDR-Data | FDTT_Sustainable_MDR | Stacked low-rate distribution | FDTT; Direction DL; template rate buckets | Operator × Campaign × Rate bucket |
-| 17 | FDTT UL (7s) | — | CDR-Data | FDTT_Sustainable_MDR | CDF line | FDTT; Direction UL | Operator × Campaign |
-| 17 | FDTT UL (7s) | — | CDR-Data | FDTT_Sustainable_MDR | Stacked low-rate distribution | FDTT; Direction UL; template rate buckets | Operator × Campaign × Rate bucket |
-| 18 | FDFS DL | — | CDR-Data | Mean_Data_Rate | CDF line | FDFS; Direction DL | Operator × Campaign |
-| 18 | FDFS DL | — | CDR-Data | Data_Test_Duration | CDF line | FDFS; Direction DL | Operator × Campaign |
-| 18 | FDFS DL | — | CDR-Data | Data_Test_Duration | Average transfer-time column | FDFS; Direction DL | Operator × Campaign |
-| 19 | FDFS UL | — | CDR-Data | Mean_Data_Rate | CDF line | FDFS; Direction UL | Operator × Campaign |
-| 19 | FDFS UL | — | CDR-Data | Data_Test_Duration | CDF line | FDFS; Direction UL | Operator × Campaign |
-| 19 | FDFS UL | — | CDR-Data | Data_Test_Duration | Average transfer-time column | FDFS; Direction UL | Operator × Campaign |
-| 20 | Interactivity | — | CDR-Data | Interactivity_RTT_Median | CDF line | Interactivity tests | Operator × Campaign |
-| 20 | Interactivity | — | CDR-Data | Interactivity_RTT_Median | Median RTT column | Interactivity tests | Operator × Campaign |
-| 20 | Interactivity | — | CDR-Data | Interactivity_Packet_Error_Ratio | CDF line | Interactivity tests | Operator × Campaign |
-| 20 | Interactivity | — | CDR-Data | Interactivity_Packet_Error_Ratio | Average packet-error-ratio column | Interactivity tests | Operator × Campaign |
-| 21 | Browsing | — | CDR-Data | http_Browser_1MB_Reached_Duration | CDF line | Browsing/HTTP tests | Operator × Campaign |
-| 21 | Browsing | — | CDR-Data | http_Browser_1MB_Reached_Duration | Average time-to-1MB column | Browsing/HTTP tests | Operator × Campaign |
+| 8 | Completed Call Ratio | — | CDR-Voice | Call_Status | 100% Stacked Vertical Bars | Session_Type: VoLTE, MultiRAB, WhatsApp | Call family × Operator × Campaign |
+| 9 | Voice failures per Q/city | — | CDR-Voice | Call_Status | Count Stacked Horizontal Bars | Failed/Dropped; VoLTE, MultiRAB, WhatsApp | Call family × City × Operator × Campaign |
+| 10 | Data failure | — | CDR-Data | Test_Result | 100% Stacked Vertical Bars | HTTP, Browsing, Video and YouTube tests | Test family × Operator × Campaign |
+| 11 | Data failures - FDFS test | — | CDR-Data | Test_Result | 100% Stacked Vertical Bars | Test_Name contains FDFS | Test name × Direction × Operator × Campaign |
+| 12 | POLQA AVG MOS (Multirab&volte) | — | CDR-Voice | POLQA_LQ_Avg | CDF Line | Session_Type: VoLTE or MultiRAB | Operator × Campaign |
+| 12 | POLQA AVG MOS (Multirab&volte) | — | CDR-Voice | POLQA_LQ_Avg | Average Vertical Bars | Session_Type: VoLTE or MultiRAB | Operator × Campaign |
+| 13 | POLQA AVG MOS (WhatsApp) | — | CDR-Speech | LQ | CDF Line | Session_Type contains WhatsApp | Operator × Campaign |
+| 13 | POLQA AVG MOS (WhatsApp) | — | CDR-Speech | LQ | Average Vertical Bars | Session_Type contains WhatsApp | Operator × Campaign |
+| 14 | POLQA <1.6 | — | CDR-Speech | LQ | 100% Stacked Vertical Bars | WhatsApp; LQ < 1.6 vs ≥ 1.6 | Operator × Campaign |
+| 14 | POLQA <1.6 | — | CDR-Voice | POLQA_LQ_Avg | 100% Stacked Vertical Bars | VoLTE; POLQA < 1.6 vs ≥ 1.6 | Operator × Campaign |
+| 15 | CST | — | CDR-Voice | Call_Setup_Time | CDF Line | Session_Type: VoLTE or MultiRAB | Operator × Campaign |
+| 15 | CST | — | CDR-Voice | Call_Setup_Time | Average Vertical Bars | Session_Type: VoLTE or MultiRAB | Operator × Campaign |
+| 16 | FDTT DL (7s) | — | CDR-Data | FDTT_Sustainable_MDR | CDF Line | FDTT; Direction DL | Operator × Campaign |
+| 16 | FDTT DL (7s) | — | CDR-Data | FDTT_Sustainable_MDR | Distribution Stacked Vertical Bars | FDTT; Direction DL; template rate buckets | Operator × Campaign × Rate bucket |
+| 17 | FDTT UL (7s) | — | CDR-Data | FDTT_Sustainable_MDR | CDF Line | FDTT; Direction UL | Operator × Campaign |
+| 17 | FDTT UL (7s) | — | CDR-Data | FDTT_Sustainable_MDR | Distribution Stacked Vertical Bars | FDTT; Direction UL; template rate buckets | Operator × Campaign × Rate bucket |
+| 18 | FDFS DL | — | CDR-Data | Mean_Data_Rate | CDF Line | FDFS; Direction DL | Operator × Campaign |
+| 18 | FDFS DL | — | CDR-Data | Data_Test_Duration | CDF Line | FDFS; Direction DL | Operator × Campaign |
+| 18 | FDFS DL | — | CDR-Data | Data_Test_Duration | Average Vertical Bars | FDFS; Direction DL | Operator × Campaign |
+| 19 | FDFS UL | — | CDR-Data | Mean_Data_Rate | CDF Line | FDFS; Direction UL | Operator × Campaign |
+| 19 | FDFS UL | — | CDR-Data | Data_Test_Duration | CDF Line | FDFS; Direction UL | Operator × Campaign |
+| 19 | FDFS UL | — | CDR-Data | Data_Test_Duration | Average Vertical Bars | FDFS; Direction UL | Operator × Campaign |
+| 20 | Interactivity | — | CDR-Data | Interactivity_RTT_Median | CDF Line | Interactivity tests | Operator × Campaign |
+| 20 | Interactivity | — | CDR-Data | Interactivity_RTT_Median | Median Vertical Bars | Interactivity tests | Operator × Campaign |
+| 20 | Interactivity | — | CDR-Data | Interactivity_Packet_Error_Ratio | CDF Line | Interactivity tests | Operator × Campaign |
+| 20 | Interactivity | — | CDR-Data | Interactivity_Packet_Error_Ratio | Average Vertical Bars | Interactivity tests | Operator × Campaign |
+| 21 | Browsing | — | CDR-Data | http_Browser_1MB_Reached_Duration | CDF Line | Browsing/HTTP tests | Operator × Campaign |
+| 21 | Browsing | — | CDR-Data | http_Browser_1MB_Reached_Duration | Average Vertical Bars | Browsing/HTTP tests | Operator × Campaign |
 | 22 | Conclusions | — | — | — | Preserved conclusions | — | — |
 
 ### SA template
@@ -104,41 +106,41 @@ Export the active NSA or SA catalogue from Admin before editing it. The tables b
 | 9 | Netcheck 5G SA Most Reliable Network Scoring | London | — | — | Not automated | — | — |
 | 10 | Q2 2026 vs SA Campaign – Delta Scoring | London | — | — | Not automated | — | — |
 | 11 | Netcheck CDR Voice and Speech Analysis | 2026 Q2 NSA vs SA Campaign<br>7 Cities and London | — | — | Preserved section divider | — | — |
-| 12 | Voice Failures | 7 Cities | CDR-Voice | Call_Status | Stacked horizontal count bar | Failed/Dropped; Classic call, MultiRAB, WhatsApp | Call family × Operator × Campaign |
-| 12 | Voice Failures | 7 Cities | CDR-Voice | Failure_Technology | Stacked horizontal count bar | Failed/Dropped; Classic call, MultiRAB, WhatsApp | Call family × Failure technology × Operator × Campaign |
-| 13 | Voice Failures (Vodafone UK) | 7 Cities | CDR-Voice | Call_Status | Stacked horizontal count bar | Failed/Dropped; Operator Vodafone UK | Call family × City × Campaign |
-| 13 | Voice Failures (Vodafone UK) | 7 Cities | CDR-Voice | Failure_Technology | Stacked horizontal count bar | Failed/Dropped; Operator Vodafone UK | Call family × Failure technology × Campaign |
-| 13 | Voice Failures (Vodafone UK) | 7 Cities | CDR-Voice | Failure_Category | Stacked horizontal count bar | Failed/Dropped; Operator Vodafone UK | Call family × Failure category × Campaign |
-| 14 | Completed Call Ratio | 7 cities | CDR-Voice | Call_Status | 100% stacked column | Classic call, MultiRAB, WhatsApp | Call family × Operator × Campaign |
-| 15 | POLQA <1.6 Rate | 7 cities | CDR-Speech | LQ | 100% stacked column | LQ < 1.6 vs ≥ 1.6 | Call family × Operator × Campaign |
-| 16 | POLQA <1.6 Rate Vodafone (Whatsapp) | 7 cities | CDR-Speech | LQ | Stacked quality-rate column | Operator Vodafone UK; WhatsApp; LQ < 1.6; NR band | NR band |
+| 12 | Voice Failures | 7 Cities | CDR-Voice | Call_Status | Count Stacked Horizontal Bars | Failed/Dropped; Classic call, MultiRAB, WhatsApp | Call family × Operator × Campaign |
+| 12 | Voice Failures | 7 Cities | CDR-Voice | Failure_Technology | Count Stacked Horizontal Bars | Failed/Dropped; Classic call, MultiRAB, WhatsApp | Call family × Failure technology × Operator × Campaign |
+| 13 | Voice Failures (Vodafone UK) | 7 Cities | CDR-Voice | Call_Status | Count Stacked Horizontal Bars | Failed/Dropped; Operator Vodafone UK | Call family × City × Campaign |
+| 13 | Voice Failures (Vodafone UK) | 7 Cities | CDR-Voice | Failure_Technology | Count Stacked Horizontal Bars | Failed/Dropped; Operator Vodafone UK | Call family × Failure technology × Campaign |
+| 13 | Voice Failures (Vodafone UK) | 7 Cities | CDR-Voice | Failure_Category | Count Stacked Horizontal Bars | Failed/Dropped; Operator Vodafone UK | Call family × Failure category × Campaign |
+| 14 | Completed Call Ratio | 7 cities | CDR-Voice | Call_Status | 100% Stacked Vertical Bars | Classic call, MultiRAB, WhatsApp | Call family × Operator × Campaign |
+| 15 | POLQA <1.6 Rate | 7 cities | CDR-Speech | LQ | 100% Stacked Vertical Bars | LQ < 1.6 vs ≥ 1.6 | Call family × Operator × Campaign |
+| 16 | POLQA <1.6 Rate Vodafone (Whatsapp) | 7 cities | CDR-Speech | LQ | Threshold Stacked Vertical Bars | Operator Vodafone UK; WhatsApp; LQ < 1.6; NR band | NR band |
 | 16 | POLQA <1.6 Rate Vodafone (Whatsapp) | 7 cities | CDR-Speech | LQ vs Playing_RSRP_NR_Avg | Scatter | Operator Vodafone UK; WhatsApp; NR samples | Radio strength × LQ state |
 | 16 | POLQA <1.6 Rate Vodafone (Whatsapp) | 7 cities | CDR-Speech | LQ vs 4G_RSRP_Avg_A | Scatter | Operator Vodafone UK; WhatsApp; LTE samples | Radio strength × LQ state |
-| 17 | POLQA <1.6 Rate Three UK (Whatsapp) | 7 cities | CDR-Speech | LQ | 100% stacked column | Operator Three UK; WhatsApp; LQ < 1.6 vs ≥ 1.6 | Campaign |
-| 17 | POLQA <1.6 Rate Three UK (Whatsapp) | 7 cities | CDR-Speech | LQ | CDF line | Operator Three UK; WhatsApp | Campaign |
-| 18 | POLQA Avg MOS | 7 cities | CDR-Voice | POLQA_LQ_Avg | CDF line | Classic call or MultiRAB | Operator × Campaign |
-| 18 | POLQA Avg MOS | 7 cities | CDR-Voice | POLQA_LQ_Avg | Average-MOS column | Classic call or MultiRAB | Operator × Campaign |
-| 18 | POLQA Avg MOS | 7 cities | CDR-Speech | LQ | CDF line | WhatsApp | Operator × Campaign |
-| 18 | POLQA Avg MOS | 7 cities | CDR-Speech | LQ | Average-MOS column | WhatsApp | Operator × Campaign |
-| 19 | POLQA Avg MOS | London | CDR-Voice | POLQA_LQ_Avg | CDF line | Classic call or MultiRAB; location London | Operator × Campaign |
-| 19 | POLQA Avg MOS | London | CDR-Voice | POLQA_LQ_Avg | Average-MOS column | Classic call or MultiRAB; location London | Operator × Campaign |
-| 19 | POLQA Avg MOS | London | CDR-Speech | LQ | CDF line | WhatsApp; location London | Operator × Campaign |
-| 19 | POLQA Avg MOS | London | CDR-Speech | LQ | Average-MOS column | WhatsApp; location London | Operator × Campaign |
+| 17 | POLQA <1.6 Rate Three UK (Whatsapp) | 7 cities | CDR-Speech | LQ | 100% Stacked Vertical Bars | Operator Three UK; WhatsApp; LQ < 1.6 vs ≥ 1.6 | Campaign |
+| 17 | POLQA <1.6 Rate Three UK (Whatsapp) | 7 cities | CDR-Speech | LQ | CDF Line | Operator Three UK; WhatsApp | Campaign |
+| 18 | POLQA Avg MOS | 7 cities | CDR-Voice | POLQA_LQ_Avg | CDF Line | Classic call or MultiRAB | Operator × Campaign |
+| 18 | POLQA Avg MOS | 7 cities | CDR-Voice | POLQA_LQ_Avg | Average Vertical Bars | Classic call or MultiRAB | Operator × Campaign |
+| 18 | POLQA Avg MOS | 7 cities | CDR-Speech | LQ | CDF Line | WhatsApp | Operator × Campaign |
+| 18 | POLQA Avg MOS | 7 cities | CDR-Speech | LQ | Average Vertical Bars | WhatsApp | Operator × Campaign |
+| 19 | POLQA Avg MOS | London | CDR-Voice | POLQA_LQ_Avg | CDF Line | Classic call or MultiRAB; location London | Operator × Campaign |
+| 19 | POLQA Avg MOS | London | CDR-Voice | POLQA_LQ_Avg | Average Vertical Bars | Classic call or MultiRAB; location London | Operator × Campaign |
+| 19 | POLQA Avg MOS | London | CDR-Speech | LQ | CDF Line | WhatsApp; location London | Operator × Campaign |
+| 19 | POLQA Avg MOS | London | CDR-Speech | LQ | Average Vertical Bars | WhatsApp; location London | Operator × Campaign |
 | 20 | Netcheck CDR Data Analysis | 2026 Q2 NSA vs SA Campaign<br>7 Cities and London | — | — | Preserved section divider | — | — |
-| 21 | FDFS Success Ratio | — | CDR-Data | Test_Result | 100% stacked column | FDFS; Direction DL; 7 cities | Operator × Campaign |
-| 21 | FDFS Success Ratio | — | CDR-Data | Test_Result | 100% stacked column | FDFS; Direction UL; London | Operator × Campaign |
-| 22 | FDFS DL Throughput | 7 Cities | CDR-Data | Mean_Data_Rate | CDF line | FDFS; Direction DL | Operator × Campaign |
-| 22 | FDFS DL Throughput | 7 Cities | CDR-Data | Data_Test_Duration | Average transfer-time column | FDFS; Direction DL | Operator × Campaign |
-| 23 | FDFS UL Throughput | 7 Cities | CDR-Data | Mean_Data_Rate | CDF line | FDFS; Direction UL | Operator × Campaign |
-| 23 | FDFS UL Throughput | 7 Cities | CDR-Data | Data_Test_Duration | Average transfer-time column | FDFS; Direction UL | Operator × Campaign |
-| 24 | FDTT DL and UL Throughput | 7 Cities | CDR-Data | FDTT_Sustainable_MDR | CDF line | FDTT; Directions DL and UL | Operator × Campaign |
-| 24 | FDTT DL and UL Throughput | 7 Cities | CDR-Data | FDTT_Sustainable_MDR | Stacked low-rate distribution | FDTT; Directions DL and UL; template rate buckets | Operator × Campaign × Rate bucket |
-| 25 | Interactivity KPIs | 7 Cities | CDR-Data | Interactivity_RTT_Median | CDF line | Interactivity tests | Operator × Campaign |
-| 25 | Interactivity KPIs | 7 Cities | CDR-Data | Interactivity_RTT_Median | Median RTT column | Interactivity tests | Operator × Campaign |
-| 25 | Interactivity KPIs | 7 Cities | CDR-Data | Interactivity_Packet_Error_Ratio | CDF line | Interactivity tests | Operator × Campaign |
-| 25 | Interactivity KPIs | 7 Cities | CDR-Data | Interactivity_Packet_Error_Ratio | Average packet-error-ratio column | Interactivity tests | Operator × Campaign |
-| 26 | Browsing Time to 1MB | 7 cities | CDR-Data | http_Browser_1MB_Reached_Duration | CDF line | Browsing/HTTP tests | Operator × Campaign |
-| 26 | Browsing Time to 1MB | 7 cities | CDR-Data | http_Browser_1MB_Reached_Duration | Average time-to-1MB column | Browsing/HTTP tests | Operator × Campaign |
+| 21 | FDFS Success Ratio | — | CDR-Data | Test_Result | 100% Stacked Vertical Bars | FDFS; Direction DL; 7 cities | Operator × Campaign |
+| 21 | FDFS Success Ratio | — | CDR-Data | Test_Result | 100% Stacked Vertical Bars | FDFS; Direction UL; London | Operator × Campaign |
+| 22 | FDFS DL Throughput | 7 Cities | CDR-Data | Mean_Data_Rate | CDF Line | FDFS; Direction DL | Operator × Campaign |
+| 22 | FDFS DL Throughput | 7 Cities | CDR-Data | Data_Test_Duration | Average Vertical Bars | FDFS; Direction DL | Operator × Campaign |
+| 23 | FDFS UL Throughput | 7 Cities | CDR-Data | Mean_Data_Rate | CDF Line | FDFS; Direction UL | Operator × Campaign |
+| 23 | FDFS UL Throughput | 7 Cities | CDR-Data | Data_Test_Duration | Average Vertical Bars | FDFS; Direction UL | Operator × Campaign |
+| 24 | FDTT DL and UL Throughput | 7 Cities | CDR-Data | FDTT_Sustainable_MDR | CDF Line | FDTT; Directions DL and UL | Operator × Campaign |
+| 24 | FDTT DL and UL Throughput | 7 Cities | CDR-Data | FDTT_Sustainable_MDR | Distribution Stacked Vertical Bars | FDTT; Directions DL and UL; template rate buckets | Operator × Campaign × Rate bucket |
+| 25 | Interactivity KPIs | 7 Cities | CDR-Data | Interactivity_RTT_Median | CDF Line | Interactivity tests | Operator × Campaign |
+| 25 | Interactivity KPIs | 7 Cities | CDR-Data | Interactivity_RTT_Median | Median Vertical Bars | Interactivity tests | Operator × Campaign |
+| 25 | Interactivity KPIs | 7 Cities | CDR-Data | Interactivity_Packet_Error_Ratio | CDF Line | Interactivity tests | Operator × Campaign |
+| 25 | Interactivity KPIs | 7 Cities | CDR-Data | Interactivity_Packet_Error_Ratio | Average Vertical Bars | Interactivity tests | Operator × Campaign |
+| 26 | Browsing Time to 1MB | 7 cities | CDR-Data | http_Browser_1MB_Reached_Duration | CDF Line | Browsing/HTTP tests | Operator × Campaign |
+| 26 | Browsing Time to 1MB | 7 cities | CDR-Data | http_Browser_1MB_Reached_Duration | Average Vertical Bars | Browsing/HTTP tests | Operator × Campaign |
 | 27 | Conclusions | — | — | — | Preserved conclusions | — | — |
 | 28 |  | — | — | — | Preserved closing slide | — | — |
 

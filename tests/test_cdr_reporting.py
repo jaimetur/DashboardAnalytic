@@ -5,7 +5,7 @@ from io import BytesIO
 from pathlib import Path
 from pptx import Presentation
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, classify_sessions, enrich_multivendor, parse_catalog_csv, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, classify_sessions, enrich_multivendor, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, vendor_from_cells
 
 
 def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> None:
@@ -59,7 +59,7 @@ def test_vodafone_mapping_derives_gcid_from_4g_enodeb_and_local_cell() -> None:
 def test_catalogue_csv_requires_the_report_chart_contract_columns() -> None:
     catalogue = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,Completed Call Ratio,Voice quality,CDR-Voice,Call_Status,100% stacked column,VoLTE,Operator × Campaign\n'
+        + '\n8,Completed Call Ratio,Voice quality,CDR-Voice,Call_Status,100% Stacked Vertical Bars,VoLTE,Operator × Campaign\n'
     ).encode('utf-8')
 
     entries = parse_catalog_csv(catalogue, 'nsa')
@@ -68,14 +68,37 @@ def test_catalogue_csv_requires_the_report_chart_contract_columns() -> None:
     assert entries[0].slide_title == 'Completed Call Ratio'
     assert entries[0].slide_subtitle == 'Voice quality'
     assert entries[0].source_kind == 'voice'
-    assert entries[0].chart_type == '100% stacked column'
+    assert entries[0].chart_type == '100% Stacked Vertical Bars'
+
+
+def test_catalogue_filter_and_grouping_contract_is_parsed_and_applied() -> None:
+    conditions = parse_catalog_filters('Session_Type IN (VoLTE, MultiRAB); LQ >= 1.6')
+    grouping = parse_catalog_grouping('City × Operator × Campaign')
+    assert [(item.column, item.operator, item.values) for item in conditions] == [
+        ('Session_Type', 'IN', ('VoLTE', 'MultiRAB')), ('LQ', '>=', ('1.6',)),
+    ]
+    assert grouping.dimensions == ('City', 'Operator', 'Campaign')
+    entry = parse_catalog_csv(
+        ','.join(CATALOG_HEADERS) + '\n8,Quality,,CDR-Speech,LQ,Average Vertical Bars,Session_Type IN (VoLTE); LQ >= 1.6,City × Operator × Campaign\n',
+        'nsa',
+    )[0]
+    frame = pd.DataFrame({
+        'Session_Type': ['VoLTE', 'WhatsApp'], 'LQ': [3.2, 4.0], 'City': ['London', 'Leeds'],
+        'Operator': ['EE', 'O2'], 'Campaign': ['Q1', 'Q1'],
+    })
+    filtered = _apply_catalog_filters(frame, entry, False, 'LQ')
+    grouped, primary, series = _apply_catalog_grouping(filtered, entry, False, 'LQ')
+    assert len(grouped) == 1
+    assert grouped[primary].tolist() == ['London']
+    assert grouped[series].tolist() == ['EE']
+    assert grouped['__catalog_stack'].tolist() == ['Q1']
 
 
 def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None:
     catalogue = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,Completed Call Ratio,Voice quality,CDR-Voice,Call_Status,100% stacked column,VoLTE,Operator × Campaign'
-        + '\n8,Completed Call Ratio,Voice quality,CDR-Voice,Call_Setup_Time,Average column,VoLTE,Operator × Campaign\n'
+        + '\n8,Completed Call Ratio,Voice quality,CDR-Voice,Call_Status,100% Stacked Vertical Bars,VoLTE,Operator × Campaign'
+        + '\n8,Completed Call Ratio,Voice quality,CDR-Voice,Call_Setup_Time,Average Vertical Bars,VoLTE,Operator × Campaign\n'
     ).encode('utf-8')
     frames = {
         'data': pd.DataFrame(),
