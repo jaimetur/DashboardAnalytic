@@ -21,25 +21,29 @@
             <h1>{{ app_name }}</h1>
           </div>
           <span class="title-badge">v{{ app_version }} · {{ app_release_date }}</span>
-          {% if user %}<span class="title-badge title-user-badge title-user-badge-{{ user.role }}">{{ user.username }}</span>{% endif %}
         </div>
       </div>
       {% if user %}
       <nav class="topnav">
-        <a class="topnav-link topnav-link-doc" href="/documents/view/readme" target="_blank" rel="noopener noreferrer">Readme</a>
-        <a class="topnav-link topnav-link-doc" href="/documents/view/changelog" target="_blank" rel="noopener noreferrer">Changelog</a>
-        <a class="topnav-link topnav-link-doc" href="/documents/view/help" target="_blank" rel="noopener noreferrer">Help</a>
-        {% if user.role == 'admin' %}<a class="topnav-link topnav-link-admin" href="/admin">Admin</a>{% endif %}
+        <span class="topnav-link topnav-user-badge topnav-user-badge-{{ user.role }}">User: {{ user.username }}</span>
         <a class="topnav-link topnav-link-logout" href="/logout">Logout</a>
       </nav>
       {% endif %}
     </header>
     <main>
-      {% if user and request.url.path in ['/workspace', '/dashboard', '/reporting', '/admin'] %}
+      {% if user %}
       <nav class="module-tabs" aria-label="E2E Bench modules">
-        <a class="module-tab{% if request.url.path == '/workspace' %} active{% endif %}" href="/workspace">Workspace</a>
-        <a class="module-tab{% if request.url.path == '/dashboard' %} active{% endif %}" href="/dashboard">E2E Bench Dashboard</a>
-        <a class="module-tab{% if request.url.path == '/reporting' %} active{% endif %}" href="/reporting">E2E Bench Reporting</a>
+        <div class="module-tabs-primary">
+          <a class="module-tab module-tab-workspace{% if request.url.path == '/workspace' %} active{% endif %}" href="/workspace">Workspace</a>
+          <a class="module-tab module-tab-dashboard{% if request.url.path == '/dashboard' %} active{% endif %}" href="/dashboard">E2E Bench Dashboard</a>
+          <a class="module-tab module-tab-reporting{% if request.url.path == '/reporting' %} active{% endif %}" href="/reporting">E2E Bench Reporting</a>
+        </div>
+        <div class="module-tabs-secondary" aria-label="Documentation and administration">
+          <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/readme' %} active{% endif %}" href="/documents/view/readme">Readme</a>
+          <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/changelog' %} active{% endif %}" href="/documents/view/changelog">Changelog</a>
+          <a class="module-tab module-tab-utility{% if request.url.path.startswith('/documents/view/help') %} active{% endif %}" href="/documents/view/help">Help</a>
+          {% if user.role == 'admin' %}<a class="module-tab module-tab-admin{% if request.url.path == '/admin' %} active{% endif %}" href="/admin">Admin</a>{% endif %}
+        </div>
       </nav>
       {% endif %}
       {% block content %}{% endblock %}

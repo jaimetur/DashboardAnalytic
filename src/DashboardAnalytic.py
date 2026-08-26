@@ -68,10 +68,26 @@ INPUT_KIND_LABELS = {
     'voice': 'CDR-Voice',
     'speech': 'CDR-Speech',
     'data': 'CDR-Data',
-    'mapping': 'Multivendor Mapping',
+    'mapping_vodafone': 'Multivendor Mapping — Vodafone UK (VFUK)',
+    'mapping_three': 'Multivendor Mapping — Three UK (3UK)',
+    'smart_orchestrator_logs': 'Smart Orchestrator Logs',
     'generic': 'Other',
 }
+UPLOAD_DATASET_KINDS = frozenset({'data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'smart_orchestrator_logs', 'generic'})
 DATASET_NORMALIZATION_VERSION = 2
+HELP_HOME_DOCUMENT = '00-help.md'
+HELP_NAVIGATION_DOCUMENTS = (
+    HELP_HOME_DOCUMENT,
+    '01-configuration-file.md',
+    '02-web-interface.md',
+    '03-data-ingestion.md',
+    '04-kpi-analysis.md',
+    '05-powerpoint-reporting.md',
+    '06-admin-panel.md',
+    '07-docker-deployment.md',
+    '08-project-structure.md',
+    '09-roadmap.md',
+)
 
 
 @asynccontextmanager
@@ -98,7 +114,7 @@ def asset_version(relative_path: str) -> str:
     asset_path = settings.static_dir / relative_path
     if not asset_path.exists():
         return __version__
-    return str(int(asset_path.stat().st_mtime))
+    return str(asset_path.stat().st_mtime_ns)
 
 
 def parse_extra_filters(raw_filters: str) -> dict[str, Any]:
@@ -446,7 +462,8 @@ def ensure_dataset_query_table(dataset: dict[str, Any], required_columns: list[s
 
 
 def process_dataset(dataset_id: int, dataset_path: Path, username: str) -> None:
-    if not repository.get_dataset(dataset_id) or not dataset_path.exists():
+    dataset = repository.get_dataset(dataset_id)
+    if not dataset or not dataset_path.exists():
         clear_stop_request(dataset_id)
         return
     clear_stop_request(dataset_id)
@@ -456,7 +473,9 @@ def process_dataset(dataset_id: int, dataset_path: Path, username: str) -> None:
             ensure_not_stopped(dataset_id)
             repository.update_dataset_profile(dataset_id, progress=max(10, min(95, int(value))))
 
-        rebuild_dataset_artifacts(dataset_id, dataset_path, progress_callback=progress_update)
+        selected_kind = str(dataset['dataset_kind'] or '').strip().lower()
+        forced_dataset_kind = selected_kind if selected_kind in UPLOAD_DATASET_KINDS else None
+        rebuild_dataset_artifacts(dataset_id, dataset_path, progress_callback=progress_update, forced_dataset_kind=forced_dataset_kind)
         repository.add_log(username, 'process_dataset', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name, 'status': 'ready'}))
     except ProcessingStopped as exc:
         progress = int((repository.get_dataset(dataset_id) or {}).get('progress') or 0)
@@ -487,13 +506,20 @@ def enqueue_dataset_processing(background_tasks: BackgroundTasks, dataset_id: in
     background_tasks.add_task(process_dataset, dataset_id, dataset_path, username)
 
 
-def rebuild_dataset_artifacts(dataset_id: int, dataset_path: Path, progress_callback: Callable[[int], None] | None = None) -> dict[str, Any]:
+def rebuild_dataset_artifacts(
+    dataset_id: int,
+    dataset_path: Path,
+    progress_callback: Callable[[int], None] | None = None,
+    forced_dataset_kind: str | None = None,
+) -> dict[str, Any]:
     df = load_dataset(dataset_path, progress_callback=progress_callback)
+    if forced_dataset_kind in UPLOAD_DATASET_KINDS:
+        df['dataset_kind'] = forced_dataset_kind
     store_cached_dataset_frame(dataset_path, df)
     repository.replace_dataset_rows(dataset_id, df)
     if progress_callback:
         progress_callback(62)
-    dataset_kind = df['dataset_kind'].iloc[0] if 'dataset_kind' in df.columns and not df.empty else infer_dataset_kind(df, dataset_path.name)
+    dataset_kind = df['dataset_kind'].iloc[0] if 'dataset_kind' in df.columns and not df.empty else (forced_dataset_kind or infer_dataset_kind(df, dataset_path.name))
     repository.update_dataset_profile(dataset_id, progress=62, dataset_kind=dataset_kind)
     summary = summarise_dataset(df)
     if progress_callback:
@@ -609,7 +635,7 @@ def resolve_doc_path(doc_name: str) -> Path:
     allowed = {
         'readme': 'README.md',
         'changelog': 'CHANGELOG.md',
-        'help': 'help/help.md',
+        'help': f'help/{HELP_HOME_DOCUMENT}',
     }
     relative_path = allowed.get(normalized)
     if not relative_path:
@@ -1008,14 +1034,15 @@ def help_document_view(request: Request, doc_file: str, user: SessionUser = Depe
 def get_help_documents_index(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
     help_root = (PROJECT_ROOT / 'help').resolve()
     documents: list[dict[str, str]] = []
-    if help_root.exists():
-        for file_path in sorted(help_root.rglob('*.md'), key=lambda item: item.as_posix().lower()):
-            relative_path = file_path.resolve().relative_to(help_root).as_posix()
-            documents.append({
-                'name': file_path.name,
-                'relative_path': relative_path,
-                'url': '/documents/view/help' if relative_path == 'help.md' else f'/documents/view/help/{relative_path}',
-            })
+    for relative_path in HELP_NAVIGATION_DOCUMENTS:
+        file_path = (help_root / relative_path).resolve()
+        if not file_path.exists() or not file_path.is_file():
+            continue
+        documents.append({
+            'name': file_path.name,
+            'relative_path': relative_path,
+            'url': '/documents/view/help' if relative_path == HELP_HOME_DOCUMENT else f'/documents/view/help/{relative_path}',
+        })
     return {'root': str(help_root), 'documents': documents}
 
 
@@ -1138,7 +1165,8 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
             'data_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'data'],
             'voice_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'voice'],
             'speech_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'speech'],
-            'mapping_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping'],
+            'vodafone_mapping_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_vodafone'],
+            'three_mapping_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_three'],
         },
     )
 
@@ -1170,8 +1198,8 @@ def generate_netcheck_cdr_report(
         if multivendor:
             if not vodafone_mapping_dataset_id or not three_mapping_dataset_id:
                 raise ValueError('Select processed Vendor Mapping files for both Vodafone and Three for a multivendor report.')
-            vodafone_mapping = _reporting_dataset(vodafone_mapping_dataset_id, 'mapping')
-            three_mapping = _reporting_dataset(three_mapping_dataset_id, 'mapping')
+            vodafone_mapping = _reporting_dataset(vodafone_mapping_dataset_id, 'mapping_vodafone')
+            three_mapping = _reporting_dataset(three_mapping_dataset_id, 'mapping_three')
             vodafone_mapping_frame = _reporting_frame(vodafone_mapping['id'])
             three_mapping_frame = _reporting_frame(three_mapping['id'])
             frames = {
@@ -1229,6 +1257,7 @@ async def upload_dataset(
     request: Request,
     background_tasks: BackgroundTasks,
     dataset_files: Annotated[list[UploadFile], File(...)],
+    dataset_kinds: Annotated[list[str] | None, Form()] = None,
     user: SessionUser = Depends(current_user),
 ) -> Response:
     if not dataset_files:
@@ -1272,13 +1301,22 @@ async def upload_dataset(
             },
             status_code=400,
         )
+    selected_kinds = [str(kind or '').strip().lower() for kind in (dataset_kinds or [])]
+    if selected_kinds and len(selected_kinds) != len(dataset_files):
+        raise HTTPException(status_code=422, detail='Choose a file type for every uploaded file.')
+    if any(kind not in UPLOAD_DATASET_KINDS for kind in selected_kinds):
+        raise HTTPException(status_code=422, detail='Unsupported dataset type selection.')
+
     queued_dataset_ids: list[int] = []
-    for dataset_file in dataset_files:
+    for index, dataset_file in enumerate(dataset_files):
         extension = Path(dataset_file.filename or '').suffix.lower()
         destination = safe_join(settings.input_dir, dataset_file.filename or f'upload{extension}')
         await save_upload_file(dataset_file, destination)
         dataset_id, created = repository.add_dataset(dataset_file.filename or destination.name, str(destination), user.username)
-        repository.add_log(user.username, 'upload_dataset' if created else 'reprocess_dataset', destination.name)
+        selected_kind = selected_kinds[index] if selected_kinds else None
+        if selected_kind:
+            repository.update_dataset_profile(dataset_id, dataset_kind=selected_kind)
+        repository.add_log(user.username, 'upload_dataset' if created else 'reprocess_dataset', json.dumps({'file': destination.name, 'dataset_kind': selected_kind or 'auto-detected'}))
         enqueue_dataset_processing(background_tasks, dataset_id, destination, user.username)
         queued_dataset_ids.append(dataset_id)
 

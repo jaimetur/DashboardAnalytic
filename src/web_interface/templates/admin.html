@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block content %}
-<section class="dashboard-stack spacious-stack">
-  <article class="panel hero-panel dataset-summary-panel">
+<section class="dashboard-stack spacious-stack admin-stack">
+  <article class="panel hero-panel dataset-summary-panel module-hero-admin" style="background: linear-gradient(135deg, #ff8070, #861919) !important; color: #ffffff;">
     <div class="section-head tight-head">
       <div>
         <p class="eyebrow">Administration</p>
@@ -9,7 +9,7 @@
       </div>
       <span class="pill">{{ user.username }} · administrator</span>
     </div>
-    <p class="lede">Manage workspace identities, inspect uploaded sources and review the audit trail from a single control surface.</p>
+    <p class="lede">Manage user access, review the datasets stored in the workspace and trace significant operational events such as uploads, processing and report generation from one controlled area.</p>
     {% if error %}<div class="alert">{{ error }}</div>{% endif %}
     <form class="form-stack narrow-form" action="/admin/users" method="post">
       <h3>Create user</h3>

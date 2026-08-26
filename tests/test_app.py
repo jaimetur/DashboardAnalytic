@@ -80,8 +80,8 @@ def test_admin_can_login_upload_and_see_automatic_dashboard(client) -> None:
     dashboard_response = client.get(upload_response.headers["location"])
     assert dashboard_response.status_code == 200
     assert "sample.csv" in dashboard_response.text
-    assert "Automatic CDR Pipeline" in dashboard_response.text
     assert "Data Ingestion" in dashboard_response.text
+    assert "Workspace" in dashboard_response.text
     assert "Workspace opened from cache" in dashboard_response.text
 
     analysis_redirect = client.post(
@@ -242,6 +242,24 @@ def test_dashboard_upload_accepts_multiple_files(client) -> None:
 
     datasets = app_module.repository.list_datasets()
     assert len(datasets) == 2
+
+
+def test_workspace_upload_persists_selected_dataset_kind(client) -> None:
+    login(client)
+
+    response = client.post(
+        "/dashboard/upload",
+        data={"dataset_kinds": "mapping_vodafone"},
+        files={"dataset_files": ("operator_cells.csv", BytesIO(b"Cell ID,OP/ Vendor\n123,Ericsson\n"), "text/csv")},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    import src.DashboardAnalytic as app_module
+
+    dataset = app_module.repository.get_dataset(1)
+    assert dataset is not None
+    assert dataset["dataset_kind"] == "mapping_vodafone"
 
 
 def test_dataset_selector_shows_all_datasets_when_no_input_kind_filter_is_set(client) -> None:
@@ -472,17 +490,48 @@ def test_top_navigation_shows_document_links(client) -> None:
     response = client.get("/workspace")
     assert response.status_code == 200
     assert "<h1>Dashboard Analytic</h1>" in response.text
-    assert "v0.1.0 · 2026-07-14" in response.text
+    assert "v0.2.0 · 2026-08-26" in response.text
     assert 'href="/documents/view/readme"' in response.text
     assert 'href="/documents/view/changelog"' in response.text
     assert 'href="/documents/view/help"' in response.text
-    assert 'target="_blank"' in response.text
+    assert 'target="_blank"' not in response.text
     assert 'href="/dashboard"' in response.text
     assert 'class="module-tabs"' in response.text
-    assert 'class="module-tab active" href="/workspace"' in response.text
+    assert 'class="module-tabs-secondary"' in response.text
+    assert 'module-hero-dashboard' not in response.text
+    assert 'class="module-tab module-tab-workspace active" href="/workspace"' in response.text
     assert 'E2E Bench Reporting</a>' in response.text
     assert 'href="/logout"' in response.text
-    assert '<span class="title-badge title-user-badge title-user-badge-admin">admin</span>' in response.text
+    assert '<span class="topnav-link topnav-user-badge topnav-user-badge-admin">User: admin</span>' in response.text
+
+    dashboard = client.get("/dashboard")
+    assert dashboard.status_code == 200
+    assert 'module-hero-dashboard' in dashboard.text
+    assert 'linear-gradient(135deg, #0c4c8c, #68b8ff)' in dashboard.text
+
+    reporting = client.get("/reporting")
+    assert reporting.status_code == 200
+    assert 'module-hero-reporting' in reporting.text
+    assert 'linear-gradient(135deg, #4b208a, #bd90ff)' in reporting.text
+
+    admin = client.get("/admin")
+    assert admin.status_code == 200
+    assert 'module-hero-admin' in admin.text
+    assert 'linear-gradient(135deg, #ff8070, #861919)' in admin.text
+
+
+def test_non_admin_navigation_hides_admin_tab(client) -> None:
+    response = client.post("/login", data={"username": "demo", "password": "demo123"}, follow_redirects=False)
+    assert response.status_code == 303
+
+    workspace = client.get("/workspace")
+    assert workspace.status_code == 200
+    assert 'class="module-tabs-secondary"' in workspace.text
+    assert 'href="/documents/view/readme"' in workspace.text
+    assert 'href="/documents/view/changelog"' in workspace.text
+    assert 'href="/documents/view/help"' in workspace.text
+    assert 'href="/admin"' not in workspace.text
+    assert 'User: demo' in workspace.text
 
 
 def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
@@ -505,16 +554,27 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
 
     help_api = client.get("/api/documents/help")
     assert help_api.status_code == 200
-    assert help_api.json()["name"] == "help.md"
+    assert help_api.json()["name"] == "00-help.md"
 
     help_index = client.get("/api/documents/help-index")
     assert help_index.status_code == 200
-    assert any(item["relative_path"] == "01-web-interface.md" for item in help_index.json()["documents"])
+    help_documents = help_index.json()["documents"]
+    assert help_documents[0]["relative_path"] == "00-help.md"
+    assert any(item["relative_path"] == "02-web-interface.md" for item in help_documents)
+    excluded_help_documents = {
+        "02-arguments-description.md",
+        "02-arguments-description-short.md",
+        "05-word-reporting.md",
+        "09-github-actions.md",
+        "10-testing.md",
+    }
+    assert not excluded_help_documents.intersection(item["relative_path"] for item in help_documents)
 
-    help_article = client.get("/documents/view/help/01-web-interface.md")
+    help_article = client.get("/documents/view/help/02-web-interface.md")
     assert help_article.status_code == 200
     assert 'id="help-nav-list"' in help_article.text
-    assert "/api/documents/help/01-web-interface.md" in help_article.text
+    assert "/api/documents/help/02-web-interface.md" in help_article.text
+    assert "`${position}. ${label}`" in help_article.text
 
 
 def test_dashboard_analysis_reuses_cached_result_on_reload(client, monkeypatch) -> None:

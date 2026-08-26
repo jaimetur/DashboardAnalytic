@@ -20,7 +20,7 @@ TEMPLATE_NAMES = {
     "nsa": "Template_CDR_NSA_analysis.pptx",
     "sa": "Template_CDR_SA_analysis.pptx",
 }
-CDR_REPORT_VERSION = "2026-08-26-v2"
+CDR_REPORT_VERSION = "2026-08-26-v3"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
 
@@ -105,11 +105,20 @@ def classify_sessions(df: pd.DataFrame, technology: str) -> pd.DataFrame:
     return df[df[rat_column].astype(str).str.contains(marker, case=False, na=False, regex=True)].copy()
 
 
-def build_vendor_lookup(mapping: pd.DataFrame) -> dict[str, str]:
-    cell_column = _first_existing(mapping, ["Global CI", "Global_CI", "Cell ID", "Cell_ID"])
+def _integer_cell_component(value: object) -> int | None:
+    try:
+        if value is None or pd.isna(value):
+            return None
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def build_three_vendor_lookup(mapping: pd.DataFrame) -> dict[str, str]:
+    cell_column = _first_existing(mapping, ["Cid__ECI", "CId___ECI"])
     vendor_column = _first_existing(mapping, ["Vendor", "OP/ Vendor", "OP_Vendor"])
     if not cell_column or not vendor_column:
-        raise ValueError("The selected mapping must contain a Global CI/Cell ID column and a Vendor column.")
+        raise ValueError("The selected 3UK mapping must contain Cid__ECI and a Vendor column.")
     lookup: dict[str, str] = {}
     for cell, vendor in mapping[[cell_column, vendor_column]].dropna().itertuples(index=False):
         cell_text, vendor_text = _canonical_cell_id(cell), str(vendor).strip()
@@ -118,14 +127,35 @@ def build_vendor_lookup(mapping: pd.DataFrame) -> dict[str, str]:
     return lookup
 
 
+def build_vodafone_vendor_lookup(mapping: pd.DataFrame) -> dict[str, str]:
+    source_sheet = _first_existing(mapping, ["source_sheet"])
+    five_g_mapping = mapping
+    if source_sheet:
+        five_g_mapping = mapping[mapping[source_sheet].astype(str).str.strip().str.casefold() == "5g"].copy()
+    gnodeb_column = _first_existing(five_g_mapping, ["gNodeB ID", "gNodeB_ID"])
+    local_cell_column = _first_existing(five_g_mapping, ["Local Cell ID", "Local_Cell_ID"])
+    vendor_column = _first_existing(five_g_mapping, ["OP/ Vendor", "OP_Vendor", "Vendor"])
+    if five_g_mapping.empty or not gnodeb_column or not local_cell_column or not vendor_column:
+        raise ValueError("The selected VFUK mapping must contain the 5G sheet with gNodeB ID, Local Cell ID and OP/ Vendor columns.")
+    lookup: dict[str, str] = {}
+    for gnodeb, local_cell, vendor in five_g_mapping[[gnodeb_column, local_cell_column, vendor_column]].itertuples(index=False):
+        gnodeb_id = _integer_cell_component(gnodeb)
+        local_cell_id = _integer_cell_component(local_cell)
+        vendor_text = str(vendor).strip()
+        if gnodeb_id is None or local_cell_id is None or not vendor_text or vendor_text.lower() == "nan":
+            continue
+        lookup[str(gnodeb_id * 4096 + local_cell_id)] = vendor_text
+    return lookup
+
+
 def enrich_multivendor(df: pd.DataFrame, vodafone_mapping: pd.DataFrame, three_mapping: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
     operator_column = _first_existing(result, ["operator", "Operator"])
-    cell_column = _first_existing(result, ["Cell_ID_A", "Cell_IDs_A", "Cell_ID", "cell_id"])
+    cell_column = _first_existing(result, ["Cell_ID_A"])
     if not operator_column or not cell_column:
-        raise ValueError("The selected CDR does not contain the Operator and Cell_ID_A/Cell_IDs_A columns required for multivendor reporting.")
-    vodafone_lookup = build_vendor_lookup(vodafone_mapping)
-    three_lookup = build_vendor_lookup(three_mapping)
+        raise ValueError("The selected CDR must contain Operator and Cell_ID_A for multivendor reporting.")
+    vodafone_lookup = build_vodafone_vendor_lookup(vodafone_mapping)
+    three_lookup = build_three_vendor_lookup(three_mapping)
     result["report_vendor"] = [
         vendor_from_cells(
             operator,

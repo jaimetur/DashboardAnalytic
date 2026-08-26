@@ -1,22 +1,43 @@
-# Data Ingestion
+# Data ingestion
 
-The MVP accepts:
+The Workspace accepts CSV, XLSX, XLS and XLSM files. Uploaded data is stored with its metadata in SQLite and its tabular contents are normalised under the configured output directory. Only processed datasets can be analysed or used in reports.
 
-- `.csv`
-- `.xlsx`
-- `.xls`
+## Standard workflow
 
-The ingestion layer loads the file into a pandas DataFrame and derives:
+1. Sign in and open **Workspace**.
+2. Upload the source file.
+3. Wait until its status is **Processed**.
+4. Confirm the detected type and source name; for a batch, review every proposed type independently.
+5. Open E2E Bench Dashboard or E2E Bench Reporting and select the processed dataset.
 
-- available columns
-- numeric columns
-- categorical columns
-- row count
+If a status shows an error, correct the source and upload it again. Do not create a report from a failed or incomplete ingestion.
 
-This metadata is later used by the analytics layer.
+## Excel workbooks
 
-## Reporting inputs
+For Excel inputs, each readable worksheet is inspected. The application records worksheet names, row and column counts and a compact profile that can be used by the analysis layer. CDR workbooks commonly contain an operator worksheet; the reporting pipeline reads these sheets individually rather than assuming one fixed sheet layout.
 
-NetCheck Data, Voice and Speech CDRs are classified automatically and stored in SQLite after processing. Reporting uses those persisted rows; users do not upload the same CDR a second time when generating a report.
+## NetCheck CDR inputs
 
-A file whose name contains `Mapping` is classified as `Multivendor Mapping`. Upload one mapping for Vodafone and a separate mapping for Three before creating a multivendor report. Each file must expose a Global CI/Cell ID field and a Vendor field (for example, `Cell ID` and `OP/ Vendor`).
+A NetCheck report requires three separately processed CDR workbooks:
+
+- **Data**;
+- **Voice**; and
+- **Speech**.
+
+When files are selected, Workspace derives a proposed type from each filename and preselects it. Names containing `Data`, `Voice` or `Speech` are proposed as the corresponding CDR domain; names containing `VFUK`/`Vodafone` or `3UK`/`Three` are proposed as the corresponding mapping; Smart Orchestrator/log names are proposed as log inputs. For multiple files, it presents a confirmation panel so every proposed classification can be reviewed individually. The selected type is persisted before processing, so the reporting form can offer the appropriate selector. NSA sessions are identified from `RAT`, `RAT_A` or `Sample_RAT_A` values containing an ENDC spelling; SA sessions use values containing `NR`. The generator validates the selected combination before starting.
+
+## Smart Orchestrator Logs
+
+Smart Orchestrator Log files can already be uploaded, classified and retained in Workspace. They are not yet analysed by a dedicated reporting module, but keeping their type explicit prevents them from being confused with CDR or mapping sources and prepares them for the future Smart Orchestrator Logs Reports workflow.
+
+## Multivendor mapping inputs
+
+Multivendor reporting requires two processed mapping files: **VFUK** for Vodafone UK and **3UK** for Three UK. Workspace preselects these types when the filename includes the corresponding identifier; always confirm the proposal. O2 and EE are not mapped as multivendor operators. The mappings are selected separately so the system can resolve vendors from the first and last Global Cell ID seen in each session.
+
+| Source | Required input | How the lookup is built |
+| --- | --- | --- |
+| CDR Data, Voice or Speech | `Cell_ID_A` | The reporting flow extracts the first and last Global Cell ID available for each session. |
+| 3UK mapping | `Cid__ECI` (the source variant `CId___ECI` is also accepted) and Vendor | The value is matched directly to the CDR endpoint GCID. |
+| VFUK mapping | `5G` worksheet with `gNodeB ID`, `Local Cell ID` and Vendor | The GCID is calculated as `gNodeB ID × 4096 + Local Cell ID` before matching. |
+
+Keep the Vendor field populated and verify that the mapping has been processed successfully before opening Reporting. A mapping with an incorrect assigned type will not appear in its Vodafone or Three selector.

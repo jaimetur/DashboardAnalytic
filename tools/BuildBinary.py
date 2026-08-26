@@ -334,7 +334,7 @@ def _include_extrafiles_and_zip(input_file, output_file):
         },
         {
             'subdir': 'docs',  # These files go to the 'docs' subdirectory
-            'files': ["./README.md", "./CHANGELOG.md", "./ROADMAP.md", "./DOWNLOAD.md", "./CONTRIBUTING.md", "./CODE_OF_CONDUCT.md", "./LICENSE"]
+            'files': ["./README.md", "./CHANGELOG.md", "./DOWNLOAD.md", "./CONTRIBUTING.md", "./CODE_OF_CONDUCT.md", "./LICENSE"]
         },
         {
             'subdir': 'help',  # These files go to the 'help' subdirectory
@@ -452,46 +452,6 @@ def _extract_release_body(input_file, output_file, download_file):
         outfile.writelines(download_content)
 
 
-def _add_roadmap_to_readme(readme_file, roadmap_file):
-    """
-    Replaces the ROADMAP block in the README file with the content of another ROADMAP file.
-    If the block does not exist, it inserts it before the line that contains "## Credits".
-
-    Args:
-        readme_file (str): Path to README.md file.
-        roadmap_file (str): Path to ROADMAP.md file.
-    """
-    # Read the content of the README file
-    with open(readme_file, "r", encoding="utf-8") as f:
-        readme_lines = f.readlines()
-    # Read the content of the ROADMAP file
-    with open(roadmap_file, "r", encoding="utf-8") as f:
-        roadmap_content = f.read().strip() + "\n\n"  # Ensure a final line break
-    # Search for the existing ROADMAP block
-    start_index, end_index = None, None
-    for i, line in enumerate(readme_lines):
-        if line.strip() == "## 📅 ROADMAP":
-            start_index = i
-        if start_index is not None and line.strip() == "## 🎖️ Credits":
-            end_index = i
-            break
-    if start_index is not None and end_index is not None:
-        # Replace the existing ROADMAP block
-        print("'ROADMAP' block found")
-        updated_readme = readme_lines[:start_index] + [roadmap_content] + readme_lines[end_index:]
-    else:
-        # Search for the line where "## 🎖️ Credits" starts to insert the ROADMAP block before it
-        credits_index = next((i for i, line in enumerate(readme_lines) if line.strip() == "## 🎖️ Credits:"), None)
-        if credits_index is not None:
-            print("'CREDITS' block found but 'ROADMAP' block not found")
-            updated_readme = readme_lines[:credits_index] + [roadmap_content] + readme_lines[credits_index:]
-        else:
-            # If "## 🎖️ Credits" is not found, simply add it to the end of the file
-            print("'CREDITS' block not found")
-            updated_readme = readme_lines + [roadmap_content]
-    # Write the updated content to the README file
-    with open(readme_file, "w", encoding="utf-8") as f:
-        f.writelines(updated_readme)
 # ------------------------ END OF HELPERS ---------------------------------
 
 
@@ -557,24 +517,17 @@ def main(compiler='pyinstaller', compile_in_one_file=COMPILE_IN_ONE_FILE):
     else:
         print("Caanot find TOOL_VERSION.")
 
-    # Extract the RELEASE-NOTES body and add ROADMAP to the README.md file
-    # print("Extracting body of RELEASE-NOTES and adding ROADMAP to file README.md...")
     print("Extracting body of RELEASE-NOTES...")
 
-    # Paths for CHANGELOG.md, RELEASE-NOTES.md, README.md and ROADMAP.md
+    # Paths for CHANGELOG.md, RELEASE-NOTES.md and README.md
     download_filepath = os.path.join(root_dir, 'DOWNLOAD.md')
     changelog_filepath = os.path.join(root_dir, 'CHANGELOG.md')
     current_release_filepath = os.path.join(root_dir, 'RELEASE-NOTES.md')
-    roadmap_filepath = os.path.join(root_dir, 'ROADMAP.md')
     readme_filepath = os.path.join(root_dir, 'README.md')
 
     # Extract the body of the current Release from CHANGELOG.md
     _extract_release_body(input_file=changelog_filepath, output_file=current_release_filepath, download_file=download_filepath)
     print(f"File '{current_release_filepath}' created successfully!.")
-
-    # Add the ROADMAP into the README file
-    # _add_roadmap_to_readme(readme_filepath, roadmap_filepath)
-    # print(f"File 'README.md' updated successfully with ROADMAP.md")
 
     # Save build_info.txt into a text file
     with open(os.path.join(root_dir, 'build_info.txt'), 'w') as file:

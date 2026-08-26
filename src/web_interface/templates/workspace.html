@@ -1,17 +1,17 @@
 {% extends 'base.html' %}
 {% block content %}
 <section class="dashboard-stack spacious-stack">
-  <article class="panel hero-panel upload-panel">
+  <article class="panel hero-panel upload-panel" style="background: linear-gradient(145deg, #10314a, #08736d) !important; color: #ffffff;">
     <div class="section-head tight-head">
       <div>
-        <p class="eyebrow">Data Ingestion</p>
-        <h2>Automatic CDR Pipeline</h2>
+        <p class="eyebrow">Workspace</p>
+        <h2>Data Ingestion</h2>
       </div>
       <span class="pill live-pill">Auto profile on upload</span>
     </div>
-    <p class="lede">Upload a workbook and the platform classifies, processes and prepares it for visualization without asking for manual column mapping.</p>
-    <form class="upload-dropzone" action="/dashboard/upload" method="post" enctype="multipart/form-data" data-loading-label="Uploading and processing dataset">
-      <label class="dropzone-field">
+    <p class="lede">Bring the source files that feed every product workflow into one managed workspace: NetCheck CDR workbooks (Data, Voice and Speech), Smart Orchestrator Logs, and Vodafone UK (VFUK) or Three UK (3UK) Multivendor Mappings. Workspace proposes a type from each filename, lets you confirm it per file, and processes the result for Dashboard or Reporting.</p>
+    <form class="upload-dropzone" action="/dashboard/upload" method="post" enctype="multipart/form-data" data-loading-label="Uploading and processing dataset" data-upload-type-form>
+      <label class="dropzone-field" data-upload-dropzone>
         <span class="dropzone-title">Drop workbooks or browse</span>
         <span class="dropzone-copy">Accepted: CSV, XLS, XLSX, XLSM</span>
         <span class="file-picker-shell">
@@ -20,6 +20,11 @@
           <input type="file" name="dataset_files" accept=".csv,.xlsx,.xls,.xlsm" multiple required data-file-picker-input>
         </span>
       </label>
+      <section class="upload-type-list" data-upload-type-list hidden aria-live="polite">
+        <p class="upload-type-title" data-upload-type-title>Classify uploaded files</p>
+        <p class="dropzone-copy" data-upload-type-copy>Select the content type for every file before processing.</p>
+        <div data-upload-type-items></div>
+      </section>
       <button type="submit">Upload and process</button>
     </form>
     {% if selected_dataset and selected_dataset.is_ready %}
@@ -173,4 +178,88 @@
     </div>
   </details>
 </section>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+(() => {
+  const form = document.querySelector('[data-upload-type-form]');
+  const picker = form?.querySelector('[data-file-picker-input]');
+  const list = form?.querySelector('[data-upload-type-list]');
+  const items = form?.querySelector('[data-upload-type-items]');
+  const title = form?.querySelector('[data-upload-type-title]');
+  const copy = form?.querySelector('[data-upload-type-copy]');
+  if (!form || !picker || !list || !items || !title || !copy) return;
+
+  const types = [
+    ['data', 'NetCheck CDR — Data'],
+    ['voice', 'NetCheck CDR — Voice'],
+    ['speech', 'NetCheck CDR — Speech'],
+    ['smart_orchestrator_logs', 'Smart Orchestrator Logs'],
+    ['mapping_vodafone', 'Multivendor Mapping — Vodafone UK (VFUK)'],
+    ['mapping_three', 'Multivendor Mapping — Three UK (3UK)'],
+    ['generic', 'Other supported dataset'],
+  ];
+
+  function inferType(fileName) {
+    const normalized = String(fileName || '').toLowerCase().replace(/[_-]+/g, ' ');
+    if (normalized.includes('vfuk') || normalized.includes('vodafone uk') || normalized.includes('vodafone')) return 'mapping_vodafone';
+    if (normalized.includes('3uk') || normalized.includes('three uk') || normalized.includes('three')) return 'mapping_three';
+    if (normalized.includes('smart orchestrator') || (normalized.includes('smart') && normalized.includes('log')) || normalized.includes('orchestrator log')) return 'smart_orchestrator_logs';
+    if (normalized.includes('speech')) return 'speech';
+    if (normalized.includes('voice')) return 'voice';
+    if (normalized.includes('data')) return 'data';
+    return '';
+  }
+
+  picker.addEventListener('change', () => {
+    items.replaceChildren();
+    const files = Array.from(picker.files || []);
+    const needsConfirmation = files.length > 1;
+    title.textContent = needsConfirmation ? 'Confirm file classifications' : 'Classify uploaded file';
+    copy.textContent = needsConfirmation
+      ? 'Review the detected type for every file and correct any value before processing.'
+      : 'The type has been preselected from the filename when it could be identified. Confirm or change it before processing.';
+    files.forEach((file) => {
+      const label = document.createElement('label');
+      label.className = 'upload-type-item';
+      const name = document.createElement('span');
+      name.textContent = file.name;
+      const select = document.createElement('select');
+      select.name = 'dataset_kinds';
+      select.required = true;
+      select.setAttribute('aria-label', `Type for ${file.name}`);
+      const placeholder = new Option('Choose file type', '', true, true);
+      placeholder.disabled = true;
+      select.add(placeholder);
+      types.forEach(([value, text]) => select.add(new Option(text, value)));
+      select.value = inferType(file.name);
+      label.append(name, select);
+      items.append(label);
+    });
+    list.hidden = files.length === 0;
+    list.classList.toggle('upload-type-confirmation', needsConfirmation);
+  });
+
+  const dropzone = form.querySelector('[data-upload-dropzone]');
+  if (!dropzone || typeof DataTransfer === 'undefined') return;
+  ['dragenter', 'dragover'].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      dropzone.classList.add('is-dragging');
+    });
+  });
+  ['dragleave', 'drop'].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      dropzone.classList.remove('is-dragging');
+    });
+  });
+  dropzone.addEventListener('drop', (event) => {
+    const files = event.dataTransfer?.files;
+    if (!files?.length) return;
+    picker.files = files;
+    picker.dispatchEvent(new Event('change', {bubbles: true}));
+  });
+})();
+</script>
 {% endblock %}

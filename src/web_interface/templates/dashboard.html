@@ -3,7 +3,7 @@
 <section class="dashboard-stack spacious-stack">
   <section class="workspace-grid">
     <main class="dashboard-main-stack">
-      <article class="panel dataset-summary-panel select-dataset-card">
+      <article class="panel dataset-summary-panel select-dataset-card module-hero-dashboard" style="background: linear-gradient(135deg, #0c4c8c, #68b8ff) !important; color: #ffffff;">
         <div class="section-head tight-head">
           <div>
             <p class="eyebrow">Selected Dataset</p>
@@ -11,6 +11,7 @@
           </div>
           {% if selected_dataset %}<span class="pill status-pill status-{{ selected_dataset.status }}">{{ selected_dataset.status_label }}</span>{% endif %}
         </div>
+        <p class="lede">Explore a processed source with adaptive filters, KPI summaries, percentile scorecards and comparison charts. The selected dataset and active scope are also used by the Word and PowerPoint dashboard exports.</p>
         <form id="dashboard-dataset-form" class="dataset-selector-grid" action="/dashboard" method="get" data-loading-label="Opening dataset dashboard">
           <label>Input Type
             <select name="input_kind" data-input-kind-select>

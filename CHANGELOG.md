@@ -1,5 +1,4 @@
 # 🗓️ CHANGELOG
-[Planned Roadmap](/ROADMAP.md) for the following releases
 [Changelog](/CHANGELOG.md) for the past releases
 
 ---
@@ -8,35 +7,32 @@
 ### Release Date: 2026-08-26
 
 #### 🌟 New Features:
-- Added a `Help` navigation button that opens the embedded documentation index in a new browser tab.
-- Added the top-level `E2E Bench Dashboard` and `E2E Bench Reporting` product split.
-- Added `NetCheck CDR Reports`, allowing users to select previously processed Data, Voice and Speech CDRs and generate an NSA or SA PowerPoint report.
-- Added template-backed PowerPoint generation using the bundled NSA and SA NetCheck CDR templates.
-- Added multivendor reporting with a selectable, processed `Multivendor_Mapping` dataset.
-- Added separate Vodafone and Three Vendor Mapping selections for multivendor reports.
-- Added persistent report-run records with source dataset IDs, selected mapping, report scope, template and output filename for traceability.
-- Added the visible `Smart Orchestrator Logs Reports` module as a future-ready entry point.
+- Split the product into the top-level **Workspace**, **E2E Bench Dashboard** and **E2E Bench Reporting** modules, with a future-ready **Smart Orchestrator Logs Reports** entry point.
+- Added per-file Workspace classification for NetCheck CDR Data, Voice and Speech, Smart Orchestrator Logs, VFUK Vodafone and 3UK Three Multivendor Mappings, including filename-based preselection and batch review.
+- Added NetCheck CDR PowerPoint reporting from processed Data, Voice and Speech inputs, using the bundled NSA and SA templates.
+- Added multivendor reporting with mandatory, operator-specific VFUK Vodafone and 3UK Three mappings, plus persistent report-run traceability.
+- Added embedded Help with a numbered, project-specific navigation panel.
 
 #### 🚀 Enhancements:
-- Moved `Workspace`, `E2E Bench Dashboard` and `E2E Bench Reporting` into an independent, left-aligned module-tab bar with refined spacing, layering and panel attachment.
-- Added automatic recognition of `Multivendor_Mapping` uploads as a dedicated dataset type.
-- Limited Vendor Mapping controls to the `Multivendor` report scope and required both operator-specific mappings before generation.
-- Added NSA/SA session filtering from `RAT`, `RAT_A` or `Sample_RAT_A` (`ENDC` for NSA and `NR` for SA).
-- Added Vodafone and Three vendor classification from the first and last Global CI in the session, including the Vodafone Ericsson/null exception defined by the business formula.
-- Added report chart selection by CDR domain and KPI title, using the processed CDR rows rather than reopening source workbooks.
-- Bundled the reporting templates under `assets/templates/` and added `APP_REPORTING_TEMPLATE_DIR` for deployment overrides.
+- Refined the full tabbed interface: product tabs and documentation/admin tabs are aligned around the primary panel, have distinct active colours and matching first-panel gradients, and respect Admin access visibility.
+- Unified the Administration visual treatment with a reversed red primary gradient and matching action buttons; updated the Dashboard actions with their corresponding blue treatment.
+- Made the reporting calculation explicit: RAT-based NSA/SA filtering, CDR `Cell_ID_A` endpoint extraction, 3UK `Cid__ECI` lookup and VFUK 5G `gNodeB ID × 4096 + Local Cell ID` lookup, including the agreed Vodafone/Three vendor formula.
+- Restricted mapping selectors to multivendor reports and added direct chart generation from persisted CDR rows, preserving the template layout and blank analyst commentary areas.
+- Bundled the report templates under `assets/templates/` and added `APP_REPORTING_TEMPLATE_DIR` for deployment overrides.
+- Moved the username label beside Logout and renumbered the maintained Help articles from `00` to `09`, with `0. 🏠 Help Home` first.
+- Expanded the Workspace, Dashboard, Reporting and Administration descriptions, README and Help guides to document the current operational workflow.
 
 #### 🐛 Bug fixes:
-- Fixed NSA report filtering to accept NetCheck's `EN-DC`, `EN DC` and `ENDC` RAT spellings, preventing valid NSA sessions from being discarded.
-- Fixed template-backed CDR reports to remove inherited example chart pictures/groups before placing the generated chart in the same chart area.
-- Versioned CDR report output generation so a report requested again after a renderer change is regenerated instead of serving a stale cached PPTX.
-- Fixed the NetCheck CDR report loading dialog to close after the downloaded PPTX response completes.
-- Fixed embedded Help navigation by adding a sidebar index and routes for opening individual Markdown help articles.
+- Improved contrast for Workspace status and Dashboard summary cards, user identity and Logout controls.
+- Fixed Data Ingestion drag-and-drop and cache versioning so new static styles are reliably applied.
+- Accepted the NetCheck `EN-DC`, `EN DC` and `ENDC` NSA RAT spellings.
+- Replaced inherited example charts in generated CDR presentations and regenerated reports when the renderer changes.
+- Closed the report-generation dialog after a successful download and fixed Help sidebar navigation to open individual articles.
 
 #### 📚 Documentation:
-- Added the Help index to the embedded Markdown document viewer.
-- Documented the E2E Bench module structure, the CDR reporting workflow and multivendor prerequisites in the README.
-- Updated the web-interface, ingestion and PowerPoint reporting help pages with the Reporting workflow and template configuration.
+- Replaced inherited and unrelated documentation with a maintained, numbered Dashboard Analytic Help set and embedded Help index.
+- Removed the root-level roadmap in favour of the maintained Help roadmap article.
+- Documented the E2E Bench structure, ingestion classification, multivendor prerequisites, reporting workflow and template configuration in the README and Help guides.
 
 ---
 

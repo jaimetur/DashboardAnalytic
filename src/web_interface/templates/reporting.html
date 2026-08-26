@@ -1,14 +1,14 @@
 {% extends 'base.html' %}
 {% block content %}
 <section class="dashboard-stack spacious-stack">
-  <article class="panel hero-panel">
+  <article class="panel hero-panel module-hero-reporting" style="background: linear-gradient(135deg, #4b208a, #bd90ff) !important; color: #ffffff;">
     <div class="section-head tight-head">
       <div>
         <p class="eyebrow">E2E Bench Reporting</p>
         <h2>Choose a reporting module</h2>
       </div>
     </div>
-    <p class="lede">Generate template-backed reports from CDRs that have already been processed in the workspace.</p>
+    <p class="lede">Produce a consistent, template-based NetCheck CDR PowerPoint from the processed Data, Voice and Speech workbooks. Choose the NSA or SA session scope and, for multivendor analysis, enrich Vodafone UK and Three UK results with their corresponding VFUK and 3UK cell mappings.</p>
   </article>
 
   <article class="panel">
@@ -43,20 +43,20 @@
       </label>
       <div data-mapping-selector hidden>
         <label>Vodafone Vendor Mapping
-          <select name="vodafone_mapping_dataset_id"><option value="">Select processed Vodafone mapping</option>{% for dataset in mapping_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }}</option>{% endfor %}</select>
+          <select name="vodafone_mapping_dataset_id"><option value="">Select processed Vodafone mapping</option>{% for dataset in vodafone_mapping_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }}</option>{% endfor %}</select>
         </label>
         <label>Three Vendor Mapping
-          <select name="three_mapping_dataset_id"><option value="">Select processed Three mapping</option>{% for dataset in mapping_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }}</option>{% endfor %}</select>
+          <select name="three_mapping_dataset_id"><option value="">Select processed Three mapping</option>{% for dataset in three_mapping_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }}</option>{% endfor %}</select>
         </label>
       </div>
       <div class="form-actions"><button type="submit">Generate PowerPoint report</button></div>
     </form>
-    <p class="form-note">The template layout is preserved. Scoring and Gap Analysis slides are retained but are not populated in this release; commentary boxes are intentionally blank.</p>
+    <p class="form-note">The generated presentation preserves the selected NSA or SA template, replaces example charts with calculations from the selected CDRs, and keeps commentary areas blank for the analyst. Scoring and Gap Analysis slides are retained but are not populated in this release.</p>
   </article>
 
   <article class="panel">
     <div class="section-head tight-head"><div><p class="eyebrow">Smart Orchestrator Logs Reports</p><h2>Log reporting</h2></div><span class="pill">Coming soon</span></div>
-    <p class="lede">This module is visible for the future Smart Orchestrator implementation.</p>
+    <p class="lede">This entry point reserves the reporting workflow for processed Smart Orchestrator Log sources. It is visible now to make the product structure explicit; automated log reporting will be added in a future release.</p>
   </article>
 </section>
 {% endblock %}

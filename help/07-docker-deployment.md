@@ -1,0 +1,37 @@
+# Docker deployment
+
+Docker Compose is the supported way to run Dashboard Analytic as a service. The compose files use `docker/.env` for runtime configuration.
+
+## Development
+
+Run the development stack with a rebuild when dependencies or source code change:
+
+```bash
+docker compose --env-file docker/.env -f docker/docker-compose-dev.yml up --build
+```
+
+Use this mode while developing or validating UI and API changes. Stop it with `Ctrl+C`.
+
+## Production
+
+Start the production stack in the background:
+
+```bash
+docker compose --env-file docker/.env -f docker/docker-compose.yml up -d --build
+```
+
+Inspect running services with `docker compose -f docker/docker-compose.yml ps` and use the same compose file with `logs -f` when diagnosing an issue.
+
+## Persistent data
+
+The database, uploaded sources, normalised outputs and exports must persist outside the container filesystem. The compose configuration mounts the relevant project directories; confirm that the host directories are writable by Docker and included in the environment backup policy.
+
+Before the first production start, set a private `APP_SECRET_KEY`, a non-default administrator password and the required storage paths in `docker/.env`. See [Configuration](01-configuration-file.md) for the variable reference.
+
+## Updating safely
+
+1. Back up the persistent database and data directories.
+2. Pull or obtain the intended application revision.
+3. Rebuild and start the production compose stack.
+4. Log in, confirm the version and verify that existing workspace data is still available.
+5. Generate a small test export before processing production CDRs.

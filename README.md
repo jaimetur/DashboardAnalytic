@@ -26,26 +26,26 @@ The top navigation separates the existing **E2E Bench Dashboard** from **E2E Ben
 
 ### Modules
 
-- **NetCheck CDR Reports**: select one processed Data, Voice and Speech CDR, choose NSA or SA, and generate a PowerPoint from the matching template.
-- **Smart Orchestrator Logs Reports**: visible as a future module; processing is not implemented yet.
+- **NetCheck CDR Reports**: build a consistent template-based PowerPoint from one processed Data, Voice and Speech CDR. Select NSA or SA and, when needed, enrich Vodafone UK and Three UK results with their dedicated cell mappings.
+- **Smart Orchestrator Logs Reports**: visible as the future reporting destination for processed Smart Orchestrator Log sources; automated log reporting is not implemented yet.
 
-For a multivendor report, upload separate Vodafone and Three Vendor Mapping files through Data Ingestion first. They are recognized as dedicated mapping datasets and become selectable in Reporting only when the report scope is `Multivendor`. Vendor assignment follows the provided Vodafone/Three formula, including Vodafone's Ericsson/null mixed-vendor exception. PPT templates are shipped in `assets/templates/` and can be overridden with `APP_REPORTING_TEMPLATE_DIR`.
+Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone and 3UK Three Multivendor Mapping files. It proposes each input type from its filename, including a per-file review when files are uploaded in a batch, and persists the confirmed type before processing. For a multivendor report, upload separate **VFUK Vodafone UK** and **3UK Three UK** mapping files through Data Ingestion first. They become selectable in Reporting only when the report scope is `Multivendor`. Vendor assignment follows the provided Vodafone/Three formula, including Vodafone's Ericsson/null mixed-vendor exception. PPT templates are shipped in `assets/templates/` and can be overridden with `APP_REPORTING_TEMPLATE_DIR`.
 
 ### NetCheck CDR Reports workflow
 
 1. Upload the three NetCheck workbooks (Data, Voice and Speech) in **Workspace** and wait until each one is marked `Processed`.
-2. Upload both Vendor Mapping workbooks (one for Vodafone and one for Three) when a multivendor report is required.
+2. Upload both Multivendor Mapping workbooks (one **VFUK** file for Vodafone UK and one **3UK** file for Three UK) when a multivendor report is required.
 3. Open **E2E Bench Reporting → NetCheck CDR Reports**.
 4. Select exactly one processed CDR for each required input type.
 5. Choose `NSA` or `SA`. NSA sessions are selected when the available RAT field contains `ENDC`; SA sessions are selected when it contains `NR`.
-6. Choose `Single-vendor` or `Multivendor`. The mapping selectors are shown only for multivendor; select one processed mapping for Vodafone and another for Three.
+6. Choose `Single-vendor` or `Multivendor`. The mapping selectors are shown only for multivendor; select one processed VFUK mapping for Vodafone UK and another processed 3UK mapping for Three UK.
 7. Generate the PowerPoint report. The run stores its selected datasets, technology, scope, mapping and template in SQLite for auditability.
 
 The report starts from `Template_CDR_NSA_analysis.pptx` or `Template_CDR_SA_analysis.pptx`. Its layout and non-automated scoring/gap slides are retained. Automated CDR slides receive charts calculated from the persisted CDR rows, while commentary text boxes are cleared for analyst input.
 
 ### Multivendor calculation
 
-For Vodafone UK and Three, the report takes the first and last Global CI from `Cell_ID_A`, `Cell_IDs_A` or `Cell_ID`. Vodafone values are resolved only with the Vodafone mapping and Three values only with the Three mapping. O2 and EE retain the operator label because they have no multivendor segmentation in this workflow.
+For Vodafone UK and Three, the report takes the first and last Global CI from the CDR `Cell_ID_A` field. Vodafone values are resolved only with the VFUK mapping and Three values only with the 3UK mapping. The Three lookup uses `Cid__ECI` (with the source variant `CId___ECI` also accepted); Vodafone calculates the 5G GCID as `gNodeB ID × 4096 + Local Cell ID`. O2 and EE retain the operator label because they have no multivendor segmentation in this workflow.
 
 - Vodafone: identical first/last vendor produces `Vodafone_<vendor>`; the Ericsson/null and differing-vendor cases follow the supplied formula and resolve to `Vodafone_Mixed Vendor` or `Vodafone_Other Vendor`.
 - Three: identical first/last vendor produces `3_<vendor>`; all other combinations produce `3_Mixed Vendor`.

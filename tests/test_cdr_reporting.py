@@ -21,9 +21,15 @@ def test_session_classification_and_multivendor_enrichment() -> None:
         'RAT_A': ['LTE EN-DC', 'NR'],
         'Cell_ID_A': ['100 -> 100', '200 -> 201'],
     })
-    mapping = pd.DataFrame({
-        'Cell ID': [100, 200, 201],
-        'Vendor': ['Ericsson', 'Nokia', 'Ericsson'],
+    vodafone_mapping = pd.DataFrame({
+        'source_sheet': ['5G'],
+        'gNodeB ID': [0],
+        'Local Cell ID': [100],
+        'OP/ Vendor': ['Ericsson'],
+    })
+    three_mapping = pd.DataFrame({
+        'Cid__ECI': [200, 201],
+        'Vendor': ['Nokia', 'Ericsson'],
     })
 
     nsa = classify_sessions(cdr, 'nsa')
@@ -31,8 +37,21 @@ def test_session_classification_and_multivendor_enrichment() -> None:
 
     assert len(nsa) == 1
     assert len(sa) == 1
-    assert enrich_multivendor(nsa, mapping, mapping)['report_vendor'].tolist() == ['Vodafone_Ericsson']
-    assert enrich_multivendor(sa, mapping, mapping)['report_vendor'].tolist() == ['3_Mixed Vendor']
+    assert enrich_multivendor(nsa, vodafone_mapping, three_mapping)['report_vendor'].tolist() == ['Vodafone_Ericsson']
+    assert enrich_multivendor(sa, vodafone_mapping, three_mapping)['report_vendor'].tolist() == ['3_Mixed Vendor']
+
+
+def test_vodafone_mapping_derives_gcid_from_5g_node_and_local_cell() -> None:
+    cdr = pd.DataFrame({'Operator': ['Vodafone UK'], 'Cell_ID_A': ['221126958']})
+    vodafone_mapping = pd.DataFrame({
+        'source_sheet': ['5G'],
+        'gNodeB ID': [53986],
+        'Local Cell ID': [302],
+        'OP/ Vendor': ['Ericsson'],
+    })
+    three_mapping = pd.DataFrame({'Cid__ECI': [1], 'Vendor': ['Nokia']})
+
+    assert enrich_multivendor(cdr, vodafone_mapping, three_mapping)['report_vendor'].tolist() == ['Vodafone_Ericsson']
 
 
 def test_reporting_module_is_available_to_authenticated_users(client) -> None:

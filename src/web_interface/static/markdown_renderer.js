@@ -63,7 +63,6 @@
         const value = String(line || "").trim();
         if (!value) return false;
         if (/back to main page/i.test(value) && /\[[^\]]+\]\([^)]+\)/.test(value)) return true;
-        if (/planned roadmap for the following releases/i.test(value)) return true;
         if (/changelog for the past releases\+?/i.test(value)) return true;
         return false;
     }
@@ -75,14 +74,11 @@
             const line = String(rawLines[i] || "");
             const trimmed = line.trim();
             const normalized = trimmed.toLowerCase();
-            const isRoadmapLinkLine =
-                normalized.includes("planned roadmap") &&
-                normalized.includes("following releases");
             const isChangelogLinkLine =
                 normalized.includes("changelog") &&
                 normalized.includes("past releases");
 
-            if (isRoadmapLinkLine || isChangelogLinkLine) {
+            if (isChangelogLinkLine) {
                 skipNextTopSeparator = true;
                 continue;
             }
