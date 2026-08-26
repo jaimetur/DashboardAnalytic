@@ -102,7 +102,7 @@
             <td>
               <div class="queue-actions">
                 {% if dataset.status == 'ready' %}
-                <a class="ghost-link action-link-preview" href="/workspace/preview/{{ dataset.id }}">Open</a>
+                <a class="ghost-link action-link-preview" href="/workspace/preview/{{ dataset.id }}">View</a>
                 <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
                   <button type="submit" class="danger-button">Delete</button>
                 </form>
@@ -116,12 +116,12 @@
                 >Show Dashboard</a>
                 {% endif %}
                 {% elif dataset.status == 'processing' %}
-                <span class="ghost-link action-link-disabled" aria-disabled="true">Open</span>
+                <span class="ghost-link action-link-disabled" aria-disabled="true">View</span>
                 <form method="post" action="/dashboard/stop/{{ dataset.id }}" data-confirm="Stop processing for '{{ dataset.file_name }}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
                   <button type="submit" class="danger-button">Stop</button>
                 </form>
                 {% elif dataset.status == 'queued' %}
-                <span class="ghost-link action-link-disabled" aria-disabled="true">Open</span>
+                <span class="ghost-link action-link-disabled" aria-disabled="true">View</span>
                 <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete queued dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
                   <button type="submit" class="danger-button">Delete</button>
                 </form>

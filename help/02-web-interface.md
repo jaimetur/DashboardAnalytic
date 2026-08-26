@@ -16,7 +16,7 @@ Workspace, Dashboard and Reporting are shown as application tabs directly above 
 
 ## Workspace
 
-Use **Upload** to add a supported source file. Workspace accepts NetCheck CDR Data, Voice and Speech workbooks, Smart Orchestrator Logs and VFUK/3UK Multivendor Mappings. It proposes a type from the filename; confirm or correct it before processing. When several files are selected, each has its own type selector in a review panel. The **Data Processing** queue can be narrowed by input type, with **All Types** selected initially. Once a dataset is processed, **Open** shows a read-only row preview; CDR Data, Voice and Speech rows also expose **Show Dashboard** to open their KPI analysis. Check that the status is **Processed** before moving on: datasets still processing or showing an error are not valid report inputs.
+Use **Upload** to add a supported source file. Workspace accepts NetCheck CDR Data, Voice and Speech workbooks, Smart Orchestrator Logs and VFUK/3UK Multivendor Mappings. It proposes a type from the filename; confirm or correct it before processing. When several files are selected, each has its own type selector in a review panel. The **Data Processing** queue can be narrowed by input type, with **All Types** selected initially. Once a dataset is processed, **View** shows a read-only row preview; CDR Data, Voice and Speech rows also expose **Show Dashboard** to open their KPI analysis. Check that the status is **Processed** before moving on: datasets still processing or showing an error are not valid report inputs.
 
 ## E2E Bench Dashboard
 

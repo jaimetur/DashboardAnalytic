@@ -14,7 +14,7 @@ If a status shows an error, correct the source and upload it again. Do not creat
 
 ## Queue, preview and dashboard
 
-The **Data Processing** queue starts with **All Types** selected and can be narrowed to any supported input type. After successful processing, select **Open** to inspect a read-only sample of up to 100 rows from the persisted dataset. For CDR Data, Voice and Speech inputs, **Show Dashboard** is displayed to open the KPI analysis directly; mappings and Smart Orchestrator Logs remain available for their dedicated workflows without being sent to the CDR dashboard.
+The **Data Processing** queue starts with **All Types** selected and can be narrowed to any supported input type. After successful processing, select **View** to inspect a read-only sample of up to 100 rows from the persisted dataset. For CDR Data, Voice and Speech inputs, **Show Dashboard** is displayed to open the KPI analysis directly; mappings and Smart Orchestrator Logs remain available for their dedicated workflows without being sent to the CDR dashboard.
 
 ## Excel workbooks
 

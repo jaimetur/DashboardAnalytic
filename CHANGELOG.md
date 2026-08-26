@@ -17,7 +17,7 @@
 - Refined the tabbed interface: product and documentation/admin tabs align with the primary panel, have distinct active colours and matching gradients, and respect Admin visibility.
 - Unified the Workspace, Dashboard, Reporting and Admin visual palettes, including action buttons, labels, toggles, readable Adaptive Filters and dark Dashboard KPI subcards.
 - Completed the reporting workflow with RAT-based NSA/SA filtering, CDR `Cell_ID_A` endpoints, 3UK `Cid__ECI` and VFUK 5G GCID lookups, the agreed vendor formula, multivendor-only VFUK/3UK selectors populated only from matching processed Workspace mappings, persisted-row charts, blank analyst commentary areas and `APP_REPORTING_TEMPLATE_DIR` overrides.
-- Improved Workspace data access with an alphabetical **All Types** queue filter, disabled unavailable types, ordered preview/dashboard actions, two-axis preview scrolling and configurable preview rows (100 by default).
+- Improved Workspace data access with an alphabetical **All Types** queue filter, disabled unavailable types, ordered **View**/**Show Dashboard** actions, two-axis preview scrolling and configurable preview rows (100 by default).
 - Refined operational navigation with the username beside Logout, `0. 🏠 Help Home` first and Help articles numbered `00` to `09`.
 - Expanded module descriptions, README and Help guides to document the current operational workflow; standardized the **Generate PowerPoint Report** and **Refresh Preview** controls.
 - Created `UpdateAll.py` as a Dashboard Analytic utility for synchronizing `src/version.py` and the current `CHANGELOG.md` release header.

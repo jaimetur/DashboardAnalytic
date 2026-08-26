@@ -275,7 +275,7 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     assert workspace_response.status_code == 200
     assert 'data-queue-type-filter' in workspace_response.text
     assert 'value="">All Types' in workspace_response.text
-    assert 'href="/workspace/preview/1">Open</a>' in workspace_response.text
+    assert 'href="/workspace/preview/1">View</a>' in workspace_response.text
     assert 'Show Dashboard</a>' in workspace_response.text
 
     preview_response = client.get("/workspace/preview/1")
