@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="dashboard-stack spacious-stack dataset-preview-stack">
+  <article class="panel dataset-preview-hero">
+    <div class="section-head tight-head">
+      <div>
+        <p class="eyebrow">Workspace · Dataset preview</p>
+        <h2>{{ dataset.file_name }}</h2>
+      </div>
+      <span class="pill status-pill status-{{ dataset.status }}">{{ dataset.status_label }}</span>
+    </div>
+    <p class="lede">Read-only sample of the processed dataset. The preview shows the first {{ preview_rows | length }} rows and up to {{ preview_columns | length }} of {{ total_columns }} available columns.</p>
+    <form class="preview-row-limit-form" action="/workspace/preview/{{ dataset.id }}" method="get" data-loading-label="Refreshing dataset preview">
+      <label>Rows to preview
+        <input type="number" name="row_limit" value="{{ preview_row_limit }}" min="1" max="5000" step="1" required>
+      </label>
+      <button type="submit">Refresh Preview</button>
+    </form>
+    <section class="summary-grid compact-summary preview-summary-grid">
+      <article><span>Input Type</span><strong>{{ dataset.input_kind_label }}</strong></article>
+      <article><span>Processed Rows</span><strong>{{ dataset.row_count or 0 }}</strong></article>
+      <article><span>Available Columns</span><strong>{{ total_columns }}</strong></article>
+      <article><span>Uploaded By</span><strong>{{ dataset.uploaded_by }}</strong></article>
+    </section>
+    <div class="inline-actions preview-actions">
+      <a class="ghost-link" href="/workspace">Back to Workspace</a>
+      {% if dataset.dataset_kind in ['data', 'voice', 'speech'] %}
+      <a class="ghost-link action-link-primary" href="/dashboard?dataset_id={{ dataset.id }}&input_kind={{ dataset.dataset_kind }}" data-dashboard-open-link data-dataset-id="{{ dataset.id }}" data-input-kind="{{ dataset.dataset_kind }}">Show Dashboard</a>
+      {% endif %}
+    </div>
+  </article>
+
+  <article class="panel dataset-preview-panel">
+    <div class="section-head tight-head">
+      <div>
+        <p class="eyebrow">Processed rows</p>
+        <h2>Sample data</h2>
+      </div>
+      <span class="pill">{{ preview_rows | length }} rows shown</span>
+    </div>
+    {% if preview_columns and preview_rows %}
+    <div class="table-wrap data-table-wrap dataset-preview-table-wrap" data-horizontal-wheel-scroll tabindex="0" aria-label="Dataset preview table; use Shift and the mouse wheel to scroll horizontally">
+      <table class="dataset-preview-table">
+        <thead><tr>{% for column in preview_columns %}<th>{{ column }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for row in preview_rows %}
+          <tr>{% for column in preview_columns %}<td>{{ row.get(column, '') }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <section class="empty-state-inline">No processed rows are available for preview.</section>
+    {% endif %}
+  </article>
+</section>
+{% endblock %}

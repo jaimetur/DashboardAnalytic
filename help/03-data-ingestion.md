@@ -12,6 +12,10 @@ The Workspace accepts CSV, XLSX, XLS and XLSM files. Uploaded data is stored wit
 
 If a status shows an error, correct the source and upload it again. Do not create a report from a failed or incomplete ingestion.
 
+## Queue, preview and dashboard
+
+The **Data Processing** queue starts with **All Types** selected and can be narrowed to any supported input type. After successful processing, select **Open** to inspect a read-only sample of up to 100 rows from the persisted dataset. For CDR Data, Voice and Speech inputs, **Show Dashboard** is displayed to open the KPI analysis directly; mappings and Smart Orchestrator Logs remain available for their dedicated workflows without being sent to the CDR dashboard.
+
 ## Excel workbooks
 
 For Excel inputs, each readable worksheet is inspected. The application records worksheet names, row and column counts and a compact profile that can be used by the analysis layer. CDR workbooks commonly contain an operator worksheet; the reporting pipeline reads these sheets individually rather than assuming one fixed sheet layout.

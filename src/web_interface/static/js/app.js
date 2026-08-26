@@ -201,6 +201,14 @@ function setupCdfRangeControls() {
 document.querySelectorAll('[data-chart]').forEach(drawChart);
 setupCdfRangeControls();
 
+document.querySelectorAll('[data-horizontal-wheel-scroll]').forEach((container) => {
+  container.addEventListener('wheel', (event) => {
+    if (!event.shiftKey || container.scrollWidth <= container.clientWidth) return;
+    event.preventDefault();
+    container.scrollLeft += event.deltaY || event.deltaX;
+  }, {passive: false});
+});
+
 document.addEventListener('click', (event) => {
   const openLink = event.target.closest('[data-dashboard-open-link]');
   if (!openLink) return;
@@ -1144,6 +1152,15 @@ if (queueNode) {
   const delay = Number(queueNode.dataset.queuePollMs || '0');
   const selectedDatasetField = document.querySelector('input[name="dataset_id"], select[name="dataset_id"]');
   const waitingPanel = document.querySelector('.queue-waiting-copy');
+  const queueTypeFilter = document.querySelector('[data-queue-type-filter]');
+  const applyQueueTypeFilter = () => {
+    const selectedKind = queueTypeFilter?.value || '';
+    document.querySelectorAll('[data-dataset-row]').forEach((row) => {
+      row.hidden = Boolean(selectedKind && row.dataset.datasetKind !== selectedKind);
+    });
+  };
+  queueTypeFilter?.addEventListener('change', applyQueueTypeFilter);
+  applyQueueTypeFilter();
 
   const updateQueueRow = (dataset) => {
     const row = document.querySelector(`[data-dataset-row][data-dataset-id="${dataset.id}"]`);
@@ -1171,6 +1188,7 @@ if (queueNode) {
     }
     if (progressLabel) progressLabel.textContent = `${dataset.progress || 0}%`;
     if (updated) updated.textContent = dataset.updated_at || dataset.uploaded_at || '';
+    row.dataset.datasetKind = dataset.dataset_kind || 'generic';
     if (dataset.last_error && (dataset.status === 'failed' || dataset.status === 'stopped')) {
       if (!errorNode && progressLabel && progressLabel.parentElement) {
         errorNode = document.createElement('p');
@@ -1191,12 +1209,14 @@ if (queueNode) {
         openParams.set('input_kind', String(dataset.dataset_kind));
       }
       const openHref = `/dashboard?${openParams.toString()}`;
+      const isCdr = ['data', 'voice', 'speech'].includes(dataset.dataset_kind);
       if (dataset.status === 'ready') {
         actions.innerHTML = `
-          <a class="ghost-link action-link-primary" href="${openHref}" data-dashboard-open-link data-dataset-id="${dataset.id}"${dataset.dataset_kind ? ` data-input-kind="${String(dataset.dataset_kind)}"` : ''}>Open</a>
+          <a class="ghost-link action-link-preview" href="/workspace/preview/${dataset.id}">Open</a>
           <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
             <button type="submit" class="danger-button">Delete</button>
           </form>
+          ${isCdr ? `<a class="ghost-link action-link-primary" href="${openHref}" data-dashboard-open-link data-dataset-id="${dataset.id}"${dataset.dataset_kind ? ` data-input-kind="${String(dataset.dataset_kind)}"` : ''}>Show Dashboard</a>` : ''}
         `;
       } else if (dataset.status === 'processing') {
         actions.innerHTML = `
@@ -1222,6 +1242,7 @@ if (queueNode) {
           </form>
         `;
       }
+      applyQueueTypeFilter();
       actions.querySelectorAll('form[data-confirm]').forEach((form) => {
         form.addEventListener('submit', async (event) => {
           event.preventDefault();

@@ -262,6 +262,56 @@ def test_workspace_upload_persists_selected_dataset_kind(client) -> None:
     assert dataset["dataset_kind"] == "mapping_vodafone"
 
 
+def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
+    login(client)
+    client.post(
+        "/dashboard/upload",
+        data={"dataset_kinds": "data"},
+        files={"dataset_files": ("cdr_data.csv", BytesIO(b"operator,score\nVodafone UK,91\n"), "text/csv")},
+        follow_redirects=False,
+    )
+
+    workspace_response = client.get("/workspace")
+    assert workspace_response.status_code == 200
+    assert 'data-queue-type-filter' in workspace_response.text
+    assert 'value="">All Types' in workspace_response.text
+    assert 'href="/workspace/preview/1">Open</a>' in workspace_response.text
+    assert 'Show Dashboard</a>' in workspace_response.text
+
+    preview_response = client.get("/workspace/preview/1")
+    assert preview_response.status_code == 200
+    assert "Dataset preview" in preview_response.text
+    assert "Vodafone UK" in preview_response.text
+    assert "Show Dashboard" in preview_response.text
+    assert 'name="row_limit" value="100"' in preview_response.text
+
+    limited_preview_response = client.get("/workspace/preview/1?row_limit=25")
+    assert limited_preview_response.status_code == 200
+    assert 'name="row_limit" value="25"' in limited_preview_response.text
+
+
+def test_workspace_queue_type_filter_lists_all_supported_types_in_order(client) -> None:
+    login(client)
+
+    response = client.get("/workspace")
+    assert response.status_code == 200
+    filter_html = response.text.split('<select data-queue-type-filter>', 1)[1].split('</select>', 1)[0]
+    labels = [
+        'All Types',
+        'CDR-Data',
+        'CDR-Speech',
+        'CDR-Voice',
+        'Multivendor Mapping — Three UK (3UK)',
+        'Multivendor Mapping — Vodafone UK (VFUK)',
+        'Other supported dataset',
+        'Smart Orchestrator Logs',
+    ]
+    positions = [filter_html.index(label) for label in labels]
+    assert positions == sorted(positions)
+    assert 'value="data" disabled' in filter_html
+    assert '<summary class="collapsible-summary">\n      <div>\n        <p class="eyebrow">Data Processing</p>' in response.text
+
+
 def test_dataset_selector_shows_all_datasets_when_no_input_kind_filter_is_set(client) -> None:
     login(client)
 

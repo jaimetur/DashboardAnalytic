@@ -1097,6 +1097,45 @@ def workspace(
     )
 
 
+@app.get('/workspace/preview/{dataset_id}', response_class=HTMLResponse)
+def preview_dataset(
+    dataset_id: int,
+    request: Request,
+    row_limit: int = Query(default=100, ge=1, le=5000),
+    user: SessionUser = Depends(current_user),
+) -> HTMLResponse:
+    dataset_row = repository.get_dataset(dataset_id)
+    if not dataset_row:
+        raise HTTPException(status_code=404, detail='Dataset not found')
+    dataset = serialize_dataset_row(dataset_row)
+    if not dataset['is_ready']:
+        raise HTTPException(status_code=400, detail='Only processed datasets can be previewed.')
+
+    available_columns = repository.list_dataset_row_columns(dataset_id)
+    priority_columns = [
+        'source_sheet', 'operator', 'vendor', 'market', 'period', 'region', 'city', 'technology_primary',
+        'session_type', 'test_name', 'direction', 'event_start_time', 'status',
+    ]
+    preview_columns = [column for column in priority_columns if column in available_columns]
+    preview_columns.extend(column for column in available_columns if column not in preview_columns)
+    preview_columns = preview_columns[:24]
+    preview_frame = repository.load_dataset_rows(dataset_id, preview_columns, {}).head(row_limit)
+    preview_rows = preview_frame.astype(object).where(pd.notna(preview_frame), '').to_dict(orient='records')
+
+    return render_template(
+        request,
+        'dataset_preview.html',
+        {
+            'user': user,
+            'dataset': dataset,
+            'preview_columns': preview_columns,
+            'preview_rows': preview_rows,
+            'preview_row_limit': row_limit,
+            'total_columns': len(available_columns),
+        },
+    )
+
+
 @app.get('/dashboard', response_class=HTMLResponse)
 def dashboard(
     request: Request,

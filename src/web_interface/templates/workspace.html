@@ -35,14 +35,31 @@
 
   <details class="panel collapsible-panel queue-card" open data-panel-state-key="workspace:data-processing" data-queue-status-url="/api/datasets/status" {% if has_processing %}data-queue-poll-ms="3000"{% endif %}>
     <summary class="collapsible-summary">
-      <div class="section-head tight-head">
-        <div>
-          <p class="eyebrow">Data Processing</p>
-          <h2>Queue and Status</h2>
-        </div>
-        <span class="collapse-chip">Collapse</span>
+      <div>
+        <p class="eyebrow">Data Processing</p>
+        <h2>Queue and Status</h2>
       </div>
+      <span class="collapse-chip">Collapse</span>
     </summary>
+    <div class="queue-filter-row">
+      <label class="queue-type-filter-control">Dataset Type
+        <select data-queue-type-filter>
+          <option value="">All Types</option>
+          {% set queue_type_options = [
+            ('data', 'CDR-Data'),
+            ('speech', 'CDR-Speech'),
+            ('voice', 'CDR-Voice'),
+            ('mapping_three', 'Multivendor Mapping — Three UK (3UK)'),
+            ('mapping_vodafone', 'Multivendor Mapping — Vodafone UK (VFUK)'),
+            ('generic', 'Other supported dataset'),
+            ('smart_orchestrator_logs', 'Smart Orchestrator Logs')
+          ] %}
+          {% for kind, label in queue_type_options %}
+          <option value="{{ kind }}" {% if kind not in input_kind_options %}disabled{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
     <div class="table-wrap queue-table-wrap">
       <table class="queue-table">
         <thead>
@@ -59,7 +76,7 @@
         </thead>
         <tbody>
           {% for dataset in datasets %}
-          <tr class="{% if selected_dataset and selected_dataset.id == dataset.id %}active-row{% endif %}" data-dataset-row data-dataset-id="{{ dataset.id }}">
+          <tr class="{% if selected_dataset and selected_dataset.id == dataset.id %}active-row{% endif %}" data-dataset-row data-dataset-id="{{ dataset.id }}" data-dataset-kind="{{ dataset.dataset_kind or 'generic' }}">
             <td>
               <div class="queue-dataset-name" data-queue-file-name>{{ dataset.file_name }}</div>
               <div class="queue-dataset-path" data-queue-file-path>{{ dataset.stored_path }}</div>
@@ -85,16 +102,19 @@
             <td>
               <div class="queue-actions">
                 {% if dataset.status == 'ready' %}
+                <a class="ghost-link action-link-preview" href="/workspace/preview/{{ dataset.id }}">Open</a>
+                <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
+                  <button type="submit" class="danger-button">Delete</button>
+                </form>
+                {% if dataset.dataset_kind in ['data', 'voice', 'speech'] %}
                 <a
                   class="ghost-link action-link-primary"
                   href="/dashboard?dataset_id={{ dataset.id }}{% if dataset.dataset_kind %}&input_kind={{ dataset.dataset_kind }}{% endif %}"
                   data-dashboard-open-link
                   data-dataset-id="{{ dataset.id }}"
                   {% if dataset.dataset_kind %}data-input-kind="{{ dataset.dataset_kind }}"{% endif %}
-                >Open</a>
-                <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
-                  <button type="submit" class="danger-button">Delete</button>
-                </form>
+                >Show Dashboard</a>
+                {% endif %}
                 {% elif dataset.status == 'processing' %}
                 <span class="ghost-link action-link-disabled" aria-disabled="true">Open</span>
                 <form method="post" action="/dashboard/stop/{{ dataset.id }}" data-confirm="Stop processing for '{{ dataset.file_name }}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">

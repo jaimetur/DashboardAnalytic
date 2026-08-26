@@ -9,18 +9,17 @@
 #### 🌟 New Features:
 - Split the product into the top-level **Workspace**, **E2E Bench Dashboard** and **E2E Bench Reporting** modules, with a future-ready **Smart Orchestrator Logs Reports** entry point.
 - Added per-file Workspace classification for NetCheck CDR Data, Voice and Speech, Smart Orchestrator Logs, VFUK Vodafone and 3UK Three Multivendor Mappings, including filename-based preselection and batch review.
-- Added NetCheck CDR PowerPoint reporting from processed Data, Voice and Speech inputs, using the bundled NSA and SA templates.
-- Added multivendor reporting with mandatory, operator-specific VFUK Vodafone and 3UK Three mappings, plus persistent report-run traceability.
+- Added NetCheck CDR PowerPoint reporting from processed Data, Voice and Speech inputs, using the bundled NSA/SA templates and mandatory VFUK Vodafone/3UK Three mappings for multivendor runs, with persistent report-run traceability.
 - Added embedded Help with a numbered, project-specific navigation panel.
+- Added a read-only processed-dataset preview from the Workspace queue, with a direct CDR-only **Show Dashboard** action.
 
 #### 🚀 Enhancements:
-- Refined the full tabbed interface: product tabs and documentation/admin tabs are aligned around the primary panel, have distinct active colours and matching first-panel gradients, and respect Admin access visibility.
-- Unified the Administration visual treatment with a reversed red primary gradient and matching action buttons; updated the Dashboard actions with their corresponding blue treatment.
-- Made the reporting calculation explicit: RAT-based NSA/SA filtering, CDR `Cell_ID_A` endpoint extraction, 3UK `Cid__ECI` lookup and VFUK 5G `gNodeB ID × 4096 + Local Cell ID` lookup, including the agreed Vodafone/Three vendor formula.
-- Restricted mapping selectors to multivendor reports and added direct chart generation from persisted CDR rows, preserving the template layout and blank analyst commentary areas.
-- Bundled the report templates under `assets/templates/` and added `APP_REPORTING_TEMPLATE_DIR` for deployment overrides.
-- Moved the username label beside Logout and renumbered the maintained Help articles from `00` to `09`, with `0. 🏠 Help Home` first.
-- Expanded the Workspace, Dashboard, Reporting and Administration descriptions, README and Help guides to document the current operational workflow.
+- Refined the tabbed interface: product and documentation/admin tabs align with the primary panel, have distinct active colours and matching gradients, and respect Admin visibility.
+- Unified the Workspace, Dashboard, Reporting and Admin visual palettes, including action buttons, labels, toggles, readable Adaptive Filters and dark Dashboard KPI subcards.
+- Completed the reporting workflow with RAT-based NSA/SA filtering, CDR `Cell_ID_A` endpoints, 3UK `Cid__ECI` and VFUK 5G GCID lookups, the agreed vendor formula, multivendor-only selectors, persisted-row charts, blank analyst commentary areas and `APP_REPORTING_TEMPLATE_DIR` overrides.
+- Improved Workspace data access with an alphabetical **All Types** queue filter, disabled unavailable types, ordered preview/dashboard actions, two-axis preview scrolling and configurable preview rows (100 by default).
+- Refined operational navigation with the username beside Logout, `0. 🏠 Help Home` first and Help articles numbered `00` to `09`.
+- Expanded module descriptions, README and Help guides to document the current operational workflow; standardized the **Generate PowerPoint Report** and **Refresh Preview** controls.
 
 #### 🐛 Bug fixes:
 - Improved contrast for Workspace status and Dashboard summary cards, user identity and Logout controls.
@@ -30,8 +29,7 @@
 - Closed the report-generation dialog after a successful download and fixed Help sidebar navigation to open individual articles.
 
 #### 📚 Documentation:
-- Replaced inherited and unrelated documentation with a maintained, numbered Dashboard Analytic Help set and embedded Help index.
-- Removed the root-level roadmap in favour of the maintained Help roadmap article.
+- Replaced inherited and unrelated documentation, including the root-level roadmap, with a maintained numbered Dashboard Analytic Help set and embedded Help index.
 - Documented the E2E Bench structure, ingestion classification, multivendor prerequisites, reporting workflow and template configuration in the README and Help guides.
 
 ---
