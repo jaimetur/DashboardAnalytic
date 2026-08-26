@@ -456,6 +456,20 @@ class Repository:
             if key in {'aggregation', 'extra_filters', 'date_from', 'date_to'} or value in (None, '') or not resolved_key:
                 continue
             values = value if isinstance(value, (list, tuple, set)) else [value]
+            if str(key).casefold() == 'gcid':
+                integer_values: list[int] = []
+                for item in values:
+                    try:
+                        numeric_value = float(str(item).strip())
+                    except (TypeError, ValueError):
+                        continue
+                    if numeric_value.is_integer():
+                        integer_values.append(int(numeric_value))
+                if integer_values:
+                    placeholders = ', '.join('?' for _ in integer_values)
+                    where_clauses.append(f"CAST({self._quote_identifier(resolved_key)} AS INTEGER) IN ({placeholders})")
+                    params.extend(integer_values)
+                continue
             normalized_values = [str(item).strip().lower() for item in values if str(item).strip()]
             if not normalized_values:
                 continue

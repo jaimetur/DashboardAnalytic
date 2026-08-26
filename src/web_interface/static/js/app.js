@@ -210,6 +210,11 @@ document.querySelectorAll('[data-horizontal-wheel-scroll]').forEach((container) 
 });
 
 document.addEventListener('click', (event) => {
+  const previewLink = event.target.closest('[data-preview-open-link]');
+  if (previewLink) {
+    showLoadingOverlay(previewLink.dataset.loadingLabel || 'Generating dataset preview');
+    return;
+  }
   const openLink = event.target.closest('[data-dashboard-open-link]');
   if (!openLink) return;
   const datasetId = openLink.dataset.datasetId;
@@ -1212,7 +1217,7 @@ if (queueNode) {
       const isCdr = ['data', 'voice', 'speech'].includes(dataset.dataset_kind);
       if (dataset.status === 'ready') {
         actions.innerHTML = `
-          <a class="ghost-link action-link-preview" href="/workspace/preview/${dataset.id}">View</a>
+          <a class="ghost-link action-link-preview" href="/workspace/preview/${dataset.id}" data-preview-open-link data-loading-label="Generating dataset preview">Preview</a>
           <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
             <button type="submit" class="danger-button">Delete</button>
           </form>
@@ -1220,14 +1225,14 @@ if (queueNode) {
         `;
       } else if (dataset.status === 'processing') {
         actions.innerHTML = `
-          <span class="ghost-link action-link-disabled" aria-disabled="true">View</span>
+          <span class="ghost-link action-link-disabled" aria-disabled="true">Preview</span>
           <form method="post" action="/dashboard/stop/${dataset.id}" data-confirm="Stop processing for '${dataset.file_name}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
             <button type="submit" class="danger-button">Stop</button>
           </form>
         `;
       } else if (dataset.status === 'queued') {
         actions.innerHTML = `
-          <span class="ghost-link action-link-disabled" aria-disabled="true">View</span>
+          <span class="ghost-link action-link-disabled" aria-disabled="true">Preview</span>
           <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete queued dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
             <button type="submit" class="danger-button">Delete</button>
           </form>

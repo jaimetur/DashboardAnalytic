@@ -102,7 +102,7 @@
             <td>
               <div class="queue-actions">
                 {% if dataset.status == 'ready' %}
-                <a class="ghost-link action-link-preview" href="/workspace/preview/{{ dataset.id }}">View</a>
+                <a class="ghost-link action-link-preview" href="/workspace/preview/{{ dataset.id }}" data-preview-open-link data-loading-label="Generating dataset preview">Preview</a>
                 <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
                   <button type="submit" class="danger-button">Delete</button>
                 </form>

@@ -91,6 +91,13 @@ def add_vfuk_gcid_column(df: pd.DataFrame) -> pd.DataFrame:
     return dataset
 
 
+def add_three_gcid_column(df: pd.DataFrame) -> pd.DataFrame:
+    """Materialise the 3UK mapping GCID from its source ECI column."""
+    dataset = df.copy()
+    dataset['GCID'] = _first_available_series(dataset, ['CId___ECI', 'Cid__ECI'])
+    return dataset
+
+
 def _parse_campaign_dimension(value: object, part: str) -> object:
     if pd.isna(value):
         return pd.NA
@@ -147,6 +154,20 @@ def _make_unique_headers(headers: Iterable[object]) -> list[str]:
         occurrence = counts[base_name]
         unique_headers.append(base_name if occurrence == 1 else f'{base_name}__{occurrence}')
     return unique_headers
+
+
+def get_excel_sheet_columns(file_path: Path, sheet_name: str) -> list[str]:
+    """Return a worksheet's source headers using the ingestion naming rules."""
+    if file_path.suffix.lower() not in {'.xlsx', '.xlsm'}:
+        return []
+    workbook = load_workbook(filename=file_path, read_only=True, data_only=True)
+    if sheet_name not in workbook.sheetnames:
+        return []
+    for row in workbook[sheet_name].iter_rows(values_only=True):
+        values = tuple(row or ())
+        if not _sheet_has_only_empty_values(values):
+            return _make_unique_headers(values)
+    return []
 
 
 def _read_openxml_sheet(worksheet, progress_callback: Callable[[int], None] | None, progress_state: dict[str, int], total_rows: int) -> pd.DataFrame:

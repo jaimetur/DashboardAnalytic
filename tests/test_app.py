@@ -276,7 +276,7 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     assert workspace_response.status_code == 200
     assert 'data-queue-type-filter' in workspace_response.text
     assert 'value="">All Types' in workspace_response.text
-    assert 'href="/workspace/preview/1">View</a>' in workspace_response.text
+    assert 'href="/workspace/preview/1" data-preview-open-link data-loading-label="Generating dataset preview">Preview</a>' in workspace_response.text
     assert 'Show Dashboard</a>' in workspace_response.text
 
     preview_response = client.get("/workspace/preview/1")
@@ -333,6 +333,8 @@ def test_vfuk_preview_limits_mapping_sheets_and_displays_materialised_gcid(clien
     assert '<option value="5G">5G</option>' in default_preview.text
     assert '2G' not in default_preview.text
     assert '3330049' in default_preview.text
+    assert '>source_sheet<' not in default_preview.text
+    assert 'class="gcid-column"' in default_preview.text
 
     five_g_preview = client.get('/workspace/preview/1?source_sheet=5G')
     assert five_g_preview.status_code == 200
@@ -356,7 +358,128 @@ def test_three_mapping_preview_excludes_empty_normalized_columns(client) -> None
     assert 'Cid__ECI' in preview.text
     assert 'Vendor' in preview.text
     assert '>operator<' not in preview.text
+    assert '>vendor__2<' not in preview.text
     assert '>technology_primary<' not in preview.text
+    assert '>GCID<' in preview.text
+    assert '>123<' in preview.text
+    assert preview.text.index('>GCID<') < preview.text.index('>MBNL_ID<')
+    assert 'class="vendor-column">Vendor<' in preview.text
+
+
+def test_mapping_preview_shows_every_source_column(client) -> None:
+    login(client)
+    source_columns = ['CId___ECI', 'Vendor', *(f'Extra_{number:02d}' for number in range(1, 27))]
+    source_row = ['123', 'Ericsson', *(str(number) for number in range(1, 27))]
+    content = (','.join(source_columns) + '\n' + ','.join(source_row) + '\n').encode()
+    response = client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'mapping_three'},
+        files={'dataset_files': ('Multivendor_Mapping_3UK.csv', BytesIO(content), 'text/csv')},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    preview = client.get('/workspace/preview/1')
+    assert preview.status_code == 200
+    assert '>Extra_26<' in preview.text
+
+
+def test_mapping_preview_formats_integral_gcid_without_decimal_suffix(client) -> None:
+    login(client)
+    response = client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'mapping_vodafone'},
+        files={'dataset_files': ('Multivendor_Mapping_VFUK.csv', BytesIO(b'source_sheet,gNodeB ID,Local Cell ID,OP/ Vendor\n5G,53986,302,Ericsson\n5G,,,Ericsson\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    preview = client.get('/workspace/preview/1?source_sheet=5G')
+    assert preview.status_code == 200
+    assert '>221126958<' in preview.text
+    assert '>221126958.0<' not in preview.text
+
+
+def test_mapping_preview_hides_unnamed_columns_but_keeps_cell_name(client) -> None:
+    login(client)
+    response = client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'mapping_vodafone'},
+        files={'dataset_files': ('Multivendor_Mapping_VFUK.csv', BytesIO(b'source_sheet,eNodeB ID,Local Cell ID,Cell Name,Unnamed_2,OP/ Vendor\n4G,13008,1,Cell A,,Samsung\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    preview = client.get('/workspace/preview/1')
+    assert preview.status_code == 200
+    assert '>Cell Name<' in preview.text
+    assert '>Cell A<' in preview.text
+    assert '>Unnamed_2<' not in preview.text
+    assert '>source_sheet<' not in preview.text
+
+
+def test_vfuk_preview_uses_only_the_selected_source_sheet_columns(client) -> None:
+    login(client)
+    workbook = BytesIO()
+    with pd.ExcelWriter(workbook, engine='openpyxl') as writer:
+        pd.DataFrame({
+            'Cell Name': ['4G Cell'],
+            'eNodeB ID': [13008],
+            'Local Cell ID': [1],
+            'OP/ Vendor': ['Samsung'],
+        }).to_excel(writer, sheet_name='4G', index=False)
+        pd.DataFrame({
+            'Cell Name': ['5G Cell'],
+            'gNodeB ID': [53986],
+            'Local Cell ID': [302],
+            'Only 5G': ['present only in 5G'],
+            'OP/ Vendor': ['Ericsson'],
+        }).to_excel(writer, sheet_name='5G', index=False)
+    workbook.seek(0)
+    response = client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'mapping_vodafone'},
+        files={'dataset_files': ('Multivendor_Mapping_VFUK.xlsx', workbook, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    four_g_preview = client.get('/workspace/preview/1?source_sheet=4G')
+    assert four_g_preview.status_code == 200
+    assert '>Cell Name<' in four_g_preview.text
+    assert '>4G Cell<' in four_g_preview.text
+    assert '>Only 5G<' not in four_g_preview.text
+
+    five_g_preview = client.get('/workspace/preview/1?source_sheet=5G')
+    assert five_g_preview.status_code == 200
+    assert '>Only 5G<' in five_g_preview.text
+    assert '>present only in 5G<' in five_g_preview.text
+    assert 'all 6 available columns' in five_g_preview.text
+    assert '<span>Available Columns</span><strong>6</strong>' in five_g_preview.text
+
+
+def test_mapping_preview_filters_by_vendor_and_gcid(client) -> None:
+    login(client)
+    response = client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'mapping_three'},
+        files={'dataset_files': ('Multivendor_Mapping_3UK.csv', BytesIO(b'Vendor,CId___ECI,Site_Name\nEricsson,123,Site A\nNokia,456,Site B\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    vendor_preview = client.get('/workspace/preview/1?mapping_vendor=Nokia')
+    assert vendor_preview.status_code == 200
+    vendor_rows = vendor_preview.text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
+    assert '>Nokia<' in vendor_rows
+    assert '>Ericsson<' not in vendor_rows
+    assert 'name="mapping_vendor"' in vendor_preview.text
+
+    gcid_preview = client.get('/workspace/preview/1?gcid=123')
+    assert gcid_preview.status_code == 200
+    gcid_rows = gcid_preview.text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
+    assert '>123<' in gcid_rows
+    assert '>456<' not in gcid_rows
 
 
 def test_workspace_queue_type_filter_lists_all_supported_types_in_order(client) -> None:

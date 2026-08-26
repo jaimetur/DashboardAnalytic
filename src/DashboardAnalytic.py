@@ -26,7 +26,7 @@ from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
 from src.modules.cdr_reporting import CDR_REPORT_VERSION, TEMPLATE_NAMES, classify_sessions, enrich_multivendor, render_cdr_report
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
-from src.modules.ingestion import add_vfuk_gcid_column, infer_dataset_kind, load_dataset, summarise_dataset
+from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
 from src.version import __app_name__, __release_date__, __version__
 from src.utils.filesystem import ensure_directories, safe_join
@@ -74,15 +74,42 @@ INPUT_KIND_LABELS = {
     'generic': 'Other',
 }
 UPLOAD_DATASET_KINDS = frozenset({'data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'smart_orchestrator_logs', 'generic'})
-DATASET_NORMALIZATION_VERSION = 3
+DATASET_NORMALIZATION_VERSION = 4
 MAPPING_PREVIEW_NORMALIZED_COLUMNS = frozenset({
-    'dataset_kind', 'source_file', 'campaign', 'market', 'period', 'campaign_year', 'campaign_quarter',
+    'dataset_kind', 'source_file', 'source_sheet', 'campaign', 'market', 'period', 'campaign_year', 'campaign_quarter',
     'operator', 'session_type', 'test_name', 'direction', 'region', 'city', 'vendor', 'status',
     'disturbed', 'impaired', 'dropped', 'unsustainable_call', 'success', 'failure',
     'event_start_time', 'event_end_time', 'hour_bucket', 'day_bucket', 'setup_time_seconds',
     'duration_seconds', 'quality_score', 'throughput_mbps', 'latency_ms', 'packet_loss_pct',
     'jitter_ms', 'handovers', 'technology_primary', 'technology_secondary',
 })
+
+
+def is_mapping_preview_normalized_column(column: object) -> bool:
+    """Hide normalized fields, including SQLite's collision-safe ``__2`` names."""
+    source_name = str(column).strip()
+    # These are source mapping headers. The generated lower-case ``vendor``
+    # becomes ``vendor__2`` when SQLite keeps both names case-insensitively.
+    if source_name in {'Vendor', 'OP/ Vendor', 'OP_Vendor'}:
+        return False
+    normalized = source_name.casefold()
+    if normalized.startswith('unnamed'):
+        return True
+    base, separator, suffix = normalized.rpartition('__')
+    if separator and suffix.isdigit():
+        normalized = base
+    return normalized in MAPPING_PREVIEW_NORMALIZED_COLUMNS
+
+
+def format_preview_gcid(value: object) -> object:
+    """Render GCID as an identifier rather than a floating-point measurement."""
+    if value is None or pd.isna(value):
+        return ''
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return str(int(numeric_value)) if numeric_value.is_integer() else str(value)
 HELP_HOME_DOCUMENT = '00-help.md'
 HELP_NAVIGATION_DOCUMENTS = (
     HELP_HOME_DOCUMENT,
@@ -525,6 +552,8 @@ def rebuild_dataset_artifacts(
         df['dataset_kind'] = forced_dataset_kind
     if forced_dataset_kind == 'mapping_vodafone':
         df = add_vfuk_gcid_column(df)
+    elif forced_dataset_kind == 'mapping_three':
+        df = add_three_gcid_column(df)
     store_cached_dataset_frame(dataset_path, df)
     repository.replace_dataset_rows(dataset_id, df)
     if progress_callback:
@@ -574,18 +603,22 @@ def rebuild_dataset_artifacts(
     }
 
 
-def ensure_vfuk_mapping_gcid(dataset: dict[str, Any]) -> dict[str, Any]:
+def ensure_mapping_gcid(dataset: dict[str, Any]) -> dict[str, Any]:
     """Backfill GCID for mappings processed before the column was introduced."""
-    if dataset.get('dataset_kind') != 'mapping_vodafone' or not dataset.get('is_ready'):
+    dataset_kind = dataset.get('dataset_kind')
+    if dataset_kind not in {'mapping_vodafone', 'mapping_three'} or not dataset.get('is_ready'):
         return dataset
     dataset_id = int(dataset['id'])
-    if repository.resolve_dataset_row_column_name(dataset_id, 'GCID'):
+    if (
+        repository.resolve_dataset_row_column_name(dataset_id, 'GCID')
+        and int(dataset.get('normalization_version') or 1) >= DATASET_NORMALIZATION_VERSION
+    ):
         return dataset
 
     dataset_path = Path(dataset.get('stored_path') or '')
     if not dataset_path.exists():
         return dataset
-    rebuild_dataset_artifacts(dataset_id, dataset_path, forced_dataset_kind='mapping_vodafone')
+    rebuild_dataset_artifacts(dataset_id, dataset_path, forced_dataset_kind=dataset_kind)
     refreshed = repository.get_dataset(dataset_id)
     return serialize_dataset_row(refreshed) if refreshed else dataset
 
@@ -1129,6 +1162,8 @@ def preview_dataset(
     request: Request,
     row_limit: int = Query(default=100, ge=1, le=5000),
     source_sheet: str | None = Query(default=None),
+    mapping_vendor: str | None = Query(default=None),
+    gcid: str | None = Query(default=None),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
     dataset_row = repository.get_dataset(dataset_id)
@@ -1137,9 +1172,15 @@ def preview_dataset(
     dataset = serialize_dataset_row(dataset_row)
     if not dataset['is_ready']:
         raise HTTPException(status_code=400, detail='Only processed datasets can be previewed.')
-    dataset = ensure_vfuk_mapping_gcid(dataset)
+    dataset = ensure_mapping_gcid(dataset)
 
     available_columns = repository.list_dataset_row_columns(dataset_id)
+    vendor_preview_column = next(
+        (column for column in ('Vendor', 'OP/ Vendor', 'OP_Vendor') if column in available_columns),
+        None,
+    ) if dataset['dataset_kind'] in {'mapping_vodafone', 'mapping_three'} else None
+    vendor_preview_columns = {vendor_preview_column} if vendor_preview_column else set()
+    vendor_filter_options = repository.list_distinct_dataset_row_values(dataset_id, vendor_preview_column) if vendor_preview_column else []
     preview_sheet_options: list[str] = []
     preview_source_sheet: str | None = None
     preview_filters: dict[str, str] = {}
@@ -1153,18 +1194,31 @@ def preview_dataset(
                 preview_sheet_options[0],
             )
             preview_filters['source_sheet'] = preview_source_sheet
+    selected_mapping_vendor = mapping_vendor if mapping_vendor in vendor_filter_options else ''
+    if selected_mapping_vendor and vendor_preview_column:
+        preview_filters[vendor_preview_column] = selected_mapping_vendor
+    selected_gcid = (gcid or '').strip()
+    if selected_gcid:
+        preview_filters['GCID'] = selected_gcid
 
     if dataset['dataset_kind'] == 'mapping_vodafone':
-        preview_columns = [column for column in ('source_sheet', 'GCID') if column in available_columns]
+        source_columns = get_excel_sheet_columns(Path(dataset['stored_path']), preview_source_sheet) if preview_source_sheet else []
+        preview_columns = [column for column in ('GCID',) if column in available_columns]
+        preview_columns.extend(
+            column for column in source_columns
+            if column not in preview_columns and repository.resolve_dataset_row_column_name(dataset_id, column)
+        )
+        if not source_columns:
+            preview_columns.extend(
+                column for column in available_columns
+                if column not in preview_columns and not is_mapping_preview_normalized_column(column)
+            )
+    elif dataset['dataset_kind'] == 'mapping_three':
+        preview_columns = [column for column in ('GCID',) if column in available_columns]
         preview_columns.extend(
             column for column in available_columns
-            if column not in preview_columns and column not in MAPPING_PREVIEW_NORMALIZED_COLUMNS
+            if column not in preview_columns and not is_mapping_preview_normalized_column(column)
         )
-    elif dataset['dataset_kind'] == 'mapping_three':
-        preview_columns = [
-            column for column in available_columns
-            if column not in MAPPING_PREVIEW_NORMALIZED_COLUMNS
-        ]
     else:
         priority_columns = [
             'source_sheet', 'GCID', 'operator', 'vendor', 'market', 'period', 'region', 'city', 'technology_primary',
@@ -1172,8 +1226,10 @@ def preview_dataset(
         ]
         preview_columns = [column for column in priority_columns if column in available_columns]
         preview_columns.extend(column for column in available_columns if column not in preview_columns)
-    preview_columns = preview_columns[:24]
     preview_frame = repository.load_dataset_rows(dataset_id, preview_columns, preview_filters).head(row_limit)
+    if 'GCID' in preview_frame.columns:
+        preview_frame = preview_frame.copy()
+        preview_frame['GCID'] = preview_frame['GCID'].map(format_preview_gcid)
     preview_rows = preview_frame.astype(object).where(pd.notna(preview_frame), '').to_dict(orient='records')
 
     return render_template(
@@ -1187,7 +1243,11 @@ def preview_dataset(
             'preview_row_limit': row_limit,
             'preview_sheet_options': preview_sheet_options,
             'preview_source_sheet': preview_source_sheet,
-            'total_columns': len(available_columns),
+            'vendor_preview_columns': vendor_preview_columns,
+            'vendor_filter_options': vendor_filter_options,
+            'selected_mapping_vendor': selected_mapping_vendor,
+            'selected_gcid': selected_gcid,
+            'visible_column_count': len(preview_columns),
         },
     )
 
