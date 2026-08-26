@@ -16,13 +16,14 @@
 #### 🚀 Enhancements:
 - Refined the tabbed interface: product and documentation/admin tabs align with the primary panel, have distinct active colours and matching gradients, and respect Admin visibility.
 - Unified the Workspace, Dashboard, Reporting and Admin visual palettes, including action buttons, labels, toggles, readable Adaptive Filters and dark Dashboard KPI subcards.
-- Completed the reporting workflow with RAT-based NSA/SA filtering, CDR `Cell_ID_A` endpoints, 3UK `Cid__ECI` and VFUK 5G GCID lookups, the agreed vendor formula, multivendor-only selectors, persisted-row charts, blank analyst commentary areas and `APP_REPORTING_TEMPLATE_DIR` overrides.
+- Completed the reporting workflow with RAT-based NSA/SA filtering, CDR `Cell_ID_A` endpoints, 3UK `Cid__ECI` and VFUK 5G GCID lookups, the agreed vendor formula, multivendor-only VFUK/3UK selectors populated only from matching processed Workspace mappings, persisted-row charts, blank analyst commentary areas and `APP_REPORTING_TEMPLATE_DIR` overrides.
 - Improved Workspace data access with an alphabetical **All Types** queue filter, disabled unavailable types, ordered preview/dashboard actions, two-axis preview scrolling and configurable preview rows (100 by default).
 - Refined operational navigation with the username beside Logout, `0. 🏠 Help Home` first and Help articles numbered `00` to `09`.
 - Expanded module descriptions, README and Help guides to document the current operational workflow; standardized the **Generate PowerPoint Report** and **Refresh Preview** controls.
 - Created `UpdateAll.py` as a Dashboard Analytic utility for synchronizing `src/version.py` and the current `CHANGELOG.md` release header.
 
 #### 🐛 Bug fixes:
+- Made Excel worksheet headers unique during ingestion, preventing VFUK mappings and CDR workbooks with duplicate or blank headers from failing during Pandas reindexing.
 - Added Windows-1252 and Latin-1 CSV decoding fallbacks after UTF-8, allowing 3UK Multivendor Mapping files with legacy characters to process correctly.
 - Removed the obsolete `DOWNLOAD.md` dependency from `BuildBinary.py`; binary release notes now come directly from `CHANGELOG.md`.
 - Removed the obsolete PhotoMigrator-only `UpdateDownloadLinks.py` utility, which referenced unavailable documentation and release links.

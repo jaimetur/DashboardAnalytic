@@ -70,6 +70,32 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert 'data-download-form="1"' in page.text
 
 
+def test_reporting_mapping_selectors_show_only_matching_workspace_mapping_types(client) -> None:
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    uploads = [
+        ('Multivendor_Mapping_VFUK.csv', 'mapping_vodafone', b'gNodeB ID,Local Cell ID,OP/ Vendor\n0,100,Ericsson\n'),
+        ('Multivendor_Mapping_3UK.csv', 'mapping_three', b'Cid__ECI,Vendor\n100,Nokia\n'),
+    ]
+    for filename, dataset_kind, content in uploads:
+        response = client.post(
+            '/dashboard/upload',
+            data={'dataset_kinds': dataset_kind},
+            files={'dataset_files': (filename, BytesIO(content), 'text/csv')},
+        )
+        assert response.status_code == 200
+
+    page = client.get('/reporting')
+    assert page.status_code == 200
+    vfuk_selector = page.text.split('name="vodafone_mapping_dataset_id"', 1)[1].split('</select>', 1)[0]
+    three_selector = page.text.split('name="three_mapping_dataset_id"', 1)[1].split('</select>', 1)[0]
+    assert 'VFUK Vendor Mapping' in page.text
+    assert '3UK Vendor Mapping' in page.text
+    assert 'Multivendor_Mapping_VFUK.csv' in vfuk_selector
+    assert 'Multivendor_Mapping_3UK.csv' not in vfuk_selector
+    assert 'Multivendor_Mapping_3UK.csv' in three_selector
+    assert 'Multivendor_Mapping_VFUK.csv' not in three_selector
+
+
 def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
     client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
     uploads = [

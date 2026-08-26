@@ -87,6 +87,22 @@ def test_load_dataset_reads_cp1252_three_mapping_csv(tmp_path) -> None:
     assert dataset["Site_Name"].iloc[0] == "Leeds ° North"
 
 
+def test_load_dataset_makes_duplicate_excel_headers_unique(tmp_path) -> None:
+    mapping = tmp_path / "Multivendor_Mapping_VFUK.xlsx"
+    source = pd.DataFrame(
+        [[123, 302, "Ericsson", "Cell A", "Cell A copy"]],
+        columns=["gNodeB ID", "Local Cell ID", "OP/ Vendor", "Cell Name", "Cell Name"],
+    )
+    with pd.ExcelWriter(mapping, engine="openpyxl") as writer:
+        source.to_excel(writer, sheet_name="5G", index=False)
+
+    dataset = load_dataset(mapping)
+
+    assert dataset.columns.is_unique
+    assert dataset["Cell Name"].iloc[0] == "Cell A"
+    assert dataset["Cell Name__2"].iloc[0] == "Cell A copy"
+
+
 def test_normalise_dataset_uses_rat_as_primary_technology_for_data() -> None:
     source = pd.DataFrame({
         "RAT": ["5G NSA"],

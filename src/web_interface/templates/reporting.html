@@ -42,11 +42,11 @@
         <select name="report_scope" data-report-scope><option value="single">Single-vendor</option><option value="multivendor">Multivendor</option></select>
       </label>
       <div data-mapping-selector hidden>
-        <label>Vodafone Vendor Mapping
-          <select name="vodafone_mapping_dataset_id"><option value="">Select processed Vodafone mapping</option>{% for dataset in vodafone_mapping_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }}</option>{% endfor %}</select>
+        <label>VFUK Vendor Mapping
+          <select name="vodafone_mapping_dataset_id"><option value="">Select processed VFUK mapping</option>{% for dataset in vodafone_mapping_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }}</option>{% endfor %}</select>
         </label>
-        <label>Three Vendor Mapping
-          <select name="three_mapping_dataset_id"><option value="">Select processed Three mapping</option>{% for dataset in three_mapping_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }}</option>{% endfor %}</select>
+        <label>3UK Vendor Mapping
+          <select name="three_mapping_dataset_id"><option value="">Select processed 3UK mapping</option>{% for dataset in three_mapping_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }}</option>{% endfor %}</select>
         </label>
       </div>
       <div class="form-actions reporting-submit-action"><button type="submit">Generate PowerPoint Report</button></div>

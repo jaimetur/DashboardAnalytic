@@ -81,6 +81,20 @@ def _sheet_has_only_empty_values(values: tuple[object, ...]) -> bool:
     return all(value is None or str(value).strip() == '' for value in values)
 
 
+def _make_unique_headers(headers: Iterable[object]) -> list[str]:
+    """Return stable, unique column labels while preserving the first occurrence."""
+    counts: dict[str, int] = {}
+    unique_headers: list[str] = []
+    for index, value in enumerate(headers, start=1):
+        base_name = str(value).strip() if value is not None else ''
+        if not base_name:
+            base_name = f'Unnamed_{index}'
+        counts[base_name] = counts.get(base_name, 0) + 1
+        occurrence = counts[base_name]
+        unique_headers.append(base_name if occurrence == 1 else f'{base_name}__{occurrence}')
+    return unique_headers
+
+
 def _read_openxml_sheet(worksheet, progress_callback: Callable[[int], None] | None, progress_state: dict[str, int], total_rows: int) -> pd.DataFrame:
     rows_iter = worksheet.iter_rows(values_only=True)
     header: list[str] | None = None
@@ -100,7 +114,7 @@ def _read_openxml_sheet(worksheet, progress_callback: Callable[[int], None] | No
         values = tuple(row or ())
         if _sheet_has_only_empty_values(values):
             continue
-        header = [str(value).strip() if value is not None else '' for value in values]
+        header = _make_unique_headers(values)
         break
 
     if not header:
