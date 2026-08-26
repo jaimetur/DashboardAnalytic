@@ -18,6 +18,7 @@
 - Added the visible `Smart Orchestrator Logs Reports` module as a future-ready entry point.
 
 #### 🚀 Enhancements:
+- Moved `Workspace`, `E2E Bench Dashboard` and `E2E Bench Reporting` into an independent module-tab bar above the first workspace panel.
 - Added automatic recognition of `Multivendor_Mapping` uploads as a dedicated dataset type.
 - Limited Vendor Mapping controls to the `Multivendor` report scope and required both operator-specific mappings before generation.
 - Added NSA/SA session filtering from `RAT`, `RAT_A` or `Sample_RAT_A` (`ENDC` for NSA and `NR` for SA).

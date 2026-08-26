@@ -478,6 +478,9 @@ def test_top_navigation_shows_document_links(client) -> None:
     assert 'href="/documents/view/help"' in response.text
     assert 'target="_blank"' in response.text
     assert 'href="/dashboard"' in response.text
+    assert 'class="module-tabs"' in response.text
+    assert 'class="module-tab active" href="/workspace"' in response.text
+    assert 'E2E Bench Reporting</a>' in response.text
     assert 'href="/logout"' in response.text
     assert '<span class="title-badge title-user-badge title-user-badge-admin">admin</span>' in response.text
 
