@@ -15,7 +15,7 @@
         <form id="dashboard-dataset-form" class="dataset-selector-grid" action="/dashboard" method="get" data-loading-label="Opening dataset dashboard">
           <label>Input Type
             <select name="input_kind" data-input-kind-select>
-              <option value="">All Inputs</option>
+              <option value="">All CDR Types</option>
               {% for kind in input_kind_options %}
               <option value="{{ kind }}" {% if input_kind == kind %}selected{% endif %}>{{ 'CDR-' + kind.title() if kind in ['voice', 'speech', 'data'] else 'Other' }}</option>
               {% endfor %}

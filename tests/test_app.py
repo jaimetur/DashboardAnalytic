@@ -73,6 +73,7 @@ def test_admin_can_login_upload_and_see_automatic_dashboard(client) -> None:
     csv_content = b"market,period,score,gap\nES,2026-Q1,91,2.1\nES,2026-Q1,87,3.3\nDE,2026-Q2,76,5.2\n"
     upload_response = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -113,6 +114,7 @@ def test_dashboard_disables_metrics_without_non_null_values(client) -> None:
     )
     upload_response = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -130,6 +132,7 @@ def test_admin_can_retry_stuck_dataset(client) -> None:
     login(client)
     client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
     )
@@ -149,6 +152,7 @@ def test_admin_cannot_retry_queued_dataset(client) -> None:
     login(client)
     client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
     )
@@ -162,6 +166,7 @@ def test_admin_can_delete_queued_dataset(client) -> None:
     login(client)
     client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
     )
@@ -182,6 +187,7 @@ def test_admin_can_stop_processing_dataset(client) -> None:
     login(client)
     client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
     )
@@ -202,11 +208,13 @@ def test_reupload_same_file_reuses_existing_dataset_entry(client) -> None:
     payload = b"market,period,score\nES,2026-Q1,91\n"
     first_upload = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(payload), "text/csv")},
         follow_redirects=False,
     )
     second_upload = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(payload), "text/csv")},
         follow_redirects=False,
     )
@@ -529,11 +537,13 @@ def test_dataset_selector_only_lists_ready_datasets(client) -> None:
 
     client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("ready.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
     )
     client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("stopped.csv", BytesIO(b"market,period,score\nDE,2026-Q2,78\n"), "text/csv")},
         follow_redirects=False,
     )
@@ -551,16 +561,40 @@ def test_dataset_selector_only_lists_ready_datasets(client) -> None:
     assert 'stopped.csv' not in selector_fragment
 
 
+def test_dashboard_selector_excludes_mapping_and_other_dataset_types(client) -> None:
+    login(client)
+    client.post(
+        "/dashboard/upload",
+        data={"dataset_kinds": "data"},
+        files={"dataset_files": ("cdr-data.csv", BytesIO(b"Mean_Data_Rate,Operator\n12.5,EE\n"), "text/csv")},
+        follow_redirects=False,
+    )
+    client.post(
+        "/dashboard/upload",
+        data={"dataset_kinds": "mapping_vodafone"},
+        files={"dataset_files": ("VFUK.csv", BytesIO(b"eNodeB ID,Local Cell ID,OP/ Vendor\n1,1,Ericsson\n"), "text/csv")},
+        follow_redirects=False,
+    )
+
+    response = client.get("/dashboard?dataset_id=2")
+    selector_fragment = response.text.split('data-dataset-select', 1)[1].split('</select>', 1)[0]
+    assert 'cdr-data.csv' in selector_fragment
+    assert 'VFUK.csv' not in selector_fragment
+    assert 'All CDR Types' in response.text
+
+
 def test_dashboard_ignores_non_ready_dataset_id_in_selector_flow(client) -> None:
     login(client)
 
     client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("ready.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
     )
     client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("failed.csv", BytesIO(b"market,period,score\nDE,2026-Q2,78\n"), "text/csv")},
         follow_redirects=False,
     )
@@ -867,6 +901,7 @@ def test_dashboard_analysis_reuses_cached_result_on_reload(client, monkeypatch) 
     csv_content = b"market,period,score,gap\nES,2026-Q1,91,2.1\nES,2026-Q1,87,3.3\n"
     upload_response = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -900,6 +935,7 @@ def test_dashboard_analysis_reuses_cached_dataset_frame_across_metric_changes(cl
     csv_content = b"market,period,score,gap\nES,2026-Q1,91,2.1\nES,2026-Q1,87,3.3\n"
     upload_response = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -933,6 +969,7 @@ def test_dashboard_renders_multiple_selected_metrics(client) -> None:
     csv_content = b"market,period,score,gap\nES,2026-Q1,91,2.1\nES,2026-Q1,87,3.3\n"
     upload_response = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -957,6 +994,7 @@ def test_dashboard_shows_date_range_filters_and_applies_them(client) -> None:
     )
     upload_response = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -979,6 +1017,7 @@ def test_dashboard_adaptive_filters_include_city_and_multi_select_fields(client)
     )
     upload_response = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -998,6 +1037,7 @@ def test_dashboard_adaptive_filters_label_technology_without_primary(client) -> 
     csv_content = b"market,period,score,RAT\nES,2026-Q1,91,5G\nES,2026-Q1,87,LTE\n"
     upload_response = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -1014,6 +1054,7 @@ def test_dashboard_comparison_chart_exposes_per_metric_aggregation_override_cont
     csv_content = b"market,period,score,gap,operator,region\nES,2026-Q1,91,2.1,Vodafone,North\nES,2026-Q1,87,3.3,o2,South\n"
     upload_response = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -1035,6 +1076,7 @@ def test_dashboard_exposes_global_and_per_metric_cdf_comparison_controls(client)
     )
     upload_response = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -1059,6 +1101,7 @@ def test_dashboard_powerpoint_export_includes_visual_analytics_payload(client) -
     )
     upload_response = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -1107,6 +1150,7 @@ def test_workspace_logs_capture_analysis_warnings(client, monkeypatch) -> None:
     csv_content = b"market,period,score,gap\nES,2026-Q1,91,2.1\nES,2026-Q1,87,3.3\n"
     client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -1135,6 +1179,7 @@ def test_dashboard_handles_empty_table_rows_without_template_failure(client) -> 
     csv_content = b"market,period,operator,score\nES,2026-Q1,VDF,91\nES,2026-Q1,VDF,87\n"
     upload_response = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -1150,6 +1195,7 @@ def test_dashboard_materializes_legacy_ready_dataset_on_first_analysis(client) -
     csv_content = b"market,period,operator,score\nES,2026-Q1,VDF,91\nES,2026-Q1,VDF,87\n"
     upload_response = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -1171,6 +1217,7 @@ def test_dashboard_reuses_materialized_table_when_legacy_columns_only_differ_by_
     csv_content = b"market,period,operator,score\nES,2026-Q1,VDF,91\nES,2026-Q1,ORG,87\n"
     upload_response = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -1210,6 +1257,7 @@ def test_dashboard_refreshes_stale_dataset_normalization_before_render(client) -
     csv_content = b"market,period,score,RAT,PCell_RAT_Timeline\nES,2026-Q1,91,5G NSA,NR->LTE\nES,2026-Q1,87,LTE,LTE->NR\n"
     upload_response = client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -1247,6 +1295,7 @@ def test_dataset_status_endpoint_returns_queue_payload(client) -> None:
     login(client)
     client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
     )
@@ -1331,6 +1380,7 @@ def test_workspace_queue_shows_dataset_size_column(client) -> None:
     login(client)
     client.post(
         "/dashboard/upload",
+        data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
     )

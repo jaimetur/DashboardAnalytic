@@ -380,6 +380,9 @@ def test_derive_available_metrics_excludes_time_parts_and_ids() -> None:
         "Year": [2026, 2026],
         "Week": [28, 28],
         "Hour": [10, 11],
+        "Latitude": [51.5, 51.6],
+        "Longitude": [-0.1, -0.2],
+        "Cell_ID_A": [12345, 12346],
         "call_id": [1001, 1002],
         "session_id": [2001, 2002],
         "customer_uuid": [3001, 3002],
@@ -395,6 +398,9 @@ def test_derive_available_metrics_excludes_time_parts_and_ids() -> None:
     assert "call_id" not in metrics
     assert "session_id" not in metrics
     assert "customer_uuid" not in metrics
+    assert "Latitude" not in metrics
+    assert "Longitude" not in metrics
+    assert "Cell_ID_A" not in metrics
 
 
 def test_top_records_deduplicates_metric_column_when_metric_is_preferred_field() -> None:

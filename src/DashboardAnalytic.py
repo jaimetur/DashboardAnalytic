@@ -75,6 +75,7 @@ INPUT_KIND_LABELS = {
     'generic': 'Other',
 }
 UPLOAD_DATASET_KINDS = frozenset({'data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'smart_orchestrator_logs', 'generic'})
+CDR_DATASET_KINDS = frozenset({'data', 'voice', 'speech'})
 DATASET_NORMALIZATION_VERSION = 4
 MAPPING_PREVIEW_NORMALIZED_COLUMNS = frozenset({
     'dataset_kind', 'source_file', 'source_sheet', 'campaign', 'market', 'period', 'campaign_year', 'campaign_quarter',
@@ -319,8 +320,14 @@ def is_metric_candidate(column: str) -> bool:
     }
     excluded_fragments = (
         '_id', ' id', 'uuid', 'guid',
+        'latitude', 'longitude', 'gps_lat', 'gps_lon', 'coordinate', 'location_accuracy',
+        'cell_id', 'cellid', 'global_ci', 'globalci', 'gcid', 'cgi', 'eci', 'enodeb',
+        'local_cell', 'physical_cell', 'pci', 'arfcn', 'channel', 'mcc', 'mnc', 'tac', 'lac',
     )
+    excluded_normalized = {'lat', 'lon', 'latitude', 'longitude', 'altitude', 'bearing', 'accuracy', 'x_coordinate', 'y_coordinate'}
     if lowered in excluded_exact:
+        return False
+    if lowered in excluded_normalized:
         return False
     if any(fragment in lowered for fragment in excluded_fragments):
         return False
@@ -757,8 +764,14 @@ def resolve_help_doc_path(doc_file: str) -> Path:
     return target
 
 
-def choose_selected_dataset(datasets: list[dict[str, Any]], dataset_id: int | None, input_kind: str | None) -> dict[str, Any] | None:
-    ready_datasets = [dataset for dataset in datasets if dataset.get('is_ready')]
+def choose_selected_dataset(
+    datasets: list[dict[str, Any]], dataset_id: int | None, input_kind: str | None,
+    allowed_kinds: frozenset[str] | None = None,
+) -> dict[str, Any] | None:
+    ready_datasets = [
+        dataset for dataset in datasets
+        if dataset.get('is_ready') and (allowed_kinds is None or dataset.get('dataset_kind') in allowed_kinds)
+    ]
     if dataset_id is not None:
         for dataset in ready_datasets:
             if dataset['id'] == dataset_id:
@@ -827,11 +840,17 @@ def build_dashboard_table_rows(df: pd.DataFrame, selected_metrics: list[str], ag
     return rows[preferred_columns].to_dict(orient='records')
 
 
-def build_dataset_view_state(dataset_id: int | None, input_kind: str | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], dict[str, Any] | None]:
+def build_dataset_view_state(
+    dataset_id: int | None, input_kind: str | None, allowed_kinds: frozenset[str] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], dict[str, Any] | None]:
     datasets = [serialize_dataset_row(row) for row in repository.list_datasets()]
-    ready_datasets = [dataset for dataset in datasets if dataset['is_ready']]
-    input_kind_options = sorted({dataset.get('dataset_kind') or 'generic' for dataset in datasets})
-    selected_dataset = choose_selected_dataset(datasets, dataset_id, input_kind)
+    ready_datasets = [
+        dataset for dataset in datasets
+        if dataset['is_ready'] and (allowed_kinds is None or dataset.get('dataset_kind') in allowed_kinds)
+    ]
+    input_kind_options = sorted({dataset.get('dataset_kind') or 'generic' for dataset in ready_datasets})
+    valid_input_kind = input_kind if input_kind in input_kind_options else None
+    selected_dataset = choose_selected_dataset(datasets, dataset_id, valid_input_kind, allowed_kinds)
     return datasets, ready_datasets, input_kind_options, selected_dataset
 
 
@@ -1311,7 +1330,7 @@ def dashboard(
     input_kind: str | None = Query(default=None),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
-    datasets, ready_datasets, input_kind_options, selected_dataset = build_dataset_view_state(dataset_id, input_kind)
+    datasets, ready_datasets, input_kind_options, selected_dataset = build_dataset_view_state(dataset_id, input_kind, CDR_DATASET_KINDS)
     selected_dataset = refresh_selected_dataset_if_stale(selected_dataset)
     selected_dataset = enrich_selected_dataset_for_dashboard(selected_dataset)
     analysis, analyses, selected_metrics, filter_options, analysis_error, analysis_loaded = build_dashboard_payload(selected_dataset, request, user.username)
@@ -1633,6 +1652,8 @@ def export_report(
     selected_dataset = enrich_selected_dataset_for_dashboard(serialize_dataset_row(dataset))
     if not selected_dataset or not selected_dataset['is_ready']:
         raise HTTPException(status_code=400, detail='Dataset is not ready for export')
+    if selected_dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
+        raise HTTPException(status_code=400, detail='Only NetCheck CDR Data, Voice and Speech datasets can be exported from E2E Dashboard.')
 
     query_items: list[tuple[str, str]] = [
         ('dataset_id', str(dataset_id)),
