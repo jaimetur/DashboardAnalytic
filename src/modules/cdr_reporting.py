@@ -39,6 +39,34 @@ PRESERVED_CHART_TYPES = {"not automated (preserve)"}
 FILTER_OPERATORS = ("CONTAINS", "IN", ">=", "<=", "!=", "=", ">", "<")
 
 
+def _catalogue_header_key(value: str) -> str:
+    """Make harmless spelling/case/separator changes in imported headers equivalent."""
+    return re.sub(r"[^a-z0-9]+", "", str(value).casefold())
+
+
+CATALOG_HEADER_ALIASES = {
+    "slide": "Slide",
+    "slidetittle": "Slide tittle",
+    "slidetitle": "Slide tittle",
+    "slidesubtittle": "Slide Subtittle",
+    "slidesubtitle": "Slide Subtittle",
+    "layout": "Layout",
+    "charttittle": "Chart Tittle",
+    "charttitle": "Chart Tittle",
+    "cdrsource": "CDR source",
+    "kpi": "KPI",
+    "charttype": "Chart type",
+    "legend": "Legend",
+    "filter": "Filters",
+    "filters": "Filters",
+    "groupingrows": "Grouping_Rows",
+    "groupingrow": "Grouping_Rows",
+    "groupingcolumns": "Grouping_Columns",
+    "groupingcolumn": "Grouping_Columns",
+    "grouping": "Grouping",
+}
+
+
 @dataclass(frozen=True)
 class FilterCondition:
     column: str
@@ -77,18 +105,19 @@ def parse_catalog_filters(value: str) -> tuple[FilterCondition, ...]:
         return ()
     conditions: list[FilterCondition] = []
     for clause in (part.strip() for part in value.split(";") if part.strip()):
-        match = re.fullmatch(r"(.+?)\s+(CONTAINS|IN|>=|<=|!=|=|>|<)\s+(.+)", clause, flags=re.I)
+        match = re.fullmatch(r"(.+?)\s+(NOT\s+CONTAINS|NOT\s+IN|CONTAINS|IN|>=|<=|!=|=|>|<)\s+(.+)", clause, flags=re.I)
         if not match:
             # Compatibility for the initial supplied catalogues. New catalogues must use the syntax above.
             continue
         column, operator, raw_values = (part.strip() for part in match.groups())
+        operator = re.sub(r"\s+", " ", operator).upper()
         # Existing quality-ratio rows describe both output states as "LQ < 1.6 vs ≥ 1.6".
         # That is chart metadata, not a source-row filter.
         if operator in {">", ">=", "<", "<="} and re.search(r"\bvs\b", raw_values, flags=re.I):
             continue
         if not column:
             raise ValueError(f"Invalid filter '{clause}': a column name is required.")
-        if operator.upper() == "IN":
+        if operator in {"IN", "NOT IN"}:
             if not raw_values.startswith("(") or not raw_values.endswith(")"):
                 raise ValueError(f"Invalid filter '{clause}': IN values must use parentheses.")
             values = tuple(item.strip() for item in raw_values[1:-1].split(",") if item.strip())
@@ -96,7 +125,7 @@ def parse_catalog_filters(value: str) -> tuple[FilterCondition, ...]:
             values = (raw_values,)
         if not values:
             raise ValueError(f"Invalid filter '{clause}': a value is required.")
-        conditions.append(FilterCondition(column, operator.upper(), values))
+        conditions.append(FilterCondition(column, operator, values))
     return tuple(conditions)
 
 
@@ -170,6 +199,60 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
     if not entries:
         raise ValueError("The report catalogue does not contain any rows.")
     return entries
+
+
+def convert_catalog_csv(content: bytes | str, technology: str) -> bytes:
+    """Migrate a compatible legacy CSV into the current editable catalogue schema.
+
+    The importer deliberately accepts common title spelling variants and the former
+    single ``Grouping`` column.  Missing newer presentation-only columns are left
+    blank, while the normal validator still protects required report definitions.
+    """
+    if isinstance(content, bytes):
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ValueError("The report catalogue must be a UTF-8 CSV file.") from exc
+    else:
+        text = content
+    reader = csv.DictReader(io.StringIO(text))
+    original_headers = tuple(reader.fieldnames or ())
+    if not original_headers:
+        raise ValueError("The report catalogue does not contain a header row.")
+
+    header_map: dict[str, str] = {}
+    for original in original_headers:
+        canonical = CATALOG_HEADER_ALIASES.get(_catalogue_header_key(original))
+        if canonical and canonical not in header_map:
+            header_map[canonical] = original
+    if "Slide" not in header_map:
+        raise ValueError("The uploaded CSV cannot be converted because it does not contain a Slide column.")
+
+    converted_rows: list[dict[str, str]] = []
+    for row in reader:
+        converted = {header: "" for header in CATALOG_HEADERS}
+        for canonical, original in header_map.items():
+            if canonical == "Grouping":
+                continue
+            converted[canonical] = (row.get(original) or "").strip()
+        legacy_grouping = (row.get(header_map.get("Grouping", "")) or "").strip()
+        if legacy_grouping:
+            dimensions = parse_catalog_grouping(legacy_grouping).dimensions
+            if not converted["Grouping_Rows"]:
+                converted["Grouping_Rows"] = " × ".join(dimensions[:1])
+            if not converted["Grouping_Columns"]:
+                converted["Grouping_Columns"] = " × ".join(dimensions[1:])
+        converted_rows.append(converted)
+
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=CATALOG_HEADERS, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(converted_rows)
+    converted_content = output.getvalue().encode("utf-8")
+    # Reuse the regular validator so a conversion never imports an incomplete chart
+    # contract just because it used an older set of column headings.
+    entries = parse_catalog_csv(converted_content, technology)
+    return catalogue_csv(entries)
 
 
 def load_catalog_csv(path: Path, technology: str) -> list[CatalogEntry]:
@@ -581,11 +664,15 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
                 comparison = {"=": series.astype(str).str.casefold() == target.casefold(), "!=": series.astype(str).str.casefold() != target.casefold()}.get(condition.operator)
                 if comparison is None:
                     raise ValueError(f"Slide {entry.slide}: '{condition.operator}' requires a numeric value for '{condition.column}'.")
-        elif condition.operator == "CONTAINS":
+        elif condition.operator in {"CONTAINS", "NOT CONTAINS"}:
             comparison = series.astype(str).str.contains(condition.values[0], case=False, na=False, regex=False)
-        else:  # IN
+            if condition.operator == "NOT CONTAINS":
+                comparison = ~comparison
+        else:  # IN / NOT IN
             accepted = {item.casefold() for item in condition.values}
             comparison = series.astype(str).str.casefold().isin(accepted)
+            if condition.operator == "NOT IN":
+                comparison = ~comparison
         result = result.loc[comparison].copy()
     return result
 

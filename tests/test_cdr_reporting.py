@@ -7,7 +7,7 @@ from pathlib import Path
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, assign_cdr_vendors, classify_sessions, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, vendor_from_cells
 
 
 def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> None:
@@ -59,6 +59,23 @@ def test_workspace_vendor_assignment_writes_the_normalized_vendor_field() -> Non
 
     assert mapped['vendor'].tolist() == ['Vodafone_Ericsson', '3_Mixed Vendor', pd.NA]
     assert mapped['report_vendor'].tolist() == ['Vodafone_Ericsson', '3_Mixed Vendor', 'O2 (UK)']
+
+
+def test_catalogue_converter_migrates_legacy_headers_and_grouping() -> None:
+    legacy = (
+        'Slide,Slide title,Slide subtitle,Layout,CDR Source,KPI,Chart Type,Filters,Grouping\n'
+        '8,Quality,Voice,Title and 1 column + Comments,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator × Campaign\n'
+    )
+
+    converted = convert_catalog_csv(legacy, 'nsa')
+    entries = parse_catalog_csv(converted, 'nsa')
+
+    assert converted.decode('utf-8').splitlines()[0] == ','.join(CATALOG_HEADERS)
+    assert entries[0].slide_title == 'Quality'
+    assert entries[0].chart_title == ''
+    assert entries[0].legend == ''
+    assert entries[0].grouping_rows == 'Operator'
+    assert entries[0].grouping_columns == 'Campaign'
 
 
 def test_legacy_workspace_mapping_gets_the_report_group_without_writing_operator_as_vendor() -> None:
@@ -120,6 +137,23 @@ def test_catalogue_filter_and_grouping_contract_is_parsed_and_applied() -> None:
     assert grouped[primary].tolist() == ['London']
     assert grouped[series].tolist() == ['EE · Q1']
     assert '__catalog_stack' not in grouped.columns
+
+
+def test_catalogue_filter_contract_supports_not_in_and_not_contains() -> None:
+    conditions = parse_catalog_filters('Session_Type NOT IN (WhatsApp, SMS); Campaign NOT CONTAINS legacy')
+    assert [(item.column, item.operator, item.values) for item in conditions] == [
+        ('Session_Type', 'NOT IN', ('WhatsApp', 'SMS')),
+        ('Campaign', 'NOT CONTAINS', ('legacy',)),
+    ]
+    entry = parse_catalog_csv(
+        ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,Average Vertical Bars,,Session_Type NOT IN (WhatsApp); Campaign NOT CONTAINS legacy,Operator,Campaign\n',
+        'nsa',
+    )[0]
+    frame = pd.DataFrame({
+        'Session_Type': ['VoLTE', 'WhatsApp', 'VoLTE'], 'Campaign': ['Q1', 'Q1', 'legacy-Q2'],
+        'LQ': [3.2, 4.0, 3.8], 'Operator': ['EE', 'EE', 'O2'],
+    })
+    assert _apply_catalog_filters(frame, entry, False, 'LQ')['Operator'].tolist() == ['EE']
 
 
 def test_catalogue_call_family_uses_documented_netcheck_session_values() -> None:

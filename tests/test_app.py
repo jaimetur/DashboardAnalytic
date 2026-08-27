@@ -959,6 +959,31 @@ def test_admin_imports_report_catalogue_and_synchronizes_help(client, tmp_path, 
     assert exported.content == content
 
 
+def test_admin_import_converts_a_legacy_catalogue_when_requested(client, tmp_path, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    help_document = tmp_path / 'powerpoint-reporting.md'
+    help_document.write_text('# Reporting\n\n<!-- SLIDE_CATALOGUE:START -->\nold\n<!-- SLIDE_CATALOGUE:END -->\n', encoding='utf-8')
+    monkeypatch.setattr(app_module, 'REPORT_CATALOGUE_DOCUMENT', help_document)
+    legacy = (
+        'Slide,Slide title,Slide subtitle,Layout,CDR Source,KPI,Chart Type,Filters,Grouping\n'
+        '8,Legacy quality,,Title and 1 column + Comments,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator × Campaign\n'
+    ).encode('utf-8')
+
+    response = client.post(
+        '/admin/report-catalogues/nsa',
+        data={'catalogue_name': 'Legacy baseline', 'convert_catalogue': '1'},
+        files={'catalogue_file': ('legacy.csv', BytesIO(legacy), 'text/csv')},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    stored = app_module.reporting_catalog_path('nsa').read_text(encoding='utf-8')
+    assert 'Chart Tittle' in stored
+    assert 'Legacy quality' in stored
+
+
 def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(client, tmp_path, monkeypatch) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
     import src.DashboardAnalytic as app_module
@@ -982,15 +1007,34 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     admin = client.get('/admin')
     assert 'Baseline Q4' in admin.text
     assert 'Updated Q4' in admin.text
-    assert '/admin/report-catalogues/nsa/baseline-q4/activate' in admin.text
+    assert 'name="catalogue_selection"' in admin.text
+    assert 'value="nsa:baseline-q4"' in admin.text
+    assert '/admin/report-catalogues/export-selected' in admin.text
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Second'
 
     reporting = client.get('/reporting')
     assert 'value="nsa:updated-q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting.text
 
+    editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=baseline-q4')
+    assert editor.status_code == 200
+    assert 'Slide Catalogue Editor' in editor.text
+    assert 'data-catalogue-editor-table' in editor.text
+    assert 'data-catalogue-field="Layout"' in editor.text
+    assert 'data-catalogue-editor-options' in editor.text
+    assert 'Title and 1 column + Comments' in editor.text
+    assert '<optgroup label="Layouts">' in editor.text
+    assert '<optgroup label="Chart types">' in editor.text
+    assert '<optgroup label="CDR fields">' in editor.text
+
+    edited = (','.join(CATALOG_HEADERS) + '\n8,Edited,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n')
+    saved = client.post('/admin/report-catalogues/nsa/baseline-q4/save', data={'catalogue_content': edited}, follow_redirects=False)
+    assert saved.status_code == 303
+    saved_editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=baseline-q4')
+    assert '>Edited</td>' in saved_editor.text
+
     activated = client.post('/admin/report-catalogues/nsa/baseline-q4/activate', follow_redirects=False)
     assert activated.status_code == 303
-    assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'First'
+    assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Edited'
 
     reporting_after_activation = client.get('/reporting')
     assert 'value="nsa:baseline-q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting_after_activation.text

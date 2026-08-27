@@ -17,7 +17,7 @@ from urllib.parse import urlencode
 
 import pandas as pd
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.datastructures import QueryParams
@@ -25,7 +25,7 @@ from starlette.datastructures import QueryParams
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import TEMPLATE_NAMES, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, render_cdr_report, update_catalogue_document
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, PRESERVED_CHART_TYPES, TEMPLATE_NAMES, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, render_cdr_report, update_catalogue_document
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
@@ -187,7 +187,7 @@ def report_catalogue_options(technology: str) -> list[dict[str, Any]]:
     active_identifier = technology_registry.get('active', 'default')
     options = [{
         'identifier': 'default',
-        'name': 'Default catalogue',
+        'name': str(technology_registry.get('default_name') or 'Default catalogue'),
         'path': active_catalog_path(settings.report_catalog_dir, DEFAULT_REPORT_CATALOGS[technology], technology),
         'source': 'Default source',
         'active': active_identifier == 'default',
@@ -219,6 +219,94 @@ def reporting_catalog_path(technology: str) -> Path:
 
 def reporting_catalog_entries(technology: str):
     return load_catalog_csv(reporting_catalog_path(technology), technology)
+
+
+def catalogue_editor_columns() -> dict[str, list[str]]:
+    """Offer the processed CDR fields that can be used in the catalogue editor."""
+    common = {'Operator', 'Campaign', 'source_sheet', 'vendor', 'RAT_A', 'RAT'}
+    derived = {'Call Family', 'Test Family', 'Rate Bucket', 'Threshold', 'Buckets'}
+    columns: dict[str, set[str]] = {
+        'cdr-data': set(common) | {'Test_Result', 'Test_Name', 'Type_of_Test', 'Direction', 'G Level 4'},
+        'cdr-voice': set(common) | {'Call_Status', 'Session_Type', 'Call_Setup_Time', 'G Level 4'},
+        'cdr-speech': set(common) | {'Call_Status', 'Session_Type', 'LQ', 'G Level 4'},
+    }
+    for dataset in repository.list_datasets():
+        kind = str(dataset['dataset_kind'] or '').casefold()
+        source = f'cdr-{kind}'
+        if source not in columns or dataset['status'] != 'ready':
+            continue
+        columns[source].update(str(column) for column in repository.list_dataset_row_columns(dataset['id']))
+    return {source: sorted(values | derived, key=str.casefold) for source, values in columns.items()}
+
+
+def catalogue_editor_filter_values(columns: dict[str, list[str]]) -> dict[str, dict[str, list[str]]]:
+    """Expose a bounded set of real processed values for catalogue filter assistance."""
+    values: dict[str, dict[str, set[str]]] = {source: {} for source in columns}
+    for dataset in repository.list_datasets():
+        kind = str(dataset['dataset_kind'] or '').casefold()
+        source = f'cdr-{kind}'
+        if source not in values or dataset['status'] != 'ready' or not repository.dataset_rows_table_exists(dataset['id']):
+            continue
+        for column in repository.list_dataset_row_columns(dataset['id']):
+            known = values[source].setdefault(str(column), set())
+            known.update(repository.list_distinct_dataset_row_values(dataset['id'], str(column), limit=100))
+    return {
+        source: {
+            column: sorted(column_values, key=str.casefold)[:100]
+            for column, column_values in per_column.items()
+            if column_values
+        }
+        for source, per_column in values.items()
+    }
+
+
+def catalogue_layout_names(technology: str) -> list[str]:
+    template = settings.reporting_template_dir / TEMPLATE_NAMES[technology]
+    if not template.exists():
+        return []
+    try:
+        from pptx import Presentation
+        return sorted({layout.name for layout in Presentation(template).slide_layouts if layout.name.strip()}, key=str.casefold)
+    except Exception:
+        return []
+
+
+def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -> dict[str, Any] | None:
+    if technology not in TEMPLATE_NAMES or not catalogue_id:
+        return None
+    catalogue = next((item for item in report_catalogue_options(technology) if item['identifier'] == catalogue_id), None)
+    if not catalogue:
+        return None
+    entries = load_catalog_csv(catalogue['path'], technology)
+    rows = [
+        {
+            'Slide': entry.slide,
+            'Slide tittle': entry.slide_title,
+            'Slide Subtittle': entry.slide_subtitle,
+            'Layout': entry.layout,
+            'Chart Tittle': entry.chart_title,
+            'CDR source': entry.cdr_source,
+            'KPI': entry.kpi,
+            'Chart type': entry.chart_type,
+            'Legend': entry.legend,
+            'Filters': entry.filters,
+            'Grouping_Rows': entry.grouping_rows,
+            'Grouping_Columns': entry.grouping_columns,
+        }
+        for entry in entries
+    ]
+    columns = catalogue_editor_columns()
+    return {
+        'technology': technology,
+        'catalogue': catalogue,
+        'rows': rows,
+        'headers': CATALOG_HEADERS,
+        'suggestions': {
+            'layouts': catalogue_layout_names(technology),
+            'chart_types': sorted(CHART_TYPES | PRESERVED_CHART_TYPES, key=str.casefold),
+            'columns': columns,
+        },
+    }
 
 
 def synchronize_reporting_catalogue_document() -> None:
@@ -1013,6 +1101,30 @@ def would_remove_last_active_admin(target_user, normalized_role: str, will_be_ac
 
 
 def render_admin_template(request: Request, user: SessionUser, error: str | None = None, status_code: int = 200) -> HTMLResponse:
+    selected_technology = request.query_params.get('catalogue_technology') or None
+    selected_catalogue = request.query_params.get('catalogue_id') or None
+    selection = request.query_params.get('catalogue_selection') or ''
+    if selection and ':' in selection:
+        candidate_technology, candidate_catalogue = selection.split(':', 1)
+        if candidate_technology in TEMPLATE_NAMES and candidate_catalogue:
+            selected_technology, selected_catalogue = candidate_technology, candidate_catalogue
+    if not selected_technology or not selected_catalogue:
+        selected_technology = 'nsa'
+        active_catalogue = next((item for item in report_catalogue_options('nsa') if item['active']), None)
+        selected_catalogue = active_catalogue['identifier'] if active_catalogue else None
+    report_catalogs = {
+        technology: {
+            'path': reporting_catalog_path(technology),
+            'source': 'Active catalogue',
+            'catalogues': report_catalogue_options(technology),
+        }
+        for technology in TEMPLATE_NAMES
+    }
+    workspace_catalogues = [
+        {**catalogue, 'technology': technology}
+        for technology, payload in report_catalogs.items()
+        for catalogue in payload['catalogues']
+    ]
     return render_template(
         request,
         'admin.html',
@@ -1021,14 +1133,10 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             'users': repository.list_users(),
             'datasets': repository.list_datasets(),
             'logs': repository.list_logs(),
-            'report_catalogs': {
-                technology: {
-                    'path': reporting_catalog_path(technology),
-                    'source': 'Active catalogue',
-                    'catalogues': report_catalogue_options(technology),
-                }
-                for technology in TEMPLATE_NAMES
-            },
+            'report_catalogs': report_catalogs,
+            'workspace_catalogues': workspace_catalogues,
+            'catalogue_editor': catalogue_editor_payload(selected_technology, selected_catalogue),
+            'catalogue_notice': request.query_params.get('catalogue_notice') or None,
             'error': error,
         },
         status_code=status_code,
@@ -1984,25 +2092,49 @@ def admin_panel(request: Request, user: SessionUser = Depends(admin_user)) -> HT
     return render_admin_template(request, user)
 
 
+@app.get('/admin/catalogue-filter-values')
+def catalogue_filter_values(
+    source: str,
+    column: str,
+    user: SessionUser = Depends(admin_user),
+) -> JSONResponse:
+    """Return values only for the field currently being configured in the editor."""
+    normalized_source = source.strip().casefold()
+    if normalized_source not in {'cdr-data', 'cdr-voice', 'cdr-speech'} or not column.strip():
+        raise HTTPException(status_code=400, detail='Unsupported CDR source or filter field.')
+    kind = normalized_source.removeprefix('cdr-')
+    values: set[str] = set()
+    for dataset in repository.list_datasets():
+        if str(dataset['dataset_kind'] or '').casefold() != kind or dataset['status'] != 'ready':
+            continue
+        if not repository.dataset_rows_table_exists(dataset['id']):
+            continue
+        values.update(repository.list_distinct_dataset_row_values(dataset['id'], column, limit=200))
+    return JSONResponse({'values': sorted(values, key=str.casefold)[:200]})
+
+
 @app.post('/admin/report-catalogues/{technology}', response_class=HTMLResponse)
 def import_report_catalogue(
     request: Request,
     technology: str,
-    catalogue_file: UploadFile = File(...),
-    catalogue_name: str = Form(...),
+    catalogue_file: UploadFile | None = File(default=None),
+    catalogue_name: str = Form(''),
+    convert_catalogue: bool = Form(False),
     user: SessionUser = Depends(admin_user),
 ) -> HTMLResponse:
     technology = technology.strip().lower()
     if technology not in TEMPLATE_NAMES:
         raise HTTPException(status_code=404, detail='Report technology not found')
-    if not catalogue_file.filename or Path(catalogue_file.filename).suffix.lower() != '.csv':
+    if not catalogue_file or not catalogue_file.filename or Path(catalogue_file.filename).suffix.lower() != '.csv':
         return render_admin_template(request, user, error='Select a CSV slide catalogue.', status_code=400)
     try:
-        catalogue_name = catalogue_name.strip()
+        catalogue_name = catalogue_name.strip() or re.sub(r'[_-]+', ' ', Path(catalogue_file.filename).stem).strip()
         if not catalogue_name:
             raise ValueError('Enter a name for the catalogue.')
         identifier = catalogue_identifier(catalogue_name)
         content = catalogue_file.file.read()
+        if convert_catalogue:
+            content = convert_catalog_csv(content, technology)
         entries = parse_catalog_csv(content, technology)
         registry = load_report_catalogue_registry()
         technology_registry = registry.setdefault(technology, {'active': 'default', 'catalogues': {}})
@@ -2016,7 +2148,12 @@ def import_report_catalogue(
         technology_registry['active'] = identifier
         save_report_catalogue_registry(registry)
         synchronize_reporting_catalogue_document()
-    except ValueError as exc:
+    except Exception as exc:
+        repository.add_log(user.username, 'import_report_catalogue_failed', json.dumps({
+            'technology': technology,
+            'file': catalogue_file.filename,
+            'error': str(exc),
+        }))
         return render_admin_template(request, user, error=str(exc), status_code=400)
     repository.add_log(user.username, 'import_report_catalogue', json.dumps({
         'technology': technology,
@@ -2024,7 +2161,8 @@ def import_report_catalogue(
         'file': catalogue_file.filename,
         'chart_rows': sum(1 for entry in entries if entry.source_kind),
     }))
-    return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+    query = urlencode({'catalogue_notice': f"Imported {catalogue_name} ({technology.upper()})."})
+    return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/admin/report-catalogues/{technology}/{catalogue_id}/activate', response_class=HTMLResponse)
@@ -2052,6 +2190,131 @@ def activate_report_catalogue(
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 
+def _named_catalogue(technology: str, catalogue_id: str) -> dict[str, Any] | None:
+    return next((item for item in report_catalogue_options(technology) if item['identifier'] == catalogue_id), None)
+
+
+@app.post('/admin/report-catalogues/{technology}/{catalogue_id}/rename', response_class=HTMLResponse)
+def rename_report_catalogue(
+    request: Request,
+    technology: str,
+    catalogue_id: str,
+    catalogue_name: str = Form(...),
+    user: SessionUser = Depends(admin_user),
+) -> HTMLResponse:
+    technology = technology.strip().lower()
+    catalogue = _named_catalogue(technology, catalogue_id) if technology in TEMPLATE_NAMES else None
+    if not catalogue:
+        return render_admin_template(request, user, error='Slide catalogue not found.', status_code=404)
+    try:
+        name = catalogue_name.strip()
+        if not name:
+            raise ValueError('Enter a catalogue name.')
+        registry = load_report_catalogue_registry()
+        technology_registry = registry.setdefault(technology, {'active': 'default', 'catalogues': {}})
+        if catalogue_id == 'default':
+            technology_registry['default_name'] = name
+        else:
+            metadata = technology_registry.setdefault('catalogues', {}).get(catalogue_id)
+            if not isinstance(metadata, dict):
+                raise ValueError('Named catalogue metadata was not found.')
+            metadata['name'] = name
+        save_report_catalogue_registry(registry)
+    except ValueError as exc:
+        return render_admin_template(request, user, error=str(exc), status_code=400)
+    repository.add_log(user.username, 'rename_report_catalogue', json.dumps({'technology': technology, 'catalogue': catalogue_id, 'name': name}))
+    return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/admin/report-catalogues/{technology}/{catalogue_id}/duplicate', response_class=HTMLResponse)
+def duplicate_report_catalogue(
+    request: Request,
+    technology: str,
+    catalogue_id: str,
+    user: SessionUser = Depends(admin_user),
+) -> HTMLResponse:
+    technology = technology.strip().lower()
+    catalogue = _named_catalogue(technology, catalogue_id) if technology in TEMPLATE_NAMES else None
+    if not catalogue:
+        return render_admin_template(request, user, error='Slide catalogue not found.', status_code=404)
+    registry = load_report_catalogue_registry()
+    technology_registry = registry.setdefault(technology, {'active': 'default', 'catalogues': {}})
+    catalogues = technology_registry.setdefault('catalogues', {})
+    base_name = f"{catalogue['name']} copy"
+    suffix = 1
+    name = base_name
+    identifier = catalogue_identifier(name)
+    while identifier in catalogues or named_catalogue_path(technology, identifier).exists():
+        suffix += 1
+        name = f"{base_name} {suffix}"
+        identifier = catalogue_identifier(name)
+    destination = named_catalogue_path(technology, identifier)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(catalogue['path'].read_bytes())
+    catalogues[identifier] = {'name': name}
+    save_report_catalogue_registry(registry)
+    repository.add_log(user.username, 'duplicate_report_catalogue', json.dumps({'technology': technology, 'source': catalogue_id, 'catalogue': name}))
+    return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/admin/report-catalogues/{technology}/{catalogue_id}/delete', response_class=HTMLResponse)
+def delete_report_catalogue(
+    request: Request,
+    technology: str,
+    catalogue_id: str,
+    user: SessionUser = Depends(admin_user),
+) -> HTMLResponse:
+    technology = technology.strip().lower()
+    if technology not in TEMPLATE_NAMES:
+        raise HTTPException(status_code=404, detail='Report technology not found')
+    if catalogue_id == 'default':
+        return render_admin_template(request, user, error='The default catalogue cannot be deleted.', status_code=400)
+    catalogue = _named_catalogue(technology, catalogue_id)
+    if not catalogue:
+        return render_admin_template(request, user, error='Slide catalogue not found.', status_code=404)
+    registry = load_report_catalogue_registry()
+    technology_registry = registry.setdefault(technology, {'active': 'default', 'catalogues': {}})
+    technology_registry.setdefault('catalogues', {}).pop(catalogue_id, None)
+    if technology_registry.get('active') == catalogue_id:
+        technology_registry['active'] = 'default'
+        synchronize_reporting_catalogue_document()
+    catalogue['path'].unlink(missing_ok=True)
+    save_report_catalogue_registry(registry)
+    repository.add_log(user.username, 'delete_report_catalogue', json.dumps({'technology': technology, 'catalogue': catalogue['name']}))
+    return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/admin/report-catalogues/{technology}/{catalogue_id}/save', response_class=HTMLResponse)
+def save_report_catalogue(
+    request: Request,
+    technology: str,
+    catalogue_id: str,
+    catalogue_content: str = Form(...),
+    user: SessionUser = Depends(admin_user),
+) -> HTMLResponse:
+    technology = technology.strip().lower()
+    if technology not in TEMPLATE_NAMES:
+        raise HTTPException(status_code=404, detail='Report technology not found')
+    catalogue = next((item for item in report_catalogue_options(technology) if item['identifier'] == catalogue_id), None)
+    if not catalogue:
+        return render_admin_template(request, user, error='Slide catalogue not found.', status_code=404)
+    try:
+        entries = parse_catalog_csv(catalogue_content, technology)
+        catalogue['path'].parent.mkdir(parents=True, exist_ok=True)
+        catalogue['path'].write_bytes(catalogue_csv(entries))
+        if catalogue['active']:
+            synchronize_reporting_catalogue_document()
+    except ValueError as exc:
+        return render_admin_template(request, user, error=str(exc), status_code=400)
+    repository.add_log(user.username, 'save_report_catalogue', json.dumps({
+        'technology': technology,
+        'catalogue': catalogue['name'],
+        'chart_rows': sum(1 for entry in entries if entry.source_kind),
+    }))
+    query = urlencode({'catalogue_technology': technology, 'catalogue_id': catalogue_id})
+    return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)
+
+
 @app.get('/admin/report-catalogues/{technology}/export')
 def export_report_catalogue(technology: str, user: SessionUser = Depends(admin_user)) -> Response:
     technology = technology.strip().lower()
@@ -2062,6 +2325,27 @@ def export_report_catalogue(technology: str, user: SessionUser = Depends(admin_u
         content=catalogue_csv(entries),
         media_type='text/csv; charset=utf-8',
         headers={'Content-Disposition': f'attachment; filename="{technology}-slide-catalogue.csv"'},
+    )
+
+
+@app.get('/admin/report-catalogues/export-selected')
+def export_selected_report_catalogue(
+    catalogue_selection: str,
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    if ':' not in catalogue_selection:
+        raise HTTPException(status_code=400, detail='Select a slide catalogue to export.')
+    technology, catalogue_id = catalogue_selection.split(':', 1)
+    technology = technology.strip().lower()
+    if technology not in TEMPLATE_NAMES:
+        raise HTTPException(status_code=404, detail='Report technology not found')
+    catalogue = next((item for item in report_catalogue_options(technology) if item['identifier'] == catalogue_id), None)
+    if not catalogue:
+        raise HTTPException(status_code=404, detail='Slide catalogue not found')
+    return Response(
+        content=catalogue_csv(load_catalog_csv(catalogue['path'], technology)),
+        media_type='text/csv; charset=utf-8',
+        headers={'Content-Disposition': f'attachment; filename="{technology}-{catalogue["identifier"]}-slide-catalogue.csv"'},
     )
 
 

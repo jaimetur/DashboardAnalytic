@@ -257,6 +257,279 @@ document.querySelectorAll('[data-preview-table-filters]').forEach((filters) => {
   applyPreviewFilters();
 });
 
+document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
+  const table = editor.querySelector('[data-catalogue-editor-table]');
+  const saveForm = editor.querySelector('[data-catalogue-editor-save]');
+  const contentField = editor.querySelector('[data-catalogue-editor-content]');
+  const heading = editor.querySelector('[data-catalogue-editor-heading]');
+  const copy = editor.querySelector('[data-catalogue-editor-copy]');
+  const optionsLabel = editor.querySelector('[data-catalogue-editor-options-label]');
+  const options = editor.querySelector('[data-catalogue-editor-options]');
+  const apply = editor.querySelector('[data-catalogue-editor-apply]');
+  const filterBuilder = editor.querySelector('[data-catalogue-filter-builder]');
+  const filterConditions = editor.querySelector('[data-catalogue-filter-conditions]');
+  const addFilter = editor.querySelector('[data-catalogue-filter-add]');
+  if (!table || !saveForm || !contentField || !heading || !copy || !optionsLabel || !options || !apply) return;
+
+  let suggestions = {};
+  try { suggestions = JSON.parse(editor.dataset.editorSuggestions || '{}'); } catch (_error) { suggestions = {}; }
+  let activeCell = null;
+  const fieldColumns = new Set(['Filters', 'Grouping_Rows', 'Grouping_Columns', 'Legend']);
+  const groupingColumns = new Set(['Grouping_Rows', 'Grouping_Columns']);
+  const optionList = (field, cell) => {
+    if (field === 'Layout') return suggestions.layouts || [];
+    if (field === 'Chart type') return suggestions.chart_types || [];
+    if (field === 'CDR source') return Object.keys(suggestions.columns || {}).map((source) => source.replace(/^cdr-/, 'CDR-').replace(/(^|-)\w/g, (letter) => letter.toUpperCase()));
+    if (fieldColumns.has(field) || field === 'KPI') {
+      const row = cell.closest('tr');
+      const source = row?.querySelector('[data-catalogue-field="CDR source"]')?.textContent.trim().toLocaleLowerCase();
+      return suggestions.columns?.[source] || [];
+    }
+    return [];
+  };
+  const helperCopy = (field) => {
+    if (field === 'Layout') return 'Choose one of the layouts defined by the selected PowerPoint template. It replaces the current value.';
+    if (field === 'Chart type') return 'Choose one supported chart type. It replaces the current value.';
+    if (field === 'CDR source') return 'Choose the CDR source used to create this chart. It replaces the current value.';
+    if (field === 'KPI') return 'Choose a processed field from the CDR source. It replaces the current value.';
+    if (field === 'Legend') return 'Select one or more CDR fields to use as the displayed legend labels. Values are stored as a comma-separated list.';
+    if (field === 'Filters') return 'Build complete conditions from a processed CDR field, operator and real observed value. Conditions are joined with semicolons (AND), and the cell remains manually editable.';
+    if (field === 'Grouping_Rows') return 'Select one or more dimensions for the chart category axis or table rows. They are appended with ×.';
+    if (field === 'Grouping_Columns') return 'Select one or more dimensions for comparison series or table columns. They are appended with ×.';
+    return 'This value can be edited directly. Select Layout, Chart type, Filters or Grouping for contextual suggestions.';
+  };
+  const selectedSource = (cell) => cell?.closest('tr')?.querySelector('[data-catalogue-field="CDR source"]')?.textContent.trim().toLocaleLowerCase() || '';
+  const filterOperators = [
+    ['=', 'Equals (=)'], ['!=', 'Not equal (!=)'], ['CONTAINS', 'Contains'], ['NOT CONTAINS', 'Not contains'],
+    ['IN', 'In list (IN)'], ['NOT IN', 'Not in list (NOT IN)'], ['<', 'Less than (<)'], ['<=', 'Less than or equal (≤)'],
+    ['>', 'Greater than (>)'], ['>=', 'Greater than or equal (≥)'],
+  ];
+  const parseFilterConditions = (raw) => String(raw || '').split(';').map((clause) => {
+    const match = clause.trim().match(/^(.+?)\s+(NOT\s+CONTAINS|NOT\s+IN|CONTAINS|IN|>=|<=|!=|=|>|<)\s+(.+)$/i);
+    if (!match) return null;
+    const [, field, operator, value] = match;
+    return { field: field.trim(), operator: operator.replace(/\s+/g, ' ').toUpperCase(), value: value.trim().replace(/^\((.*)\)$/, '$1') };
+  }).filter(Boolean);
+  const syncFilterCell = () => {
+    if (!activeCell || activeCell.dataset.catalogueField !== 'Filters' || !filterConditions) return;
+    const clauses = Array.from(filterConditions.querySelectorAll('[data-filter-condition]')).map((row) => {
+      const field = row.querySelector('[data-filter-field]')?.value.trim();
+      const operator = row.querySelector('[data-filter-operator]')?.value.trim();
+      const rawValue = row.querySelector('[data-filter-value]')?.value.trim();
+      if (!field || !operator || !rawValue) return '';
+      const value = ['IN', 'NOT IN'].includes(operator) && !/^\(.+\)$/.test(rawValue) ? `(${rawValue})` : rawValue;
+      return `${field} ${operator} ${value}`;
+    }).filter(Boolean);
+    activeCell.textContent = clauses.join('; ');
+  };
+  const addFilterCondition = (condition = {}) => {
+    if (!filterConditions || !activeCell) return;
+    const source = selectedSource(activeCell);
+    const fields = suggestions.columns?.[source] || [];
+    const row = document.createElement('div');
+    row.className = 'catalogue-filter-condition';
+    row.dataset.filterCondition = '';
+    const field = document.createElement('select');
+    field.dataset.filterField = '';
+    field.dataset.searchableSelect = '';
+    field.setAttribute('aria-label', 'Filter field');
+    field.append(new Option('Choose field', ''));
+    fields.forEach((value) => field.add(new Option(value, value)));
+    field.value = condition.field || '';
+    const operator = document.createElement('select');
+    operator.dataset.filterOperator = '';
+    operator.dataset.searchableSelect = '';
+    operator.setAttribute('aria-label', 'Filter operator');
+    filterOperators.forEach(([value, label]) => operator.add(new Option(label, value)));
+    operator.value = condition.operator || '=';
+    const value = document.createElement('input');
+    const list = document.createElement('datalist');
+    const listId = `catalogue-filter-values-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    value.type = 'text'; value.dataset.filterValue = ''; value.placeholder = 'Choose or type a value'; value.setAttribute('list', listId);
+    list.id = listId;
+    let valueRequest = 0;
+    const updateValues = async () => {
+      const request = ++valueRequest;
+      const selectedField = field.value;
+      list.replaceChildren();
+      if (!source || !selectedField) return;
+      try {
+        const query = new URLSearchParams({ source, column: selectedField });
+        const response = await fetch(`/admin/catalogue-filter-values?${query.toString()}`, { credentials: 'same-origin' });
+        const payload = response.ok ? await response.json() : { values: [] };
+        if (request !== valueRequest) return;
+        const available = Array.isArray(payload.values) ? payload.values : [];
+        list.replaceChildren(...available.map((item) => new Option(item, item)));
+      } catch (_error) {
+        // A value may always be entered manually if contextual values are unavailable.
+      }
+    };
+    value.value = condition.value || '';
+    updateValues();
+    const remove = document.createElement('button');
+    remove.type = 'button'; remove.className = 'catalogue-filter-remove'; remove.textContent = '−'; remove.title = 'Remove condition'; remove.setAttribute('aria-label', 'Remove filter condition');
+    field.addEventListener('change', () => { updateValues(); syncFilterCell(); });
+    operator.addEventListener('change', syncFilterCell);
+    value.addEventListener('input', syncFilterCell);
+    remove.addEventListener('click', () => { row.remove(); syncFilterCell(); });
+    row.append(field, operator, value, remove, list);
+    filterConditions.append(row);
+    setupSearchableSingleSelects();
+  };
+  const populateFilterBuilder = (cell) => {
+    if (!filterBuilder || !filterConditions) return;
+    filterConditions.replaceChildren();
+    const conditions = parseFilterConditions(cell.textContent);
+    (conditions.length ? conditions : [{}]).forEach(addFilterCondition);
+    filterBuilder.hidden = false;
+  };
+  const selectCell = (cell) => {
+    if (activeCell) activeCell.classList.remove('is-selected');
+    activeCell = cell;
+    activeCell.classList.add('is-selected');
+    const field = cell.dataset.catalogueField || '';
+    heading.textContent = field || 'Selected cell';
+    copy.textContent = helperCopy(field);
+    const values = optionList(field, cell);
+    const allowsMultiple = fieldColumns.has(field);
+    options.multiple = allowsMultiple;
+    options.size = allowsMultiple ? 11 : 1;
+    options.replaceChildren();
+    const existingValues = new Set(
+      (allowsMultiple
+        ? cell.textContent.split(groupingColumns.has(field) ? /(?:\s*×\s*|\s+[xX]\s+)/ : /\s*,\s*/)
+        : [cell.textContent])
+        .map((value) => value.trim())
+        .filter(Boolean),
+    );
+    if (values.length) {
+      values.forEach((value) => options.add(new Option(value, value, false, existingValues.has(value))));
+    } else {
+      options.add(new Option('No contextual values are defined for this field. Edit it manually.', '', true, false));
+      options.options[0].disabled = true;
+    }
+    optionsLabel.hidden = false;
+    apply.hidden = values.length === 0;
+    if (field === 'Filters') {
+      optionsLabel.hidden = true;
+      apply.hidden = true;
+      populateFilterBuilder(cell);
+    } else if (filterBuilder) {
+      filterBuilder.hidden = true;
+    }
+    options.dispatchEvent(new Event('searchable-select:options-updated'));
+    options.dispatchEvent(new Event('multiselect:options-updated'));
+    // A preceding single-value field removes the custom control; recreate it
+    // whenever this cell switches Available values back to multi-select.
+    setupCustomMultiSelects();
+    setupSearchableSingleSelects();
+  };
+  const selectedCellFromEvent = (event) => event.target.closest?.('[data-catalogue-field]');
+  table.addEventListener('focusin', (event) => {
+    const cell = selectedCellFromEvent(event);
+    if (cell) selectCell(cell);
+  });
+  table.addEventListener('click', (event) => {
+    const cell = selectedCellFromEvent(event);
+    if (cell) selectCell(cell);
+  });
+  addFilter?.addEventListener('click', () => addFilterCondition());
+  apply.addEventListener('click', () => {
+    if (!activeCell) return;
+    const selected = Array.from(options.selectedOptions).map((option) => option.value).filter(Boolean);
+    if (!selected.length) return;
+    const field = activeCell.dataset.catalogueField || '';
+    const current = activeCell.textContent.trim();
+    if (field === 'Layout' || field === 'Chart type' || field === 'CDR source' || field === 'KPI') {
+      activeCell.textContent = selected[0];
+    } else if (field === 'Filters') {
+      const clauses = selected.map((value) => `${value} = `).join('; ');
+      activeCell.textContent = current ? `${current}; ${clauses}` : clauses;
+    } else if (field === 'Legend') {
+      activeCell.textContent = selected.join(', ');
+    } else {
+      const currentOrder = current.split(/(?:\s*×\s*|\s+[xX]\s+)/).map((value) => value.trim()).filter(Boolean);
+      const retained = currentOrder.filter((value) => selected.includes(value));
+      const additions = selected.filter((value) => !currentOrder.includes(value));
+      activeCell.textContent = [...retained, ...additions].join(' × ');
+    }
+    activeCell.focus();
+  });
+  saveForm.addEventListener('submit', () => {
+    const headers = Array.from(table.querySelectorAll('thead th')).map((cell) => cell.textContent.trim());
+    const escapeCsv = (value) => {
+      const text = String(value || '').replace(/\r?\n/g, '\\n');
+      return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const rows = Array.from(table.querySelectorAll('tbody tr')).map((row) => (
+      Array.from(row.querySelectorAll('[data-catalogue-field]')).map((cell) => escapeCsv(cell.textContent.trim())).join(',')
+    ));
+    contentField.value = [headers.map(escapeCsv).join(','), ...rows].join('\n');
+  });
+});
+
+document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
+  const initialValue = input.value;
+  input.addEventListener('change', () => {
+    if (input.value.trim() && input.value.trim() !== initialValue.trim()) {
+      input.form?.requestSubmit();
+    }
+  });
+});
+
+document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
+  const name = form.querySelector('[data-catalogue-import-name]');
+  const file = form.querySelector('[data-catalogue-import-file]');
+  const convert = form.querySelector('[data-catalogue-convert]');
+  const currentHeaders = [
+    'Slide', 'Slide tittle', 'Slide Subtittle', 'Layout', 'Chart Tittle', 'CDR source',
+    'KPI', 'Chart type', 'Legend', 'Filters', 'Grouping_Rows', 'Grouping_Columns',
+  ];
+  const normalizedHeader = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const hasCurrentSchema = async (selected) => {
+    const headerLine = (await selected.slice(0, 65536).text())
+      .replace(/^\uFEFF/, '')
+      .split(/\r?\n/)
+      .find((line) => line.trim());
+    if (!headerLine) return false;
+    const headers = headerLine.split(',').map((header) => normalizedHeader(header.replace(/^"|"$/g, '')));
+    return headers.length === currentHeaders.length
+      && headers.every((header, index) => header === normalizedHeader(currentHeaders[index]));
+  };
+  file?.addEventListener('change', () => {
+    const selected = file.files?.[0];
+    if (!selected || !name || name.value.trim()) return;
+    name.value = selected.name.replace(/\.csv$/i, '').replace(/[_-]+/g, ' ').trim();
+  });
+  form.addEventListener('submit', async (event) => {
+    if (form.dataset.catalogueSubmitting === '1') return;
+    event.preventDefault();
+    const selected = file?.files?.[0];
+    if (!selected) {
+      form.dataset.catalogueSubmitting = '1';
+      HTMLFormElement.prototype.submit.call(form);
+      return;
+    }
+    let shouldConvert = false;
+    try {
+      shouldConvert = !(await hasCurrentSchema(selected));
+    } catch (_) {
+      // Let the server provide the detailed error if this file cannot be read.
+    }
+    if (shouldConvert) {
+      const accepted = await showConfirmDialog(
+        'This CSV uses an older or different column layout. Compatible fields will be migrated to the current Slide Catalogue format; new presentation fields will be left blank where they do not exist.',
+        {title: 'Convert Slide Catalogue?', confirmLabel: 'Convert and Import'},
+      );
+      if (!accepted) return;
+    }
+    if (convert) convert.value = shouldConvert ? '1' : '0';
+    form.dataset.catalogueSubmitting = '1';
+    showLoadingOverlay('Importing Slide Catalogue', 'Validating and storing the selected catalogue in the workspace.');
+    HTMLFormElement.prototype.submit.call(form);
+  });
+});
+
 document.addEventListener('click', (event) => {
   const previewLink = event.target.closest('[data-preview-open-link]');
   if (previewLink) {
@@ -628,6 +901,87 @@ function setupPersistentPanelState() {
   });
 }
 
+function setupSearchableSingleSelects() {
+  document.querySelectorAll('select[data-searchable-select]:not([multiple])').forEach((select) => {
+    if (select.dataset.searchableReady === '1') return;
+    select.dataset.searchableReady = '1';
+    select.classList.add('searchable-select-native');
+
+    const shell = document.createElement('div');
+    shell.className = 'searchable-select-shell';
+    const input = document.createElement('input');
+    input.type = 'search';
+    input.className = 'searchable-select-input';
+    input.placeholder = 'Search values…';
+    input.setAttribute('aria-label', select.getAttribute('aria-label') || 'Search values');
+    const menu = document.createElement('div');
+    menu.className = 'searchable-select-menu';
+    menu.hidden = true;
+
+    const syncInput = () => {
+      const current = Array.from(select.options).find((option) => option.selected);
+      input.value = current?.textContent?.trim() || '';
+    };
+    const renderOptions = (query = '') => {
+      const normalized = query.trim().toLocaleLowerCase();
+      menu.replaceChildren();
+      Array.from(select.options).filter((option) => (
+        !option.disabled && (!normalized || (option.textContent || '').toLocaleLowerCase().includes(normalized))
+      )).forEach((option) => {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'searchable-select-option';
+        item.textContent = option.textContent || option.value;
+        item.setAttribute('aria-selected', String(option.selected));
+        item.addEventListener('click', () => {
+          select.value = option.value;
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+          select.dispatchEvent(new Event('input', { bubbles: true }));
+          syncInput();
+          menu.hidden = true;
+        });
+        menu.appendChild(item);
+      });
+      if (!menu.childElementCount) {
+        const empty = document.createElement('p');
+        empty.className = 'searchable-select-empty';
+        empty.textContent = 'No matching values';
+        menu.appendChild(empty);
+      }
+    };
+    const filterSingleSelect = () => {
+      renderOptions(input.value);
+      menu.hidden = false;
+    };
+    input.addEventListener('focus', () => {
+      // Replace the current selection when the user starts typing a search.
+      input.select();
+      renderOptions('');
+      menu.hidden = false;
+    });
+    input.addEventListener('input', filterSingleSelect);
+    input.addEventListener('keyup', filterSingleSelect);
+    input.addEventListener('search', filterSingleSelect);
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { menu.hidden = true; input.blur(); }
+    });
+    document.addEventListener('click', (event) => {
+      if (!shell.contains(event.target)) menu.hidden = true;
+    });
+    select.addEventListener('change', syncInput);
+    const rebuildOnOptionUpdate = () => {
+      select.removeEventListener('searchable-select:options-updated', rebuildOnOptionUpdate);
+      shell.remove();
+      select.classList.remove('searchable-select-native');
+      delete select.dataset.searchableReady;
+    };
+    select.addEventListener('searchable-select:options-updated', rebuildOnOptionUpdate);
+    select.after(shell);
+    shell.append(input, menu);
+    syncInput();
+  });
+}
+
 function setupCustomMultiSelects() {
   document.querySelectorAll('select[multiple]').forEach((select) => {
     if (select.dataset.multiselectReady === '1') return;
@@ -654,6 +1008,13 @@ function setupCustomMultiSelects() {
     const menu = document.createElement('div');
     menu.className = 'multiselect-menu';
     menu.hidden = true;
+
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.className = 'multiselect-search';
+    search.placeholder = 'Filter values…';
+    search.setAttribute('aria-label', 'Filter available values');
+    menu.appendChild(search);
 
     const actionButton = document.createElement('button');
     actionButton.type = 'button';
@@ -730,6 +1091,17 @@ function setupCustomMultiSelects() {
       menu.appendChild(optionLabel);
     });
 
+    const filterMultiSelect = () => {
+      const query = search.value.trim().toLocaleLowerCase();
+      Array.from(menu.querySelectorAll('.multiselect-option')).forEach((optionLabel) => {
+        const text = optionLabel.textContent?.toLocaleLowerCase() || '';
+        optionLabel.hidden = Boolean(query) && !text.includes(query);
+      });
+    };
+    search.addEventListener('input', filterMultiSelect);
+    search.addEventListener('keyup', filterMultiSelect);
+    search.addEventListener('search', filterMultiSelect);
+
     const syncCheckboxes = () => {
       Array.from(menu.querySelectorAll('input[type="checkbox"][data-option-value]')).forEach((checkbox) => {
         const option = Array.from(select.options).find((item) => item.value === checkbox.getAttribute('data-option-value'));
@@ -743,6 +1115,7 @@ function setupCustomMultiSelects() {
     trigger.addEventListener('click', () => {
       menu.hidden = !menu.hidden;
       syncTrigger();
+      if (!menu.hidden) search.focus();
     });
 
     document.addEventListener('click', (event) => {
@@ -753,6 +1126,15 @@ function setupCustomMultiSelects() {
     });
 
     select.addEventListener('change', syncCheckboxes);
+    const rebuildOnOptionUpdate = () => {
+      // Dynamic option lists need a new checkbox menu to remain in sync.
+      select.removeEventListener('multiselect:options-updated', rebuildOnOptionUpdate);
+      shell.remove();
+      select.classList.remove('multiselect-native');
+      delete select.dataset.multiselectReady;
+      setupCustomMultiSelects();
+    };
+    select.addEventListener('multiselect:options-updated', rebuildOnOptionUpdate);
     select.after(shell);
     shell.appendChild(trigger);
     shell.appendChild(menu);
@@ -854,6 +1236,7 @@ if (window.location.pathname === '/workspace') {
 setupPersistentControls();
 setupPersistentPanelState();
 setupCustomMultiSelects();
+setupSearchableSingleSelects();
 
 function maybeSyncPersistedGlobalDashboardSelectors() {
   if (window.location.pathname !== '/dashboard' || hasPendingLocationRestore) return;
