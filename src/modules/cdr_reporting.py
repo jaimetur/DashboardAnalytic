@@ -373,6 +373,37 @@ def enrich_multivendor(df: pd.DataFrame, vodafone_mapping: pd.DataFrame, three_m
     return result
 
 
+def assign_cdr_vendors(
+    df: pd.DataFrame,
+    vodafone_mapping: pd.DataFrame | None = None,
+    three_mapping: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Assign the agreed multivendor value to the normalized CDR ``vendor`` field.
+
+    This is the persistent Workspace counterpart of report-time enrichment.  The
+    same first/last ``Cell_ID_A`` and operator formula is used, while allowing a
+    CDR to be mapped with the VFUK and/or 3UK mapping files available in its
+    Workspace.
+    """
+    result = df.copy()
+    operator_column = _first_existing(result, ["operator", "Operator"])
+    cell_column = _first_existing(result, ["Cell_ID_A", "Cell_IDs_A", "Cell_ID"])
+    if not operator_column or not cell_column:
+        raise ValueError("The selected CDR must contain Operator and Cell_ID_A to assign vendors.")
+
+    vodafone_lookup = build_vodafone_vendor_lookup(vodafone_mapping) if vodafone_mapping is not None else {}
+    three_lookup = build_three_vendor_lookup(three_mapping) if three_mapping is not None else {}
+    result["vendor"] = [
+        vendor_from_cells(
+            operator,
+            cells,
+            vodafone_lookup if _normalise_operator(operator) == "Vodafone UK" else three_lookup,
+        )
+        for operator, cells in result[[operator_column, cell_column]].itertuples(index=False)
+    ]
+    return result
+
+
 def _font(size: int, bold: bool = False) -> ImageFont.ImageFont:
     path = "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf"
     try:

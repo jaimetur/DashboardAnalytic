@@ -303,6 +303,41 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     assert 'href="/workspace/preview/1" data-preview-open-link data-loading-label="Generating dataset preview">Preview Dataset</a>' in dashboard_response.text
 
 
+def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mapping(client) -> None:
+    login(client)
+    client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'data'},
+        files={'dataset_files': ('cdr_data.csv', BytesIO(b'operator,Cell_ID_A,score\n3,200 -> 200,91\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'mapping_three'},
+        files={'dataset_files': ('Multivendor_Mapping_3UK.csv', BytesIO(b'Cid__ECI,Vendor\n200,Nokia\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+
+    workspace = client.get('/workspace')
+    assert 'Map Vendors</button>' in workspace.text
+    assert 'name="three_mapping_dataset_id" required' in workspace.text
+    assert 'name="vodafone_mapping_dataset_id" required' not in workspace.text
+
+    response = client.post(
+        '/workspace/map-vendors',
+        data={'cdr_dataset_id': 1, 'three_mapping_dataset_id': 2},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    preview = client.get('/workspace/preview/1')
+    assert preview.status_code == 200
+    assert '>3_Nokia<' in preview.text
+    workspace_after_mapping = client.get('/workspace').text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
+    assert 'data-dataset-id="1"' in workspace_after_mapping
+    assert 'Map Vendors</button>' not in workspace_after_mapping
+
+
 def test_vfuk_preview_limits_mapping_sheets_and_displays_materialised_gcid(client) -> None:
     login(client)
     workbook = BytesIO()

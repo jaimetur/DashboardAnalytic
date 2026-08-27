@@ -106,6 +106,7 @@
                 <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
                   <button type="submit" class="danger-button">Delete</button>
                 </form>
+                {% if dataset.can_map_vendors or dataset.dataset_kind in ['data', 'voice', 'speech'] %}
                 {% if dataset.dataset_kind in ['data', 'voice', 'speech'] %}
                 <a
                   class="ghost-link action-link-primary"
@@ -114,6 +115,16 @@
                   data-dataset-id="{{ dataset.id }}"
                   {% if dataset.dataset_kind %}data-input-kind="{{ dataset.dataset_kind }}"{% endif %}
                 >Show Dashboard</a>
+                {% endif %}
+                {% if dataset.can_map_vendors %}
+                <button
+                  type="button"
+                  class="ghost-link action-link-map-vendors"
+                  data-vendor-map-open
+                  data-dataset-id="{{ dataset.id }}"
+                  data-dataset-name="{{ dataset.file_name }}"
+                >Map Vendors</button>
+                {% endif %}
                 {% endif %}
                 {% elif dataset.status == 'processing' %}
                 <span class="ghost-link action-link-disabled" aria-disabled="true">View</span>
@@ -145,6 +156,46 @@
       </table>
     </div>
   </details>
+
+  <dialog class="vendor-mapping-dialog" data-vendor-mapping-dialog aria-labelledby="vendor-mapping-title">
+    <form method="post" action="/workspace/map-vendors" data-loading-label="Mapping CDR vendors">
+      <input type="hidden" name="cdr_dataset_id" data-vendor-mapping-cdr-id>
+      <p class="eyebrow">NetCheck CDR</p>
+      <h3 id="vendor-mapping-title">Map Vendors</h3>
+      <p class="lede">Choose the processed Multivendor Mappings to assign the calculated Vendor to every CDR sample using its Operator and the first and last values in <code>Cell_ID_A</code>.</p>
+      <p class="form-note" data-vendor-mapping-dataset-name></p>
+      <div class="vendor-mapping-fields">
+        {% if vodafone_mapping_datasets %}
+        <label>VFUK Multivendor Mapping
+          <select name="vodafone_mapping_dataset_id" required>
+            <option value="" selected disabled>Select a VFUK mapping</option>
+            {% for mapping in vodafone_mapping_datasets %}
+            <option value="{{ mapping.id }}">{{ mapping.file_name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        {% else %}
+        <p class="form-note">No processed VFUK Multivendor Mapping is currently available.</p>
+        {% endif %}
+        {% if three_mapping_datasets %}
+        <label>3UK Multivendor Mapping
+          <select name="three_mapping_dataset_id" required>
+            <option value="" selected disabled>Select a 3UK mapping</option>
+            {% for mapping in three_mapping_datasets %}
+            <option value="{{ mapping.id }}">{{ mapping.file_name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        {% else %}
+        <p class="form-note">No processed 3UK Multivendor Mapping is currently available.</p>
+        {% endif %}
+      </div>
+      <div class="vendor-mapping-actions">
+        <button type="button" class="ghost-link" data-vendor-map-cancel>Cancel</button>
+        <button type="submit">Map Vendors</button>
+      </div>
+    </form>
+  </dialog>
 
   <details class="panel collapsible-panel" open data-panel-state-key="workspace:logs">
     <summary class="collapsible-summary">
@@ -279,6 +330,26 @@
     if (!files?.length) return;
     picker.files = files;
     picker.dispatchEvent(new Event('change', {bubbles: true}));
+  });
+})();
+</script>
+<script>
+(() => {
+  const dialog = document.querySelector('[data-vendor-mapping-dialog]');
+  const cdrId = dialog?.querySelector('[data-vendor-mapping-cdr-id]');
+  const datasetName = dialog?.querySelector('[data-vendor-mapping-dataset-name]');
+  if (!dialog || !cdrId || !datasetName) return;
+
+  document.querySelectorAll('[data-vendor-map-open]').forEach((button) => {
+    button.addEventListener('click', () => {
+      cdrId.value = button.dataset.datasetId || '';
+      datasetName.textContent = button.dataset.datasetName || '';
+      dialog.showModal();
+    });
+  });
+  dialog.querySelector('[data-vendor-map-cancel]')?.addEventListener('click', () => dialog.close());
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog) dialog.close();
   });
 })();
 </script>

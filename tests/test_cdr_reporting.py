@@ -6,7 +6,7 @@ from io import BytesIO
 from pathlib import Path
 from pptx import Presentation
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, classify_sessions, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, assign_cdr_vendors, classify_sessions, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, vendor_from_cells
 
 
 def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> None:
@@ -42,6 +42,21 @@ def test_session_classification_and_multivendor_enrichment() -> None:
     assert len(sa) == 1
     assert enrich_multivendor(nsa, vodafone_mapping, three_mapping)['report_vendor'].tolist() == ['Vodafone_Ericsson']
     assert enrich_multivendor(sa, vodafone_mapping, three_mapping)['report_vendor'].tolist() == ['3_Mixed Vendor']
+
+
+def test_workspace_vendor_assignment_writes_the_normalized_vendor_field() -> None:
+    cdr = pd.DataFrame({
+        'Operator': ['Vodafone UK', '3', 'O2'],
+        'Cell_ID_A': ['100 -> 100', '200 -> 201', '300'],
+    })
+    vodafone_mapping = pd.DataFrame({
+        'source_sheet': ['4G'], 'eNodeB ID': [0], 'Local Cell ID': [100], 'OP/ Vendor': ['Ericsson'],
+    })
+    three_mapping = pd.DataFrame({'Cid__ECI': [200, 201], 'Vendor': ['Nokia', 'Ericsson']})
+
+    mapped = assign_cdr_vendors(cdr, vodafone_mapping, three_mapping)
+
+    assert mapped['vendor'].tolist() == ['Vodafone_Ericsson', '3_Mixed Vendor', 'O2']
 
 
 def test_vodafone_mapping_derives_gcid_from_4g_enodeb_and_local_cell() -> None:

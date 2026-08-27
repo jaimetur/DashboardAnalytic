@@ -25,7 +25,7 @@ from starlette.datastructures import QueryParams
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import TEMPLATE_NAMES, active_catalog_path, classify_sessions, enrich_multivendor, load_catalog_csv, parse_catalog_csv, render_cdr_report, update_catalogue_document
+from src.modules.cdr_reporting import TEMPLATE_NAMES, active_catalog_path, assign_cdr_vendors, classify_sessions, enrich_multivendor, load_catalog_csv, parse_catalog_csv, render_cdr_report, update_catalogue_document
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
@@ -667,6 +667,54 @@ def ensure_mapping_gcid(dataset: dict[str, Any]) -> dict[str, Any]:
     return serialize_dataset_row(refreshed) if refreshed else dataset
 
 
+def dataset_has_vendor_assignments(dataset_id: int) -> bool:
+    """Return whether every processed CDR sample already has a Vendor value."""
+    columns = repository.list_dataset_row_columns(dataset_id)
+    if 'vendor' not in columns:
+        return False
+    frame = repository.load_dataset_rows(dataset_id, ['vendor'], {})
+    if frame.empty or 'vendor' not in frame.columns:
+        return False
+    assigned = frame['vendor'].fillna('').astype(str).str.strip().ne('')
+    return bool(assigned.all())
+
+
+def persist_mapped_cdr_frame(dataset: dict[str, Any], frame: pd.DataFrame) -> None:
+    """Replace a materialized CDR after vendor mapping and refresh its profile."""
+    dataset_id = int(dataset['id'])
+    repository.replace_dataset_rows(dataset_id, frame)
+    summary = summarise_dataset(frame)
+    available_metrics = derive_available_metrics(frame)
+    analysis = build_analysis(frame, {'aggregation': 'all', 'extra_filters': {}}, '')
+    profile_df = restrict_frame_to_metric(frame, analysis.selected_metric)
+    filter_options = derive_filter_options(profile_df)
+    available_aggregations = derive_available_aggregations(filter_options)
+    default_aggregation = analysis.filters.get('aggregation')
+    if default_aggregation == 'all' and available_aggregations:
+        default_aggregation = available_aggregations[0]
+    repository.update_dataset_profile(
+        dataset_id,
+        normalization_version=DATASET_NORMALIZATION_VERSION,
+        row_count=summary.rows,
+        column_count=len(summary.columns),
+        default_metric=analysis.selected_metric,
+        default_aggregation=default_aggregation or 'all',
+        available_metrics_json=json.dumps(available_metrics),
+        available_aggregations_json=json.dumps(available_aggregations),
+        filter_options_json=json.dumps(filter_options),
+        summary_json=json.dumps(asdict(summary)),
+        kpis_json=json.dumps(analysis.kpis),
+        processed_at=now_iso(),
+        last_error=None,
+    )
+
+
+def clear_dataset_analysis_cache(dataset_path: Path) -> None:
+    resolved_path = str(dataset_path.resolve())
+    for key in [key for key in ANALYSIS_CACHE if resolved_path in key]:
+        ANALYSIS_CACHE.pop(key, None)
+
+
 def refresh_selected_dataset_if_stale(selected_dataset: dict[str, Any] | None) -> dict[str, Any] | None:
     if not selected_dataset or not selected_dataset.get('is_ready'):
         return selected_dataset
@@ -936,6 +984,8 @@ def describe_workspace_log_entry(log: dict[str, Any]) -> str:
             return f"Dataset {details.get('dataset_id')} processed successfully."
         if log['action'] == 'retry_dataset':
             return f"Retry requested for dataset {details.get('dataset_id')}."
+        if log['action'] == 'map_dataset_vendors':
+            return f"Vendor mapping applied to CDR dataset {details.get('dataset_id')}."
         if log['action'] in {'stop_dataset', 'stop_dataset_requested'}:
             return f"Stop requested for dataset {details.get('dataset_id')}."
         if log['action'] == 'delete_dataset':
@@ -1210,6 +1260,17 @@ def workspace(
         log['summary'] = describe_workspace_log_entry(log)
         log['log_type'] = classify_workspace_log_entry(log)
 
+    vodafone_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_vodafone']
+    three_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_three']
+    has_vendor_mappings = bool(vodafone_mapping_datasets or three_mapping_datasets)
+    for dataset in datasets:
+        dataset['can_map_vendors'] = (
+            has_vendor_mappings
+            and dataset.get('is_ready')
+            and dataset.get('dataset_kind') in CDR_DATASET_KINDS
+            and not dataset_has_vendor_assignments(dataset['id'])
+        )
+
     return render_template(
         request,
         'workspace.html',
@@ -1223,7 +1284,9 @@ def workspace(
             'workspace_logs': workspace_logs,
             'error': None,
             'has_processing': has_processing,
-        },
+            'vodafone_mapping_datasets': vodafone_mapping_datasets,
+            'three_mapping_datasets': three_mapping_datasets,
+            },
     )
 
 
@@ -1556,6 +1619,51 @@ def retry_dataset(dataset_id: int, background_tasks: BackgroundTasks, user: Sess
     enqueue_dataset_processing(background_tasks, dataset_id, Path(dataset_payload['stored_path']), user.username)
     repository.add_log(user.username, 'retry_dataset', json.dumps({'dataset_id': dataset_id, 'file': dataset_payload['file_name']}))
     return RedirectResponse(f'/workspace?dataset_id={dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/workspace/map-vendors')
+def map_dataset_vendors(
+    cdr_dataset_id: int = Form(...),
+    vodafone_mapping_dataset_id: int | None = Form(default=None),
+    three_mapping_dataset_id: int | None = Form(default=None),
+    user: SessionUser = Depends(current_user),
+) -> Response:
+    cdr_row = repository.get_dataset(cdr_dataset_id)
+    if not cdr_row:
+        raise HTTPException(status_code=404, detail='The selected CDR was not found.')
+    cdr_dataset = serialize_dataset_row(cdr_row)
+    if not cdr_dataset['is_ready'] or cdr_dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
+        raise HTTPException(status_code=400, detail='Vendor mapping is only available for processed NetCheck CDR datasets.')
+    if dataset_has_vendor_assignments(cdr_dataset_id):
+        raise HTTPException(status_code=400, detail='This CDR already has mapped Vendor values.')
+    if not vodafone_mapping_dataset_id and not three_mapping_dataset_id:
+        raise HTTPException(status_code=400, detail='Select at least one processed VFUK or 3UK Multivendor Mapping.')
+
+    try:
+        vodafone_mapping = (
+            _reporting_dataset(vodafone_mapping_dataset_id, 'mapping_vodafone')
+            if vodafone_mapping_dataset_id else None
+        )
+        three_mapping = (
+            _reporting_dataset(three_mapping_dataset_id, 'mapping_three')
+            if three_mapping_dataset_id else None
+        )
+        mapped_frame = assign_cdr_vendors(
+            _reporting_frame(cdr_dataset_id),
+            _reporting_frame(vodafone_mapping['id']) if vodafone_mapping else None,
+            _reporting_frame(three_mapping['id']) if three_mapping else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    persist_mapped_cdr_frame(cdr_dataset, mapped_frame)
+    clear_dataset_analysis_cache(Path(cdr_dataset['stored_path']))
+    repository.add_log(user.username, 'map_dataset_vendors', json.dumps({
+        'dataset_id': cdr_dataset_id,
+        'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
+        'three_mapping_dataset_id': three_mapping_dataset_id,
+    }))
+    return RedirectResponse(f'/workspace?dataset_id={cdr_dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/dashboard/stop/{dataset_id}')
