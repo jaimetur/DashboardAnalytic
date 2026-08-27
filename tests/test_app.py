@@ -1135,6 +1135,46 @@ def test_dashboard_adaptive_filters_include_city_and_multi_select_fields(client)
     assert "All values are selected by default. Clearing all values applies an empty filter." in response.text
 
 
+def test_dashboard_adaptive_filters_populate_netcheck_a_columns_for_existing_cdrs(client) -> None:
+    login(client)
+    csv_content = (
+        b"RAT_A,Operator_A,Session_Type_A,Call_Status_A,Call_Duration\n"
+        b"ENDC,Vodafone UK,VoLTE,Completed,61\n"
+        b"NR,Three UK,VoNR,Dropped,42\n"
+    )
+    upload_response = client.post(
+        "/dashboard/upload",
+        data={"dataset_kinds": "voice"},
+        files={"dataset_files": ("netcheck_voice.csv", BytesIO(csv_content), "text/csv")},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    import src.DashboardAnalytic as app_module
+
+    table_name = app_module.repository.dataset_rows_table_name(1)
+    with app_module.repository.connection() as conn:
+        conn.execute(
+            f'''UPDATE "{table_name}" SET "operator" = NULL, "session_type" = NULL, "status" = NULL'''
+        )
+        conn.execute(
+            """
+            UPDATE dataset_profiles
+            SET normalization_version = 4, filter_options_json = '{}'
+            WHERE dataset_id = 1
+            """
+        )
+
+    response = client.get("/dashboard?dataset_id=1&metric=Call_Duration&aggregation=all&load=1")
+    assert response.status_code == 200
+    assert 'select name="operator" multiple' in response.text
+    assert 'value="Vodafone UK"' in response.text
+    assert 'value="Three UK"' in response.text
+    assert 'select name="session_type" multiple' in response.text
+    assert 'value="VoLTE"' in response.text
+    assert 'value="VoNR"' in response.text
+
+
 def test_dashboard_adaptive_filters_label_technology_without_primary(client) -> None:
     login(client)
     csv_content = b"market,period,score,RAT\nES,2026-Q1,91,5G\nES,2026-Q1,87,LTE\n"

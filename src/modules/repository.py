@@ -415,18 +415,21 @@ class Repository:
             return requested
 
         lowered = str(requested).strip().lower()
+        # Pandas preserves an original source column (for example ``Operator``)
+        # and stores the normalised equivalent as ``operator__2`` when their
+        # names collide case-insensitively.  A request for the normalised lower
+        # case field must prefer that generated column.
+        suffixed_matches = sorted(
+            column for column in existing_columns
+            if str(column).strip().lower().startswith(f'{lowered}__')
+        )
+        if suffixed_matches:
+            return suffixed_matches[0]
+
         case_matches = [column for column in existing_columns if str(column).strip().lower() == lowered]
         if case_matches:
             exact_lowercase = next((column for column in case_matches if column == lowered), None)
-            return exact_lowercase or case_matches[0]
-
-        suffixed_matches = [
-            column for column in existing_columns
-            if str(column).strip().lower().startswith(f'{lowered}__')
-        ]
-        if suffixed_matches:
-            exact_lowercase = next((column for column in suffixed_matches if str(column).startswith(f'{lowered}__')), None)
-            return exact_lowercase or suffixed_matches[0]
+            return exact_lowercase or sorted(case_matches)[0]
         return None
 
     def resolve_dataset_row_column_name(self, dataset_id: int, requested: str) -> str | None:
@@ -454,36 +457,55 @@ class Repository:
             rows = conn.execute(query, (int(limit),)).fetchall()
         return [str(row['value']).strip() for row in rows if str(row['value']).strip()]
 
-    def refresh_dataset_row_technology_primary(self, dataset_id: int) -> bool:
+    def refresh_dataset_row_normalized_dimensions(self, dataset_id: int) -> bool:
         table_name = self.dataset_rows_table_name(dataset_id)
         existing_columns = set(self.list_dataset_row_columns(dataset_id))
-        target_column = self._resolve_dataset_row_column_name(existing_columns, 'technology_primary')
-        if not target_column:
-            return False
-
-        source_candidates = ['RAT', 'RAT_A', 'L2_call_Mode_A', 'Playing_Technology']
-        resolved_sources = [
-            self._resolve_dataset_row_column_name(existing_columns, candidate)
-            for candidate in source_candidates
-        ]
-        resolved_sources = [column for column in resolved_sources if column]
-        if not resolved_sources:
-            return False
-
-        coalesce_expression = ', '.join(
-            f"NULLIF(TRIM(CAST({self._quote_identifier(column)} AS TEXT)), '')"
-            for column in resolved_sources
-        )
+        normalised_sources = {
+            'operator': ['Operator_A', 'Operator', 'Home_Operator_A', 'Home_Operator'],
+            'session_type': ['Session_Type_A', 'Session_Type', 'Type_of_Test'],
+            'test_name': ['Test_Name', 'Session_Type_A', 'Session_Type', 'Type_of_Test'],
+            'direction': ['Direction_A', 'Direction', 'Call_Direction'],
+            'status': ['Call_Status_A', 'Call_Status', 'Test_Result', 'Test_Status'],
+            'technology_primary': ['RAT_A', 'RAT', 'L2_call_Mode_A', 'Playing_Technology'],
+        }
         quoted_table = self._quote_identifier(table_name)
-        quoted_target = self._quote_identifier(target_column)
+        updates: list[tuple[str, list[str]]] = []
+        for target, candidates in normalised_sources.items():
+            target_column = self._resolve_dataset_row_column_name(existing_columns, target)
+            if not target_column:
+                continue
+            sources: list[str] = []
+            for candidate in candidates:
+                source = self._resolve_dataset_row_column_name(existing_columns, candidate)
+                if source and source != target_column and source not in sources:
+                    sources.append(source)
+            if sources:
+                updates.append((target_column, sources))
+
+        if not updates:
+            return False
+
         with self.connection() as conn:
-            conn.execute(
-                f"""
-                UPDATE {quoted_table}
-                SET {quoted_target} = COALESCE({coalesce_expression}, {quoted_target})
-                """
-            )
+            for target_column, sources in updates:
+                coalesce_expression = ', '.join(
+                    f"NULLIF(TRIM(CAST({self._quote_identifier(column)} AS TEXT)), '')"
+                    for column in sources
+                )
+                quoted_target = self._quote_identifier(target_column)
+                conn.execute(
+                    f"""
+                    UPDATE {quoted_table}
+                    SET {quoted_target} = COALESCE(
+                        NULLIF(TRIM(CAST({quoted_target} AS TEXT)), ''),
+                        {coalesce_expression}
+                    )
+                    """
+                )
         return True
+
+    def refresh_dataset_row_technology_primary(self, dataset_id: int) -> bool:
+        """Backward-compatible alias for callers before dimension backfill v5."""
+        return self.refresh_dataset_row_normalized_dimensions(dataset_id)
 
     def load_dataset_rows(self, dataset_id: int, columns: list[str], filters: dict[str, Any]) -> pd.DataFrame:
         table_name = self.dataset_rows_table_name(dataset_id)

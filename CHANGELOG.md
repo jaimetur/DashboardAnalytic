@@ -33,7 +33,7 @@
 - Simplified Multivendor Reporting to use the Vendor mapping already persisted on selected CDRs: VFUK/3UK mapping selectors were removed, and the Multivendor scope becomes available only when at least one selected CDR has been mapped in Workspace.
 - Enhanced CDR previews with soft-blue Vendor and soft-yellow source_sheet columns, multi-select Operator, Vendor, RAT/RAT_A, Session Type and Call Status filters; filter menus now layer above Sample Data instead of being obscured by the next panel.
 - Optimized Workspace loading by using persistent Vendor-mapping and Vendor-completeness flags instead of reopening or scanning every CDR on each page load; legacy mapped CDRs are marked once during database initialization.
-- Improved E2E Dashboard filter readability with compact light-blue selected/focus states, and changed Workspace/Dashboard Preview actions to open the processed preview in a new tab.
+- Improved E2E Dashboard filter readability with compact light-blue selected/focus states, completed NetCheck `*_A` field normalisation so Adaptive Filters populate from processed CDR values (including existing datasets), and changed Workspace/Dashboard Preview actions to open the processed preview in a new tab.
 - Added **Preview Dataset** to the E2E Dashboard Selected Dataset panel, reusing the same processed-data preview, row-limit controls, filters and loading dialog as Workspace.
 - Kept Dashboard **Preview Dataset** left-aligned while Word and PowerPoint exports remain right-aligned in their shared action row; made Dashboard panels, controls and KPI cards fluid at mobile widths.
 - Refined operational navigation with the username beside Logout, `00. Help Home 🏠` first and Help articles numbered directly from their filenames (`00` to `09`).

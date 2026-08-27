@@ -76,7 +76,7 @@ INPUT_KIND_LABELS = {
 }
 UPLOAD_DATASET_KINDS = frozenset({'data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'smart_orchestrator_logs', 'generic'})
 CDR_DATASET_KINDS = frozenset({'data', 'voice', 'speech'})
-DATASET_NORMALIZATION_VERSION = 4
+DATASET_NORMALIZATION_VERSION = 5
 MAPPING_PREVIEW_NORMALIZED_COLUMNS = frozenset({
     'dataset_kind', 'source_file', 'source_sheet', 'campaign', 'market', 'period', 'campaign_year', 'campaign_quarter',
     'operator', 'session_type', 'test_name', 'direction', 'region', 'city', 'vendor', 'status',
@@ -725,20 +725,13 @@ def refresh_selected_dataset_if_stale(selected_dataset: dict[str, Any] | None) -
         return selected_dataset
 
     dataset_id = int(selected_dataset['id'])
-    if repository.dataset_rows_table_exists(dataset_id) and repository.refresh_dataset_row_technology_primary(dataset_id):
-        filter_options = dict(selected_dataset.get('filter_options') or {})
-        technology_values = repository.list_distinct_dataset_row_values(dataset_id, 'technology_primary')
-        if technology_values:
-            filter_options['technology_primary'] = technology_values
-        else:
-            filter_options.pop('technology_primary', None)
-
-        available_aggregations = [
-            item for item in (selected_dataset.get('available_aggregations') or [])
-            if item != 'technology_primary'
-        ]
-        if len(technology_values) > 1:
-            available_aggregations.append('technology_primary')
+    if repository.dataset_rows_table_exists(dataset_id) and repository.refresh_dataset_row_normalized_dimensions(dataset_id):
+        filter_options = {
+            dimension: values
+            for dimension in FILTER_DIMENSIONS
+            if (values := repository.list_distinct_dataset_row_values(dataset_id, dimension))
+        }
+        available_aggregations = derive_available_aggregations(filter_options)
 
         repository.update_dataset_profile(
             dataset_id,
