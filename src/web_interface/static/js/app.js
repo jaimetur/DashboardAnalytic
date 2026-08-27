@@ -620,7 +620,7 @@ function setupCustomMultiSelects() {
       if (totalEnabled === 0) {
         triggerLabel.textContent = 'No values';
       } else if (selectedOptions.length === 0) {
-        triggerLabel.textContent = 'No values selected';
+        triggerLabel.textContent = 'None Selected';
       } else if (totalEnabled > 0 && selectedOptions.length === totalEnabled) {
         triggerLabel.textContent = 'All values';
       } else if (selectedOptions.length === 1) {
