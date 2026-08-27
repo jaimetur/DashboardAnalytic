@@ -320,6 +320,13 @@ def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> Non
         follow_redirects=False,
     )
 
+    default_preview = client.get('/workspace/preview/1')
+    assert default_preview.status_code == 200
+    assert '<option value="Vodafone UK" selected>' in default_preview.text
+    assert '<option value="3" selected>' in default_preview.text
+    assert '<option value="Ericsson" selected>' in default_preview.text
+    assert '<option value="Nokia" selected>' in default_preview.text
+
     preview = client.get(
         '/workspace/preview/1?cdr_operator=3&cdr_vendor=Nokia&cdr_rat=NR'
         '&cdr_session_type=WhatsApp&cdr_call_status=Dropped',

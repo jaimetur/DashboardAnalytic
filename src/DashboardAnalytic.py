@@ -1364,7 +1364,14 @@ def preview_dataset(
             if not column:
                 continue
             options = repository.list_distinct_dataset_row_values(dataset_id, column)
-            selected_values = [value for value in requested_values if value in options]
+            # A newly opened CDR preview represents the complete dataset, so
+            # its multi-select controls must visibly start with every available
+            # value selected.  Explicit query values continue to narrow the
+            # selection when the user refreshes the preview.
+            selected_values = (
+                [value for value in requested_values if value in options]
+                if requested_values else list(options)
+            )
             if selected_values:
                 preview_filters[column] = selected_values
             cdr_preview_filters.append({
