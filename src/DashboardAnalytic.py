@@ -25,7 +25,7 @@ from starlette.datastructures import QueryParams
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import TEMPLATE_NAMES, active_catalog_path, assign_cdr_vendors, classify_sessions, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, render_cdr_report, update_catalogue_document
+from src.modules.cdr_reporting import TEMPLATE_NAMES, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, render_cdr_report, update_catalogue_document
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
@@ -1931,12 +1931,16 @@ def import_report_catalogue(
 
 
 @app.get('/admin/report-catalogues/{technology}/export')
-def export_report_catalogue(technology: str, user: SessionUser = Depends(admin_user)) -> FileResponse:
+def export_report_catalogue(technology: str, user: SessionUser = Depends(admin_user)) -> Response:
     technology = technology.strip().lower()
     if technology not in TEMPLATE_NAMES:
         raise HTTPException(status_code=404, detail='Report technology not found')
-    catalogue = reporting_catalog_path(technology)
-    return FileResponse(catalogue, filename=f'{technology}-slide-catalogue.csv', media_type='text/csv; charset=utf-8')
+    entries = reporting_catalog_entries(technology)
+    return Response(
+        content=catalogue_csv(entries),
+        media_type='text/csv; charset=utf-8',
+        headers={'Content-Disposition': f'attachment; filename="{technology}-slide-catalogue.csv"'},
+    )
 
 
 @app.post('/admin/users', response_class=HTMLResponse)

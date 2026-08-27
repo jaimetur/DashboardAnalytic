@@ -26,7 +26,8 @@ TEMPLATE_NAMES = {
 CDR_REPORT_VERSION = "2026-08-27-v7"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
-CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "CDR source", "KPI", "Chart type", "Filters", "Grouping")
+CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "CDR source", "KPI", "Chart type", "Filters", "Grouping_Rows", "Grouping_Columns")
+LEGACY_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "CDR source", "KPI", "Chart type", "Filters", "Grouping")
 CATALOG_SOURCE_KINDS = {"cdr-data": "data", "cdr-voice": "voice", "cdr-speech": "speech"}
 CHART_TYPES = {
     "100% stacked vertical bars", "count stacked horizontal bars", "cdf line", "scatter", "table",
@@ -58,7 +59,8 @@ class CatalogEntry:
     kpi: str
     chart_type: str
     filters: str
-    grouping: str
+    grouping_rows: str
+    grouping_columns: str
 
     @property
     def source_kind(self) -> str | None:
@@ -115,7 +117,8 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
     else:
         text = content
     reader = csv.DictReader(io.StringIO(text))
-    if tuple(reader.fieldnames or ()) != CATALOG_HEADERS:
+    fieldnames = tuple(reader.fieldnames or ())
+    if fieldnames not in {CATALOG_HEADERS, LEGACY_CATALOG_HEADERS}:
         raise ValueError("The report catalogue must use exactly these columns: " + ", ".join(CATALOG_HEADERS))
     entries: list[CatalogEntry] = []
     for line_number, row in enumerate(reader, start=2):
@@ -125,6 +128,8 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
             raise ValueError(f"Catalog row {line_number} has an invalid Slide value.") from exc
         if slide < 1:
             raise ValueError(f"Catalog row {line_number} must use a positive slide number.")
+        legacy_grouping = (row.get("Grouping") or "").strip()
+        legacy_dimensions = parse_catalog_grouping(legacy_grouping).dimensions
         entry = CatalogEntry(
             slide=slide,
             slide_title=(row.get("Slide tittle") or "").strip().replace("\\n", "\n"),
@@ -134,7 +139,8 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
             kpi=(row.get("KPI") or "").strip(),
             chart_type=(row.get("Chart type") or "").strip(),
             filters=(row.get("Filters") or "").strip(),
-            grouping=(row.get("Grouping") or "").strip(),
+            grouping_rows=(row.get("Grouping_Rows") or "").strip() or " × ".join(legacy_dimensions[:1]),
+            grouping_columns=(row.get("Grouping_Columns") or "").strip() or " × ".join(legacy_dimensions[1:]),
         )
         if entry.source_kind and not entry.slide_title:
             raise ValueError(f"Catalog row {line_number} requires Slide tittle for a CDR source.")
@@ -146,11 +152,12 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
             raise ValueError(f"Catalog row {line_number} requires KPI and Chart type for a CDR source.")
         if entry.source_kind and entry.chart_type.casefold() not in CHART_TYPES:
             raise ValueError(f"Catalog row {line_number} has unsupported Chart type '{entry.chart_type}'.")
-        if entry.source_kind and not entry.grouping:
-            raise ValueError(f"Catalog row {line_number} requires Grouping for a CDR source.")
+        if entry.source_kind and not (entry.grouping_rows or entry.grouping_columns):
+            raise ValueError(f"Catalog row {line_number} requires Grouping_Rows or Grouping_Columns for a CDR source.")
         try:
             parse_catalog_filters(entry.filters)
-            parse_catalog_grouping(entry.grouping)
+            parse_catalog_grouping(entry.grouping_rows)
+            parse_catalog_grouping(entry.grouping_columns)
         except ValueError as exc:
             raise ValueError(f"Catalog row {line_number}: {exc}") from exc
         entries.append(entry)
@@ -170,11 +177,32 @@ def active_catalog_path(catalog_dir: Path, fallback_catalog: Path, technology: s
 
 def catalogue_markdown(entries: list[CatalogEntry], technology: str) -> str:
     heading = "NSA" if technology == "nsa" else "SA"
-    lines = [f"### {heading} template", "", "| " + " | ".join(CATALOG_HEADERS) + " |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+    lines = [f"### {heading} template", "", "| " + " | ".join(CATALOG_HEADERS) + " |", "| " + " | ".join("---" for _ in CATALOG_HEADERS) + " |"]
     for entry in entries:
-        values = (str(entry.slide), entry.slide_title, entry.slide_subtitle or "—", entry.layout or "—", entry.cdr_source or "—", entry.kpi or "—", entry.chart_type or "—", entry.filters or "—", entry.grouping or "—")
+        values = (str(entry.slide), entry.slide_title, entry.slide_subtitle or "—", entry.layout or "—", entry.cdr_source or "—", entry.kpi or "—", entry.chart_type or "—", entry.filters or "—", entry.grouping_rows or "—", entry.grouping_columns or "—")
         lines.append("| " + " | ".join(value.replace("|", "\\|").replace("\n", "<br>") for value in values) + " |")
     return "\n".join(lines)
+
+
+def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
+    """Serialize the active catalogue using the current editable CSV schema."""
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=CATALOG_HEADERS, lineterminator="\n")
+    writer.writeheader()
+    for entry in entries:
+        writer.writerow({
+            "Slide": entry.slide,
+            "Slide tittle": entry.slide_title.replace("\n", "\\n"),
+            "Slide Subtittle": entry.slide_subtitle.replace("\n", "\\n"),
+            "Layout": entry.layout,
+            "CDR source": entry.cdr_source,
+            "KPI": entry.kpi,
+            "Chart type": entry.chart_type,
+            "Filters": entry.filters,
+            "Grouping_Rows": entry.grouping_rows,
+            "Grouping_Columns": entry.grouping_columns,
+        })
+    return output.getvalue().encode("utf-8")
 
 
 def update_catalogue_document(document: Path, nsa_entries: list[CatalogEntry], sa_entries: list[CatalogEntry]) -> None:
@@ -579,25 +607,44 @@ def _catalog_bucket_edges(entry: CatalogEntry) -> list[float] | None:
 
 
 def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendor: bool, metric: str | None) -> tuple[pd.DataFrame, str, str]:
-    spec = parse_catalog_grouping(entry.grouping)
-    resolved: list[str] = []
+    row_spec = parse_catalog_grouping(entry.grouping_rows)
+    column_spec = parse_catalog_grouping(entry.grouping_columns)
     bucket_edges = _catalog_bucket_edges(entry)
-    for dimension in spec.dimensions:
-        column = _catalog_column(frame, dimension, multivendor, metric, bucket_edges)
-        if not column:
-            raise ValueError(f"Slide {entry.slide}: grouping dimension '{dimension}' does not exist in {entry.cdr_source}.")
-        resolved.append(column)
-    # The first level is the category axis; all following levels form the comparison series.
+    def resolve_dimensions(dimensions: tuple[str, ...], axis: str) -> list[str]:
+        resolved: list[str] = []
+        for dimension in dimensions:
+            column = _catalog_column(frame, dimension, multivendor, metric, bucket_edges)
+            if not column:
+                raise ValueError(f"Slide {entry.slide}: {axis} grouping dimension '{dimension}' does not exist in {entry.cdr_source}.")
+            resolved.append(column)
+        return resolved
+
+    row_columns = resolve_dimensions(row_spec.dimensions, "row")
+    column_columns = resolve_dimensions(column_spec.dimensions, "column")
+    # Rows form the category/table-row hierarchy. Columns form chart series and
+    # table columns. Distribution charts reserve the final column level as the
+    # stack/bucket breakdown and use any preceding column levels as the series.
     primary = "__catalog_primary"
     series = "__catalog_series"
-    frame[primary] = frame[resolved[0]].fillna("(blank)").astype(str)
-    if len(resolved) == 1:
-        frame[series] = frame[primary]
+    def materialise(columns: list[str], target: str) -> None:
+        if not columns:
+            frame[target] = "(all)"
+        elif len(columns) == 1:
+            frame[target] = frame[columns[0]].fillna("(blank)").astype(str)
+        else:
+            frame[target] = frame[columns].fillna("(blank)").astype(str).agg(" · ".join, axis=1)
+
+    materialise(row_columns, primary)
+    is_distribution = entry.chart_type.casefold() == "distribution stacked vertical bars"
+    if is_distribution and column_columns:
+        stack_column = column_columns[-1]
+        series_columns = column_columns[:-1]
+        materialise(series_columns, series)
+        frame["__catalog_stack"] = frame[stack_column].fillna("(blank)").astype(str)
     else:
-        series_columns = resolved[1:-1] if len(resolved) >= 3 else resolved[1:]
-        frame[series] = frame[series_columns].fillna("(blank)").astype(str).agg(" · ".join, axis=1)
-    if len(resolved) >= 3:
-        frame["__catalog_stack"] = frame[resolved[-1]].fillna("(blank)").astype(str)
+        materialise(column_columns, series)
+    if not column_columns:
+        frame[series] = frame[primary]
     return frame, primary, series
 
 
