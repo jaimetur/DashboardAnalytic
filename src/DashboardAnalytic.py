@@ -361,6 +361,7 @@ def serialize_dataset_row(row) -> dict[str, Any]:
     item['progress'] = int(item.get('progress') or 0)
     item['normalization_version'] = int(item.get('normalization_version') or 1)
     item['vendor_mapping_applied'] = bool(item.get('vendor_mapping_applied'))
+    item['vendor_values_complete'] = bool(item.get('vendor_values_complete'))
     item['is_ready'] = item.get('status') == 'ready'
     dataset_path = Path(item.get('stored_path') or '')
     size_bytes = dataset_path.stat().st_size if dataset_path.exists() else 0
@@ -622,12 +623,18 @@ def rebuild_dataset_artifacts(
         default_aggregation = available_aggregations[0]
     if progress_callback:
         progress_callback(94)
+    vendor_values_complete = bool(
+        'vendor' in df.columns
+        and not df.empty
+        and df['vendor'].fillna('').astype(str).str.strip().ne('').all()
+    )
     repository.update_dataset_profile(
         dataset_id,
         status='ready',
         progress=100,
         normalization_version=DATASET_NORMALIZATION_VERSION,
         vendor_mapping_applied=False,
+        vendor_values_complete=vendor_values_complete,
         dataset_kind=dataset_kind,
         row_count=summary.rows,
         column_count=len(summary.columns),
@@ -669,56 +676,6 @@ def ensure_mapping_gcid(dataset: dict[str, Any]) -> dict[str, Any]:
     return serialize_dataset_row(refreshed) if refreshed else dataset
 
 
-def dataset_has_vendor_assignments(dataset_id: int) -> bool:
-    """Return whether every processed CDR sample already has a Vendor value."""
-    columns = repository.list_dataset_row_columns(dataset_id)
-    if 'vendor' not in columns:
-        return False
-    frame = repository.load_dataset_rows(dataset_id, ['vendor'], {})
-    if frame.empty or 'vendor' not in frame.columns:
-        return False
-    assigned = frame['vendor'].fillna('').astype(str).str.strip().ne('')
-    return bool(assigned.all())
-
-
-def dataset_has_any_vendor_assignments(dataset_id: int) -> bool:
-    columns = repository.list_dataset_row_columns(dataset_id)
-    if 'vendor' not in columns:
-        return False
-    frame = repository.load_dataset_rows(dataset_id, ['vendor'], {})
-    return bool(
-        not frame.empty
-        and 'vendor' in frame.columns
-        and frame['vendor'].fillna('').astype(str).str.strip().ne('').any()
-    )
-
-
-def has_tool_applied_vendor_mapping(dataset: dict[str, Any]) -> bool:
-    """Recognise current and pre-flag Workspace Vendor mappings.
-
-    Older releases materialised mapping results without recording the profile
-    flag.  A non-empty materialized vendor column paired with an empty source
-    vendor column is unambiguously a tool-applied mapping and can be cleared.
-    """
-    if dataset.get('vendor_mapping_applied'):
-        return True
-    if not dataset.get('is_ready') or dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
-        return False
-    dataset_id = int(dataset['id'])
-    if not dataset_has_any_vendor_assignments(dataset_id):
-        return False
-    dataset_path = Path(dataset.get('stored_path') or '')
-    if not dataset_path.exists():
-        return False
-    source_frame = load_cached_dataset(dataset_path)
-    source_vendor = source_frame.get('vendor', pd.Series(dtype='object'))
-    if source_vendor.fillna('').astype(str).str.strip().ne('').any():
-        return False
-    repository.update_dataset_profile(dataset_id, vendor_mapping_applied=True)
-    dataset['vendor_mapping_applied'] = True
-    return True
-
-
 def persist_mapped_cdr_frame(dataset: dict[str, Any], frame: pd.DataFrame) -> None:
     """Replace a materialized CDR after vendor mapping and refresh its profile."""
     dataset_id = int(dataset['id'])
@@ -736,6 +693,11 @@ def persist_mapped_cdr_frame(dataset: dict[str, Any], frame: pd.DataFrame) -> No
         dataset_id,
         normalization_version=DATASET_NORMALIZATION_VERSION,
         vendor_mapping_applied=True,
+        vendor_values_complete=bool(
+            'vendor' in frame.columns
+            and not frame.empty
+            and frame['vendor'].fillna('').astype(str).str.strip().ne('').all()
+        ),
         row_count=summary.rows,
         column_count=len(summary.columns),
         default_metric=analysis.selected_metric,
@@ -1307,13 +1269,13 @@ def workspace(
     three_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_three']
     has_vendor_mappings = bool(vodafone_mapping_datasets or three_mapping_datasets)
     for dataset in datasets:
-        vendor_mapping_applied = has_tool_applied_vendor_mapping(dataset)
+        vendor_mapping_applied = bool(dataset.get('vendor_mapping_applied'))
         dataset['can_map_vendors'] = (
             has_vendor_mappings
             and dataset.get('is_ready')
             and dataset.get('dataset_kind') in CDR_DATASET_KINDS
             and not vendor_mapping_applied
-            and not dataset_has_vendor_assignments(dataset['id'])
+            and not dataset.get('vendor_values_complete')
         )
         dataset['can_clear_vendors'] = (
             dataset.get('is_ready')
@@ -1708,7 +1670,7 @@ def map_dataset_vendors(
     cdr_dataset = serialize_dataset_row(cdr_row)
     if not cdr_dataset['is_ready'] or cdr_dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
         raise HTTPException(status_code=400, detail='Vendor mapping is only available for processed NetCheck CDR datasets.')
-    if has_tool_applied_vendor_mapping(cdr_dataset):
+    if cdr_dataset.get('vendor_mapping_applied'):
         raise HTTPException(status_code=400, detail='This CDR already has a Vendor mapping. Clear it before mapping again.')
     if not vodafone_mapping_dataset_id and not three_mapping_dataset_id:
         raise HTTPException(status_code=400, detail='Select at least one processed VFUK or 3UK Multivendor Mapping.')
@@ -1748,7 +1710,7 @@ def clear_dataset_vendors(dataset_id: int, user: SessionUser = Depends(current_u
     dataset = serialize_dataset_row(dataset_row)
     if not dataset['is_ready'] or dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
         raise HTTPException(status_code=400, detail='Vendor clearing is only available for processed NetCheck CDR datasets.')
-    if not has_tool_applied_vendor_mapping(dataset):
+    if not dataset.get('vendor_mapping_applied'):
         raise HTTPException(status_code=400, detail='This CDR does not have a tool-applied Vendor mapping to clear.')
 
     dataset_path = Path(dataset['stored_path'])

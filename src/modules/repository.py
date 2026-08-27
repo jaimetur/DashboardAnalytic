@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS dataset_profiles (
     progress INTEGER NOT NULL DEFAULT 0,
     normalization_version INTEGER NOT NULL DEFAULT 1,
     vendor_mapping_applied INTEGER NOT NULL DEFAULT 0,
+    vendor_values_complete INTEGER NOT NULL DEFAULT 0,
     dataset_kind TEXT,
     row_count INTEGER,
     column_count INTEGER,
@@ -112,6 +113,7 @@ class Repository:
             self._ensure_dataset_profile_columns(conn)
             self._ensure_report_run_columns(conn)
             self._cleanup_duplicate_datasets(conn)
+            self._migrate_legacy_vendor_mapping_profiles(conn)
             conn.execute(
                 """
                 INSERT OR IGNORE INTO dataset_profiles (dataset_id, status, progress)
@@ -135,6 +137,48 @@ class Repository:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN normalization_version INTEGER NOT NULL DEFAULT 1")
         if 'vendor_mapping_applied' not in existing_columns:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN vendor_mapping_applied INTEGER NOT NULL DEFAULT 0")
+        if 'vendor_values_complete' not in existing_columns:
+            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN vendor_values_complete INTEGER NOT NULL DEFAULT 0")
+
+    def _migrate_legacy_vendor_mapping_profiles(self, conn: sqlite3.Connection) -> None:
+        """Mark pre-profile mappings once, without reopening source CDR files."""
+        candidates = conn.execute(
+            """
+            SELECT p.dataset_id
+            FROM dataset_profiles p
+            WHERE p.status = 'ready'
+              AND p.dataset_kind IN ('data', 'voice', 'speech')
+              AND COALESCE(p.vendor_mapping_applied, 0) = 0
+            """
+        ).fetchall()
+        for candidate in candidates:
+            dataset_id = int(candidate['dataset_id'])
+            table_name = self.dataset_rows_table_name(dataset_id)
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table_name,),
+            ).fetchone()
+            if not exists:
+                continue
+            columns = [row['name'] for row in conn.execute(f"PRAGMA table_info({self._quote_identifier(table_name)})").fetchall()]
+            vendor_column = next((column for column in columns if column == 'vendor'), None)
+            if not vendor_column:
+                continue
+            quoted_table = self._quote_identifier(table_name)
+            quoted_vendor = self._quote_identifier(vendor_column)
+            mapped = conn.execute(
+                f"""
+                SELECT 1 FROM {quoted_table}
+                WHERE LOWER(TRIM(CAST({quoted_vendor} AS TEXT))) LIKE 'vodafone_%'
+                   OR LOWER(TRIM(CAST({quoted_vendor} AS TEXT))) LIKE '3_%'
+                LIMIT 1
+                """
+            ).fetchone()
+            if mapped:
+                conn.execute(
+                    "UPDATE dataset_profiles SET vendor_mapping_applied = 1 WHERE dataset_id = ?",
+                    (dataset_id,),
+                )
 
     def _ensure_report_run_columns(self, conn: sqlite3.Connection) -> None:
         existing_columns = {row['name'] for row in conn.execute("PRAGMA table_info(report_runs)").fetchall()}
@@ -553,7 +597,7 @@ class Repository:
             return conn.execute(
                 """
                 SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                       p.status, p.progress, p.normalization_version, p.vendor_mapping_applied, p.dataset_kind, p.row_count, p.column_count,
+                       p.status, p.progress, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.dataset_kind, p.row_count, p.column_count,
                        p.default_metric, p.default_aggregation, p.available_metrics_json,
                        p.available_aggregations_json, p.filter_options_json, p.summary_json,
                        p.kpis_json, p.last_error, p.processed_at, p.updated_at
@@ -570,7 +614,7 @@ class Repository:
                 conn.execute(
                     """
                     SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                           p.status, p.progress, p.normalization_version, p.vendor_mapping_applied, p.dataset_kind, p.row_count, p.column_count,
+                           p.status, p.progress, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.dataset_kind, p.row_count, p.column_count,
                            p.default_metric, p.default_aggregation, p.available_metrics_json,
                            p.available_aggregations_json, p.filter_options_json, p.summary_json,
                            p.kpis_json, p.last_error, p.processed_at, p.updated_at

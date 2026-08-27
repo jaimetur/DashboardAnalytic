@@ -342,6 +342,23 @@ def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> Non
     assert 'name="cdr_operator" multiple' in multi_preview.text
 
 
+def test_workspace_uses_persisted_vendor_flags_without_reloading_cdr_files(client, monkeypatch) -> None:
+    login(client)
+    client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'data'},
+        files={'dataset_files': ('cdr_data.csv', BytesIO(b'operator,score\nVodafone UK,91\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    import src.DashboardAnalytic as app_module
+
+    def source_reload_should_not_run(*_args, **_kwargs):
+        raise AssertionError('Workspace should use the persisted Vendor flags, not reload CDR files.')
+
+    monkeypatch.setattr(app_module, 'load_cached_dataset', source_reload_should_not_run)
+    assert client.get('/workspace').status_code == 200
+
+
 def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mapping(client) -> None:
     login(client)
     client.post(
@@ -373,8 +390,6 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     assert preview.status_code == 200
     assert '>3_Nokia<' in preview.text
 
-    import src.DashboardAnalytic as app_module
-    app_module.repository.update_dataset_profile(1, vendor_mapping_applied=False)
     workspace_after_mapping = client.get('/workspace').text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
     assert 'data-dataset-id="1"' in workspace_after_mapping
     assert 'Map Vendors</button>' not in workspace_after_mapping
