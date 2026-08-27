@@ -945,6 +945,7 @@ def test_admin_imports_report_catalogue_and_synchronizes_help(client, tmp_path, 
 
     response = client.post(
         '/admin/report-catalogues/nsa',
+        data={'catalogue_name': 'Test baseline'},
         files={'catalogue_file': ('nsa-slide-catalogue.csv', BytesIO(content), 'text/csv')},
         follow_redirects=False,
     )
@@ -956,6 +957,41 @@ def test_admin_imports_report_catalogue_and_synchronizes_help(client, tmp_path, 
     exported = client.get('/admin/report-catalogues/nsa/export')
     assert exported.status_code == 200
     assert exported.content == content
+
+
+def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(client, tmp_path, monkeypatch) -> None:
+    from src.modules.cdr_reporting import CATALOG_HEADERS
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    help_document = tmp_path / 'powerpoint-reporting.md'
+    help_document.write_text('# Reporting\n\n<!-- SLIDE_CATALOGUE:START -->\nold\n<!-- SLIDE_CATALOGUE:END -->\n', encoding='utf-8')
+    monkeypatch.setattr(app_module, 'REPORT_CATALOGUE_DOCUMENT', help_document)
+    first = (','.join(CATALOG_HEADERS) + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n').encode('utf-8')
+    second = (','.join(CATALOG_HEADERS) + '\n8,Second,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n').encode('utf-8')
+
+    for name, content in [('Baseline Q4', first), ('Updated Q4', second)]:
+        response = client.post(
+            '/admin/report-catalogues/nsa',
+            data={'catalogue_name': name},
+            files={'catalogue_file': ('nsa.csv', BytesIO(content), 'text/csv')},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    admin = client.get('/admin')
+    assert 'Baseline Q4' in admin.text
+    assert 'Updated Q4' in admin.text
+    assert '/admin/report-catalogues/nsa/baseline-q4/activate' in admin.text
+    assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Second'
+
+    activated = client.post('/admin/report-catalogues/nsa/baseline-q4/activate', follow_redirects=False)
+    assert activated.status_code == 303
+    assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'First'
+
+    exported = client.get('/admin/report-catalogues/nsa/updated-q4/export')
+    assert exported.status_code == 200
+    assert b'Second' in exported.content
 
 
 def test_docs_routes_expose_readme_changelog_and_help(client) -> None:

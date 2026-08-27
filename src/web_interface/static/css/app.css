@@ -143,6 +143,17 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-management-section h3 { margin: 0; color: #5b1c22; font-size: 1.08rem; }
 .catalogue-management-actions { display: flex; gap: 0.7rem; align-items: center; margin-top: 0.55rem; }
 .catalogue-management-actions > * { flex: 1; }
+.catalogue-library { display: grid; gap: 0.55rem; margin-top: 1rem; padding-top: 0.9rem; border-top: 1px solid var(--line); }
+.catalogue-library-title { margin: 0; color: var(--muted); font-size: 0.76rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.catalogue-library-item { display: flex; align-items: center; justify-content: space-between; gap: 0.7rem; padding: 0.65rem 0.7rem; border: 1px solid rgba(16, 49, 74, 0.12); border-radius: 12px; background: rgba(255, 255, 255, 0.68); }
+.catalogue-library-item.active { border-color: rgba(11, 122, 117, 0.36); background: rgba(11, 122, 117, 0.09); }
+.catalogue-library-item strong, .catalogue-library-item span { display: block; }
+.catalogue-library-item strong { color: #263d50; font-size: 0.86rem; }
+.catalogue-library-item span { margin-top: 0.16rem; color: var(--muted); font-size: 0.74rem; }
+.catalogue-library-actions { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
+.catalogue-library-actions a, .catalogue-library-actions button { min-height: 1.9rem; padding: 0.34rem 0.52rem; border-radius: 8px; font-size: 0.76rem; font-weight: 700; }
+.catalogue-library-actions a { color: #075d59; background: rgba(11, 122, 117, 0.10); text-decoration: none; }
+.catalogue-library-actions form { margin: 0; }
 .catalogue-export-button { display: inline-flex; align-items: center; justify-content: center; min-height: 2.65rem; padding: 0.55rem 0.9rem; border-radius: 10px; background: linear-gradient(145deg, #10314a, #08736d); border: 1px solid rgba(7, 93, 89, 0.72); color: #fff; font-weight: 700; box-shadow: 0 8px 18px rgba(11, 122, 117, 0.22); }
 .catalogue-export-button:hover { background: linear-gradient(145deg, #0b293e, #065e59); color: #fff; }
 .admin-stack .toggle-slider { background: linear-gradient(135deg, #d8a0a1, #bf6d70); box-shadow: inset 0 2px 6px rgba(95, 16, 21, 0.22); }
