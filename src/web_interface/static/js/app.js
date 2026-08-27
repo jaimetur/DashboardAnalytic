@@ -937,6 +937,13 @@ document.querySelectorAll('form[data-confirm]').forEach((form) => {
       confirmLabel: form.dataset.confirmLabel || 'Confirm',
     });
     if (accepted) {
+      const parentDialog = form.closest('dialog');
+      if (parentDialog?.open) {
+        parentDialog.close();
+      }
+      if (form.dataset.confirmLoadingLabel) {
+        showLoadingOverlay(form.dataset.confirmLoadingLabel, form.dataset.confirmLoadingCopy);
+      }
       form.submit();
     }
   });

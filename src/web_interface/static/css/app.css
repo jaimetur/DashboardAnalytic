@@ -284,13 +284,18 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .queue-actions form { display: inline-flex; margin: 0; }
 .queue-actions .ghost-link,
 .queue-actions button { min-height: 2.15rem; padding: 0.42rem 0.62rem; white-space: nowrap; font-size: 0.78rem; line-height: 1.1; }
-.vendor-mapping-dialog { width: min(560px, calc(100vw - 2rem)); border: 1px solid var(--line); border-radius: 20px; padding: 0; color: var(--text); background: var(--panel-strong); box-shadow: 0 24px 72px rgba(7, 21, 31, 0.34); }
+.vendor-mapping-dialog { width: min(560px, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); border: 1px solid var(--line); border-radius: 20px; padding: 0; color: var(--text); background: var(--panel-strong); box-shadow: 0 24px 72px rgba(7, 21, 31, 0.34); overflow: auto; }
 .vendor-mapping-dialog::backdrop { background: rgba(9, 28, 40, 0.48); backdrop-filter: blur(3px); }
 .vendor-mapping-dialog form { display: grid; gap: 1rem; padding: 1.45rem; }
 .vendor-mapping-dialog h3, .vendor-mapping-dialog p { margin: 0; }
 .vendor-mapping-fields { display: grid; gap: 0.9rem; }
 .vendor-mapping-fields label { display: grid; gap: 0.38rem; }
 .vendor-mapping-fields .form-note { padding: 0.75rem 0.9rem; border-radius: 12px; background: rgba(16, 49, 74, 0.06); }
+.vendor-mapping-rule { padding: 0.9rem 1rem; border: 1px solid rgba(12, 76, 140, 0.20); border-radius: 14px; background: linear-gradient(135deg, #f7fbff, #eaf5ff); color: #164f89; }
+.vendor-mapping-rule summary { cursor: pointer; font-weight: 800; color: #0c4c8c; }
+.vendor-mapping-rule ol { margin: 0.7rem 0; padding-left: 1.25rem; }
+.vendor-mapping-rule p { margin: 0.7rem 0 0; line-height: 1.4; }
+.vendor-mapping-rule code { color: #103d70; }
 .vendor-mapping-actions { display: flex; justify-content: flex-end; gap: 0.75rem; flex-wrap: wrap; }
 .vendor-mapping-actions .ghost-link { background: linear-gradient(135deg, #edf3f6, #d7e5eb); border-color: rgba(16, 49, 74, 0.24); color: #10314a; font-weight: 700; box-shadow: none; }
 .vendor-mapping-actions .ghost-link:hover { background: linear-gradient(135deg, #dceaf0, #c5dae4); color: #08283d; }
@@ -419,6 +424,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .confirm-icon { display: inline-grid; place-items: center; width: 54px; height: 54px; margin-bottom: 0.9rem; border-radius: 18px; background: linear-gradient(135deg, rgba(200, 74, 74, 0.16), rgba(224, 106, 90, 0.24)); color: #bb3c3c; font-family: "Space Grotesk", "Segoe UI", sans-serif; font-size: 1.6rem; font-weight: 700; box-shadow: inset 0 1px 0 rgba(255,255,255,0.65); }
 .confirm-panel h3 { margin: 0.2rem 0 0.55rem; font-size: 1.7rem; }
 .confirm-panel p { margin: 0; color: var(--muted); }
+.confirm-panel #confirm-copy { white-space: pre-line; max-height: min(42vh, 360px); overflow-y: auto; padding-right: 0.2rem; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.35rem; flex-wrap: wrap; }
 .confirm-cancel { cursor: pointer; color: #44515d; box-shadow: 0 8px 20px rgba(18, 32, 43, 0.08); }
 .doc-page { display: grid; }

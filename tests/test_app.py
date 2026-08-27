@@ -378,6 +378,9 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     assert 'Map Vendors</button>' in workspace.text
     assert 'name="three_mapping_dataset_id" required' in workspace.text
     assert 'name="vodafone_mapping_dataset_id" required' not in workspace.text
+    assert 'Vendor mapping rule' in workspace.text
+    assert 'the same non-empty Vendor at both endpoints returns' in workspace.text
+    assert 'data-loading-label="Mapping Vendors to CDR samples"' in workspace.text
 
     response = client.post(
         '/workspace/map-vendors',
@@ -394,6 +397,7 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     assert 'data-dataset-id="1"' in workspace_after_mapping
     assert 'Map Vendors</button>' not in workspace_after_mapping
     assert 'Clear Vendors</button>' in workspace_after_mapping
+    assert 'data-confirm-loading-label="Clearing Vendors from selected dataset"' in workspace_after_mapping
 
     clear_response = client.post('/workspace/clear-vendors/1', follow_redirects=False)
     assert clear_response.status_code == 303

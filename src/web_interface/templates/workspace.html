@@ -117,7 +117,7 @@
                 >Show Dashboard</a>
                 {% endif %}
                 {% if dataset.can_clear_vendors %}
-                <form method="post" action="/workspace/clear-vendors/{{ dataset.id }}" data-confirm="Clear the mapped Vendor values for '{{ dataset.file_name }}'? You can map the CDR again using updated mappings." data-confirm-title="Clear Vendor mapping" data-confirm-label="Clear Vendors">
+                <form method="post" action="/workspace/clear-vendors/{{ dataset.id }}" data-confirm="Clear the mapped Vendor values for '{{ dataset.file_name }}'? You can map the CDR again using updated mappings." data-confirm-title="Clear Vendor mapping" data-confirm-label="Clear Vendors" data-confirm-loading-label="Clearing Vendors from selected dataset" data-confirm-loading-copy="Removing the mapped Vendor values from the selected CDR. Please wait while the dataset is refreshed.">
                   <button type="submit" class="action-link-clear-vendors">Clear Vendors</button>
                 </form>
                 {% endif %}
@@ -167,13 +167,23 @@
       method="post"
       action="/workspace/map-vendors"
       data-loading-label="Mapping Vendors to CDR samples"
-      data-loading-copy="For each sample, the tool reads its Operator and the first and last Cell_ID_A values, looks them up in the selected VFUK or 3UK mapping, and applies the agreed Vodafone/Three Vendor formula."
+      data-loading-copy="Applying the agreed Vodafone UK and 3UK rules to the first and last Cell_ID_A values for every CDR sample. Please wait while the dataset is refreshed."
     >
       <input type="hidden" name="cdr_dataset_id" data-vendor-mapping-cdr-id>
       <p class="eyebrow">NetCheck CDR</p>
       <h3 id="vendor-mapping-title">Map Vendors</h3>
       <p class="lede">Choose the processed Multivendor Mappings to assign the calculated Vendor to every CDR sample using its Operator and the first and last values in <code>Cell_ID_A</code>.</p>
       <p class="form-note" data-vendor-mapping-dataset-name></p>
+      <details class="vendor-mapping-rule" open>
+        <summary>Vendor mapping rule</summary>
+        <ol>
+          <li>For each CDR sample, split <code>Cell_ID_A</code> in chronological order and retain only the first and last Global Cell ID.</li>
+          <li>Look up both endpoints in the selected VFUK mapping for Vodafone UK or the selected 3UK mapping for Three UK.</li>
+        </ol>
+        <p><strong>Vodafone UK:</strong> the same non-empty Vendor at both endpoints returns <code>Vodafone_&lt;Vendor&gt;</code>. If Ericsson is present at either endpoint and the other Vendor is different or missing, the result is <code>Vodafone_Mixed Vendor</code>. Every other different or missing endpoint combination returns <code>Vodafone_Other Vendor</code>.</p>
+        <p><strong>3UK:</strong> the same non-empty Vendor at both endpoints returns <code>3_&lt;Vendor&gt;</code>. Any different or missing endpoint Vendor returns <code>3_Mixed Vendor</code>.</p>
+        <p><strong>O2 and EE:</strong> no Vendor is assigned; they remain Operator comparison groups only.</p>
+      </details>
       <div class="vendor-mapping-fields">
         {% if vodafone_mapping_datasets %}
         <label>VFUK Multivendor Mapping
@@ -346,6 +356,7 @@
 <script>
 (() => {
   const dialog = document.querySelector('[data-vendor-mapping-dialog]');
+  const mappingForm = dialog?.querySelector('form[action="/workspace/map-vendors"]');
   const cdrId = dialog?.querySelector('[data-vendor-mapping-cdr-id]');
   const datasetName = dialog?.querySelector('[data-vendor-mapping-dataset-name]');
   if (!dialog || !cdrId || !datasetName) return;
@@ -357,7 +368,16 @@
       dialog.showModal();
     });
   });
-  dialog.querySelector('[data-vendor-map-cancel]')?.addEventListener('click', () => dialog.close());
+  dialog.querySelector('[data-vendor-map-cancel]')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dialog.close();
+  });
+  mappingForm?.addEventListener('submit', () => {
+    // The global loading handler displays the progress overlay.  Closing the
+    // native dialog here exposes it immediately while the request runs.
+    dialog.close();
+  });
   dialog.addEventListener('click', (event) => {
     if (event.target === dialog) dialog.close();
   });
