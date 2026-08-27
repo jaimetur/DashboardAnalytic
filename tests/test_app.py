@@ -298,6 +298,10 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     assert limited_preview_response.status_code == 200
     assert 'name="row_limit" value="25"' in limited_preview_response.text
 
+    dashboard_response = client.get('/dashboard?dataset_id=1&input_kind=data')
+    assert dashboard_response.status_code == 200
+    assert 'href="/workspace/preview/1" data-preview-open-link data-loading-label="Generating dataset preview">Preview Dataset</a>' in dashboard_response.text
+
 
 def test_vfuk_preview_limits_mapping_sheets_and_displays_materialised_gcid(client) -> None:
     login(client)

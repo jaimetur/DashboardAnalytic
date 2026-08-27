@@ -45,8 +45,9 @@
           <article><span>Number of processed sheets</span><strong>{{ (selected_dataset.filter_options.get('source_sheet', []) | length) if selected_dataset.filter_options else 0 }}</strong></article>
         </div>
         <p class="form-note">Uploaded by {{ selected_dataset.uploaded_by }} on {{ selected_dataset.uploaded_at }}</p>
-        {% if analysis_loaded and analysis %}
         <div class="dataset-export-actions inline-actions">
+          <a class="ghost-link action-link-preview" href="/workspace/preview/{{ selected_dataset.id }}" data-preview-open-link data-loading-label="Generating dataset preview">Preview Dataset</a>
+          {% if analysis_loaded and analysis %}
           <form method="post" action="/dashboard/export/word" data-loading-label="Exporting Word report" data-download-form="1">
             <input type="hidden" name="dataset_id" value="{{ selected_dataset.id }}">
             {% for metric_name in selected_metrics %}
@@ -93,8 +94,8 @@
             {% endfor %}
             <button type="submit">Export PowerPoint</button>
           </form>
+          {% endif %}
         </div>
-        {% endif %}
         {% else %}
         <p class="form-note">No processed datasets are available yet.</p>
         {% endif %}

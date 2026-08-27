@@ -147,7 +147,10 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .reporting-stack button { background: linear-gradient(135deg, #4b208a, #8250c6); border: 1px solid rgba(75, 32, 138, 0.56); box-shadow: 0 10px 22px rgba(75, 32, 138, 0.22); }
 .reporting-stack button:hover:not(:disabled) { background: linear-gradient(135deg, #39176f, #6d3faf); }
 .reporting-stack label { color: #5d319b; font-weight: 700; }
-.reporting-stack select { border-color: rgba(75, 32, 138, 0.28); background: linear-gradient(135deg, #fffaff, #f4eaff); }
+.reporting-stack select { border-color: rgba(75, 32, 138, 0.28); background: linear-gradient(135deg, #fffaff, #f4eaff); color: #43206e; color-scheme: light; }
+.reporting-stack select:focus { outline: 3px solid rgba(125, 78, 190, 0.22); outline-offset: 2px; border-color: rgba(75, 32, 138, 0.58); background: linear-gradient(135deg, #fffaff, #eadbff); color: #341657; box-shadow: 0 0 0 4px rgba(125, 78, 190, 0.10); }
+.reporting-stack select option { background: #fffaff; color: #43206e; }
+.reporting-stack select option:checked { background: #e2cdfb; color: #341657; }
 .reporting-panel .pill { background: linear-gradient(135deg, #eee1ff, #dfcbfb); border-color: rgba(75, 32, 138, 0.26); color: #55328c; }
 .reporting-submit-action { margin-top: 0.65rem; }
 .analytics-dashboard-stack button { background: linear-gradient(135deg, #0c4c8c, #287bc2); border: 1px solid rgba(12, 76, 140, 0.52); box-shadow: 0 10px 22px rgba(12, 76, 140, 0.20); }
@@ -165,7 +168,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .analytics-dashboard-stack .metric-stat-card::before { background: linear-gradient(90deg, #75bfff, #d8edff); }
 .module-hero-dashboard .pill, .module-hero-reporting .pill, .module-hero-admin .pill { background: rgba(255,255,255,0.88); border-color: rgba(255,255,255,0.46); color: #263d50; }
 .retry-form { margin-bottom: 1rem; }
-.dataset-export-actions { justify-content: flex-end; margin-top: 1rem; }
+.dataset-export-actions { justify-content: flex-end; margin-top: 1rem; width: 100%; }
+.dataset-export-actions .action-link-preview { margin-right: auto; }
 .upload-dropzone { display: grid; gap: 1rem; margin-top: 1.25rem; }
 .upload-type-list { display: grid; gap: 0.35rem; padding: 0.95rem 1rem; border: 1px solid rgba(255,255,255,0.28); border-radius: 16px; background: rgba(255,255,255,0.08); }
 .upload-type-list.upload-type-confirmation { border-color: rgba(255,255,255,0.5); background: rgba(255,255,255,0.14); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08); }
@@ -209,6 +213,16 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 2rem; align-items: start; }
 .dashboard-main-stack { display: grid; gap: 2rem; }
 .dashboard-sidebar { position: relative; align-self: stretch; }
+.analytics-dashboard-stack,
+.analytics-dashboard-stack .workspace-grid,
+.analytics-dashboard-stack .dashboard-main-stack,
+.analytics-dashboard-stack .dashboard-sidebar,
+.analytics-dashboard-stack .section-head,
+.analytics-dashboard-stack .summary-inline-actions,
+.analytics-dashboard-stack .multi-metric-panel,
+.analytics-dashboard-stack .executive-metric-subpanel,
+.analytics-dashboard-stack .metric-detail-grid,
+.analytics-dashboard-stack .chart-card { min-width: 0; max-width: 100%; }
 .sticky-panel { position: sticky; top: 1rem; min-height: calc(100vh - 2rem); }
 .adaptive-filters-panel { padding: 1.55rem; }
 .collapsible-panel { padding: 0; overflow: hidden; }
@@ -430,6 +444,11 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
   .summary-grid { grid-template-columns: 1fr 1fr; }
   .dataset-selector-grid { grid-template-columns: 1fr; }
   .sidebar-filters { grid-template-columns: 1fr; }
+  .analytics-dashboard-stack .section-head,
+  .analytics-dashboard-stack .collapsible-summary { flex-wrap: wrap; }
+  .analytics-dashboard-stack .summary-inline-actions { width: 100%; margin-left: 0; flex-wrap: wrap; }
+  .analytics-dashboard-stack .chart-aggregation-control,
+  .analytics-dashboard-stack .panel-aggregation-control { min-width: 0; width: 100%; }
   .doc-toolbar { flex-direction: column; align-items: stretch; }
   .doc-layout { grid-template-columns: 1fr; }
   .doc-sidebar { position: static; max-height: none; }
@@ -441,4 +460,6 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
   .summary-grid { grid-template-columns: 1fr; }
   .collapsible-summary { align-items: flex-start; }
   .sidebar-actions, .inline-actions { flex-direction: column; align-items: stretch; }
+  .dataset-export-actions .action-link-preview { margin-right: 0; }
+  .analytics-dashboard-stack .summary-inline-actions { flex-direction: column; align-items: stretch; }
 }
