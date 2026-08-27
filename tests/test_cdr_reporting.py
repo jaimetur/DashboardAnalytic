@@ -6,7 +6,7 @@ from io import BytesIO
 from pathlib import Path
 from pptx import Presentation
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, assign_cdr_vendors, classify_sessions, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, assign_cdr_vendors, classify_sessions, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, vendor_from_cells
 
 
 def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> None:
@@ -46,7 +46,7 @@ def test_session_classification_and_multivendor_enrichment() -> None:
 
 def test_workspace_vendor_assignment_writes_the_normalized_vendor_field() -> None:
     cdr = pd.DataFrame({
-        'Operator': ['Vodafone UK', '3', 'O2'],
+        'Operator': ['Vodafone UK', '3', 'O2 (UK)'],
         'Cell_ID_A': ['100 -> 100', '200 -> 201', '300'],
     })
     vodafone_mapping = pd.DataFrame({
@@ -56,7 +56,16 @@ def test_workspace_vendor_assignment_writes_the_normalized_vendor_field() -> Non
 
     mapped = assign_cdr_vendors(cdr, vodafone_mapping, three_mapping)
 
-    assert mapped['vendor'].tolist() == ['Vodafone_Ericsson', '3_Mixed Vendor', 'O2']
+    assert mapped['vendor'].tolist() == ['Vodafone_Ericsson', '3_Mixed Vendor', pd.NA]
+    assert mapped['report_vendor'].tolist() == ['Vodafone_Ericsson', '3_Mixed Vendor', 'O2 (UK)']
+
+
+def test_legacy_workspace_mapping_gets_the_report_group_without_writing_operator_as_vendor() -> None:
+    frame = pd.DataFrame({'Operator': ['Vodafone UK', 'O2 (UK)'], 'vendor': ['Vodafone_Ericsson', pd.NA]})
+
+    grouped = ensure_report_vendor_group(frame)
+
+    assert grouped['report_vendor'].tolist() == ['Vodafone_Ericsson', 'O2 (UK)']
 
 
 def test_vodafone_mapping_derives_gcid_from_4g_enodeb_and_local_cell() -> None:
@@ -194,17 +203,18 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert 'NetCheck CDR Reports' in page.text
     assert 'Smart Orchestrator Logs Reports' in page.text
     assert 'Generate PowerPoint Report' in page.text
-    assert 'data-mapping-selector hidden' in page.text
-    assert 'name="vodafone_mapping_dataset_id"' in page.text
-    assert 'name="three_mapping_dataset_id"' in page.text
+    assert 'name="vodafone_mapping_dataset_id"' not in page.text
+    assert 'name="three_mapping_dataset_id"' not in page.text
+    assert '<option value="multivendor" disabled>Multivendor</option>' in page.text
     assert 'data-download-form="1"' in page.text
 
 
-def test_reporting_mapping_selectors_show_only_matching_workspace_mapping_types(client) -> None:
+def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client) -> None:
     client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
     uploads = [
-        ('Multivendor_Mapping_VFUK.csv', 'mapping_vodafone', b'eNodeB ID,Local Cell ID,OP/ Vendor\n0,100,Ericsson\n'),
-        ('Multivendor_Mapping_3UK.csv', 'mapping_three', b'Cid__ECI,Vendor\n100,Nokia\n'),
+        ('NetCheck_CDR_Data.csv', 'data', b'RAT,Operator,Mean_Data_Rate\nENDC,Vodafone UK,42\n'),
+        ('NetCheck_CDR_Voice.csv', 'voice', b'RAT_A,Operator,Call_Duration\nENDC,Vodafone UK,60\n'),
+        ('NetCheck_CDR_Speech.csv', 'speech', b'Sample_RAT_A,Operator,LQ\nENDC,Vodafone UK,3.8\n'),
     ]
     for filename, dataset_kind, content in uploads:
         response = client.post(
@@ -216,14 +226,13 @@ def test_reporting_mapping_selectors_show_only_matching_workspace_mapping_types(
 
     page = client.get('/reporting')
     assert page.status_code == 200
-    vfuk_selector = page.text.split('name="vodafone_mapping_dataset_id"', 1)[1].split('</select>', 1)[0]
-    three_selector = page.text.split('name="three_mapping_dataset_id"', 1)[1].split('</select>', 1)[0]
-    assert 'VFUK Vendor Mapping' in page.text
-    assert '3UK Vendor Mapping' in page.text
-    assert 'Multivendor_Mapping_VFUK.csv' in vfuk_selector
-    assert 'Multivendor_Mapping_3UK.csv' not in vfuk_selector
-    assert 'Multivendor_Mapping_3UK.csv' in three_selector
-    assert 'Multivendor_Mapping_VFUK.csv' not in three_selector
+    assert 'data-vendor-mapped="false"' in page.text
+    report = client.post('/reporting/netcheck-cdr', data={
+        'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
+        'technology': 'nsa', 'report_scope': 'multivendor',
+    })
+    assert report.status_code == 400
+    assert 'requires at least one selected CDR with a Workspace Vendor mapping' in report.text
 
 
 def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:

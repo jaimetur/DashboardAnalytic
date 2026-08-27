@@ -393,14 +393,50 @@ def assign_cdr_vendors(
 
     vodafone_lookup = build_vodafone_vendor_lookup(vodafone_mapping) if vodafone_mapping is not None else {}
     three_lookup = build_three_vendor_lookup(three_mapping) if three_mapping is not None else {}
-    result["vendor"] = [
-        vendor_from_cells(
-            operator,
-            cells,
-            vodafone_lookup if _normalise_operator(operator) == "Vodafone UK" else three_lookup,
-        )
-        for operator, cells in result[[operator_column, cell_column]].itertuples(index=False)
-    ]
+    assigned_vendors: list[object] = []
+    report_groups: list[str] = []
+    for operator, cells in result[[operator_column, cell_column]].itertuples(index=False):
+        normalized_operator = _normalise_operator(operator)
+        if normalized_operator == "Vodafone UK":
+            mapped_value = vendor_from_cells(operator, cells, vodafone_lookup)
+            assigned_vendors.append(mapped_value)
+            report_groups.append(mapped_value)
+        elif normalized_operator == "3":
+            mapped_value = vendor_from_cells(operator, cells, three_lookup)
+            assigned_vendors.append(mapped_value)
+            report_groups.append(mapped_value)
+        else:
+            # O2/EE are operators without a multivendor mapping.  They are not
+            # vendors and must not be materialised in the Vendor field.  Their
+            # operator remains available in the report-only comparison grouping,
+            # exactly as the final ELSE branch of the supplied formula requires.
+            assigned_vendors.append(pd.NA)
+            report_groups.append(normalized_operator)
+    result["vendor"] = assigned_vendors
+    result["report_vendor"] = report_groups
+    return result
+
+
+def ensure_report_vendor_group(df: pd.DataFrame) -> pd.DataFrame:
+    """Provide the formula-compatible comparison field for mapped CDRs.
+
+    This also upgrades CDRs mapped before the report_vendor field was
+    materialised: mapped Vodafone/3UK Vendor values are used where present,
+    while O2/EE keep their operator as required by the formula's final ELSE.
+    """
+    result = df.copy()
+    if "report_vendor" in result.columns:
+        return result
+    operator_column = _first_existing(result, ["operator", "Operator"])
+    vendor_column = _first_existing(result, ["vendor", "Vendor"])
+    if not operator_column:
+        return result
+    operators = result[operator_column].fillna("").astype(str).str.strip()
+    if vendor_column:
+        vendors = result[vendor_column].fillna("").astype(str).str.strip()
+        result["report_vendor"] = vendors.where(vendors.ne(""), operators)
+    else:
+        result["report_vendor"] = operators
     return result
 
 

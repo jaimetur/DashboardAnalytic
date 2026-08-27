@@ -36,6 +36,16 @@
         <input type="text" name="gcid" value="{{ selected_gcid }}" inputmode="numeric" placeholder="Exact GCID">
       </label>
       {% endif %}
+      {% for filter in cdr_preview_filters %}
+      <label>{{ filter.label }}
+        <select name="{{ filter.parameter }}" aria-label="{{ filter.label }} preview filter">
+          <option value="">All {{ filter.label | lower }} values</option>
+          {% for option in filter.options %}
+          <option value="{{ option }}"{% if option == filter.selected_value %} selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endfor %}
       <button type="submit">Refresh Preview</button>
     </form>
     <section class="summary-grid compact-summary preview-summary-grid">

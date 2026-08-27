@@ -91,6 +91,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .action-link-preview:hover { background: linear-gradient(135deg, #c9e2ef, #abcfe2); color: #08283d; }
 .action-link-map-vendors { background: linear-gradient(135deg, #a55d08, #d8891f); border-color: rgba(132, 72, 5, 0.50); color: #fff; font-weight: 700; box-shadow: 0 10px 22px rgba(165, 93, 8, 0.22); }
 .action-link-map-vendors:hover { background: linear-gradient(135deg, #824604, #ba7012); color: #fff; }
+.action-link-clear-vendors { background: linear-gradient(135deg, #c75683, #ed98b7); border: 1px solid rgba(167, 54, 103, 0.48); color: #fff; font-weight: 700; box-shadow: 0 10px 22px rgba(188, 74, 124, 0.24); }
+.action-link-clear-vendors:hover { background: linear-gradient(135deg, #a93d6b, #d9769e); color: #fff; }
 .action-link-disabled { background: linear-gradient(135deg, #e3e8ec, #d5dde4); border-color: rgba(126, 139, 152, 0.24); color: #7a8792; cursor: not-allowed; font-weight: 600; box-shadow: none; }
 .eyebrow { margin: 0 0 0.35rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--brand-2); font-size: 0.78rem; }
 .hero-copy, .panel { background: var(--panel); border: 1px solid rgba(255,255,255,0.55); box-shadow: var(--shadow); border-radius: var(--radius); backdrop-filter: blur(14px); }
@@ -278,6 +280,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .vendor-mapping-fields label { display: grid; gap: 0.38rem; }
 .vendor-mapping-fields .form-note { padding: 0.75rem 0.9rem; border-radius: 12px; background: rgba(16, 49, 74, 0.06); }
 .vendor-mapping-actions { display: flex; justify-content: flex-end; gap: 0.75rem; flex-wrap: wrap; }
+.vendor-mapping-actions .ghost-link { background: linear-gradient(135deg, #edf3f6, #d7e5eb); border-color: rgba(16, 49, 74, 0.24); color: #10314a; font-weight: 700; box-shadow: none; }
+.vendor-mapping-actions .ghost-link:hover { background: linear-gradient(135deg, #dceaf0, #c5dae4); color: #08283d; }
 .queue-filter-row { display: flex; justify-content: flex-start; margin: -0.1rem 0 0.9rem; }
 .queue-type-filter-control { width: min(330px, 100%); font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
 .queue-type-filter-control select { font-weight: 600; text-transform: none; letter-spacing: normal; }

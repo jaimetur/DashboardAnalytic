@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS dataset_profiles (
     status TEXT NOT NULL DEFAULT 'queued',
     progress INTEGER NOT NULL DEFAULT 0,
     normalization_version INTEGER NOT NULL DEFAULT 1,
+    vendor_mapping_applied INTEGER NOT NULL DEFAULT 0,
     dataset_kind TEXT,
     row_count INTEGER,
     column_count INTEGER,
@@ -132,6 +133,8 @@ class Repository:
         existing_columns = {row['name'] for row in conn.execute("PRAGMA table_info(dataset_profiles)").fetchall()}
         if 'normalization_version' not in existing_columns:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN normalization_version INTEGER NOT NULL DEFAULT 1")
+        if 'vendor_mapping_applied' not in existing_columns:
+            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN vendor_mapping_applied INTEGER NOT NULL DEFAULT 0")
 
     def _ensure_report_run_columns(self, conn: sqlite3.Connection) -> None:
         existing_columns = {row['name'] for row in conn.execute("PRAGMA table_info(report_runs)").fetchall()}
@@ -550,7 +553,7 @@ class Repository:
             return conn.execute(
                 """
                 SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                       p.status, p.progress, p.normalization_version, p.dataset_kind, p.row_count, p.column_count,
+                       p.status, p.progress, p.normalization_version, p.vendor_mapping_applied, p.dataset_kind, p.row_count, p.column_count,
                        p.default_metric, p.default_aggregation, p.available_metrics_json,
                        p.available_aggregations_json, p.filter_options_json, p.summary_json,
                        p.kpis_json, p.last_error, p.processed_at, p.updated_at
@@ -567,7 +570,7 @@ class Repository:
                 conn.execute(
                     """
                     SELECT d.id, d.file_name, d.stored_path, d.uploaded_by, d.uploaded_at,
-                           p.status, p.progress, p.normalization_version, p.dataset_kind, p.row_count, p.column_count,
+                           p.status, p.progress, p.normalization_version, p.vendor_mapping_applied, p.dataset_kind, p.row_count, p.column_count,
                            p.default_metric, p.default_aggregation, p.available_metrics_json,
                            p.available_aggregations_json, p.filter_options_json, p.summary_json,
                            p.kpis_json, p.last_error, p.processed_at, p.updated_at

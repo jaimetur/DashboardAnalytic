@@ -116,6 +116,11 @@
                   {% if dataset.dataset_kind %}data-input-kind="{{ dataset.dataset_kind }}"{% endif %}
                 >Show Dashboard</a>
                 {% endif %}
+                {% if dataset.can_clear_vendors %}
+                <form method="post" action="/workspace/clear-vendors/{{ dataset.id }}" data-confirm="Clear the mapped Vendor values for '{{ dataset.file_name }}'? You can map the CDR again using updated mappings." data-confirm-title="Clear Vendor mapping" data-confirm-label="Clear Vendors">
+                  <button type="submit" class="action-link-clear-vendors">Clear Vendors</button>
+                </form>
+                {% endif %}
                 {% if dataset.can_map_vendors %}
                 <button
                   type="button"
@@ -158,7 +163,12 @@
   </details>
 
   <dialog class="vendor-mapping-dialog" data-vendor-mapping-dialog aria-labelledby="vendor-mapping-title">
-    <form method="post" action="/workspace/map-vendors" data-loading-label="Mapping CDR vendors">
+    <form
+      method="post"
+      action="/workspace/map-vendors"
+      data-loading-label="Mapping Vendors to CDR samples"
+      data-loading-copy="For each sample, the tool reads its Operator and the first and last Cell_ID_A values, looks them up in the selected VFUK or 3UK mapping, and applies the agreed Vodafone/Three Vendor formula."
+    >
       <input type="hidden" name="cdr_dataset_id" data-vendor-mapping-cdr-id>
       <p class="eyebrow">NetCheck CDR</p>
       <h3 id="vendor-mapping-title">Map Vendors</h3>
@@ -192,7 +202,7 @@
       </div>
       <div class="vendor-mapping-actions">
         <button type="button" class="ghost-link" data-vendor-map-cancel>Cancel</button>
-        <button type="submit">Map Vendors</button>
+        <button type="submit" class="action-link-map-vendors">Map Vendors</button>
       </div>
     </form>
   </dialog>

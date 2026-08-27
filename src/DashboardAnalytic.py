@@ -25,7 +25,7 @@ from starlette.datastructures import QueryParams
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import TEMPLATE_NAMES, active_catalog_path, assign_cdr_vendors, classify_sessions, enrich_multivendor, load_catalog_csv, parse_catalog_csv, render_cdr_report, update_catalogue_document
+from src.modules.cdr_reporting import TEMPLATE_NAMES, active_catalog_path, assign_cdr_vendors, classify_sessions, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, render_cdr_report, update_catalogue_document
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
@@ -360,6 +360,7 @@ def serialize_dataset_row(row) -> dict[str, Any]:
     item['input_kind_label'] = INPUT_KIND_LABELS.get(item.get('dataset_kind') or 'generic', 'Other')
     item['progress'] = int(item.get('progress') or 0)
     item['normalization_version'] = int(item.get('normalization_version') or 1)
+    item['vendor_mapping_applied'] = bool(item.get('vendor_mapping_applied'))
     item['is_ready'] = item.get('status') == 'ready'
     dataset_path = Path(item.get('stored_path') or '')
     size_bytes = dataset_path.stat().st_size if dataset_path.exists() else 0
@@ -626,6 +627,7 @@ def rebuild_dataset_artifacts(
         status='ready',
         progress=100,
         normalization_version=DATASET_NORMALIZATION_VERSION,
+        vendor_mapping_applied=False,
         dataset_kind=dataset_kind,
         row_count=summary.rows,
         column_count=len(summary.columns),
@@ -679,6 +681,44 @@ def dataset_has_vendor_assignments(dataset_id: int) -> bool:
     return bool(assigned.all())
 
 
+def dataset_has_any_vendor_assignments(dataset_id: int) -> bool:
+    columns = repository.list_dataset_row_columns(dataset_id)
+    if 'vendor' not in columns:
+        return False
+    frame = repository.load_dataset_rows(dataset_id, ['vendor'], {})
+    return bool(
+        not frame.empty
+        and 'vendor' in frame.columns
+        and frame['vendor'].fillna('').astype(str).str.strip().ne('').any()
+    )
+
+
+def has_tool_applied_vendor_mapping(dataset: dict[str, Any]) -> bool:
+    """Recognise current and pre-flag Workspace Vendor mappings.
+
+    Older releases materialised mapping results without recording the profile
+    flag.  A non-empty materialized vendor column paired with an empty source
+    vendor column is unambiguously a tool-applied mapping and can be cleared.
+    """
+    if dataset.get('vendor_mapping_applied'):
+        return True
+    if not dataset.get('is_ready') or dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
+        return False
+    dataset_id = int(dataset['id'])
+    if not dataset_has_any_vendor_assignments(dataset_id):
+        return False
+    dataset_path = Path(dataset.get('stored_path') or '')
+    if not dataset_path.exists():
+        return False
+    source_frame = load_cached_dataset(dataset_path)
+    source_vendor = source_frame.get('vendor', pd.Series(dtype='object'))
+    if source_vendor.fillna('').astype(str).str.strip().ne('').any():
+        return False
+    repository.update_dataset_profile(dataset_id, vendor_mapping_applied=True)
+    dataset['vendor_mapping_applied'] = True
+    return True
+
+
 def persist_mapped_cdr_frame(dataset: dict[str, Any], frame: pd.DataFrame) -> None:
     """Replace a materialized CDR after vendor mapping and refresh its profile."""
     dataset_id = int(dataset['id'])
@@ -695,6 +735,7 @@ def persist_mapped_cdr_frame(dataset: dict[str, Any], frame: pd.DataFrame) -> No
     repository.update_dataset_profile(
         dataset_id,
         normalization_version=DATASET_NORMALIZATION_VERSION,
+        vendor_mapping_applied=True,
         row_count=summary.rows,
         column_count=len(summary.columns),
         default_metric=analysis.selected_metric,
@@ -986,6 +1027,8 @@ def describe_workspace_log_entry(log: dict[str, Any]) -> str:
             return f"Retry requested for dataset {details.get('dataset_id')}."
         if log['action'] == 'map_dataset_vendors':
             return f"Vendor mapping applied to CDR dataset {details.get('dataset_id')}."
+        if log['action'] == 'clear_dataset_vendors':
+            return f"Vendor mapping cleared from CDR dataset {details.get('dataset_id')}."
         if log['action'] in {'stop_dataset', 'stop_dataset_requested'}:
             return f"Stop requested for dataset {details.get('dataset_id')}."
         if log['action'] == 'delete_dataset':
@@ -1264,11 +1307,18 @@ def workspace(
     three_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_three']
     has_vendor_mappings = bool(vodafone_mapping_datasets or three_mapping_datasets)
     for dataset in datasets:
+        vendor_mapping_applied = has_tool_applied_vendor_mapping(dataset)
         dataset['can_map_vendors'] = (
             has_vendor_mappings
             and dataset.get('is_ready')
             and dataset.get('dataset_kind') in CDR_DATASET_KINDS
+            and not vendor_mapping_applied
             and not dataset_has_vendor_assignments(dataset['id'])
+        )
+        dataset['can_clear_vendors'] = (
+            dataset.get('is_ready')
+            and dataset.get('dataset_kind') in CDR_DATASET_KINDS
+            and vendor_mapping_applied
         )
 
     return render_template(
@@ -1298,6 +1348,11 @@ def preview_dataset(
     source_sheet: str | None = Query(default=None),
     mapping_vendor: str | None = Query(default=None),
     gcid: str | None = Query(default=None),
+    cdr_operator: str | None = Query(default=None),
+    cdr_vendor: str | None = Query(default=None),
+    cdr_rat: str | None = Query(default=None),
+    cdr_session_type: str | None = Query(default=None),
+    cdr_call_status: str | None = Query(default=None),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
     dataset_row = repository.get_dataset(dataset_id)
@@ -1334,6 +1389,37 @@ def preview_dataset(
     selected_gcid = (gcid or '').strip()
     if selected_gcid:
         preview_filters['GCID'] = selected_gcid
+    cdr_preview_filters: list[dict[str, object]] = []
+    if dataset['dataset_kind'] in CDR_DATASET_KINDS:
+        cdr_filter_definitions = [
+            ('cdr_operator', 'Operator', cdr_operator, ('operator', 'Operator')),
+            ('cdr_vendor', 'Vendor', cdr_vendor, ('vendor', 'Vendor')),
+            ('cdr_rat', 'RAT', cdr_rat, ('RAT_A', 'RAT', 'Sample_RAT_A')),
+            ('cdr_session_type', 'Session Type', cdr_session_type, ('Session_Type', 'session_type', 'Type_of_Test')),
+            ('cdr_call_status', 'Call Status', cdr_call_status, ('Call_Status', 'call_status', 'status')),
+        ]
+        for parameter, label, requested_value, candidates in cdr_filter_definitions:
+            column = next(
+                (
+                    resolved for candidate in candidates
+                    if (resolved := repository.resolve_dataset_row_column_name(dataset_id, candidate))
+                ),
+                None,
+            )
+            if not column:
+                continue
+            options = repository.list_distinct_dataset_row_values(dataset_id, column)
+            selected_value = requested_value if requested_value in options else ''
+            if selected_value:
+                preview_filters[column] = selected_value
+            cdr_preview_filters.append({
+                'parameter': parameter,
+                'label': label,
+                'options': options,
+                'selected_value': selected_value,
+            })
+            if parameter == 'cdr_vendor':
+                vendor_preview_columns.add(column)
 
     if dataset['dataset_kind'] == 'mapping_vodafone':
         source_columns = get_excel_sheet_columns(Path(dataset['stored_path']), preview_source_sheet) if preview_source_sheet else []
@@ -1381,6 +1467,7 @@ def preview_dataset(
             'vendor_filter_options': vendor_filter_options,
             'selected_mapping_vendor': selected_mapping_vendor,
             'selected_gcid': selected_gcid,
+            'cdr_preview_filters': cdr_preview_filters,
             'visible_column_count': len(preview_columns),
         },
     )
@@ -1454,8 +1541,6 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
             'data_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'data'],
             'voice_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'voice'],
             'speech_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'speech'],
-            'vodafone_mapping_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_vodafone'],
-            'three_mapping_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_three'],
         },
     )
 
@@ -1467,8 +1552,6 @@ def generate_netcheck_cdr_report(
     speech_dataset_id: int = Form(...),
     technology: str = Form(...),
     report_scope: str = Form('single'),
-    vodafone_mapping_dataset_id: int | None = Form(default=None),
-    three_mapping_dataset_id: int | None = Form(default=None),
     user: SessionUser = Depends(current_user),
 ) -> FileResponse:
     technology = technology.strip().lower()
@@ -1484,19 +1567,12 @@ def generate_netcheck_cdr_report(
     }
     try:
         frames = {kind: classify_sessions(_reporting_frame(dataset['id']), technology) for kind, dataset in selected.items()}
-        if multivendor:
-            if not vodafone_mapping_dataset_id or not three_mapping_dataset_id:
-                raise ValueError('Select processed Vendor Mapping files for both Vodafone and Three for a multivendor report.')
-            vodafone_mapping = _reporting_dataset(vodafone_mapping_dataset_id, 'mapping_vodafone')
-            three_mapping = _reporting_dataset(three_mapping_dataset_id, 'mapping_three')
-            vodafone_mapping_frame = _reporting_frame(vodafone_mapping['id'])
-            three_mapping_frame = _reporting_frame(three_mapping['id'])
-            frames = {
-                kind: enrich_multivendor(frame, vodafone_mapping_frame, three_mapping_frame)
-                for kind, frame in frames.items()
-            }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if multivendor and not any(dataset.get('vendor_mapping_applied') for dataset in selected.values()):
+        raise HTTPException(status_code=400, detail='Multivendor reporting requires at least one selected CDR with a Workspace Vendor mapping.')
+    if multivendor:
+        frames = {kind: ensure_report_vendor_group(frame) for kind, frame in frames.items()}
 
     template = settings.reporting_template_dir / TEMPLATE_NAMES[technology]
     catalog_path = reporting_catalog_path(technology)
@@ -1515,14 +1591,12 @@ def generate_netcheck_cdr_report(
         'datasets': {kind: dataset['id'] for kind, dataset in selected.items()},
         'technology': technology,
         'scope': report_scope,
-        'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
-        'three_mapping_dataset_id': three_mapping_dataset_id,
         'file': destination.name,
     }))
     repository.add_report_run(
         report_type='netcheck_cdr', technology=technology, scope=report_scope,
         data_dataset_id=data_dataset_id, voice_dataset_id=voice_dataset_id, speech_dataset_id=speech_dataset_id,
-        vodafone_mapping_dataset_id=vodafone_mapping_dataset_id, three_mapping_dataset_id=three_mapping_dataset_id,
+        vodafone_mapping_dataset_id=None, three_mapping_dataset_id=None,
         template_name=template.name, output_file=destination.name,
         created_by=user.username,
     )
@@ -1634,8 +1708,8 @@ def map_dataset_vendors(
     cdr_dataset = serialize_dataset_row(cdr_row)
     if not cdr_dataset['is_ready'] or cdr_dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
         raise HTTPException(status_code=400, detail='Vendor mapping is only available for processed NetCheck CDR datasets.')
-    if dataset_has_vendor_assignments(cdr_dataset_id):
-        raise HTTPException(status_code=400, detail='This CDR already has mapped Vendor values.')
+    if has_tool_applied_vendor_mapping(cdr_dataset):
+        raise HTTPException(status_code=400, detail='This CDR already has a Vendor mapping. Clear it before mapping again.')
     if not vodafone_mapping_dataset_id and not three_mapping_dataset_id:
         raise HTTPException(status_code=400, detail='Select at least one processed VFUK or 3UK Multivendor Mapping.')
 
@@ -1664,6 +1738,27 @@ def map_dataset_vendors(
         'three_mapping_dataset_id': three_mapping_dataset_id,
     }))
     return RedirectResponse(f'/workspace?dataset_id={cdr_dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/workspace/clear-vendors/{dataset_id}')
+def clear_dataset_vendors(dataset_id: int, user: SessionUser = Depends(current_user)) -> Response:
+    dataset_row = repository.get_dataset(dataset_id)
+    if not dataset_row:
+        raise HTTPException(status_code=404, detail='The selected CDR was not found.')
+    dataset = serialize_dataset_row(dataset_row)
+    if not dataset['is_ready'] or dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
+        raise HTTPException(status_code=400, detail='Vendor clearing is only available for processed NetCheck CDR datasets.')
+    if not has_tool_applied_vendor_mapping(dataset):
+        raise HTTPException(status_code=400, detail='This CDR does not have a tool-applied Vendor mapping to clear.')
+
+    dataset_path = Path(dataset['stored_path'])
+    try:
+        rebuild_dataset_artifacts(dataset_id, dataset_path, forced_dataset_kind=dataset['dataset_kind'])
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    clear_dataset_analysis_cache(dataset_path)
+    repository.add_log(user.username, 'clear_dataset_vendors', json.dumps({'dataset_id': dataset_id}))
+    return RedirectResponse(f'/workspace?dataset_id={dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/dashboard/stop/{dataset_id}')

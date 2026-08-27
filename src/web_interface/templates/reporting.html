@@ -8,7 +8,7 @@
         <h2>Choose a reporting module</h2>
       </div>
     </div>
-    <p class="lede">Produce a consistent, template-based NetCheck CDR PowerPoint from the processed Data, Voice and Speech workbooks. Choose the NSA or SA session scope and, for multivendor analysis, enrich Vodafone UK and Three UK results with their corresponding VFUK and 3UK cell mappings.</p>
+    <p class="lede">Produce a consistent, template-based NetCheck CDR PowerPoint from processed Data, Voice and Speech workbooks. Select NSA or SA; Multivendor is available only when at least one selected CDR has already been mapped in Workspace.</p>
   </article>
 
   <article class="panel reporting-panel">
@@ -20,38 +20,30 @@
       <label>CDR Data
         <select name="data_dataset_id" required>
           <option value="">Select processed Data CDR</option>
-          {% for dataset in data_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
+          {% for dataset in data_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}">{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
       <label>CDR Voice
         <select name="voice_dataset_id" required>
           <option value="">Select processed Voice CDR</option>
-          {% for dataset in voice_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
+          {% for dataset in voice_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}">{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
       <label>CDR Speech
         <select name="speech_dataset_id" required>
           <option value="">Select processed Speech CDR</option>
-          {% for dataset in speech_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
+          {% for dataset in speech_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}">{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
       <label>Technology
         <select name="technology" required><option value="nsa">NSA (Non-Standalone)</option><option value="sa">SA (Standalone)</option></select>
       </label>
       <label>Report scope
-        <select name="report_scope" data-report-scope><option value="single">Single-vendor</option><option value="multivendor">Multivendor</option></select>
+        <select name="report_scope" data-report-scope><option value="single">Single-vendor</option><option value="multivendor" disabled>Multivendor</option></select>
       </label>
-      <div data-mapping-selector hidden>
-        <label>VFUK Vendor Mapping
-          <select name="vodafone_mapping_dataset_id"><option value="">Select processed VFUK mapping</option>{% for dataset in vodafone_mapping_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }}</option>{% endfor %}</select>
-        </label>
-        <label>3UK Vendor Mapping
-          <select name="three_mapping_dataset_id"><option value="">Select processed 3UK mapping</option>{% for dataset in three_mapping_datasets %}<option value="{{ dataset.id }}">{{ dataset.file_name }}</option>{% endfor %}</select>
-        </label>
-      </div>
       <div class="form-actions reporting-submit-action"><button type="submit">Generate PowerPoint Report</button></div>
     </form>
-    <p class="form-note">The generated presentation preserves the selected NSA or SA template, replaces example charts with calculations from the selected CDRs, and keeps commentary areas blank for the analyst. Scoring and Gap Analysis slides are retained but are not populated in this release.</p>
+    <p class="form-note">Map Vendors from Workspace before choosing Multivendor. The generated presentation preserves the selected NSA or SA template, replaces example charts with calculations from the selected CDRs, and keeps commentary areas blank for the analyst. Scoring and Gap Analysis slides are retained but are not populated in this release.</p>
   </article>
 
   <article class="panel reporting-panel">
@@ -62,12 +54,18 @@
 {% endblock %}
 {% block extra_scripts %}
 <script>
-  document.querySelector('[data-report-scope]')?.addEventListener('change', function () {
-    const selector = document.querySelector('[data-mapping-selector]');
-    const inputs = selector?.querySelectorAll('select') || [];
-    const enabled = this.value === 'multivendor';
-    if (selector) selector.hidden = !enabled;
-    inputs.forEach((input) => { input.required = enabled; });
-  });
+  (() => {
+    const scope = document.querySelector('[data-report-scope]');
+    const cdrSelectors = document.querySelectorAll('select[name$="_dataset_id"]');
+    const multivendorOption = scope?.querySelector('option[value="multivendor"]');
+    if (!scope || !multivendorOption) return;
+    const updateScope = () => {
+      const hasMappedCdr = Array.from(cdrSelectors).some((select) => select.selectedOptions[0]?.dataset.vendorMapped === 'true');
+      multivendorOption.disabled = !hasMappedCdr;
+      if (!hasMappedCdr && scope.value === 'multivendor') scope.value = 'single';
+    };
+    cdrSelectors.forEach((select) => select.addEventListener('change', updateScope));
+    updateScope();
+  })();
 </script>
 {% endblock %}

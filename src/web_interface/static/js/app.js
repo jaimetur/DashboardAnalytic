@@ -717,10 +717,10 @@ function hideLoadingOverlay() {
   document.body.classList.remove('loading-active');
 }
 
-function showLoadingOverlay(label) {
+function showLoadingOverlay(label, copy) {
   if (!loadingOverlay) return;
   loadingTitle.textContent = label || 'Processing request';
-  loadingCopy.textContent = 'Please wait while the workspace processes the selected dataset or updates the dashboard.';
+  loadingCopy.textContent = copy || 'Please wait while the workspace processes the selected dataset or updates the dashboard.';
   loadingOverlay.hidden = false;
   document.body.classList.add('loading-active');
 }
@@ -861,7 +861,7 @@ document.querySelectorAll('form[data-loading-label]').forEach((form) => {
         params.get('input_kind'),
         form.dataset.loadingLabel,
       )) {
-        showLoadingOverlay(form.dataset.loadingLabel);
+        showLoadingOverlay(form.dataset.loadingLabel, form.dataset.loadingCopy);
         replaceLocation(buildDatasetDashboardUrl(params));
       }
       return;
@@ -881,7 +881,7 @@ document.querySelectorAll('form[data-loading-label]').forEach((form) => {
       window.location.search = params.toString();
       return;
     }
-    showLoadingOverlay(form.dataset.loadingLabel);
+    showLoadingOverlay(form.dataset.loadingLabel, form.dataset.loadingCopy);
   });
 });
 

@@ -303,6 +303,39 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     assert 'href="/workspace/preview/1" data-preview-open-link data-loading-label="Generating dataset preview">Preview Dataset</a>' in dashboard_response.text
 
 
+def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> None:
+    login(client)
+    client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'data'},
+        files={'dataset_files': (
+            'cdr_data.csv',
+            BytesIO(
+                b'operator,vendor,RAT_A,Session_Type,Call_Status,score\n'
+                b'Vodafone UK,Ericsson,ENDC,VoLTE,Completed,91\n'
+                b'3,Nokia,NR,WhatsApp,Dropped,90\n'
+            ),
+            'text/csv',
+        )},
+        follow_redirects=False,
+    )
+
+    preview = client.get(
+        '/workspace/preview/1?cdr_operator=3&cdr_vendor=Nokia&cdr_rat=NR'
+        '&cdr_session_type=WhatsApp&cdr_call_status=Dropped',
+    )
+    assert preview.status_code == 200
+    assert 'name="cdr_operator"' in preview.text
+    assert 'name="cdr_vendor"' in preview.text
+    assert 'name="cdr_rat"' in preview.text
+    assert 'name="cdr_session_type"' in preview.text
+    assert 'name="cdr_call_status"' in preview.text
+    assert 'class="vendor-column">vendor<' in preview.text
+    preview_rows = preview.text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
+    assert '>Nokia<' in preview_rows
+    assert '>Ericsson<' not in preview_rows
+
+
 def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mapping(client) -> None:
     login(client)
     client.post(
@@ -333,9 +366,19 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     preview = client.get('/workspace/preview/1')
     assert preview.status_code == 200
     assert '>3_Nokia<' in preview.text
+
+    import src.DashboardAnalytic as app_module
+    app_module.repository.update_dataset_profile(1, vendor_mapping_applied=False)
     workspace_after_mapping = client.get('/workspace').text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
     assert 'data-dataset-id="1"' in workspace_after_mapping
     assert 'Map Vendors</button>' not in workspace_after_mapping
+    assert 'Clear Vendors</button>' in workspace_after_mapping
+
+    clear_response = client.post('/workspace/clear-vendors/1', follow_redirects=False)
+    assert clear_response.status_code == 303
+    workspace_after_clear = client.get('/workspace').text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
+    assert 'Map Vendors</button>' in workspace_after_clear
+    assert 'Clear Vendors</button>' not in workspace_after_clear
 
 
 def test_vfuk_preview_limits_mapping_sheets_and_displays_materialised_gcid(client) -> None:
