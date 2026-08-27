@@ -1,9 +1,7 @@
 {% extends 'base.html' %}
 {% block content %}
 <section class="dashboard-stack spacious-stack analytics-dashboard-stack">
-  <section class="workspace-grid">
-    <main class="dashboard-main-stack">
-      <article class="panel dataset-summary-panel select-dataset-card module-hero-dashboard" style="background: linear-gradient(135deg, #0c4c8c, #68b8ff) !important; color: #ffffff;">
+  <article class="panel dataset-summary-panel select-dataset-card module-hero-dashboard" style="background: linear-gradient(135deg, #0c4c8c, #68b8ff) !important; color: #ffffff;">
         <div class="section-head tight-head">
           <div>
             <p class="eyebrow">Selected Dataset</p>
@@ -99,8 +97,10 @@
         {% else %}
         <p class="form-note">No processed datasets are available yet.</p>
         {% endif %}
-      </article>
+  </article>
 
+  <section class="workspace-grid dashboard-content-grid">
+    <main class="dashboard-main-stack">
       {% if selected_dataset and selected_dataset.is_ready %}
       <details class="panel collapsible-panel" open data-panel-state-key="dashboard:executive-dashboard">
         <summary class="collapsible-summary">
