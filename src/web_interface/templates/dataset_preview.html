@@ -38,10 +38,9 @@
       {% endif %}
       {% for filter in cdr_preview_filters %}
       <label>{{ filter.label }}
-        <select name="{{ filter.parameter }}" aria-label="{{ filter.label }} preview filter">
-          <option value="">All {{ filter.label | lower }} values</option>
+        <select name="{{ filter.parameter }}" multiple aria-label="{{ filter.label }} preview filter">
           {% for option in filter.options %}
-          <option value="{{ option }}"{% if option == filter.selected_value %} selected{% endif %}>{{ option }}</option>
+          <option value="{{ option }}"{% if option in filter.selected_values %} selected{% endif %}>{{ option }}</option>
           {% endfor %}
         </select>
       </label>
@@ -73,10 +72,10 @@
     {% if preview_columns and preview_rows %}
     <div class="table-wrap data-table-wrap dataset-preview-table-wrap" data-horizontal-wheel-scroll tabindex="0" aria-label="Dataset preview table; use Shift and the mouse wheel to scroll horizontally">
       <table class="dataset-preview-table">
-        <thead><tr>{% for column in preview_columns %}<th{% if column == 'GCID' %} class="gcid-column"{% elif column in vendor_preview_columns %} class="vendor-column"{% endif %}>{{ column }}</th>{% endfor %}</tr></thead>
+        <thead><tr>{% for column in preview_columns %}<th{% if column == 'GCID' or (dataset.dataset_kind in ['data', 'voice', 'speech'] and column == 'source_sheet') %} class="gcid-column"{% elif column in vendor_preview_columns %} class="vendor-column"{% endif %}>{{ column }}</th>{% endfor %}</tr></thead>
         <tbody>
           {% for row in preview_rows %}
-          <tr>{% for column in preview_columns %}<td{% if column == 'GCID' %} class="gcid-column"{% elif column in vendor_preview_columns %} class="vendor-column"{% endif %}>{{ row.get(column, '') }}</td>{% endfor %}</tr>
+          <tr>{% for column in preview_columns %}<td{% if column == 'GCID' or (dataset.dataset_kind in ['data', 'voice', 'speech'] and column == 'source_sheet') %} class="gcid-column"{% elif column in vendor_preview_columns %} class="vendor-column"{% endif %}>{{ row.get(column, '') }}</td>{% endfor %}</tr>
           {% endfor %}
         </tbody>
       </table>

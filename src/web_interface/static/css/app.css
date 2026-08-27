@@ -286,7 +286,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .queue-type-filter-control { width: min(330px, 100%); font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
 .queue-type-filter-control select { font-weight: 600; text-transform: none; letter-spacing: normal; }
 .queue-type-filter-control select option:disabled { color: #9aa6af; background: #eef1f3; }
-.dataset-preview-hero { background: linear-gradient(145deg, rgba(16, 49, 74, 0.97), rgba(11, 122, 117, 0.90)); border-color: rgba(11, 122, 117, 0.48); color: #fff; }
+.dataset-preview-hero { position: relative; z-index: 2; overflow: visible; background: linear-gradient(145deg, rgba(16, 49, 74, 0.97), rgba(11, 122, 117, 0.90)); border-color: rgba(11, 122, 117, 0.48); color: #fff; }
 .dataset-preview-hero .eyebrow, .dataset-preview-hero .lede { color: rgba(255,255,255,0.82); }
 .dataset-preview-hero .pill { background: rgba(255,255,255,0.90); border-color: rgba(255,255,255,0.45); color: #263d50; }
 .preview-summary-grid article { background: rgba(3, 43, 54, 0.36); border-color: rgba(255,255,255,0.26); }
@@ -300,7 +300,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .preview-actions { margin-top: 1rem; }
 .preview-actions .ghost-link:not(.action-link-primary) { background: rgba(255,255,255,0.13); border-color: rgba(255,255,255,0.34); color: #fff; }
 .dataset-preview-stack, .dataset-preview-panel { width: 100%; max-width: 100%; min-width: 0; }
-.dataset-preview-panel { overflow: hidden; }
+.dataset-preview-panel { position: relative; z-index: 1; overflow: hidden; }
 .dataset-preview-table-wrap { width: 100%; max-width: 100%; min-width: 0; height: min(65vh, 38rem); max-height: none; overflow-x: scroll !important; overflow-y: scroll !important; scrollbar-gutter: stable both-edges; overscroll-behavior: contain; }
 .dataset-preview-table { width: max-content; min-width: 1200px; }
 .dataset-preview-table .gcid-column { background: #fff6bf; color: #554000; font-weight: 700; }

@@ -1348,11 +1348,11 @@ def preview_dataset(
     source_sheet: str | None = Query(default=None),
     mapping_vendor: str | None = Query(default=None),
     gcid: str | None = Query(default=None),
-    cdr_operator: str | None = Query(default=None),
-    cdr_vendor: str | None = Query(default=None),
-    cdr_rat: str | None = Query(default=None),
-    cdr_session_type: str | None = Query(default=None),
-    cdr_call_status: str | None = Query(default=None),
+    cdr_operator: list[str] = Query(default=[]),
+    cdr_vendor: list[str] = Query(default=[]),
+    cdr_rat: list[str] = Query(default=[]),
+    cdr_session_type: list[str] = Query(default=[]),
+    cdr_call_status: list[str] = Query(default=[]),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
     dataset_row = repository.get_dataset(dataset_id)
@@ -1372,7 +1372,7 @@ def preview_dataset(
     vendor_filter_options = repository.list_distinct_dataset_row_values(dataset_id, vendor_preview_column) if vendor_preview_column else []
     preview_sheet_options: list[str] = []
     preview_source_sheet: str | None = None
-    preview_filters: dict[str, str] = {}
+    preview_filters: dict[str, Any] = {}
     if dataset['dataset_kind'] == 'mapping_vodafone':
         available_sheets = {sheet.casefold(): sheet for sheet in repository.list_distinct_dataset_row_values(dataset_id, 'source_sheet')}
         preview_sheet_options = [available_sheets[name] for name in ('4g', '5g') if name in available_sheets]
@@ -1398,7 +1398,7 @@ def preview_dataset(
             ('cdr_session_type', 'Session Type', cdr_session_type, ('Session_Type', 'session_type', 'Type_of_Test')),
             ('cdr_call_status', 'Call Status', cdr_call_status, ('Call_Status', 'call_status', 'status')),
         ]
-        for parameter, label, requested_value, candidates in cdr_filter_definitions:
+        for parameter, label, requested_values, candidates in cdr_filter_definitions:
             column = next(
                 (
                     resolved for candidate in candidates
@@ -1409,14 +1409,14 @@ def preview_dataset(
             if not column:
                 continue
             options = repository.list_distinct_dataset_row_values(dataset_id, column)
-            selected_value = requested_value if requested_value in options else ''
-            if selected_value:
-                preview_filters[column] = selected_value
+            selected_values = [value for value in requested_values if value in options]
+            if selected_values:
+                preview_filters[column] = selected_values
             cdr_preview_filters.append({
                 'parameter': parameter,
                 'label': label,
                 'options': options,
-                'selected_value': selected_value,
+                'selected_values': selected_values,
             })
             if parameter == 'cdr_vendor':
                 vendor_preview_columns.add(column)

@@ -335,6 +335,12 @@ def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> Non
     assert '>Nokia<' in preview_rows
     assert '>Ericsson<' not in preview_rows
 
+    multi_preview = client.get('/workspace/preview/1?cdr_operator=Vodafone%20UK&cdr_operator=3')
+    multi_rows = multi_preview.text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
+    assert '>Nokia<' in multi_rows
+    assert '>Ericsson<' in multi_rows
+    assert 'name="cdr_operator" multiple' in multi_preview.text
+
 
 def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mapping(client) -> None:
     login(client)
