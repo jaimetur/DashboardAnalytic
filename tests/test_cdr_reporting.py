@@ -6,7 +6,7 @@ from io import BytesIO
 from pathlib import Path
 from pptx import Presentation
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, classify_sessions, enrich_multivendor, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, classify_sessions, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, vendor_from_cells
 
 
 def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> None:
@@ -113,6 +113,30 @@ def test_catalogue_call_family_uses_documented_netcheck_session_values() -> None
     grouped, primary, _ = _apply_catalog_grouping(filtered, entry, False, 'Call_Status')
 
     assert grouped[primary].tolist() == ['VoLTE', 'MultiRAB', 'WhatsApp']
+
+
+def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> None:
+    entries = load_catalog_csv(Path('assets/ppt-slides-catalog/nsa-slide-catalogue.csv'), 'nsa')
+    slide_ten = [entry for entry in entries if entry.slide == 10]
+    slide_thirteen = [entry for entry in entries if entry.slide == 13]
+
+    assert len(slide_ten) == 2
+    assert {entry.layout for entry in slide_ten} == {'Title and 2 rows + Comments right'}
+    assert len(slide_thirteen) == 3
+    assert {entry.layout for entry in slide_thirteen} == {'Title and 3 columns + Comments'}
+    assert {slide: sum(entry.slide == slide for entry in entries) for slide in range(12, 22)} == {
+        12: 2, 13: 3, 14: 2, 15: 2, 16: 2,
+        17: 2, 18: 3, 19: 3, 20: 4, 21: 2,
+    }
+
+
+def test_catalogue_uses_one_preservation_type_and_records_nsa_conclusions_table() -> None:
+    entries = load_catalog_csv(Path('assets/ppt-slides-catalog/nsa-slide-catalogue.csv'), 'nsa')
+    preserved = [entry.chart_type for entry in entries if not entry.source_kind and entry.slide != 22]
+    conclusions = next(entry for entry in entries if entry.slide == 22)
+
+    assert set(preserved) == {'Not Automated (preserve)'}
+    assert conclusions.chart_type == 'Table'
 
 
 def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None:

@@ -44,7 +44,7 @@ The renderer follows the visual grammar of the supplied template for every autom
 
 The technology condition below is always applied before the slide-level filters: NSA contains an ENDC spelling in `RAT`, `RAT_A` or `Sample_RAT_A`; SA contains `NR` in the same fields.
 
-For automated rows, `Chart type`, `Filters`, `Grouping` and `Layout` are executable catalogue fields. Write filters as semicolon-separated expressions such as `Call Family IN (VoLTE, MultiRAB); Direction = DL` or `Type_of_Test = Interactivity`; supported operators are `IN (...)`, `CONTAINS`, `=`, `!=`, `<`, `<=`, `>` and `>=`. Use processed CDR column names (case-insensitive matching is supported). `Call Family` is a supported derived dimension: the NetCheck CDR values `CALL`, `MultiRAB CALL` and `WhatsApp CALL` are normalised to their test families, with the classic-call mode resolving VoLTE or VoNR where available. `Threshold = 1.6` configures `Threshold Stacked Vertical Bars`, while `Buckets = 1,5,20,100` configures the `Rate Bucket` grouping for `Distribution Stacked Vertical Bars`. Write grouping dimensions with `×`, for example `City × Operator × Campaign`: the first dimension becomes the primary category, remaining dimensions define comparison series, stack/bucket breakdowns and table columns. `Operator` resolves to the calculated operator-vendor series in multivendor reports. The valid automated chart types are `100% Stacked Vertical Bars`, `Count Stacked Horizontal Bars`, `CDF Line`, `Scatter`, `Table`, `Average Vertical Bars`, `Median Vertical Bars`, `Distribution Stacked Vertical Bars` and `Threshold Stacked Vertical Bars`.
+For automated rows, `Chart type`, `Filters`, `Grouping` and `Layout` are executable catalogue fields. Write filters as semicolon-separated expressions such as `Call Family IN (VoLTE, MultiRAB); Direction = DL` or `Type_of_Test = Interactivity`; supported operators are `IN (...)`, `CONTAINS`, `=`, `!=`, `<`, `<=`, `>` and `>=`. Use processed CDR column names (case-insensitive matching is supported). `Call Family` is a supported derived dimension: the NetCheck CDR values `CALL`, `MultiRAB CALL` and `WhatsApp CALL` are normalised to their test families, with the classic-call mode resolving VoLTE or VoNR where available. `Threshold = 1.6` configures `Threshold Stacked Vertical Bars`, while `Buckets = 1,5,20,100` configures the `Rate Bucket` grouping for `Distribution Stacked Vertical Bars`. Write grouping dimensions with `×`, for example `City × Operator × Campaign`: the first dimension becomes the primary category, remaining dimensions define comparison series, stack/bucket breakdowns and table columns. `Operator` resolves to the calculated operator-vendor series in multivendor reports. The valid automated chart types are `100% Stacked Vertical Bars`, `Count Stacked Horizontal Bars`, `CDF Line`, `Scatter`, `Table`, `Average Vertical Bars`, `Median Vertical Bars`, `Distribution Stacked Vertical Bars` and `Threshold Stacked Vertical Bars`. Entries that intentionally keep template content use the single `Not Automated (preserve)` value; the NSA conclusions table is catalogued as `Table` but remains a manually maintained template table until it is assigned a CDR source.
 
 <!-- SLIDE_CATALOGUE:START -->
 
@@ -54,21 +54,23 @@ Export the active NSA or SA catalogue from Admin before editing it. The tables b
 
 | Slide | Slide tittle | Slide Subtittle | Layout | CDR source | KPI | Chart type | Filters | Grouping |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 2025 Q4 Net check UK | NSA CDR analysis<br>Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | — | — | — | Preserved cover | — | — |
-| 2 | Executive Summary | — | — | — | — | Preserved summary | — | — |
-| 3 | Netcheck Q4 scoring “Best network”. Drive city | — | — | — | — | Not automated | — | — |
-| 4 | Score breakdown | — | — | — | — | Not automated | — | — |
-| 5 | KPIs prioritization: gap Vodafone vs EE | — | — | — | — | Not automated | — | — |
-| 6 | KPIs prioritization: gap Three vs EE | — | — | — | — | Not automated | — | — |
-| 7 | 7 cities analysis | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | — | — | — | Preserved section divider | — | — |
+| 1 | 2025 Q4 Net check UK | NSA CDR analysis<br>Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | — | — | — | Not Automated (preserve) | — | — |
+| 2 | Executive Summary | — | — | — | — | Not Automated (preserve) | — | — |
+| 3 | Netcheck Q4 scoring “Best network”. Drive city | — | — | — | — | Not Automated (preserve) | — | — |
+| 4 | Score breakdown | — | — | — | — | Not Automated (preserve) | — | — |
+| 5 | KPIs prioritization: gap Vodafone vs EE | — | — | — | — | Not Automated (preserve) | — | — |
+| 6 | KPIs prioritization: gap Three vs EE | — | — | — | — | Not Automated (preserve) | — | — |
+| 7 | 7 cities analysis | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | — | — | — | Not Automated (preserve) | — | — |
 | 8 | Completed Call Ratio | — | Title and 1 column + Comments | CDR-Voice | Call_Status | 100% Stacked Vertical Bars | Call Family IN (VoLTE, MultiRAB, WhatsApp) | Call Family × Operator × Campaign |
 | 9 | Voice failures per Q/city | — | Title and 1 column + Comments | CDR-Voice | Call_Status | Count Stacked Horizontal Bars | Call Family IN (VoLTE, MultiRAB, WhatsApp); Call_Status IN (Failed, Dropped) | Call Family × City × Operator × Campaign |
-| 10 | Data failure | — | Title and 1 column + Comments | CDR-Data | Test_Result | 100% Stacked Vertical Bars | Test Family IN (httpBrowser, htttpBrowser, httpTransfer, YouTube, VideoStreaming) | Test Family × Operator × Campaign |
+| 10 | Data failure | — | Title and 2 rows + Comments right | CDR-Data | Test_Result | 100% Stacked Vertical Bars | Test Family IN (httpBrowser, htttpBrowser, httpTransfer, YouTube, VideoStreaming) | Test Family × Operator × Campaign |
+| 10 | Data failure | — | Title and 2 rows + Comments right | CDR-Data | Test_Result | 100% Stacked Vertical Bars | Test_Name CONTAINS FDFS | Direction × Operator × Campaign |
 | 11 | Data failures - FDFS test | — | Title and 1 column + Comments | CDR-Data | Test_Result | 100% Stacked Vertical Bars | Test_Name CONTAINS FDFS | Test Name × Operator × Campaign |
 | 12 | POLQA AVG MOS (Multirab&volte) | — | Title and 2 columns + Comments | CDR-Voice | POLQA_LQ_Avg | CDF Line | Call Family IN (VoLTE, MultiRAB) | Operator × Campaign |
 | 12 | POLQA AVG MOS (Multirab&volte) | — | Title and 2 columns + Comments | CDR-Voice | POLQA_LQ_Avg | Average Vertical Bars | Call Family IN (VoLTE, MultiRAB) | Operator × Campaign |
-| 13 | POLQA AVG MOS (WhatsApp) | — | Title and 2 columns (1 smaller) + Comments | CDR-Speech | LQ | CDF Line | Call Family = WhatsApp | Operator × Campaign |
-| 13 | POLQA AVG MOS (WhatsApp) | — | Title and 2 columns (1 smaller) + Comments | CDR-Speech | LQ | Average Vertical Bars | Call Family = WhatsApp | Operator × Campaign |
+| 13 | POLQA AVG MOS (WhatsApp) | — | Title and 3 columns + Comments | CDR-Speech | LQ | CDF Line | Call Family = WhatsApp | Operator × Campaign |
+| 13 | POLQA AVG MOS (WhatsApp) | — | Title and 3 columns + Comments | CDR-Speech | LQ | Average Vertical Bars | Call Family = WhatsApp | Operator × Campaign |
+| 13 | POLQA AVG MOS (WhatsApp) | — | Title and 3 columns + Comments | CDR-Speech | LQ | CDF Line | Call Family = WhatsApp; Campaign = 2025 Q4 | Operator |
 | 14 | POLQA <1.6 | — | Title and 2 columns + Comments | CDR-Speech | LQ | Threshold Stacked Vertical Bars | Call Family = WhatsApp; Threshold = 1.6 | Operator × Campaign |
 | 14 | POLQA <1.6 | — | Title and 2 columns + Comments | CDR-Voice | POLQA_LQ_Avg | Threshold Stacked Vertical Bars | Call Family = VoLTE; Threshold = 1.6 | Operator × Campaign |
 | 15 | CST | — | Title and 2 columns + Comments | CDR-Voice | Call_Setup_Time | CDF Line | Call Family = VoLTE | Operator × Campaign |
@@ -89,23 +91,23 @@ Export the active NSA or SA catalogue from Admin before editing it. The tables b
 | 20 | Interactivity | — | Title and 2 columns and 2 rows + Comments right | CDR-Data | Packet_Error_Ratio | Average Vertical Bars | Type_of_Test = Interactivity | Operator × Campaign |
 | 21 | Browsing | — | Title and 2 columns + Comments | CDR-Data | http_Browser_1MB_Reached_Duration | CDF Line | Type_of_Test CONTAINS Browser | Operator × Campaign |
 | 21 | Browsing | — | Title and 2 columns + Comments | CDR-Data | http_Browser_1MB_Reached_Duration | Average Vertical Bars | Type_of_Test CONTAINS Browser | Operator × Campaign |
-| 22 | Conclusions | — | — | — | — | Preserved conclusions | — | — |
+| 22 | Conclusions | — | 1_Title and 1 column | — | — | Table | — | — |
 
 ### SA template
 
 | Slide | Slide tittle | Slide Subtittle | Layout | CDR source | KPI | Chart type | Filters | Grouping |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | NPPI Tech Forum<br>VodafoneThree & Ericsson<br>2026-08-06 | 2026 Q2 Net check 5G SA Campaign<br>Final Scoring and Gap Analysis<br>CDR KPI Analysis | — | — | — | Preserved cover | — | — |
-| 2 | Agenda | — | — | — | — | Preserved agenda | — | — |
-| 3 | Actions Tracker | — | — | — | — | Preserved tracker | — | — |
-| 4 | Netcheck CDR Scoring and Gap Analysis | 2026 Q2 NSA vs SA Campaign<br>7 Cities and London | — | — | — | Preserved section divider | — | — |
-| 5 | Netcheck 5G SA Best Network Scoring | 7 Cities | — | — | — | Not automated | — | — |
-| 6 | Netcheck 5G SA Most Reliable Network Scoring | 7 Cities | — | — | — | Not automated | — | — |
-| 7 | Q2 2026 vs SA Campaign – Delta Scoring | 7 Cities | — | — | — | Not automated | — | — |
-| 8 | Netcheck 5G SA Best Network Scoring | London | — | — | — | Not automated | — | — |
-| 9 | Netcheck 5G SA Most Reliable Network Scoring | London | — | — | — | Not automated | — | — |
-| 10 | Q2 2026 vs SA Campaign – Delta Scoring | London | — | — | — | Not automated | — | — |
-| 11 | Netcheck CDR Voice and Speech Analysis | 2026 Q2 NSA vs SA Campaign<br>7 Cities and London | — | — | — | Preserved section divider | — | — |
+| 1 | NPPI Tech Forum<br>VodafoneThree & Ericsson<br>2026-08-06 | 2026 Q2 Net check 5G SA Campaign<br>Final Scoring and Gap Analysis<br>CDR KPI Analysis | — | — | — | Not Automated (preserve) | — | — |
+| 2 | Agenda | — | — | — | — | Not Automated (preserve) | — | — |
+| 3 | Actions Tracker | — | — | — | — | Not Automated (preserve) | — | — |
+| 4 | Netcheck CDR Scoring and Gap Analysis | 2026 Q2 NSA vs SA Campaign<br>7 Cities and London | — | — | — | Not Automated (preserve) | — | — |
+| 5 | Netcheck 5G SA Best Network Scoring | 7 Cities | — | — | — | Not Automated (preserve) | — | — |
+| 6 | Netcheck 5G SA Most Reliable Network Scoring | 7 Cities | — | — | — | Not Automated (preserve) | — | — |
+| 7 | Q2 2026 vs SA Campaign – Delta Scoring | 7 Cities | — | — | — | Not Automated (preserve) | — | — |
+| 8 | Netcheck 5G SA Best Network Scoring | London | — | — | — | Not Automated (preserve) | — | — |
+| 9 | Netcheck 5G SA Most Reliable Network Scoring | London | — | — | — | Not Automated (preserve) | — | — |
+| 10 | Q2 2026 vs SA Campaign – Delta Scoring | London | — | — | — | Not Automated (preserve) | — | — |
+| 11 | Netcheck CDR Voice and Speech Analysis | 2026 Q2 NSA vs SA Campaign<br>7 Cities and London | — | — | — | Not Automated (preserve) | — | — |
 | 12 | Voice Failures | 7 Cities | Title and 2 columns | CDR-Voice | Call_Status | Count Stacked Horizontal Bars | Failed/Dropped; Classic call, MultiRAB, WhatsApp | Call family × Operator × Campaign |
 | 12 | Voice Failures | 7 Cities | Title and 2 columns | CDR-Voice | Failure_Technology | Count Stacked Horizontal Bars | Failed/Dropped; Classic call, MultiRAB, WhatsApp | Call family × Failure technology × Operator × Campaign |
 | 13 | Voice Failures (Vodafone UK) | 7 Cities | Title and 3 columns | CDR-Voice | Call_Status | Count Stacked Horizontal Bars | Failed/Dropped; Operator Vodafone UK | Call family × City × Campaign |
@@ -126,7 +128,7 @@ Export the active NSA or SA catalogue from Admin before editing it. The tables b
 | 19 | POLQA Avg MOS | London | Title and 8 Content | CDR-Voice | POLQA_LQ_Avg | Average Vertical Bars | Classic call or MultiRAB; location London | Operator × Campaign |
 | 19 | POLQA Avg MOS | London | Title and 8 Content | CDR-Speech | LQ | CDF Line | WhatsApp; location London | Operator × Campaign |
 | 19 | POLQA Avg MOS | London | Title and 8 Content | CDR-Speech | LQ | Average Vertical Bars | WhatsApp; location London | Operator × Campaign |
-| 20 | Netcheck CDR Data Analysis | 2026 Q2 NSA vs SA Campaign<br>7 Cities and London | — | — | — | Preserved section divider | — | — |
+| 20 | Netcheck CDR Data Analysis | 2026 Q2 NSA vs SA Campaign<br>7 Cities and London | — | — | — | Not Automated (preserve) | — | — |
 | 21 | FDFS Success Ratio | — | Title and 2 columns | CDR-Data | Test_Result | 100% Stacked Vertical Bars | FDFS; Direction DL; 7 cities | Operator × Campaign |
 | 21 | FDFS Success Ratio | — | Title and 2 columns | CDR-Data | Test_Result | 100% Stacked Vertical Bars | FDFS; Direction UL; London | Operator × Campaign |
 | 22 | FDFS DL Throughput | 7 Cities | Title and 2 columns | CDR-Data | Mean_Data_Rate | CDF Line | FDFS; Direction DL | Operator × Campaign |
@@ -141,7 +143,7 @@ Export the active NSA or SA catalogue from Admin before editing it. The tables b
 | 25 | Interactivity KPIs | 7 Cities | Title and 8 Content | CDR-Data | Interactivity_Packet_Error_Ratio | Average Vertical Bars | Interactivity tests | Operator × Campaign |
 | 26 | Browsing Time to 1MB | 7 cities | Title and 2 columns | CDR-Data | http_Browser_1MB_Reached_Duration | CDF Line | Browsing/HTTP tests | Operator × Campaign |
 | 26 | Browsing Time to 1MB | 7 cities | Title and 2 columns | CDR-Data | http_Browser_1MB_Reached_Duration | Average Vertical Bars | Browsing/HTTP tests | Operator × Campaign |
-| 27 | Conclusions | — | — | — | — | Preserved conclusions | — | — |
-| 28 |  | — | — | — | — | Preserved closing slide | — | — |
+| 27 | Conclusions | — | — | — | — | Not Automated (preserve) | — | — |
+| 28 |  | — | — | — | — | Not Automated (preserve) | — | — |
 
 <!-- SLIDE_CATALOGUE:END -->

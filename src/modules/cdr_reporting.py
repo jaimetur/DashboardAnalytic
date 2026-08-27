@@ -32,10 +32,7 @@ CHART_TYPES = {
     "100% stacked vertical bars", "count stacked horizontal bars", "cdf line", "scatter", "table",
     "distribution stacked vertical bars", "threshold stacked vertical bars", "average vertical bars", "median vertical bars",
 }
-PRESERVED_CHART_TYPES = {
-    "preserved cover", "preserved agenda", "preserved section divider", "preserved summary",
-    "preserved tracker", "preserved conclusions", "preserved closing slide", "not automated",
-}
+PRESERVED_CHART_TYPES = {"not automated (preserve)"}
 FILTER_OPERATORS = ("CONTAINS", "IN", ">=", "<=", "!=", "=", ">", "<")
 
 
