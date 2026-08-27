@@ -36,14 +36,23 @@
         </select>
       </label>
       <label>Technology
-        <select name="technology" required><option value="nsa">NSA (Non-Standalone)</option><option value="sa">SA (Standalone)</option></select>
+        <select name="technology" required data-report-technology><option value="nsa">NSA (Non-Standalone)</option><option value="sa">SA (Standalone)</option></select>
+      </label>
+      <label>Slide Catalogue
+        <select name="slide_catalogue" required data-report-catalogue aria-label="Slide Catalogue">
+          {% for technology, catalogues in report_catalogues.items() %}
+          {% for catalogue in catalogues %}
+          <option value="{{ technology }}:{{ catalogue.identifier }}" data-catalogue-technology="{{ technology }}"{% if technology == 'nsa' and catalogue.active %} selected{% endif %}>{{ technology | upper }} · {{ catalogue.name }}{% if catalogue.active %} · Active{% endif %}</option>
+          {% endfor %}
+          {% endfor %}
+        </select>
       </label>
       <label>Report scope
         <select name="report_scope" data-report-scope><option value="single">Single-vendor</option><option value="multivendor" disabled>Multivendor</option></select>
       </label>
       <div class="form-actions reporting-submit-action"><button type="submit">Generate PowerPoint Report</button></div>
     </form>
-    <p class="form-note">Map Vendors from Workspace before choosing Multivendor. The generated presentation preserves the selected NSA or SA template, replaces example charts with calculations from the selected CDRs, and keeps commentary areas blank for the analyst. Scoring and Gap Analysis slides are retained but are not populated in this release.</p>
+    <p class="form-note">Choose a Slide Catalogue matching the selected technology; it applies only to this report and does not change the globally active catalogue. Map Vendors from Workspace before choosing Multivendor. The generated presentation preserves the selected NSA or SA template, replaces example charts with calculations from the selected CDRs, and keeps commentary areas blank for the analyst. Scoring and Gap Analysis slides are retained but are not populated in this release.</p>
   </article>
 
   <article class="panel reporting-panel">
@@ -56,6 +65,8 @@
 <script>
   (() => {
     const scope = document.querySelector('[data-report-scope]');
+    const technology = document.querySelector('[data-report-technology]');
+    const catalogue = document.querySelector('[data-report-catalogue]');
     const cdrSelectors = document.querySelectorAll('select[name$="_dataset_id"]');
     const multivendorOption = scope?.querySelector('option[value="multivendor"]');
     if (!scope || !multivendorOption) return;
@@ -65,7 +76,18 @@
       if (!hasMappedCdr && scope.value === 'multivendor') scope.value = 'single';
     };
     cdrSelectors.forEach((select) => select.addEventListener('change', updateScope));
+    const updateCatalogues = () => {
+      if (!technology || !catalogue) return;
+      const matching = Array.from(catalogue.options).filter((option) => option.dataset.catalogueTechnology === technology.value);
+      Array.from(catalogue.options).forEach((option) => { option.hidden = option.disabled = option.dataset.catalogueTechnology !== technology.value; });
+      if (!matching.some((option) => option.selected)) {
+        const active = matching.find((option) => option.textContent.includes('· Active')) || matching[0];
+        if (active) active.selected = true;
+      }
+    };
+    technology?.addEventListener('change', updateCatalogues);
     updateScope();
+    updateCatalogues();
   })();
 </script>
 {% endblock %}

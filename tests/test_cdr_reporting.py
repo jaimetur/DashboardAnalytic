@@ -218,6 +218,8 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert 'name="vodafone_mapping_dataset_id"' not in page.text
     assert 'name="three_mapping_dataset_id"' not in page.text
     assert '<option value="multivendor" disabled>Multivendor</option>' in page.text
+    assert 'name="slide_catalogue"' in page.text
+    assert 'value="nsa:default"' in page.text
     assert 'data-download-form="1"' in page.text
 
 
@@ -264,6 +266,7 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
         'speech_dataset_id': 3,
         'technology': 'nsa',
         'report_scope': 'single',
+        'slide_catalogue': 'nsa:default',
     })
 
     assert report.status_code == 200

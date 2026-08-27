@@ -1571,6 +1571,10 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
             'data_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'data'],
             'voice_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'voice'],
             'speech_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'speech'],
+            'report_catalogues': {
+                technology: report_catalogue_options(technology)
+                for technology in TEMPLATE_NAMES
+            },
         },
     )
 
@@ -1582,6 +1586,7 @@ def generate_netcheck_cdr_report(
     speech_dataset_id: int = Form(...),
     technology: str = Form(...),
     report_scope: str = Form('single'),
+    slide_catalogue: str = Form(''),
     user: SessionUser = Depends(current_user),
 ) -> FileResponse:
     technology = technology.strip().lower()
@@ -1605,11 +1610,20 @@ def generate_netcheck_cdr_report(
         frames = {kind: ensure_report_vendor_group(frame) for kind, frame in frames.items()}
 
     template = settings.reporting_template_dir / TEMPLATE_NAMES[technology]
-    catalog_path = reporting_catalog_path(technology)
+    available_catalogues = {item['identifier']: item for item in report_catalogue_options(technology)}
+    selected_catalogue = next((item for item in available_catalogues.values() if item['active']), None)
+    if slide_catalogue:
+        catalogue_technology, separator, catalogue_identifier = slide_catalogue.partition(':')
+        if separator != ':' or catalogue_technology != technology or catalogue_identifier not in available_catalogues:
+            raise HTTPException(status_code=400, detail='Choose a Slide Catalogue compatible with the selected technology.')
+        selected_catalogue = available_catalogues[catalogue_identifier]
+    if selected_catalogue is None:
+        raise HTTPException(status_code=400, detail=f'No {technology.upper()} Slide Catalogue is available.')
+    catalog_path = selected_catalogue['path']
     try:
         catalog_entries = load_catalog_csv(catalog_path, technology)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f'Unable to load the active {technology.upper()} report catalogue: {exc}') from exc
+        raise HTTPException(status_code=400, detail=f"Unable to load the selected {technology.upper()} report catalogue: {exc}") from exc
     generated_at = datetime.now().strftime('%Y%m%d-%H%M')
     file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{generated_at}.pptx"
     destination = safe_join(settings.export_dir, file_name)
@@ -1621,6 +1635,7 @@ def generate_netcheck_cdr_report(
         'datasets': {kind: dataset['id'] for kind, dataset in selected.items()},
         'technology': technology,
         'scope': report_scope,
+        'slide_catalogue': selected_catalogue['name'],
         'file': destination.name,
     }))
     repository.add_report_run(
