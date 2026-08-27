@@ -168,6 +168,14 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .analytics-dashboard-stack .adaptive-filters-panel .multiselect-menu { border-color: rgba(12, 76, 140, 0.24); background: rgba(255,255,255,0.98); }
 .analytics-dashboard-stack .adaptive-filters-panel .multiselect-action { background: linear-gradient(135deg, #ddecfa, #c9e4f8); color: #164f89; box-shadow: none; }
 .analytics-dashboard-stack .adaptive-filters-panel .multiselect-option:hover { background: rgba(12, 76, 140, 0.08); }
+.analytics-dashboard-stack .adaptive-filters-panel select { color: #164f89; background: linear-gradient(135deg, #ffffff, #eaf5ff); color-scheme: light; font-size: 0.82rem; line-height: 1.2; }
+.analytics-dashboard-stack .adaptive-filters-panel select:focus { outline: 3px solid rgba(40, 123, 194, 0.20); outline-offset: 2px; border-color: rgba(12, 76, 140, 0.50); background: linear-gradient(135deg, #ffffff, #dcefff); color: #103d70; box-shadow: 0 0 0 4px rgba(40, 123, 194, 0.08); }
+.analytics-dashboard-stack .adaptive-filters-panel select option { background: #ffffff; color: #164f89; }
+.analytics-dashboard-stack .adaptive-filters-panel select option:checked { background: #d4eafd; color: #103d70; }
+.analytics-dashboard-stack .adaptive-filters-panel .multiselect-trigger { padding: 0.65rem 0.75rem; font-size: 0.82rem; line-height: 1.2; }
+.analytics-dashboard-stack .adaptive-filters-panel .multiselect-menu { font-size: 0.8rem; }
+.analytics-dashboard-stack .adaptive-filters-panel .multiselect-option { padding: 0.5rem 0.6rem; color: #164f89; }
+.analytics-dashboard-stack .adaptive-filters-panel .multiselect-option input { accent-color: #287bc2; }
 .analytics-dashboard-stack .metric-stat-card { background: linear-gradient(145deg, #082f5b, #155f9e); border-color: rgba(255,255,255,0.16); box-shadow: 0 14px 30px rgba(3, 37, 72, 0.22); }
 .analytics-dashboard-stack .metric-stat-card::before { background: linear-gradient(90deg, #75bfff, #d8edff); }
 .module-hero-dashboard .pill, .module-hero-reporting .pill, .module-hero-admin .pill { background: rgba(255,255,255,0.88); border-color: rgba(255,255,255,0.46); color: #263d50; }

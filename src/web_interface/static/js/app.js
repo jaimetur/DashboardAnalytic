@@ -212,6 +212,7 @@ document.querySelectorAll('[data-horizontal-wheel-scroll]').forEach((container) 
 document.addEventListener('click', (event) => {
   const previewLink = event.target.closest('[data-preview-open-link]');
   if (previewLink) {
+    if (previewLink.target === '_blank') return;
     showLoadingOverlay(previewLink.dataset.loadingLabel || 'Generating dataset preview');
     return;
   }
@@ -1217,7 +1218,7 @@ if (queueNode) {
       const isCdr = ['data', 'voice', 'speech'].includes(dataset.dataset_kind);
       if (dataset.status === 'ready') {
         actions.innerHTML = `
-          <a class="ghost-link action-link-preview" href="/workspace/preview/${dataset.id}" data-preview-open-link data-loading-label="Generating dataset preview">Preview</a>
+          <a class="ghost-link action-link-preview" href="/workspace/preview/${dataset.id}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview</a>
           <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
             <button type="submit" class="danger-button">Delete</button>
           </form>

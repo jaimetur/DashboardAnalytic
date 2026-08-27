@@ -284,7 +284,7 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     assert workspace_response.status_code == 200
     assert 'data-queue-type-filter' in workspace_response.text
     assert 'value="">All Types' in workspace_response.text
-    assert 'href="/workspace/preview/1" data-preview-open-link data-loading-label="Generating dataset preview">Preview</a>' in workspace_response.text
+    assert 'href="/workspace/preview/1" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview</a>' in workspace_response.text
     assert 'Show Dashboard</a>' in workspace_response.text
 
     preview_response = client.get("/workspace/preview/1")
@@ -300,7 +300,7 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
 
     dashboard_response = client.get('/dashboard?dataset_id=1&input_kind=data')
     assert dashboard_response.status_code == 200
-    assert 'href="/workspace/preview/1" data-preview-open-link data-loading-label="Generating dataset preview">Preview Dataset</a>' in dashboard_response.text
+    assert 'href="/workspace/preview/1" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview Dataset</a>' in dashboard_response.text
 
 
 def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> None:
