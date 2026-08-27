@@ -15,6 +15,7 @@ from typing import Iterable
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
+from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.util import Inches, Pt
 
@@ -1041,19 +1042,22 @@ def _set_slide_header(slide, title: str, subtitle: str) -> None:
             (shape for shape in slide.shapes if getattr(shape, "has_text_frame", False) and shape.top < Inches(1.2)),
             None,
         )
-    if title_shape is not None and title:
-        title_shape.text = title
+    if title_shape is not None and (title or subtitle):
+        # The template title placeholder is the single header surface. Keep the
+        # catalogue subtitle inside it as a second paragraph rather than adding
+        # a separate text box below the placeholder.
+        text_frame = title_shape.text_frame
+        text_frame.clear()
+        title_paragraph = text_frame.paragraphs[0]
+        title_paragraph.text = title
+        if subtitle:
+            subtitle_paragraph = text_frame.add_paragraph()
+            subtitle_paragraph.text = subtitle
+            subtitle_paragraph.font.size = Pt(16)
+            subtitle_paragraph.font.color.rgb = RGBColor(36, 90, 150)
     existing_subtitle = next((shape for shape in slide.shapes if shape.name == "catalogue-subtitle"), None)
     if existing_subtitle is not None:
         existing_subtitle._element.getparent().remove(existing_subtitle._element)
-    if subtitle:
-        top = (title_shape.top + title_shape.height) if title_shape is not None else Inches(0.8)
-        text_box = slide.shapes.add_textbox(Inches(0.55), top, Inches(11.6), Inches(0.36))
-        text_box.name = "catalogue-subtitle"
-        paragraph = text_box.text_frame.paragraphs[0]
-        paragraph.text = subtitle
-        paragraph.font.size = Pt(13)
-        paragraph.font.italic = True
 
 
 def _chart_frames(slide) -> list[tuple[int, int, int, int]]:

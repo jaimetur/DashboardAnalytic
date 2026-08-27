@@ -5,6 +5,7 @@ import pandas as pd
 from io import BytesIO
 from pathlib import Path
 from pptx import Presentation
+from pptx.dml.color import RGBColor
 
 from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, assign_cdr_vendors, classify_sessions, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, vendor_from_cells
 
@@ -190,7 +191,16 @@ def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None
 
     slide = Presentation(destination).slides[7]
     assert sum(1 for shape in slide.shapes if hasattr(shape, 'image')) >= 2
-    assert any(getattr(shape, 'text', '') == 'Voice quality' for shape in slide.shapes)
+    title_shape = next(
+        shape for shape in slide.shapes
+        if getattr(shape, 'has_text_frame', False) and getattr(shape, 'is_placeholder', False)
+        and shape.placeholder_format.type in {1, 3}
+    )
+    assert [paragraph.text for paragraph in title_shape.text_frame.paragraphs] == ['Completed Call Ratio', 'Voice quality']
+    subtitle_paragraph = title_shape.text_frame.paragraphs[1]
+    assert subtitle_paragraph.font.size.pt == 16
+    assert subtitle_paragraph.font.color.rgb == RGBColor(36, 90, 150)
+    assert not any(shape.name == 'catalogue-subtitle' for shape in slide.shapes)
 
 
 def test_reporting_module_is_available_to_authenticated_users(client) -> None:
