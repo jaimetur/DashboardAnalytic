@@ -985,9 +985,15 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert '/admin/report-catalogues/nsa/baseline-q4/activate' in admin.text
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Second'
 
+    reporting = client.get('/reporting')
+    assert 'value="nsa:updated-q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting.text
+
     activated = client.post('/admin/report-catalogues/nsa/baseline-q4/activate', follow_redirects=False)
     assert activated.status_code == 303
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'First'
+
+    reporting_after_activation = client.get('/reporting')
+    assert 'value="nsa:baseline-q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting_after_activation.text
 
     exported = client.get('/admin/report-catalogues/nsa/updated-q4/export')
     assert exported.status_code == 200

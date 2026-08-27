@@ -42,7 +42,7 @@
         <select name="slide_catalogue" required data-report-catalogue aria-label="Slide Catalogue">
           {% for technology, catalogues in report_catalogues.items() %}
           {% for catalogue in catalogues %}
-          <option value="{{ technology }}:{{ catalogue.identifier }}" data-catalogue-technology="{{ technology }}"{% if technology == 'nsa' and catalogue.active %} selected{% endif %}>{{ technology | upper }} · {{ catalogue.name }}{% if catalogue.active %} · Active{% endif %}</option>
+          <option value="{{ technology }}:{{ catalogue.identifier }}" data-catalogue-technology="{{ technology }}" data-catalogue-active="{{ 'true' if catalogue.active else 'false' }}"{% if technology == 'nsa' and catalogue.active %} selected{% endif %}>{{ technology | upper }} · {{ catalogue.name }}{% if catalogue.active %} · Active{% endif %}</option>
           {% endfor %}
           {% endfor %}
         </select>
@@ -81,7 +81,7 @@
       const matching = Array.from(catalogue.options).filter((option) => option.dataset.catalogueTechnology === technology.value);
       Array.from(catalogue.options).forEach((option) => { option.hidden = option.disabled = option.dataset.catalogueTechnology !== technology.value; });
       if (!matching.some((option) => option.selected)) {
-        const active = matching.find((option) => option.textContent.includes('· Active')) || matching[0];
+        const active = matching.find((option) => option.dataset.catalogueActive === 'true') || matching[0];
         if (active) active.selected = true;
       }
     };
