@@ -293,6 +293,9 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     assert "Vodafone UK" in preview_response.text
     assert "Show Dashboard" in preview_response.text
     assert 'name="row_limit" value="100"' in preview_response.text
+    assert 'data-preview-column-filter' in preview_response.text
+    assert 'data-preview-row-filter' in preview_response.text
+    assert 'data-preview-filter-table' in preview_response.text
 
     limited_preview_response = client.get("/workspace/preview/1?row_limit=25")
     assert limited_preview_response.status_code == 200

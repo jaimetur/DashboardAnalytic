@@ -316,6 +316,10 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .preview-row-limit-form button:hover:not(:disabled) { background: linear-gradient(135deg, #d2f8ea, #9fdcc8); }
 .preview-actions { margin-top: 1rem; }
 .preview-actions .ghost-link:not(.action-link-primary) { background: rgba(255,255,255,0.13); border-color: rgba(255,255,255,0.34); color: #fff; }
+.preview-table-filters { display: flex; align-items: end; gap: 0.8rem 1rem; flex-wrap: wrap; margin: 0 0 1rem; padding: 0.85rem 1rem; border: 1px solid rgba(16, 49, 74, 0.14); border-radius: 14px; background: linear-gradient(135deg, rgba(234, 246, 250, 0.82), rgba(255, 255, 255, 0.88)); }
+.preview-table-filters label { display: grid; gap: 0.34rem; flex: 1 1 240px; color: #28495e; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.035em; text-transform: uppercase; }
+.preview-table-filters input { min-width: 0; width: 100%; border-color: rgba(16, 49, 74, 0.25); background: rgba(255, 255, 255, 0.96); color: #10314a; font-size: 0.88rem; font-weight: 600; letter-spacing: normal; text-transform: none; }
+.preview-table-filter-status { flex: 1 0 100%; margin: -0.1rem 0 0; color: #5a6b78; font-size: 0.8rem; font-weight: 600; }
 .dataset-preview-stack, .dataset-preview-panel { width: 100%; max-width: 100%; min-width: 0; }
 .dataset-preview-panel { position: relative; z-index: 1; overflow: hidden; }
 .dataset-preview-table-wrap { width: 100%; max-width: 100%; min-width: 0; height: min(65vh, 38rem); max-height: none; overflow-x: scroll !important; overflow-y: scroll !important; scrollbar-gutter: stable both-edges; overscroll-behavior: contain; }

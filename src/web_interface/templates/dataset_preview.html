@@ -70,8 +70,17 @@
       <span class="pill">{% if preview_source_sheet %}{{ preview_source_sheet }} · {% endif %}{{ preview_rows | length }} rows shown</span>
     </div>
     {% if preview_columns and preview_rows %}
+    <div class="preview-table-filters" data-preview-table-filters>
+      <label>Filter columns
+        <input type="search" data-preview-column-filter placeholder="Column names, separated by commas" autocomplete="off">
+      </label>
+      <label>Filter rows
+        <input type="search" data-preview-row-filter placeholder="Values, separated by commas" autocomplete="off">
+      </label>
+      <p class="preview-table-filter-status" data-preview-filter-status aria-live="polite">Showing {{ preview_rows | length }} of {{ preview_rows | length }} rows · {{ visible_column_count }} of {{ visible_column_count }} columns</p>
+    </div>
     <div class="table-wrap data-table-wrap dataset-preview-table-wrap" data-horizontal-wheel-scroll tabindex="0" aria-label="Dataset preview table; use Shift and the mouse wheel to scroll horizontally">
-      <table class="dataset-preview-table">
+      <table class="dataset-preview-table" data-preview-filter-table>
         <thead><tr>{% for column in preview_columns %}<th{% if column == 'GCID' or (dataset.dataset_kind in ['data', 'voice', 'speech'] and column == 'source_sheet') %} class="gcid-column"{% elif column in vendor_preview_columns %} class="vendor-column"{% endif %}>{{ column }}</th>{% endfor %}</tr></thead>
         <tbody>
           {% for row in preview_rows %}

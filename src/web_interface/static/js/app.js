@@ -209,6 +209,54 @@ document.querySelectorAll('[data-horizontal-wheel-scroll]').forEach((container) 
   }, {passive: false});
 });
 
+document.querySelectorAll('[data-preview-table-filters]').forEach((filters) => {
+  const panel = filters.closest('.dataset-preview-panel');
+  const table = panel?.querySelector('[data-preview-filter-table]');
+  const columnInput = filters.querySelector('[data-preview-column-filter]');
+  const rowInput = filters.querySelector('[data-preview-row-filter]');
+  const status = filters.querySelector('[data-preview-filter-status]');
+  if (!table || !columnInput || !rowInput) return;
+
+  const headers = Array.from(table.querySelectorAll('thead th'));
+  const rows = Array.from(table.querySelectorAll('tbody tr'));
+  const termsFor = (input) => String(input.value || '')
+    .split(',')
+    .map((term) => term.trim().toLocaleLowerCase())
+    .filter(Boolean);
+  const matchesAny = (value, terms) => !terms.length || terms.some((term) => value.includes(term));
+
+  const applyPreviewFilters = () => {
+    const columnTerms = termsFor(columnInput);
+    const rowTerms = termsFor(rowInput);
+    const visibleColumns = headers.map((header, index) => {
+      const visible = matchesAny(header.textContent.toLocaleLowerCase(), columnTerms);
+      header.hidden = !visible;
+      rows.forEach((row) => {
+        const cell = row.cells[index];
+        if (cell) cell.hidden = !visible;
+      });
+      return visible;
+    });
+    let visibleRowCount = 0;
+    rows.forEach((row) => {
+      // Row filtering searches every original cell. It remains predictable even
+      // when a separate column-name filter temporarily hides matching cells.
+      const rowText = Array.from(row.cells).map((cell) => cell.textContent.toLocaleLowerCase()).join(' ');
+      const visible = matchesAny(rowText, rowTerms);
+      row.hidden = !visible;
+      if (visible) visibleRowCount += 1;
+    });
+    if (status) {
+      const visibleColumnCount = visibleColumns.filter(Boolean).length;
+      status.textContent = `Showing ${visibleRowCount} of ${rows.length} rows · ${visibleColumnCount} of ${headers.length} columns`;
+    }
+  };
+
+  columnInput.addEventListener('input', applyPreviewFilters);
+  rowInput.addEventListener('input', applyPreviewFilters);
+  applyPreviewFilters();
+});
+
 document.addEventListener('click', (event) => {
   const previewLink = event.target.closest('[data-preview-open-link]');
   if (previewLink) {
