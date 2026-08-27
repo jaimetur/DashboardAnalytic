@@ -23,10 +23,10 @@ TEMPLATE_NAMES = {
     "nsa": "Template_CDR_NSA_analysis.pptx",
     "sa": "Template_CDR_SA_analysis.pptx",
 }
-CDR_REPORT_VERSION = "2026-08-26-v6"
+CDR_REPORT_VERSION = "2026-08-27-v7"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
-CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "CDR source", "KPI", "Chart type", "Filters", "Grouping")
+CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "CDR source", "KPI", "Chart type", "Filters", "Grouping")
 CATALOG_SOURCE_KINDS = {"cdr-data": "data", "cdr-voice": "voice", "cdr-speech": "speech"}
 CHART_TYPES = {
     "100% stacked vertical bars", "count stacked horizontal bars", "cdf line", "scatter", "table",
@@ -56,6 +56,7 @@ class CatalogEntry:
     slide: int
     slide_title: str
     slide_subtitle: str
+    layout: str
     cdr_source: str
     kpi: str
     chart_type: str
@@ -131,6 +132,7 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
             slide=slide,
             slide_title=(row.get("Slide tittle") or "").strip().replace("\\n", "\n"),
             slide_subtitle=(row.get("Slide Subtittle") or "").strip().replace("\\n", "\n"),
+            layout=(row.get("Layout") or "").strip(),
             cdr_source=(row.get("CDR source") or "").strip(),
             kpi=(row.get("KPI") or "").strip(),
             chart_type=(row.get("Chart type") or "").strip(),
@@ -139,6 +141,8 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
         )
         if entry.source_kind and not entry.slide_title:
             raise ValueError(f"Catalog row {line_number} requires Slide tittle for a CDR source.")
+        if entry.source_kind and not entry.layout:
+            raise ValueError(f"Catalog row {line_number} requires Layout for a CDR source.")
         if entry.cdr_source and entry.cdr_source.casefold() not in CATALOG_SOURCE_KINDS:
             raise ValueError(f"Catalog row {line_number} has unsupported CDR source '{entry.cdr_source}'.")
         if entry.source_kind and (not entry.kpi or not entry.chart_type):
@@ -169,9 +173,9 @@ def active_catalog_path(catalog_dir: Path, fallback_catalog: Path, technology: s
 
 def catalogue_markdown(entries: list[CatalogEntry], technology: str) -> str:
     heading = "NSA" if technology == "nsa" else "SA"
-    lines = [f"### {heading} template", "", "| " + " | ".join(CATALOG_HEADERS) + " |", "| --- | --- | --- | --- | --- | --- | --- |"]
+    lines = [f"### {heading} template", "", "| " + " | ".join(CATALOG_HEADERS) + " |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
     for entry in entries:
-        values = (str(entry.slide), entry.slide_title, entry.slide_subtitle or "—", entry.cdr_source or "—", entry.kpi or "—", entry.chart_type or "—", entry.filters or "—", entry.grouping or "—")
+        values = (str(entry.slide), entry.slide_title, entry.slide_subtitle or "—", entry.layout or "—", entry.cdr_source or "—", entry.kpi or "—", entry.chart_type or "—", entry.filters or "—", entry.grouping or "—")
         lines.append("| " + " | ".join(value.replace("|", "\\|").replace("\n", "<br>") for value in values) + " |")
     return "\n".join(lines)
 
@@ -401,11 +405,39 @@ def _catalog_column(frame: pd.DataFrame, name: str, multivendor: bool, metric: s
     normalized = _normalise_catalog_name(name)
     if normalized == "operator":
         return _group_column(frame, multivendor)
+    if normalized == "callfamily":
+        session_column = _column(frame, ("Session_Type", "session_type"))
+        if not session_column:
+            return _column(frame, ("Call_Family", "call_family"))
+        call_mode = _column(frame, ("L1_Call_Mode_A", "L1_Call_Mode_B", "Call_Mode", "call_mode"))
+        session = frame[session_column].fillna("").astype(str)
+        family = pd.Series("CALL", index=frame.index, dtype="string")
+        family.loc[session.str.contains("multirab", case=False, na=False)] = "MultiRAB"
+        family.loc[session.str.contains("whatsapp", case=False, na=False)] = "WhatsApp"
+        family.loc[session.str.contains("volte", case=False, na=False)] = "VoLTE"
+        family.loc[session.str.contains("vonr", case=False, na=False)] = "VoNR"
+        if call_mode:
+            modes = frame[call_mode].fillna("").astype(str)
+            family.loc[(family == "CALL") & modes.str.contains("volte", case=False, na=False)] = "VoLTE"
+            family.loc[(family == "CALL") & modes.str.contains("vonr", case=False, na=False)] = "VoNR"
+        frame["__catalog_call_family"] = family
+        return "__catalog_call_family"
+    if normalized == "testfamily":
+        type_column = _column(frame, ("Type_of_Test", "Test_Type", "test_type"))
+        name_column = _column(frame, ("Test_Name", "test_name"))
+        if not type_column and not name_column:
+            return None
+        test_family = frame[type_column].fillna("").astype(str) if type_column else pd.Series("", index=frame.index, dtype="string")
+        if name_column:
+            test_names = frame[name_column].fillna("").astype(str)
+            test_family.loc[test_names.str.contains("youtube", case=False, na=False)] = "YouTube"
+            test_family.loc[test_names.str.contains("fdfs", case=False, na=False)] = "FDFS"
+            test_family.loc[test_names.str.contains("fdtt", case=False, na=False)] = "FDTT"
+        frame["__catalog_test_family"] = test_family
+        return "__catalog_test_family"
     aliases = {
         "campaign": ("Campaign", "period", "Period", "Quarter"),
         "city": ("City", "city", "G_Level_1", "G_Level_2"),
-        "callfamily": ("Call_Family", "Session_Type", "Test_Name", "Test_Type"),
-        "testfamily": ("Test_Family", "Test_Name", "Test_Type", "Type_of_Test"),
         "failuretechnology": ("Failure_Technology",),
         "failurecategory": ("Failure_Category",),
         "n rband": ("NR_Band", "NR band", "Band_NR"),
@@ -601,20 +633,32 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
     if frame.empty or not group:
         return _empty_chart(title)
     status = _column(frame, ("Call_Status", "Test_Result", "status"))
-    session = _column(frame, ("Session_Type", "session_type", "Test_Name", "Test_Type"))
     if not status: return _empty_chart(title)
-    failed = frame[~frame[status].astype(str).str.contains("complete|success|pass|ok", case=False, na=False)].copy()
+    failed = frame[frame[status].astype(str).str.contains("failed|drop|cutoff", case=False, na=False)].copy()
     if failed.empty: return _empty_chart(title)
-    label = period or session or group
+    failed["__catalog_failure_state"] = failed[status].astype(str).map(
+        lambda value: "Dropped" if "drop" in value.casefold() else "Failed"
+    )
+    label = period or group
     fields = [group] if label == group else [group, label]
-    counts = failed.groupby(fields, dropna=False).size().reset_index(name="count").head(18)
-    image, draw = _canvas(title); maximum = max(int(counts["count"].max()), 1)
-    for index, row in counts.iterrows():
-        y = 105 + index * 38; width = int(1120 * int(row["count"]) / maximum)
-        draw.text((30, y + 6), f"{row[group]} · {row[label]}"[:38], fill="#34495A", font=_font(15))
-        draw.rectangle((370, y, 370 + width, y + 24), fill=_colour(row[group], index))
-        draw.text((380 + width, y + 4), str(int(row["count"])), fill="#34495A", font=_font(15, True))
-    draw.text((370, 820), "# of failed / dropped sessions", fill="#62727E", font=_font(16))
+    counts = failed.groupby([*fields, "__catalog_failure_state"], dropna=False).size().unstack(fill_value=0)
+    counts = counts.head(16)
+    image, draw = _canvas(title); maximum = max(int(counts.sum(axis=1).max()), 1)
+    colours = {"Failed": "#E15759", "Dropped": "#F28E2B"}
+    for index, (labels, values) in enumerate(counts.iterrows()):
+        labels = labels if isinstance(labels, tuple) else (labels,)
+        y = 120 + index * 42; x = 390
+        draw.text((28, y + 6), " · ".join(str(value) for value in labels)[:42], fill="#34495A", font=_font(14))
+        for state in ("Failed", "Dropped"):
+            count = int(values.get(state, 0)); width = int(980 * count / maximum)
+            if width:
+                draw.rectangle((x, y, x + width, y + 25), fill=colours[state])
+                if width > 26: draw.text((x + 5, y + 5), str(count), fill="white", font=_font(13, True))
+            x += width
+    for index, state in enumerate(("Failed", "Dropped")):
+        x = 1050 + index * 160
+        draw.rectangle((x, 82, x + 20, 100), fill=colours[state]); draw.text((x + 27, 82), state, fill="#34495A", font=_font(13))
+    draw.text((390, 820), "# of failed / dropped sessions", fill="#62727E", font=_font(16))
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
@@ -657,11 +701,11 @@ def _combine_charts(title: str, charts: list[BytesIO]) -> BytesIO:
     return output
 
 
-def _render_cdf_mean(title: str, frame: pd.DataFrame, group: str | None, period: str | None, metric: str | None) -> BytesIO:
+def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period: str | None, metric: str | None) -> BytesIO:
     if frame.empty or not group or not metric: return _empty_chart(title)
     data = frame[[group, metric] + ([period] if period else [])].copy(); data[metric] = pd.to_numeric(data[metric], errors="coerce"); data = data.dropna()
     if data.empty: return _empty_chart(title)
-    image, draw = _canvas(title); left, top, width, height = 75, 120, 910, 620
+    image, draw = _canvas(title); left, top, width, height = 100, 135, 1320, 590
     low, high = float(data[metric].min()), float(data[metric].max()); high = high if high > low else low + 1
     series_column = period if period else group
     labels = [f"{g} · {p}" if period else str(g) for g, p in data[[group, series_column]].drop_duplicates().itertuples(index=False)] if period else [str(v) for v in data[group].drop_duplicates()]
@@ -672,7 +716,7 @@ def _render_cdf_mean(title: str, frame: pd.DataFrame, group: str | None, period:
         if not values: continue
         points = [(left + (value - low) / (high - low) * width, top + height - ((n + 1) / len(values)) * height) for n, value in enumerate(values)]
         draw.line(points, fill=_colour(label, index), width=4)
-        legend_x = left + (index % 5) * 175
+        legend_x = left + (index % 5) * 250
         legend_y = 86 + (index // 5) * 23
         draw.line((legend_x, legend_y + 8, legend_x + 28, legend_y + 8), fill=_colour(label, index), width=4)
         draw.text((legend_x + 35, legend_y), label[:19], fill="#34495A", font=_font(13))
@@ -684,11 +728,6 @@ def _render_cdf_mean(title: str, frame: pd.DataFrame, group: str | None, period:
         draw.line((x, top + height, x, top + height + 7), fill="#62727E", width=1)
         draw.text((x - 16, top + height + 7), f"{value:.1f}", fill="#62727E", font=_font(12))
     draw.text((left + width / 2 - 70, top + height + 25), metric.replace("_", " "), fill="#62727E", font=_font(15))
-    means = data.groupby(group)[metric].mean().sort_values(); bar_left = 1080; bar_width = 70; max_mean = max(float(means.max()), 1.0)
-    for index, (label, value) in enumerate(means.items()):
-        height_value = 460 * float(value) / max_mean; x = bar_left + index * 115; y = 680 - height_value
-        draw.rectangle((x, y, x + bar_width, 680), fill=_colour(label, index)); draw.text((x, y - 24), f"{float(value):.2f}", fill="#34495A", font=_font(14)); draw.text((x, 692), str(label)[:10], fill="#62727E", font=_font(13))
-    draw.text((1080, 730), "Average", fill="#62727E", font=_font(15))
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
@@ -783,27 +822,13 @@ def _catalog_tokens(filters: str, keyword: str) -> tuple[str, ...]:
 
 
 def _catalog_spec(entry: CatalogEntry) -> dict:
-    filters = entry.filters.casefold()
     chart_type = entry.chart_type.casefold()
     metric_parts = tuple(part.strip(" `") for part in re.split(r"\s+vs\s+", entry.kpi, flags=re.I) if part.strip())
     spec: dict = {"source": entry.source_kind, "metric": metric_parts[:1] or (entry.kpi,)}
-    sessions, tests, directions = _catalog_tokens(entry.filters, "session"), _catalog_tokens(entry.filters, "test"), _catalog_tokens(entry.filters, "direction")
-    if sessions:
-        spec["sessions"] = sessions
-    if tests:
-        spec["tests"] = tests
-    if directions:
-        spec["directions"] = directions
-    if "vodafone" in filters:
-        spec["operators"] = ("vodafone",)
-    elif "three uk" in filters or "3uk" in filters:
-        spec["operators"] = ("three", "3 uk", "3")
-    if "london" in filters:
-        spec["city_scope"] = "london"
     if "scatter" in chart_type:
         spec["kind"] = "scatter"
         spec["x_metric"] = metric_parts[1:] or ("Playing_RSRP_NR_Avg", "NR_RSRP_Avg")
-    elif "failed" in filters or "failure" in entry.slide_title.casefold():
+    elif chart_type == "count stacked horizontal bars":
         spec["kind"] = "failure_count"
     elif "100%" in chart_type or chart_type == "threshold stacked vertical bars":
         spec["kind"] = "quality_100" if chart_type == "threshold stacked vertical bars" or any(token in entry.kpi.casefold() for token in ("lq", "polqa")) else "status_100"
@@ -843,7 +868,7 @@ def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame
         return _render_table(entry.slide_title, frame, group, period, metric)
     if "vertical bars" in chart_type:
         return _render_mean_column(entry.slide_title, frame, "__catalog_label", metric, aggregation="median" if chart_type == "median vertical bars" else "mean")
-    return _render_cdf_mean(entry.slide_title, frame, group, period, metric)
+    return _render_cdf_line(entry.slide_title, frame, group, period, metric)
 
 
 def _chart_for_spec(title: str, frames: dict[str, pd.DataFrame], spec: dict, multivendor: bool) -> BytesIO:
@@ -863,24 +888,27 @@ def _chart_for_spec(title: str, frames: dict[str, pd.DataFrame], spec: dict, mul
     if spec["kind"] == "quality_cdf":
         return _combine_charts(title, [
             _render_status_100("POLQA <1.6 rate", frame, group, period, True, spec.get("threshold", 1.6), metric),
-            _render_cdf_mean("POLQA AVG MOS CDF", frame, group, period, metric),
+            _render_cdf_line("POLQA AVG MOS CDF", frame, group, period, metric),
         ])
     if spec["kind"] == "cdf_pair":
         secondary_metric = _column(frame, spec.get("secondary_metric", ()))
         return _combine_charts(title, [
-            _render_cdf_mean(metric.replace("_", " ") if metric else title, frame, group, period, metric),
-            _render_cdf_mean(secondary_metric.replace("_", " ") if secondary_metric else title, frame, group, period, secondary_metric),
+            _render_cdf_line(metric.replace("_", " ") if metric else title, frame, group, period, metric),
+            _render_cdf_line(secondary_metric.replace("_", " ") if secondary_metric else title, frame, group, period, secondary_metric),
         ])
     if spec["kind"] == "cdf_bucket":
         # The template combines a throughput CDF with a low-rate distribution.
         # The averaged columns are retained as the numerical distribution summary.
-        return _render_cdf_mean(title, frame, group, period, metric)
-    return _render_cdf_mean(title, frame, group, period, metric)
+        return _render_cdf_line(title, frame, group, period, metric)
+    return _render_cdf_line(title, frame, group, period, metric)
 
 
 def _clear_commentary(slide) -> None:
     for shape in slide.shapes:
         if not getattr(shape, "has_text_frame", False):
+            continue
+        if getattr(shape, "is_placeholder", False) and shape.placeholder_format.idx == 10:
+            shape.text_frame.clear()
             continue
         text = shape.text.strip().lower()
         if len(text) > 45 and any(hint in text for hint in COMMENT_HINTS):
@@ -936,6 +964,22 @@ def _chart_frames(slide) -> list[tuple[int, int, int, int]]:
     return frames
 
 
+def _remove_template_chart_placeholders(slide) -> None:
+    """Remove inherited chart pictures stored *inside* the template placeholders.
+
+    The supplied templates encode their sample Tableau exports as picture
+    placeholders rather than regular picture shapes.  Removing only regular
+    images therefore left the old chart under the new one.  Index 0 is the
+    master title and index 10 is the deliberately blank analyst-comments area.
+    """
+    for shape in list(slide.shapes):
+        if not getattr(shape, "is_placeholder", False):
+            continue
+        if shape.placeholder_format.idx in {0, 10}:
+            continue
+        shape._element.getparent().remove(shape._element)
+
+
 def _combined_frame(frames: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int] | None:
     if not frames:
         return None
@@ -946,21 +990,18 @@ def _combined_frame(frames: list[tuple[int, int, int, int]]) -> tuple[int, int, 
     return left, top, right - left, bottom - top
 
 
-def _master_placeholder_frames(presentation: Presentation, chart_count: int) -> list[tuple[int, int, int, int]]:
-    """Read the bundled master layouts as the placement contract for chart images."""
-    if not 1 <= chart_count <= 4:
-        return []
-    expected = f"title and {chart_count} {'column' if chart_count == 1 else 'columns'}"
+def _layout_chart_frames(presentation: Presentation, layout_name: str) -> list[tuple[int, int, int, int]]:
+    """Read named chart placeholder frames from the selected template layout."""
+    expected = layout_name.strip().casefold()
     for layout in presentation.slide_layouts:
         if layout.name.strip().casefold() != expected:
             continue
         frames = [
             (shape.left, shape.top, shape.width, shape.height)
             for shape in layout.placeholders
-            if shape.placeholder_format.type == 7  # PP_PLACEHOLDER_TYPE.OBJECT
+            if shape.placeholder_format.type == 7 and shape.placeholder_format.idx != 10
         ]
-        if len(frames) >= chart_count:
-            return sorted(frames, key=lambda frame: (frame[1], frame[0]))[:chart_count]
+        return sorted(frames, key=lambda frame: (frame[1], frame[0]))
     return []
 
 
@@ -985,11 +1026,18 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
         catalog_entries = catalog_by_slide.get(number, [])
         if catalog_entries:
             removed_frames = _chart_frames(slide)
-            placement_frames = _master_placeholder_frames(presentation, len(catalog_entries)) or removed_frames
+            _remove_template_chart_placeholders(slide)
+            layouts = {entry.layout for entry in catalog_entries}
+            if len(layouts) != 1:
+                raise ValueError(f"Slide {number} uses more than one Layout in the active catalogue.")
+            layout_name = layouts.pop()
+            placement_frames = _layout_chart_frames(presentation, layout_name)
             if len(placement_frames) < len(catalog_entries):
-                combined = _combined_frame(removed_frames) or (Inches(0.55), Inches(1.65), Inches(6.15), Inches(3.75))
-                placement_frames = [combined] * len(catalog_entries)
-            for entry, placement in zip(catalog_entries, placement_frames, strict=True):
+                raise ValueError(
+                    f"Slide {number}: layout '{layout_name}' has {len(placement_frames)} chart placeholders, "
+                    f"but the catalogue defines {len(catalog_entries)} charts."
+                )
+            for entry, placement in zip(catalog_entries, placement_frames[:len(catalog_entries)], strict=True):
                 slide.shapes.add_picture(_chart_for_catalog_entry(entry, frames, multivendor), *placement)
             continue
         spec = chart_specs.get(number)

@@ -60,7 +60,7 @@ def test_vodafone_mapping_derives_gcid_from_4g_enodeb_and_local_cell() -> None:
 def test_catalogue_csv_requires_the_report_chart_contract_columns() -> None:
     catalogue = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,Completed Call Ratio,Voice quality,CDR-Voice,Call_Status,100% Stacked Vertical Bars,VoLTE,Operator × Campaign\n'
+        + '\n8,Completed Call Ratio,Voice quality,Title and 1 column + Comments,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Call Family = VoLTE,Operator × Campaign\n'
     ).encode('utf-8')
 
     entries = parse_catalog_csv(catalogue, 'nsa')
@@ -80,7 +80,7 @@ def test_catalogue_filter_and_grouping_contract_is_parsed_and_applied() -> None:
     ]
     assert grouping.dimensions == ('City', 'Operator', 'Campaign')
     entry = parse_catalog_csv(
-        ','.join(CATALOG_HEADERS) + '\n8,Quality,,CDR-Speech,LQ,Average Vertical Bars,Session_Type IN (VoLTE); LQ >= 1.6,City × Operator × Campaign\n',
+        ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,CDR-Speech,LQ,Average Vertical Bars,Session_Type IN (VoLTE); LQ >= 1.6,City × Operator × Campaign\n',
         'nsa',
     )[0]
     frame = pd.DataFrame({
@@ -95,11 +95,31 @@ def test_catalogue_filter_and_grouping_contract_is_parsed_and_applied() -> None:
     assert grouped['__catalog_stack'].tolist() == ['Q1']
 
 
+def test_catalogue_call_family_uses_documented_netcheck_session_values() -> None:
+    entry = parse_catalog_csv(
+        ','.join(CATALOG_HEADERS)
+        + '\n8,Completed Call Ratio,,Title and 1 column + Comments,CDR-Voice,Call_Status,100% Stacked Vertical Bars,"Call Family IN (VoLTE, MultiRAB, WhatsApp)",Call Family × Operator × Campaign\n',
+        'nsa',
+    )[0]
+    frame = pd.DataFrame({
+        'Session_Type': ['CALL', 'MultiRAB CALL', 'WhatsApp CALL'],
+        'L1_Call_Mode_A': ['VoLTE', '', ''],
+        'Operator': ['EE', 'EE', 'EE'],
+        'Campaign': ['Q1', 'Q1', 'Q1'],
+        'Call_Status': ['Completed', 'Completed', 'Completed'],
+    })
+
+    filtered = _apply_catalog_filters(frame, entry, False, 'Call_Status')
+    grouped, primary, _ = _apply_catalog_grouping(filtered, entry, False, 'Call_Status')
+
+    assert grouped[primary].tolist() == ['VoLTE', 'MultiRAB', 'WhatsApp']
+
+
 def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None:
     catalogue = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,Completed Call Ratio,Voice quality,CDR-Voice,Call_Status,100% Stacked Vertical Bars,VoLTE,Operator × Campaign'
-        + '\n8,Completed Call Ratio,Voice quality,CDR-Voice,Call_Setup_Time,Average Vertical Bars,VoLTE,Operator × Campaign\n'
+        + '\n8,Completed Call Ratio,Voice quality,Title and 2 columns + Comments,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Call Family = VoLTE,Operator × Campaign'
+        + '\n8,Completed Call Ratio,Voice quality,Title and 2 columns + Comments,CDR-Voice,Call_Setup_Time,Average Vertical Bars,Call Family = VoLTE,Operator × Campaign\n'
     ).encode('utf-8')
     frames = {
         'data': pd.DataFrame(),

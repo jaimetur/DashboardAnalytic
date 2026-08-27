@@ -823,7 +823,7 @@ def test_admin_imports_report_catalogue_and_synchronizes_help(client, tmp_path, 
     monkeypatch.setattr(app_module, 'REPORT_CATALOGUE_DOCUMENT', help_document)
     content = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,Completed Call Ratio,Voice quality,CDR-Voice,Call_Status,100% Stacked Vertical Bars,VoLTE,Operator × Campaign\n'
+        + '\n8,Completed Call Ratio,Voice quality,Title and 1 column + Comments,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Call Family = VoLTE,Operator × Campaign\n'
     ).encode('utf-8')
 
     response = client.post(
