@@ -405,6 +405,7 @@ document.querySelectorAll('[data-preview-table-filters]').forEach((filters) => {
 document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const table = editor.querySelector('[data-catalogue-editor-table]');
   const saveForm = editor.querySelector('[data-catalogue-editor-save]');
+  const reenumerate = editor.querySelector('[data-catalogue-reenumerate]');
   const contentField = editor.querySelector('[data-catalogue-editor-content]');
   const heading = editor.querySelector('[data-catalogue-editor-heading]');
   const copy = editor.querySelector('[data-catalogue-editor-copy]');
@@ -619,10 +620,10 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     actions.className = 'catalogue-row-actions';
     actions.dataset.catalogueRowActions = '';
     actions.append(
-      createActionButton('Insert', 'insert', 'Insert a row below'),
       createActionButton('↑', 'up', 'Move row up'),
       createActionButton('↓', 'down', 'Move row down'),
-      createActionButton('Delete', 'delete', 'Delete row', 'catalogue-row-delete'),
+      createActionButton('+', 'insert', 'Insert a row below'),
+      createActionButton('−', 'delete', 'Delete row', 'catalogue-row-delete'),
     );
     row.append(actions);
     return row;
@@ -666,6 +667,38 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     updateRowActionStates();
   });
   updateRowActionStates();
+  reenumerate?.addEventListener('click', () => {
+    const body = table.querySelector('tbody');
+    if (!body) return;
+    const rows = Array.from(body.querySelectorAll('tr')).map((row, position) => {
+      const value = row.querySelector('[data-catalogue-field="Slide"]')?.textContent.trim() || '';
+      const parsed = Number(value);
+      return {
+        row,
+        position,
+        slide: Number.isInteger(parsed) && parsed > 0 ? parsed : null,
+      };
+    });
+    rows.sort((left, right) => {
+      if (left.slide === null && right.slide === null) return left.position - right.position;
+      if (left.slide === null) return 1;
+      if (right.slide === null) return -1;
+      return left.slide - right.slide || left.position - right.position;
+    });
+    const reenumeratedSlides = new Map();
+    let nextSlide = 1;
+    rows.forEach(({ row, slide }) => {
+      body.append(row);
+      if (slide === null) return;
+      if (!reenumeratedSlides.has(slide)) {
+        reenumeratedSlides.set(slide, nextSlide);
+        nextSlide += 1;
+      }
+      const slideCell = row.querySelector('[data-catalogue-field="Slide"]');
+      if (slideCell) slideCell.textContent = String(reenumeratedSlides.get(slide));
+    });
+    updateRowActionStates();
+  });
   table.addEventListener('focusin', (event) => {
     const cell = selectedCellFromEvent(event);
     if (cell) selectCell(cell);
@@ -697,7 +730,6 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     activeCell.focus();
   });
   saveForm.addEventListener('submit', () => {
-    const headers = Array.from(table.querySelectorAll('thead th')).map((cell) => cell.textContent.trim());
     const escapeCsv = (value) => {
       const text = String(value || '').replace(/\r?\n/g, '\\n');
       return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
@@ -705,7 +737,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const rows = Array.from(table.querySelectorAll('tbody tr')).map((row) => (
       Array.from(row.querySelectorAll('[data-catalogue-field]')).map((cell) => escapeCsv(cell.textContent.trim())).join(',')
     ));
-    contentField.value = [headers.map(escapeCsv).join(','), ...rows].join('\n');
+    contentField.value = [catalogueHeaders.map(escapeCsv).join(','), ...rows].join('\n');
   });
 });
 

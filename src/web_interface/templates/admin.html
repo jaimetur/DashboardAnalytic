@@ -171,23 +171,27 @@
         <input type="hidden" name="catalogue_content" value="" data-catalogue-editor-content>
         <div class="table-wrap">
           <table class="slide-catalogue-editor-table" data-catalogue-editor-table>
-            <thead><tr>{% for header in catalogue_editor.headers %}<th>{{ header }}</th>{% endfor %}<th class="catalogue-row-actions-heading">Row actions</th></tr></thead>
+            <thead><tr><th class="catalogue-row-actions-heading">Row actions</th>{% for header in catalogue_editor.headers %}<th>{{ header }}</th>{% endfor %}</tr></thead>
             <tbody>
               {% for row in catalogue_editor.rows %}
               <tr>
-                {% for header in catalogue_editor.headers %}<td contenteditable="true" spellcheck="false" data-catalogue-field="{{ header }}">{{ row.get(header, '') }}</td>{% endfor %}
                 <td class="catalogue-row-actions" data-catalogue-row-actions>
-                  <button type="button" data-catalogue-row-action="insert" title="Insert a row below">Insert</button>
                   <button type="button" data-catalogue-row-action="up" title="Move row up" aria-label="Move row up">↑</button>
                   <button type="button" data-catalogue-row-action="down" title="Move row down" aria-label="Move row down">↓</button>
-                  <button type="button" class="catalogue-row-delete" data-catalogue-row-action="delete">Delete</button>
+                  <button type="button" data-catalogue-row-action="insert" title="Insert a row below" aria-label="Insert a row below">+</button>
+                  <button type="button" class="catalogue-row-delete" data-catalogue-row-action="delete" title="Delete row" aria-label="Delete row">−</button>
                 </td>
+                {% for header in catalogue_editor.headers %}<td contenteditable="true" spellcheck="false" data-catalogue-field="{{ header }}">{{ row.get(header, '') }}</td>{% endfor %}
               </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
-        <div class="form-actions"><button type="submit">Save Catalogue</button></div>
+        <div class="form-actions">
+          <button type="button" class="catalogue-reenumerate-button" data-catalogue-reenumerate>Re-Enumerate Slides</button>
+          <button type="submit">Save Catalogue</button>
+          <span class="catalogue-editor-scroll-hint">Scroll vertically with the mouse wheel · Scroll horizontally with Shift + wheel</span>
+        </div>
       </form>
       <aside class="catalogue-editor-helper" aria-live="polite">
         <p class="eyebrow">Cell assistance</p>

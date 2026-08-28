@@ -1132,6 +1132,8 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'data-catalogue-row-action="up"' in editor.text
     assert 'data-catalogue-row-action="down"' in editor.text
     assert 'data-catalogue-row-action="delete"' in editor.text
+    assert 'data-catalogue-reenumerate' in editor.text
+    assert editor.text.index('catalogue-row-actions-heading') < editor.text.index('>Slide</th>')
     assert 'value="nsa:baseline-q4" selected' in editor.text
     assert 'Title and 1 column + Comments' in editor.text
     assert '<optgroup label="Layouts">' in editor.text
