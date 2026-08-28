@@ -39,7 +39,7 @@ Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone
 3. Open **E2E PowerPoint Reporting → NetCheck CDR Reports**.
 4. Select exactly one processed CDR for each required input type.
 5. Choose `NSA` or `SA`. NSA sessions are selected when the available RAT field contains `ENDC`; SA sessions are selected when it contains `NR`.
-6. Choose a compatible slide catalogue and `Single-vendor` or `Multivendor`. Multivendor is enabled only if at least one selected CDR has a saved vendor mapping.
+6. Choose a compatible slide catalogue and `Single-vendor` or `Multivendor`. Multivendor is enabled only when all three selected Data, Voice and Speech CDRs have a saved vendor mapping.
 7. Generate the PowerPoint report. The run stores its selected datasets, technology, scope, catalogue and template in SQLite for auditability. Generated filenames use `yyyymmdd-hhmm`.
 
 All NSA, SA, single-vendor and multivendor reports use the single master/layout-only `assets/templates/Template_CDR_analysis.pptx`. The selected Slide Catalogue determines the technology-specific slide sequence, layouts and generated CDR charts; commentary placeholders remain blank for analyst input.

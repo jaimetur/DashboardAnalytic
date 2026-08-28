@@ -1711,8 +1711,8 @@ def generate_netcheck_cdr_report(
         frames = {kind: classify_sessions(_reporting_frame(dataset['id']), technology) for kind, dataset in selected.items()}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if multivendor and not any(dataset.get('vendor_mapping_applied') for dataset in selected.values()):
-        raise HTTPException(status_code=400, detail='Multivendor reporting requires at least one selected CDR with a Workspace Vendor mapping.')
+    if multivendor and not all(dataset.get('vendor_mapping_applied') for dataset in selected.values()):
+        raise HTTPException(status_code=400, detail='Multivendor reporting requires every selected Data, Voice and Speech CDR to have a Workspace Vendor mapping.')
     if multivendor:
         frames = {kind: ensure_report_vendor_group(frame) for kind, frame in frames.items()}
 

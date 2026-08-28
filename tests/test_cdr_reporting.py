@@ -9,7 +9,7 @@ from unittest.mock import patch
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, _layout_chart_frames, _named_slide_layout, _render_failure_count, _render_status_100, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, _layout_chart_frames, _named_slide_layout, _render_failure_count, _render_status_100, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
 
 
 def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> None:
@@ -181,6 +181,34 @@ def test_catalogue_filter_and_grouping_contract_is_parsed_and_applied() -> None:
     assert grouped[primary].tolist() == ['London']
     assert grouped[series].tolist() == ['EE · Q1']
     assert '__catalog_stack' not in grouped.columns
+
+
+def test_multivendor_rendering_rewrites_operator_display_and_grouping_but_not_filters() -> None:
+    entry = parse_catalog_csv(
+        ','.join(CATALOG_HEADERS)
+        + '\n8,Operator comparison,Operator subtitle,Title and 1 column + Comments,Operator chart,CDR-Speech,LQ,Average Vertical Bars,Operator,Operator = Vodafone UK,Operator,Operator × Campaign\n',
+        'nsa',
+    )[0]
+    rendered = prepare_multivendor_catalog_entry(entry)
+
+    assert rendered.slide_title == 'Vendor comparison'
+    assert rendered.slide_subtitle == 'Vendor subtitle'
+    assert rendered.chart_title == 'Vendor chart'
+    assert rendered.legend == 'Campaign'
+    assert rendered.grouping_rows == 'Vendor'
+    assert rendered.grouping_columns == 'Vendor × Campaign'
+    assert rendered.filters == 'Operator = Vodafone UK'
+
+    frame = pd.DataFrame({
+        'Operator': ['Vodafone UK', '3'],
+        'report_vendor': ['Vodafone_Ericsson', '3_Nokia'],
+        'Campaign': ['UK_Q2_SA_2026', 'UK_Q2_SA_2026'],
+        'LQ': [3.8, 3.5],
+    })
+    filtered = _apply_catalog_filters(frame, rendered, True, 'LQ')
+    grouped, primary, series = _apply_catalog_grouping(filtered, rendered, True, 'LQ')
+    assert grouped[primary].tolist() == ['Vodafone_Ericsson']
+    assert grouped[series].tolist() == ['Vodafone_Ericsson · 2026 Q2']
 
 
 def test_rows_only_grouping_uses_one_all_series_without_repeating_the_category() -> None:
@@ -467,7 +495,7 @@ def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client)
         'technology': 'nsa', 'report_scope': 'multivendor',
     })
     assert report.status_code == 400
-    assert 'requires at least one selected CDR with a Workspace Vendor mapping' in report.text
+    assert 'requires every selected Data, Voice and Speech CDR to have a Workspace Vendor mapping' in report.text
 
 
 def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:

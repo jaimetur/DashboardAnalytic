@@ -10,7 +10,7 @@ Upload and process the required files in Workspace first:
 - one `CDR-Voice` workbook;
 - one `CDR-Speech` workbook.
 
-For a Multivendor report, also process the relevant **VFUK Vodafone UK** and/or **3UK Three UK** mappings, then use **Map Vendors** from the Workspace queue on the CDRs. The reporting page no longer selects mapping files: it uses the Vendor values persisted on the selected CDRs. Multivendor remains disabled until at least one selected CDR has already been mapped.
+For a Multivendor report, also process the relevant **VFUK Vodafone UK** and/or **3UK Three UK** mappings, then use **Map Vendors** from the Workspace queue on every selected Data, Voice and Speech CDR. The reporting page no longer selects mapping files: it uses the Vendor values persisted on the selected CDRs. Multivendor remains disabled until all three selected CDRs have been mapped.
 
 ## Report options
 
@@ -24,7 +24,7 @@ Choose the technology according to the required session scope:
 Then choose a report scope:
 
 - **Single-vendor** generates the operator analysis without further mapping requirements.
-- **Multivendor** is available only when selected CDRs already contain a Vendor mapping. It creates operator-vendor series where applicable, while keeping O2/EE as operator comparisons.
+- **Multivendor** is available only when all selected CDRs already contain a Vendor mapping. It creates vendor series where applicable, while keeping O2/EE as operator comparisons. During rendering, catalogue grouping dimensions named `Operator` become `Vendor`; legends named `Operator` become `Campaign`; and occurrences of `Operator` in slide titles, subtitles and chart titles become `Vendor`. `Operator` filters are deliberately not changed and continue to filter the source CDR Operator field.
 
 Choose a **Slide Catalogue** as well. The technology's active/default catalogue is preselected; another stored NSA or SA catalogue can be chosen for that run without changing the workspace default.
 

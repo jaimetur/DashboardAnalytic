@@ -8,7 +8,7 @@
         <h2>Choose a reporting module</h2>
       </div>
     </div>
-    <p class="lede">Produce a consistent, template-based NetCheck CDR PowerPoint from processed Data, Voice and Speech workbooks. Select NSA or SA; Multivendor is available only when at least one selected CDR has already been mapped in Workspace.</p>
+    <p class="lede">Produce a consistent, template-based NetCheck CDR PowerPoint from processed Data, Voice and Speech workbooks. Select NSA or SA; Multivendor is available only when every selected CDR has already been mapped in Workspace.</p>
   </article>
 
   <article class="panel reporting-panel">
@@ -71,9 +71,9 @@
     const multivendorOption = scope?.querySelector('option[value="multivendor"]');
     if (!scope || !multivendorOption) return;
     const updateScope = () => {
-      const hasMappedCdr = Array.from(cdrSelectors).some((select) => select.selectedOptions[0]?.dataset.vendorMapped === 'true');
-      multivendorOption.disabled = !hasMappedCdr;
-      if (!hasMappedCdr && scope.value === 'multivendor') scope.value = 'single';
+      const allCdrsMapped = Array.from(cdrSelectors).every((select) => select.selectedOptions[0]?.dataset.vendorMapped === 'true');
+      multivendorOption.disabled = !allCdrsMapped;
+      if (!allCdrsMapped && scope.value === 'multivendor') scope.value = 'single';
     };
     cdrSelectors.forEach((select) => select.addEventListener('change', updateScope));
     const updateCatalogues = () => {

@@ -6,7 +6,7 @@ import csv
 import io
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import BytesIO
 from pathlib import Path
 from typing import Iterable
@@ -25,7 +25,7 @@ TEMPLATE_NAMES = {
     "nsa": "Template_CDR_analysis.pptx",
     "sa": "Template_CDR_analysis.pptx",
 }
-CDR_REPORT_VERSION = "2026-08-28-v8"
+CDR_REPORT_VERSION = "2026-08-28-v9"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
 CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns")
@@ -650,6 +650,49 @@ def ensure_report_vendor_group(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+def _replace_word(value: str, source: str, replacement: str) -> str:
+    """Replace a catalogue word while retaining the source word's casing."""
+    def replace_match(match: re.Match[str]) -> str:
+        word = match.group(0)
+        if word.isupper():
+            return replacement.upper()
+        if word[0].isupper():
+            return replacement.capitalize()
+        return replacement.lower()
+    return re.sub(rf"\b{re.escape(source)}\b", replace_match, value, flags=re.I)
+
+
+def _replace_operator_label(value: str, replacement: str) -> str:
+    """Replace singular and plural display labels without touching filters."""
+    return _replace_word(_replace_word(value, "Operators", f"{replacement}s"), "Operator", replacement)
+
+
+def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
+    """Apply the report-only multivendor wording and grouping interpretation.
+
+    The stored catalogue remains an operator-oriented template.  For a
+    multivendor run, only grouping dimensions, display legends and titles are
+    transformed.  Filters deliberately remain untouched so an ``Operator``
+    condition continues to filter the physical CDR Operator column.
+    """
+    def vendor_grouping(value: str) -> str:
+        dimensions = parse_catalog_grouping(value).dimensions
+        return " × ".join(
+            "Vendor" if _normalise_catalog_name(dimension) == "operator" else dimension
+            for dimension in dimensions
+        )
+
+    return replace(
+        entry,
+        slide_title=_replace_operator_label(entry.slide_title, "Vendor"),
+        slide_subtitle=_replace_operator_label(entry.slide_subtitle, "Vendor"),
+        chart_title=_replace_operator_label(entry.chart_title, "Vendor"),
+        legend=_replace_operator_label(entry.legend, "Campaign"),
+        grouping_rows=vendor_grouping(entry.grouping_rows),
+        grouping_columns=vendor_grouping(entry.grouping_columns),
+    )
+
+
 def _font(size: int, bold: bool = False) -> ImageFont.ImageFont:
     path = "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf"
     try:
@@ -674,11 +717,20 @@ def _normalise_catalog_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", value.casefold())
 
 
-def _catalog_column(frame: pd.DataFrame, name: str, multivendor: bool, metric: str | None = None, bucket_edges: list[float] | None = None) -> str | None:
+def _catalog_column(
+    frame: pd.DataFrame,
+    name: str,
+    multivendor: bool,
+    metric: str | None = None,
+    bucket_edges: list[float] | None = None,
+    operator_as_vendor: bool = True,
+) -> str | None:
     """Resolve a catalogue field name against a source column or supported semantic dimension."""
     normalized = _normalise_catalog_name(name)
     if normalized == "operator":
-        return _group_column(frame, multivendor)
+        return _group_column(frame, multivendor) if operator_as_vendor else _column(frame, ("Operator", "operator"))
+    if normalized in {"vendor", "reportvendor"}:
+        return _group_column(frame, multivendor) if multivendor else _column(frame, ("Vendor", "vendor"))
     if normalized == "callfamily":
         session_column = _column(frame, ("Session_Type", "session_type"))
         if not session_column:
@@ -767,7 +819,9 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
     for condition in parse_catalog_filters(entry.filters):
         if _normalise_catalog_name(condition.column) in {"threshold", "buckets"}:
             continue
-        column = _catalog_column(result, condition.column, multivendor, metric)
+        # Operator filters always refer to the source CDR Operator field. Only
+        # grouping dimensions are promoted to Vendor for multivendor reports.
+        column = _catalog_column(result, condition.column, multivendor, metric, operator_as_vendor=False)
         if not column:
             raise ValueError(f"Slide {entry.slide}: filter column '{condition.column}' does not exist in {entry.cdr_source}.")
         series = result[column]
@@ -1680,7 +1734,8 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
     _remove_all_slides(presentation)
 
     catalogue_slides: dict[int, list[CatalogEntry]] = defaultdict(list)
-    for entry in catalog:
+    render_catalog = [prepare_multivendor_catalog_entry(entry) if multivendor else entry for entry in catalog]
+    for entry in render_catalog:
         catalogue_slides[entry.slide].append(entry)
 
     for number in sorted(catalogue_slides):
