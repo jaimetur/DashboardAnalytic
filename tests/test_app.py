@@ -727,6 +727,34 @@ def test_dashboard_ignores_non_ready_dataset_id_in_selector_flow(client) -> None
     assert 'option value="2"' not in selector_fragment
 
 
+def test_reporting_preselects_latest_ready_cdr_of_each_type(client) -> None:
+    login(client)
+    uploads = [
+        ('old-data.csv', 'data', b'Mean_Data_Rate,RAT_A\n10,ENDC\n'),
+        ('voice.csv', 'voice', b'Call_Setup_Time,RAT_A\n1.2,ENDC\n'),
+        ('latest-data.csv', 'data', b'Mean_Data_Rate,RAT_A\n20,ENDC\n'),
+        ('speech.csv', 'speech', b'LQ,RAT_A\n3.8,ENDC\n'),
+    ]
+    for filename, kind, content in uploads:
+        response = client.post(
+            '/dashboard/upload',
+            data={'dataset_kinds': kind},
+            files={'dataset_files': (filename, BytesIO(content), 'text/csv')},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    reporting = client.get('/reporting')
+    data_select = reporting.text.split('name="data_dataset_id"', 1)[1].split('</select>', 1)[0]
+    voice_select = reporting.text.split('name="voice_dataset_id"', 1)[1].split('</select>', 1)[0]
+    speech_select = reporting.text.split('name="speech_dataset_id"', 1)[1].split('</select>', 1)[0]
+
+    assert 'value="3" data-vendor-mapped="false" selected' in data_select
+    assert 'value="2" data-vendor-mapped="false" selected' in voice_select
+    assert 'value="4" data-vendor-mapped="false" selected' in speech_select
+    assert 'if (active) catalogue.value = active.value;' in reporting.text
+
+
 def test_dashboard_explicit_dataset_id_overrides_mismatched_input_kind_filter(client) -> None:
     login(client)
 
