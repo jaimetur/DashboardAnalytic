@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 from pptx.util import Inches, Pt
 
 
@@ -1448,19 +1449,52 @@ def _combined_frame(frames: list[tuple[int, int, int, int]]) -> tuple[int, int, 
     return left, top, right - left, bottom - top
 
 
-def _layout_chart_frames(presentation: Presentation, layout_name: str) -> list[tuple[int, int, int, int]]:
-    """Read named chart placeholder frames from the selected template layout."""
+def _named_slide_layout(presentation: Presentation, layout_name: str):
+    """Resolve a catalogue layout name against the template slide master."""
     expected = layout_name.strip().casefold()
     for layout in presentation.slide_layouts:
-        if layout.name.strip().casefold() != expected:
+        if layout.name.strip().casefold() == expected:
+            return layout
+    return None
+
+
+def _apply_catalogue_layout(presentation: Presentation, slide, layout_name: str):
+    """Assign the requested layout and align retained structural placeholders."""
+    layout = _named_slide_layout(presentation, layout_name)
+    if layout is None:
+        return None
+    layout_relationship_ids = [
+        relationship_id
+        for relationship_id, relationship in slide.part.rels.items()
+        if relationship.reltype == RT.SLIDE_LAYOUT
+    ]
+    for relationship_id in layout_relationship_ids:
+        slide.part.rels.pop(relationship_id)
+    slide.part.rels.get_or_add(RT.SLIDE_LAYOUT, layout.part)
+
+    layout_placeholders = {
+        placeholder.placeholder_format.idx: placeholder
+        for placeholder in layout.placeholders
+    }
+    for shape in slide.placeholders:
+        target = layout_placeholders.get(shape.placeholder_format.idx)
+        if target is None or shape.placeholder_format.idx not in {0, 10}:
             continue
-        frames = [
-            (shape.left, shape.top, shape.width, shape.height)
-            for shape in layout.placeholders
-            if shape.placeholder_format.type == 7 and shape.placeholder_format.idx != 10
-        ]
-        return sorted(frames, key=lambda frame: (frame[1], frame[0]))
-    return []
+        shape.left, shape.top = target.left, target.top
+        shape.width, shape.height = target.width, target.height
+    return layout
+
+
+def _layout_chart_frames(layout) -> list[tuple[int, int, int, int]]:
+    """Read chart placeholder frames from the selected template layout."""
+    if layout is None:
+        return []
+    frames = [
+        (shape.left, shape.top, shape.width, shape.height)
+        for shape in layout.placeholders
+        if shape.placeholder_format.type == 7 and shape.placeholder_format.idx != 10
+    ]
+    return sorted(frames, key=lambda frame: (frame[1], frame[0]))
 
 
 def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.DataFrame], technology: str,
@@ -1489,7 +1523,8 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
             if len(layouts) != 1:
                 raise ValueError(f"Slide {number} uses more than one Layout in the active catalogue.")
             layout_name = layouts.pop()
-            placement_frames = _layout_chart_frames(presentation, layout_name)
+            selected_layout = _apply_catalogue_layout(presentation, slide, layout_name)
+            placement_frames = _layout_chart_frames(selected_layout)
             if len(placement_frames) < len(catalog_entries):
                 raise ValueError(
                     f"Slide {number}: layout '{layout_name}' has {len(placement_frames)} chart placeholders, "

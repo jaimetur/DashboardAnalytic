@@ -15,7 +15,6 @@
 #### 🚀 Enhancements:
 - Reworked template-backed CDR rendering into an explicit NSA/SA slide contract: each automated slide now selects its CDR source, technology/session/test/direction filters, KPI and template chart grammar (100% stacked columns, stacked failure counts, CDF lines, mean/median bars or scatter) rather than reusing one generic bar chart. The complete catalog now records CDR source, KPI, chart type, filters and grouping per chart (one row per chart), with matching editable NSA/SA CSV exports.
 - Rebased the NSA catalogue on the NetCheck CDR Dictionary and benchmarking methodology: it now uses the documented call families, data-test fields, FDFS transfer duration, interactivity packet-error KPI and the DL/UL FDTT bucket definitions from the template.
-- Added an explicit `Layout` catalogue field. The renderer validates the named master layout, clears the inherited sample-chart placeholders, populates only its chart areas, leaves analyst comments blank and renders CDF lines separately from mean/median bar charts.
 - Split NSA template screenshots that contained several charts into independent catalogue rows and matching row/column layouts, including the two data-success charts on slide 10 and the three WhatsApp POLQA visuals on slide 13.
 - Assigned the NSA WhatsApp POLQA slide's three independent charts to the equal-width three-column layout.
 - Standardized preserved template entries as `Not Automated (preserve)` and recorded the NSA conclusions slide as its existing preserved `Table`.
@@ -51,6 +50,7 @@
 - Named generated NetCheck CDR PowerPoint reports with their generation timestamp (`yyyymmdd-hhmm`) instead of an opaque content-hash suffix.
 - Created `UpdateAll.py` as a Dashboard Analytic utility for synchronizing `src/version.py` and the current `CHANGELOG.md` release header.
 - Added client-side filtering to every dataset preview table. Column names and row values support case-insensitive partial matches, with comma-separated terms combined as an OR search; additionally, every column header opens an Excel-style searchable checklist of its distinct values, supporting multi-selection and combined filters across multiple columns without reloading the preview.
+- Added an explicit `Layout` catalogue field. The renderer validates and assigns the named master layout to the generated slide, synchronizes its title/comments placeholders, clears inherited sample charts and fills every chart area in layout order—including both rows of **Title and 2 rows + Comments right**—while leaving analyst comments blank and rendering CDF lines separately from mean/median bar charts.
 
 #### 🐛 Bug fixes:
 - Show Slide Catalogue import validation failures in a floating dialog after redirecting back to Admin, rather than leaving the cause embedded in the management panel.

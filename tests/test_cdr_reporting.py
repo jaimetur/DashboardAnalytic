@@ -264,8 +264,8 @@ def test_catalogue_uses_one_preservation_type_and_records_nsa_conclusions_table(
 def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None:
     catalogue = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,Completed Call Ratio,Voice quality,Title and 2 columns + Comments,Status ratio,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Completed/Dropped/Failed,Call Family = VoLTE,Call Family,Operator × Campaign'
-        + '\n8,Completed Call Ratio,Voice quality,Title and 2 columns + Comments,Setup time,CDR-Voice,Call_Setup_Time,Average Vertical Bars,,Call Family = VoLTE,Call Family,Operator × Campaign\n'
+        + '\n8,Completed Call Ratio,Voice quality,Title and 2 rows + Comments right,Status ratio,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Completed/Dropped/Failed,Call Family = VoLTE,Call Family,Operator × Campaign'
+        + '\n8,Completed Call Ratio,Voice quality,Title and 2 rows + Comments right,Setup time,CDR-Voice,Call_Setup_Time,Average Vertical Bars,,Call Family = VoLTE,Call Family,Operator × Campaign\n'
     ).encode('utf-8')
     frames = {
         'data': pd.DataFrame(),
@@ -287,7 +287,15 @@ def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None
     )
 
     slide = Presentation(destination).slides[7]
-    assert sum(1 for shape in slide.shapes if hasattr(shape, 'image')) >= 2
+    assert slide.slide_layout.name == 'Title and 2 rows + Comments right'
+    pictures = sorted((shape for shape in slide.shapes if hasattr(shape, 'image')), key=lambda shape: shape.top)
+    assert len(pictures) >= 2
+    assert pictures[0].top < pictures[1].top
+    comments = next(shape for shape in slide.placeholders if shape.placeholder_format.idx == 10)
+    layout_comments = next(shape for shape in slide.slide_layout.placeholders if shape.placeholder_format.idx == 10)
+    assert (comments.left, comments.top, comments.width, comments.height) == (
+        layout_comments.left, layout_comments.top, layout_comments.width, layout_comments.height,
+    )
     title_shape = next(
         shape for shape in slide.shapes
         if getattr(shape, 'has_text_frame', False) and getattr(shape, 'is_placeholder', False)
