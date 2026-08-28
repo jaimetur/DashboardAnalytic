@@ -921,7 +921,9 @@ def test_top_navigation_shows_document_links(client) -> None:
     assert 'class="module-tabs-secondary"' in response.text
     assert 'module-hero-dashboard' not in response.text
     assert 'class="module-tab module-tab-workspace active" href="/workspace"' in response.text
-    assert 'E2E PowerPoint Reporting</a>' in response.text
+    assert '<span class="module-tab-label-desktop">E2E PowerPoint Reporting</span>' in response.text
+    assert '<span class="module-tab-label-mobile">Reporting</span>' in response.text
+    assert '<span class="module-tab-label-mobile">Dashboard</span>' in response.text
     assert 'href="/logout"' in response.text
     assert '<span class="topnav-link topnav-user-badge topnav-user-badge-admin">User: admin</span>' in response.text
 

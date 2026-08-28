@@ -35,8 +35,8 @@
       <nav class="module-tabs" aria-label="E2E modules">
         <div class="module-tabs-primary">
           <a class="module-tab module-tab-workspace{% if request.url.path == '/workspace' %} active{% endif %}" href="/workspace">Workspace</a>
-          <a class="module-tab module-tab-dashboard{% if request.url.path == '/dashboard' %} active{% endif %}" href="/dashboard">E2E Dashboard</a>
-          <a class="module-tab module-tab-reporting{% if request.url.path == '/reporting' %} active{% endif %}" href="/reporting">E2E PowerPoint Reporting</a>
+          <a class="module-tab module-tab-dashboard{% if request.url.path == '/dashboard' %} active{% endif %}" href="/dashboard"><span class="module-tab-label-desktop">E2E Dashboard</span><span class="module-tab-label-mobile">Dashboard</span></a>
+          <a class="module-tab module-tab-reporting{% if request.url.path == '/reporting' %} active{% endif %}" href="/reporting"><span class="module-tab-label-desktop">E2E PowerPoint Reporting</span><span class="module-tab-label-mobile">Reporting</span></a>
         </div>
         <div class="module-tabs-secondary" aria-label="Documentation and administration">
           <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/readme' %} active{% endif %}" href="/documents/view/readme">Readme</a>
