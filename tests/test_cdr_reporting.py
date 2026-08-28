@@ -4,10 +4,11 @@ import re
 import pandas as pd
 from io import BytesIO
 from pathlib import Path
+from unittest.mock import patch
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, _render_failure_count, _render_status_100, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, vendor_from_cells
 
 
 def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> None:
@@ -196,9 +197,44 @@ def test_catalogue_call_family_uses_documented_netcheck_session_values() -> None
     })
 
     filtered = _apply_catalog_filters(frame, entry, False, 'Call_Status')
-    grouped, primary, _ = _apply_catalog_grouping(filtered, entry, False, 'Call_Status')
+    grouped, primary, series = _apply_catalog_grouping(filtered, entry, False, 'Call_Status')
 
     assert grouped[primary].tolist() == ['VoLTE', 'MultiRAB', 'WhatsApp']
+    assert grouped['__catalog_row_0'].tolist() == ['VoLTE', 'MultiRAB', 'WhatsApp']
+    assert grouped['__catalog_column_0'].tolist() == ['EE', 'EE', 'EE']
+    assert grouped['__catalog_column_1'].tolist() == ['Q1', 'Q1', 'Q1']
+
+    with patch('src.modules.cdr_reporting._render_status_100_hierarchy') as hierarchy_renderer:
+        hierarchy_renderer.return_value = BytesIO(b'nested-chart')
+        chart = _render_status_100('Completed Call Ratio', grouped, primary, series)
+
+    assert chart.getvalue() == b'nested-chart'
+    assert hierarchy_renderer.call_args.args[2] == ['__catalog_row_0']
+    assert hierarchy_renderer.call_args.args[3] == ['__catalog_column_0', '__catalog_column_1']
+
+
+def test_failure_count_uses_row_and_column_hierarchies_without_flattening() -> None:
+    entry = parse_catalog_csv(
+        ','.join(CATALOG_HEADERS)
+        + '\n9,Voice failures per Q/city,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,Failed/Dropped,,Call Family × G Level 4,Operator × Campaign\n',
+        'nsa',
+    )[0]
+    frame = pd.DataFrame({
+        'Session_Type': ['VoLTE', 'VoLTE', 'MultiRAB CALL'],
+        'G_Level_4': ['London', 'London', 'Belfast'],
+        'Operator': ['EE', 'EE', '3'],
+        'Campaign': ['Q2', 'Q2', 'Q3'],
+        'Call_Status': ['Failed', 'Dropped', 'Failed'],
+    })
+    grouped, primary, series = _apply_catalog_grouping(frame, entry, False, 'Call_Status')
+
+    with patch('src.modules.cdr_reporting._render_failure_count_hierarchy') as hierarchy_renderer:
+        hierarchy_renderer.return_value = BytesIO(b'nested-failure-chart')
+        chart = _render_failure_count('Voice failures per Q/city', grouped, primary, series)
+
+    assert chart.getvalue() == b'nested-failure-chart'
+    assert hierarchy_renderer.call_args.args[2] == ['__catalog_row_0', '__catalog_row_1']
+    assert hierarchy_renderer.call_args.args[3] == ['__catalog_column_0', '__catalog_column_1']
 
 
 def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> None:

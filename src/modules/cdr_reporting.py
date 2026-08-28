@@ -744,6 +744,13 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
 
     row_columns = resolve_dimensions(row_spec.dimensions, "row")
     column_columns = resolve_dimensions(column_spec.dimensions, "column")
+    # Preserve every resolved hierarchy level for renderers that need pane-like
+    # rows and nested column headers. The flattened primary/series fields remain
+    # available for chart grammars that intentionally use compact labels.
+    for index, column in enumerate(row_columns):
+        frame[f"__catalog_row_{index}"] = frame[column].fillna("(blank)").astype(str)
+    for index, column in enumerate(column_columns):
+        frame[f"__catalog_column_{index}"] = frame[column].fillna("(blank)").astype(str)
     # Rows form the category/table-row hierarchy. Columns form chart series and
     # table columns. Distribution charts reserve the final column level as the
     # stack/bucket breakdown and use any preceding column levels as the series.
@@ -843,13 +850,21 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
         return _empty_chart(title)
     states = ("< 1.6", "≥ 1.6") if quality else ("Completed", "Dropped", "Failed")
     colours = ("#E15759", "#59A14F") if quality else ("#4E79A7", "#F28E2B", "#E15759")
-    data = frame[[group, period, state_column]].copy()
+    hierarchy_columns = sorted(
+        [column for column in frame.columns if column.startswith("__catalog_row_") or column.startswith("__catalog_column_")],
+        key=lambda column: (0 if column.startswith("__catalog_row_") else 1, int(column.rsplit("_", 1)[1])),
+    )
+    data = frame[[group, period, state_column, *hierarchy_columns]].copy()
     if quality:
         data["state"] = pd.to_numeric(data[state_column], errors="coerce").map(lambda value: "< 1.6" if pd.notna(value) and value < threshold else "≥ 1.6")
     else:
         raw = data[state_column].astype(str).str.casefold()
         data["state"] = raw.map(lambda value: "Completed" if any(item in value for item in ("complete", "success", "pass", "ok")) else "Dropped" if "drop" in value else "Failed")
     data = data.dropna(subset=[group, period])
+    row_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_row_")]
+    column_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_column_")]
+    if row_hierarchy and column_hierarchy:
+        return _render_status_100_hierarchy(title, data, row_hierarchy, column_hierarchy, states, colours, legend_labels)
     combos = [(str(g), str(p)) for g, p in data[[group, period]].drop_duplicates().itertuples(index=False)]
     if not combos:
         return _empty_chart(title)
@@ -877,6 +892,88 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
+def _render_status_100_hierarchy(
+    title: str,
+    data: pd.DataFrame,
+    row_hierarchy: list[str],
+    column_hierarchy: list[str],
+    states: tuple[str, ...],
+    colours: tuple[str, ...],
+    legend_labels: tuple[str, ...] = (),
+) -> BytesIO:
+    """Render catalogue row groups as panes and column groups as nested headers."""
+    row_keys = list(data[row_hierarchy].drop_duplicates().itertuples(index=False, name=None))
+    column_keys = list(data[column_hierarchy].drop_duplicates().itertuples(index=False, name=None))
+    if not row_keys or not column_keys:
+        return _empty_chart(title)
+
+    image, draw = _canvas(title)
+    chart_left, chart_top, chart_width, chart_height = 205, 145, 1190, 610
+    row_height = chart_height / len(row_keys)
+    column_width = chart_width / len(column_keys)
+    bar_width = max(18, min(86, column_width * 0.68))
+
+    # The first column level is the upper header (Operator in the catalogue
+    # contract); lower levels, such as Campaign, are shown below every column.
+    outer_values = [str(key[0]) for key in column_keys]
+    start = 0
+    while start < len(column_keys):
+        end = start + 1
+        while end < len(column_keys) and outer_values[end] == outer_values[start]:
+            end += 1
+        centre = chart_left + ((start + end) / 2) * column_width
+        caption = outer_values[start]
+        draw.text((centre - min(len(caption) * 4, 70), chart_top - 46), caption[:22], fill="#566A78", font=_font(14, True))
+        draw.line((chart_left + start * column_width, chart_top - 14, chart_left + end * column_width, chart_top - 14), fill="#CDD7DE", width=1)
+        start = end
+
+    for row_index, row_key in enumerate(row_keys):
+        pane_top = chart_top + row_index * row_height
+        pane_bottom = pane_top + row_height
+        row_label = " · ".join(str(value) for value in row_key)
+        draw.text((24, pane_top + row_height / 2 - 10), row_label[:24], fill="#566A78", font=_font(14))
+        draw.line((24, pane_bottom, chart_left + chart_width, pane_bottom), fill="#D7DEE3", width=1)
+        ticks = (0, 50, 100) if row_index == len(row_keys) - 1 else (50, 100)
+        for tick in ticks:
+            tick_y = pane_bottom - tick / 100 * row_height
+            draw.line((chart_left, tick_y, chart_left + chart_width, tick_y), fill="#E8ECEF", width=1)
+            draw.text((chart_left - 43, tick_y - 7), f"{tick}%", fill="#7A8993", font=_font(11))
+
+        row_mask = pd.Series(True, index=data.index)
+        for field, value in zip(row_hierarchy, row_key, strict=True):
+            row_mask &= data[field].astype(str).eq(str(value))
+        for column_index, column_key in enumerate(column_keys):
+            mask = row_mask.copy()
+            for field, value in zip(column_hierarchy, column_key, strict=True):
+                mask &= data[field].astype(str).eq(str(value))
+            subset = data.loc[mask]
+            if subset.empty:
+                continue
+            x = chart_left + column_index * column_width + (column_width - bar_width) / 2
+            total = len(subset)
+            running = 0.0
+            for state, colour in zip(states, colours, strict=True):
+                ratio = float(subset["state"].eq(state).sum()) / total
+                segment_height = ratio * row_height
+                y = pane_bottom - running - segment_height
+                draw.rectangle((x, y, x + bar_width, y + segment_height), fill=colour)
+                if ratio >= 0.08:
+                    draw.text((x + 3, y + segment_height / 2 - 7), f"{ratio:.0%}", fill="white", font=_font(12, True))
+                running += segment_height
+
+    for column_index, column_key in enumerate(column_keys):
+        lower_caption = " · ".join(str(value) for value in column_key[1:]) or str(column_key[0])
+        centre = chart_left + (column_index + 0.5) * column_width
+        draw.text((centre - min(len(lower_caption) * 3.5, 62), chart_top + chart_height + 10), lower_caption[:20], fill="#62727E", font=_font(12))
+
+    for index, (state, colour) in enumerate(zip(states, colours, strict=True)):
+        x = chart_left + index * 185
+        draw.rectangle((x, 82, x + 18, 99), fill=colour)
+        draw.text((x + 25, 81), _legend_caption(legend_labels, index, state), fill="#34495A", font=_font(13))
+    output = BytesIO(); image.save(output, format="PNG"); output.seek(0)
+    return output
+
+
 def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, period: str | None, legend_labels: tuple[str, ...] = ()) -> BytesIO:
     if frame.empty or not group:
         return _empty_chart(title)
@@ -887,6 +984,16 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
     failed["__catalog_failure_state"] = failed[status].astype(str).map(
         lambda value: "Dropped" if "drop" in value.casefold() else "Failed"
     )
+    row_hierarchy = sorted(
+        [column for column in failed.columns if column.startswith("__catalog_row_")],
+        key=lambda column: int(column.rsplit("_", 1)[1]),
+    )
+    column_hierarchy = sorted(
+        [column for column in failed.columns if column.startswith("__catalog_column_")],
+        key=lambda column: int(column.rsplit("_", 1)[1]),
+    )
+    if row_hierarchy and column_hierarchy:
+        return _render_failure_count_hierarchy(title, failed, row_hierarchy, column_hierarchy, legend_labels)
     has_series = bool(period) and not failed[period].fillna("(all)").astype(str).eq("(all)").all()
     fields = [group, period] if has_series else [group]
     counts = failed.groupby([*fields, "__catalog_failure_state"], dropna=False).size().unstack(fill_value=0)
@@ -908,6 +1015,96 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
         draw.rectangle((x, 82, x + 20, 100), fill=colours[state]); draw.text((x + 27, 82), _legend_caption(legend_labels, index, state), fill="#34495A", font=_font(13))
     draw.text((390, 820), "# of failed / dropped sessions", fill="#62727E", font=_font(16))
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
+
+
+def _render_failure_count_hierarchy(
+    title: str,
+    failed: pd.DataFrame,
+    row_hierarchy: list[str],
+    column_hierarchy: list[str],
+    legend_labels: tuple[str, ...] = (),
+) -> BytesIO:
+    """Render failure counts with catalogue rows and columns as separate axes."""
+    row_keys = list(failed[row_hierarchy].drop_duplicates().itertuples(index=False, name=None))
+    column_keys = list(failed[column_hierarchy].drop_duplicates().itertuples(index=False, name=None))
+    if not row_keys or not column_keys:
+        return _empty_chart(title)
+
+    counts = failed.groupby([*row_hierarchy, *column_hierarchy, "__catalog_failure_state"], dropna=False).size()
+    maximum = max(int(counts.groupby(level=list(range(len(row_hierarchy) + len(column_hierarchy)))).sum().max()), 1)
+    image, draw = _canvas(title)
+    chart_left, chart_top, chart_width, chart_height = 285, 150, 1250, 620
+    row_height = chart_height / len(row_keys)
+    column_width = chart_width / len(column_keys)
+    colours = {"Failed": "#E15759", "Dropped": "#F28E2B"}
+
+    outer_values = [str(key[0]) for key in column_keys]
+    start = 0
+    while start < len(column_keys):
+        end = start + 1
+        while end < len(column_keys) and outer_values[end] == outer_values[start]:
+            end += 1
+        centre = chart_left + ((start + end) / 2) * column_width
+        caption = outer_values[start]
+        draw.text((centre - min(len(caption) * 4, 64), chart_top - 58), caption[:20], fill="#566A78", font=_font(15, True))
+        draw.line((chart_left + start * column_width, chart_top - 24, chart_left + end * column_width, chart_top - 24), fill="#C8D2D9", width=1)
+        start = end
+
+    for column_index, column_key in enumerate(column_keys):
+        lower_caption = " · ".join(str(value) for value in column_key[1:]) or str(column_key[0])
+        centre = chart_left + (column_index + 0.5) * column_width
+        draw.text((centre - min(len(lower_caption) * 3.5, 58), chart_top - 21), lower_caption[:18], fill="#62727E", font=_font(12))
+        cell_left = chart_left + column_index * column_width
+        draw.line((cell_left, chart_top - 24, cell_left, chart_top + chart_height + 25), fill="#D5DDE2", width=1)
+        draw.text((cell_left + 3, chart_top + chart_height + 7), "0", fill="#7A8993", font=_font(10))
+        draw.text((cell_left + column_width - 22, chart_top + chart_height + 7), str(maximum), fill="#7A8993", font=_font(10))
+
+    # Render each row hierarchy level in its own label column. Repeated outer
+    # values are merged visually so Call Family remains distinct from G Level 4.
+    label_width = max((chart_left - 28) / len(row_hierarchy), 65)
+    for level, field in enumerate(row_hierarchy):
+        values = [str(key[level]) for key in row_keys]
+        start = 0
+        while start < len(row_keys):
+            end = start + 1
+            while end < len(row_keys) and row_keys[end][:level + 1] == row_keys[start][:level + 1]:
+                end += 1
+            centre_y = chart_top + ((start + end) / 2) * row_height
+            x = 20 + level * label_width
+            draw.text((x, centre_y - 8), values[start][:22], fill="#566A78", font=_font(12, level == 0))
+            start = end
+
+    for row_index, row_key in enumerate(row_keys):
+        row_top = chart_top + row_index * row_height
+        row_bottom = row_top + row_height
+        draw.line((20, row_bottom, chart_left + chart_width, row_bottom), fill="#DCE3E7", width=1)
+        for column_index, column_key in enumerate(column_keys):
+            key_prefix = (*row_key, *column_key)
+            state_counts = {
+                state: int(counts.get((*key_prefix, state), 0))
+                for state in ("Failed", "Dropped")
+            }
+            cell_left = chart_left + column_index * column_width
+            available_width = max(column_width - 10, 1)
+            x = cell_left + 4
+            bar_height = max(8, min(20, row_height * 0.58))
+            y = row_top + (row_height - bar_height) / 2
+            for state in ("Failed", "Dropped"):
+                count = state_counts[state]
+                segment_width = available_width * count / maximum
+                if segment_width:
+                    draw.rectangle((x, y, x + segment_width, y + bar_height), fill=colours[state])
+                    if segment_width >= 14:
+                        draw.text((x + 3, y + 2), str(count), fill="white", font=_font(10, True))
+                x += segment_width
+
+    draw.line((chart_left + chart_width, chart_top - 24, chart_left + chart_width, chart_top + chart_height + 25), fill="#D5DDE2", width=1)
+    for index, state in enumerate(("Failed", "Dropped")):
+        x = chart_left + index * 180
+        draw.rectangle((x, 82, x + 18, 99), fill=colours[state])
+        draw.text((x + 25, 81), _legend_caption(legend_labels, index, state), fill="#34495A", font=_font(13))
+    output = BytesIO(); image.save(output, format="PNG"); output.seek(0)
+    return output
 
 
 def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | None, series: str | None, stack: str, legend_labels: tuple[str, ...] = ()) -> BytesIO:

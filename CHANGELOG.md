@@ -22,7 +22,6 @@
 - Added Admin export/import for NSA and SA Slide Catalogue CSVs stored in `assets/ppt-slides-catalog/`; active catalogues drive report generation, refresh the related Help tables and retain slide titles, subtitles and matching master layouts.
 - Standardized validated, dataset-agnostic chart types around explicit geometry and aggregation: vertical/horizontal bars, CDF, scatter and tables.
 - Made catalogue filters, threshold/bucket settings and `×` grouping hierarchies executable, driving CDR selection, aggregation, axes, series, stacks and table layout.
-- Corrected chart grouping semantics across CDF, scatter, mean/median bars, stacked status/failure/distribution bars and tables: **Grouping_Rows** remains the visible category hierarchy, **Grouping_Columns** becomes the comparison series (with the final distribution level as its stack), and rows-only charts use one `(all)` series without duplicated labels.
 - Restricted E2E Dashboard dataset selection and exports to NetCheck CDR Data, Voice and Speech sources; VFUK/3UK mappings and Other inputs remain separately classified in Workspace but are no longer dashboard candidates.
 - Excluded geographic coordinates, cell/network identifiers and other technical metadata from the Dashboard metric selector.
 - Refined the tabbed interface: product and documentation/admin tabs align with the primary panel, have distinct active colours and matching gradients, and respect Admin visibility. On mobile, documentation/admin tabs occupy the upper row while the main modules use compact **Workspace**, **Dashboard** and **Reporting** labels below.
@@ -74,6 +73,7 @@
 - Accepted the NetCheck `EN-DC`, `EN DC` and `ENDC` NSA RAT spellings.
 - Replaced inherited example charts in generated CDR presentations and regenerated reports when the renderer changes.
 - Closed the report-generation dialog after a successful download and fixed Help sidebar navigation to open individual articles.
+- Corrected chart grouping semantics across CDF, scatter, mean/median bars, stacked status/failure/distribution bars and tables: **Grouping_Rows** remains the visible category hierarchy, **Grouping_Columns** becomes the comparison series (with the final distribution level as its stack), and rows-only charts use one `(all)` series without duplicated labels. **100% Stacked Vertical Bars** now preserve every hierarchy level and render row panes separately from nested column headers—for example, Call Family rows with Operator above Campaign columns—instead of flattening all dimensions into one axis label. **Count Stacked Horizontal Bars** use the same contract, rendering Call Family/G Level 4 as separate row levels and Operator/Campaign as nested column panels containing the Failed/Dropped counts.
 
 #### 📚 Documentation:
 - Replaced inherited and unrelated documentation, including the root-level roadmap, with a maintained numbered Dashboard Analytic Help set and embedded Help index.

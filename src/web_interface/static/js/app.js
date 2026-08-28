@@ -219,6 +219,8 @@ document.querySelectorAll('[data-preview-table-filters]').forEach((filters) => {
 
   const headers = Array.from(table.querySelectorAll('thead th'));
   const rows = Array.from(table.querySelectorAll('tbody tr'));
+  const valueFilters = new Map();
+  let openColumnMenu = null;
   const termsFor = (input) => String(input.value || '')
     .split(',')
     .map((term) => term.trim().toLocaleLowerCase())
@@ -242,18 +244,161 @@ document.querySelectorAll('[data-preview-table-filters]').forEach((filters) => {
       // Row filtering searches every original cell. It remains predictable even
       // when a separate column-name filter temporarily hides matching cells.
       const rowText = Array.from(row.cells).map((cell) => cell.textContent.toLocaleLowerCase()).join(' ');
-      const visible = matchesAny(rowText, rowTerms);
+      const matchesColumnValues = Array.from(valueFilters.entries()).every(([columnIndex, accepted]) => {
+        const cellValue = String(row.cells[columnIndex]?.textContent || '').trim();
+        return accepted.has(cellValue);
+      });
+      const visible = matchesAny(rowText, rowTerms) && matchesColumnValues;
       row.hidden = !visible;
       if (visible) visibleRowCount += 1;
     });
     if (status) {
       const visibleColumnCount = visibleColumns.filter(Boolean).length;
-      status.textContent = `Showing ${visibleRowCount} of ${rows.length} rows · ${visibleColumnCount} of ${headers.length} columns`;
+      const activeValueFilters = valueFilters.size ? ` · ${valueFilters.size} column filter${valueFilters.size === 1 ? '' : 's'} active` : '';
+      status.textContent = `Showing ${visibleRowCount} of ${rows.length} rows · ${visibleColumnCount} of ${headers.length} columns${activeValueFilters}`;
     }
   };
 
+  const closeColumnMenu = () => {
+    if (!openColumnMenu) return;
+    openColumnMenu.trigger.setAttribute('aria-expanded', 'false');
+    openColumnMenu.menu.remove();
+    openColumnMenu = null;
+  };
+
+  const setCheckboxes = (menu, checked) => {
+    menu.querySelectorAll('[data-preview-value-option]').forEach((checkbox) => {
+      checkbox.checked = checked;
+    });
+  };
+
+  const openValueMenu = (header, trigger, columnIndex) => {
+    if (openColumnMenu?.trigger === trigger) {
+      closeColumnMenu();
+      return;
+    }
+    closeColumnMenu();
+    const values = Array.from(new Set(rows.map((row) => String(row.cells[columnIndex]?.textContent || '').trim())))
+      .sort((left, right) => left.localeCompare(right, undefined, {numeric: true, sensitivity: 'base'}));
+    const activeValues = valueFilters.get(columnIndex);
+    const selectedValues = new Set(activeValues ? Array.from(activeValues) : values);
+    const menu = document.createElement('section');
+    menu.className = 'preview-column-filter-menu';
+    menu.setAttribute('role', 'dialog');
+    menu.setAttribute('aria-label', `Filter ${trigger.dataset.columnLabel}`);
+
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.className = 'preview-column-filter-search';
+    search.placeholder = 'Search values';
+    search.autocomplete = 'off';
+    search.setAttribute('aria-label', `Search ${trigger.dataset.columnLabel} values`);
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'preview-column-filter-toolbar';
+    const selectAll = document.createElement('button');
+    selectAll.type = 'button';
+    selectAll.textContent = 'Select all';
+    const clearAll = document.createElement('button');
+    clearAll.type = 'button';
+    clearAll.textContent = 'Clear';
+    toolbar.append(selectAll, clearAll);
+
+    const options = document.createElement('div');
+    options.className = 'preview-column-filter-options';
+    values.forEach((value) => {
+      const option = document.createElement('label');
+      option.className = 'preview-column-filter-option';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = value;
+      checkbox.checked = selectedValues.has(value);
+      checkbox.setAttribute('data-preview-value-option', '');
+      const caption = document.createElement('span');
+      caption.textContent = value || '(Blank)';
+      option.append(checkbox, caption);
+      options.append(option);
+    });
+
+    const footer = document.createElement('div');
+    footer.className = 'preview-column-filter-footer';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'preview-column-filter-cancel';
+    cancel.textContent = 'Cancel';
+    const apply = document.createElement('button');
+    apply.type = 'button';
+    apply.className = 'preview-column-filter-apply';
+    apply.textContent = 'Apply';
+    footer.append(cancel, apply);
+    menu.append(search, toolbar, options, footer);
+    document.body.append(menu);
+
+    const positionMenu = () => {
+      const bounds = trigger.getBoundingClientRect();
+      const width = Math.min(300, window.innerWidth - 20);
+      menu.style.width = `${width}px`;
+      menu.style.left = `${Math.max(10, Math.min(bounds.left, window.innerWidth - width - 10))}px`;
+      const preferredTop = bounds.bottom + 5;
+      const menuHeight = menu.offsetHeight;
+      menu.style.top = `${preferredTop + menuHeight <= window.innerHeight - 10 ? preferredTop : Math.max(10, bounds.top - menuHeight - 5)}px`;
+    };
+    positionMenu();
+    trigger.setAttribute('aria-expanded', 'true');
+    openColumnMenu = {menu, trigger};
+
+    search.addEventListener('input', () => {
+      const term = search.value.trim().toLocaleLowerCase();
+      options.querySelectorAll('.preview-column-filter-option').forEach((option) => {
+        option.hidden = Boolean(term) && !option.textContent.toLocaleLowerCase().includes(term);
+      });
+    });
+    selectAll.addEventListener('click', () => setCheckboxes(menu, true));
+    clearAll.addEventListener('click', () => setCheckboxes(menu, false));
+    cancel.addEventListener('click', closeColumnMenu);
+    apply.addEventListener('click', () => {
+      const accepted = new Set(Array.from(options.querySelectorAll('[data-preview-value-option]:checked')).map((checkbox) => checkbox.value));
+      if (accepted.size === values.length) valueFilters.delete(columnIndex);
+      else valueFilters.set(columnIndex, accepted);
+      header.classList.toggle('has-value-filter', valueFilters.has(columnIndex));
+      applyPreviewFilters();
+      closeColumnMenu();
+    });
+    menu.addEventListener('click', (event) => event.stopPropagation());
+    requestAnimationFrame(() => search.focus());
+  };
+
+  headers.forEach((header, columnIndex) => {
+    const columnLabel = header.textContent.trim();
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'preview-column-filter-trigger';
+    trigger.dataset.columnLabel = columnLabel;
+    trigger.setAttribute('aria-label', `Filter ${columnLabel}`);
+    trigger.setAttribute('aria-haspopup', 'dialog');
+    trigger.setAttribute('aria-expanded', 'false');
+    const caption = document.createElement('span');
+    caption.textContent = columnLabel;
+    const icon = document.createElement('span');
+    icon.className = 'preview-column-filter-icon';
+    icon.textContent = '▾';
+    icon.setAttribute('aria-hidden', 'true');
+    trigger.append(caption, icon);
+    header.replaceChildren(trigger);
+    trigger.addEventListener('click', (event) => {
+      event.stopPropagation();
+      openValueMenu(header, trigger, columnIndex);
+    });
+  });
+
   columnInput.addEventListener('input', applyPreviewFilters);
   rowInput.addEventListener('input', applyPreviewFilters);
+  document.addEventListener('click', closeColumnMenu);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeColumnMenu();
+  });
+  window.addEventListener('resize', closeColumnMenu);
+  panel.querySelector('.dataset-preview-table-wrap')?.addEventListener('scroll', closeColumnMenu, {passive: true});
   applyPreviewFilters();
 });
 
