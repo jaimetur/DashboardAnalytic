@@ -527,6 +527,7 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
     event.preventDefault();
     const selected = file?.files?.[0];
     if (!selected) {
+      preserveAdminScrollPosition();
       form.dataset.catalogueSubmitting = '1';
       HTMLFormElement.prototype.submit.call(form);
       return;
@@ -547,6 +548,7 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
     if (convert) convert.value = shouldConvert ? '1' : '0';
     form.dataset.catalogueSubmitting = '1';
     showLoadingOverlay('Importing Slide Catalogue', 'Validating and storing the selected catalogue in the workspace.');
+    preserveAdminScrollPosition();
     HTMLFormElement.prototype.submit.call(form);
   });
 });
@@ -601,7 +603,34 @@ const persistencePathnames = new Set(['/dashboard', '/admin']);
 const dashboardStateKey = 'dashboard-analytic:/dashboard:last-query';
 const dashboardStateKeyPrefix = 'dashboard-analytic:/dashboard:last-query:dataset:';
 const activeDatasetStateKey = 'dashboard-analytic:active-dataset';
+const adminScrollRestoreKey = 'dashboard-analytic:/admin:scroll-restore';
 let hasPendingLocationRestore = false;
+
+function preserveAdminScrollPosition() {
+  if (window.location.pathname !== '/admin') return;
+  try {
+    window.sessionStorage.setItem(adminScrollRestoreKey, String(window.scrollY));
+  } catch (_error) {
+    // A blocked storage area only affects the convenience restoration.
+  }
+}
+
+function restoreAdminScrollPosition() {
+  if (window.location.pathname !== '/admin') return;
+  try {
+    const value = window.sessionStorage.getItem(adminScrollRestoreKey);
+    if (value === null) return;
+    window.sessionStorage.removeItem(adminScrollRestoreKey);
+    const top = Number(value);
+    if (Number.isFinite(top) && top > 0) {
+      requestAnimationFrame(() => window.scrollTo({top, behavior: 'auto'}));
+    }
+  } catch (_error) {
+    // A blocked storage area only affects the convenience restoration.
+  }
+}
+
+restoreAdminScrollPosition();
 
 function hasMeaningfulDashboardState(params) {
   if (!params) return false;
@@ -1454,6 +1483,9 @@ document.querySelectorAll('form[data-confirm]').forEach((form) => {
       }
       if (form.dataset.confirmLoadingLabel) {
         showLoadingOverlay(form.dataset.confirmLoadingLabel, form.dataset.confirmLoadingCopy);
+      }
+      if (form.action.includes('/admin/report-catalogues/')) {
+        preserveAdminScrollPosition();
       }
       form.submit();
     }
