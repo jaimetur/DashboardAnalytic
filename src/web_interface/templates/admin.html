@@ -91,7 +91,7 @@
       </div>
     </div>
     <p class="lede">Import or export the NSA and SA slide-catalogue CSV formats. Stored workspace catalogues are selected and managed from the editor below.</p>
-    {% if error %}<div class="alert catalogue-management-message">{{ error }}</div>{% endif %}
+    {% if catalogue_error %}<span hidden data-catalogue-import-error>{{ catalogue_error }}</span>{% endif %}
     {% if catalogue_notice %}<div class="alert catalogue-management-notice">{{ catalogue_notice }}</div>{% endif %}
     <div class="catalogue-management-grid">
       {% for technology, catalogue in report_catalogs.items() %}

@@ -1137,6 +1137,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             'workspace_catalogues': workspace_catalogues,
             'catalogue_editor': catalogue_editor_payload(selected_technology, selected_catalogue),
             'catalogue_notice': request.query_params.get('catalogue_notice') or None,
+            'catalogue_error': request.query_params.get('catalogue_error') or None,
             'error': error,
         },
         status_code=status_code,
@@ -2126,7 +2127,8 @@ def import_report_catalogue(
     if technology not in TEMPLATE_NAMES:
         raise HTTPException(status_code=404, detail='Report technology not found')
     if not catalogue_file or not catalogue_file.filename or Path(catalogue_file.filename).suffix.lower() != '.csv':
-        return render_admin_template(request, user, error='Select a CSV slide catalogue.', status_code=400)
+        query = urlencode({'catalogue_error': 'Select a CSV slide catalogue.'})
+        return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)
     try:
         catalogue_name = catalogue_name.strip() or re.sub(r'[_-]+', ' ', Path(catalogue_file.filename).stem).strip()
         if not catalogue_name:
@@ -2154,7 +2156,8 @@ def import_report_catalogue(
             'file': catalogue_file.filename,
             'error': str(exc),
         }))
-        return render_admin_template(request, user, error=str(exc), status_code=400)
+        query = urlencode({'catalogue_error': str(exc)})
+        return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)
     repository.add_log(user.username, 'import_report_catalogue', json.dumps({
         'technology': technology,
         'catalogue_name': catalogue_name,

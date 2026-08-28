@@ -1325,6 +1325,7 @@ function showConfirmDialog(message, options = {}) {
   confirmTitle.textContent = options.title || 'Confirm action';
   confirmCopy.textContent = message || options.copy || 'Are you sure you want to continue?';
   confirmAccept.textContent = options.confirmLabel || 'Confirm';
+  confirmCancel.hidden = options.hideCancel === true;
   confirmOverlay.hidden = false;
   document.body.classList.add('loading-active');
 
@@ -1336,6 +1337,7 @@ function showConfirmDialog(message, options = {}) {
       confirmCancel.removeEventListener('click', handleCancel);
       confirmOverlay.removeEventListener('click', handleBackdrop);
       window.removeEventListener('keydown', handleKeydown);
+      confirmCancel.hidden = false;
       resolve(accepted);
     };
 
@@ -1357,6 +1359,17 @@ function showConfirmDialog(message, options = {}) {
     confirmOverlay.addEventListener('click', handleBackdrop);
     window.addEventListener('keydown', handleKeydown);
     confirmAccept.focus();
+  });
+}
+
+const catalogueImportError = document.querySelector('[data-catalogue-import-error]');
+if (catalogueImportError?.textContent.trim()) {
+  requestAnimationFrame(() => {
+    showConfirmDialog(catalogueImportError.textContent.trim(), {
+      title: 'Slide Catalogue Import Failed',
+      confirmLabel: 'Close',
+      hideCancel: true,
+    });
   });
 }
 

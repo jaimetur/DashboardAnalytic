@@ -67,6 +67,21 @@ CATALOG_HEADER_ALIASES = {
 }
 
 
+def _default_catalogue_layout(technology: str, chart_count: int) -> str:
+    """Choose the standard template layout when a legacy catalogue omitted it."""
+    if technology == "nsa":
+        return {
+            1: "Title and 1 column + Comments",
+            2: "Title and 2 columns + Comments",
+            3: "Title and 3 columns + Comments",
+        }.get(chart_count, "Title and 2 columns and 2 rows + Comments right")
+    return {
+        1: "Title and 1 column",
+        2: "Title and 2 columns",
+        3: "Title and 3 columns",
+    }.get(chart_count, "Title and 4 columns")
+
+
 @dataclass(frozen=True)
 class FilterCondition:
     column: str
@@ -243,6 +258,19 @@ def convert_catalog_csv(content: bytes | str, technology: str) -> bytes:
             if not converted["Grouping_Columns"]:
                 converted["Grouping_Columns"] = " × ".join(dimensions[1:])
         converted_rows.append(converted)
+
+    # Older catalogues did not contain a Layout column.  Its suitable default is
+    # determined by the number of automated charts represented by that slide.
+    charts_per_slide: dict[str, int] = defaultdict(int)
+    for row in converted_rows:
+        if row["CDR source"].strip().casefold() in CATALOG_SOURCE_KINDS:
+            charts_per_slide[row["Slide"].strip()] += 1
+    for row in converted_rows:
+        if (
+            not row["Layout"].strip()
+            and row["CDR source"].strip().casefold() in CATALOG_SOURCE_KINDS
+        ):
+            row["Layout"] = _default_catalogue_layout(technology, charts_per_slide[row["Slide"].strip()])
 
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=CATALOG_HEADERS, lineterminator="\n")

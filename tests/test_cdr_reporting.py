@@ -78,6 +78,18 @@ def test_catalogue_converter_migrates_legacy_headers_and_grouping() -> None:
     assert entries[0].grouping_columns == 'Campaign'
 
 
+def test_catalogue_converter_assigns_layouts_for_missing_legacy_layouts() -> None:
+    legacy = (
+        'Slide,Slide title,Slide subtitle,Layout,CDR Source,KPI,Chart Type,Filters,Grouping\n'
+        '9,Quality,,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator × Campaign\n'
+        '9,Quality,,,CDR-Voice,Call_Setup_Time,Average Vertical Bars,,Operator × Campaign\n'
+    )
+
+    entries = parse_catalog_csv(convert_catalog_csv(legacy, 'nsa'), 'nsa')
+
+    assert {entry.layout for entry in entries} == {'Title and 2 columns + Comments'}
+
+
 def test_legacy_workspace_mapping_gets_the_report_group_without_writing_operator_as_vendor() -> None:
     frame = pd.DataFrame({'Operator': ['Vodafone UK', 'O2 (UK)'], 'vendor': ['Vodafone_Ericsson', pd.NA]})
 
