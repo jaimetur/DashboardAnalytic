@@ -1064,6 +1064,10 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'data-catalogue-editor-table' in editor.text
     assert 'data-catalogue-field="Layout"' in editor.text
     assert 'data-catalogue-editor-options' in editor.text
+    assert 'data-catalogue-row-action="insert"' in editor.text
+    assert 'data-catalogue-row-action="up"' in editor.text
+    assert 'data-catalogue-row-action="down"' in editor.text
+    assert 'data-catalogue-row-action="delete"' in editor.text
     assert 'value="nsa:baseline-q4" selected' in editor.text
     assert 'Title and 1 column + Comments' in editor.text
     assert '<optgroup label="Layouts">' in editor.text

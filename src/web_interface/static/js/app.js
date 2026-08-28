@@ -419,6 +419,9 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   let suggestions = {};
   try { suggestions = JSON.parse(editor.dataset.editorSuggestions || '{}'); } catch (_error) { suggestions = {}; }
   let activeCell = null;
+  const catalogueHeaders = Array.from(table.querySelectorAll('thead th[data-catalogue-field], thead th'))
+    .map((cell) => cell.textContent.trim())
+    .filter((header) => header && header !== 'Row actions');
   const fieldColumns = new Set(['Filters', 'Grouping_Rows', 'Grouping_Columns', 'Legend']);
   const groupingColumns = new Set(['Grouping_Rows', 'Grouping_Columns']);
   const optionList = (field, cell) => {
@@ -570,6 +573,99 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     setupSearchableSingleSelects();
   };
   const selectedCellFromEvent = (event) => event.target.closest?.('[data-catalogue-field]');
+
+  const updateRowActionStates = () => {
+    const rows = Array.from(table.querySelectorAll('tbody tr'));
+    rows.forEach((row, index) => {
+      const action = (name) => row.querySelector(`[data-catalogue-row-action="${name}"]`);
+      const up = action('up');
+      const down = action('down');
+      const remove = action('delete');
+      if (up) up.disabled = index === 0;
+      if (down) down.disabled = index === rows.length - 1;
+      if (remove) remove.disabled = rows.length <= 1;
+    });
+  };
+  const rowValues = (row) => Object.fromEntries(
+    catalogueHeaders.map((header) => [
+      header,
+      row.querySelector(`[data-catalogue-field="${header}"]`)?.textContent.trim() || '',
+    ]),
+  );
+  const createActionButton = (label, action, title, className = '') => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.dataset.catalogueRowAction = action;
+    button.title = title;
+    if (className) button.className = className;
+    return button;
+  };
+  const createCatalogueRow = (sourceRow) => {
+    const source = sourceRow ? rowValues(sourceRow) : {};
+    const retained = ['Slide', 'Slide tittle', 'Slide Subtittle', 'Layout'];
+    const row = document.createElement('tr');
+    catalogueHeaders.forEach((header) => {
+      const cell = document.createElement('td');
+      cell.contentEditable = 'true';
+      cell.spellcheck = false;
+      cell.dataset.catalogueField = header;
+      // A new sibling normally shares slide metadata/layout, while its chart
+      // definition starts empty so it cannot silently duplicate a KPI.
+      cell.textContent = retained.includes(header) ? (source[header] || '') : '';
+      row.append(cell);
+    });
+    const actions = document.createElement('td');
+    actions.className = 'catalogue-row-actions';
+    actions.dataset.catalogueRowActions = '';
+    actions.append(
+      createActionButton('Insert', 'insert', 'Insert a row below'),
+      createActionButton('↑', 'up', 'Move row up'),
+      createActionButton('↓', 'down', 'Move row down'),
+      createActionButton('Delete', 'delete', 'Delete row', 'catalogue-row-delete'),
+    );
+    row.append(actions);
+    return row;
+  };
+  table.addEventListener('click', (event) => {
+    const button = event.target.closest?.('[data-catalogue-row-action]');
+    if (!button) return;
+    event.preventDefault();
+    const row = button.closest('tr');
+    const body = row?.parentElement;
+    if (!row || !body) return;
+    const action = button.dataset.catalogueRowAction;
+    if (action === 'insert') {
+      const inserted = createCatalogueRow(row);
+      body.insertBefore(inserted, row.nextElementSibling);
+      updateRowActionStates();
+      const target = inserted.querySelector('[data-catalogue-field="CDR source"]')
+        || inserted.querySelector('[data-catalogue-field="Slide"]');
+      if (target) {
+        target.focus();
+        selectCell(target);
+      }
+      return;
+    }
+    if (action === 'up' && row.previousElementSibling) {
+      body.insertBefore(row, row.previousElementSibling);
+    } else if (action === 'down' && row.nextElementSibling) {
+      body.insertBefore(row.nextElementSibling, row);
+    } else if (action === 'delete') {
+      if (activeCell?.closest('tr') === row) {
+        activeCell.classList.remove('is-selected');
+        activeCell = null;
+        heading.textContent = 'Select a cell';
+        copy.textContent = 'Select a table cell to see compatible layouts, chart types or processed CDR columns.';
+        optionsLabel.hidden = true;
+        apply.hidden = true;
+        if (filterBuilder) filterBuilder.hidden = true;
+      }
+      row.remove();
+    }
+    updateRowActionStates();
+  });
+  updateRowActionStates();
   table.addEventListener('focusin', (event) => {
     const cell = selectedCellFromEvent(event);
     if (cell) selectCell(cell);

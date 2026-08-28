@@ -165,16 +165,24 @@
       </form>
     </section>
     {% if catalogue_editor %}
-    <p class="lede">Select a cell to edit it manually or use the contextual suggestions on the right. Layout and Chart Type replace the selected value; Filters and Grouping fields append the selected columns so that several can be added at once.</p>
+    <p class="lede">Select a cell to edit it manually or use the contextual suggestions on the right. Layout and Chart Type replace the selected value; Filters and Grouping fields append the selected columns so that several can be added at once. Use the row controls to insert, reorder or remove unsaved rows.</p>
     <div class="slide-catalogue-editor-grid" data-catalogue-editor data-editor-suggestions='{{ catalogue_editor.suggestions | tojson }}'>
       <form class="slide-catalogue-editor-table-wrap" action="/admin/report-catalogues/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/save" method="post" data-catalogue-editor-save>
         <input type="hidden" name="catalogue_content" value="" data-catalogue-editor-content>
         <div class="table-wrap">
           <table class="slide-catalogue-editor-table" data-catalogue-editor-table>
-            <thead><tr>{% for header in catalogue_editor.headers %}<th>{{ header }}</th>{% endfor %}</tr></thead>
+            <thead><tr>{% for header in catalogue_editor.headers %}<th>{{ header }}</th>{% endfor %}<th class="catalogue-row-actions-heading">Row actions</th></tr></thead>
             <tbody>
               {% for row in catalogue_editor.rows %}
-              <tr>{% for header in catalogue_editor.headers %}<td contenteditable="true" spellcheck="false" data-catalogue-field="{{ header }}">{{ row.get(header, '') }}</td>{% endfor %}</tr>
+              <tr>
+                {% for header in catalogue_editor.headers %}<td contenteditable="true" spellcheck="false" data-catalogue-field="{{ header }}">{{ row.get(header, '') }}</td>{% endfor %}
+                <td class="catalogue-row-actions" data-catalogue-row-actions>
+                  <button type="button" data-catalogue-row-action="insert" title="Insert a row below">Insert</button>
+                  <button type="button" data-catalogue-row-action="up" title="Move row up" aria-label="Move row up">↑</button>
+                  <button type="button" data-catalogue-row-action="down" title="Move row down" aria-label="Move row down">↓</button>
+                  <button type="button" class="catalogue-row-delete" data-catalogue-row-action="delete">Delete</button>
+                </td>
+              </tr>
               {% endfor %}
             </tbody>
           </table>

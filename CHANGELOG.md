@@ -4,7 +4,7 @@
 ---
 
 ## Release: v0.2.0
-### Release Date: 2026-08-27
+### Release Date: 2026-08-30
 #### 🌟 New Features:
 - Split the product into the top-level **Workspace**, **E2E Dashboard** and **E2E PowerPoint Reporting** modules, with a future-ready **Smart Orchestrator Logs Reports** entry point.
 - Added per-file Workspace classification for NetCheck CDR Data, Voice and Speech, Smart Orchestrator Logs, VFUK Vodafone and 3UK Three Multivendor Mappings, including filename-based preselection and batch review.
@@ -41,6 +41,7 @@
 - Added a **Slide Catalogue** selector to E2E PowerPoint Reporting. It lists the stored NSA/SA catalogues for the chosen technology and applies the selected catalogue to that report only, without changing the global active catalogue.
 - Made the Reporting catalogue selector default to the workspace catalogue activated with **Use**, including when switching between NSA and SA.
 - Added an in-application **Slide Catalogue Editor** with a compact catalogue selector at its top. Any NSA or SA catalogue can be edited or exported directly in a fixed-height grid with horizontal/vertical scrolling and a fixed **Slide** column that remains visible during horizontal navigation; Slide Catalogue Management provides compact one-row imports, including a floating confirmation to convert compatible legacy CSV schemas to the current format and automatic chart-count-based layouts when legacy rows omit one, and a workspace catalogue list with automatic rename-on-change plus per-technology **Set Default**, duplicate, delete and export actions.
+- Added inline Slide Catalogue Editor row controls to insert a sibling chart row, move a row up or down, or delete it before saving. Row order now directly controls the generated placeholder order for charts sharing a slide.
 - Expanded contextual cell assistance with a complete bordered grid, editable manual values and searchable CDR-aware choices: every single- and multi-select list filters live while typing (replacing the current value on focus), with neutral high-contrast result menus; Layout, CDR Source, KPI and Chart Type use single selection; Grouping and Legend use preselected checkbox multi-selects; and the contextual Filter Builder loads, adds or removes Field/Operator/Value conditions (including `NOT IN` and `NOT CONTAINS`) which the report parser executes.
 - Enhanced CDR previews with soft-blue Vendor and soft-yellow source_sheet columns, multi-select Operator, Vendor, RAT/RAT_A, Session Type and Call Status filters preselected to all available values; filter menus now layer above Sample Data instead of being obscured by the next panel.
 - Optimized Workspace loading by using persistent Vendor-mapping and Vendor-completeness flags instead of reopening or scanning every CDR on each page load; legacy mapped CDRs are marked once during database initialization.

@@ -23,6 +23,7 @@ Import a UTF-8 CSV by giving it a name and selecting the target NSA or SA sectio
 Choose a stored catalogue in the editor picker, then select **Edit**. The editable grid has horizontal and vertical scrolling. Every cell can be typed manually; selecting a cell also opens contextual assistance:
 
 - **Layout**, **CDR source**, **KPI** and **Chart type** offer single, searchable selections.
+- Every editable row includes **Insert**, **↑**, **↓** and **Delete** controls. Insert creates a new unsaved sibling row with the same slide title/subtitle and layout, ready for another chart definition; the arrows change row order (and therefore the placeholder order for charts in the same slide), while Delete removes the row until the catalogue is saved. The final remaining row cannot be deleted.
 - **Grouping_Rows**, **Grouping_Columns** and **Legend** offer searchable multi-selection and preserve existing selected values without duplicating dimensions.
 - **Filters** opens the Filter Builder. It loads existing conditions, allows adding/removing conditions, and offers CDR fields, operators and values. Conditions are joined with AND. `NOT IN` and `NOT CONTAINS` are supported.
 

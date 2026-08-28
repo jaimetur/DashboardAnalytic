@@ -206,6 +206,14 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .slide-catalogue-editor-table td[data-catalogue-field="Slide"]:focus, .slide-catalogue-editor-table td[data-catalogue-field="Slide"].is-selected { background: #ece0ff; }
 .slide-catalogue-editor-table th:nth-child(7), .slide-catalogue-editor-table td[data-catalogue-field="KPI"] { min-width: 96px; width: 96px; }
 .slide-catalogue-editor-table td:focus, .slide-catalogue-editor-table td.is-selected { outline: 3px solid rgba(103, 61, 167, 0.28); outline-offset: -3px; background: rgba(236, 224, 255, 0.72); }
+.slide-catalogue-editor-table .catalogue-row-actions-heading, .slide-catalogue-editor-table .catalogue-row-actions { position: sticky; right: 0; min-width: 248px; width: 248px; border-left: 1px solid rgba(75, 32, 138, 0.20); text-align: center; }
+.slide-catalogue-editor-table .catalogue-row-actions-heading { z-index: 4; background: #eee7f8; }
+.slide-catalogue-editor-table .catalogue-row-actions { z-index: 1; display: flex; align-items: center; justify-content: center; gap: 0.32rem; background: #ffffff; }
+.catalogue-row-actions button { min-height: 1.9rem; padding: 0.3rem 0.5rem; border-radius: 999px; background: linear-gradient(145deg, #57338b, #3f2872); border-color: rgba(61, 37, 110, 0.78); color: #fff; font-size: 0.72rem; line-height: 1; box-shadow: none; }
+.catalogue-row-actions button:hover:not(:disabled) { background: linear-gradient(145deg, #6844a0, #4b2f80); color: #fff; box-shadow: none; }
+.catalogue-row-actions .catalogue-row-delete { background: linear-gradient(145deg, #b53352, #8f2343); border-color: rgba(122, 22, 53, 0.78); }
+.catalogue-row-actions .catalogue-row-delete:hover:not(:disabled) { background: linear-gradient(145deg, #c54161, #a1294c); }
+.catalogue-row-actions button:disabled { opacity: 0.42; cursor: not-allowed; }
 .slide-catalogue-editor-table-wrap .form-actions { margin-top: 0.9rem; }
 .catalogue-editor-helper { position: sticky; top: 1rem; display: grid; gap: 0.75rem; padding: 1rem; border: 1px solid rgba(54, 72, 82, 0.24); border-radius: 16px; background: linear-gradient(145deg, #ffffff, #f1f5f6); }
 .catalogue-editor-helper h3, .catalogue-editor-helper p { margin: 0; }
