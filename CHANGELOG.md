@@ -56,6 +56,7 @@
 #### 🐛 Bug fixes:
 - Show Slide Catalogue import validation failures in a floating dialog after redirecting back to Admin, rather than leaving the cause embedded in the management panel.
 - Show successful Slide Catalogue import confirmations in the same floating dialog instead of embedding status text in Slide Catalogue Management.
+- Use a dedicated informational import dialog with one **Close** action (rather than a confirmation dialog); closing it removes the import query state with `history.replaceState`, preserving the current Admin page and scroll position.
 - Save catalogue name edits asynchronously when the name field loses focus, preserving the current Admin scroll position and showing a floating error only if the rename cannot be saved.
 - Switched VFUK GCID resolution to the supplied 4G `eNodeB ID`/`Local Cell ID` hexadecimal-equivalent formula and accepted the Cell ID field variants used by Data, Voice and Speech CDRs.
 - Made Excel worksheet headers unique during ingestion, preventing VFUK mappings and CDR workbooks with duplicate or blank headers from failing during Pandas reindexing.

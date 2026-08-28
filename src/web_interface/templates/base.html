@@ -71,6 +71,17 @@
       </div>
     </div>
   </div>
+  <div id="info-overlay" class="confirm-overlay info-overlay" hidden>
+    <div class="confirm-panel info-panel" role="dialog" aria-modal="true" aria-labelledby="info-title" aria-describedby="info-copy">
+      <div class="confirm-icon info-icon" aria-hidden="true">i</div>
+      <p class="eyebrow">Information</p>
+      <h3 id="info-title">Update complete</h3>
+      <p id="info-copy"></p>
+      <div class="confirm-actions">
+        <button id="info-close" type="button" class="info-close-button">Close</button>
+      </div>
+    </div>
+  </div>
   <script src="{{ static_path('js/app.js') }}?v={{ asset_version('js/app.js') }}"></script>
   {% block extra_scripts %}{% endblock %}
 </body>

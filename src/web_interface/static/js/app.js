@@ -587,6 +587,10 @@ const confirmTitle = document.getElementById('confirm-title');
 const confirmCopy = document.getElementById('confirm-copy');
 const confirmAccept = document.getElementById('confirm-accept');
 const confirmCancel = document.getElementById('confirm-cancel');
+const infoOverlay = document.getElementById('info-overlay');
+const infoTitle = document.getElementById('info-title');
+const infoCopy = document.getElementById('info-copy');
+const infoClose = document.getElementById('info-close');
 const filePickerInput = document.querySelector('[data-file-picker-input]');
 const filePickerText = document.querySelector('[data-file-picker-text]');
 const inputKindSelect = document.querySelector('[data-input-kind-select]');
@@ -1382,13 +1386,45 @@ function showConfirmDialog(message, options = {}) {
   });
 }
 
+function showInfoDialog(message, options = {}) {
+  if (!infoOverlay || !infoTitle || !infoCopy || !infoClose) {
+    window.alert(message || 'Update complete');
+    options.onClose?.();
+    return;
+  }
+  infoTitle.textContent = options.title || 'Information';
+  infoCopy.textContent = message || '';
+  infoOverlay.hidden = false;
+  document.body.classList.add('loading-active');
+  const close = () => {
+    infoOverlay.hidden = true;
+    document.body.classList.remove('loading-active');
+    infoClose.removeEventListener('click', close);
+    infoOverlay.removeEventListener('click', handleBackdrop);
+    window.removeEventListener('keydown', handleKeydown);
+    options.onClose?.();
+  };
+  const handleBackdrop = (event) => { if (event.target === infoOverlay) close(); };
+  const handleKeydown = (event) => { if (event.key === 'Escape') close(); };
+  infoClose.addEventListener('click', close);
+  infoOverlay.addEventListener('click', handleBackdrop);
+  window.addEventListener('keydown', handleKeydown);
+  infoClose.focus();
+}
+
+function clearCatalogueImportQuery() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('catalogue_notice');
+  url.searchParams.delete('catalogue_error');
+  history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
 const catalogueImportError = document.querySelector('[data-catalogue-import-error]');
 if (catalogueImportError?.textContent.trim()) {
   requestAnimationFrame(() => {
-    showConfirmDialog(catalogueImportError.textContent.trim(), {
+    showInfoDialog(catalogueImportError.textContent.trim(), {
       title: 'Slide Catalogue Import Failed',
-      confirmLabel: 'Close',
-      hideCancel: true,
+      onClose: clearCatalogueImportQuery,
     });
   });
 }
@@ -1396,10 +1432,9 @@ if (catalogueImportError?.textContent.trim()) {
 const catalogueImportNotice = document.querySelector('[data-catalogue-import-notice]');
 if (catalogueImportNotice?.textContent.trim()) {
   requestAnimationFrame(() => {
-    showConfirmDialog(catalogueImportNotice.textContent.trim(), {
+    showInfoDialog(catalogueImportNotice.textContent.trim(), {
       title: 'Slide Catalogue Imported',
-      confirmLabel: 'Close',
-      hideCancel: true,
+      onClose: clearCatalogueImportQuery,
     });
   });
 }

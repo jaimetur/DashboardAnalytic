@@ -961,6 +961,7 @@ def test_admin_imports_report_catalogue_and_synchronizes_help(client, tmp_path, 
     confirmation = client.get('/admin?catalogue_notice=Imported%20Test%20baseline%20%28NSA%29.')
     assert 'data-catalogue-import-notice' in confirmation.text
     assert 'catalogue-management-notice' not in confirmation.text
+    assert 'id="info-overlay"' in confirmation.text
 
 
 def test_admin_import_converts_a_legacy_catalogue_when_requested(client, tmp_path, monkeypatch) -> None:
