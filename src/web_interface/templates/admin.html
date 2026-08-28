@@ -110,7 +110,7 @@
     </div>
     <div class="table-wrap catalogue-workspace-table-wrap">
       <table class="catalogue-workspace-table">
-        <thead><tr><th>Catalogue name</th><th>Type</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Catalogue name</th><th>Type</th><th>Default</th><th>Actions</th></tr></thead>
         <tbody>
           {% for catalogue in workspace_catalogues %}
           <tr>
@@ -119,11 +119,12 @@
                 <input type="text" name="catalogue_name" value="{{ catalogue.name }}" aria-label="Name for {{ catalogue.name }}" maxlength="80" required data-catalogue-auto-rename>
               </form>
             </td>
-            <td>{{ catalogue.technology | upper }}{% if catalogue.active %} · Active{% endif %}</td>
+            <td>{{ catalogue.technology | upper }}</td>
+            <td class="catalogue-default-cell"><span class="catalogue-default-mark {% if catalogue.active %}is-default{% else %}is-not-default{% endif %}" aria-label="{% if catalogue.active %}Default catalogue{% else %}Not the default catalogue{% endif %}" title="{% if catalogue.active %}Default catalogue{% else %}Not the default catalogue{% endif %}">{% if catalogue.active %}✓{% else %}○{% endif %}</span></td>
             <td>
               <div class="catalogue-workspace-actions">
                 {% if catalogue.active %}<button type="button" class="catalogue-set-default-button" disabled>Set Default</button>{% else %}<form action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/activate" method="post"><button type="submit" class="catalogue-set-default-button">Set Default</button></form>{% endif %}
-                {% if catalogue.identifier != 'default' %}<form action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/delete" method="post" data-confirm="Delete catalogue {{ catalogue.name }}? This cannot be undone."><button type="submit" class="danger-button">Delete</button></form>{% else %}<button type="button" class="danger-button" disabled title="The default catalogue cannot be deleted">Delete</button>{% endif %}
+                {% if not catalogue.active %}<form action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/delete" method="post" data-confirm="Delete catalogue {{ catalogue.name }}? This cannot be undone."><button type="submit" class="danger-button">Delete</button></form>{% else %}<button type="button" class="danger-button" disabled title="The default catalogue cannot be deleted">Delete</button>{% endif %}
                 <form action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/duplicate" method="post"><button type="submit" class="catalogue-duplicate-button">Duplicate</button></form>
                 <a class="catalogue-export-button" href="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/export">Export</a>
               </div>
@@ -148,11 +149,12 @@
       <p class="catalogue-library-title">Workspace catalogues</p>
       <form class="catalogue-editor-picker-form" action="/admin" method="get">
         <label>Catalogue to edit
-          <select name="catalogue_selection" aria-label="Catalogue to edit">
+          <select name="catalogue_selection" aria-label="Catalogue to edit" required>
+            <option value="" {% if not catalogue_editor %}selected{% endif %}>Choose a catalogue to edit</option>
             {% for technology, catalogue in report_catalogs.items() %}
             <optgroup label="{{ technology | upper }} catalogues">
               {% for item in catalogue.catalogues %}
-              <option value="{{ technology }}:{{ item.identifier }}" {% if catalogue_editor and catalogue_editor.technology == technology and catalogue_editor.catalogue.identifier == item.identifier %}selected{% endif %}>{{ item.name }}{% if item.active %} · Active{% endif %}</option>
+              <option value="{{ technology }}:{{ item.identifier }}" {% if catalogue_editor and catalogue_editor.technology == technology and catalogue_editor.catalogue.identifier == item.identifier %}selected{% endif %}>{{ item.name }}{% if item.active %} · Default{% endif %}</option>
               {% endfor %}
             </optgroup>
             {% endfor %}

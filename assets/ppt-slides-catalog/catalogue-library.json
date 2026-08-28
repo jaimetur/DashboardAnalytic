@@ -1,9 +1,12 @@
 {
   "nsa": {
-    "active": "nsa-slide-catalogue-gabriele",
+    "active": "default",
     "catalogues": {
       "nsa-slide-catalogue-gabriele": {
         "name": "nsa slide catalogue GABRIELE"
+      },
+      "nsa-slide-catalogue-gabriele-copy": {
+        "name": "nsa slide catalogue GABRIELE copy"
       }
     },
     "default_name": "Default NSA Slide Catalogue"

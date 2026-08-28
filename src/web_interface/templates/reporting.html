@@ -42,7 +42,7 @@
         <select name="slide_catalogue" required data-report-catalogue aria-label="Slide Catalogue">
           {% for technology, catalogues in report_catalogues.items() %}
           {% for catalogue in catalogues %}
-          <option value="{{ technology }}:{{ catalogue.identifier }}" data-catalogue-technology="{{ technology }}" data-catalogue-active="{{ 'true' if catalogue.active else 'false' }}"{% if technology == 'nsa' and catalogue.active %} selected{% endif %}>{{ technology | upper }} · {{ catalogue.name }}{% if catalogue.active %} · Active{% endif %}</option>
+          <option value="{{ technology }}:{{ catalogue.identifier }}" data-catalogue-technology="{{ technology }}" data-catalogue-active="{{ 'true' if catalogue.active else 'false' }}"{% if technology == 'nsa' and catalogue.active %} selected{% endif %}>{{ technology | upper }} · {{ catalogue.name }}{% if catalogue.active %} · Default{% endif %}</option>
           {% endfor %}
           {% endfor %}
         </select>

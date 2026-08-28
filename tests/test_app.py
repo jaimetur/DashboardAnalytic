@@ -1013,6 +1013,10 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'Baseline Q4' in admin.text
     assert 'Updated Q4' in admin.text
     assert 'name="catalogue_selection"' in admin.text
+    assert 'Choose a catalogue to edit' in admin.text
+    assert 'data-catalogue-editor-table' not in admin.text
+    assert '<th>Default</th>' in admin.text
+    assert 'catalogue-default-mark is-default' in admin.text
     assert 'value="nsa:baseline-q4"' in admin.text
     assert '/admin/report-catalogues/export-selected' in admin.text
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Second'
@@ -1026,6 +1030,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'data-catalogue-editor-table' in editor.text
     assert 'data-catalogue-field="Layout"' in editor.text
     assert 'data-catalogue-editor-options' in editor.text
+    assert 'value="nsa:baseline-q4" selected' in editor.text
     assert 'Title and 1 column + Comments' in editor.text
     assert '<optgroup label="Layouts">' in editor.text
     assert '<optgroup label="Chart types">' in editor.text
@@ -1041,12 +1046,20 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert activated.status_code == 303
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Edited'
 
+    protected_delete = client.post('/admin/report-catalogues/nsa/baseline-q4/delete')
+    assert protected_delete.status_code == 400
+    assert 'The default catalogue cannot be deleted.' in protected_delete.text
+
     reporting_after_activation = client.get('/reporting')
     assert 'value="nsa:baseline-q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting_after_activation.text
 
     exported = client.get('/admin/report-catalogues/nsa/updated-q4/export')
     assert exported.status_code == 200
     assert b'Second' in exported.content
+
+    removed_default = client.post('/admin/report-catalogues/nsa/default/delete', follow_redirects=False)
+    assert removed_default.status_code == 303
+    assert all(item['identifier'] != 'default' for item in app_module.report_catalogue_options('nsa'))
 
 
 def test_admin_catalogue_rename_supports_background_json_save(client) -> None:

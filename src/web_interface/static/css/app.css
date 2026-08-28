@@ -173,6 +173,10 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-import-row input { min-width: 0; }
 .catalogue-workspace-table-wrap { margin-top: 0.9rem; }
 .catalogue-workspace-table { min-width: 720px; }
+.catalogue-default-cell { width: 5.5rem; text-align: center; }
+.catalogue-default-mark { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 999px; font-size: 1rem; font-weight: 800; line-height: 1; }
+.catalogue-default-mark.is-default { color: #08736d; background: rgba(8, 115, 109, 0.14); border: 1px solid rgba(8, 115, 109, 0.34); }
+.catalogue-default-mark.is-not-default { color: #87949d; background: rgba(135, 148, 157, 0.12); border: 1px solid rgba(135, 148, 157, 0.28); }
 .catalogue-rename-form, .catalogue-workspace-actions { display: flex; align-items: center; gap: 0.45rem; }
 .catalogue-rename-form { min-width: 280px; margin: 0; }
 .catalogue-rename-form input { min-width: 0; }

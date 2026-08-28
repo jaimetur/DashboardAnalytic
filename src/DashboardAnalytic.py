@@ -185,13 +185,15 @@ def report_catalogue_options(technology: str) -> list[dict[str, Any]]:
     technology_registry = registry.get(technology, {})
     catalogues = technology_registry.get('catalogues', {})
     active_identifier = technology_registry.get('active', 'default')
-    options = [{
-        'identifier': 'default',
-        'name': str(technology_registry.get('default_name') or 'Default catalogue'),
-        'path': active_catalog_path(settings.report_catalog_dir, DEFAULT_REPORT_CATALOGS[technology], technology),
-        'source': 'Default source',
-        'active': active_identifier == 'default',
-    }]
+    options: list[dict[str, Any]] = []
+    if active_identifier == 'default' or not technology_registry.get('hide_default'):
+        options.append({
+            'identifier': 'default',
+            'name': str(technology_registry.get('default_name') or 'Default catalogue'),
+            'path': active_catalog_path(settings.report_catalog_dir, DEFAULT_REPORT_CATALOGS[technology], technology),
+            'source': 'Default source',
+            'active': active_identifier == 'default',
+        })
     if not isinstance(catalogues, dict):
         return options
     for identifier, metadata in sorted(catalogues.items(), key=lambda item: str(item[1].get('name', item[0])).casefold()):
@@ -207,7 +209,7 @@ def report_catalogue_options(technology: str) -> list[dict[str, Any]]:
             'source': 'Named workspace catalogue',
             'active': active_identifier == identifier,
         })
-    if not any(option['active'] for option in options):
+    if options and not any(option['active'] for option in options):
         options[0]['active'] = True
     return options
 
@@ -1108,10 +1110,6 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         candidate_technology, candidate_catalogue = selection.split(':', 1)
         if candidate_technology in TEMPLATE_NAMES and candidate_catalogue:
             selected_technology, selected_catalogue = candidate_technology, candidate_catalogue
-    if not selected_technology or not selected_catalogue:
-        selected_technology = 'nsa'
-        active_catalogue = next((item for item in report_catalogue_options('nsa') if item['active']), None)
-        selected_catalogue = active_catalogue['identifier'] if active_catalogue else None
     report_catalogs = {
         technology: {
             'path': reporting_catalog_path(technology),
@@ -2276,17 +2274,21 @@ def delete_report_catalogue(
     technology = technology.strip().lower()
     if technology not in TEMPLATE_NAMES:
         raise HTTPException(status_code=404, detail='Report technology not found')
-    if catalogue_id == 'default':
-        return render_admin_template(request, user, error='The default catalogue cannot be deleted.', status_code=400)
     catalogue = _named_catalogue(technology, catalogue_id)
     if not catalogue:
         return render_admin_template(request, user, error='Slide catalogue not found.', status_code=404)
     registry = load_report_catalogue_registry()
     technology_registry = registry.setdefault(technology, {'active': 'default', 'catalogues': {}})
-    technology_registry.setdefault('catalogues', {}).pop(catalogue_id, None)
     if technology_registry.get('active') == catalogue_id:
-        technology_registry['active'] = 'default'
-        synchronize_reporting_catalogue_document()
+        return render_admin_template(request, user, error='The default catalogue cannot be deleted.', status_code=400)
+    if catalogue_id == 'default':
+        # The bundled fallback file remains on disk, but it is removed from this
+        # workspace's library once another catalogue has become its default.
+        technology_registry['hide_default'] = True
+        save_report_catalogue_registry(registry)
+        repository.add_log(user.username, 'delete_report_catalogue', json.dumps({'technology': technology, 'catalogue': catalogue['name']}))
+        return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+    technology_registry.setdefault('catalogues', {}).pop(catalogue_id, None)
     catalogue['path'].unlink(missing_ok=True)
     save_report_catalogue_registry(registry)
     repository.add_log(user.username, 'delete_report_catalogue', json.dumps({'technology': technology, 'catalogue': catalogue['name']}))
