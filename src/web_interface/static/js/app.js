@@ -2048,13 +2048,20 @@ if (queueNode) {
       }
       const openHref = `/dashboard?${openParams.toString()}`;
       const isCdr = ['data', 'voice', 'speech'].includes(dataset.dataset_kind);
+      const fileName = String(dataset.file_name || 'dataset')
+        .replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       if (dataset.status === 'ready') {
         actions.innerHTML = `
           <a class="ghost-link action-link-preview" href="/workspace/preview/${dataset.id}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview</a>
-          <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
+          <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete dataset '${fileName}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
             <button type="submit" class="danger-button">Delete</button>
           </form>
           ${isCdr ? `<a class="ghost-link action-link-primary" href="${openHref}" data-dashboard-open-link data-dataset-id="${dataset.id}"${dataset.dataset_kind ? ` data-input-kind="${String(dataset.dataset_kind)}"` : ''}>Show Dashboard</a>` : ''}
+          ${dataset.can_clear_vendors ? `
+            <form method="post" action="/workspace/clear-vendors/${dataset.id}" data-confirm="Clear the mapped Vendor values for '${fileName}'? You can map the CDR again using updated mappings." data-confirm-title="Clear Vendor mapping" data-confirm-label="Clear Vendors" data-confirm-loading-label="Clearing Vendors from selected dataset" data-confirm-loading-copy="Removing the mapped Vendor values from the selected CDR. Please wait while the dataset is refreshed.">
+              <button type="submit" class="action-link-clear-vendors">Clear Vendors</button>
+            </form>` : ''}
+          ${dataset.can_map_vendors ? `<button type="button" class="ghost-link action-link-map-vendors" data-vendor-map-open data-dataset-id="${dataset.id}" data-dataset-name="${fileName}">Map Vendors</button>` : ''}
         `;
       } else if (dataset.status === 'processing') {
         actions.innerHTML = `

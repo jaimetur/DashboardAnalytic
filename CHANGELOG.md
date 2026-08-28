@@ -33,6 +33,8 @@
 - Fixed master-layout placeholder assignment, inherited-chart cleanup, generated-report download completion and Help article navigation.
 - Fixed CDR/mapping ingestion for duplicate headers, legacy CSV encodings, VFUK/3UK GCIDs, alternate Cell ID fields and NSA RAT spellings.
 - Fixed Workspace drag-and-drop, cache refreshes, profile-backed loading and Dashboard filter population/contrast.
+- Fixed live Workspace queue updates so newly processed CDRs immediately show the applicable **Map Vendors** or **Clear Vendors** action without a page refresh.
+- Fixed mobile README/document overflow by constraining rendered images and the Markdown container, including the application logo.
 
 #### 📚 Documentation:
 - Replaced inherited documentation and the root-level roadmap with a maintained numbered Dashboard Analytic Help set and embedded index.

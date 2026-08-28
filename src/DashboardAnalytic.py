@@ -528,6 +528,28 @@ def serialize_dataset_row(row) -> dict[str, Any]:
     return item
 
 
+def add_workspace_vendor_capabilities(datasets: list[dict[str, Any]]) -> None:
+    """Materialise the Workspace-only Vendor actions for pages and live polling."""
+    has_vendor_mappings = any(
+        dataset.get('is_ready') and dataset.get('dataset_kind') in {'mapping_vodafone', 'mapping_three'}
+        for dataset in datasets
+    )
+    for dataset in datasets:
+        vendor_mapping_applied = bool(dataset.get('vendor_mapping_applied'))
+        dataset['can_map_vendors'] = (
+            has_vendor_mappings
+            and dataset.get('is_ready')
+            and dataset.get('dataset_kind') in CDR_DATASET_KINDS
+            and not vendor_mapping_applied
+            and not dataset.get('vendor_values_complete')
+        )
+        dataset['can_clear_vendors'] = (
+            dataset.get('is_ready')
+            and dataset.get('dataset_kind') in CDR_DATASET_KINDS
+            and vendor_mapping_applied
+        )
+
+
 def derive_runtime_available_metrics(dataset: dict[str, Any]) -> list[str]:
     available_metrics = [metric for metric in (dataset.get('available_metrics') or []) if is_metric_candidate(metric)]
     if not available_metrics or not dataset.get('is_ready'):
@@ -1488,21 +1510,7 @@ def workspace(
 
     vodafone_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_vodafone']
     three_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_three']
-    has_vendor_mappings = bool(vodafone_mapping_datasets or three_mapping_datasets)
-    for dataset in datasets:
-        vendor_mapping_applied = bool(dataset.get('vendor_mapping_applied'))
-        dataset['can_map_vendors'] = (
-            has_vendor_mappings
-            and dataset.get('is_ready')
-            and dataset.get('dataset_kind') in CDR_DATASET_KINDS
-            and not vendor_mapping_applied
-            and not dataset.get('vendor_values_complete')
-        )
-        dataset['can_clear_vendors'] = (
-            dataset.get('is_ready')
-            and dataset.get('dataset_kind') in CDR_DATASET_KINDS
-            and vendor_mapping_applied
-        )
+    add_workspace_vendor_capabilities(datasets)
 
     return render_template(
         request,
@@ -1811,6 +1819,7 @@ def generate_netcheck_cdr_report(
 @app.get('/api/datasets/status')
 def dataset_status(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
     datasets = [serialize_dataset_row(row) for row in repository.list_datasets()]
+    add_workspace_vendor_capabilities(datasets)
     return {'datasets': datasets}
 
 

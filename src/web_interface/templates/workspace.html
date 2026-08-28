@@ -392,12 +392,12 @@
   const datasetName = dialog?.querySelector('[data-vendor-mapping-dataset-name]');
   if (!dialog || !cdrId || !datasetName) return;
 
-  document.querySelectorAll('[data-vendor-map-open]').forEach((button) => {
-    button.addEventListener('click', () => {
-      cdrId.value = button.dataset.datasetId || '';
-      datasetName.textContent = button.dataset.datasetName || '';
-      dialog.showModal();
-    });
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest?.('[data-vendor-map-open]');
+    if (!button) return;
+    cdrId.value = button.dataset.datasetId || '';
+    datasetName.textContent = button.dataset.datasetName || '';
+    dialog.showModal();
   });
   dialog.querySelector('[data-vendor-map-cancel]')?.addEventListener('click', (event) => {
     event.preventDefault();

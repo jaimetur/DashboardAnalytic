@@ -579,12 +579,12 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .confirm-panel #confirm-copy { white-space: pre-line; max-height: min(42vh, 360px); overflow-y: auto; padding-right: 0.2rem; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.35rem; flex-wrap: wrap; }
 .confirm-cancel { cursor: pointer; color: #44515d; box-shadow: 0 8px 20px rgba(18, 32, 43, 0.08); }
-.doc-page { display: grid; }
-.doc-panel { padding: 1.55rem; }
+.doc-page { display: grid; min-width: 0; max-width: 100%; }
+.doc-panel { min-width: 0; max-width: 100%; padding: 1.55rem; overflow: hidden; }
 .doc-toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1rem; }
 .doc-toolbar h2 { margin: 0; }
 .doc-meta { margin: 0 0 1rem; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.84rem; word-break: break-all; }
-.doc-markdown { background: rgba(255,255,255,0.72); border: 1px solid var(--line); border-radius: 20px; padding: 1.5rem; line-height: 1.7; }
+.doc-markdown { min-width: 0; max-width: 100%; overflow-wrap: anywhere; background: rgba(255,255,255,0.72); border: 1px solid var(--line); border-radius: 20px; padding: 1.5rem; line-height: 1.7; }
 .doc-markdown h1, .doc-markdown h2, .doc-markdown h3, .doc-markdown h4 { margin: 1.2em 0 0.55em; line-height: 1.25; }
 .doc-markdown h1, .doc-markdown h2 { padding-bottom: 0.28em; border-bottom: 1px solid var(--line); }
 .doc-markdown p { margin: 0.75em 0; }
@@ -596,7 +596,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .doc-markdown pre code { background: transparent; color: inherit; padding: 0; }
 .doc-markdown blockquote { margin: 1rem 0; padding: 0.4rem 1rem; border-left: 4px solid rgba(11, 122, 117, 0.24); color: #445560; background: rgba(11, 122, 117, 0.04); }
 .doc-markdown table { min-width: 0; }
-.doc-markdown img { max-width: 100%; height: auto; border-radius: 12px; }
+.doc-markdown img { display: block; width: auto; max-width: 100% !important; max-inline-size: 100% !important; height: auto !important; margin-inline: auto; border-radius: 12px; }
 .doc-layout { display: grid; grid-template-columns: 17rem minmax(0, 1fr); gap: 1rem; align-items: start; }
 .doc-sidebar { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; padding: 1rem; border: 1px solid var(--line); border-radius: 18px; background: rgba(255,255,255,0.72); }
 .doc-sidebar h3 { margin: 0 0 0.35rem; }
@@ -646,6 +646,8 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 }
 @media (max-width: 640px) {
   .shell { padding: 1rem; }
+  .doc-panel { padding: 1rem; }
+  .doc-markdown { padding: 1rem; }
   .module-tabs { flex-direction: column; align-items: stretch; overflow: visible; }
   .module-tabs-primary, .module-tabs-secondary { box-sizing: border-box; width: 100%; gap: 0.3rem; overflow-x: auto; }
   .module-tabs-primary { order: 2; margin-left: 0.2rem; }

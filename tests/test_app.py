@@ -395,6 +395,8 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     assert 'Vendor mapping rule' in workspace.text
     assert 'the same non-empty Vendor at both endpoints returns' in workspace.text
     assert 'data-loading-label="Mapping Vendors to CDR samples"' in workspace.text
+    live_status = client.get('/api/datasets/status').json()['datasets']
+    assert next(dataset for dataset in live_status if dataset['id'] == 1)['can_map_vendors'] is True
 
     response = client.post(
         '/workspace/map-vendors',
@@ -412,6 +414,8 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     assert 'Map Vendors</button>' not in workspace_after_mapping
     assert 'Clear Vendors</button>' in workspace_after_mapping
     assert 'data-confirm-loading-label="Clearing Vendors from selected dataset"' in workspace_after_mapping
+    live_status_after_mapping = client.get('/api/datasets/status').json()['datasets']
+    assert next(dataset for dataset in live_status_after_mapping if dataset['id'] == 1)['can_clear_vendors'] is True
 
     clear_response = client.post('/workspace/clear-vendors/1', follow_redirects=False)
     assert clear_response.status_code == 303
