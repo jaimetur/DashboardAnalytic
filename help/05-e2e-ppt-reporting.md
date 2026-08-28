@@ -34,9 +34,9 @@ For Vodafone and Three, the report derives vendor from the first and last value 
 
 ## Generated presentation
 
-The report uses the NSA or SA template under `assets/templates/` (or the directory configured through `APP_REPORTING_TEMPLATE_DIR`). It preserves the provided presentation structure, removes inherited example chart graphics in the automated chart areas and inserts new charts computed from the processed CDR rows. Commentary areas are deliberately blank for analyst input. Scoring and GAP-analysis slides remain present but are not populated automatically at this stage.
+Every NSA, SA, single-vendor and multivendor report uses the same `assets/templates/Template_CDR_analysis.pptx` (or the file with that name under `APP_REPORTING_TEMPLATE_DIR`). It is a master/layout-only template and intentionally contains no slides. For every distinct `Slide` number in the selected catalogue, the renderer creates one new slide from its named layout, ordered by slide number. Rows with the same number represent separate charts on that slide and fill its image placeholders from left to right and then top to bottom. Commentary placeholders remain blank for analyst input.
 
-An administrator can manage several named NSA and SA Slide Catalogue CSVs. A catalogue can be set as the default, duplicated, renamed, deleted or exported, then edited directly in the browser. Every CDR row represents one chart image and declares its named PowerPoint `Layout`; the renderer populates the title, keeps the analyst-comments area empty, removes the template sample-chart placeholders and inserts each generated chart into the layout's matching chart placeholder. Importing or selecting a new default catalogue refreshes the tables below.
+An administrator can manage several named NSA and SA Slide Catalogue CSVs. A catalogue can be set as the default, duplicated, renamed, deleted or exported, then edited directly in the browser. Every CDR row represents one chart image and declares its named PowerPoint `Layout`; the renderer creates the slide, populates its title and places generated charts in the layout's matching chart placeholders. Importing or selecting a new default catalogue refreshes the tables below.
 
 After generation, the timestamp-named PPTX downloads through the browser and the generation dialog closes. If the report contains no valid samples, re-check the selected technology, operator sheets and CDR inputs; the message indicates that the selected persisted rows did not match the relevant KPI and technology filter. For NSA, validate that the relevant RAT field actually contains an ENDC variant; for SA, validate the expected `NR` values.
 
@@ -46,11 +46,18 @@ The renderer follows the visual grammar of the supplied template for every autom
 
 The technology condition below is always applied before the slide-level filters: NSA contains an ENDC spelling in `RAT`, `RAT_A` or `Sample_RAT_A`; SA contains `NR` in the same fields.
 
-The current CSV schema is `Slide`, `Slide tittle`, `Slide Subtittle`, `Layout`, `Chart Tittle`, `CDR source`, `KPI`, `Chart type`, `Legend`, `Filters`, `Grouping_Rows` and `Grouping_Columns`. For automated rows, all of these chart-definition fields are executable. `Slide Subtittle` is rendered in the second line of the title placeholder in smaller blue text; `Chart Tittle` is the chart heading; `Legend` can replace generated captions in comma-separated order.
+The current CSV schema is `Slide`, `Slide tittle`, `Slide Subtittle`, `Layout`, `Chart Tittle`, `CDR source`, `KPI`, `Chart type`, `Legend`, `Filters`, `Grouping_Rows` and `Grouping_Columns`. For automated rows, all chart-definition fields are executable. `Slide Subtittle` is rendered in the second line of a chart slide's title placeholder in smaller blue text; `Chart Tittle` is the chart heading; `Legend` can replace generated captions in comma-separated order.
+
+Two structural `Chart type` values build non-KPI slides:
+
+- `Title Slide` creates the presentation cover, normally with the `Title Page` layout. `Slide tittle` and `Slide Subtittle` populate the layout's title and subtitle placeholders.
+- `Transition Slide` creates a section divider, normally with `Title Only` or another suitable transition layout. It accepts a title and optional subtitle.
+
+A structural slide occupies exactly one catalogue row and cannot share its slide number with chart rows. Leave `Chart Tittle`, `CDR source`, `KPI`, `Legend`, `Filters`, `Grouping_Rows` and `Grouping_Columns` empty. The former `Not Automated (preserve)` value is retained only for legacy conversion: imported legacy rows are migrated to `Title Slide` or `Transition Slide`, because an empty template has no source slide to preserve.
 
 Write filters as semicolon-separated expressions such as `Call Family IN (VoLTE, MultiRAB); Direction = DL` or `Type_of_Test = Interactivity`. Supported operators are `IN (...)`, `NOT IN (...)`, `CONTAINS`, `NOT CONTAINS`, `=`, `!=`, `<`, `<=`, `>` and `>=`. Use processed CDR column names (case-insensitive matching is supported). `Call Family` is a supported derived dimension: the NetCheck CDR values `CALL`, `MultiRAB CALL` and `WhatsApp CALL` are normalised to their test families, with the classic-call mode resolving VoLTE or VoNR where available. `Threshold = 1.6` configures `Threshold Stacked Vertical Bars`, while `Buckets = 1,5,20,100` configures `Rate Bucket` for `Distribution Stacked Vertical Bars`.
 
-Write each grouping hierarchy with `×`. `Grouping_Rows` defines the visible category/table-row hierarchy. `Grouping_Columns` defines comparison series and table columns; if it is empty, the renderer uses one `(all)` series and does not duplicate category labels. For distribution charts the final column dimension is the stack/bucket breakdown. This interpretation is consistent across CDF, scatter, mean/median bars, stacked status/failure/distribution bars and tables. `Operator` resolves to the calculated operator-vendor comparison field in multivendor reports. The valid automated chart types are `100% Stacked Vertical Bars`, `Count Stacked Horizontal Bars`, `CDF Line`, `Scatter`, `Table`, `Average Vertical Bars`, `Median Vertical Bars`, `Distribution Stacked Vertical Bars` and `Threshold Stacked Vertical Bars`. Entries that intentionally keep template content use the single `Not Automated (preserve)` value.
+Write each grouping hierarchy with `×`. `Grouping_Rows` defines the visible category/table-row hierarchy. `Grouping_Columns` defines comparison series and table columns; if it is empty, the renderer uses one `(all)` series and does not duplicate category labels. For distribution charts the final column dimension is the stack/bucket breakdown. This interpretation is consistent across CDF, scatter, mean/median bars, stacked status/failure/distribution bars and tables. `Operator` resolves to the calculated operator-vendor comparison field in multivendor reports. The valid automated chart types are `100% Stacked Vertical Bars`, `Count Stacked Horizontal Bars`, `CDF Line`, `Scatter`, `Table`, `Average Vertical Bars`, `Median Vertical Bars`, `Distribution Stacked Vertical Bars` and `Threshold Stacked Vertical Bars`; the structural types are `Title Slide` and `Transition Slide`.
 
 The importer accepts the current schema and compatible legacy schemas. If the headers differ, it presents a conversion confirmation: compatible names are migrated, legacy `Grouping` is split into row/column grouping, new optional presentation fields remain blank, and a missing layout is assigned from the number of CDR charts on that slide. Any remaining invalid chart contract is presented in a floating import-failure dialog.
 
@@ -62,25 +69,25 @@ Export the active NSA or SA catalogue from Admin before editing it. The tables b
 
 | Slide | Slide tittle | Slide Subtittle | Layout | Chart Tittle | CDR source | KPI | Chart type | Legend | Filters | Grouping_Rows | Grouping_Columns |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 2025 Q4 Net check UK | NSA CDR analysis<br>Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 2 | Executive Summary | — | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 3 | Netcheck Q4 scoring “Best network”. Drive city | — | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 4 | Score breakdown | — | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 5 | KPIs prioritization: gap Vodafone vs EE | — | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 6 | KPIs prioritization: gap Three vs EE | — | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 7 | 7 cities analysis | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | — | — | — | — | Not Automated (preserve) | — | — | — | — |
+| 1 | 2025 Q4 Net check UK | NSA CDR analysis<br>Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title Page | — | — | — | Title Slide | — | — | — | — |
+| 2 | Executive Summary | — | Title Only | — | — | — | Transition Slide | — | — | — | — |
+| 3 | Netcheck Q4 scoring “Best network”. Drive city | — | Title Only | — | — | — | Transition Slide | — | — | — | — |
+| 4 | Score breakdown | — | Title Only | — | — | — | Transition Slide | — | — | — | — |
+| 5 | KPIs prioritization: gap Vodafone vs EE | — | Title Only | — | — | — | Transition Slide | — | — | — | — |
+| 6 | KPIs prioritization: gap Three vs EE | — | Title Only | — | — | — | Transition Slide | — | — | — | — |
+| 7 | 7 cities analysis | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title Only | — | — | — | Transition Slide | — | — | — | — |
 | 8 | Completed Call Ratio | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 1 column + Comments | — | CDR-Voice | Call_Status | 100% Stacked Vertical Bars | — | Call Family IN (VoLTE, MultiRAB, WhatsApp); Operator IN (Vodafone UK, 3, EE) | Call Family | Operator × Campaign |
 | 9 | Voice failures per Q/city | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 1 column + Comments | — | CDR-Voice | Call_Status | Count Stacked Horizontal Bars | — | Call Family IN (VoLTE, MultiRAB, WhatsApp); Call_Status IN (Failed, Dropped) | Call Family × G Level 4 | Operator × Campaign |
 | 10 | Data failure | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 rows + Comments right | — | CDR-Data | Test_Result | 100% Stacked Vertical Bars | — | Test Family IN (httpBrowser, htttpBrowser, httpTransfer, YouTube, VideoStreaming) | Type_of_Test | Operator × Campaign |
 | 10 | Data failure | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 rows + Comments right | — | CDR-Data | Test_Result | 100% Stacked Vertical Bars | — | Test_Name CONTAINS FDFS | Type_of_Test | Operator × Campaign |
 | 11 | Data failures - FDFS test | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 1 column + Comments | — | CDR-Data | Test_Result | 100% Stacked Vertical Bars | — | Test_Name CONTAINS FDFS | Test Family × Test Name × Direction | Operator × Campaign |
-| 12 | POLQA AVG MOS (Multirab&volte) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Speech | LQ | CDF Line | — | Call Family IN (VoLTE, MultiRAB) | Operator | Campaign |
-| 12 | POLQA AVG MOS (Multirab&volte) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Speech | LQ | Average Vertical Bars | — | Call Family IN (VoLTE, MultiRAB) | Operator | Campaign |
-| 13 | POLQA AVG MOS (WhatsApp) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 3 columns + Comments | — | CDR-Speech | LQ | CDF Line | — | Call Family = WhatsApp | Operator | Campaign |
-| 13 | POLQA AVG MOS (WhatsApp) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 3 columns + Comments | — | CDR-Speech | LQ | Average Vertical Bars | — | Call Family = WhatsApp | Operator | Campaign |
-| 13 | POLQA AVG MOS (WhatsApp) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 3 columns + Comments | — | CDR-Speech | LQ | CDF Line | — | Call Family = WhatsApp; Campaign = 2025 Q4 | Operator | — |
-| 14 | POLQA <1.6 | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Speech | LQ | Threshold Stacked Vertical Bars | — | Call Family = WhatsApp; Threshold = 1.6 | Operator | Campaign |
-| 14 | POLQA <1.6 | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Speech | LQ | Threshold Stacked Vertical Bars | — | Call Family = VoLTE; Threshold = 1.6 | Operator | Campaign |
+| 12 | POLQA AVG MOS (Multirab&volte) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Speech | LQ | CDF Line | — | Call_Status = Completed; Call Family IN (VoLTE, MultiRAB); Operator IN (Vodafone UK, 3, EE) | Operator | Campaign |
+| 12 | POLQA AVG MOS (Multirab&volte) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Speech | LQ | Average Vertical Bars | — | Call_Status = Completed; Call Family IN (VoLTE, MultiRAB); Operator IN (Vodafone UK, 3, EE) | Operator | Campaign |
+| 13 | POLQA AVG MOS (WhatsApp) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 3 columns + Comments | — | CDR-Speech | LQ | CDF Line | — | Call_Status = Completed; Call Family = WhatsApp; Operator IN (Vodafone UK, 3, EE) | Operator | Campaign |
+| 13 | POLQA AVG MOS (WhatsApp) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 3 columns + Comments | — | CDR-Speech | LQ | Average Vertical Bars | — | Call_Status = Completed; Call Family = WhatsApp; Operator IN (Vodafone UK, 3, EE) | Operator | Campaign |
+| 13 | POLQA AVG MOS (WhatsApp) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 3 columns + Comments | — | CDR-Speech | LQ | CDF Line | — | Call_Status = Completed; Call Family = WhatsApp; Operator IN (Vodafone UK, 3, EE); Campaign = Latest | Operator | — |
+| 14 | POLQA <1.6 | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Speech | LQ | Threshold Stacked Vertical Bars | — | Call_Status = Completed; Call Family = WhatsApp; Operator IN (Vodafone UK, 3, EE); Threshold = 1.6 | Operator | Campaign |
+| 14 | POLQA <1.6 | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Speech | LQ | Threshold Stacked Vertical Bars | — | Call_Status = Completed; Call Family = VoLTE; Operator IN (Vodafone UK, 3, EE); Threshold = 1.6 | Operator | Campaign |
 | 15 | CST | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Voice | Call_Setup_Time | CDF Line | — | Call Family IN (VoLTE, MultiRAB) | Operator | Campaign |
 | 15 | CST | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Voice | Call_Setup_Time | Average Vertical Bars | — | Call Family IN (VoLTE, MultiRAB) | Operator | Campaign |
 | 16 | FDTT DL (7s) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Data | Mean_Data_Rate | CDF Line | — | Test_Result = Completed; Test_Name CONTAINS FDTT http DL MT; Operator IN (Vodafone UK, 3, EE) | Operator | Campaign |
@@ -99,23 +106,23 @@ Export the active NSA or SA catalogue from Admin before editing it. The tables b
 | 20 | Interactivity | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns and 2 rows + Comments right | — | CDR-Data | Packet_Error_Ratio | Average Vertical Bars | — | Test_Result = Completed; Type_of_Test = Interactivity; Operator IN (Vodafone UK, 3, EE) | Operator | Campaign |
 | 21 | Browsing | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Data | http_Browser_1MB_Reached_Duration | CDF Line | — | Test_Result = Completed; Type_of_Test = httpBrowser; Operator IN (Vodafone UK, 3, EE) | Operator | Campaign |
 | 21 | Browsing | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Data | http_Browser_1MB_Reached_Duration | Average Vertical Bars | — | Test_Result = Completed; Type_of_Test = httpBrowser; Operator IN (Vodafone UK, 3, EE) | Operator | Campaign |
-| 22 | Conclusions | — | 1_Title and 1 column | — | — | — | Table | — | — | — | — |
+| 22 | Conclusions | — | Title Only | — | — | — | Transition Slide | — | — | — | — |
 
 ### SA template
 
 | Slide | Slide tittle | Slide Subtittle | Layout | Chart Tittle | CDR source | KPI | Chart type | Legend | Filters | Grouping_Rows | Grouping_Columns |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | NPPI Tech Forum<br>VodafoneThree & Ericsson<br>2026-08-06 | 2026 Q2 Net check 5G SA Campaign<br>Final Scoring and Gap Analysis<br>CDR KPI Analysis | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 2 | Agenda | — | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 3 | Actions Tracker | — | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 4 | Netcheck CDR Scoring and Gap Analysis | 2026 Q2 NSA vs SA Campaign<br>7 Cities and London | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 5 | Netcheck 5G SA Best Network Scoring | 7 Cities | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 6 | Netcheck 5G SA Most Reliable Network Scoring | 7 Cities | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 7 | Q2 2026 vs SA Campaign – Delta Scoring | 7 Cities | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 8 | Netcheck 5G SA Best Network Scoring | London | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 9 | Netcheck 5G SA Most Reliable Network Scoring | London | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 10 | Q2 2026 vs SA Campaign – Delta Scoring | London | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 11 | Netcheck CDR Voice and Speech Analysis | 2026 Q2 NSA vs SA Campaign<br>7 Cities and London | — | — | — | — | Not Automated (preserve) | — | — | — | — |
+| 1 | NPPI Tech Forum<br>VodafoneThree & Ericsson<br>2026-08-06 | 2026 Q2 Net check 5G SA Campaign<br>Final Scoring and Gap Analysis<br>CDR KPI Analysis | Title Page | — | — | — | Title Slide | — | — | — | — |
+| 2 | Agenda | — | Title Only | — | — | — | Transition Slide | — | — | — | — |
+| 3 | Actions Tracker | — | Title Only | — | — | — | Transition Slide | — | — | — | — |
+| 4 | Netcheck CDR Scoring and Gap Analysis | 2026 Q2 NSA vs SA Campaign<br>7 Cities and London | Title Only | — | — | — | Transition Slide | — | — | — | — |
+| 5 | Netcheck 5G SA Best Network Scoring | 7 Cities | Title Only | — | — | — | Transition Slide | — | — | — | — |
+| 6 | Netcheck 5G SA Most Reliable Network Scoring | 7 Cities | Title Only | — | — | — | Transition Slide | — | — | — | — |
+| 7 | Q2 2026 vs SA Campaign – Delta Scoring | 7 Cities | Title Only | — | — | — | Transition Slide | — | — | — | — |
+| 8 | Netcheck 5G SA Best Network Scoring | London | Title Only | — | — | — | Transition Slide | — | — | — | — |
+| 9 | Netcheck 5G SA Most Reliable Network Scoring | London | Title Only | — | — | — | Transition Slide | — | — | — | — |
+| 10 | Q2 2026 vs SA Campaign – Delta Scoring | London | Title Only | — | — | — | Transition Slide | — | — | — | — |
+| 11 | Netcheck CDR Voice and Speech Analysis | 2026 Q2 NSA vs SA Campaign<br>7 Cities and London | Title Only | — | — | — | Transition Slide | — | — | — | — |
 | 12 | Voice Failures | 7 Cities | Title and 2 columns | — | CDR-Voice | Call_Status | Count Stacked Horizontal Bars | — | Failed/Dropped; Classic call, MultiRAB, WhatsApp | Call family | Operator × Campaign |
 | 12 | Voice Failures | 7 Cities | Title and 2 columns | — | CDR-Voice | Failure_Technology | Count Stacked Horizontal Bars | — | Failed/Dropped; Classic call, MultiRAB, WhatsApp | Call family | Failure technology × Operator × Campaign |
 | 13 | Voice Failures (Vodafone UK) | 7 Cities | Title and 3 columns | — | CDR-Voice | Call_Status | Count Stacked Horizontal Bars | — | Failed/Dropped; Operator Vodafone UK | Call family | City × Campaign |
@@ -136,7 +143,7 @@ Export the active NSA or SA catalogue from Admin before editing it. The tables b
 | 19 | POLQA Avg MOS | London | Title and 8 Content | — | CDR-Voice | POLQA_LQ_Avg | Average Vertical Bars | — | Classic call or MultiRAB; location London | Operator | Campaign |
 | 19 | POLQA Avg MOS | London | Title and 8 Content | — | CDR-Speech | LQ | CDF Line | — | WhatsApp; location London | Operator | Campaign |
 | 19 | POLQA Avg MOS | London | Title and 8 Content | — | CDR-Speech | LQ | Average Vertical Bars | — | WhatsApp; location London | Operator | Campaign |
-| 20 | Netcheck CDR Data Analysis | 2026 Q2 NSA vs SA Campaign<br>7 Cities and London | — | — | — | — | Not Automated (preserve) | — | — | — | — |
+| 20 | Netcheck CDR Data Analysis | 2026 Q2 NSA vs SA Campaign<br>7 Cities and London | Title Only | — | — | — | Transition Slide | — | — | — | — |
 | 21 | FDFS Success Ratio | — | Title and 2 columns | — | CDR-Data | Test_Result | 100% Stacked Vertical Bars | — | FDFS; Direction DL; 7 cities | Operator | Campaign |
 | 21 | FDFS Success Ratio | — | Title and 2 columns | — | CDR-Data | Test_Result | 100% Stacked Vertical Bars | — | FDFS; Direction UL; London | Operator | Campaign |
 | 22 | FDFS DL Throughput | 7 Cities | Title and 2 columns | — | CDR-Data | Mean_Data_Rate | CDF Line | — | FDFS; Direction DL | Operator | Campaign |
@@ -151,7 +158,6 @@ Export the active NSA or SA catalogue from Admin before editing it. The tables b
 | 25 | Interactivity KPIs | 7 Cities | Title and 8 Content | — | CDR-Data | Interactivity_Packet_Error_Ratio | Average Vertical Bars | — | Interactivity tests | Operator | Campaign |
 | 26 | Browsing Time to 1MB | 7 cities | Title and 2 columns | — | CDR-Data | http_Browser_1MB_Reached_Duration | CDF Line | — | Browsing/HTTP tests | Operator | Campaign |
 | 26 | Browsing Time to 1MB | 7 cities | Title and 2 columns | — | CDR-Data | http_Browser_1MB_Reached_Duration | Average Vertical Bars | — | Browsing/HTTP tests | Operator | Campaign |
-| 27 | Conclusions | — | — | — | — | — | Not Automated (preserve) | — | — | — | — |
-| 28 |  | — | — | — | — | — | Not Automated (preserve) | — | — | — | — |
+| 27 | Conclusions | — | Title Only | — | — | — | Transition Slide | — | — | — | — |
 
 <!-- SLIDE_CATALOGUE:END -->

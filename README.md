@@ -42,7 +42,7 @@ Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone
 6. Choose a compatible slide catalogue and `Single-vendor` or `Multivendor`. Multivendor is enabled only if at least one selected CDR has a saved vendor mapping.
 7. Generate the PowerPoint report. The run stores its selected datasets, technology, scope, catalogue and template in SQLite for auditability. Generated filenames use `yyyymmdd-hhmm`.
 
-The report starts from `Template_CDR_NSA_analysis.pptx` or `Template_CDR_SA_analysis.pptx`. Its layout and non-automated scoring/gap slides are retained. Automated CDR slides receive charts calculated from the persisted CDR rows, while commentary text boxes are cleared for analyst input.
+All NSA, SA, single-vendor and multivendor reports use the single master/layout-only `assets/templates/Template_CDR_analysis.pptx`. The selected Slide Catalogue determines the technology-specific slide sequence, layouts and generated CDR charts; commentary placeholders remain blank for analyst input.
 
 ### Multivendor calculation and remapping
 
@@ -105,7 +105,9 @@ Only KPI-like numeric CDR fields are offered as Dashboard metrics; geographic co
 
 ### Slide catalogues and chart grouping
 
-Each automated catalogue row defines a single chart. The current CSV schema is: `Slide`, `Slide tittle`, `Slide Subtittle`, `Layout`, `Chart Tittle`, `CDR source`, `KPI`, `Chart type`, `Legend`, `Filters`, `Grouping_Rows` and `Grouping_Columns`.
+The bundled `Template_CDR_analysis.pptx` contains masters and named layouts but no source slides. The generator creates one new presentation slide for every distinct `Slide` number in the selected NSA or SA catalogue, in ascending order. Each automated catalogue row defines one chart; rows sharing the same slide number fill the selected layout's chart placeholders in row-major order.
+
+The CSV schema is: `Slide`, `Slide tittle`, `Slide Subtittle`, `Layout`, `Chart Tittle`, `CDR source`, `KPI`, `Chart type`, `Legend`, `Filters`, `Grouping_Rows` and `Grouping_Columns`. `Chart type` also supports `Title Slide` and `Transition Slide`. These structural rows use only the slide title, subtitle and named layout and cannot contain CDR, KPI, chart, legend, filter or grouping configuration.
 
 `Grouping_Rows` controls the visible category hierarchy. `Grouping_Columns` controls comparison series and legend values; when it is empty, the renderer uses one `(all)` series and does not repeat the category in labels. For distribution charts, the final column grouping is the stack/bucket dimension. This contract applies consistently to CDF, scatter, vertical bars, stacked bars and tables. Administrators can import legacy compatible files: the application offers to convert their headings, splits legacy `Grouping`, and assigns an appropriate default layout from the number of charts on each slide.
 

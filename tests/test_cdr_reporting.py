@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import pandas as pd
+import pytest
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
@@ -140,6 +141,25 @@ def test_catalogue_csv_requires_the_report_chart_contract_columns() -> None:
     assert entries[0].chart_type == '100% Stacked Vertical Bars'
 
 
+def test_catalogue_accepts_structural_slides_and_rejects_chart_configuration_on_them() -> None:
+    title = parse_catalog_csv(
+        ','.join(CATALOG_HEADERS) + '\n1,Quarterly report,NSA analysis,Title Page,,,,Title Slide,,,,\n',
+        'nsa',
+    )[0]
+    transition = parse_catalog_csv(
+        ','.join(CATALOG_HEADERS) + '\n2,Voice analysis,Seven cities,Title Only,,,,Transition Slide,,,,\n',
+        'nsa',
+    )[0]
+
+    assert title.structural_type == 'title slide'
+    assert transition.structural_type == 'transition slide'
+    with pytest.raises(ValueError, match='cannot define chart, CDR, KPI'):
+        parse_catalog_csv(
+            ','.join(CATALOG_HEADERS) + '\n1,Quarterly report,,Title Page,,CDR-Data,LQ,Title Slide,,,,\n',
+            'nsa',
+        )
+
+
 def test_catalogue_filter_and_grouping_contract_is_parsed_and_applied() -> None:
     conditions = parse_catalog_filters('Session_Type IN (VoLTE, MultiRAB); LQ >= 1.6')
     grouping = parse_catalog_grouping('City × Operator × Campaign')
@@ -267,7 +287,7 @@ def test_nsa_speech_catalogue_filters_produce_samples_and_use_latest_campaign() 
 
 
 def test_layout_chart_frames_are_always_ordered_by_visual_rows_then_columns() -> None:
-    presentation = Presentation('assets/templates/Template_CDR_NSA_analysis.pptx')
+    presentation = Presentation('assets/templates/Template_CDR_analysis.pptx')
     layout = _named_slide_layout(presentation, 'Title and 2 columns and 2 rows + Comments right')
 
     frames = _layout_chart_frames(layout)
@@ -317,13 +337,15 @@ def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> N
     }
 
 
-def test_catalogue_uses_one_preservation_type_and_records_nsa_conclusions_table() -> None:
+def test_catalogue_uses_explicit_title_and_transition_slides() -> None:
     entries = load_catalog_csv(Path('assets/ppt-slides-catalog/nsa-slide-catalogue.csv'), 'nsa')
-    preserved = [entry.chart_type for entry in entries if not entry.source_kind and entry.slide != 22]
+    structural = [entry.chart_type for entry in entries if not entry.source_kind]
+    title = next(entry for entry in entries if entry.slide == 1)
     conclusions = next(entry for entry in entries if entry.slide == 22)
 
-    assert set(preserved) == {'Not Automated (preserve)'}
-    assert conclusions.chart_type == 'Table'
+    assert set(structural) == {'Title Slide', 'Transition Slide'}
+    assert (title.chart_type, title.layout) == ('Title Slide', 'Title Page')
+    assert (conclusions.chart_type, conclusions.layout) == ('Transition Slide', 'Title Only')
 
 
 def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None:
@@ -344,14 +366,16 @@ def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None
 
     render_cdr_report(
         destination,
-        Path('assets/templates/Template_CDR_NSA_analysis.pptx'),
+        Path('assets/templates/Template_CDR_analysis.pptx'),
         frames,
         'nsa',
         False,
         parse_catalog_csv(catalogue, 'nsa'),
     )
 
-    slide = Presentation(destination).slides[7]
+    generated = Presentation(destination)
+    assert len(generated.slides) == 1
+    slide = generated.slides[0]
     assert slide.slide_layout.name == 'Title and 2 rows + Comments right'
     pictures = sorted((shape for shape in slide.shapes if hasattr(shape, 'image')), key=lambda shape: shape.top)
     assert len(pictures) >= 2
@@ -371,6 +395,35 @@ def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None
     assert subtitle_paragraph.font.size.pt == 16
     assert subtitle_paragraph.font.color.rgb == RGBColor(36, 90, 150)
     assert not any(shape.name == 'catalogue-subtitle' for shape in slide.shapes)
+
+
+def test_layout_only_template_builds_one_new_slide_per_catalogue_number(tmp_path) -> None:
+    template = Path('assets/templates/Template_CDR_analysis.pptx')
+    assert len(Presentation(template).slides) == 0
+    catalogue = (
+        ','.join(CATALOG_HEADERS)
+        + '\n1,Quarterly report,NSA analysis,Title Page,,,,Title Slide,,,,'
+        + '\n2,Voice section,Seven cities,Title Only,,,,Transition Slide,,,,'
+        + '\n8,Completed Call Ratio,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n'
+    )
+    destination = tmp_path / 'catalogue-built.pptx'
+
+    render_cdr_report(
+        destination,
+        template,
+        {'data': pd.DataFrame(), 'speech': pd.DataFrame(), 'voice': pd.DataFrame()},
+        'nsa',
+        False,
+        parse_catalog_csv(catalogue, 'nsa'),
+    )
+
+    generated = Presentation(destination)
+    assert len(generated.slides) == 3
+    assert [slide.slide_layout.name for slide in generated.slides] == [
+        'Title Page', 'Title Only', 'Title and 1 column + Comments',
+    ]
+    assert generated.slides[0].placeholders[0].text == 'Quarterly report'
+    assert generated.slides[0].placeholders[1].text == 'NSA analysis'
 
 
 def test_reporting_module_is_available_to_authenticated_users(client) -> None:

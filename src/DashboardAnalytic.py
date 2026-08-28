@@ -25,7 +25,7 @@ from starlette.datastructures import QueryParams
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, PRESERVED_CHART_TYPES, TEMPLATE_NAMES, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, render_cdr_report, update_catalogue_document
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, render_cdr_report, update_catalogue_document
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
@@ -305,7 +305,7 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
         'headers': CATALOG_HEADERS,
         'suggestions': {
             'layouts': catalogue_layout_names(technology),
-            'chart_types': sorted(CHART_TYPES | PRESERVED_CHART_TYPES, key=str.casefold),
+            'chart_types': sorted(CHART_TYPES | STRUCTURAL_SLIDE_TYPES, key=str.casefold),
             'columns': columns,
         },
     }

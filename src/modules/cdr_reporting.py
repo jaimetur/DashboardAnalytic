@@ -5,7 +5,6 @@ from __future__ import annotations
 import csv
 import io
 import re
-import shutil
 from collections import defaultdict
 from dataclasses import dataclass
 from io import BytesIO
@@ -17,15 +16,16 @@ from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.enum.text import MSO_AUTO_SIZE
 from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 from pptx.util import Inches, Pt
 
 
 TEMPLATE_NAMES = {
-    "nsa": "Template_CDR_NSA_analysis.pptx",
-    "sa": "Template_CDR_SA_analysis.pptx",
+    "nsa": "Template_CDR_analysis.pptx",
+    "sa": "Template_CDR_analysis.pptx",
 }
-CDR_REPORT_VERSION = "2026-08-27-v7"
+CDR_REPORT_VERSION = "2026-08-28-v8"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
 CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns")
@@ -36,6 +36,7 @@ CHART_TYPES = {
     "100% stacked vertical bars", "count stacked horizontal bars", "cdf line", "scatter", "table",
     "distribution stacked vertical bars", "threshold stacked vertical bars", "average vertical bars", "median vertical bars",
 }
+STRUCTURAL_SLIDE_TYPES = {"title slide", "transition slide"}
 PRESERVED_CHART_TYPES = {"not automated (preserve)"}
 FILTER_OPERATORS = ("CONTAINS", "IN", ">=", "<=", "!=", "=", ">", "<")
 
@@ -113,6 +114,11 @@ class CatalogEntry:
     @property
     def source_kind(self) -> str | None:
         return CATALOG_SOURCE_KINDS.get(self.cdr_source.strip().casefold())
+
+    @property
+    def structural_type(self) -> str | None:
+        value = self.chart_type.strip().casefold()
+        return value if value in STRUCTURAL_SLIDE_TYPES else None
 
 
 def parse_catalog_filters(value: str) -> tuple[FilterCondition, ...]:
@@ -193,12 +199,30 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
             grouping_rows=(row.get("Grouping_Rows") or "").strip() or " × ".join(legacy_dimensions[:1]),
             grouping_columns=(row.get("Grouping_Columns") or "").strip() or " × ".join(legacy_dimensions[1:]),
         )
+        if entry.structural_type:
+            if not entry.slide_title:
+                raise ValueError(f"Catalog row {line_number} requires Slide tittle for a structural slide.")
+            if not entry.layout:
+                raise ValueError(f"Catalog row {line_number} requires Layout for a structural slide.")
+            structural_chart_fields = (
+                entry.chart_title, entry.cdr_source, entry.kpi, entry.legend,
+                entry.filters, entry.grouping_rows, entry.grouping_columns,
+            )
+            if any(value.strip() for value in structural_chart_fields):
+                raise ValueError(
+                    f"Catalog row {line_number} is a {entry.chart_type} and cannot define chart, CDR, KPI, "
+                    "legend, filter or grouping values."
+                )
         if entry.source_kind and not entry.slide_title:
             raise ValueError(f"Catalog row {line_number} requires Slide tittle for a CDR source.")
         if entry.source_kind and not entry.layout:
             raise ValueError(f"Catalog row {line_number} requires Layout for a CDR source.")
         if entry.cdr_source and entry.cdr_source.casefold() not in CATALOG_SOURCE_KINDS:
             raise ValueError(f"Catalog row {line_number} has unsupported CDR source '{entry.cdr_source}'.")
+        if not entry.source_kind and not entry.structural_type and entry.chart_type.casefold() not in PRESERVED_CHART_TYPES:
+            raise ValueError(
+                f"Catalog row {line_number} must define a supported CDR chart, Title Slide or Transition Slide."
+            )
         if entry.source_kind and (not entry.kpi or not entry.chart_type):
             raise ValueError(f"Catalog row {line_number} requires KPI and Chart type for a CDR source.")
         if entry.source_kind and entry.chart_type.casefold() not in CHART_TYPES:
@@ -214,6 +238,15 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
         entries.append(entry)
     if not entries:
         raise ValueError("The report catalogue does not contain any rows.")
+    entries_by_slide: dict[int, list[CatalogEntry]] = defaultdict(list)
+    for entry in entries:
+        entries_by_slide[entry.slide].append(entry)
+    for slide_number, slide_entries in entries_by_slide.items():
+        structural_entries = [entry for entry in slide_entries if entry.structural_type]
+        if structural_entries and len(slide_entries) != 1:
+            raise ValueError(
+                f"Slide {slide_number} cannot combine a structural Title/Transition row with chart rows."
+            )
     return entries
 
 
@@ -272,6 +305,15 @@ def convert_catalog_csv(content: bytes | str, technology: str) -> bytes:
             and row["CDR source"].strip().casefold() in CATALOG_SOURCE_KINDS
         ):
             row["Layout"] = _default_catalogue_layout(technology, charts_per_slide[row["Slide"].strip()])
+
+    # A slide-less template cannot preserve source slides. Migrate the former
+    # preservation marker into an explicit structural slide contract instead.
+    for row in converted_rows:
+        if row["Chart type"].strip().casefold() not in PRESERVED_CHART_TYPES:
+            continue
+        is_title = row["Slide"].strip() == "1"
+        row["Chart type"] = "Title Slide" if is_title else "Transition Slide"
+        row["Layout"] = row["Layout"].strip() or ("Title Page" if is_title else "Title Only")
 
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=CATALOG_HEADERS, lineterminator="\n")
@@ -1473,6 +1515,44 @@ def _set_slide_header(slide, title: str, subtitle: str) -> None:
         existing_subtitle._element.getparent().remove(existing_subtitle._element)
 
 
+def _set_structural_slide_text(slide, title: str, subtitle: str) -> None:
+    """Populate a title/transition layout without creating extra text boxes."""
+    title_shape = next(
+        (
+            shape for shape in slide.placeholders
+            if shape.placeholder_format.type in {1, 3}
+        ),
+        None,
+    )
+    subtitle_shape = next(
+        (
+            shape for shape in slide.placeholders
+            if shape.placeholder_format.type == 4
+        ),
+        None,
+    )
+    if title_shape is not None:
+        title_shape.text = title
+        title_shape.text_frame.word_wrap = True
+        title_shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    if subtitle_shape is not None:
+        subtitle_shape.text = subtitle
+        subtitle_shape.text_frame.word_wrap = True
+        subtitle_shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    elif subtitle:
+        _set_slide_header(slide, title, subtitle)
+
+    # Structural slides keep only their title/subtitle placeholders. Branding
+    # and decorations inherited from the master/layout remain untouched.
+    retained_elements = {
+        shape._element for shape in (title_shape, subtitle_shape) if shape is not None
+    }
+    for shape in list(slide.placeholders):
+        if shape._element in retained_elements:
+            continue
+        shape._element.getparent().remove(shape._element)
+
+
 def _chart_frames(slide) -> list[tuple[int, int, int, int]]:
     """Remove example chart images/groups and return their occupied areas.
 
@@ -1525,6 +1605,14 @@ def _named_slide_layout(presentation: Presentation, layout_name: str):
         if layout.name.strip().casefold() == expected:
             return layout
     return None
+
+
+def _remove_all_slides(presentation: Presentation) -> None:
+    """Leave the source deck as a master/layout-only presentation."""
+    slide_id_list = presentation.slides._sldIdLst
+    for slide_id in list(slide_id_list):
+        presentation.part.drop_rel(slide_id.rId)
+        slide_id_list.remove(slide_id)
 
 
 def _apply_catalogue_layout(presentation: Presentation, slide, layout_name: str):
@@ -1586,46 +1674,54 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
                       multivendor: bool, catalog: list[CatalogEntry] | None = None) -> Path:
     if not template.exists():
         raise FileNotFoundError(f"Reporting template not found: {template.name}")
-    shutil.copyfile(template, destination)
-    presentation = Presentation(destination)
-    chart_specs = REPORT_CHART_SPECS[technology]
-    catalog_by_slide: dict[int, list[CatalogEntry]] = defaultdict(list)
-    catalog_headers: dict[int, CatalogEntry] = {}
-    for entry in catalog or []:
-        catalog_headers.setdefault(entry.slide, entry)
-        if entry.source_kind:
-            catalog_by_slide[entry.slide].append(entry)
-    for number, slide in enumerate(presentation.slides, start=1):
+    if not catalog:
+        raise ValueError("A Slide Catalogue is required to generate the report.")
+    presentation = Presentation(template)
+    _remove_all_slides(presentation)
+
+    catalogue_slides: dict[int, list[CatalogEntry]] = defaultdict(list)
+    for entry in catalog:
+        catalogue_slides[entry.slide].append(entry)
+
+    for number in sorted(catalogue_slides):
+        slide_entries = catalogue_slides[number]
+        header = slide_entries[0]
+        structural = header.structural_type
+        if not structural and header.chart_type.strip().casefold() in PRESERVED_CHART_TYPES:
+            structural = "title slide" if number == min(catalogue_slides) else "transition slide"
+
+        if structural:
+            layout_name = header.layout or ("Title Page" if structural == "title slide" else "Title Only")
+            layout = _named_slide_layout(presentation, layout_name)
+            if layout is None:
+                raise ValueError(f"Slide {number}: layout '{layout_name}' does not exist in the selected template.")
+            slide = presentation.slides.add_slide(layout)
+            _set_structural_slide_text(slide, header.slide_title, header.slide_subtitle)
+            continue
+
+        chart_entries = [entry for entry in slide_entries if entry.source_kind]
+        if not chart_entries:
+            raise ValueError(
+                f"Slide {number} does not define an automated chart, a Title Slide or a Transition Slide."
+            )
+        layouts = {entry.layout for entry in chart_entries}
+        if len(layouts) != 1:
+            raise ValueError(f"Slide {number} uses more than one Layout in the active catalogue.")
+        layout_name = layouts.pop()
+        layout = _named_slide_layout(presentation, layout_name)
+        if layout is None:
+            raise ValueError(f"Slide {number}: layout '{layout_name}' does not exist in the selected template.")
+        placement_frames = _layout_chart_frames(layout)
+        if len(placement_frames) < len(chart_entries):
+            raise ValueError(
+                f"Slide {number}: layout '{layout_name}' has {len(placement_frames)} chart placeholders, "
+                f"but the catalogue defines {len(chart_entries)} charts."
+            )
+        slide = presentation.slides.add_slide(layout)
+        _set_slide_header(slide, header.slide_title, header.slide_subtitle)
         _clear_commentary(slide)
-        if number in catalog_headers:
-            header = catalog_headers[number]
-            _set_slide_header(slide, header.slide_title, header.slide_subtitle)
-        catalog_entries = catalog_by_slide.get(number, [])
-        if catalog_entries:
-            removed_frames = _chart_frames(slide)
-            _remove_template_chart_placeholders(slide)
-            layouts = {entry.layout for entry in catalog_entries}
-            if len(layouts) != 1:
-                raise ValueError(f"Slide {number} uses more than one Layout in the active catalogue.")
-            layout_name = layouts.pop()
-            selected_layout = _apply_catalogue_layout(presentation, slide, layout_name)
-            placement_frames = _layout_chart_frames(selected_layout)
-            if len(placement_frames) < len(catalog_entries):
-                raise ValueError(
-                    f"Slide {number}: layout '{layout_name}' has {len(placement_frames)} chart placeholders, "
-                    f"but the catalogue defines {len(catalog_entries)} charts."
-                )
-            for entry, placement in zip(catalog_entries, placement_frames[:len(catalog_entries)], strict=True):
-                slide.shapes.add_picture(_chart_for_catalog_entry(entry, frames, multivendor), *placement)
-            continue
-        spec = chart_specs.get(number)
-        if not spec:
-            continue
-        title = next((shape.text.strip() for shape in slide.shapes if getattr(shape, "has_text_frame", False) and shape.text.strip()), "CDR KPI")
-        chart = _chart_for_spec(title, frames, spec, multivendor)
-        chart_frame = _combined_frame(_chart_frames(slide))
-        if not chart_frame:
-            chart_frame = (Inches(0.55), Inches(1.65), Inches(6.15), Inches(3.75))
-        slide.shapes.add_picture(chart, *chart_frame)
+        _remove_template_chart_placeholders(slide)
+        for entry, placement in zip(chart_entries, placement_frames[:len(chart_entries)], strict=True):
+            slide.shapes.add_picture(_chart_for_catalog_entry(entry, frames, multivendor), *placement)
     presentation.save(destination)
     return destination

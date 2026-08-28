@@ -13,6 +13,8 @@
 - Added a read-only processed-dataset preview from the Workspace queue, with a direct CDR-only **Show Dashboard** action.
 
 #### 🚀 Enhancements:
+- Unified NSA, SA, single-vendor and multivendor generation on the single master/layout-only `Template_CDR_analysis.pptx`, with no source slides. The selected catalogue supplies the technology-specific structure and the renderer creates exactly one slide per catalogue number, applying its named layout and filling chart placeholders in row-major order.
+- Added catalogue-native `Title Slide` and `Transition Slide` types for covers and section dividers. They populate title/subtitle placeholders without accepting CDR, KPI, chart, legend, filter or grouping fields; legacy preserve rows are converted to the corresponding structural format.
 - Reworked template-backed CDR rendering into an explicit NSA/SA slide contract: each automated slide now selects its CDR source, technology/session/test/direction filters, KPI and template chart grammar (100% stacked columns, stacked failure counts, CDF lines, mean/median bars or scatter) rather than reusing one generic bar chart. The complete catalog now records CDR source, KPI, chart type, filters and grouping per chart (one row per chart), with matching editable NSA/SA CSV exports.
 - Rebased the NSA catalogue on the NetCheck CDR Dictionary and benchmarking methodology: it now uses the documented call families, data-test fields, FDFS transfer duration, interactivity packet-error KPI and the DL/UL FDTT bucket definitions from the template.
 - Split NSA template screenshots that contained several charts into independent catalogue rows and matching row/column layouts, including the two data-success charts on slide 10 and the three WhatsApp POLQA visuals on slide 13.

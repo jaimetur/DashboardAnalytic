@@ -1,11 +1,11 @@
 Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Legend,Filters,Grouping_Rows,Grouping_Columns
-1,2025 Q4 Net check UK,"NSA CDR analysis\nBelfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield",,,, ,Not Automated (preserve),,,,
-2,Executive Summary,,,,,,Not Automated (preserve),,,,
-3,Netcheck Q4 scoring “Best network”. Drive city,,,,,,Not Automated (preserve),,,,
-4,Score breakdown,,,,,,Not Automated (preserve),,,,
-5,KPIs prioritization: gap Vodafone vs EE,,,,,,Not Automated (preserve),,,,
-6,KPIs prioritization: gap Three vs EE,,,,,,Not Automated (preserve),,,,
-7,7 cities analysis,"Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield",,,,,Not Automated (preserve),,,,
+1,2025 Q4 Net check UK,"NSA CDR analysis\nBelfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield",Title Page,,,,Title Slide,,,,
+2,Executive Summary,,Title Only,,,,Transition Slide,,,,
+3,Netcheck Q4 scoring “Best network”. Drive city,,Title Only,,,,Transition Slide,,,,
+4,Score breakdown,,Title Only,,,,Transition Slide,,,,
+5,KPIs prioritization: gap Vodafone vs EE,,Title Only,,,,Transition Slide,,,,
+6,KPIs prioritization: gap Three vs EE,,Title Only,,,,Transition Slide,,,,
+7,7 cities analysis,"Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield",Title Only,,,,Transition Slide,,,,
 8,Completed Call Ratio,"Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield",Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,"Call Family IN (VoLTE, MultiRAB, WhatsApp); Operator IN (Vodafone UK, 3, EE)",Call Family,Operator × Campaign
 9,Voice failures per Q/city,"Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield",Title and 1 column + Comments,,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,,"Call Family IN (VoLTE, MultiRAB, WhatsApp); Call_Status IN (Failed, Dropped)",Call Family × G Level 4,Operator × Campaign
 10,Data failure,"Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield",Title and 2 rows + Comments right,,CDR-Data,Test_Result,100% Stacked Vertical Bars,,"Test Family IN (httpBrowser, htttpBrowser, httpTransfer, YouTube, VideoStreaming)",Type_of_Test,Operator × Campaign
@@ -36,4 +36,4 @@ Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type
 20,Interactivity,"Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield",Title and 2 columns and 2 rows + Comments right,,CDR-Data,Packet_Error_Ratio,Average Vertical Bars,,"Test_Result = Completed; Type_of_Test = Interactivity; Operator IN (Vodafone UK, 3, EE)",Operator,Campaign
 21,Browsing,"Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield",Title and 2 columns + Comments,,CDR-Data,http_Browser_1MB_Reached_Duration,CDF Line,,"Test_Result = Completed; Type_of_Test = httpBrowser; Operator IN (Vodafone UK, 3, EE)",Operator,Campaign
 21,Browsing,"Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield",Title and 2 columns + Comments,,CDR-Data,http_Browser_1MB_Reached_Duration,Average Vertical Bars,,"Test_Result = Completed; Type_of_Test = httpBrowser; Operator IN (Vodafone UK, 3, EE)",Operator,Campaign
-22,Conclusions,,1_Title and 1 column,,,,Table,,,,
+22,Conclusions,,Title Only,,,,Transition Slide,,,,
