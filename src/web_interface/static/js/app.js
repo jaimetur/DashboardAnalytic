@@ -1988,6 +1988,7 @@ const queueNode = document.querySelector('[data-queue-status-url]');
 if (queueNode) {
   const url = queueNode.dataset.queueStatusUrl || '';
   const delay = Number(queueNode.dataset.queuePollMs || '0');
+  let refreshWorkspaceAfterCompletion = false;
   const selectedDatasetField = document.querySelector('input[name="dataset_id"], select[name="dataset_id"]');
   const waitingPanel = document.querySelector('.queue-waiting-copy');
   const queueTypeFilter = document.querySelector('[data-queue-type-filter]');
@@ -2012,6 +2013,8 @@ if (queueNode) {
     const updated = row.querySelector('[data-queue-updated]');
     const actions = row.querySelector('.queue-actions');
     let errorNode = row.querySelector('[data-queue-error]');
+    const previousStatus = row.dataset.queueStatus
+      || (statusPill?.classList.contains('queue-status-ready') ? 'ready' : '');
 
     if (kind) kind.textContent = dataset.input_kind_label || 'Other';
     if (rows) rows.textContent = String(dataset.row_count || 0);
@@ -2019,6 +2022,10 @@ if (queueNode) {
     if (statusPill) {
       statusPill.textContent = dataset.status_label || dataset.status || 'Queued';
       statusPill.className = `queue-status-pill queue-status-${dataset.status}`;
+    }
+    row.dataset.queueStatus = dataset.status || '';
+    if (previousStatus && previousStatus !== 'ready' && dataset.status === 'ready') {
+      refreshWorkspaceAfterCompletion = true;
     }
     if (progressBar) {
       progressBar.style.width = `${dataset.progress || 0}%`;
@@ -2120,6 +2127,12 @@ if (queueNode) {
       const payload = await response.json();
       const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
       datasets.forEach(updateQueueRow);
+      if (refreshWorkspaceAfterCompletion) {
+        // A complete reload obtains the final server-rendered action set,
+        // including Map/Clear Vendors, after background processing finishes.
+        window.location.reload();
+        return;
+      }
       const selectedDatasetId = selectedDatasetField ? selectedDatasetField.value : '';
       if (waitingPanel && selectedDatasetId) {
         const selected = datasets.find((dataset) => String(dataset.id) === String(selectedDatasetId));

@@ -390,6 +390,7 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
 
     workspace = client.get('/workspace')
     assert 'Map Vendors</button>' in workspace.text
+    assert 'data-queue-status="ready"' in workspace.text
     assert 'name="three_mapping_dataset_id" required' in workspace.text
     assert 'name="vodafone_mapping_dataset_id" required' not in workspace.text
     assert 'Vendor mapping rule' in workspace.text
