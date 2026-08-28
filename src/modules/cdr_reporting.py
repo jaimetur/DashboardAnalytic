@@ -766,8 +766,6 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         frame["__catalog_stack"] = frame[stack_column].fillna("(blank)").astype(str)
     else:
         materialise(column_columns, series)
-    if not column_columns:
-        frame[series] = frame[primary]
     return frame, primary, series
 
 
@@ -816,6 +814,12 @@ def _legend_caption(labels: tuple[str, ...], index: int, fallback: object) -> st
     return labels[index] if index < len(labels) else str(fallback)
 
 
+def _catalogue_display_label(category: object, series: object) -> str:
+    """Keep row categories visible while using column groups as comparisons."""
+    category_text, series_text = str(category), str(series)
+    return category_text if series_text == "(all)" else f"{category_text} · {series_text}"
+
+
 def _canvas(title: str) -> tuple[Image.Image, ImageDraw.ImageDraw]:
     image = Image.new("RGB", (1600, 900), "white")
     draw = ImageDraw.Draw(image)
@@ -862,7 +866,8 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
             draw.rectangle((x, y, x + bar_width, y + height), fill=colour)
             if value >= .08: draw.text((x + 2, y + height / 2 - 8), f"{value:.0%}", fill="white", font=_font(14, True))
             running += height
-        draw.text((x - 4, chart_top + chart_height + 8), p[-8:], fill="#5A6B78", font=_font(13))
+        label = _catalogue_display_label(g, p)
+        draw.text((x - 4, chart_top + chart_height + 8), label[:24], fill="#5A6B78", font=_font(13))
     for y in range(0, 101, 20):
         value_y = chart_top + chart_height - (y / 100 * chart_height)
         draw.line((chart_left - 20, value_y, chart_left + chart_width, value_y), fill="#E4E9ED", width=1)
@@ -882,8 +887,8 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
     failed["__catalog_failure_state"] = failed[status].astype(str).map(
         lambda value: "Dropped" if "drop" in value.casefold() else "Failed"
     )
-    label = period or group
-    fields = [group] if label == group else [group, label]
+    has_series = bool(period) and not failed[period].fillna("(all)").astype(str).eq("(all)").all()
+    fields = [group, period] if has_series else [group]
     counts = failed.groupby([*fields, "__catalog_failure_state"], dropna=False).size().unstack(fill_value=0)
     counts = counts.head(16)
     image, draw = _canvas(title); maximum = max(int(counts.sum(axis=1).max()), 1)
@@ -922,7 +927,7 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
             value = len(subset[subset[stack] == bucket]) / total; segment = value * height; y = top + height - running - segment
             draw.rectangle((x, y, x + bar_width, y + segment), fill=_colour(bucket, bucket_index))
             running += segment
-        draw.text((x - 4, top + height + 10), str(series_value)[:12], fill="#5A6B78", font=_font(12))
+        draw.text((x - 4, top + height + 10), _catalogue_display_label(category, series_value)[:24], fill="#5A6B78", font=_font(12))
     for index, bucket in enumerate(buckets[:8]):
         x = left + index * 150
         draw.rectangle((x, 82, x + 20, 100), fill=_colour(bucket, index)); draw.text((x + 27, 82), _legend_caption(legend_labels, index, bucket), fill="#34495A", font=_font(13))
@@ -950,13 +955,15 @@ def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period:
     if data.empty: return _empty_chart(title)
     image, draw = _canvas(title); left, top, width, height = 100, 135, 1320, 590
     low, high = float(data[metric].min()), float(data[metric].max()); high = high if high > low else low + 1
-    series_column = period if period else group
-    labels = [f"{g} · {p}" if period else str(g) for g, p in data[[group, series_column]].drop_duplicates().itertuples(index=False)] if period else [str(v) for v in data[group].drop_duplicates()]
-    for index, label in enumerate(labels[:10]):
-        if period:
-            g, p = label.split(" · ", 1); values = data[(data[group].astype(str) == g) & (data[period].astype(str) == p)][metric].sort_values().tolist()
-        else: values = data[data[group].astype(str) == label][metric].sort_values().tolist()
+    series_column = period or group
+    combinations = list(data[[group, series_column]].drop_duplicates().itertuples(index=False, name=None))
+    for index, (category, series_value) in enumerate(combinations[:10]):
+        values = data[
+            (data[group].astype(str) == str(category))
+            & (data[series_column].astype(str) == str(series_value))
+        ][metric].sort_values().tolist()
         if not values: continue
+        label = _catalogue_display_label(category, series_value) if period else str(category)
         points = [(left + (value - low) / (high - low) * width, top + height - ((n + 1) / len(values)) * height) for n, value in enumerate(values)]
         draw.line(points, fill=_colour(label, index), width=4)
         legend_x = left + (index % 5) * 250
@@ -1030,7 +1037,8 @@ def _render_table(title: str, frame: pd.DataFrame, group: str | None, series: st
     data = data.dropna(subset=[metric])
     if data.empty:
         return _empty_chart(title)
-    if series and series != group:
+    has_series = bool(series) and not data[series].fillna("(all)").astype(str).eq("(all)").all()
+    if has_series:
         table = data.pivot_table(index=group, columns=series, values=metric, aggfunc="mean")
     else:
         table = data.groupby(group)[metric].mean().to_frame("Value")
@@ -1105,8 +1113,13 @@ def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame
         return _render_failure_count(chart_title, frame, group, period, legend_labels)
     if chart_type == "distribution stacked vertical bars":
         return _render_stacked_distribution(chart_title, frame, group, period, "__catalog_stack", legend_labels)
-    # Non-stacked visuals have one visual series per complete grouping combination.
-    frame["__catalog_label"] = frame[group].fillna("(blank)").astype(str) + " · " + frame[period].fillna("(blank)").astype(str)
+    # Non-stacked visuals have one visual series per row/column combination. A
+    # rows-only chart remains a single category series rather than becoming the
+    # misleading ``Operator · Operator`` label used by the earlier renderer.
+    frame["__catalog_label"] = [
+        _catalogue_display_label(category, series)
+        for category, series in frame[[group, period]].fillna("(blank)").itertuples(index=False, name=None)
+    ]
     if spec["kind"] == "scatter":
         return _render_scatter(chart_title, frame, "__catalog_label", metric, _column(frame, spec.get("x_metric", ())), legend_labels)
     if chart_type == "table":

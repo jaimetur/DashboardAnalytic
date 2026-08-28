@@ -151,6 +151,19 @@ def test_catalogue_filter_and_grouping_contract_is_parsed_and_applied() -> None:
     assert '__catalog_stack' not in grouped.columns
 
 
+def test_rows_only_grouping_uses_one_all_series_without_repeating_the_category() -> None:
+    entry = parse_catalog_csv(
+        ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,Average Vertical Bars,,,Operator,\n',
+        'nsa',
+    )[0]
+    frame = pd.DataFrame({'Operator': ['EE', 'O2'], 'LQ': [3.2, 3.8]})
+
+    grouped, primary, series = _apply_catalog_grouping(frame, entry, False, 'LQ')
+
+    assert grouped[primary].tolist() == ['EE', 'O2']
+    assert grouped[series].tolist() == ['(all)', '(all)']
+
+
 def test_catalogue_filter_contract_supports_not_in_and_not_contains() -> None:
     conditions = parse_catalog_filters('Session_Type NOT IN (WhatsApp, SMS); Campaign NOT CONTAINS legacy')
     assert [(item.column, item.operator, item.values) for item in conditions] == [
