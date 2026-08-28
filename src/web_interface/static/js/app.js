@@ -473,11 +473,12 @@ document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
   input.addEventListener('change', async () => {
     const name = input.value.trim();
     if (!name || name === savedValue || !input.form) return;
+    const formData = new FormData(input.form);
     input.disabled = true;
     try {
       const response = await fetch(input.form.action, {
         method: 'POST',
-        body: new FormData(input.form),
+        body: formData,
         credentials: 'same-origin',
         headers: {Accept: 'application/json'},
       });
@@ -488,8 +489,8 @@ document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
       input.setAttribute('aria-label', `Name for ${savedValue}`);
     } catch (error) {
       input.value = savedValue;
-      showConfirmDialog(error instanceof Error ? error.message : 'The catalogue name could not be saved.', {
-        title: 'Catalogue Rename Failed', confirmLabel: 'Close', hideCancel: true,
+      showInfoDialog(error instanceof Error ? error.message : 'The catalogue name could not be saved.', {
+        title: 'Catalogue Rename Failed',
       });
     } finally {
       input.disabled = false;
