@@ -2326,9 +2326,26 @@ def rename_report_catalogue(
         if catalogue_id == 'default':
             technology_registry['default_name'] = name
         else:
-            metadata = technology_registry.setdefault('catalogues', {}).get(catalogue_id)
+            catalogues = technology_registry.setdefault('catalogues', {})
+            metadata = catalogues.get(catalogue_id)
             if not isinstance(metadata, dict):
                 raise ValueError('Named catalogue metadata was not found.')
+            new_identifier = catalogue_identifier(name)
+            if new_identifier != catalogue_id:
+                if new_identifier in catalogues:
+                    raise ValueError(f"A {technology.upper()} catalogue named '{catalogues[new_identifier].get('name', new_identifier)}' already exists.")
+                source_path = named_catalogue_path(technology, catalogue_id)
+                destination_path = named_catalogue_path(technology, new_identifier)
+                if not source_path.exists():
+                    raise ValueError('The named catalogue CSV could not be found.')
+                if destination_path.exists():
+                    raise ValueError(f"The catalogue file '{destination_path.name}' already exists.")
+                source_path.rename(destination_path)
+                catalogues[new_identifier] = catalogues.pop(catalogue_id)
+                metadata = catalogues[new_identifier]
+                if technology_registry.get('active') == catalogue_id:
+                    technology_registry['active'] = new_identifier
+                catalogue_id = new_identifier
             metadata['name'] = name
         save_report_catalogue_registry(registry)
     except ValueError as exc:
@@ -2337,7 +2354,10 @@ def rename_report_catalogue(
         return render_admin_template(request, user, error=str(exc), status_code=400)
     repository.add_log(user.username, 'rename_report_catalogue', json.dumps({'technology': technology, 'catalogue': catalogue_id, 'name': name}))
     if 'application/json' in request.headers.get('accept', ''):
-        return JSONResponse({'name': name})
+        payload = {'name': name}
+        if catalogue['identifier'] != 'default':
+            payload['identifier'] = catalogue_id
+        return JSONResponse(payload)
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 

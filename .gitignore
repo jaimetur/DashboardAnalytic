@@ -14,4 +14,6 @@ data/exports/*
 !data/input/.gitkeep
 !data/output/.gitkeep
 !data/exports/.gitkeep
+/assets/ppt-slides-catalog/catalogue-library.json
+/assets/ppt-slides-catalog/library/
 .idea/

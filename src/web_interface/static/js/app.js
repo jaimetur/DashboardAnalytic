@@ -743,6 +743,28 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
 
 document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
   let savedValue = input.value.trim();
+  const updateCatalogueIdentifier = (previousIdentifier, identifier) => {
+    if (!previousIdentifier || !identifier || previousIdentifier === identifier) return;
+    const row = input.closest('tr');
+    const technology = input.form?.action.match(/\/admin\/report-catalogues\/([^/]+)\//)?.[1];
+    if (!row || !technology) return;
+    const oldSegment = `/admin/report-catalogues/${technology}/${previousIdentifier}/`;
+    const newSegment = `/admin/report-catalogues/${technology}/${identifier}/`;
+    row.querySelectorAll('form[action], a[href]').forEach((element) => {
+      const attribute = element.tagName === 'A' ? 'href' : 'action';
+      const value = element.getAttribute(attribute);
+      if (value?.includes(oldSegment)) element.setAttribute(attribute, value.replace(oldSegment, newSegment));
+    });
+    document.querySelectorAll(`option[value="${technology}:${previousIdentifier}"]`).forEach((option) => {
+      option.value = `${technology}:${identifier}`;
+    });
+    const parameters = new URLSearchParams(window.location.search);
+    if (parameters.get('catalogue_technology') === technology && parameters.get('catalogue_id') === previousIdentifier) {
+      parameters.set('catalogue_id', identifier);
+      const query = parameters.toString();
+      window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
+    }
+  };
   input.addEventListener('change', async () => {
     const name = input.value.trim();
     if (!name || name === savedValue || !input.form) return;
@@ -760,6 +782,8 @@ document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
       savedValue = String(payload.name || name).trim();
       input.value = savedValue;
       input.setAttribute('aria-label', `Name for ${savedValue}`);
+      const previousIdentifier = input.form.action.match(/\/admin\/report-catalogues\/[^/]+\/([^/]+)\/rename$/)?.[1];
+      updateCatalogueIdentifier(previousIdentifier, payload.identifier);
     } catch (error) {
       input.value = savedValue;
       showInfoDialog(error instanceof Error ? error.message : 'The catalogue name could not be saved.', {

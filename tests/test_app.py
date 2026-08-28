@@ -1186,6 +1186,41 @@ def test_admin_catalogue_rename_supports_background_json_save(client) -> None:
     assert next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'default')['name'] == 'Renamed default'
 
 
+def test_admin_renaming_named_catalogue_renames_its_csv_file(client, tmp_path, monkeypatch) -> None:
+    from src.modules.cdr_reporting import CATALOG_HEADERS
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    help_document = tmp_path / 'powerpoint-reporting.md'
+    help_document.write_text('# Reporting\n\n<!-- SLIDE_CATALOGUE:START -->\nold\n<!-- SLIDE_CATALOGUE:END -->\n', encoding='utf-8')
+    monkeypatch.setattr(app_module, 'REPORT_CATALOGUE_DOCUMENT', help_document)
+    content = (
+        ','.join(CATALOG_HEADERS)
+        + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n'
+    ).encode('utf-8')
+    imported = client.post(
+        '/admin/report-catalogues/nsa',
+        data={'catalogue_name': 'Original catalogue'},
+        files={'catalogue_file': ('nsa.csv', BytesIO(content), 'text/csv')},
+        follow_redirects=False,
+    )
+    assert imported.status_code == 303
+
+    original_path = app_module.named_catalogue_path('nsa', 'original-catalogue')
+    response = client.post(
+        '/admin/report-catalogues/nsa/original-catalogue/rename',
+        data={'catalogue_name': 'Renamed catalogue'},
+        headers={'accept': 'application/json'},
+    )
+
+    renamed_path = app_module.named_catalogue_path('nsa', 'renamed-catalogue')
+    assert response.status_code == 200
+    assert response.json() == {'name': 'Renamed catalogue', 'identifier': 'renamed-catalogue'}
+    assert not original_path.exists()
+    assert renamed_path.read_bytes() == content
+    assert next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'renamed-catalogue')['active']
+
+
 def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     login(client)
 

@@ -24,6 +24,7 @@
 - Refined the responsive tabbed UI, module palettes, action controls, loading dialogs and Help navigation across Workspace, Dashboard, Reporting and Admin.
 - Added a reporting catalogue selector that follows the NSA/SA workspace default while allowing a per-report override.
 - Expanded the in-browser Slide Catalogue Editor with contextual assistance, Filter Builder, searchable single/multi-select values, fixed action/Slide columns, row movement/insertion/removal, re-enumeration and scroll guidance.
+- Renaming a named workspace catalogue now also renames its managed CSV file and preserves its default selection.
 - Added timestamped report filenames, `UpdateAll.py`, and removed obsolete release-document tooling.
 
 #### 🐛 Bug fixes:
