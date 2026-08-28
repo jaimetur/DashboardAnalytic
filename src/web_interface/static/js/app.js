@@ -502,6 +502,11 @@ document.querySelectorAll('.catalogue-editor-picker-form').forEach((form) => {
   form.addEventListener('submit', () => preserveAdminScrollPosition());
 });
 
+document.querySelectorAll('form[action*="/admin/report-catalogues/"]').forEach((form) => {
+  if (form.classList.contains('catalogue-rename-form')) return;
+  form.addEventListener('submit', () => preserveAdminScrollPosition());
+});
+
 document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
   const name = form.querySelector('[data-catalogue-import-name]');
   const file = form.querySelector('[data-catalogue-import-file]');
