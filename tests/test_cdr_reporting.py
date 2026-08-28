@@ -74,6 +74,22 @@ def test_workspace_vendor_assignment_writes_the_normalized_vendor_field() -> Non
     assert mapped['report_vendor'].tolist() == ['Vodafone_Ericsson', '3_Mixed Vendor', 'O2 (UK)']
 
 
+def test_workspace_vendor_assignment_supports_a_single_selected_mapping() -> None:
+    cdr = pd.DataFrame({
+        'Operator': ['Vodafone UK', '3'],
+        'Cell_ID_A': ['100 -> 100', '200 -> 200'],
+    })
+    vodafone_mapping = pd.DataFrame({
+        'source_sheet': ['4G'], 'eNodeB ID': [0], 'Local Cell ID': [100], 'OP/ Vendor': ['Ericsson'],
+    })
+
+    mapped = assign_cdr_vendors(cdr, vodafone_mapping, None)
+
+    assert mapped.loc[0, 'vendor'] == 'Vodafone_Ericsson'
+    assert pd.isna(mapped.loc[1, 'vendor'])
+    assert mapped['report_vendor'].tolist() == ['Vodafone_Ericsson', '3']
+
+
 def test_catalogue_converter_migrates_legacy_headers_and_grouping() -> None:
     legacy = (
         'Slide,Slide title,Slide subtitle,Layout,CDR Source,KPI,Chart Type,Filters,Grouping\n'

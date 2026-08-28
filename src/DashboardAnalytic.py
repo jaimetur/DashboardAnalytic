@@ -699,7 +699,13 @@ def ensure_dataset_query_table(dataset: dict[str, Any], required_columns: list[s
     repository.replace_dataset_rows(dataset_id, df)
 
 
-def process_dataset(dataset_id: int, dataset_path: Path, username: str) -> None:
+def process_dataset(
+    dataset_id: int,
+    dataset_path: Path,
+    username: str,
+    vodafone_mapping_dataset_id: int | None = None,
+    three_mapping_dataset_id: int | None = None,
+) -> None:
     dataset = repository.get_dataset(dataset_id)
     if not dataset or not dataset_path.exists():
         clear_stop_request(dataset_id)
@@ -713,8 +719,21 @@ def process_dataset(dataset_id: int, dataset_path: Path, username: str) -> None:
 
         selected_kind = str(dataset['dataset_kind'] or '').strip().lower()
         forced_dataset_kind = selected_kind if selected_kind in UPLOAD_DATASET_KINDS else None
-        rebuild_dataset_artifacts(dataset_id, dataset_path, progress_callback=progress_update, forced_dataset_kind=forced_dataset_kind)
-        repository.add_log(username, 'process_dataset', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name, 'status': 'ready'}))
+        rebuild_dataset_artifacts(
+            dataset_id,
+            dataset_path,
+            progress_callback=progress_update,
+            forced_dataset_kind=forced_dataset_kind,
+            vodafone_mapping_dataset_id=vodafone_mapping_dataset_id,
+            three_mapping_dataset_id=three_mapping_dataset_id,
+        )
+        repository.add_log(username, 'process_dataset', json.dumps({
+            'dataset_id': dataset_id,
+            'file': dataset_path.name,
+            'status': 'ready',
+            'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
+            'three_mapping_dataset_id': three_mapping_dataset_id,
+        }))
     except ProcessingStopped as exc:
         progress = int((repository.get_dataset(dataset_id) or {}).get('progress') or 0)
         repository.update_dataset_profile(
@@ -732,7 +751,14 @@ def process_dataset(dataset_id: int, dataset_path: Path, username: str) -> None:
         clear_stop_request(dataset_id)
 
 
-def enqueue_dataset_processing(background_tasks: BackgroundTasks, dataset_id: int, dataset_path: Path, username: str) -> None:
+def enqueue_dataset_processing(
+    background_tasks: BackgroundTasks,
+    dataset_id: int,
+    dataset_path: Path,
+    username: str,
+    vodafone_mapping_dataset_id: int | None = None,
+    three_mapping_dataset_id: int | None = None,
+) -> None:
     clear_stop_request(dataset_id)
     stale_keys = [key for key in ANALYSIS_CACHE if str(dataset_path.resolve()) in key]
     for key in stale_keys:
@@ -741,7 +767,14 @@ def enqueue_dataset_processing(background_tasks: BackgroundTasks, dataset_id: in
     for key in stale_dataset_keys:
         DATAFRAME_CACHE.pop(key, None)
     repository.update_dataset_profile(dataset_id, status='queued', progress=0, last_error=None, processed_at=None)
-    background_tasks.add_task(process_dataset, dataset_id, dataset_path, username)
+    background_tasks.add_task(
+        process_dataset,
+        dataset_id,
+        dataset_path,
+        username,
+        vodafone_mapping_dataset_id,
+        three_mapping_dataset_id,
+    )
 
 
 def rebuild_dataset_artifacts(
@@ -749,6 +782,8 @@ def rebuild_dataset_artifacts(
     dataset_path: Path,
     progress_callback: Callable[[int], None] | None = None,
     forced_dataset_kind: str | None = None,
+    vodafone_mapping_dataset_id: int | None = None,
+    three_mapping_dataset_id: int | None = None,
 ) -> dict[str, Any]:
     df = load_dataset(dataset_path, progress_callback=progress_callback)
     if forced_dataset_kind in UPLOAD_DATASET_KINDS:
@@ -757,11 +792,29 @@ def rebuild_dataset_artifacts(
         df = add_vfuk_gcid_column(df)
     elif forced_dataset_kind == 'mapping_three':
         df = add_three_gcid_column(df)
+    dataset_kind = df['dataset_kind'].iloc[0] if 'dataset_kind' in df.columns and not df.empty else (forced_dataset_kind or infer_dataset_kind(df, dataset_path.name))
+    auto_vendor_mapping_applied = False
+    if dataset_kind in CDR_DATASET_KINDS and (vodafone_mapping_dataset_id or three_mapping_dataset_id):
+        if progress_callback:
+            progress_callback(52)
+        vodafone_mapping = (
+            _reporting_dataset(vodafone_mapping_dataset_id, 'mapping_vodafone')
+            if vodafone_mapping_dataset_id else None
+        )
+        three_mapping = (
+            _reporting_dataset(three_mapping_dataset_id, 'mapping_three')
+            if three_mapping_dataset_id else None
+        )
+        df = assign_cdr_vendors(
+            df,
+            _reporting_frame(vodafone_mapping['id']) if vodafone_mapping else None,
+            _reporting_frame(three_mapping['id']) if three_mapping else None,
+        )
+        auto_vendor_mapping_applied = True
     store_cached_dataset_frame(dataset_path, df)
     repository.replace_dataset_rows(dataset_id, df)
     if progress_callback:
         progress_callback(62)
-    dataset_kind = df['dataset_kind'].iloc[0] if 'dataset_kind' in df.columns and not df.empty else (forced_dataset_kind or infer_dataset_kind(df, dataset_path.name))
     repository.update_dataset_profile(dataset_id, progress=62, dataset_kind=dataset_kind)
     summary = summarise_dataset(df)
     if progress_callback:
@@ -790,7 +843,7 @@ def rebuild_dataset_artifacts(
         status='ready',
         progress=100,
         normalization_version=DATASET_NORMALIZATION_VERSION,
-        vendor_mapping_applied=False,
+        vendor_mapping_applied=auto_vendor_mapping_applied,
         vendor_values_complete=vendor_values_complete,
         dataset_kind=dataset_kind,
         row_count=summary.rows,
@@ -1767,6 +1820,8 @@ async def upload_dataset(
     background_tasks: BackgroundTasks,
     dataset_files: Annotated[list[UploadFile], File(...)],
     dataset_kinds: Annotated[list[str] | None, Form()] = None,
+    vodafone_mapping_dataset_ids: Annotated[list[str] | None, Form()] = None,
+    three_mapping_dataset_ids: Annotated[list[str] | None, Form()] = None,
     user: SessionUser = Depends(current_user),
 ) -> Response:
     if not dataset_files:
@@ -1816,6 +1871,36 @@ async def upload_dataset(
     if any(kind not in UPLOAD_DATASET_KINDS for kind in selected_kinds):
         raise HTTPException(status_code=422, detail='Unsupported dataset type selection.')
 
+    def parse_mapping_selection(values: list[str] | None, label: str) -> list[int | None]:
+        if not values:
+            return [None] * len(dataset_files)
+        if len(values) != len(dataset_files):
+            raise HTTPException(status_code=422, detail=f'Choose one {label} value for every uploaded file.')
+        selected_ids: list[int | None] = []
+        for value in values:
+            value = str(value or '').strip()
+            if not value:
+                selected_ids.append(None)
+                continue
+            try:
+                selected_ids.append(int(value))
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f'Invalid {label} selection.') from exc
+        return selected_ids
+
+    selected_vodafone_mappings = parse_mapping_selection(vodafone_mapping_dataset_ids, 'VFUK mapping')
+    selected_three_mappings = parse_mapping_selection(three_mapping_dataset_ids, '3UK mapping')
+    for index, selected_kind in enumerate(selected_kinds or [''] * len(dataset_files)):
+        if selected_kind not in CDR_DATASET_KINDS:
+            continue
+        try:
+            if selected_vodafone_mappings[index]:
+                _reporting_dataset(selected_vodafone_mappings[index], 'mapping_vodafone')
+            if selected_three_mappings[index]:
+                _reporting_dataset(selected_three_mappings[index], 'mapping_three')
+        except HTTPException:
+            raise
+
     queued_dataset_ids: list[int] = []
     for index, dataset_file in enumerate(dataset_files):
         extension = Path(dataset_file.filename or '').suffix.lower()
@@ -1825,8 +1910,22 @@ async def upload_dataset(
         selected_kind = selected_kinds[index] if selected_kinds else None
         if selected_kind:
             repository.update_dataset_profile(dataset_id, dataset_kind=selected_kind)
-        repository.add_log(user.username, 'upload_dataset' if created else 'reprocess_dataset', json.dumps({'file': destination.name, 'dataset_kind': selected_kind or 'auto-detected'}))
-        enqueue_dataset_processing(background_tasks, dataset_id, destination, user.username)
+        vodafone_mapping_dataset_id = selected_vodafone_mappings[index] if selected_kind in CDR_DATASET_KINDS else None
+        three_mapping_dataset_id = selected_three_mappings[index] if selected_kind in CDR_DATASET_KINDS else None
+        repository.add_log(user.username, 'upload_dataset' if created else 'reprocess_dataset', json.dumps({
+            'file': destination.name,
+            'dataset_kind': selected_kind or 'auto-detected',
+            'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
+            'three_mapping_dataset_id': three_mapping_dataset_id,
+        }))
+        enqueue_dataset_processing(
+            background_tasks,
+            dataset_id,
+            destination,
+            user.username,
+            vodafone_mapping_dataset_id,
+            three_mapping_dataset_id,
+        )
         queued_dataset_ids.append(dataset_id)
 
     if not queued_dataset_ids:

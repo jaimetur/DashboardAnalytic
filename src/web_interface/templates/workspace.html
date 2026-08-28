@@ -9,8 +9,8 @@
       </div>
       <span class="pill live-pill">Auto profile on upload</span>
     </div>
-    <p class="lede">Bring the source files that feed every product workflow into one managed workspace: NetCheck CDR workbooks (Data, Voice and Speech), Smart Orchestrator Logs, and Vodafone UK (VFUK) or Three UK (3UK) Multivendor Mappings. Workspace proposes a type from each filename, lets you confirm it per file, and processes the result for Dashboard or Reporting.</p>
-    <form class="upload-dropzone" action="/dashboard/upload" method="post" enctype="multipart/form-data" data-loading-label="Uploading and processing dataset" data-upload-type-form>
+    <p class="lede">Bring the source files that feed every product workflow into one managed workspace: NetCheck CDR workbooks (Data, Voice and Speech), Smart Orchestrator Logs, and Vodafone UK (VFUK) or Three UK (3UK) Multivendor Mappings. Workspace proposes a type from each filename, lets you confirm it per file and, for CDRs, can apply selected processed VFUK and 3UK Vendor mappings during import.</p>
+    <form class="upload-dropzone" action="/dashboard/upload" method="post" enctype="multipart/form-data" data-loading-label="Uploading, processing and optionally mapping Vendor values" data-upload-type-form data-vodafone-mapping-options='{{ vodafone_mapping_datasets | default([]) | tojson }}' data-three-mapping-options='{{ three_mapping_datasets | default([]) | tojson }}'>
       <label class="dropzone-field" data-upload-dropzone>
         <span class="dropzone-title">Drop workbooks or browse</span>
         <span class="dropzone-copy">Accepted: CSV, XLS, XLSX, XLSM</span>
@@ -290,6 +290,12 @@
     ['mapping_three', 'Multivendor Mapping — Three UK (3UK)'],
     ['generic', 'Other supported dataset'],
   ];
+  const cdrTypes = new Set(['data', 'voice', 'speech']);
+  const parseMappingOptions = (attribute) => {
+    try { return JSON.parse(form.dataset[attribute] || '[]'); } catch (_error) { return []; }
+  };
+  const vodafoneMappings = parseMappingOptions('vodafoneMappingOptions');
+  const threeMappings = parseMappingOptions('threeMappingOptions');
 
   function inferType(fileName) {
     const normalized = String(fileName || '').toLowerCase().replace(/[_-]+/g, ' ');
@@ -311,8 +317,8 @@
       ? 'Review the detected type for every file and correct any value before processing.'
       : 'The type has been preselected from the filename when it could be identified. Confirm or change it before processing.';
     files.forEach((file) => {
-      const label = document.createElement('label');
-      label.className = 'upload-type-item';
+      const item = document.createElement('div');
+      item.className = 'upload-type-item';
       const name = document.createElement('span');
       name.textContent = file.name;
       const select = document.createElement('select');
@@ -324,8 +330,33 @@
       select.add(placeholder);
       types.forEach(([value, text]) => select.add(new Option(text, value)));
       select.value = inferType(file.name);
-      label.append(name, select);
-      items.append(label);
+      const mappings = document.createElement('div');
+      mappings.className = 'upload-vendor-mapping-selectors';
+      mappings.hidden = !cdrTypes.has(select.value);
+      const addMappingSelector = (labelText, fieldName, choices) => {
+        const field = document.createElement('label');
+        field.textContent = labelText;
+        field.hidden = choices.length === 0;
+        const mappingSelect = document.createElement('select');
+        mappingSelect.name = fieldName;
+        mappingSelect.setAttribute('aria-label', `${labelText} for ${file.name}`);
+        mappingSelect.add(new Option('No Map Vendor Column', ''));
+        choices.forEach((mapping, index) => {
+          mappingSelect.add(new Option(`${mapping.file_name} · ${mapping.row_count || 0} rows`, String(mapping.id), false, index === 0));
+        });
+        field.append(mappingSelect);
+        mappings.append(field);
+      };
+      addMappingSelector('VFUK mapping', 'vodafone_mapping_dataset_ids', vodafoneMappings);
+      addMappingSelector('3UK mapping', 'three_mapping_dataset_ids', threeMappings);
+      const updateMappings = () => {
+        const hasVisibleSelector = Array.from(mappings.children).some((field) => !field.hidden);
+        mappings.hidden = !cdrTypes.has(select.value) || !hasVisibleSelector;
+      };
+      select.addEventListener('change', updateMappings);
+      updateMappings();
+      item.append(name, select, mappings);
+      items.append(item);
     });
     list.hidden = files.length === 0;
     list.classList.toggle('upload-type-confirmation', needsConfirmation);

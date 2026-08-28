@@ -420,6 +420,70 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     assert 'Clear Vendors</button>' not in workspace_after_clear
 
 
+def test_workspace_upload_can_map_selected_cdr_vendor_during_processing(client) -> None:
+    login(client)
+    mapping_response = client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'mapping_three'},
+        files={'dataset_files': ('Multivendor_Mapping_3UK.csv', BytesIO(b'Cid__ECI,Vendor\n200,Nokia\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    assert mapping_response.status_code == 303
+
+    workspace = client.get('/workspace')
+    assert 'data-three-mapping-options=' in workspace.text
+    assert 'Multivendor_Mapping_3UK.csv' in workspace.text
+    assert 'No Map Vendor Column' in workspace.text
+    assert 'name = \'three_mapping_dataset_ids\'' not in workspace.text
+    assert "mappingSelect.name = fieldName" in workspace.text
+
+    cdr_response = client.post(
+        '/dashboard/upload',
+        data={
+            'dataset_kinds': 'data',
+            'vodafone_mapping_dataset_ids': '',
+            'three_mapping_dataset_ids': '1',
+        },
+        files={'dataset_files': ('cdr_data.csv', BytesIO(b'Operator,Cell_ID_A,score\n3,200 -> 200,91\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    assert cdr_response.status_code == 303
+
+    preview = client.get('/workspace/preview/2')
+    assert preview.status_code == 200
+    assert '>3_Nokia<' in preview.text
+
+    import src.DashboardAnalytic as app_module
+    dataset = app_module.serialize_dataset_row(app_module.repository.get_dataset(2))
+    assert dataset['vendor_mapping_applied'] is True
+
+
+def test_workspace_batch_upload_keeps_vendor_mapping_choices_aligned_per_file(client) -> None:
+    login(client)
+    client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'mapping_three'},
+        files={'dataset_files': ('Multivendor_Mapping_3UK.csv', BytesIO(b'Cid__ECI,Vendor\n200,Nokia\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+
+    response = client.post(
+        '/dashboard/upload',
+        data={
+            'dataset_kinds': ['data', 'generic'],
+            'vodafone_mapping_dataset_ids': ['', ''],
+            'three_mapping_dataset_ids': ['1', ''],
+        },
+        files=[
+            ('dataset_files', ('cdr_data.csv', BytesIO(b'Operator,Cell_ID_A,score\n3,200 -> 200,91\n'), 'text/csv')),
+            ('dataset_files', ('other.csv', BytesIO(b'name,value\nother,1\n'), 'text/csv')),
+        ],
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert '>3_Nokia<' in client.get('/workspace/preview/2').text
+
+
 def test_vfuk_preview_limits_mapping_sheets_and_displays_materialised_gcid(client) -> None:
     login(client)
     workbook = BytesIO()

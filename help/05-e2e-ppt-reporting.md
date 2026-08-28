@@ -10,7 +10,7 @@ Upload and process the required files in Workspace first:
 - one `CDR-Voice` workbook;
 - one `CDR-Speech` workbook.
 
-For a Multivendor report, also process the relevant **VFUK Vodafone UK** and/or **3UK Three UK** mappings, then use **Map Vendors** from the Workspace queue on every selected Data, Voice and Speech CDR. The reporting page no longer selects mapping files: it uses the Vendor values persisted on the selected CDRs. Multivendor remains disabled until all three selected CDRs have been mapped.
+For a Multivendor report, also process the relevant **VFUK Vodafone UK** and/or **3UK Three UK** mappings, then apply them while importing each CDR or use **Map Vendors** from the Workspace queue later. The reporting page no longer selects mapping files: it uses the Vendor values persisted on the selected CDRs. Multivendor remains disabled until all three selected CDRs have been mapped.
 
 ## Report options
 

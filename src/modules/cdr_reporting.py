@@ -608,13 +608,21 @@ def assign_cdr_vendors(
     for operator, cells in result[[operator_column, cell_column]].itertuples(index=False):
         normalized_operator = _normalise_operator(operator)
         if normalized_operator == "Vodafone UK":
-            mapped_value = vendor_from_cells(operator, cells, vodafone_lookup)
-            assigned_vendors.append(mapped_value)
-            report_groups.append(mapped_value)
+            if vodafone_mapping is None:
+                assigned_vendors.append(pd.NA)
+                report_groups.append(normalized_operator)
+            else:
+                mapped_value = vendor_from_cells(operator, cells, vodafone_lookup)
+                assigned_vendors.append(mapped_value)
+                report_groups.append(mapped_value)
         elif normalized_operator == "3":
-            mapped_value = vendor_from_cells(operator, cells, three_lookup)
-            assigned_vendors.append(mapped_value)
-            report_groups.append(mapped_value)
+            if three_mapping is None:
+                assigned_vendors.append(pd.NA)
+                report_groups.append(normalized_operator)
+            else:
+                mapped_value = vendor_from_cells(operator, cells, three_lookup)
+                assigned_vendors.append(mapped_value)
+                report_groups.append(mapped_value)
         else:
             # O2/EE are operators without a multivendor mapping.  They are not
             # vendors and must not be materialised in the Vendor field.  Their
