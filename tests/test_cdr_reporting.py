@@ -8,7 +8,7 @@ from unittest.mock import patch
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, _render_failure_count, _render_status_100, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, _layout_chart_frames, _named_slide_layout, _render_failure_count, _render_status_100, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, vendor_from_cells
 
 
 def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> None:
@@ -44,6 +44,17 @@ def test_session_classification_and_multivendor_enrichment() -> None:
     assert len(sa) == 1
     assert enrich_multivendor(nsa, vodafone_mapping, three_mapping)['report_vendor'].tolist() == ['Vodafone_Ericsson']
     assert enrich_multivendor(sa, vodafone_mapping, three_mapping)['report_vendor'].tolist() == ['3_Mixed Vendor']
+
+
+def test_speech_session_classification_uses_call_mode_when_sample_rat_is_blank() -> None:
+    speech = pd.DataFrame({
+        'sample': ['native-volte', 'native-vonr', 'whatsapp-endc', 'whatsapp-nr'],
+        'Sample_RAT_A': [None, None, 'EN-DC', 'NR SA'],
+        'L1_Call_Mode_A': ['VoLTE', 'VoNR', 'VoIP', 'VoIP'],
+    })
+
+    assert classify_sessions(speech, 'nsa')['sample'].tolist() == ['native-volte', 'whatsapp-endc']
+    assert classify_sessions(speech, 'sa')['sample'].tolist() == ['native-vonr', 'whatsapp-nr']
 
 
 def test_workspace_vendor_assignment_writes_the_normalized_vendor_field() -> None:
@@ -211,6 +222,42 @@ def test_catalogue_call_family_uses_documented_netcheck_session_values() -> None
     assert chart.getvalue() == b'nested-chart'
     assert hierarchy_renderer.call_args.args[2] == ['__catalog_row_0']
     assert hierarchy_renderer.call_args.args[3] == ['__catalog_column_0', '__catalog_column_1']
+
+
+def test_nsa_speech_catalogue_filters_produce_samples_and_use_latest_campaign() -> None:
+    entries = load_catalog_csv(Path('assets/ppt-slides-catalog/nsa-slide-catalogue.csv'), 'nsa')
+    speech = pd.DataFrame({
+        'sample': ['volte', 'multirab', 'whatsapp-old', 'whatsapp-latest', 'whatsapp-sa', 'o2-latest'],
+        'Session_Type': ['CALL', 'MultiRAB CALL', 'WhatsApp CALL', 'WhatsApp CALL', 'WhatsApp CALL', 'WhatsApp CALL'],
+        'L1_Call_Mode_A': ['VoLTE', 'VoLTE', 'VoIP', 'VoIP', 'VoIP', 'VoIP'],
+        'Sample_RAT_A': [None, None, 'EN-DC', 'EN-DC', 'NR SA', 'EN-DC'],
+        'Call_Status': ['Completed'] * 6,
+        'Operator': ['Vodafone UK', '3', 'EE', 'EE', 'EE', 'O2 (UK)'],
+        'Campaign': ['UK_Q3_2025', 'UK_Q3_2025', 'UK_Q3_2025', 'UK_Q4_2025', 'UK_Q4_2025', 'UK_Q4_2025'],
+        'LQ': [3.8, 3.7, 3.9, 4.0, 4.1, 4.2],
+    })
+    nsa = classify_sessions(speech, 'nsa')
+    filtered_by_entry = {
+        (entry.slide, entry.chart_type, index): _apply_catalog_filters(nsa, entry, False, 'LQ')
+        for index, entry in enumerate(entries)
+        if entry.slide in {12, 13, 14}
+    }
+
+    assert all(not frame.empty for frame in filtered_by_entry.values())
+    third_slide_thirteen = [frame for (slide, _chart, _index), frame in filtered_by_entry.items() if slide == 13][2]
+    assert third_slide_thirteen['sample'].tolist() == ['whatsapp-latest']
+
+
+def test_layout_chart_frames_are_always_ordered_by_visual_rows_then_columns() -> None:
+    presentation = Presentation('assets/templates/Template_CDR_NSA_analysis.pptx')
+    layout = _named_slide_layout(presentation, 'Title and 2 columns and 2 rows + Comments right')
+
+    frames = _layout_chart_frames(layout)
+
+    assert len(frames) == 4
+    assert frames[0][0] < frames[1][0]
+    assert frames[0][1] < frames[2][1]
+    assert frames[2][0] < frames[3][0]
 
 
 def test_failure_count_uses_row_and_column_hierarchies_without_flattening() -> None:

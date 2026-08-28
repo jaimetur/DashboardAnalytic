@@ -447,13 +447,33 @@ def _first_existing(df: pd.DataFrame, candidates: Iterable[str]) -> str | None:
 
 
 def classify_sessions(df: pd.DataFrame, technology: str) -> pd.DataFrame:
-    rat_column = _first_existing(df, ["RAT", "RAT_A", "Sample_RAT_A", "technology_primary"])
+    main_rat_column = _first_existing(df, ["RAT", "RAT_A"])
+    sample_rat_column = _first_existing(df, ["Sample_RAT_A"])
+    normalized_rat_column = _first_existing(df, ["technology_primary"])
+    rat_column = main_rat_column or sample_rat_column or normalized_rat_column
     if not rat_column:
         raise ValueError("The selected CDR does not contain RAT, RAT_A or Sample_RAT_A, required to separate NSA and SA sessions.")
     # NetCheck exports use both ENDC and EN-DC (sometimes EN DC) for NSA.
     # The business filter is the technology concept, not one file spelling.
     marker = r"EN[- ]?DC" if technology == "nsa" else r"NR"
-    return df[df[rat_column].astype(str).str.contains(marker, case=False, na=False, regex=True)].copy()
+    rat_values = df[rat_column].fillna("").astype(str).str.strip()
+    mask = rat_values.str.contains(marker, case=False, na=False, regex=True)
+
+    # Speech CDRs populate Sample_RAT_A only for WhatsApp samples. Native and
+    # MultiRAB calls therefore need the documented call-mode fallback: VoLTE /
+    # EPSFB belongs to the NSA report and VoNR to the SA report. A populated
+    # sample RAT remains authoritative for WhatsApp and is never overridden.
+    if main_rat_column is None:
+        call_mode_column = _first_existing(df, ["L1_Call_Mode_A", "L1_call_Mode_A", "L2_Call_Mode_A", "L2_call_Mode_A"])
+        if call_mode_column:
+            call_mode = df[call_mode_column].fillna("").astype(str)
+            sample_is_explicit = (
+                df[sample_rat_column].fillna("").astype(str).str.strip().ne("")
+                if sample_rat_column else pd.Series(False, index=df.index)
+            )
+            fallback_marker = r"VoLTE|EPSFB" if technology == "nsa" else r"VoNR"
+            mask |= (~sample_is_explicit) & call_mode.str.contains(fallback_marker, case=False, na=False, regex=True)
+    return df[mask].copy()
 
 
 def _integer_cell_component(value: object) -> int | None:
@@ -674,6 +694,22 @@ def _catalog_column(frame: pd.DataFrame, name: str, multivendor: bool, metric: s
     return None
 
 
+def _latest_campaign_value(series: pd.Series) -> str | None:
+    """Return the latest year/quarter campaign independently of its text format."""
+    values = [value for value in series.dropna().astype(str).str.strip().unique() if value]
+    if not values:
+        return None
+    def campaign_key(value: str) -> tuple[int, int, str]:
+        year_match = re.search(r"(?:19|20)\d{2}", value)
+        quarter_match = re.search(r"(?:^|[^A-Z0-9])Q\s*([1-4])(?:[^0-9]|$)", value, flags=re.I)
+        return (
+            int(year_match.group(0)) if year_match else -1,
+            int(quarter_match.group(1)) if quarter_match else -1,
+            value.casefold(),
+        )
+    return max(values, key=campaign_key)
+
+
 def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor: bool, metric: str | None) -> pd.DataFrame:
     result = frame.copy()
     for condition in parse_catalog_filters(entry.filters):
@@ -685,6 +721,17 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
         series = result[column]
         if condition.operator in {">", ">=", "<", "<=", "=", "!="}:
             target = condition.values[0]
+            if (
+                _normalise_catalog_name(condition.column) == "campaign"
+                and condition.operator in {"=", "!="}
+                and _normalise_catalog_name(target) in {"latest", "latestcampaign"}
+            ):
+                latest_campaign = _latest_campaign_value(series)
+                comparison = series.astype(str).eq(latest_campaign) if latest_campaign is not None else pd.Series(False, index=series.index)
+                if condition.operator == "!=":
+                    comparison = ~comparison
+                result = result.loc[comparison].copy()
+                continue
             numeric = pd.to_numeric(series, errors="coerce")
             target_number = pd.to_numeric(pd.Series([target]), errors="coerce").iloc[0]
             if pd.notna(target_number):
@@ -1494,7 +1541,23 @@ def _layout_chart_frames(layout) -> list[tuple[int, int, int, int]]:
         for shape in layout.placeholders
         if shape.placeholder_format.type == 7 and shape.placeholder_format.idx != 10
     ]
-    return sorted(frames, key=lambda frame: (frame[1], frame[0]))
+    # PowerPoint layouts commonly differ by one or two EMU between placeholders
+    # that are visually on the same row. A strict (top, left) sort therefore
+    # placed the right-hand chart before the left-hand chart. Build visual rows
+    # with a small vertical tolerance, then order each row from left to right.
+    visual_rows: list[list[tuple[int, int, int, int]]] = []
+    row_tolerance = int(Inches(0.08))
+    for frame in sorted(frames, key=lambda item: item[1]):
+        matching_row = next(
+            (row for row in visual_rows if abs(frame[1] - min(item[1] for item in row)) <= row_tolerance),
+            None,
+        )
+        if matching_row is None:
+            visual_rows.append([frame])
+        else:
+            matching_row.append(frame)
+    visual_rows.sort(key=lambda row: min(frame[1] for frame in row))
+    return [frame for row in visual_rows for frame in sorted(row, key=lambda item: item[0])]
 
 
 def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.DataFrame], technology: str,
