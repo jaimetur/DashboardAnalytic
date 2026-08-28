@@ -24,9 +24,9 @@ Choose the technology according to the required session scope:
 Then choose a report scope:
 
 - **Single-vendor** generates the operator analysis without further mapping requirements.
-- **Multivendor** is available only when all selected CDRs already contain a Vendor mapping. It creates vendor series where applicable, while keeping O2/EE as operator comparisons. During rendering, catalogue grouping dimensions named `Operator` become `Vendor`; legends named `Operator` become `Campaign`; and occurrences of `Operator` in slide titles, subtitles and chart titles become `Vendor`. `Operator` filters are deliberately not changed and continue to filter the source CDR Operator field.
+- **Multivendor** is available only when all selected CDRs already contain a Vendor mapping. It creates vendor series where applicable, while keeping O2/EE as operator comparisons. During rendering, template grouping dimensions named `Operator` become `Vendor`; legends named `Operator` become `Campaign`; and occurrences of `Operator` in slide titles, subtitles and chart titles become `Vendor`. `Operator` filters are deliberately not changed and continue to filter the source CDR Operator field.
 
-Choose a **Slide Catalogue** as well. The technology's active/default catalogue is preselected; another stored NSA or SA catalogue can be chosen for that run without changing the workspace default.
+Choose **Slides Templates** as well. The technology's default template is preselected; another stored NSA or SA template can be chosen for that run without changing the workspace default.
 
 ## Vendor calculation
 
@@ -34,13 +34,13 @@ For Vodafone and Three, the report derives vendor from the first and last value 
 
 ## Generated presentation
 
-Every NSA, SA, single-vendor and multivendor report uses the same `assets/templates/Template_CDR_analysis.pptx` (or the file with that name under `APP_REPORTING_TEMPLATE_DIR`). It is a master/layout-only template and intentionally contains no slides. For every distinct `Slide` number in the selected catalogue, the renderer creates one new slide from its named layout, ordered by slide number. Rows with the same number represent separate charts on that slide and fill its image placeholders from left to right and then top to bottom. Commentary placeholders remain blank for analyst input.
+Every NSA, SA, single-vendor and multivendor report uses the same `assets/ppt-templates/Template_CDR_analysis.pptx` (or the file with that name under `APP_PPT_TEMPLATES_DIR`). It is a master/layout-only template and intentionally contains no slides. For every distinct `Slide` number in the selected Slides Templates, the renderer creates one new slide from its named layout, ordered by slide number. Rows with the same number represent separate charts on that slide and fill its image placeholders from left to right and then top to bottom. Commentary placeholders remain blank for analyst input.
 
-An administrator can manage several named NSA and SA Slide Catalogue CSVs. A catalogue can be set as the default, duplicated, renamed, deleted or exported, then edited directly in the browser. Every CDR row represents one chart image and declares its named PowerPoint `Layout`; the renderer creates the slide, populates its title and places generated charts in the layout's matching chart placeholders. Importing or selecting a new default catalogue refreshes the tables below.
+An administrator can manage several named NSA and SA Slides Templates CSVs. A template can be set as the default, duplicated, renamed, deleted or exported, then edited directly in the browser. Every CDR row represents one chart image and declares its named PowerPoint `Layout`; the renderer creates the slide, populates its title and places generated charts in the layout's matching chart placeholders. Importing or selecting a new default template refreshes the tables below.
 
 After generation, the timestamp-named PPTX downloads through the browser and the generation dialog closes. If the report contains no valid samples, re-check the selected technology, operator sheets and CDR inputs; the message indicates that the selected persisted rows did not match the relevant KPI and technology filter. For NSA, validate that the relevant RAT field actually contains an ENDC variant; for SA, validate the expected `NR` values.
 
-## Slide catalogue and chart contract
+## Slides Templates and chart contract
 
 The renderer follows the visual grammar of the supplied template for every automated KPI slide: 100% stacked columns for success/quality splits, stacked count bars for failures, CDF lines for continuous KPIs, vertical bars for mean or median comparisons, distribution bars for FDTT rate buckets, and band/radio-quality scatter plots on the dedicated SA Vodafone analysis. Operator colours remain consistent with the template: 3UK orange, EE blue, VFUK red and O2 purple. `Campaign` (or the processed `period` fallback) is the benchmark/category dimension; a multivendor run replaces the operator series with the calculated operator-vendor series.
 
@@ -53,7 +53,7 @@ Two structural `Chart type` values build non-KPI slides:
 - `Title Slide` creates the presentation cover, normally with the `Title Page` layout. `Slide tittle` and `Slide Subtittle` populate the layout's title and subtitle placeholders.
 - `Transition Slide` creates a section divider, normally with `Title Only` or another suitable transition layout. It accepts a title and optional subtitle.
 
-A structural slide occupies exactly one catalogue row and cannot share its slide number with chart rows. Leave `Chart Tittle`, `CDR source`, `KPI`, `Legend`, `Filters`, `Grouping_Rows` and `Grouping_Columns` empty. The former `Not Automated (preserve)` value is retained only for legacy conversion: imported legacy rows are migrated to `Title Slide` or `Transition Slide`, because an empty template has no source slide to preserve.
+A structural slide occupies exactly one template row and cannot share its slide number with chart rows. Leave `Chart Tittle`, `CDR source`, `KPI`, `Legend`, `Filters`, `Grouping_Rows` and `Grouping_Columns` empty. The former `Not Automated (preserve)` value is retained only for legacy conversion: imported legacy rows are migrated to `Title Slide` or `Transition Slide`, because an empty template has no source slide to preserve.
 
 Write filters as semicolon-separated expressions such as `Call Family IN (VoLTE, MultiRAB); Direction = DL` or `Type_of_Test = Interactivity`. Supported operators are `IN (...)`, `NOT IN (...)`, `CONTAINS`, `NOT CONTAINS`, `=`, `!=`, `<`, `<=`, `>` and `>=`. Use processed CDR column names (case-insensitive matching is supported). `Call Family` is a supported derived dimension: the NetCheck CDR values `CALL`, `MultiRAB CALL` and `WhatsApp CALL` are normalised to their test families, with the classic-call mode resolving VoLTE or VoNR where available. `Threshold = 1.6` configures `Threshold Stacked Vertical Bars`, while `Buckets = 1,5,20,100` configures `Rate Bucket` for `Distribution Stacked Vertical Bars`.
 
@@ -61,9 +61,9 @@ Write each grouping hierarchy with `×`. `Grouping_Rows` defines the visible cat
 
 The importer accepts the current schema and compatible legacy schemas. If the headers differ, it presents a conversion confirmation: compatible names are migrated, legacy `Grouping` is split into row/column grouping, new optional presentation fields remain blank, and a missing layout is assigned from the number of CDR charts on that slide. Any remaining invalid chart contract is presented in a floating import-failure dialog.
 
-<!-- SLIDE_CATALOGUE:START -->
+<!-- SLIDES_TEMPLATES:START -->
 
-Export the active NSA or SA catalogue from Admin before editing it. The tables below always reflect the active CSV files under `assets/ppt-slides-catalog/`.
+Export the active NSA or SA Slides Template from Admin before editing it. The tables below always reflect the active CSV files under `assets/slides-templates/default/`.
 
 ### NSA template
 
@@ -146,4 +146,4 @@ Export the active NSA or SA catalogue from Admin before editing it. The tables b
 | 17 | Browsing Time to 1MB | 7 cities | Title and 2 columns | — | CDR-Data | http_Browser_1MB_Reached_Duration | Average Vertical Bars | — | Browsing/HTTP tests | Operator | Campaign |
 | 18 | Conclusions | — | Title Only | — | — | — | Transition Slide | — | — | — | — |
 
-<!-- SLIDE_CATALOGUE:END -->
+<!-- SLIDES_TEMPLATES:END -->

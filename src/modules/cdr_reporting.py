@@ -70,7 +70,7 @@ CATALOG_HEADER_ALIASES = {
 
 
 def _default_catalogue_layout(technology: str, chart_count: int) -> str:
-    """Choose the standard template layout when a legacy catalogue omitted it."""
+    """Choose the standard template layout when a legacy Slides Template omitted it."""
     if technology == "nsa":
         return {
             1: "Title and 1 column + Comments",
@@ -161,20 +161,20 @@ def parse_catalog_grouping(value: str) -> GroupingSpec:
 
 
 def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntry]:
-    """Validate the editable report-catalogue CSV and return its chart rows."""
+    """Validate the editable report-template CSV and return its chart rows."""
     if technology not in TEMPLATE_NAMES:
         raise ValueError("Catalog technology must be NSA or SA.")
     if isinstance(content, bytes):
         try:
             text = content.decode("utf-8-sig")
         except UnicodeDecodeError as exc:
-            raise ValueError("The report catalogue must be a UTF-8 CSV file.") from exc
+            raise ValueError("The report template must be a UTF-8 CSV file.") from exc
     else:
         text = content
     reader = csv.DictReader(io.StringIO(text))
     fieldnames = tuple(reader.fieldnames or ())
     if fieldnames not in {CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, LEGACY_CATALOG_HEADERS}:
-        raise ValueError("The report catalogue must use exactly these columns: " + ", ".join(CATALOG_HEADERS))
+        raise ValueError("The report template must use exactly these columns: " + ", ".join(CATALOG_HEADERS))
     entries: list[CatalogEntry] = []
     for line_number, row in enumerate(reader, start=2):
         try:
@@ -237,7 +237,7 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
             raise ValueError(f"Catalog row {line_number}: {exc}") from exc
         entries.append(entry)
     if not entries:
-        raise ValueError("The report catalogue does not contain any rows.")
+        raise ValueError("The report template does not contain any rows.")
     entries_by_slide: dict[int, list[CatalogEntry]] = defaultdict(list)
     for entry in entries:
         entries_by_slide[entry.slide].append(entry)
@@ -251,7 +251,7 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
 
 
 def convert_catalog_csv(content: bytes | str, technology: str) -> bytes:
-    """Migrate a compatible legacy CSV into the current editable catalogue schema.
+    """Migrate a compatible legacy CSV into the current editable Slides Templates schema.
 
     The importer deliberately accepts common title spelling variants and the former
     single ``Grouping`` column.  Missing newer presentation-only columns are left
@@ -261,13 +261,13 @@ def convert_catalog_csv(content: bytes | str, technology: str) -> bytes:
         try:
             text = content.decode("utf-8-sig")
         except UnicodeDecodeError as exc:
-            raise ValueError("The report catalogue must be a UTF-8 CSV file.") from exc
+            raise ValueError("The report template must be a UTF-8 CSV file.") from exc
     else:
         text = content
     reader = csv.DictReader(io.StringIO(text))
     original_headers = tuple(reader.fieldnames or ())
     if not original_headers:
-        raise ValueError("The report catalogue does not contain a header row.")
+        raise ValueError("The report template does not contain a header row.")
 
     header_map: dict[str, str] = {}
     for original in original_headers:
@@ -293,7 +293,7 @@ def convert_catalog_csv(content: bytes | str, technology: str) -> bytes:
                 converted["Grouping_Columns"] = " × ".join(dimensions[1:])
         converted_rows.append(converted)
 
-    # Older catalogues did not contain a Layout column.  Its suitable default is
+    # Older templates did not contain a Layout column. Its suitable default is
     # determined by the number of automated charts represented by that slide.
     charts_per_slide: dict[str, int] = defaultdict(int)
     for row in converted_rows:
@@ -331,8 +331,8 @@ def load_catalog_csv(path: Path, technology: str) -> list[CatalogEntry]:
 
 
 def active_catalog_path(catalog_dir: Path, fallback_catalog: Path, technology: str) -> Path:
-    imported = catalog_dir / f"{technology}-slide-catalogue.csv"
-    return imported if imported.exists() else fallback_catalog
+    """Return the built-in Slides Template kept in the technology library."""
+    return fallback_catalog
 
 
 def catalogue_markdown(entries: list[CatalogEntry], technology: str) -> str:
@@ -368,12 +368,12 @@ def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
 
 
 def update_catalogue_document(document: Path, nsa_entries: list[CatalogEntry], sa_entries: list[CatalogEntry]) -> None:
-    start = "<!-- SLIDE_CATALOGUE:START -->"
-    end = "<!-- SLIDE_CATALOGUE:END -->"
+    start = "<!-- SLIDES_TEMPLATES:START -->"
+    end = "<!-- SLIDES_TEMPLATES:END -->"
     content = document.read_text(encoding="utf-8")
     if start not in content or end not in content:
-        raise ValueError("The PowerPoint reporting help document is missing its slide-catalogue markers.")
-    block = "\n".join((start, "", "Export the active NSA or SA catalogue from Admin before editing it. The tables below always reflect the active CSV files under `assets/ppt-slides-catalog/`.", "", catalogue_markdown(nsa_entries, "nsa"), "", catalogue_markdown(sa_entries, "sa"), "", end))
+        raise ValueError("The PowerPoint reporting help document is missing its Slides Templates markers.")
+    block = "\n".join((start, "", "Export the active NSA or SA Slides Template from Admin before editing it. The tables below always reflect the active CSV files under `assets/slides-templates/default/`.", "", catalogue_markdown(nsa_entries, "nsa"), "", catalogue_markdown(sa_entries, "sa"), "", end))
     document.write_text(re.sub(re.escape(start) + r".*?" + re.escape(end), block, content, flags=re.S), encoding="utf-8")
 
 # The PPT templates contain rasterised Tableau charts.  These rules are the
@@ -1737,7 +1737,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
     if not template.exists():
         raise FileNotFoundError(f"Reporting template not found: {template.name}")
     if not catalog:
-        raise ValueError("A Slide Catalogue is required to generate the report.")
+        raise ValueError("A Slides Template is required to generate the report.")
     presentation = Presentation(template)
     _remove_all_slides(presentation)
 

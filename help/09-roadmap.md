@@ -4,7 +4,7 @@
 
 Dashboard Analytic currently provides a Workspace for processed datasets, the E2E Dashboard for interactive KPI inspection and E2E PowerPoint Reporting for NetCheck CDR PowerPoint generation.
 
-NetCheck reporting supports Data, Voice and Speech CDR inputs, NSA/SA selection, single-vendor reports and multivendor reports from Vendor values mapped in Workspace using VFUK/3UK datasets. The output uses a selected named slide catalogue and the project templates, while leaving analyst comment areas available for manual conclusions.
+NetCheck reporting supports Data, Voice and Speech CDR inputs, NSA/SA selection, single-vendor reports and multivendor reports from Vendor values mapped in Workspace using VFUK/3UK datasets. The output uses selected named Slides Templates and the project PowerPoint template, while leaving analyst comment areas available for manual conclusions.
 
 ## Planned reporting work
 

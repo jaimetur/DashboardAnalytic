@@ -27,10 +27,10 @@ The top navigation separates the existing **E2E Dashboard** from **E2E PowerPoin
 
 ### Modules
 
-- **NetCheck CDR Reports**: build a template-based PowerPoint from one processed Data, Voice and Speech CDR. Select NSA or SA, a stored slide catalogue and, when eligible, a multivendor scope based on vendors already mapped in Workspace.
+- **NetCheck CDR Reports**: build a template-based PowerPoint from one processed Data, Voice and Speech CDR. Select NSA or SA, stored Slides Templates and, when eligible, a multivendor scope based on vendors already mapped in Workspace.
 - **Smart Orchestrator Logs Reports**: visible as the future reporting destination for processed Smart Orchestrator Log sources; automated log reporting is not implemented yet.
 
-Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone and 3UK Three Multivendor Mapping files. It proposes each input type from its filename, including a per-file review when files are uploaded in a batch, and persists the confirmed type before processing. When ready VFUK and/or 3UK mappings already exist, each CDR upload also offers its own optional mapping selectors: the most recent matching mapping is preselected, or **No Map Vendor Column** keeps the CDR unmapped. Either operator mapping can be applied independently. Mapping can also be run later from the CDR action; Reporting deliberately does not perform mapping itself. Vendor assignment follows the provided Vodafone/Three formula, including Vodafone's Ericsson/null mixed-vendor exception. PPT templates are shipped in `assets/templates/` and can be overridden with `APP_REPORTING_TEMPLATE_DIR`. Workspace slide catalogues are stored in `assets/ppt-slides-catalog/`; administrators can import, convert, duplicate, set a default, export and edit them in the browser.
+Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone and 3UK Three Multivendor Mapping files. It proposes each input type from its filename, including a per-file review when files are uploaded in a batch, and persists the confirmed type before processing. When ready VFUK and/or 3UK mappings already exist, each CDR upload also offers its own optional mapping selectors: the most recent matching mapping is preselected, or **No Map Vendor Column** keeps the CDR unmapped. Either operator mapping can be applied independently. Mapping can also be run later from the CDR action; Reporting deliberately does not perform mapping itself. Vendor assignment follows the provided Vodafone/Three formula, including Vodafone's Ericsson/null mixed-vendor exception. Managed Slides Templates are stored in `assets/slides-templates/` and the PowerPoint master in `assets/ppt-templates/`; their locations can be overridden with `APP_SLIDES_TEMPLATES_DIR` and `APP_PPT_TEMPLATES_DIR`.
 
 ### NetCheck CDR Reports workflow
 
@@ -39,10 +39,10 @@ Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone
 3. Open **E2E PowerPoint Reporting → NetCheck CDR Reports**.
 4. Select exactly one processed CDR for each required input type.
 5. Choose `NSA` or `SA`. NSA sessions are selected when the available RAT field contains `ENDC`; SA sessions are selected when it contains `NR`.
-6. Choose a compatible slide catalogue and `Single-vendor` or `Multivendor`. Multivendor is enabled only when all three selected Data, Voice and Speech CDRs have a saved vendor mapping.
-7. Generate the PowerPoint report. The run stores its selected datasets, technology, scope, catalogue and template in SQLite for auditability. Generated filenames use `yyyymmdd-hhmm`.
+6. Choose compatible Slides Templates and `Single-vendor` or `Multivendor`. Multivendor is enabled only when all three selected Data, Voice and Speech CDRs have a saved vendor mapping.
+7. Generate the PowerPoint report. The run stores its selected datasets, technology, scope and Slides Template in SQLite for auditability. Generated filenames use `yyyymmdd-hhmm`.
 
-All NSA, SA, single-vendor and multivendor reports use the single master/layout-only `assets/templates/Template_CDR_analysis.pptx`. The selected Slide Catalogue determines the technology-specific slide sequence, layouts and generated CDR charts; commentary placeholders remain blank for analyst input.
+All NSA, SA, single-vendor and multivendor reports use the single master/layout-only `assets/ppt-templates/Template_CDR_analysis.pptx`. The selected Slides Templates determine the technology-specific slide sequence, layouts and generated CDR charts; commentary placeholders remain blank for analyst input.
 
 ### Multivendor calculation and remapping
 
@@ -103,9 +103,9 @@ The dashboard currently includes:
 
 Only KPI-like numeric CDR fields are offered as Dashboard metrics; geographic coordinates, identifiers and other technical metadata are excluded. Voice, speech and data datasets expose different KPI mixes based on the normalized columns available in the source.
 
-### Slide catalogues and chart grouping
+### Slides Templates and chart grouping
 
-The bundled `Template_CDR_analysis.pptx` contains masters and named layouts but no source slides. The generator creates one new presentation slide for every distinct `Slide` number in the selected NSA or SA catalogue, in ascending order. Each automated catalogue row defines one chart; rows sharing the same slide number fill the selected layout's chart placeholders in row-major order.
+The bundled `Template_CDR_analysis.pptx` contains masters and named layouts but no source slides. The generator creates one new presentation slide for every distinct `Slide` number in the selected NSA or SA Slides Templates, in ascending order. Each automated template row defines one chart; rows sharing the same slide number fill the selected layout's chart placeholders in row-major order.
 
 The CSV schema is: `Slide`, `Slide tittle`, `Slide Subtittle`, `Layout`, `Chart Tittle`, `CDR source`, `KPI`, `Chart type`, `Legend`, `Filters`, `Grouping_Rows` and `Grouping_Columns`. `Chart type` also supports `Title Slide` and `Transition Slide`. These structural rows use only the slide title, subtitle and named layout and cannot contain CDR, KPI, chart, legend, filter or grouping configuration.
 
@@ -140,8 +140,8 @@ The `admin` panel provides:
 - user listing
 - dataset listing
 - audit log inspection
-- named NSA/SA catalogue management, import conversion, default selection, duplication, deletion and export
-- an in-browser catalogue editor with contextual assistance for layouts, chart types, fields, legends, grouping and filter conditions
+- named NSA/SA template management, import conversion, default selection, duplication, deletion and export
+- an in-browser template editor with contextual assistance for layouts, chart types, fields, legends, grouping and filter conditions
 
 ## Embedded documentation
 
@@ -196,7 +196,8 @@ Important runtime variables:
 - `APP_INPUT_DIR`
 - `APP_OUTPUT_DIR`
 - `APP_EXPORT_DIR`
-- `APP_REPORTING_TEMPLATE_DIR`
+- `APP_SLIDES_TEMPLATES_DIR`
+- `APP_PPT_TEMPLATES_DIR`
 - `HOST_CONFIG_DIR`
 - `HOST_DATA_DIR`
 - `IMAGE_REPOSITORY`

@@ -1037,7 +1037,7 @@ def test_admin_imports_report_catalogue_and_synchronizes_help(client, tmp_path, 
     login(client)
     help_document = tmp_path / 'powerpoint-reporting.md'
     help_document.write_text(
-        '# Reporting\n\n<!-- SLIDE_CATALOGUE:START -->\nold\n<!-- SLIDE_CATALOGUE:END -->\n',
+        '# Reporting\n\n<!-- SLIDES_TEMPLATES:START -->\nold\n<!-- SLIDES_TEMPLATES:END -->\n',
         encoding='utf-8',
     )
     monkeypatch.setattr(app_module, 'REPORT_CATALOGUE_DOCUMENT', help_document)
@@ -1049,7 +1049,7 @@ def test_admin_imports_report_catalogue_and_synchronizes_help(client, tmp_path, 
     response = client.post(
         '/admin/report-catalogues/nsa',
         data={'catalogue_name': 'Test baseline'},
-        files={'catalogue_file': ('nsa-slide-catalogue.csv', BytesIO(content), 'text/csv')},
+        files={'catalogue_file': ('nsa-slides-template.csv', BytesIO(content), 'text/csv')},
         follow_redirects=False,
     )
 
@@ -1072,7 +1072,7 @@ def test_admin_import_converts_a_legacy_catalogue_when_requested(client, tmp_pat
 
     login(client)
     help_document = tmp_path / 'powerpoint-reporting.md'
-    help_document.write_text('# Reporting\n\n<!-- SLIDE_CATALOGUE:START -->\nold\n<!-- SLIDE_CATALOGUE:END -->\n', encoding='utf-8')
+    help_document.write_text('# Reporting\n\n<!-- SLIDES_TEMPLATES:START -->\nold\n<!-- SLIDES_TEMPLATES:END -->\n', encoding='utf-8')
     monkeypatch.setattr(app_module, 'REPORT_CATALOGUE_DOCUMENT', help_document)
     legacy = (
         'Slide,Slide title,Slide subtitle,Layout,CDR Source,KPI,Chart Type,Filters,Grouping\n'
@@ -1098,7 +1098,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
 
     login(client)
     help_document = tmp_path / 'powerpoint-reporting.md'
-    help_document.write_text('# Reporting\n\n<!-- SLIDE_CATALOGUE:START -->\nold\n<!-- SLIDE_CATALOGUE:END -->\n', encoding='utf-8')
+    help_document.write_text('# Reporting\n\n<!-- SLIDES_TEMPLATES:START -->\nold\n<!-- SLIDES_TEMPLATES:END -->\n', encoding='utf-8')
     monkeypatch.setattr(app_module, 'REPORT_CATALOGUE_DOCUMENT', help_document)
     first = (','.join(CATALOG_HEADERS) + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n').encode('utf-8')
     second = (','.join(CATALOG_HEADERS) + '\n8,Second,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n').encode('utf-8')
@@ -1116,20 +1116,22 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'Baseline Q4' in admin.text
     assert 'Updated Q4' in admin.text
     assert 'name="catalogue_selection"' in admin.text
-    assert 'Choose a catalogue to edit' in admin.text
+    assert 'Choose a template to edit' in admin.text
     assert 'data-catalogue-editor-table' not in admin.text
     assert '<th>Default</th>' in admin.text
     assert 'catalogue-default-mark is-default' in admin.text
     assert 'value="nsa:baseline-q4"' in admin.text
     assert '/admin/report-catalogues/export-selected' in admin.text
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Second'
+    assert app_module.reporting_catalog_path('nsa').name == 'updated-q4.csv'
+    assert app_module.named_catalogue_path('nsa', 'baseline-q4').exists()
 
     reporting = client.get('/reporting')
-    assert 'value="nsa:updated-q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting.text
+    assert 'value="nsa:default" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting.text
 
     editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=baseline-q4')
     assert editor.status_code == 200
-    assert 'Slide Catalogue Editor' in editor.text
+    assert 'Slides Templates Editor' in editor.text
     assert 'data-catalogue-editor-table' in editor.text
     assert 'data-catalogue-field="Layout"' in editor.text
     assert 'data-catalogue-editor-options' in editor.text
@@ -1154,22 +1156,19 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     activated = client.post('/admin/report-catalogues/nsa/baseline-q4/activate', follow_redirects=False)
     assert activated.status_code == 303
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Edited'
+    assert app_module.reporting_catalog_path('nsa').name == 'baseline-q4.csv'
+    assert app_module.named_catalogue_path('nsa', 'updated-q4').exists()
 
-    protected_delete = client.post('/admin/report-catalogues/nsa/baseline-q4/delete')
+    protected_delete = client.post('/admin/report-catalogues/nsa/default/delete')
     assert protected_delete.status_code == 400
-    assert 'The default catalogue cannot be deleted.' in protected_delete.text
+    assert 'The default template cannot be deleted.' in protected_delete.text
 
     reporting_after_activation = client.get('/reporting')
-    assert 'value="nsa:baseline-q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting_after_activation.text
+    assert 'value="nsa:default" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting_after_activation.text
 
     exported = client.get('/admin/report-catalogues/nsa/updated-q4/export')
     assert exported.status_code == 200
     assert b'Second' in exported.content
-
-    removed_default = client.post('/admin/report-catalogues/nsa/default/delete', follow_redirects=False)
-    assert removed_default.status_code == 303
-    assert all(item['identifier'] != 'default' for item in app_module.report_catalogue_options('nsa'))
-
 
 def test_admin_catalogue_rename_supports_background_json_save(client) -> None:
     import src.DashboardAnalytic as app_module
@@ -1192,7 +1191,7 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client, tmp_path, m
 
     login(client)
     help_document = tmp_path / 'powerpoint-reporting.md'
-    help_document.write_text('# Reporting\n\n<!-- SLIDE_CATALOGUE:START -->\nold\n<!-- SLIDE_CATALOGUE:END -->\n', encoding='utf-8')
+    help_document.write_text('# Reporting\n\n<!-- SLIDES_TEMPLATES:START -->\nold\n<!-- SLIDES_TEMPLATES:END -->\n', encoding='utf-8')
     monkeypatch.setattr(app_module, 'REPORT_CATALOGUE_DOCUMENT', help_document)
     content = (
         ','.join(CATALOG_HEADERS)
@@ -1206,6 +1205,14 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client, tmp_path, m
     )
     assert imported.status_code == 303
 
+    replacement = client.post(
+        '/admin/report-catalogues/nsa',
+        data={'catalogue_name': 'Replacement template'},
+        files={'catalogue_file': ('replacement.csv', BytesIO(content), 'text/csv')},
+        follow_redirects=False,
+    )
+    assert replacement.status_code == 303
+
     original_path = app_module.named_catalogue_path('nsa', 'original-catalogue')
     response = client.post(
         '/admin/report-catalogues/nsa/original-catalogue/rename',
@@ -1218,7 +1225,7 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client, tmp_path, m
     assert response.json() == {'name': 'Renamed catalogue', 'identifier': 'renamed-catalogue'}
     assert not original_path.exists()
     assert renamed_path.read_bytes() == content
-    assert next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'renamed-catalogue')['active']
+    assert not next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'renamed-catalogue')['active']
 
 
 def test_docs_routes_expose_readme_changelog_and_help(client) -> None:

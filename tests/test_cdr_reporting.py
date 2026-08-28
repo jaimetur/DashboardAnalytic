@@ -307,7 +307,7 @@ def test_catalogue_call_family_uses_documented_netcheck_session_values() -> None
 
 
 def test_nsa_speech_catalogue_filters_produce_samples_and_use_latest_campaign() -> None:
-    entries = load_catalog_csv(Path('assets/ppt-slides-catalog/nsa-slide-catalogue.csv'), 'nsa')
+    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/nsa-slides-template.csv'), 'nsa')
     speech = pd.DataFrame({
         'sample': ['volte', 'multirab', 'whatsapp-old', 'whatsapp-latest', 'whatsapp-sa', 'o2-latest'],
         'Session_Type': ['CALL', 'MultiRAB CALL', 'WhatsApp CALL', 'WhatsApp CALL', 'WhatsApp CALL', 'WhatsApp CALL'],
@@ -331,7 +331,7 @@ def test_nsa_speech_catalogue_filters_produce_samples_and_use_latest_campaign() 
 
 
 def test_layout_chart_frames_are_always_ordered_by_visual_rows_then_columns() -> None:
-    presentation = Presentation('assets/templates/Template_CDR_analysis.pptx')
+    presentation = Presentation('assets/ppt-templates/Template_CDR_analysis.pptx')
     layout = _named_slide_layout(presentation, 'Title and 2 columns and 2 rows + Comments right')
 
     frames = _layout_chart_frames(layout)
@@ -367,7 +367,7 @@ def test_failure_count_uses_row_and_column_hierarchies_without_flattening() -> N
 
 
 def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> None:
-    entries = load_catalog_csv(Path('assets/ppt-slides-catalog/nsa-slide-catalogue.csv'), 'nsa')
+    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/nsa-slides-template.csv'), 'nsa')
     slide_ten = [entry for entry in entries if entry.slide == 10]
     slide_thirteen = [entry for entry in entries if entry.slide == 13]
 
@@ -382,7 +382,7 @@ def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> N
 
 
 def test_catalogue_uses_explicit_title_and_transition_slides() -> None:
-    entries = load_catalog_csv(Path('assets/ppt-slides-catalog/nsa-slide-catalogue.csv'), 'nsa')
+    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/nsa-slides-template.csv'), 'nsa')
     structural = [entry.chart_type for entry in entries if not entry.source_kind]
     title = next(entry for entry in entries if entry.slide == 1)
     conclusions = next(entry for entry in entries if entry.slide == 22)
@@ -410,7 +410,7 @@ def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None
 
     render_cdr_report(
         destination,
-        Path('assets/templates/Template_CDR_analysis.pptx'),
+        Path('assets/ppt-templates/Template_CDR_analysis.pptx'),
         frames,
         'nsa',
         False,
@@ -442,7 +442,7 @@ def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None
 
 
 def test_layout_only_template_builds_one_new_slide_per_catalogue_number(tmp_path) -> None:
-    template = Path('assets/templates/Template_CDR_analysis.pptx')
+    template = Path('assets/ppt-templates/Template_CDR_analysis.pptx')
     assert len(Presentation(template).slides) == 0
     catalogue = (
         ','.join(CATALOG_HEADERS)
@@ -483,7 +483,7 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert 'name="vodafone_mapping_dataset_id"' not in page.text
     assert 'name="three_mapping_dataset_id"' not in page.text
     assert '<option value="multivendor" disabled>Multivendor</option>' in page.text
-    assert 'name="slide_catalogue"' in page.text
+    assert 'name="slides_templates"' in page.text
     assert 'value="nsa:default"' in page.text
     assert 'data-download-form="1"' in page.text
 
@@ -531,7 +531,7 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
         'speech_dataset_id': 3,
         'technology': 'nsa',
         'report_scope': 'single',
-        'slide_catalogue': 'nsa:default',
+        'slides_templates': 'nsa:default',
     })
 
     assert report.status_code == 200

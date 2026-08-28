@@ -8,7 +8,7 @@ Dashboard Analytic separates the work into three connected product areas:
 
 - **Workspace** is the controlled entry point for NetCheck CDR Data, Voice and Speech workbooks, Smart Orchestrator Logs and operator-specific Multivendor Mappings. It proposes a file type from the name, allows an analyst to correct it and can apply ready VFUK/3UK mappings to each CDR while it is processed, then stores the result for later use.
 - **E2E Dashboard** is the interactive analysis surface for one processed dataset. It provides adaptive filters, KPI summaries, percentile scorecards, CDF/comparison charts and exports of the active dashboard scope.
-- **E2E PowerPoint Reporting** produces the standard NSA or SA NetCheck CDR PowerPoint from the three processed CDR domains and a selected workspace slide catalogue. A multivendor run uses Vendor values that were mapped and stored on the CDR beforehand.
+- **E2E PowerPoint Reporting** produces the standard NSA or SA NetCheck CDR PowerPoint from the three processed CDR domains and selected workspace Slides Templates. A multivendor run uses Vendor values that were mapped and stored on the CDR beforehand.
 
 ## Recommended reading order
 
@@ -24,4 +24,4 @@ Dashboard Analytic separates the work into three connected product areas:
 
 ## Getting help
 
-Start in Workspace when a source file has not yet been processed. A report can only use datasets that have already been uploaded and processed in the workspace. For NetCheck reporting, select one processed Data CDR, one Voice CDR and one Speech CDR. To use Multivendor, map Vendor values first from the CDR's **Map Vendors** action using available VFUK/3UK mappings; the Reporting scope is enabled only when all three selected CDRs are mapped. If a file or catalogue is not offered by a selector, verify its processing status, assigned type and active/default state in Workspace or Administration.
+Start in Workspace when a source file has not yet been processed. A report can only use datasets that have already been uploaded and processed in the workspace. For NetCheck reporting, select one processed Data CDR, one Voice CDR and one Speech CDR. To use Multivendor, map Vendor values first from the CDR's **Map Vendors** action using available VFUK/3UK mappings; the Reporting scope is enabled only when all three selected CDRs are mapped. If a file or template is not offered by a selector, verify its processing status, assigned type and default state in Workspace or Administration.

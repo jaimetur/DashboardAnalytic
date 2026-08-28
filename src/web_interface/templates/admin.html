@@ -87,21 +87,21 @@
     <div class="section-head tight-head">
       <div>
         <p class="eyebrow">PowerPoint reporting</p>
-        <h2>Slide Catalogue Management</h2>
+        <h2>Slides Templates Management</h2>
       </div>
     </div>
-    <p class="lede">Import or export the NSA and SA slide-catalogue CSV formats. Stored workspace catalogues are selected and managed from the editor below.</p>
+    <p class="lede">Import or export the NSA and SA Slides Templates CSV formats. Stored workspace templates are selected and managed from the editor below.</p>
     {% if catalogue_error %}<span hidden data-catalogue-import-error>{{ catalogue_error }}</span>{% endif %}
     {% if catalogue_notice %}<span hidden data-catalogue-import-notice>{{ catalogue_notice }}</span>{% endif %}
     <div class="catalogue-management-grid">
       {% for technology, catalogue in report_catalogs.items() %}
       <section class="catalogue-management-section">
         <div class="section-head tight-head">
-          <div><p class="eyebrow">{{ technology | upper }}</p><h3>{{ technology | upper }} Slide Catalog</h3></div>
+          <div><p class="eyebrow">{{ technology | upper }}</p><h3>{{ technology | upper }} Slides Templates</h3></div>
         </div>
         <form class="catalogue-import-row" action="/admin/report-catalogues/{{ technology }}" method="post" enctype="multipart/form-data" data-catalogue-import-form novalidate>
-          <input type="text" name="catalogue_name" aria-label="{{ technology | upper }} catalogue name" placeholder="Catalogue name (optional)" maxlength="80" data-catalogue-import-name>
-          <input type="file" name="catalogue_file" aria-label="{{ technology | upper }} catalogue CSV" accept=".csv,text/csv" data-catalogue-import-file>
+          <input type="text" name="catalogue_name" aria-label="{{ technology | upper }} template name" placeholder="Template name (optional)" maxlength="80" data-catalogue-import-name>
+          <input type="file" name="catalogue_file" aria-label="{{ technology | upper }} template CSV" accept=".csv,text/csv" data-catalogue-import-file>
           <input type="hidden" name="convert_catalogue" value="0" data-catalogue-convert>
           <button type="submit">Import</button>
         </form>
@@ -110,7 +110,7 @@
     </div>
     <div class="table-wrap catalogue-workspace-table-wrap">
       <table class="catalogue-workspace-table">
-        <thead><tr><th>Catalogue name</th><th>Type</th><th>Default</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Template name</th><th>Type</th><th>Default</th><th>Actions</th></tr></thead>
         <tbody>
           {% for catalogue in workspace_catalogues %}
           <tr>
@@ -120,11 +120,11 @@
               </form>
             </td>
             <td>{{ catalogue.technology | upper }}</td>
-            <td class="catalogue-default-cell"><span class="catalogue-default-mark {% if catalogue.active %}is-default{% else %}is-not-default{% endif %}" aria-label="{% if catalogue.active %}Default catalogue{% else %}Not the default catalogue{% endif %}" title="{% if catalogue.active %}Default catalogue{% else %}Not the default catalogue{% endif %}">{% if catalogue.active %}✓{% else %}○{% endif %}</span></td>
+            <td class="catalogue-default-cell"><span class="catalogue-default-mark {% if catalogue.active %}is-default{% else %}is-not-default{% endif %}" aria-label="{% if catalogue.active %}Default template{% else %}Not the default template{% endif %}" title="{% if catalogue.active %}Default template{% else %}Not the default template{% endif %}">{% if catalogue.active %}✓{% else %}○{% endif %}</span></td>
             <td>
               <div class="catalogue-workspace-actions">
                 {% if catalogue.active %}<button type="button" class="catalogue-set-default-button" disabled>Set Default</button>{% else %}<form action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/activate" method="post"><button type="submit" class="catalogue-set-default-button">Set Default</button></form>{% endif %}
-                {% if not catalogue.active %}<form action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/delete" method="post" data-confirm="Delete catalogue {{ catalogue.name }}? This cannot be undone."><button type="submit" class="danger-button">Delete</button></form>{% else %}<button type="button" class="danger-button" disabled title="The default catalogue cannot be deleted">Delete</button>{% endif %}
+                {% if not catalogue.active %}<form action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/delete" method="post" data-confirm="Delete template {{ catalogue.name }}? This cannot be undone."><button type="submit" class="danger-button">Delete</button></form>{% else %}<button type="button" class="danger-button" disabled title="The default template cannot be deleted">Delete</button>{% endif %}
                 <form action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/duplicate" method="post"><button type="submit" class="catalogue-duplicate-button">Duplicate</button></form>
                 <a class="catalogue-export-button" href="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/export">Export</a>
               </div>
@@ -137,22 +137,22 @@
     <p class="form-note">Required columns: Slide, Slide tittle, Slide Subtittle, Layout, Chart Tittle, CDR source, KPI, Chart type, Legend, Filters, Grouping_Rows and Grouping_Columns. Each slide number creates a new slide from its named layout. Use Title Slide or Transition Slide for structural rows without KPI/chart fields. Grouping_Rows defines chart categories/table rows; Grouping_Columns defines comparison series/table columns. Chart layouts need one image placeholder per CDR row and keep analyst comments blank.</p>
   </article>
 
-  <article class="panel slide-catalogue-editor-panel" id="catalogue-editor">
+  <article class="panel slides-templates-editor-panel" id="catalogue-editor">
     <div class="section-head tight-head">
       <div>
         <p class="eyebrow">PowerPoint reporting</p>
-        <h2>Slide Catalogue Editor</h2>
+        <h2>Slides Templates Editor</h2>
       </div>
       {% if catalogue_editor %}<span class="pill">{{ catalogue_editor.technology | upper }} · {{ catalogue_editor.catalogue.name }}</span>{% endif %}
     </div>
-    <section class="catalogue-editor-catalogue-picker" aria-label="Workspace catalogues">
-      <p class="catalogue-library-title">Workspace catalogues</p>
+    <section class="catalogue-editor-catalogue-picker" aria-label="Workspace templates">
+      <p class="catalogue-library-title">Workspace templates</p>
       <form class="catalogue-editor-picker-form" action="/admin" method="get">
-        <label>Catalogue to edit
-          <select name="catalogue_selection" aria-label="Catalogue to edit" required>
-            <option value="" {% if not catalogue_editor %}selected{% endif %}>Choose a catalogue to edit</option>
+        <label>Template to edit
+          <select name="catalogue_selection" aria-label="Template to edit" required>
+            <option value="" {% if not catalogue_editor %}selected{% endif %}>Choose a template to edit</option>
             {% for technology, catalogue in report_catalogs.items() %}
-            <optgroup label="{{ technology | upper }} catalogues">
+            <optgroup label="{{ technology | upper }} templates">
               {% for item in catalogue.catalogues %}
               <option value="{{ technology }}:{{ item.identifier }}" {% if catalogue_editor and catalogue_editor.technology == technology and catalogue_editor.catalogue.identifier == item.identifier %}selected{% endif %}>{{ item.name }}{% if item.active %} · Default{% endif %}</option>
               {% endfor %}
@@ -166,11 +166,11 @@
     </section>
     {% if catalogue_editor %}
     <p class="lede">Select a cell to edit it manually or use the contextual suggestions on the right. Layout and Chart Type replace the selected value; Filters and Grouping fields append the selected columns so that several can be added at once. Use the row controls to insert, reorder or remove unsaved rows.</p>
-    <div class="slide-catalogue-editor-grid" data-catalogue-editor data-editor-suggestions='{{ catalogue_editor.suggestions | tojson }}'>
-      <form class="slide-catalogue-editor-table-wrap" action="/admin/report-catalogues/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/save" method="post" data-catalogue-editor-save>
+    <div class="slides-templates-editor-grid" data-catalogue-editor data-editor-suggestions='{{ catalogue_editor.suggestions | tojson }}'>
+      <form class="slides-templates-editor-table-wrap" action="/admin/report-catalogues/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/save" method="post" data-catalogue-editor-save>
         <input type="hidden" name="catalogue_content" value="" data-catalogue-editor-content>
         <div class="table-wrap">
-          <table class="slide-catalogue-editor-table" data-catalogue-editor-table>
+          <table class="slides-templates-editor-table" data-catalogue-editor-table>
             <thead><tr><th class="catalogue-row-actions-heading">Row actions</th>{% for header in catalogue_editor.headers %}<th>{{ header }}</th>{% endfor %}</tr></thead>
             <tbody>
               {% for row in catalogue_editor.rows %}
@@ -189,7 +189,7 @@
         </div>
         <div class="form-actions">
           <button type="button" class="catalogue-reenumerate-button" data-catalogue-reenumerate>Re-Enumerate Slides</button>
-          <button type="submit">Save Catalogue</button>
+          <button type="submit">Save Template</button>
           <span class="catalogue-editor-scroll-hint">Scroll vertically with the mouse wheel · Scroll horizontally with Shift + wheel</span>
         </div>
       </form>
@@ -221,7 +221,7 @@
       </aside>
     </div>
     {% else %}
-    <p class="lede">Choose <strong>Edit</strong> next to any NSA or SA workspace catalogue above to open it here. The editor saves directly to that catalogue, so exporting and re-importing is not required.</p>
+    <p class="lede">Choose <strong>Edit</strong> next to any NSA or SA workspace template above to open it here. The editor saves directly to that template, so exporting and re-importing is not required.</p>
     {% endif %}
   </article>
 

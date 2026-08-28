@@ -38,8 +38,8 @@
       <label>Technology
         <select name="technology" required data-report-technology><option value="nsa">NSA (Non-Standalone)</option><option value="sa">SA (Standalone)</option></select>
       </label>
-      <label>Slide Catalogue
-        <select name="slide_catalogue" required data-report-catalogue aria-label="Slide Catalogue">
+      <label>Slides Templates
+        <select name="slides_templates" required data-report-catalogue aria-label="Slides Templates">
           {% for technology, catalogues in report_catalogues.items() %}
           {% for catalogue in catalogues %}
           <option value="{{ technology }}:{{ catalogue.identifier }}" data-catalogue-technology="{{ technology }}" data-catalogue-active="{{ 'true' if catalogue.active else 'false' }}"{% if technology == 'nsa' and catalogue.active %} selected{% endif %}>{{ technology | upper }} · {{ catalogue.name }}{% if catalogue.active %} · Default{% endif %}</option>
@@ -52,7 +52,7 @@
       </label>
       <div class="form-actions reporting-submit-action"><button type="submit">Generate PowerPoint Report</button></div>
     </form>
-    <p class="form-note">Choose a Slide Catalogue matching the selected technology; it applies only to this report and does not change the globally active catalogue. Map Vendors from Workspace before choosing Multivendor. The common Template_CDR_analysis.pptx supplies masters and layouts for every report: the selected catalogue creates each slide from scratch, fills its chart placeholders from the selected CDRs and keeps commentary areas blank for the analyst.</p>
+    <p class="form-note">Choose Slides Templates matching the selected technology; they apply only to this report and do not change the workspace default. Map Vendors from Workspace before choosing Multivendor. The common Template_CDR_analysis.pptx supplies masters and layouts for every report: the selected template creates each slide from scratch, fills its chart placeholders from the selected CDRs and keeps commentary areas blank for the analyst.</p>
   </article>
 
   <article class="panel reporting-panel">

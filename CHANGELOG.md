@@ -12,18 +12,21 @@
 - Added NetCheck CDR PowerPoint reporting from processed Data, Voice and Speech inputs, with report-run traceability and timestamped filenames.
 - Added embedded Help with consistently numbered navigation and recommended reading (`00` to `09`), including the explicit **04. E2E Dashboard** and **05. E2E PowerPoint Reporting** sections.
 - Added processed-dataset previews, direct CDR-only **Show Dashboard** access and matching Dashboard **Preview Dataset** access.
-- Added workspace Slide Catalogue Management: named NSA/SA imports, conversion of compatible legacy CSVs, defaults, duplication, deletion, export and in-browser editing.
+- Added workspace Slides Templates Management: named NSA/SA imports, conversion of compatible legacy CSVs, defaults, duplication, deletion, export and in-browser editing.
 
 #### 🚀 Enhancements:
 - Unified NSA, SA, single-vendor and multivendor rendering on the master/layout-only `Template_CDR_analysis.pptx`; the selected catalogue creates slides and fills layout placeholders in row-major order.
-- Made slide catalogues executable: source, KPI, generic chart type, filters, thresholds/buckets, legend, `Grouping_Rows`, `Grouping_Columns` and named layout now drive rendering. Structural **Title Slide** and **Transition Slide** rows are also supported.
+- Made Slides Templates executable: source, KPI, generic chart type, filters, thresholds/buckets, legend, `Grouping_Rows`, `Grouping_Columns` and named layout now drive rendering. Structural **Title Slide** and **Transition Slide** rows are also supported.
 - Reworked NSA/SA catalogues against the NetCheck methodology, split multi-chart screenshots into separate rows/layouts, and completed the requested NSA KPI, source, filter and grouping definitions through slide 21.
 - Improved multivendor processing: VFUK/3UK GCID lookups and the agreed first/last-cell Vendor formula are persisted on CDRs; Reporting enables Multivendor only when all selected CDRs are mapped and transforms Operator displays to Vendor without changing stored filters or catalogues.
 - Expanded mapping and CDR previews with materialised GCID, source-preserving fields, column/row search, Excel-style multi-value filters, CDR-specific filters and configurable row limits. Workspace now uses persisted profiles for faster loading.
 - Restricted Dashboard analysis to CDR datasets and meaningful KPI fields; improved adaptive-filter normalisation, responsive layouts, previews and exports.
 - Refined the responsive tabbed UI, module palettes, action controls, loading dialogs and Help navigation across Workspace, Dashboard, Reporting and Admin.
 - Added a reporting catalogue selector that follows the NSA/SA workspace default while allowing a per-report override.
-- Expanded the in-browser Slide Catalogue Editor with contextual assistance, Filter Builder, searchable single/multi-select values, fixed action/Slide columns, row movement/insertion/removal, re-enumeration and scroll guidance.
+- Expanded the in-browser Slides Templates Editor with contextual assistance, Filter Builder, searchable single/multi-select values, fixed action/Slide columns, row movement/insertion/removal, re-enumeration and scroll guidance.
+- Separated the master PowerPoint into `assets/ppt-templates/` and the NSA/SA Slides Templates storage into `assets/slides-templates/`, with the runtime registry stored at the latter's root.
+- Made `assets/slides-templates/library/nsa/` and `library/sa/` the complete canonical Slides Templates library; `default/nsa/` and `default/sa/` now hold only the same-named active mirror used for generation.
+- Standardized Administration and Help labels on **Template** terminology.
 - Renaming a named workspace catalogue now also renames its managed CSV file and preserves its default selection.
 - Added timestamped report filenames, `UpdateAll.py`, and removed obsolete release-document tooling.
 

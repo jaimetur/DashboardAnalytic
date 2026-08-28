@@ -21,9 +21,10 @@ Dashboard Analytic reads its runtime configuration from environment variables. F
 | `APP_INPUT_DIR` | Uploaded source files. |
 | `APP_OUTPUT_DIR` | Generated analysis artefacts. |
 | `APP_EXPORT_DIR` | Downloadable exports, including generated reports. |
-| `APP_REPORTING_TEMPLATE_DIR` | Optional override for the bundled PowerPoint template directory. |
+| `APP_SLIDES_TEMPLATES_DIR` | Optional override for the managed Slides Templates directory. |
+| `APP_PPT_TEMPLATES_DIR` | Optional override for the bundled PowerPoint master-template directory. |
 
-The service process must have read/write access to the configured storage directories. In Docker, mount them as volumes so that uploaded data, generated reports and managed slide catalogue state survive a container replacement. The version and release date displayed in the application are maintained in `src/version.py` and the changelog, not through an environment variable.
+The service process must have read/write access to the configured storage directories. In Docker, mount them as volumes so that uploaded data, generated reports and managed Slides Templates state survive a container replacement. The version and release date displayed in the application are maintained in `src/version.py` and the changelog, not through an environment variable.
 
 ## Recommended deployment setup
 

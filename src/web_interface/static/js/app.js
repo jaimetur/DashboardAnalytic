@@ -778,7 +778,7 @@ document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
         headers: {Accept: 'application/json'},
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || 'The catalogue name could not be saved.');
+      if (!response.ok) throw new Error(payload.error || 'The template name could not be saved.');
       savedValue = String(payload.name || name).trim();
       input.value = savedValue;
       input.setAttribute('aria-label', `Name for ${savedValue}`);
@@ -786,8 +786,8 @@ document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
       updateCatalogueIdentifier(previousIdentifier, payload.identifier);
     } catch (error) {
       input.value = savedValue;
-      showInfoDialog(error instanceof Error ? error.message : 'The catalogue name could not be saved.', {
-        title: 'Catalogue Rename Failed',
+      showInfoDialog(error instanceof Error ? error.message : 'The template name could not be saved.', {
+        title: 'Template Rename Failed',
       });
     } finally {
       input.disabled = false;
@@ -846,14 +846,14 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
     }
     if (shouldConvert) {
       const accepted = await showConfirmDialog(
-        'This CSV uses an older or different column layout. Compatible fields will be migrated to the current Slide Catalogue format; new presentation fields will be left blank where they do not exist.',
-        {title: 'Convert Slide Catalogue?', confirmLabel: 'Convert and Import'},
+        'This CSV uses an older or different column layout. Compatible fields will be migrated to the current Slides Templates format; new presentation fields will be left blank where they do not exist.',
+        {title: 'Convert Slides Templates?', confirmLabel: 'Convert and Import'},
       );
       if (!accepted) return;
     }
     if (convert) convert.value = shouldConvert ? '1' : '0';
     form.dataset.catalogueSubmitting = '1';
-    showLoadingOverlay('Importing Slide Catalogue', 'Validating and storing the selected catalogue in the workspace.');
+    showLoadingOverlay('Importing Slides Templates', 'Validating and storing the selected template in the workspace.');
     preserveAdminScrollPosition();
     HTMLFormElement.prototype.submit.call(form);
   });
@@ -1759,7 +1759,7 @@ const catalogueImportError = document.querySelector('[data-catalogue-import-erro
 if (catalogueImportError?.textContent.trim()) {
   requestAnimationFrame(() => {
     showInfoDialog(catalogueImportError.textContent.trim(), {
-      title: 'Slide Catalogue Import Failed',
+      title: 'Slides Templates Import Failed',
       onClose: clearCatalogueImportQuery,
     });
   });
@@ -1769,7 +1769,7 @@ const catalogueImportNotice = document.querySelector('[data-catalogue-import-not
 if (catalogueImportNotice?.textContent.trim()) {
   requestAnimationFrame(() => {
     showInfoDialog(catalogueImportNotice.textContent.trim(), {
-      title: 'Slide Catalogue Imported',
+      title: 'Slides Templates Imported',
       onClose: clearCatalogueImportQuery,
     });
   });
