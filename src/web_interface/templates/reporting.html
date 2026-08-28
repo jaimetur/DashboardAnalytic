@@ -19,20 +19,20 @@
     <form action="/reporting/netcheck-cdr" method="post" class="form-grid" data-loading-label="Generating NetCheck CDR report" data-download-form="1">
       <label>CDR Data
         <select name="data_dataset_id" required>
-          <option value="">Select processed Data CDR</option>
-          {% for dataset in data_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}">{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
+          <option value=""{% if not data_datasets %} selected{% endif %}>Select processed Data CDR</option>
+          {% for dataset in data_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
       <label>CDR Voice
         <select name="voice_dataset_id" required>
-          <option value="">Select processed Voice CDR</option>
-          {% for dataset in voice_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}">{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
+          <option value=""{% if not voice_datasets %} selected{% endif %}>Select processed Voice CDR</option>
+          {% for dataset in voice_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
       <label>CDR Speech
         <select name="speech_dataset_id" required>
-          <option value="">Select processed Speech CDR</option>
-          {% for dataset in speech_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}">{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
+          <option value=""{% if not speech_datasets %} selected{% endif %}>Select processed Speech CDR</option>
+          {% for dataset in speech_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
       <label>Technology
@@ -80,10 +80,8 @@
       if (!technology || !catalogue) return;
       const matching = Array.from(catalogue.options).filter((option) => option.dataset.catalogueTechnology === technology.value);
       Array.from(catalogue.options).forEach((option) => { option.hidden = option.disabled = option.dataset.catalogueTechnology !== technology.value; });
-      if (!matching.some((option) => option.selected)) {
-        const active = matching.find((option) => option.dataset.catalogueActive === 'true') || matching[0];
-        if (active) active.selected = true;
-      }
+      const active = matching.find((option) => option.dataset.catalogueActive === 'true') || matching[0];
+      if (active) catalogue.value = active.value;
     };
     technology?.addEventListener('change', updateCatalogues);
     updateScope();

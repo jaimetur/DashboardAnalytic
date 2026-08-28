@@ -62,6 +62,7 @@
 - Start the Slide Catalogue Editor without a loaded catalogue and require an explicit choice; its selector now displays the same catalogue as the editable grid once **Edit** is used, retains its scroll position when opened, and visibly prompts **Choose a catalogue to edit**. A non-active bundled default catalogue can now be removed from the workspace library after another catalogue is set as default.
 - Label the current catalogue consistently as **Default** rather than **Active** in the editor and reporting catalogue selectors.
 - Preserve the Admin scroll position for all server-backed catalogue library actions, including **Set Default**, **Duplicate** and **Delete**.
+- Preselect the most recently uploaded ready Data, Voice and Speech CDRs in Reporting, and automatically select the NSA/SA **Default** slide catalogue whenever the report technology changes.
 - Save catalogue name edits asynchronously when the name field loses focus, preserving the current Admin scroll position; form data is captured before the field is disabled, and any rename failure uses the single-action informational dialog.
 - Switched VFUK GCID resolution to the supplied 4G `eNodeB ID`/`Local Cell ID` hexadecimal-equivalent formula and accepted the Cell ID field variants used by Data, Voice and Speech CDRs.
 - Made Excel worksheet headers unique during ingestion, preventing VFUK mappings and CDR workbooks with duplicate or blank headers from failing during Pandas reindexing.
