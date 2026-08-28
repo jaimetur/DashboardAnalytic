@@ -1,0 +1,12 @@
+{
+  "nsa": {
+    "active": "default",
+    "catalogues": {},
+    "default_name": "Default NSA Slide Catalogue"
+  },
+  "sa": {
+    "active": "default",
+    "catalogues": {},
+    "default_name": "Default SA Slide Catalogue"
+  }
+}

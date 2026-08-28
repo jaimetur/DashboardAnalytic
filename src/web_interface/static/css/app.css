@@ -171,8 +171,6 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-editor-library { margin-top: 0; padding-top: 0; border-top: 0; }
 .catalogue-import-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 0.6rem; }
 .catalogue-import-row input { min-width: 0; }
-.catalogue-management-message, .catalogue-management-notice { margin: 0.8rem 0; }
-.catalogue-management-notice { background: rgba(17, 122, 97, 0.12); border-color: rgba(17, 122, 97, 0.30); color: #075d59; }
 .catalogue-workspace-table-wrap { margin-top: 0.9rem; }
 .catalogue-workspace-table { min-width: 720px; }
 .catalogue-rename-form, .catalogue-workspace-actions { display: flex; align-items: center; gap: 0.45rem; }

@@ -1373,6 +1373,17 @@ if (catalogueImportError?.textContent.trim()) {
   });
 }
 
+const catalogueImportNotice = document.querySelector('[data-catalogue-import-notice]');
+if (catalogueImportNotice?.textContent.trim()) {
+  requestAnimationFrame(() => {
+    showConfirmDialog(catalogueImportNotice.textContent.trim(), {
+      title: 'Slide Catalogue Imported',
+      confirmLabel: 'Close',
+      hideCancel: true,
+    });
+  });
+}
+
 document.querySelectorAll('form[data-confirm]').forEach((form) => {
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
