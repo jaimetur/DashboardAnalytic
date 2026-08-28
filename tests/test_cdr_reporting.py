@@ -176,6 +176,24 @@ def test_rows_only_grouping_uses_one_all_series_without_repeating_the_category()
     assert grouped[series].tolist() == ['(all)', '(all)']
 
 
+def test_campaign_grouping_displays_only_year_and_quarter() -> None:
+    entry = parse_catalog_csv(
+        ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,Average Vertical Bars,,,Operator,Campaign\n',
+        'nsa',
+    )[0]
+    frame = pd.DataFrame({
+        'Operator': ['EE', '3', 'Vodafone UK'],
+        'Campaign': ['UK_Q2_SA_2026', 'UK_Q4_2025', '2024 Q3 NSA'],
+        'LQ': [3.2, 3.8, 4.0],
+    })
+
+    grouped, _primary, series = _apply_catalog_grouping(frame, entry, False, 'LQ')
+
+    assert grouped['Campaign'].tolist() == ['UK_Q2_SA_2026', 'UK_Q4_2025', '2024 Q3 NSA']
+    assert grouped['__catalog_column_0'].tolist() == ['2026 Q2', '2025 Q4', '2024 Q3']
+    assert grouped[series].tolist() == ['2026 Q2', '2025 Q4', '2024 Q3']
+
+
 def test_catalogue_filter_contract_supports_not_in_and_not_contains() -> None:
     conditions = parse_catalog_filters('Session_Type NOT IN (WhatsApp, SMS); Campaign NOT CONTAINS legacy')
     assert [(item.column, item.operator, item.values) for item in conditions] == [

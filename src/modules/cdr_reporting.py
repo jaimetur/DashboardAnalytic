@@ -710,6 +710,16 @@ def _latest_campaign_value(series: pd.Series) -> str | None:
     return max(values, key=campaign_key)
 
 
+def _campaign_display_value(value: object) -> str:
+    """Reduce NetCheck campaign identifiers to a stable year/quarter label."""
+    text = str(value).strip()
+    year_match = re.search(r"(?:19|20)\d{2}", text)
+    quarter_match = re.search(r"(?:^|[^A-Z0-9])Q\s*([1-4])(?:[^0-9]|$)", text, flags=re.I)
+    if year_match and quarter_match:
+        return f"{year_match.group(0)} Q{quarter_match.group(1)}"
+    return text
+
+
 def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor: bool, metric: str | None) -> pd.DataFrame:
     result = frame.copy()
     for condition in parse_catalog_filters(entry.filters):
@@ -795,10 +805,22 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
     # Preserve every resolved hierarchy level for renderers that need pane-like
     # rows and nested column headers. The flattened primary/series fields remain
     # available for chart grammars that intentionally use compact labels.
-    for index, column in enumerate(row_columns):
-        frame[f"__catalog_row_{index}"] = frame[column].fillna("(blank)").astype(str)
-    for index, column in enumerate(column_columns):
-        frame[f"__catalog_column_{index}"] = frame[column].fillna("(blank)").astype(str)
+    def materialise_dimension(dimension: str, column: str, target: str) -> None:
+        values = frame[column].fillna("(blank)").astype(str)
+        if _normalise_catalog_name(dimension) == "campaign":
+            values = values.map(_campaign_display_value)
+        frame[target] = values
+
+    row_display_columns: list[str] = []
+    for index, (dimension, column) in enumerate(zip(row_spec.dimensions, row_columns, strict=True)):
+        target = f"__catalog_row_{index}"
+        materialise_dimension(dimension, column, target)
+        row_display_columns.append(target)
+    column_display_columns: list[str] = []
+    for index, (dimension, column) in enumerate(zip(column_spec.dimensions, column_columns, strict=True)):
+        target = f"__catalog_column_{index}"
+        materialise_dimension(dimension, column, target)
+        column_display_columns.append(target)
     # Rows form the category/table-row hierarchy. Columns form chart series and
     # table columns. Distribution charts reserve the final column level as the
     # stack/bucket breakdown and use any preceding column levels as the series.
@@ -812,15 +834,15 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         else:
             frame[target] = frame[columns].fillna("(blank)").astype(str).agg(" · ".join, axis=1)
 
-    materialise(row_columns, primary)
+    materialise(row_display_columns, primary)
     is_distribution = entry.chart_type.casefold() == "distribution stacked vertical bars"
-    if is_distribution and column_columns:
-        stack_column = column_columns[-1]
-        series_columns = column_columns[:-1]
+    if is_distribution and column_display_columns:
+        stack_column = column_display_columns[-1]
+        series_columns = column_display_columns[:-1]
         materialise(series_columns, series)
         frame["__catalog_stack"] = frame[stack_column].fillna("(blank)").astype(str)
     else:
-        materialise(column_columns, series)
+        materialise(column_display_columns, series)
     return frame, primary, series
 
 
