@@ -7,7 +7,6 @@ Dashboard Analytic reads its runtime configuration from environment variables. F
 | Variable | Purpose |
 | --- | --- |
 | `APP_NAME` | Name shown by the application. |
-| `APP_VERSION` | Version shown in the interface and diagnostic information. |
 | `APP_PORT` | Port exposed by the production service. |
 | `APP_DEV_PORT` | Port used by the development service. |
 | `APP_SECRET_KEY` | Secret used to protect signed session data. Use a unique, private value outside local development. |
@@ -24,7 +23,7 @@ Dashboard Analytic reads its runtime configuration from environment variables. F
 | `APP_EXPORT_DIR` | Downloadable exports, including generated reports. |
 | `APP_REPORTING_TEMPLATE_DIR` | Optional override for the bundled PowerPoint template directory. |
 
-The service process must have read/write access to the configured storage directories. In Docker, mount them as volumes so that uploaded data and generated reports survive a container replacement.
+The service process must have read/write access to the configured storage directories. In Docker, mount them as volumes so that uploaded data, generated reports and managed slide catalogue state survive a container replacement. The version and release date displayed in the application are maintained in `src/version.py` and the changelog, not through an environment variable.
 
 ## Recommended deployment setup
 

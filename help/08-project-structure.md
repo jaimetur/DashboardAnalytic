@@ -10,6 +10,7 @@ DashboardAnalytic/
 │   ├── utils/                     # shared helpers
 │   └── web_interface/             # Jinja templates, JavaScript and CSS
 ├── assets/templates/              # bundled NetCheck CDR PowerPoint templates
+├── assets/ppt-slides-catalog/     # default and workspace report catalogue CSVs
 ├── help/                          # Help-centre Markdown articles
 ├── tests/                         # automated tests
 ├── docker/                        # Compose definitions and environment configuration
@@ -20,7 +21,8 @@ DashboardAnalytic/
 ## Key implementation areas
 
 - **Routes and pages:** `src/DashboardAnalytic.py` exposes API and document/help routes; `src/web_interface/templates/` contains the application, reporting and Help views.
-- **Reporting:** the reporting module loads processed CDR data, applies NSA/SA and vendor logic, then fills the supplied PowerPoint layouts. Template assets are kept in `assets/templates/` so deployments do not depend on a user desktop.
+- **Reporting:** the reporting module loads processed CDR data, applies NSA/SA and persisted vendor logic, parses filters and row/column grouping from the selected catalogue, then fills the supplied PowerPoint layouts. Template assets are kept in `assets/templates/` so deployments do not depend on a user desktop.
+- **Catalogue assets:** `assets/ppt-slides-catalog/` contains the built-in NSA/SA catalogues and the managed workspace catalogue library. The Admin editor and importer use this schema as the executable chart contract.
 - **Persistence:** the data modules keep workspace metadata and processed datasets available for later Dashboard and Reporting use.
 - **Help:** articles in `help/` are rendered by the in-app document viewer. The Help navigation is an explicit curated list, preventing generic documentation from appearing in the product UI.
 

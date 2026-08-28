@@ -12,11 +12,21 @@ The **Users** table is the authoritative operational view: submit the row action
 
 The Administration view also exposes the datasets recorded by Workspace. Use it to verify the source filename, assigned input type, processing state and ownership when investigating a missing Dashboard or Reporting input. Dataset analysis itself remains in the normal Workspace and Dashboard workflow; the Admin view is for oversight and traceability.
 
-## PowerPoint slide catalogue importer
+## Slide Catalogue Management
 
-The **Slide catalogue importer** accepts a separate UTF-8 CSV for **NSA** and **SA**. The active files are stored under `assets/ppt-slides-catalog/` and can be exported from the matching Admin panel before editing. The required columns are `Slide`, `Slide tittle`, `Slide Subtittle`, `Layout`, `CDR source`, `KPI`, `Chart type`, `Filters` and `Grouping`; each row that has a CDR source represents one chart image. `Slide tittle` and `Slide Subtittle` are taken from the supplied PowerPoint templates; a non-empty subtitle is rendered beneath the title. `Layout` must exactly match a named layout in the selected PPT template and must offer at least as many chart placeholders as CDR rows for that slide. The title placeholder is populated, while the analyst-comments placeholder is deliberately left empty. Where the source header has multiple lines, the exported CSV uses the literal `\n` sequence, which the importer restores as a line break. Validate edits in the exported CSV, then import it into the matching technology panel.
+**Slide Catalogue Management** maintains named NSA and SA report definitions stored under `assets/ppt-slides-catalog/`. The workspace list shows the catalogue name, technology and current default. It supports **Set Default**, **Delete**, **Duplicate** and **Export**; changing a name saves it automatically. The default catalogue is preselected in Reporting, while a user can still select another compatible catalogue for a single report run.
 
-The imported catalogue becomes the active reference for subsequent reports. For every automated slide, the renderer uses the explicitly declared `Layout`, removes the template's inherited sample-chart placeholders and inserts the calculated chart image into each matching chart placeholder. The existing analyst commentary area is retained and cleared. The importer also rewrites the NSA/SA Slide Catalogue tables in the PowerPoint Reporting help page from the active catalogues. The audit log records each successful import.
+Import a UTF-8 CSV by giving it a name and selecting the target NSA or SA section. The current schema is `Slide`, `Slide tittle`, `Slide Subtittle`, `Layout`, `Chart Tittle`, `CDR source`, `KPI`, `Chart type`, `Legend`, `Filters`, `Grouping_Rows` and `Grouping_Columns`. Each CDR-source row represents one chart image. If an older compatible schema is supplied, the application asks in a floating dialog whether it should convert it. Conversion maps compatible headings, splits a former `Grouping` hierarchy into rows and columns, leaves new optional fields blank and supplies a layout based on the number of charts on the slide. Validation failures are shown in a floating dialog and are also recorded in the audit log.
+
+## Slide Catalogue Editor
+
+Choose a stored catalogue in the editor picker, then select **Edit**. The editable grid has horizontal and vertical scrolling. Every cell can be typed manually; selecting a cell also opens contextual assistance:
+
+- **Layout**, **CDR source**, **KPI** and **Chart type** offer single, searchable selections.
+- **Grouping_Rows**, **Grouping_Columns** and **Legend** offer searchable multi-selection and preserve existing selected values without duplicating dimensions.
+- **Filters** opens the Filter Builder. It loads existing conditions, allows adding/removing conditions, and offers CDR fields, operators and values. Conditions are joined with AND. `NOT IN` and `NOT CONTAINS` are supported.
+
+`Layout` must match a named layout in the selected PPT template and provide enough chart placeholders for the number of CDR rows in that slide. The title placeholder receives `Slide tittle` and its optional blue subtitle; the analyst-comments placeholder stays blank. During report generation the renderer removes inherited template chart examples and inserts calculated charts in the selected layout. Imports/default changes also refresh the NSA/SA catalogue tables in the PowerPoint Reporting help page.
 
 ## Audit activity
 

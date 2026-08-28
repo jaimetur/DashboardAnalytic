@@ -10,7 +10,7 @@ Dashboard Analytic is a multi-user web workspace for ingesting CDR-style dataset
 
 - Uploads `CSV`, `XLS`, `XLSX`, and `XLSM` datasets from the web UI
 - Detects CDR workbook structure automatically, including multi-sheet operator workbooks
-- Classifies imported datasets as `CDR-Voice`, `CDR-Speech`, `CDR-Data`, `Multivendor Mapping`, or `Other`
+- Classifies imported datasets as `CDR-Voice`, `CDR-Speech`, `CDR-Data`, `Multivendor Mapping — VFUK`, `Multivendor Mapping — 3UK`, `Smart Orchestrator Logs`, or `Other`
 - Normalizes common dimensions such as market, period, operator, region, vendor, session type, direction, technology, and source sheet
 - Extracts reusable base metrics such as setup time, duration, quality score, throughput, latency, jitter, packet loss, and handovers
 - Builds dataset profiles and stores their status, progress, filter options, default metrics, and KPI snapshot in SQLite
@@ -18,7 +18,8 @@ Dashboard Analytic is a multi-user web workspace for ingesting CDR-style dataset
 - Opens the workspace immediately from cached metadata, without forcing a full dataset reload on every page refresh
 - Applies adaptive filters and loads charts or tables only when the user requests `Update Dashboard`
 - Exports the active dashboard context to Word or PowerPoint
-- Exposes embedded `Readme` and `Changelog` viewers rendered from Markdown
+- Provides read-only dataset previews in a separate tab, including row/column text filters and CDR-specific multi-select filters
+- Exposes embedded Readme, Changelog and Help viewers rendered from Markdown
 
 ## E2E PowerPoint Reporting
 
@@ -26,29 +27,31 @@ The top navigation separates the existing **E2E Dashboard** from **E2E PowerPoin
 
 ### Modules
 
-- **NetCheck CDR Reports**: build a consistent template-based PowerPoint from one processed Data, Voice and Speech CDR. Select NSA or SA and, when needed, enrich Vodafone UK and Three UK results with their dedicated cell mappings.
+- **NetCheck CDR Reports**: build a template-based PowerPoint from one processed Data, Voice and Speech CDR. Select NSA or SA, a stored slide catalogue and, when eligible, a multivendor scope based on vendors already mapped in Workspace.
 - **Smart Orchestrator Logs Reports**: visible as the future reporting destination for processed Smart Orchestrator Log sources; automated log reporting is not implemented yet.
 
-Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone and 3UK Three Multivendor Mapping files. It proposes each input type from its filename, including a per-file review when files are uploaded in a batch, and persists the confirmed type before processing. For a multivendor report, upload separate **VFUK Vodafone UK** and **3UK Three UK** mapping files through Data Ingestion first. They become selectable in Reporting only when the report scope is `Multivendor`. Vendor assignment follows the provided Vodafone/Three formula, including Vodafone's Ericsson/null mixed-vendor exception. PPT templates are shipped in `assets/templates/` and can be overridden with `APP_REPORTING_TEMPLATE_DIR`. The active NSA/SA slide catalogues are stored in `assets/ppt-slides-catalog/`; administrators can export, edit and import them to control the rendered slide title, optional subtitle and chart layout.
+Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone and 3UK Three Multivendor Mapping files. It proposes each input type from its filename, including a per-file review when files are uploaded in a batch, and persists the confirmed type before processing. Map vendors from the CDR action before generating a multivendor report; Reporting deliberately does not perform mapping itself. Vendor assignment follows the provided Vodafone/Three formula, including Vodafone's Ericsson/null mixed-vendor exception. PPT templates are shipped in `assets/templates/` and can be overridden with `APP_REPORTING_TEMPLATE_DIR`. Workspace slide catalogues are stored in `assets/ppt-slides-catalog/`; administrators can import, convert, duplicate, set a default, export and edit them in the browser.
 
 ### NetCheck CDR Reports workflow
 
 1. Upload the three NetCheck workbooks (Data, Voice and Speech) in **Workspace** and wait until each one is marked `Processed`.
-2. Upload both Multivendor Mapping workbooks (one **VFUK** file for Vodafone UK and one **3UK** file for Three UK) when a multivendor report is required.
+2. If a multivendor report is required, upload the **VFUK** and/or **3UK** mapping workbooks and use **Map Vendors** on each applicable CDR. The CDR stores the calculated Vendor values.
 3. Open **E2E PowerPoint Reporting → NetCheck CDR Reports**.
 4. Select exactly one processed CDR for each required input type.
 5. Choose `NSA` or `SA`. NSA sessions are selected when the available RAT field contains `ENDC`; SA sessions are selected when it contains `NR`.
-6. Choose `Single-vendor` or `Multivendor`. The mapping selectors are shown only for multivendor; select one processed VFUK mapping for Vodafone UK and another processed 3UK mapping for Three UK.
-7. Generate the PowerPoint report. The run stores its selected datasets, technology, scope, mapping and template in SQLite for auditability.
+6. Choose a compatible slide catalogue and `Single-vendor` or `Multivendor`. Multivendor is enabled only if at least one selected CDR has a saved vendor mapping.
+7. Generate the PowerPoint report. The run stores its selected datasets, technology, scope, catalogue and template in SQLite for auditability. Generated filenames use `yyyymmdd-hhmm`.
 
 The report starts from `Template_CDR_NSA_analysis.pptx` or `Template_CDR_SA_analysis.pptx`. Its layout and non-automated scoring/gap slides are retained. Automated CDR slides receive charts calculated from the persisted CDR rows, while commentary text boxes are cleared for analyst input.
 
-### Multivendor calculation
+### Multivendor calculation and remapping
 
 For Vodafone UK and Three, the report takes the first and last Global CI from the available CDR `Cell_ID_A`, `Cell_IDs_A` or `Cell_ID` field. Vodafone values are resolved only with the VFUK mapping and Three values only with the 3UK mapping. When a VFUK mapping is processed, Workspace materialises a `GCID` column for its `4G` rows as `eNodeB ID × 256 + Local Cell ID`, equivalent to the supplied hexadecimal Excel formula; it also materialises the existing `5G` convention as `gNodeB ID × 4096 + Local Cell ID`. A 3UK mapping materialises the same `GCID` value as its `Cid__ECI` (or `CId___ECI`) source field. Mapping previews show every source column, with `GCID` first and highlighted; the VFUK preview is deliberately limited to a selectable `4G` or `5G` sheet. O2 and EE retain the operator label because they have no multivendor segmentation in this workflow.
 
 - Vodafone: identical first/last vendor produces `Vodafone_<vendor>`; the Ericsson/null and differing-vendor cases follow the supplied formula and resolve to `Vodafone_Mixed Vendor` or `Vodafone_Other Vendor`.
 - Three: identical first/last vendor produces `3_<vendor>`; all other combinations produce `3_Mixed Vendor`.
+- O2/EE are retained only as report comparison operators; they are not written into the CDR Vendor field.
+- **Clear Vendors** removes a previous mapping so the CDR can be mapped again using newer mapping files.
 
 ## Current UI workflow
 
@@ -67,7 +70,7 @@ For Vodafone UK and Three, the report takes the first and last Global CI from th
 ### Automatic ingestion
 
 - `XLSM` CDR workbooks are supported directly
-- `Multivendor_Mapping` workbooks are recognized and retained as selectable mapping datasets for reporting
+- `Multivendor_Mapping` workbooks are recognized as separate VFUK/3UK mappings and retained for CDR vendor mapping in Workspace
 - Known summary sheets such as `MASTER`, `RANKING`, and similar non-data tabs are ignored
 - Operator sheets are concatenated when needed
 - Duplicate uploads of the same stored file are reused instead of creating a new dataset row
@@ -98,7 +101,13 @@ The dashboard currently includes:
 - comparison chart by aggregation
 - processed metrics table
 
-Voice, speech, and data datasets expose different KPI mixes based on the normalized columns available in the source.
+Only KPI-like numeric CDR fields are offered as Dashboard metrics; geographic coordinates, identifiers and other technical metadata are excluded. Voice, speech and data datasets expose different KPI mixes based on the normalized columns available in the source.
+
+### Slide catalogues and chart grouping
+
+Each automated catalogue row defines a single chart. The current CSV schema is: `Slide`, `Slide tittle`, `Slide Subtittle`, `Layout`, `Chart Tittle`, `CDR source`, `KPI`, `Chart type`, `Legend`, `Filters`, `Grouping_Rows` and `Grouping_Columns`.
+
+`Grouping_Rows` controls the visible category hierarchy. `Grouping_Columns` controls comparison series and legend values; when it is empty, the renderer uses one `(all)` series and does not repeat the category in labels. For distribution charts, the final column grouping is the stack/bucket dimension. This contract applies consistently to CDF, scatter, vertical bars, stacked bars and tables. Administrators can import legacy compatible files: the application offers to convert their headings, splits legacy `Grouping`, and assigns an appropriate default layout from the number of charts on each slide.
 
 ## Performance model
 
@@ -123,12 +132,14 @@ Default local accounts:
 - `admin / admin123`
 - `demo / demo123`
 
-The `admin` panel currently provides:
+The `admin` panel provides:
 
 - user creation
 - user listing
 - dataset listing
 - audit log inspection
+- named NSA/SA catalogue management, import conversion, default selection, duplication, deletion and export
+- an in-browser catalogue editor with contextual assistance for layouts, chart types, fields, legends, grouping and filter conditions
 
 ## Embedded documentation
 
@@ -136,8 +147,9 @@ The top navigation exposes:
 
 - `Readme`
 - `Changelog`
+- `Help`
 
-Both open in a new tab and render Markdown inside the application through the same document-viewer pattern used in the related PhotoMigrator project.
+They render Markdown inside the application; Help also provides a numbered sidebar for its project-specific articles.
 
 ## Local development
 
@@ -323,7 +335,7 @@ Recommended stack layout:
 - progress is coarse-grained, not a true step-by-step backend pipeline
 - analytics caching is in memory, not persisted as a long-lived analytical cache
 - SQLite is enough for the current app, but not the final storage model for very large multi-user deployments
-- Word and PowerPoint exports are functional, but not yet tied to a final branded reporting template system
+- Smart Orchestrator Logs reporting and scoring/GAP automation remain future work
 
 ## Recommended next steps
 

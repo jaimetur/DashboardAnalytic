@@ -1,15 +1,16 @@
 # 4. E2E Dashboard
 
-E2E Dashboard is the interactive layer for a processed workspace dataset. It adapts to the columns present in the source, so the available filters and metrics may differ between datasets.
+E2E Dashboard is the interactive layer for a processed NetCheck CDR dataset. It adapts to the available CDR columns, so filter values and KPIs can differ between Data, Voice and Speech sources.
 
 ## Typical analysis flow
 
 1. Open **E2E Dashboard**.
-2. Select a processed dataset from the workspace.
+2. Select a processed `CDR-Data`, `CDR-Voice` or `CDR-Speech` dataset from the workspace. Mappings, logs and Other datasets are not Dashboard candidates.
 3. Filter by market, operator, period, technology, vendor or other categorical fields available in the source.
-4. Select one or more numeric KPIs and, where available, choose the CDF and comparison aggregation.
+4. Select one or more KPI-like numeric fields and, where available, choose the CDF and comparison aggregation. Coordinates, cell identifiers, locations and other technical metadata are deliberately excluded from the metric list.
 5. Review global and per-metric summary cards, percentile values, CDF curves, comparison charts and the filtered record table.
-6. Export only after validating the active dataset, filters, metrics and scope.
+6. Use **Preview Dataset** when raw persisted values need checking; it opens the same new-tab preview as Workspace.
+7. Export only after validating the active dataset, filters, metrics and scope.
 
 ## Available KPI outputs
 

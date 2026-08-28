@@ -14,7 +14,7 @@ If a status shows an error, correct the source and upload it again. Do not creat
 
 ## Queue, preview and dashboard
 
-The **Data Processing** queue starts with **All Types** selected and can be narrowed to any supported input type. After successful processing, select **Preview** to inspect a read-only sample of up to 100 rows (or customized value) from the persisted dataset. For CDR Data, Voice and Speech inputs, **Show Dashboard** is displayed to open the KPI analysis directly; mappings and Smart Orchestrator Logs remain available for their dedicated workflows without being sent to the CDR dashboard.
+The **Data Processing** queue starts with **All Types** selected and can be narrowed to any supported input type. After successful processing, select **Preview** to inspect a read-only sample of 100 rows by default (or a customized value) from the persisted dataset. The preview opens in a new tab and can filter displayed columns or rows with comma-separated text terms. CDR previews also provide multi-select Operator, Vendor, RAT/RAT_A, Session Type and Call Status controls, with all available values selected by default. For CDR Data, Voice and Speech inputs, **Show Dashboard** opens KPI analysis directly; mappings and Smart Orchestrator Logs remain available for their dedicated workflows without being sent to the CDR dashboard.
 
 ## Excel workbooks
 
@@ -36,7 +36,7 @@ Smart Orchestrator Log files can already be uploaded, classified and retained in
 
 ## Multivendor mapping inputs
 
-Multivendor reporting requires two processed mapping files: **VFUK** for Vodafone UK and **3UK** for Three UK. Workspace preselects these types when the filename includes the corresponding identifier; always confirm the proposal. O2 and EE are not mapped as multivendor operators. The mappings are selected separately so the system can resolve vendors from the first and last Global Cell ID seen in each session.
+Multivendor mapping uses processed mapping files: **VFUK** for Vodafone UK and **3UK** for Three UK. Workspace preselects these types when the filename includes the corresponding identifier; always confirm the proposal. O2 and EE are not mapped as multivendor operators. The CDR **Map Vendors** action selects the available files and resolves vendors from the first and last Global Cell ID seen in each session.
 
 | Source | Required input | How the lookup is built |
 | --- | --- | --- |
@@ -44,4 +44,4 @@ Multivendor reporting requires two processed mapping files: **VFUK** for Vodafon
 | 3UK mapping | `Cid__ECI` (the source variant `CId___ECI` is also accepted) and Vendor | Processing materialises `GCID` as the same value, which is then matched directly to the CDR endpoint GCID. |
 | VFUK mapping | `4G` worksheet with `eNodeB ID`, `Local Cell ID` and Vendor; optionally `5G` with `gNodeB ID` and `Local Cell ID` | Processing materialises a `GCID` column for `4G` as `eNodeB ID × 256 + Local Cell ID`, equivalent to the supplied hexadecimal Excel formula. It also materialises the existing `5G` calculation, `gNodeB ID × 4096 + Local Cell ID`. The mapping preview is limited to these two sheets and provides a selector between them. |
 
-Keep the Vendor field populated and verify that the mapping has been processed successfully before opening Reporting. A mapping with an incorrect assigned type will not appear in its Vodafone or Three selector.
+After the mappings are processed, use **Map Vendors** on each CDR that needs multivendor analysis. The dialog lists only ready VFUK/3UK mapping datasets and explains the applied first/last-Cell-ID rule. The action writes Vendor only for Vodafone UK and 3UK samples; O2/EE remain operators rather than vendors. **Clear Vendors** removes the stored CDR mapping so a newer mapping can be applied. Reporting enables Multivendor only after this operation has been completed for at least one selected CDR.

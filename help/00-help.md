@@ -8,7 +8,7 @@ Dashboard Analytic separates the work into three connected product areas:
 
 - **Workspace** is the controlled entry point for NetCheck CDR Data, Voice and Speech workbooks, Smart Orchestrator Logs and operator-specific Multivendor Mappings. It proposes a file type from the name, allows an analyst to correct it, then stores the processed data for later use.
 - **E2E Dashboard** is the interactive analysis surface for one processed dataset. It provides adaptive filters, KPI summaries, percentile scorecards, CDF/comparison charts and exports of the active dashboard scope.
-- **E2E PowerPoint Reporting** produces the standard NSA or SA NetCheck CDR PowerPoint from the three processed CDR domains. A multivendor run additionally uses one VFUK mapping for Vodafone UK and one 3UK mapping for Three UK.
+- **E2E PowerPoint Reporting** produces the standard NSA or SA NetCheck CDR PowerPoint from the three processed CDR domains and a selected workspace slide catalogue. A multivendor run uses Vendor values that were mapped and stored on the CDR beforehand.
 
 ## Recommended reading order
 
@@ -24,4 +24,4 @@ Dashboard Analytic separates the work into three connected product areas:
 
 ## Getting help
 
-Start in Workspace when a source file has not yet been processed. A report can only use datasets that have already been uploaded and processed in the workspace. For NetCheck reporting, select one processed Data CDR, one Voice CDR and one Speech CDR; choose Multivendor only when both the VFUK Vodafone and 3UK Three mapping files are also available. If a file is not offered by a selector, first verify its processing status and its assigned type in Workspace.
+Start in Workspace when a source file has not yet been processed. A report can only use datasets that have already been uploaded and processed in the workspace. For NetCheck reporting, select one processed Data CDR, one Voice CDR and one Speech CDR. To use Multivendor, map Vendor values first from the CDR's **Map Vendors** action using available VFUK/3UK mappings; the Reporting scope is enabled only when at least one selected CDR is already mapped. If a file or catalogue is not offered by a selector, verify its processing status, assigned type and active/default state in Workspace or Administration.

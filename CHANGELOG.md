@@ -68,7 +68,7 @@
 
 #### 📚 Documentation:
 - Replaced inherited and unrelated documentation, including the root-level roadmap, with a maintained numbered Dashboard Analytic Help set and embedded Help index.
-- Documented the E2E module structure, ingestion classification, multivendor prerequisites, reporting workflow and template configuration in the README and Help guides.
+- Expanded the README and numbered Help guides to document the current Workspace, CDR preview, Dashboard, persisted vendor mapping, reporting, catalogue conversion/editor and executable chart-grouping workflows.
 
 ---
 

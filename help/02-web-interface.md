@@ -16,20 +16,22 @@ Workspace, Dashboard and Reporting are shown as application tabs directly above 
 
 ## Workspace
 
-Use **Upload** to add a supported source file. Workspace accepts NetCheck CDR Data, Voice and Speech workbooks, Smart Orchestrator Logs and VFUK/3UK Multivendor Mappings. It proposes a type from the filename; confirm or correct it before processing. When several files are selected, each has its own type selector in a review panel. The **Data Processing** queue can be narrowed by input type, with **All Types** selected initially. Once a dataset is processed, **View** shows a read-only row preview; CDR Data, Voice and Speech rows also expose **Show Dashboard** to open their KPI analysis. Check that the status is **Processed** before moving on: datasets still processing or showing an error are not valid report inputs.
+Use **Upload** to add a supported source file. Workspace accepts NetCheck CDR Data, Voice and Speech workbooks, Smart Orchestrator Logs and separate VFUK/3UK Multivendor Mappings. It proposes a type from the filename; confirm or correct it before processing. When several files are selected, each has its own type selector in a review panel. The **Data Processing** queue can be narrowed by input type, with **All Types** selected initially and unavailable types disabled.
+
+Once a dataset is processed, **Preview** opens a read-only sample in a new tab. It supports a configurable row limit, free-text row/column matching, and source-specific controls: CDR previews provide multi-select Operator, Vendor, RAT, Session Type and Call Status filters; mapping previews provide GCID/Vendor filtering and highlight those fields. CDR rows also expose **Show Dashboard**. When mappings are available, an unmapped CDR exposes **Map Vendors**; a mapped CDR exposes **Clear Vendors** for a clean remap. Check that the status is **Processed** before moving on: datasets still processing or showing an error are not valid report inputs.
 
 ## E2E Dashboard
 
-Select a processed dataset, then use the available controls to narrow the view by the dimensions present in that data. The dashboard exposes available numeric metrics, global and per-metric KPI cards, percentile scorecards, CDF/comparison views and filtered records. KPI tables and charts always reflect the active filters. Confirm the dataset, filters and aggregation before using a Word or PowerPoint export action.
+Select a processed CDR dataset, then use the available controls to narrow the view by the dimensions present in that data. The dashboard exposes KPI-like numeric metrics only; coordinate fields, identifiers and technical metadata are excluded. Adaptive filters support compact multi-selection, date ranges and available CDR values. **Preview Dataset** opens the same persisted-data preview as Workspace. KPI tables and charts always reflect the active filters. Confirm the dataset, filters and aggregation before using a Word or PowerPoint export action.
 
 ## E2E PowerPoint Reporting
 
 Open **NetCheck CDR Reports** to create a PowerPoint report. The form requires three processed workspace datasets: one **Data**, one **Voice** and one **Speech** CDR. Select NSA or SA, then select the report scope.
 
-For **Single-vendor**, no mapping is requested. For **Multivendor**, separate **VFUK Vodafone UK** and **3UK Three UK** mapping selectors appear and both inputs are mandatory. The generated report uses the selected template, replaces its example charts with calculations from the persisted CDR rows and leaves analyst commentary areas blank. When generation completes, the report downloads and the progress dialog closes automatically.
+Choose the workspace slide catalogue that defines the report. The active/default catalogue is selected initially, but any stored catalogue of the selected technology can be used for that report. For **Single-vendor**, no further mapping is required. **Multivendor** is available only when at least one selected CDR already has persisted Vendor values; mappings are completed in Workspace rather than Reporting. The generated report uses the selected template, replaces its example charts with calculations from the persisted CDR rows and leaves analyst commentary areas blank. When generation completes, the timestamp-named report downloads and the progress dialog closes automatically.
 
 **Smart Orchestrator Logs Reports** is visible as a future module but is not implemented yet.
 
 ## Help navigation
 
-The Help tab keeps the user in the current application tab. `0. 🏠 Help Home` is the first item in the left navigation and the other articles are numbered in the same order. Only documentation relevant to Dashboard Analytic is listed.
+The Help tab keeps the user in the current application tab. `00. Help Home 🏠` is the first item in the left navigation and the other articles are numbered from their filenames in the same order. Only documentation relevant to Dashboard Analytic is listed.
