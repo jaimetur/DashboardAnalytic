@@ -2026,7 +2026,11 @@ if (queueNode) {
     }
     if (progressLabel) progressLabel.textContent = `${dataset.progress || 0}%`;
     if (updated) updated.textContent = dataset.updated_at || dataset.uploaded_at || '';
-    row.dataset.datasetKind = dataset.dataset_kind || 'generic';
+    // A profile can be in the small persistence window between status updates.
+    // Keep the known row kind until the API supplies a replacement so ready CDR
+    // actions do not disappear while another upload is being processed.
+    const datasetKind = dataset.dataset_kind || row.dataset.datasetKind || 'generic';
+    row.dataset.datasetKind = datasetKind;
     if (dataset.last_error && (dataset.status === 'failed' || dataset.status === 'stopped')) {
       if (!errorNode && progressLabel && progressLabel.parentElement) {
         errorNode = document.createElement('p');
@@ -2043,11 +2047,17 @@ if (queueNode) {
     if (actions) {
       const openParams = new URLSearchParams();
       openParams.set('dataset_id', String(dataset.id));
-      if (dataset.dataset_kind) {
-        openParams.set('input_kind', String(dataset.dataset_kind));
+      if (datasetKind && datasetKind !== 'generic') {
+        openParams.set('input_kind', String(datasetKind));
       }
       const openHref = `/dashboard?${openParams.toString()}`;
-      const isCdr = ['data', 'voice', 'speech'].includes(dataset.dataset_kind);
+      const isCdr = ['data', 'voice', 'speech'].includes(datasetKind);
+      const hadMapVendors = Boolean(actions.querySelector('[data-vendor-map-open]'));
+      const hadClearVendors = Boolean(actions.querySelector('.action-link-clear-vendors'));
+      // Preserve already available Vendor actions during live polling. New
+      // actions still come directly from the persisted API capabilities.
+      const canMapVendors = Boolean(dataset.can_map_vendors) || hadMapVendors;
+      const canClearVendors = Boolean(dataset.can_clear_vendors) || hadClearVendors;
       const fileName = String(dataset.file_name || 'dataset')
         .replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       if (dataset.status === 'ready') {
@@ -2056,12 +2066,12 @@ if (queueNode) {
           <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete dataset '${fileName}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
             <button type="submit" class="danger-button">Delete</button>
           </form>
-          ${isCdr ? `<a class="ghost-link action-link-primary" href="${openHref}" data-dashboard-open-link data-dataset-id="${dataset.id}"${dataset.dataset_kind ? ` data-input-kind="${String(dataset.dataset_kind)}"` : ''}>Show Dashboard</a>` : ''}
-          ${dataset.can_clear_vendors ? `
+          ${isCdr ? `<a class="ghost-link action-link-primary" href="${openHref}" data-dashboard-open-link data-dataset-id="${dataset.id}"${datasetKind ? ` data-input-kind="${String(datasetKind)}"` : ''}>Show Dashboard</a>` : ''}
+          ${canClearVendors ? `
             <form method="post" action="/workspace/clear-vendors/${dataset.id}" data-confirm="Clear the mapped Vendor values for '${fileName}'? You can map the CDR again using updated mappings." data-confirm-title="Clear Vendor mapping" data-confirm-label="Clear Vendors" data-confirm-loading-label="Clearing Vendors from selected dataset" data-confirm-loading-copy="Removing the mapped Vendor values from the selected CDR. Please wait while the dataset is refreshed.">
               <button type="submit" class="action-link-clear-vendors">Clear Vendors</button>
             </form>` : ''}
-          ${dataset.can_map_vendors ? `<button type="button" class="ghost-link action-link-map-vendors" data-vendor-map-open data-dataset-id="${dataset.id}" data-dataset-name="${fileName}">Map Vendors</button>` : ''}
+          ${canMapVendors ? `<button type="button" class="ghost-link action-link-map-vendors" data-vendor-map-open data-dataset-id="${dataset.id}" data-dataset-name="${fileName}">Map Vendors</button>` : ''}
         `;
       } else if (dataset.status === 'processing') {
         actions.innerHTML = `
@@ -2105,7 +2115,7 @@ if (queueNode) {
 
   const pollQueue = async () => {
     try {
-      const response = await fetch(url, {headers: {'Accept': 'application/json'}});
+      const response = await fetch(url, {cache: 'no-store', headers: {'Accept': 'application/json'}});
       if (!response.ok) return;
       const payload = await response.json();
       const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
