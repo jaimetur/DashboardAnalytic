@@ -34,7 +34,6 @@
 - Split executable slide aggregation into **Grouping_Rows** and **Grouping_Columns**. Rows now define chart categories/table rows; columns define comparison series/table columns, with the final column level used as the stack for distribution charts. Admin exports use this schema, while legacy catalogues remain readable during migration.
 - Updated NSA slides 8–15 with the requested operator scope, G Level 4 and horizontal/vertical grouping rules, corrected Speech/LQ sources for POLQA slides, the 1.6 thresholds, and the VoLTE/MultiRAB call scope. Restored the template city subtitle on slides 8–21.
 - Aligned NSA slides 16–21 with the former catalogue: `Mean_Data_Rate` for FDTT, completed-result scope, the named FDTT/FDFS test variants, the three-operator comparison set, and the specific Interactivity and httpBrowser filters. Distribution charts retain `Rate Bucket` as the renderer-required column grouping.
-- Added client-side free-text filters to every dataset preview table. Column names and row values support case-insensitive partial matches, with comma-separated terms combined as an OR search, without reloading the preview.
 - Rendered PowerPoint slide subtitles in the title placeholder itself: they now use a second line below the title, a smaller 16 pt font and the reporting blue accent.
 - Extended NSA and SA Slide Catalogue CSVs with **Chart Tittle** and **Legend**. Chart titles drive the generated chart heading; comma-separated legend labels replace generated series/state captions in display order. Existing catalogue schemas remain import-compatible.
 - Expanded **Slide Catalogue Management** with a named workspace library for multiple NSA and SA catalogues. Imports receive a distinct name, become active immediately, and can later be activated or exported individually; the active catalogue remains the report-generation and Help reference.
@@ -51,6 +50,7 @@
 - Expanded module descriptions, README and Help guides to document the current operational workflow; standardized the **Generate PowerPoint Report** and **Refresh Preview** controls.
 - Named generated NetCheck CDR PowerPoint reports with their generation timestamp (`yyyymmdd-hhmm`) instead of an opaque content-hash suffix.
 - Created `UpdateAll.py` as a Dashboard Analytic utility for synchronizing `src/version.py` and the current `CHANGELOG.md` release header.
+- Added client-side filtering to every dataset preview table. Column names and row values support case-insensitive partial matches, with comma-separated terms combined as an OR search; additionally, every column header opens an Excel-style searchable checklist of its distinct values, supporting multi-selection and combined filters across multiple columns without reloading the preview.
 
 #### 🐛 Bug fixes:
 - Show Slide Catalogue import validation failures in a floating dialog after redirecting back to Admin, rather than leaving the cause embedded in the management panel.

@@ -428,6 +428,26 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .dataset-preview-panel { position: relative; z-index: 1; overflow: hidden; }
 .dataset-preview-table-wrap { width: 100%; max-width: 100%; min-width: 0; height: min(65vh, 38rem); max-height: none; overflow-x: scroll !important; overflow-y: scroll !important; scrollbar-gutter: stable both-edges; overscroll-behavior: contain; }
 .dataset-preview-table { width: max-content; min-width: 1200px; }
+.dataset-preview-table thead th { padding: 0; }
+.preview-column-filter-trigger { display: flex; align-items: center; justify-content: space-between; gap: 0.65rem; width: 100%; min-height: 42px; padding: 0.7rem 0.8rem; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; text-align: left; box-shadow: none; white-space: nowrap; }
+.preview-column-filter-trigger:hover:not(:disabled), .preview-column-filter-trigger:focus-visible { background: rgba(16, 49, 74, 0.09); color: inherit; box-shadow: inset 0 -3px rgba(11, 122, 117, 0.45); }
+.preview-column-filter-icon { display: inline-flex; align-items: center; justify-content: center; width: 1.15rem; height: 1.15rem; border: 1px solid rgba(16, 49, 74, 0.22); border-radius: 5px; background: rgba(255, 255, 255, 0.62); color: #28495e; font-size: 0.7rem; line-height: 1; }
+.dataset-preview-table th.has-value-filter .preview-column-filter-trigger { background: rgba(11, 122, 117, 0.14); box-shadow: inset 0 -3px #0b7a75; }
+.dataset-preview-table th.has-value-filter .preview-column-filter-icon { background: #0b7a75; border-color: #075d59; color: #fff; }
+.preview-column-filter-menu { position: fixed; z-index: 2500; display: grid; gap: 0.65rem; box-sizing: border-box; max-height: min(430px, calc(100vh - 20px)); padding: 0.8rem; border: 1px solid rgba(16, 49, 74, 0.28); border-radius: 13px; background: #fff; color: #263d50; box-shadow: 0 18px 48px rgba(16, 49, 74, 0.28); }
+.preview-column-filter-search { box-sizing: border-box; min-width: 0; width: 100%; padding: 0.66rem 0.72rem; border: 1px solid rgba(16, 49, 74, 0.28); border-radius: 9px; background: #f8fbfc; color: #10314a; font-size: 0.85rem; }
+.preview-column-filter-toolbar, .preview-column-filter-footer { display: flex; align-items: center; gap: 0.5rem; }
+.preview-column-filter-toolbar button { padding: 0.42rem 0.65rem; border: 1px solid rgba(16, 49, 74, 0.18); border-radius: 999px; background: #eaf2f5; color: #28495e; font-size: 0.76rem; box-shadow: none; }
+.preview-column-filter-options { min-height: 2.4rem; max-height: 245px; overflow-y: auto; padding: 0.25rem; border: 1px solid rgba(16, 49, 74, 0.14); border-radius: 9px; background: #fbfcfd; }
+.preview-column-filter-option { display: flex; align-items: center; gap: 0.55rem; padding: 0.42rem 0.48rem; border-radius: 7px; color: #263d50; font-size: 0.82rem; font-weight: 600; cursor: pointer; }
+.preview-column-filter-option[hidden] { display: none; }
+.preview-column-filter-option:hover { background: #eaf3f6; }
+.preview-column-filter-option input { flex: 0 0 auto; width: 1rem; height: 1rem; margin: 0; accent-color: #0b7a75; }
+.preview-column-filter-option span { min-width: 0; overflow-wrap: anywhere; }
+.preview-column-filter-footer { justify-content: flex-end; padding-top: 0.1rem; }
+.preview-column-filter-footer button { padding: 0.55rem 0.9rem; border-radius: 999px; font-size: 0.8rem; font-weight: 800; }
+.preview-column-filter-cancel { border: 1px solid rgba(16, 49, 74, 0.22); background: #edf3f6; color: #28495e; box-shadow: none; }
+.preview-column-filter-apply { border: 1px solid rgba(7, 93, 89, 0.4); background: linear-gradient(135deg, #0b7a75, #149d94); color: #fff; box-shadow: 0 7px 16px rgba(11, 122, 117, 0.2); }
 .dataset-preview-table .gcid-column { background: #fff6bf; color: #554000; font-weight: 700; }
 .dataset-preview-table .vendor-column { background: #dff1ff; color: #12476b; font-weight: 700; }
 .dataset-preview-table-wrap::-webkit-scrollbar { display: block; width: 14px; height: 14px; }
