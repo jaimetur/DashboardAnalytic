@@ -2208,6 +2208,8 @@ def rename_report_catalogue(
     technology = technology.strip().lower()
     catalogue = _named_catalogue(technology, catalogue_id) if technology in TEMPLATE_NAMES else None
     if not catalogue:
+        if 'application/json' in request.headers.get('accept', ''):
+            return JSONResponse({'error': 'Slide catalogue not found.'}, status_code=404)
         return render_admin_template(request, user, error='Slide catalogue not found.', status_code=404)
     try:
         name = catalogue_name.strip()
@@ -2224,8 +2226,12 @@ def rename_report_catalogue(
             metadata['name'] = name
         save_report_catalogue_registry(registry)
     except ValueError as exc:
+        if 'application/json' in request.headers.get('accept', ''):
+            return JSONResponse({'error': str(exc)}, status_code=400)
         return render_admin_template(request, user, error=str(exc), status_code=400)
     repository.add_log(user.username, 'rename_report_catalogue', json.dumps({'technology': technology, 'catalogue': catalogue_id, 'name': name}))
+    if 'application/json' in request.headers.get('accept', ''):
+        return JSONResponse({'name': name})
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 

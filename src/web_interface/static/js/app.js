@@ -469,10 +469,30 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
 });
 
 document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
-  const initialValue = input.value;
-  input.addEventListener('change', () => {
-    if (input.value.trim() && input.value.trim() !== initialValue.trim()) {
-      input.form?.requestSubmit();
+  let savedValue = input.value.trim();
+  input.addEventListener('change', async () => {
+    const name = input.value.trim();
+    if (!name || name === savedValue || !input.form) return;
+    input.disabled = true;
+    try {
+      const response = await fetch(input.form.action, {
+        method: 'POST',
+        body: new FormData(input.form),
+        credentials: 'same-origin',
+        headers: {Accept: 'application/json'},
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'The catalogue name could not be saved.');
+      savedValue = String(payload.name || name).trim();
+      input.value = savedValue;
+      input.setAttribute('aria-label', `Name for ${savedValue}`);
+    } catch (error) {
+      input.value = savedValue;
+      showConfirmDialog(error instanceof Error ? error.message : 'The catalogue name could not be saved.', {
+        title: 'Catalogue Rename Failed', confirmLabel: 'Close', hideCancel: true,
+      });
+    } finally {
+      input.disabled = false;
     }
   });
 });

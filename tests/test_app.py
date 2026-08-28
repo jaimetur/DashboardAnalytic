@@ -1048,6 +1048,21 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert b'Second' in exported.content
 
 
+def test_admin_catalogue_rename_supports_background_json_save(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    response = client.post(
+        '/admin/report-catalogues/nsa/default/rename',
+        data={'catalogue_name': 'Renamed default'},
+        headers={'accept': 'application/json'},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {'name': 'Renamed default'}
+    assert next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'default')['name'] == 'Renamed default'
+
+
 def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     login(client)
 
