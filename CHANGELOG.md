@@ -40,6 +40,7 @@
 - Corrected catalogue grouping semantics across bars, CDF, scatter and tables; nested row/column hierarchies, distribution stacks and campaign labels now render consistently.
 - Fixed master-layout placeholder assignment, inherited-chart cleanup, generated-report download completion and Help article navigation.
 - Fixed CDR/mapping ingestion for duplicate headers, legacy CSV encodings, VFUK/3UK GCIDs, alternate Cell ID fields (including Global CI/GCID/GCI/CGI/ECI variants) and NSA RAT spellings.
+- Fixed Reporting CDR selector contrast and kept a CDR ready after a failed Vendor mapping, recording the cause in Workspace Logs instead of disabling Preview and Dashboard access.
 - Fixed Workspace drag-and-drop, cache refreshes, profile-backed loading and Dashboard filter population/contrast.
 - Fixed live Workspace queue updates so newly processed CDRs immediately show the applicable **Map Vendors**, **Clear Vendors** and **Show Dashboard** actions: the Workspace now refreshes itself once when background processing reaches Ready, using the final server profile.
 - Fixed mobile README/document overflow by constraining rendered images and the Markdown container, including the application logo.

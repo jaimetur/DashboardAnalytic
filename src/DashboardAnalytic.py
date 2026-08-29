@@ -1125,7 +1125,11 @@ def process_vendor_mapping(
         repository.update_dataset_profile(dataset_id, status='stopped', progress=99, last_error=str(exc), processed_at=now_iso())
         repository.add_log(username, 'stop_vendor_mapping', json.dumps({'dataset_id': dataset_id}))
     except Exception as exc:
-        repository.update_dataset_profile(dataset_id, status='failed', progress=100, last_error=str(exc), processed_at=now_iso())
+        # Mapping reads and enriches an already materialised CDR.  Until the
+        # final persistence step succeeds, it does not alter that CDR.  A bad
+        # mapping or an unrecognised Cell ID field must therefore leave the
+        # source dataset ready for Preview, Dashboard and a later retry.
+        repository.update_dataset_profile(dataset_id, status='ready', progress=100, last_error=None, processed_at=now_iso())
         repository.add_log(username, 'map_dataset_vendors_failed', json.dumps({'dataset_id': dataset_id, 'error': str(exc)}))
     finally:
         clear_stop_request(dataset_id)

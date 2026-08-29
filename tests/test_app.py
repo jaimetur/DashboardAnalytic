@@ -462,6 +462,29 @@ def test_workspace_queues_vendor_mapping_for_multiple_cdrs(client) -> None:
     assert all(not dataset['vendor_mapping_applied'] for dataset in datasets if dataset['id'] in {1, 2})
 
 
+def test_failed_vendor_mapping_keeps_the_cdr_available(client) -> None:
+    login(client)
+    client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'data'},
+        files={'dataset_files': ('cdr_without_cell_id.csv', BytesIO(b'Operator,score\n3,91\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'mapping_three'},
+        files={'dataset_files': ('Multivendor_Mapping_3UK.csv', BytesIO(b'Cid__ECI,Vendor\n200,Nokia\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+
+    response = client.post('/workspace/map-vendors', data={'cdr_dataset_id': 1, 'three_mapping_dataset_id': 2})
+    assert response.status_code == 200
+    dataset = next(item for item in client.get('/api/datasets/status').json()['datasets'] if item['id'] == 1)
+    assert dataset['status'] == 'ready'
+    assert client.get('/workspace/preview/1').status_code == 200
+    assert 'Vendor mapping failed for CDR dataset 1' in client.get('/workspace?dataset_id=1').text
+
+
 def test_workspace_upload_can_map_selected_cdr_vendor_during_processing(client) -> None:
     login(client)
     mapping_response = client.post(
