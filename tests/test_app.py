@@ -415,7 +415,8 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     assert 'data-dataset-id="1"' in workspace_after_mapping
     assert 'Map Vendors</button>' not in workspace_after_mapping
     assert 'Clear Vendors</button>' in workspace_after_mapping
-    assert 'data-confirm-loading-label="Clearing Vendors from selected dataset"' in workspace_after_mapping
+    assert 'data-vendor-clear-open' in workspace_after_mapping
+    assert 'action="/workspace/clear-vendors"' in workspace.text
     live_status_after_mapping = client.get('/api/datasets/status').json()['datasets']
     assert next(dataset for dataset in live_status_after_mapping if dataset['id'] == 1)['can_clear_vendors'] is True
 
@@ -450,6 +451,15 @@ def test_workspace_queues_vendor_mapping_for_multiple_cdrs(client) -> None:
     assert response.status_code == 303
     datasets = client.get('/api/datasets/status').json()['datasets']
     assert all(dataset['vendor_mapping_applied'] for dataset in datasets if dataset['id'] in {1, 2})
+
+    response = client.post(
+        '/workspace/clear-vendors',
+        data={'cdr_dataset_ids': ['1', '2']},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    datasets = client.get('/api/datasets/status').json()['datasets']
+    assert all(not dataset['vendor_mapping_applied'] for dataset in datasets if dataset['id'] in {1, 2})
 
 
 def test_workspace_upload_can_map_selected_cdr_vendor_during_processing(client) -> None:

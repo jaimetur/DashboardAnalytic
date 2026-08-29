@@ -2084,7 +2084,7 @@ if (queueNode) {
       const openHref = `/dashboard?${openParams.toString()}`;
       const isCdr = ['data', 'voice', 'speech'].includes(datasetKind);
       const hadMapVendors = Boolean(actions.querySelector('[data-vendor-map-open]'));
-      const hadClearVendors = Boolean(actions.querySelector('.action-link-clear-vendors'));
+      const hadClearVendors = Boolean(actions.querySelector('[data-vendor-clear-open]'));
       // Preserve already available Vendor actions during live polling. New
       // actions still come directly from the persisted API capabilities.
       const canMapVendors = Boolean(dataset.can_map_vendors) || hadMapVendors;
@@ -2098,10 +2098,7 @@ if (queueNode) {
             <button type="submit" class="danger-button">Delete</button>
           </form>
           ${isCdr ? `<a class="ghost-link action-link-primary" href="${openHref}" data-dashboard-open-link data-dataset-id="${dataset.id}"${datasetKind ? ` data-input-kind="${String(datasetKind)}"` : ''}>Show Dashboard</a>` : ''}
-          ${canClearVendors ? `
-            <form method="post" action="/workspace/clear-vendors/${dataset.id}" data-confirm="Clear the mapped Vendor values for '${fileName}'? You can map the CDR again using updated mappings." data-confirm-title="Clear Vendor mapping" data-confirm-label="Clear Vendors" data-confirm-loading-label="Clearing Vendors from selected dataset" data-confirm-loading-copy="Removing the mapped Vendor values from the selected CDR. Please wait while the dataset is refreshed.">
-              <button type="submit" class="action-link-clear-vendors">Clear Vendors</button>
-            </form>` : ''}
+          ${canClearVendors ? `<button type="button" class="action-link-clear-vendors" data-vendor-clear-open data-dataset-id="${dataset.id}">Clear Vendors</button>` : ''}
           ${canMapVendors ? `<button type="button" class="ghost-link action-link-map-vendors" data-vendor-map-open data-dataset-id="${dataset.id}" data-dataset-name="${fileName}">Map Vendors</button>` : ''}
         `;
       } else if (dataset.status === 'processing') {

@@ -1150,6 +1150,44 @@ def enqueue_vendor_mapping(
     )
 
 
+def process_vendor_clearing(dataset_id: int, username: str) -> None:
+    """Rebuild one CDR without the persisted Vendor enrichment in the queue."""
+    dataset_row = repository.get_dataset(dataset_id)
+    if not dataset_row:
+        return
+    dataset = serialize_dataset_row(dataset_row)
+    dataset_path = Path(dataset['stored_path'])
+    repository.update_dataset_profile(dataset_id, status='processing', progress=10, last_error=None)
+    try:
+        ensure_not_stopped(dataset_id)
+        rebuild_dataset_artifacts(
+            dataset_id,
+            dataset_path,
+            forced_dataset_kind=dataset['dataset_kind'],
+            progress_callback=lambda progress: repository.update_dataset_profile(
+                dataset_id, progress=max(10, min(95, int(progress)))
+            ),
+        )
+        clear_dataset_analysis_cache(dataset_path)
+        repository.update_dataset_profile(dataset_id, status='ready', progress=100, last_error=None, processed_at=now_iso())
+        repository.add_log(username, 'clear_dataset_vendors', json.dumps({'dataset_id': dataset_id, 'status': 'ready'}))
+    except ProcessingStopped as exc:
+        repository.update_dataset_profile(dataset_id, status='stopped', progress=99, last_error=str(exc), processed_at=now_iso())
+        repository.add_log(username, 'stop_vendor_clearing', json.dumps({'dataset_id': dataset_id}))
+    except Exception as exc:
+        repository.update_dataset_profile(dataset_id, status='failed', progress=100, last_error=str(exc), processed_at=now_iso())
+        repository.add_log(username, 'clear_dataset_vendors_failed', json.dumps({'dataset_id': dataset_id, 'error': str(exc)}))
+    finally:
+        clear_stop_request(dataset_id)
+
+
+def enqueue_vendor_clearing(background_tasks: BackgroundTasks, dataset_id: int, username: str) -> None:
+    """Queue Vendor clearing so the Workspace remains available to the user."""
+    clear_stop_request(dataset_id)
+    repository.update_dataset_profile(dataset_id, status='queued', progress=0, last_error=None, processed_at=None)
+    background_tasks.add_task(process_vendor_clearing, dataset_id, username)
+
+
 def clear_dataset_analysis_cache(dataset_path: Path) -> None:
     resolved_path = str(dataset_path.resolve())
     for key in [key for key in ANALYSIS_CACHE if resolved_path in key]:
@@ -1438,8 +1476,12 @@ def describe_workspace_log_entry(log: dict[str, Any]) -> str:
             return f"Retry requested for dataset {details.get('dataset_id')}."
         if log['action'] == 'map_dataset_vendors':
             return f"Vendor mapping applied to CDR dataset {details.get('dataset_id')}."
+        if log['action'] == 'map_dataset_vendors_failed':
+            return f"Vendor mapping failed for CDR dataset {details.get('dataset_id')}: {details.get('error', 'Unknown error')}"
         if log['action'] == 'clear_dataset_vendors':
             return f"Vendor mapping cleared from CDR dataset {details.get('dataset_id')}."
+        if log['action'] == 'clear_dataset_vendors_failed':
+            return f"Vendor clearing failed for CDR dataset {details.get('dataset_id')}: {details.get('error', 'Unknown error')}"
         if log['action'] in {'stop_dataset', 'stop_dataset_requested'}:
             return f"Stop requested for dataset {details.get('dataset_id')}."
         if log['action'] == 'delete_dataset':
@@ -1450,7 +1492,10 @@ def describe_workspace_log_entry(log: dict[str, Any]) -> str:
 
 
 def classify_workspace_log_entry(log: dict[str, Any]) -> str:
-    if log.get('action') in {'process_dataset_failed', 'analyze_dataset_failed', 'analyze_dataset_warning'}:
+    if log.get('action') in {
+        'process_dataset_failed', 'analyze_dataset_failed', 'analyze_dataset_warning',
+        'map_dataset_vendors_failed', 'clear_dataset_vendors_failed',
+    }:
         return 'Error'
     return 'Info'
 
@@ -1718,6 +1763,7 @@ def workspace(
     three_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_three']
     add_workspace_vendor_capabilities(datasets)
     mappable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_map_vendors')]
+    clearable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_clear_vendors')]
 
     return render_template(
         request,
@@ -1735,6 +1781,7 @@ def workspace(
             'vodafone_mapping_datasets': vodafone_mapping_datasets,
             'three_mapping_datasets': three_mapping_datasets,
             'mappable_cdr_datasets': mappable_cdr_datasets,
+            'clearable_cdr_datasets': clearable_cdr_datasets,
             },
     )
 
@@ -2244,24 +2291,44 @@ def map_dataset_vendors(
     return RedirectResponse(f'/workspace?dataset_id={selected_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/workspace/clear-vendors/{dataset_id}')
-def clear_dataset_vendors(dataset_id: int, user: SessionUser = Depends(current_user)) -> Response:
-    dataset_row = repository.get_dataset(dataset_id)
-    if not dataset_row:
-        raise HTTPException(status_code=404, detail='The selected CDR was not found.')
-    dataset = serialize_dataset_row(dataset_row)
-    if not dataset['is_ready'] or dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
-        raise HTTPException(status_code=400, detail='Vendor clearing is only available for processed NetCheck CDR datasets.')
-    if not dataset.get('vendor_mapping_applied'):
-        raise HTTPException(status_code=400, detail='This CDR does not have a tool-applied Vendor mapping to clear.')
+def _validate_clearable_vendor_datasets(dataset_ids: list[int]) -> list[dict[str, Any]]:
+    selected_datasets: list[dict[str, Any]] = []
+    for dataset_id in dataset_ids:
+        dataset_row = repository.get_dataset(dataset_id)
+        if not dataset_row:
+            raise HTTPException(status_code=404, detail='One selected CDR was not found.')
+        dataset = serialize_dataset_row(dataset_row)
+        if not dataset['is_ready'] or dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
+            raise HTTPException(status_code=400, detail='Vendor clearing is only available for processed NetCheck CDR datasets.')
+        if not dataset.get('vendor_mapping_applied'):
+            raise HTTPException(status_code=400, detail=f"{dataset['file_name']} does not have a tool-applied Vendor mapping to clear.")
+        selected_datasets.append(dataset)
+    return selected_datasets
 
-    dataset_path = Path(dataset['stored_path'])
-    try:
-        rebuild_dataset_artifacts(dataset_id, dataset_path, forced_dataset_kind=dataset['dataset_kind'])
-    except (FileNotFoundError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    clear_dataset_analysis_cache(dataset_path)
-    repository.add_log(user.username, 'clear_dataset_vendors', json.dumps({'dataset_id': dataset_id}))
+
+@app.post('/workspace/clear-vendors')
+def clear_vendor_datasets(
+    background_tasks: BackgroundTasks,
+    cdr_dataset_ids: Annotated[list[int] | None, Form()] = None,
+    cdr_dataset_id: int | None = Form(default=None),
+    user: SessionUser = Depends(current_user),
+) -> Response:
+    selected_ids = list(dict.fromkeys(cdr_dataset_ids or ([] if cdr_dataset_id is None else [cdr_dataset_id])))
+    if not selected_ids:
+        raise HTTPException(status_code=400, detail='Select at least one CDR with a Vendor mapping to clear.')
+    _validate_clearable_vendor_datasets(selected_ids)
+    for dataset_id in selected_ids:
+        enqueue_vendor_clearing(background_tasks, dataset_id, user.username)
+    repository.add_log(user.username, 'queue_vendor_clearing', json.dumps({'dataset_ids': selected_ids}))
+    return RedirectResponse(f'/workspace?dataset_id={selected_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/workspace/clear-vendors/{dataset_id}')
+def clear_dataset_vendors(dataset_id: int, background_tasks: BackgroundTasks, user: SessionUser = Depends(current_user)) -> Response:
+    """Backward-compatible single-dataset entry point; use the queued operation."""
+    _validate_clearable_vendor_datasets([dataset_id])
+    enqueue_vendor_clearing(background_tasks, dataset_id, user.username)
+    repository.add_log(user.username, 'queue_vendor_clearing', json.dumps({'dataset_ids': [dataset_id]}))
     return RedirectResponse(f'/workspace?dataset_id={dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
 
 

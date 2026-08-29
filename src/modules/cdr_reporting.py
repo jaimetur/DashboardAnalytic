@@ -480,9 +480,14 @@ def vendor_from_cells(operator: object, cells: object, vendor_lookup: dict[str, 
 
 
 def _first_existing(df: pd.DataFrame, candidates: Iterable[str]) -> str | None:
-    lookup = {str(column).lower(): str(column) for column in df.columns}
+    # NetCheck exports are not entirely consistent between releases: a field can
+    # be written as ``Cell_ID_A``, ``CELL ID A`` or ``cell-id-a``.  Treat only
+    # spelling separators and case as insignificant, while retaining the
+    # original column name for the caller.
+    normalise = lambda value: re.sub(r"[^a-z0-9]+", "", str(value).casefold())
+    lookup = {normalise(column): str(column) for column in df.columns}
     for candidate in candidates:
-        actual = lookup.get(candidate.lower())
+        actual = lookup.get(normalise(candidate))
         if actual:
             return actual
     return None
@@ -567,9 +572,13 @@ def build_vodafone_vendor_lookup(mapping: pd.DataFrame) -> dict[str, str]:
 def enrich_multivendor(df: pd.DataFrame, vodafone_mapping: pd.DataFrame, three_mapping: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
     operator_column = _first_existing(result, ["operator", "Operator"])
-    cell_column = _first_existing(result, ["Cell_ID_A", "Cell_IDs_A", "Cell_ID"])
+    cell_column = _first_existing(result, [
+        "Cell_ID_A", "Cell_IDs_A", "Cell_ID", "Cell ID A", "Cell IDs A",
+        "Global_Cell_ID_A", "Global_Cell_ID", "Global CI", "Global_CI",
+        "GCID", "GCI", "CGI", "ECI", "Serving_Cell_ID",
+    ])
     if not operator_column or not cell_column:
-        raise ValueError("The selected CDR must contain Operator and one of Cell_ID_A, Cell_IDs_A or Cell_ID for multivendor reporting.")
+        raise ValueError("The selected CDR must contain Operator and a supported Cell ID field for multivendor reporting.")
     vodafone_lookup = build_vodafone_vendor_lookup(vodafone_mapping)
     three_lookup = build_three_vendor_lookup(three_mapping)
     result["report_vendor"] = [
@@ -597,9 +606,16 @@ def assign_cdr_vendors(
     """
     result = df.copy()
     operator_column = _first_existing(result, ["operator", "Operator"])
-    cell_column = _first_existing(result, ["Cell_ID_A", "Cell_IDs_A", "Cell_ID"])
+    cell_column = _first_existing(result, [
+        "Cell_ID_A", "Cell_IDs_A", "Cell_ID", "Cell ID A", "Cell IDs A",
+        "Global_Cell_ID_A", "Global_Cell_ID", "Global CI", "Global_CI",
+        "GCID", "GCI", "CGI", "ECI", "Serving_Cell_ID",
+    ])
     if not operator_column or not cell_column:
-        raise ValueError("The selected CDR must contain Operator and Cell_ID_A to assign vendors.")
+        raise ValueError(
+            "The selected CDR must contain Operator and a Cell ID field. "
+            "Supported names include Cell_ID_A, Cell_IDs_A, Cell_ID, Global CI, GCID, GCI, CGI or ECI."
+        )
 
     vodafone_lookup = build_vodafone_vendor_lookup(vodafone_mapping) if vodafone_mapping is not None else {}
     three_lookup = build_three_vendor_lookup(three_mapping) if three_mapping is not None else {}

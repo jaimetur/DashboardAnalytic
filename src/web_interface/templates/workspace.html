@@ -117,9 +117,7 @@
                 >Show Dashboard</a>
                 {% endif %}
                 {% if dataset.can_clear_vendors %}
-                <form method="post" action="/workspace/clear-vendors/{{ dataset.id }}" data-confirm="Clear the mapped Vendor values for '{{ dataset.file_name }}'? You can map the CDR again using updated mappings." data-confirm-title="Clear Vendor mapping" data-confirm-label="Clear Vendors" data-confirm-loading-label="Clearing Vendors from selected dataset" data-confirm-loading-copy="Removing the mapped Vendor values from the selected CDR. Please wait while the dataset is refreshed.">
-                  <button type="submit" class="action-link-clear-vendors">Clear Vendors</button>
-                </form>
+                <button type="button" class="action-link-clear-vendors" data-vendor-clear-open data-dataset-id="{{ dataset.id }}">Clear Vendors</button>
                 {% endif %}
                 {% if dataset.can_map_vendors %}
                 <button
@@ -182,7 +180,7 @@
       <details class="vendor-mapping-rule" open>
         <summary>Vendor mapping rule</summary>
         <ol>
-          <li>For each CDR sample, split <code>Cell_ID_A</code> in chronological order and retain only the first and last Global Cell ID.</li>
+          <li>For each CDR sample, split <code>Cell_ID_A</code> (or an equivalent Global Cell ID field) in chronological order and retain only the first and last Global Cell ID.</li>
           <li>Look up both endpoints in the selected VFUK mapping for Vodafone UK or the selected 3UK mapping for Three UK.</li>
         </ol>
         <p><strong>Vodafone UK:</strong> the same non-empty Vendor at both endpoints returns <code>Vodafone_&lt;Vendor&gt;</code>. If Ericsson is present at either endpoint and the other Vendor is different or missing, the result is <code>Vodafone_Mixed Vendor</code>. Every other different or missing endpoint combination returns <code>Vodafone_Other Vendor</code>.</p>
@@ -218,6 +216,27 @@
       <div class="vendor-mapping-actions">
         <button type="button" class="ghost-link" data-vendor-map-cancel>Cancel</button>
         <button type="submit" class="action-link-map-vendors">Map Vendors</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="vendor-mapping-dialog" data-vendor-clearing-dialog aria-labelledby="vendor-clearing-title">
+    <form method="post" action="/workspace/clear-vendors">
+      <p class="eyebrow">NetCheck CDR</p>
+      <h3 id="vendor-clearing-title">Clear Vendors</h3>
+      <p class="lede">Choose one or more mapped CDRs. Clearing is queued in the background and restores each selected CDR to its processed source data without the tool-applied Vendor fields.</p>
+      <fieldset class="vendor-mapping-cdr-list">
+        <legend>CDRs to clear</legend>
+        {% for dataset in clearable_cdr_datasets %}
+        <label class="vendor-mapping-cdr-choice">
+          <input type="checkbox" name="cdr_dataset_ids" value="{{ dataset.id }}" data-vendor-clearing-cdr-choice>
+          <span>{{ dataset.file_name }} <small>· {{ dataset.input_kind_label }} · {{ dataset.row_count }} rows</small></span>
+        </label>
+        {% endfor %}
+      </fieldset>
+      <div class="vendor-mapping-actions">
+        <button type="button" class="ghost-link" data-vendor-clear-cancel>Cancel</button>
+        <button type="submit" class="action-link-clear-vendors">Clear Vendors</button>
       </div>
     </form>
   </dialog>
@@ -414,6 +433,37 @@
       return;
     }
     // Mapping is queued by the server; do not show a blocking loading overlay.
+    dialog.close();
+  });
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+})();
+</script>
+<script>
+(() => {
+  const dialog = document.querySelector('[data-vendor-clearing-dialog]');
+  const clearForm = dialog?.querySelector('form[action="/workspace/clear-vendors"]');
+  const cdrChoices = dialog?.querySelectorAll('[data-vendor-clearing-cdr-choice]');
+  if (!dialog || !cdrChoices?.length) return;
+
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest?.('[data-vendor-clear-open]');
+    if (!button) return;
+    const selectedId = button.dataset.datasetId || '';
+    cdrChoices.forEach((choice) => { choice.checked = choice.value === selectedId; });
+    dialog.showModal();
+  });
+  dialog.querySelector('[data-vendor-clear-cancel]')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    dialog.close();
+  });
+  clearForm?.addEventListener('submit', (event) => {
+    if (!Array.from(cdrChoices).some((choice) => choice.checked)) {
+      event.preventDefault();
+      return;
+    }
+    // Clearing is queued by the server, so the normal blocking overlay is not used.
     dialog.close();
   });
   dialog.addEventListener('click', (event) => {

@@ -10,6 +10,7 @@
 - Added per-file Workspace classification for NetCheck CDR Data, Voice and Speech, Smart Orchestrator Logs, VFUK and 3UK mappings, with filename detection and batch review.
 - Added optional CDR Vendor mapping during import: each CDR can select the latest ready VFUK and/or 3UK mapping, or retain **No Map Vendor Column**.
 - Added queued batch Vendor mapping from Workspace: select multiple unmapped CDRs, use the latest VFUK/3UK mappings by default, and follow each non-blocking task through the existing queue progress bar.
+- Added queued batch Vendor clearing: select one or more mapped CDRs and restore their source processing in the same non-blocking Workspace queue.
 - Added NetCheck CDR PowerPoint reporting from processed Data, Voice and Speech inputs, with report-run traceability and timestamped filenames.
 - Added multi-campaign reporting: select multiple CDRs for Data, Voice and/or Speech and the tool concatenates each source with its union of columns, preserving Campaign values for benchmark comparisons.
 - Added embedded Help with consistently numbered navigation and recommended reading (`00` to `09`), including the explicit **04. E2E Dashboard** and **05. E2E PowerPoint Reporting** sections.
@@ -38,7 +39,7 @@
 - Corrected default-catalogue state, deletion protection, editor selection and Reporting defaults for datasets and catalogues.
 - Corrected catalogue grouping semantics across bars, CDF, scatter and tables; nested row/column hierarchies, distribution stacks and campaign labels now render consistently.
 - Fixed master-layout placeholder assignment, inherited-chart cleanup, generated-report download completion and Help article navigation.
-- Fixed CDR/mapping ingestion for duplicate headers, legacy CSV encodings, VFUK/3UK GCIDs, alternate Cell ID fields and NSA RAT spellings.
+- Fixed CDR/mapping ingestion for duplicate headers, legacy CSV encodings, VFUK/3UK GCIDs, alternate Cell ID fields (including Global CI/GCID/GCI/CGI/ECI variants) and NSA RAT spellings.
 - Fixed Workspace drag-and-drop, cache refreshes, profile-backed loading and Dashboard filter population/contrast.
 - Fixed live Workspace queue updates so newly processed CDRs immediately show the applicable **Map Vendors**, **Clear Vendors** and **Show Dashboard** actions: the Workspace now refreshes itself once when background processing reaches Ready, using the final server profile.
 - Fixed mobile README/document overflow by constraining rendered images and the Markdown container, including the application logo.

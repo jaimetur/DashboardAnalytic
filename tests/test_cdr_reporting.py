@@ -91,6 +91,18 @@ def test_workspace_vendor_assignment_supports_a_single_selected_mapping() -> Non
     assert mapped['report_vendor'].tolist() == ['Vodafone_Ericsson', '3']
 
 
+def test_workspace_vendor_assignment_accepts_equivalent_global_cell_id_columns() -> None:
+    cdr = pd.DataFrame({
+        'Operator': ['3'],
+        'Global CI': ['200 -> 200'],
+    })
+    three_mapping = pd.DataFrame({'Cid__ECI': [200], 'Vendor': ['Nokia']})
+
+    mapped = assign_cdr_vendors(cdr, None, three_mapping)
+
+    assert mapped['vendor'].tolist() == ['3_Nokia']
+
+
 def test_catalogue_converter_migrates_legacy_headers_and_grouping() -> None:
     legacy = (
         'Slide,Slide title,Slide subtitle,Layout,CDR Source,KPI,Chart Type,Filters,Grouping\n'
