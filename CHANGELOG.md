@@ -24,8 +24,7 @@
 - Refined the responsive tabbed UI, module palettes, action controls, loading dialogs and Help navigation across Workspace, Dashboard, Reporting and Admin.
 - Added a reporting catalogue selector that follows the NSA/SA workspace default while allowing a per-report override.
 - Expanded the in-browser Slides Templates Editor with contextual assistance, Filter Builder, searchable single/multi-select values, fixed action/Slide columns, row movement/insertion/removal, re-enumeration and scroll guidance.
-- Separated the master PowerPoint into `assets/ppt-templates/` and the NSA/SA Slides Templates storage into `assets/slides-templates/`, with the runtime registry stored at the latter's root.
-- Made `assets/slides-templates/library/nsa/` and `library/sa/` the complete canonical Slides Templates library; `default/nsa/` and `default/sa/` now hold only the same-named active mirror used for generation.
+- Refactored PowerPoint and Slides Templates storage: the master deck lives in `assets/ppt-templates/`; `assets/slides-templates/library/` is the complete canonical NSA/SA template library (including defaults), `default/nsa/` and `default/sa/` hold only the active generation mirrors, and the root registry keeps names, defaults and file renames synchronized.
 - Standardized Administration and Help labels on **Template** terminology.
 - Renaming a named workspace catalogue now also renames its managed CSV file and preserves its default selection.
 - Added timestamped report filenames, `UpdateAll.py`, and removed obsolete release-document tooling.
