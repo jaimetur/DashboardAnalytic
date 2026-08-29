@@ -1379,6 +1379,11 @@ function setupCustomMultiSelects() {
     const actionButton = document.createElement('button');
     actionButton.type = 'button';
     actionButton.className = 'multiselect-action';
+    if (select.closest('.reporting-stack')) {
+      // Reporting has its own button palette.  Mark this generated control so
+      // it cannot inherit the strong primary-reporting button treatment.
+      actionButton.classList.add('reporting-multiselect-action');
+    }
     actionButton.textContent = 'Select All / None';
     menu.appendChild(actionButton);
 

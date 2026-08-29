@@ -286,11 +286,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .reporting-stack .multiselect-trigger-label { color: inherit; }
 .reporting-stack .multiselect-trigger-chip { border-color: #6a3c9d; }
 .reporting-stack .multiselect-menu { border-color: rgba(75, 32, 138, 0.24); background: #fffaff; }
-.reporting-stack .multiselect-action,
-.reporting-stack .multiselect-action:hover:not(:disabled),
-.reporting-stack .multiselect-action:focus-visible { background: linear-gradient(135deg, #f0e4ff, #e5d3fa); border: 1px solid rgba(100, 57, 158, 0.28); color: #4a2479; box-shadow: none; }
-.reporting-stack .multiselect-action:hover:not(:disabled),
-.reporting-stack .multiselect-action:focus-visible { background: linear-gradient(135deg, #e8d7fb, #dcc4f5); border-color: rgba(100, 57, 158, 0.42); color: #35165d; }
+.reporting-multiselect-action { background: linear-gradient(135deg, #f0e4ff, #e5d3fa) !important; border: 1px solid rgba(100, 57, 158, 0.28) !important; color: #4a2479 !important; box-shadow: none !important; }
+.reporting-multiselect-action:hover:not(:disabled), .reporting-multiselect-action:focus-visible { background: linear-gradient(135deg, #e8d7fb, #dcc4f5) !important; border-color: rgba(100, 57, 158, 0.42) !important; color: #35165d !important; box-shadow: none !important; }
 .reporting-stack .multiselect-option { color: #43206e; }
 .reporting-stack .multiselect-option:hover { background: #f0e3ff; color: #35165d; }
 .reporting-stack .multiselect-option span { color: #43206e; }
