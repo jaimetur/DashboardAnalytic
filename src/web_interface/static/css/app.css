@@ -420,6 +420,11 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .vendor-mapping-fields { display: grid; gap: 0.9rem; }
 .vendor-mapping-fields label { display: grid; gap: 0.38rem; }
 .vendor-mapping-fields .form-note { padding: 0.75rem 0.9rem; border-radius: 12px; background: rgba(16, 49, 74, 0.06); }
+.vendor-mapping-cdr-list { display: grid; gap: 0.48rem; margin: 0; padding: 0.8rem 0.9rem; border: 1px solid rgba(16, 49, 74, 0.16); border-radius: 14px; background: rgba(16, 49, 74, 0.035); }
+.vendor-mapping-cdr-list legend { padding: 0 0.3rem; color: var(--brand); font-size: 0.86rem; font-weight: 800; }
+.vendor-mapping-cdr-choice { display: flex; align-items: center; gap: 0.55rem; cursor: pointer; color: var(--text); font-weight: 650; }
+.vendor-mapping-cdr-choice input { width: 1rem; height: 1rem; accent-color: var(--brand); }
+.vendor-mapping-cdr-choice small { color: var(--muted); font-weight: 500; }
 .vendor-mapping-rule { padding: 0.9rem 1rem; border: 1px solid rgba(12, 76, 140, 0.20); border-radius: 14px; background: linear-gradient(135deg, #f7fbff, #eaf5ff); color: #164f89; }
 .vendor-mapping-rule summary { cursor: pointer; font-weight: 800; color: #0c4c8c; }
 .vendor-mapping-rule ol { margin: 0.7rem 0; padding-left: 1.25rem; }

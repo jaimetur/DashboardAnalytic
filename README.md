@@ -35,7 +35,7 @@ Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone
 ### NetCheck CDR Reports workflow
 
 1. Upload the three NetCheck workbooks (Data, Voice and Speech) in **Workspace** and wait until each one is marked `Processed`.
-2. If a multivendor report is required, upload the **VFUK** and/or **3UK** mapping workbooks first. When importing each CDR, select the required mapping(s) from its optional VFUK/3UK selectors, or use **Map Vendors** later from the queue. The CDR stores the calculated Vendor values.
+2. If a multivendor report is required, upload the **VFUK** and/or **3UK** mapping workbooks first. When importing each CDR, select the required mapping(s) from its optional VFUK/3UK selectors, or use **Map Vendors** later from the queue. That dialog preselects the newest ready mapping of each type and can queue several unmapped CDRs together without blocking the workspace. Each CDR stores the calculated Vendor values.
 3. Open **E2E PowerPoint Reporting → NetCheck CDR Reports**.
 4. Select exactly one processed CDR for each required input type.
 5. Choose `NSA` or `SA`. NSA sessions are selected when the available RAT field contains `ENDC`; SA sessions are selected when it contains `NR`.

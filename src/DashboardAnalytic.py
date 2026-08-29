@@ -1039,6 +1039,76 @@ def persist_mapped_cdr_frame(dataset: dict[str, Any], frame: pd.DataFrame) -> No
     )
 
 
+def process_vendor_mapping(
+    dataset_id: int,
+    username: str,
+    vodafone_mapping_dataset_id: int | None,
+    three_mapping_dataset_id: int | None,
+) -> None:
+    """Apply persisted mapping files as a queued Workspace operation."""
+    dataset_row = repository.get_dataset(dataset_id)
+    if not dataset_row:
+        return
+    dataset = serialize_dataset_row(dataset_row)
+    dataset_path = Path(dataset['stored_path'])
+    repository.update_dataset_profile(dataset_id, status='processing', progress=10, last_error=None)
+    try:
+        ensure_not_stopped(dataset_id)
+        vodafone_mapping = (
+            _reporting_dataset(vodafone_mapping_dataset_id, 'mapping_vodafone')
+            if vodafone_mapping_dataset_id else None
+        )
+        three_mapping = (
+            _reporting_dataset(three_mapping_dataset_id, 'mapping_three')
+            if three_mapping_dataset_id else None
+        )
+        repository.update_dataset_profile(dataset_id, progress=35)
+        ensure_not_stopped(dataset_id)
+        mapped_frame = assign_cdr_vendors(
+            _reporting_frame(dataset_id),
+            _reporting_frame(vodafone_mapping['id']) if vodafone_mapping else None,
+            _reporting_frame(three_mapping['id']) if three_mapping else None,
+        )
+        repository.update_dataset_profile(dataset_id, progress=75)
+        ensure_not_stopped(dataset_id)
+        persist_mapped_cdr_frame(dataset, mapped_frame)
+        clear_dataset_analysis_cache(dataset_path)
+        repository.update_dataset_profile(dataset_id, status='ready', progress=100, last_error=None, processed_at=now_iso())
+        repository.add_log(username, 'map_dataset_vendors', json.dumps({
+            'dataset_id': dataset_id,
+            'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
+            'three_mapping_dataset_id': three_mapping_dataset_id,
+            'status': 'ready',
+        }))
+    except ProcessingStopped as exc:
+        repository.update_dataset_profile(dataset_id, status='stopped', progress=99, last_error=str(exc), processed_at=now_iso())
+        repository.add_log(username, 'stop_vendor_mapping', json.dumps({'dataset_id': dataset_id}))
+    except Exception as exc:
+        repository.update_dataset_profile(dataset_id, status='failed', progress=100, last_error=str(exc), processed_at=now_iso())
+        repository.add_log(username, 'map_dataset_vendors_failed', json.dumps({'dataset_id': dataset_id, 'error': str(exc)}))
+    finally:
+        clear_stop_request(dataset_id)
+
+
+def enqueue_vendor_mapping(
+    background_tasks: BackgroundTasks,
+    dataset_id: int,
+    username: str,
+    vodafone_mapping_dataset_id: int | None,
+    three_mapping_dataset_id: int | None,
+) -> None:
+    """Queue one CDR mapping without blocking the Workspace request."""
+    clear_stop_request(dataset_id)
+    repository.update_dataset_profile(dataset_id, status='queued', progress=0, last_error=None, processed_at=None)
+    background_tasks.add_task(
+        process_vendor_mapping,
+        dataset_id,
+        username,
+        vodafone_mapping_dataset_id,
+        three_mapping_dataset_id,
+    )
+
+
 def clear_dataset_analysis_cache(dataset_path: Path) -> None:
     resolved_path = str(dataset_path.resolve())
     for key in [key for key in ANALYSIS_CACHE if resolved_path in key]:
@@ -1606,6 +1676,7 @@ def workspace(
     vodafone_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_vodafone']
     three_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_three']
     add_workspace_vendor_capabilities(datasets)
+    mappable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_map_vendors')]
 
     return render_template(
         request,
@@ -1622,6 +1693,7 @@ def workspace(
             'has_processing': has_processing,
             'vodafone_mapping_datasets': vodafone_mapping_datasets,
             'three_mapping_datasets': three_mapping_datasets,
+            'mappable_cdr_datasets': mappable_cdr_datasets,
             },
     )
 
@@ -2076,19 +2148,16 @@ def retry_dataset(dataset_id: int, background_tasks: BackgroundTasks, user: Sess
 
 @app.post('/workspace/map-vendors')
 def map_dataset_vendors(
-    cdr_dataset_id: int = Form(...),
+    background_tasks: BackgroundTasks,
+    cdr_dataset_ids: Annotated[list[int] | None, Form()] = None,
+    cdr_dataset_id: int | None = Form(default=None),
     vodafone_mapping_dataset_id: int | None = Form(default=None),
     three_mapping_dataset_id: int | None = Form(default=None),
     user: SessionUser = Depends(current_user),
 ) -> Response:
-    cdr_row = repository.get_dataset(cdr_dataset_id)
-    if not cdr_row:
-        raise HTTPException(status_code=404, detail='The selected CDR was not found.')
-    cdr_dataset = serialize_dataset_row(cdr_row)
-    if not cdr_dataset['is_ready'] or cdr_dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
-        raise HTTPException(status_code=400, detail='Vendor mapping is only available for processed NetCheck CDR datasets.')
-    if cdr_dataset.get('vendor_mapping_applied'):
-        raise HTTPException(status_code=400, detail='This CDR already has a Vendor mapping. Clear it before mapping again.')
+    selected_ids = list(dict.fromkeys(cdr_dataset_ids or ([] if cdr_dataset_id is None else [cdr_dataset_id])))
+    if not selected_ids:
+        raise HTTPException(status_code=400, detail='Select at least one processed NetCheck CDR to map Vendors.')
     if not vodafone_mapping_dataset_id and not three_mapping_dataset_id:
         raise HTTPException(status_code=400, detail='Select at least one processed VFUK or 3UK Multivendor Mapping.')
 
@@ -2101,22 +2170,37 @@ def map_dataset_vendors(
             _reporting_dataset(three_mapping_dataset_id, 'mapping_three')
             if three_mapping_dataset_id else None
         )
-        mapped_frame = assign_cdr_vendors(
-            _reporting_frame(cdr_dataset_id),
-            _reporting_frame(vodafone_mapping['id']) if vodafone_mapping else None,
-            _reporting_frame(three_mapping['id']) if three_mapping else None,
-        )
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    persist_mapped_cdr_frame(cdr_dataset, mapped_frame)
-    clear_dataset_analysis_cache(Path(cdr_dataset['stored_path']))
-    repository.add_log(user.username, 'map_dataset_vendors', json.dumps({
-        'dataset_id': cdr_dataset_id,
+    selected_datasets: list[dict[str, Any]] = []
+    for dataset_id in selected_ids:
+        cdr_row = repository.get_dataset(dataset_id)
+        if not cdr_row:
+            raise HTTPException(status_code=404, detail='One selected CDR was not found.')
+        cdr_dataset = serialize_dataset_row(cdr_row)
+        if not cdr_dataset['is_ready'] or cdr_dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
+            raise HTTPException(status_code=400, detail='Vendor mapping is only available for processed NetCheck CDR datasets.')
+        if cdr_dataset.get('vendor_mapping_applied'):
+            raise HTTPException(status_code=400, detail=f"{cdr_dataset['file_name']} already has a Vendor mapping. Clear it before mapping again.")
+        selected_datasets.append(cdr_dataset)
+
+    for cdr_dataset in selected_datasets:
+        enqueue_vendor_mapping(
+            background_tasks,
+            int(cdr_dataset['id']),
+            user.username,
+            vodafone_mapping['id'] if vodafone_mapping else None,
+            three_mapping['id'] if three_mapping else None,
+        )
+    repository.add_log(user.username, 'queue_vendor_mapping', json.dumps({
+        'dataset_ids': selected_ids,
         'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
         'three_mapping_dataset_id': three_mapping_dataset_id,
     }))
-    return RedirectResponse(f'/workspace?dataset_id={cdr_dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(f'/workspace?dataset_id={selected_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/workspace/clear-vendors/{dataset_id}')

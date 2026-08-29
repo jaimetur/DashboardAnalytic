@@ -166,14 +166,19 @@
     <form
       method="post"
       action="/workspace/map-vendors"
-      data-loading-label="Mapping Vendors to CDR samples"
-      data-loading-copy="Applying the agreed Vodafone UK and 3UK rules to the first and last Cell_ID_A values for every CDR sample. Please wait while the dataset is refreshed."
     >
-      <input type="hidden" name="cdr_dataset_id" data-vendor-mapping-cdr-id>
       <p class="eyebrow">NetCheck CDR</p>
       <h3 id="vendor-mapping-title">Map Vendors</h3>
-      <p class="lede">Choose the processed Multivendor Mappings to assign the calculated Vendor to every CDR sample using its Operator and the first and last values in <code>Cell_ID_A</code>.</p>
-      <p class="form-note" data-vendor-mapping-dataset-name></p>
+      <p class="lede">Choose one or more processed CDRs and the Multivendor Mappings to queue Vendor assignment in the background. You can continue working while each selected CDR progresses through the Workspace queue.</p>
+      <fieldset class="vendor-mapping-cdr-list">
+        <legend>CDRs to map</legend>
+        {% for dataset in mappable_cdr_datasets %}
+        <label class="vendor-mapping-cdr-choice">
+          <input type="checkbox" name="cdr_dataset_ids" value="{{ dataset.id }}" data-vendor-mapping-cdr-choice>
+          <span>{{ dataset.file_name }} <small>· {{ dataset.input_kind_label }} · {{ dataset.row_count }} rows</small></span>
+        </label>
+        {% endfor %}
+      </fieldset>
       <details class="vendor-mapping-rule" open>
         <summary>Vendor mapping rule</summary>
         <ol>
@@ -187,10 +192,10 @@
       <div class="vendor-mapping-fields">
         {% if vodafone_mapping_datasets %}
         <label>VFUK Multivendor Mapping
-          <select name="vodafone_mapping_dataset_id" required>
-            <option value="" selected disabled>Select a VFUK mapping</option>
+          <select name="vodafone_mapping_dataset_id">
+            <option value="">No VFUK mapping</option>
             {% for mapping in vodafone_mapping_datasets %}
-            <option value="{{ mapping.id }}">{{ mapping.file_name }}</option>
+            <option value="{{ mapping.id }}"{% if loop.first %} selected{% endif %}>{{ mapping.file_name }}</option>
             {% endfor %}
           </select>
         </label>
@@ -199,10 +204,10 @@
         {% endif %}
         {% if three_mapping_datasets %}
         <label>3UK Multivendor Mapping
-          <select name="three_mapping_dataset_id" required>
-            <option value="" selected disabled>Select a 3UK mapping</option>
+          <select name="three_mapping_dataset_id">
+            <option value="">No 3UK mapping</option>
             {% for mapping in three_mapping_datasets %}
-            <option value="{{ mapping.id }}">{{ mapping.file_name }}</option>
+            <option value="{{ mapping.id }}"{% if loop.first %} selected{% endif %}>{{ mapping.file_name }}</option>
             {% endfor %}
           </select>
         </label>
@@ -388,15 +393,14 @@
 (() => {
   const dialog = document.querySelector('[data-vendor-mapping-dialog]');
   const mappingForm = dialog?.querySelector('form[action="/workspace/map-vendors"]');
-  const cdrId = dialog?.querySelector('[data-vendor-mapping-cdr-id]');
-  const datasetName = dialog?.querySelector('[data-vendor-mapping-dataset-name]');
-  if (!dialog || !cdrId || !datasetName) return;
+  const cdrChoices = dialog?.querySelectorAll('[data-vendor-mapping-cdr-choice]');
+  if (!dialog || !cdrChoices?.length) return;
 
   document.addEventListener('click', (event) => {
     const button = event.target.closest?.('[data-vendor-map-open]');
     if (!button) return;
-    cdrId.value = button.dataset.datasetId || '';
-    datasetName.textContent = button.dataset.datasetName || '';
+    const selectedId = button.dataset.datasetId || '';
+    cdrChoices.forEach((choice) => { choice.checked = choice.value === selectedId; });
     dialog.showModal();
   });
   dialog.querySelector('[data-vendor-map-cancel]')?.addEventListener('click', (event) => {
@@ -404,9 +408,12 @@
     event.stopPropagation();
     dialog.close();
   });
-  mappingForm?.addEventListener('submit', () => {
-    // The global loading handler displays the progress overlay.  Closing the
-    // native dialog here exposes it immediately while the request runs.
+  mappingForm?.addEventListener('submit', (event) => {
+    if (!Array.from(cdrChoices).some((choice) => choice.checked)) {
+      event.preventDefault();
+      return;
+    }
+    // Mapping is queued by the server; do not show a blocking loading overlay.
     dialog.close();
   });
   dialog.addEventListener('click', (event) => {

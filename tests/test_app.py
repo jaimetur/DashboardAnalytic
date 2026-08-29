@@ -391,11 +391,12 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     workspace = client.get('/workspace')
     assert 'Map Vendors</button>' in workspace.text
     assert 'data-queue-status="ready"' in workspace.text
-    assert 'name="three_mapping_dataset_id" required' in workspace.text
-    assert 'name="vodafone_mapping_dataset_id" required' not in workspace.text
+    assert 'name="cdr_dataset_ids"' in workspace.text
+    assert 'name="three_mapping_dataset_id"' in workspace.text
+    assert 'value="2" selected' in workspace.text
+    assert 'data-loading-label="Mapping Vendors to CDR samples"' not in workspace.text
     assert 'Vendor mapping rule' in workspace.text
     assert 'the same non-empty Vendor at both endpoints returns' in workspace.text
-    assert 'data-loading-label="Mapping Vendors to CDR samples"' in workspace.text
     live_status = client.get('/api/datasets/status').json()['datasets']
     assert next(dataset for dataset in live_status if dataset['id'] == 1)['can_map_vendors'] is True
 
@@ -423,6 +424,32 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     workspace_after_clear = client.get('/workspace').text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
     assert 'Map Vendors</button>' in workspace_after_clear
     assert 'Clear Vendors</button>' not in workspace_after_clear
+
+
+def test_workspace_queues_vendor_mapping_for_multiple_cdrs(client) -> None:
+    login(client)
+    uploads = [
+        ('cdr_data_q1.csv', 'data', b'operator,Cell_ID_A,Campaign\n3,200 -> 200,2026 Q1\n'),
+        ('cdr_data_q2.csv', 'data', b'operator,Cell_ID_A,Campaign\n3,200 -> 200,2026 Q2\n'),
+        ('Multivendor_Mapping_3UK.csv', 'mapping_three', b'Cid__ECI,Vendor\n200,Nokia\n'),
+    ]
+    for file_name, kind, content in uploads:
+        response = client.post(
+            '/dashboard/upload',
+            data={'dataset_kinds': kind},
+            files={'dataset_files': (file_name, BytesIO(content), 'text/csv')},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    response = client.post(
+        '/workspace/map-vendors',
+        data={'cdr_dataset_ids': ['1', '2'], 'three_mapping_dataset_id': '3'},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    datasets = client.get('/api/datasets/status').json()['datasets']
+    assert all(dataset['vendor_mapping_applied'] for dataset in datasets if dataset['id'] in {1, 2})
 
 
 def test_workspace_upload_can_map_selected_cdr_vendor_during_processing(client) -> None:

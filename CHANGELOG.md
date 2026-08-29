@@ -9,6 +9,7 @@
 - Split the product into the top-level **Workspace**, **E2E Dashboard** and **E2E PowerPoint Reporting** modules, with a future-ready **Smart Orchestrator Logs Reports** entry point.
 - Added per-file Workspace classification for NetCheck CDR Data, Voice and Speech, Smart Orchestrator Logs, VFUK and 3UK mappings, with filename detection and batch review.
 - Added optional CDR Vendor mapping during import: each CDR can select the latest ready VFUK and/or 3UK mapping, or retain **No Map Vendor Column**.
+- Added queued batch Vendor mapping from Workspace: select multiple unmapped CDRs, use the latest VFUK/3UK mappings by default, and follow each non-blocking task through the existing queue progress bar.
 - Added NetCheck CDR PowerPoint reporting from processed Data, Voice and Speech inputs, with report-run traceability and timestamped filenames.
 - Added multi-campaign reporting: select multiple CDRs for Data, Voice and/or Speech and the tool concatenates each source with its union of columns, preserving Campaign values for benchmark comparisons.
 - Added embedded Help with consistently numbered navigation and recommended reading (`00` to `09`), including the explicit **04. E2E Dashboard** and **05. E2E PowerPoint Reporting** sections.
@@ -19,7 +20,8 @@
 - Unified NSA, SA, single-vendor and multivendor rendering on the master/layout-only `Template_CDR_analysis.pptx`; the selected catalogue creates slides and fills layout placeholders in row-major order.
 - Made Slides Templates executable: source, KPI, generic chart type, filters, thresholds/buckets, legend, `Grouping_Rows`, `Grouping_Columns` and named layout now drive rendering. Structural **Title Slide** and **Transition Slide** rows are also supported.
 - Reworked NSA/SA catalogues against the NetCheck methodology, split multi-chart screenshots into separate rows/layouts, and completed the requested NSA KPI, source, filter and grouping definitions through slide 21.
-- Improved multivendor processing: VFUK/3UK GCID lookups and the agreed first/last-cell Vendor formula are persisted on CDRs; Reporting enables Multivendor only when all selected CDRs are mapped and transforms Operator displays to Vendor without changing stored filters or catalogues.
+- Improved multivendor processing: VFUK/3UK GCID lookups and the agreed first/last-cell Vendor formula are persisted on CDRs
+- Reporting enables Multivendor only when all selected CDRs are mapped and transforms Operator displays to Vendor without changing stored filters or catalogues.
 - Expanded mapping and CDR previews with materialised GCID, source-preserving fields, column/row search, Excel-style multi-value filters, CDR-specific filters and configurable row limits. Workspace now uses persisted profiles for faster loading.
 - Restricted Dashboard analysis to CDR datasets and meaningful KPI fields; improved adaptive-filter normalisation, responsive layouts, previews and exports.
 - Refined the responsive tabbed UI, module palettes, action controls, loading dialogs and Help navigation across Workspace, Dashboard, Reporting and Admin.
