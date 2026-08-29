@@ -6,9 +6,11 @@ Dashboard Analytic supports a generic dashboard export and a template-backed Net
 
 Upload and process the required files in Workspace first:
 
-- one `CDR-Data` workbook;
-- one `CDR-Voice` workbook;
-- one `CDR-Speech` workbook.
+- one or more `CDR-Data` workbooks;
+- one or more `CDR-Voice` workbooks;
+- one or more `CDR-Speech` workbooks.
+
+The Reporting selectors default to the latest ready CDR of each type, but support multiple selection. Use Ctrl/Cmd-click to select additional workbooks. Selected Data CDRs are concatenated into the CDR-Data source, and the same happens independently for Voice and Speech. The combination uses the union of available columns, so a field that is absent from one campaign remains available for rows from campaigns that contain it. Existing `Campaign` values are retained, enabling comparisons such as 2025 Q4, 2026 Q1 and 2026 Q2 in the same report.
 
 For a Multivendor report, also process the relevant **VFUK Vodafone UK** and/or **3UK Three UK** mappings, then apply them while importing each CDR or use **Map Vendors** from the Workspace queue later. The reporting page no longer selects mapping files: it uses the Vendor values persisted on the selected CDRs. Multivendor remains disabled until all three selected CDRs have been mapped.
 
@@ -24,7 +26,7 @@ Choose the technology according to the required session scope:
 Then choose a report scope:
 
 - **Single-vendor** generates the operator analysis without further mapping requirements.
-- **Multivendor** is available only when all selected CDRs already contain a Vendor mapping. It creates vendor series where applicable, while keeping O2/EE as operator comparisons. During rendering, template grouping dimensions named `Operator` become `Vendor`; legends named `Operator` become `Campaign`; and occurrences of `Operator` in slide titles, subtitles and chart titles become `Vendor`. `Operator` filters are deliberately not changed and continue to filter the source CDR Operator field.
+- **Multivendor** is available only when every selected CDR already contains a Vendor mapping. It creates vendor series where applicable, while keeping O2/EE as operator comparisons. During rendering, template grouping dimensions named `Operator` become `Vendor`; legends named `Operator` become `Campaign`; and occurrences of `Operator` in slide titles, subtitles and chart titles become `Vendor`. `Operator` filters are deliberately not changed and continue to filter the source CDR Operator field.
 
 Choose **Slides Templates** as well. The technology's default template is preselected; another stored NSA or SA template can be chosen for that run without changing the workspace default.
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import shutil
 
@@ -23,11 +24,12 @@ def client(tmp_path: Path) -> TestClient:
     for directory in (config_dir, input_dir, output_dir, export_dir, slides_templates_dir, ppt_templates_dir):
         directory.mkdir(parents=True, exist_ok=True)
     bundled_slides_templates = app_module.PROJECT_ROOT / "assets" / "slides-templates"
+    registry = json.loads((bundled_slides_templates / "slides-templates-library.json").read_text(encoding="utf-8"))
     shutil.copy2(app_module.PROJECT_ROOT / "assets" / "ppt-templates" / "Template_CDR_analysis.pptx", ppt_templates_dir / "Template_CDR_analysis.pptx")
     for technology in ("nsa", "sa"):
         target = slides_templates_dir / "default" / technology
         target.mkdir(parents=True, exist_ok=True)
-        filename = f"{technology}-slides-template.csv"
+        filename = registry.get(technology, {}).get("default_file") or f"{technology}-slide-template.csv"
         source = bundled_slides_templates / "default" / technology / filename
         if not source.exists():
             source = bundled_slides_templates / "library" / technology / filename

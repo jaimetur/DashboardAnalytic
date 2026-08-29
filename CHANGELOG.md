@@ -10,6 +10,7 @@
 - Added per-file Workspace classification for NetCheck CDR Data, Voice and Speech, Smart Orchestrator Logs, VFUK and 3UK mappings, with filename detection and batch review.
 - Added optional CDR Vendor mapping during import: each CDR can select the latest ready VFUK and/or 3UK mapping, or retain **No Map Vendor Column**.
 - Added NetCheck CDR PowerPoint reporting from processed Data, Voice and Speech inputs, with report-run traceability and timestamped filenames.
+- Added multi-campaign reporting: select multiple CDRs for Data, Voice and/or Speech and the tool concatenates each source with its union of columns, preserving Campaign values for benchmark comparisons.
 - Added embedded Help with consistently numbered navigation and recommended reading (`00` to `09`), including the explicit **04. E2E Dashboard** and **05. E2E PowerPoint Reporting** sections.
 - Added processed-dataset previews, direct CDR-only **Show Dashboard** access and matching Dashboard **Preview Dataset** access.
 - Added workspace Slides Templates Management: named NSA/SA imports, conversion of compatible legacy CSVs, defaults, duplication, deletion, export and in-browser editing.

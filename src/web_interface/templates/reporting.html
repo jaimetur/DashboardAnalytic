@@ -8,7 +8,7 @@
         <h2>Choose a reporting module</h2>
       </div>
     </div>
-    <p class="lede">Produce a consistent, template-based NetCheck CDR PowerPoint from processed Data, Voice and Speech workbooks. Select NSA or SA; Multivendor is available only when every selected CDR has already been mapped in Workspace.</p>
+    <p class="lede">Produce a consistent, template-based NetCheck CDR PowerPoint from one or more processed Data, Voice and Speech workbooks. CDRs of the same type are combined so campaigns can be benchmarked together. Select NSA or SA; Multivendor is available only when every selected CDR has already been mapped in Workspace.</p>
   </article>
 
   <article class="panel reporting-panel">
@@ -17,21 +17,18 @@
       <span class="pill live-pill">Available</span>
     </div>
     <form action="/reporting/netcheck-cdr" method="post" class="form-grid" data-loading-label="Generating NetCheck CDR report" data-download-form="1">
-      <label>CDR Data
-        <select name="data_dataset_id" required>
-          <option value=""{% if not data_datasets %} selected{% endif %}>Select processed Data CDR</option>
+      <label>CDR Data <span class="form-label-hint">Select one or more</span>
+        <select name="data_dataset_id" required multiple size="4" aria-describedby="cdr-selection-help">
           {% for dataset in data_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
-      <label>CDR Voice
-        <select name="voice_dataset_id" required>
-          <option value=""{% if not voice_datasets %} selected{% endif %}>Select processed Voice CDR</option>
+      <label>CDR Voice <span class="form-label-hint">Select one or more</span>
+        <select name="voice_dataset_id" required multiple size="4" aria-describedby="cdr-selection-help">
           {% for dataset in voice_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
-      <label>CDR Speech
-        <select name="speech_dataset_id" required>
-          <option value=""{% if not speech_datasets %} selected{% endif %}>Select processed Speech CDR</option>
+      <label>CDR Speech <span class="form-label-hint">Select one or more</span>
+        <select name="speech_dataset_id" required multiple size="4" aria-describedby="cdr-selection-help">
           {% for dataset in speech_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
@@ -52,7 +49,7 @@
       </label>
       <div class="form-actions reporting-submit-action"><button type="submit">Generate PowerPoint Report</button></div>
     </form>
-    <p class="form-note">Choose Slides Templates matching the selected technology; they apply only to this report and do not change the workspace default. Map Vendors from Workspace before choosing Multivendor. The common Template_CDR_analysis.pptx supplies masters and layouts for every report: the selected template creates each slide from scratch, fills its chart placeholders from the selected CDRs and keeps commentary areas blank for the analyst.</p>
+    <p id="cdr-selection-help" class="form-note">Use Ctrl/Cmd-click to select several CDRs of the same type. Their processed rows are concatenated using the union of their columns, preserving Campaign values for cross-campaign comparisons. Choose Slides Templates matching the selected technology; they apply only to this report and do not change the workspace default. Map Vendors from Workspace before choosing Multivendor. The common Template_CDR_analysis.pptx supplies masters and layouts for every report: the selected template creates each slide from scratch, fills its chart placeholders from the selected CDRs and keeps commentary areas blank for the analyst.</p>
   </article>
 
   <article class="panel reporting-panel">
@@ -71,7 +68,10 @@
     const multivendorOption = scope?.querySelector('option[value="multivendor"]');
     if (!scope || !multivendorOption) return;
     const updateScope = () => {
-      const allCdrsMapped = Array.from(cdrSelectors).every((select) => select.selectedOptions[0]?.dataset.vendorMapped === 'true');
+      const allCdrsMapped = Array.from(cdrSelectors).every((select) => (
+        select.selectedOptions.length > 0
+        && Array.from(select.selectedOptions).every((option) => option.dataset.vendorMapped === 'true')
+      ));
       multivendorOption.disabled = !allCdrsMapped;
       if (!allCdrsMapped && scope.value === 'multivendor') scope.value = 'single';
     };

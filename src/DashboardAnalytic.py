@@ -153,7 +153,7 @@ def default_report_slides_template_path(
     technology_registry: dict[str, Any] | None = None,
 ) -> Path:
     """Return the current default CSV, whose filename follows the promoted template."""
-    filename = str((technology_registry or {}).get('default_file') or f'{technology}-slides-template.csv')
+    filename = str((technology_registry or {}).get('default_file') or f'{technology}-slide-template.csv')
     return settings.slides_templates_dir / 'default' / technology / filename
 
 
@@ -1819,8 +1819,25 @@ def _reporting_dataset(dataset_id: int, expected_kind: str) -> dict[str, Any]:
     return payload
 
 
+def _reporting_datasets(dataset_ids: list[int], expected_kind: str) -> list[dict[str, Any]]:
+    """Validate a non-empty, de-duplicated selection of compatible CDRs."""
+    unique_ids = list(dict.fromkeys(int(dataset_id) for dataset_id in dataset_ids))
+    if not unique_ids:
+        raise HTTPException(status_code=400, detail=f'Select at least one {expected_kind.title()} CDR.')
+    return [_reporting_dataset(dataset_id, expected_kind) for dataset_id in unique_ids]
+
+
 def _reporting_frame(dataset_id: int) -> pd.DataFrame:
     return repository.load_dataset_rows(dataset_id, repository.list_dataset_row_columns(dataset_id), {})
+
+
+def _combined_reporting_frame(datasets: list[dict[str, Any]], technology: str) -> pd.DataFrame:
+    """Union CDR columns while retaining every row from the selected campaigns."""
+    frames = [_reporting_frame(int(dataset['id'])) for dataset in datasets]
+    # ``sort=False`` retains a useful source-column order and concat performs
+    # the required union when campaign exports differ slightly in their fields.
+    combined = pd.concat(frames, ignore_index=True, sort=False) if len(frames) > 1 else frames[0].copy()
+    return classify_sessions(combined, technology)
 
 
 @app.get('/reporting', response_class=HTMLResponse)
@@ -1844,9 +1861,9 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
 
 @app.post('/reporting/netcheck-cdr')
 def generate_netcheck_cdr_report(
-    data_dataset_id: int = Form(...),
-    voice_dataset_id: int = Form(...),
-    speech_dataset_id: int = Form(...),
+    data_dataset_id: list[int] = Form(...),
+    voice_dataset_id: list[int] = Form(...),
+    speech_dataset_id: list[int] = Form(...),
     technology: str = Form(...),
     report_scope: str = Form('single'),
     slides_templates: str = Form(''),
@@ -1859,15 +1876,19 @@ def generate_netcheck_cdr_report(
         raise HTTPException(status_code=400, detail='Choose a valid report scope.')
     multivendor = report_scope == 'multivendor'
     selected = {
-        'data': _reporting_dataset(data_dataset_id, 'data'),
-        'voice': _reporting_dataset(voice_dataset_id, 'voice'),
-        'speech': _reporting_dataset(speech_dataset_id, 'speech'),
+        'data': _reporting_datasets(data_dataset_id, 'data'),
+        'voice': _reporting_datasets(voice_dataset_id, 'voice'),
+        'speech': _reporting_datasets(speech_dataset_id, 'speech'),
     }
     try:
-        frames = {kind: classify_sessions(_reporting_frame(dataset['id']), technology) for kind, dataset in selected.items()}
+        frames = {kind: _combined_reporting_frame(datasets, technology) for kind, datasets in selected.items()}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if multivendor and not all(dataset.get('vendor_mapping_applied') for dataset in selected.values()):
+    if multivendor and not all(
+        dataset.get('vendor_mapping_applied')
+        for datasets in selected.values()
+        for dataset in datasets
+    ):
         raise HTTPException(status_code=400, detail='Multivendor reporting requires every selected Data, Voice and Speech CDR to have a Workspace Vendor mapping.')
     if multivendor:
         frames = {kind: ensure_report_vendor_group(frame) for kind, frame in frames.items()}
@@ -1895,7 +1916,7 @@ def generate_netcheck_cdr_report(
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     repository.add_log(user.username, 'export_netcheck_cdr_report', json.dumps({
-        'datasets': {kind: dataset['id'] for kind, dataset in selected.items()},
+        'datasets': {kind: [dataset['id'] for dataset in datasets] for kind, datasets in selected.items()},
         'technology': technology,
         'scope': report_scope,
         'slides_templates': selected_catalogue['name'],
@@ -1903,7 +1924,10 @@ def generate_netcheck_cdr_report(
     }))
     repository.add_report_run(
         report_type='netcheck_cdr', technology=technology, scope=report_scope,
-        data_dataset_id=data_dataset_id, voice_dataset_id=voice_dataset_id, speech_dataset_id=speech_dataset_id,
+        # The report-run table predates multi-campaign reports and keeps the
+        # first dataset of each type as its representative link. The audit log
+        # directly above retains the complete selections.
+        data_dataset_id=selected['data'][0]['id'], voice_dataset_id=selected['voice'][0]['id'], speech_dataset_id=selected['speech'][0]['id'],
         vodafone_mapping_dataset_id=None, three_mapping_dataset_id=None,
         template_name=template.name, output_file=destination.name,
         created_by=user.username,

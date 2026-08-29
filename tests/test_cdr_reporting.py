@@ -6,6 +6,7 @@ import pytest
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
@@ -307,7 +308,7 @@ def test_catalogue_call_family_uses_documented_netcheck_session_values() -> None
 
 
 def test_nsa_speech_catalogue_filters_produce_samples_and_use_latest_campaign() -> None:
-    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/nsa-slides-template.csv'), 'nsa')
+    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/nsa-slide-template.csv'), 'nsa')
     speech = pd.DataFrame({
         'sample': ['volte', 'multirab', 'whatsapp-old', 'whatsapp-latest', 'whatsapp-sa', 'o2-latest'],
         'Session_Type': ['CALL', 'MultiRAB CALL', 'WhatsApp CALL', 'WhatsApp CALL', 'WhatsApp CALL', 'WhatsApp CALL'],
@@ -367,7 +368,7 @@ def test_failure_count_uses_row_and_column_hierarchies_without_flattening() -> N
 
 
 def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> None:
-    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/nsa-slides-template.csv'), 'nsa')
+    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/nsa-slide-template.csv'), 'nsa')
     slide_ten = [entry for entry in entries if entry.slide == 10]
     slide_thirteen = [entry for entry in entries if entry.slide == 13]
 
@@ -382,7 +383,7 @@ def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> N
 
 
 def test_catalogue_uses_explicit_title_and_transition_slides() -> None:
-    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/nsa-slides-template.csv'), 'nsa')
+    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/nsa-slide-template.csv'), 'nsa')
     structural = [entry.chart_type for entry in entries if not entry.source_kind]
     title = next(entry for entry in entries if entry.slide == 1)
     conclusions = next(entry for entry in entries if entry.slide == 22)
@@ -538,3 +539,45 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
     assert report.headers['content-type'].startswith('application/vnd.openxmlformats-officedocument.presentationml.presentation')
     assert report.content[:2] == b'PK'
     assert re.search(r'NetCheck_CDR_NSA_single_vendor_\d{8}-\d{4}\.pptx', report.headers['content-disposition'])
+
+
+def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    uploads = [
+        ('data-q1.csv', 'data', b'RAT_A,Campaign,Operator,Data_Q1\nENDC,2026 Q1,EE,10\n'),
+        ('data-q2.csv', 'data', b'RAT_A,Campaign,Operator,Data_Q2\nENDC,2026 Q2,EE,20\n'),
+        ('voice-q2.csv', 'voice', b'RAT_A,Campaign,Operator,Call_Status\nENDC,2026 Q2,EE,Completed\n'),
+        ('speech-q2.csv', 'speech', b'RAT_A,Campaign,Operator,LQ\nENDC,2026 Q2,EE,3.8\n'),
+    ]
+    for filename, kind, content in uploads:
+        response = client.post(
+            '/dashboard/upload',
+            data={'dataset_kinds': kind},
+            files={'dataset_files': (filename, BytesIO(content), 'text/csv')},
+        )
+        assert response.status_code == 200
+
+    captured: dict[str, pd.DataFrame] = {}
+
+    def capture_report(destination, template, frames, technology, multivendor, catalog):
+        captured.update(frames)
+        destination.write_bytes(b'PK')
+        return destination
+
+    monkeypatch.setattr(app_module, 'render_cdr_report', capture_report)
+    payload = urlencode([
+        ('data_dataset_id', '1'), ('data_dataset_id', '2'),
+        ('voice_dataset_id', '3'), ('speech_dataset_id', '4'),
+        ('technology', 'nsa'), ('report_scope', 'single'), ('slides_templates', 'nsa:default'),
+    ])
+    response = client.post(
+        '/reporting/netcheck-cdr',
+        content=payload,
+        headers={'content-type': 'application/x-www-form-urlencoded'},
+    )
+
+    assert response.status_code == 200
+    assert captured['data']['Campaign'].tolist() == ['2026 Q1', '2026 Q2']
+    assert {'Data_Q1', 'Data_Q2'}.issubset(captured['data'].columns)

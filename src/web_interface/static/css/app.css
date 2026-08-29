@@ -277,6 +277,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .reporting-stack select:focus { outline: 3px solid rgba(125, 78, 190, 0.22); outline-offset: 2px; border-color: rgba(75, 32, 138, 0.58); background: linear-gradient(135deg, #fffaff, #eadbff); color: #341657; box-shadow: 0 0 0 4px rgba(125, 78, 190, 0.10); }
 .reporting-stack select option { background: #fffaff; color: #43206e; }
 .reporting-stack select option:checked { background: #e2cdfb; color: #341657; }
+.form-label-hint { color: var(--muted); font-size: 0.78rem; font-weight: 600; }
+.reporting-stack select[multiple] { min-height: 7.5rem; padding: 0.42rem; }
+.reporting-stack select[multiple] option { padding: 0.4rem 0.5rem; }
 .reporting-panel .pill { background: linear-gradient(135deg, #eee1ff, #dfcbfb); border-color: rgba(75, 32, 138, 0.26); color: #55328c; }
 .reporting-submit-action { margin-top: 0.65rem; }
 .analytics-dashboard-stack button { background: linear-gradient(135deg, #0c4c8c, #287bc2); border: 1px solid rgba(12, 76, 140, 0.52); box-shadow: 0 10px 22px rgba(12, 76, 140, 0.20); }
