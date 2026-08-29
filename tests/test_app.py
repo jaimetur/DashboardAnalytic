@@ -1150,8 +1150,8 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'value="nsa:baseline-q4"' in admin.text
     assert '/admin/report-catalogues/export-selected' in admin.text
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Second'
-    assert app_module.reporting_catalog_path('nsa').name == 'updated-q4.csv'
-    assert app_module.named_catalogue_path('nsa', 'baseline-q4').exists()
+    assert app_module.reporting_catalog_path('nsa').name == 'Updated Q4.csv'
+    assert app_module.named_catalogue_path('nsa', 'baseline-q4', 'Baseline Q4').exists()
 
     reporting = client.get('/reporting')
     assert 'value="nsa:default" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting.text
@@ -1183,8 +1183,8 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     activated = client.post('/admin/report-catalogues/nsa/baseline-q4/activate', follow_redirects=False)
     assert activated.status_code == 303
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Edited'
-    assert app_module.reporting_catalog_path('nsa').name == 'baseline-q4.csv'
-    assert app_module.named_catalogue_path('nsa', 'updated-q4').exists()
+    assert app_module.reporting_catalog_path('nsa').name == 'Baseline Q4.csv'
+    assert app_module.named_catalogue_path('nsa', 'updated-q4', 'Updated Q4').exists()
 
     protected_delete = client.post('/admin/report-catalogues/nsa/default/delete')
     assert protected_delete.status_code == 400
@@ -1240,14 +1240,14 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client, tmp_path, m
     )
     assert replacement.status_code == 303
 
-    original_path = app_module.named_catalogue_path('nsa', 'original-catalogue')
+    original_path = app_module.named_catalogue_path('nsa', 'original-catalogue', 'Original catalogue')
     response = client.post(
         '/admin/report-catalogues/nsa/original-catalogue/rename',
         data={'catalogue_name': 'Renamed catalogue'},
         headers={'accept': 'application/json'},
     )
 
-    renamed_path = app_module.named_catalogue_path('nsa', 'renamed-catalogue')
+    renamed_path = app_module.named_catalogue_path('nsa', 'renamed-catalogue', 'Renamed catalogue')
     assert response.status_code == 200
     assert response.json() == {'name': 'Renamed catalogue', 'identifier': 'renamed-catalogue'}
     assert not original_path.exists()

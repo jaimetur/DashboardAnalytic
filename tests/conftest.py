@@ -25,6 +25,10 @@ def client(tmp_path: Path) -> TestClient:
         directory.mkdir(parents=True, exist_ok=True)
     bundled_slides_templates = app_module.PROJECT_ROOT / "assets" / "slides-templates"
     registry = json.loads((bundled_slides_templates / "slides-templates-library.json").read_text(encoding="utf-8"))
+    shutil.copy2(
+        bundled_slides_templates / "slides-templates-library.json",
+        slides_templates_dir / "slides-templates-library.json",
+    )
     shutil.copy2(app_module.PROJECT_ROOT / "assets" / "ppt-templates" / "Template_CDR_analysis.pptx", ppt_templates_dir / "Template_CDR_analysis.pptx")
     for technology in ("nsa", "sa"):
         target = slides_templates_dir / "default" / technology

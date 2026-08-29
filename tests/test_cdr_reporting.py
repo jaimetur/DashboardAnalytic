@@ -308,7 +308,7 @@ def test_catalogue_call_family_uses_documented_netcheck_session_values() -> None
 
 
 def test_nsa_speech_catalogue_filters_produce_samples_and_use_latest_campaign() -> None:
-    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/nsa-slide-template.csv'), 'nsa')
+    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/NSA Slide Template.csv'), 'nsa')
     speech = pd.DataFrame({
         'sample': ['volte', 'multirab', 'whatsapp-old', 'whatsapp-latest', 'whatsapp-sa', 'o2-latest'],
         'Session_Type': ['CALL', 'MultiRAB CALL', 'WhatsApp CALL', 'WhatsApp CALL', 'WhatsApp CALL', 'WhatsApp CALL'],
@@ -368,7 +368,7 @@ def test_failure_count_uses_row_and_column_hierarchies_without_flattening() -> N
 
 
 def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> None:
-    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/nsa-slide-template.csv'), 'nsa')
+    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/NSA Slide Template.csv'), 'nsa')
     slide_ten = [entry for entry in entries if entry.slide == 10]
     slide_thirteen = [entry for entry in entries if entry.slide == 13]
 
@@ -383,7 +383,7 @@ def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> N
 
 
 def test_catalogue_uses_explicit_title_and_transition_slides() -> None:
-    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/nsa-slide-template.csv'), 'nsa')
+    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/NSA Slide Template.csv'), 'nsa')
     structural = [entry.chart_type for entry in entries if not entry.source_kind]
     title = next(entry for entry in entries if entry.slide == 1)
     conclusions = next(entry for entry in entries if entry.slide == 22)

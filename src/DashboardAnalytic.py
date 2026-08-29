@@ -153,7 +153,7 @@ def default_report_slides_template_path(
     technology_registry: dict[str, Any] | None = None,
 ) -> Path:
     """Return the current default CSV, whose filename follows the promoted template."""
-    filename = str((technology_registry or {}).get('default_file') or f'{technology}-slide-template.csv')
+    filename = str((technology_registry or {}).get('default_file') or f'{technology.upper()} Slide Template.csv')
     return settings.slides_templates_dir / 'default' / technology / filename
 
 
@@ -182,9 +182,48 @@ def catalogue_identifier(name: str) -> str:
     return identifier[:80]
 
 
-def named_catalogue_path(technology: str, identifier: str) -> Path:
-    """Return the canonical library location for a named Slides Template."""
-    return settings.slides_templates_dir / 'library' / technology / f'{identifier}.csv'
+def template_filename(name: str) -> str:
+    """Return the human-facing CSV filename without normalising its display name."""
+    template_name = str(name or '').strip()
+    if not template_name or template_name in {'.', '..'} or Path(template_name).name != template_name:
+        raise ValueError('Template names cannot contain a path or be empty.')
+    return f'{template_name}.csv'
+
+
+def named_catalogue_path(technology: str, identifier: str, template_name: str | None = None) -> Path:
+    """Return the canonical library location, named exactly after the template."""
+    filename = template_filename(template_name) if template_name else f'{identifier}.csv'
+    return settings.slides_templates_dir / 'library' / technology / filename
+
+
+def synchronize_template_file_names(technology: str, registry: dict[str, dict[str, Any]]) -> bool:
+    """Migrate legacy slugged filenames to their exact visible template names."""
+    technology_registry = registry.setdefault(technology, {'active': 'default', 'catalogues': {}})
+    catalogues = technology_registry.setdefault('catalogues', {})
+    changed = False
+    for identifier, metadata in list(catalogues.items()):
+        if not isinstance(metadata, dict):
+            continue
+        name = str(metadata.get('name') or identifier).strip()
+        target = named_catalogue_path(technology, identifier, name)
+        legacy = named_catalogue_path(technology, identifier)
+        if target != legacy and legacy.exists() and not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            legacy.rename(target)
+            changed = True
+
+    default_name = str(technology_registry.get('default_name') or '').strip()
+    if default_name:
+        current = default_report_slides_template_path(technology, technology_registry)
+        target = current.parent / template_filename(default_name)
+        if current != target and current.exists() and not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            current.rename(target)
+            changed = True
+        if technology_registry.get('default_file') != target.name:
+            technology_registry['default_file'] = target.name
+            changed = True
+    return changed
 
 
 def ensure_default_template_in_library(
@@ -203,8 +242,9 @@ def ensure_default_template_in_library(
     if not default_path.exists():
         return False
 
-    identifier = catalogue_identifier(default_path.stem)
-    library_path = named_catalogue_path(technology, identifier)
+    default_name = str(technology_registry.get('default_name') or default_path.stem)
+    identifier = catalogue_identifier(default_name)
+    library_path = named_catalogue_path(technology, identifier, default_name)
     changed = False
     if not library_path.exists():
         library_path.parent.mkdir(parents=True, exist_ok=True)
@@ -212,7 +252,7 @@ def ensure_default_template_in_library(
         changed = True
     if identifier not in catalogues:
         catalogues[identifier] = {
-            'name': str(technology_registry.get('default_name') or 'Default template'),
+            'name': default_name,
         }
         changed = True
     return changed
@@ -230,7 +270,7 @@ def promote_report_template_to_default(
     if not isinstance(metadata, dict):
         raise ValueError('Named template metadata was not found.')
 
-    source_path = named_catalogue_path(technology, identifier)
+    source_path = named_catalogue_path(technology, identifier, str(metadata.get('name') or identifier))
     if not source_path.exists():
         raise ValueError('The named template CSV could not be found.')
     previous_default_path = default_report_slides_template_path(technology, technology_registry)
@@ -254,7 +294,8 @@ def promote_report_template_to_default(
 
 def report_catalogue_options(technology: str) -> list[dict[str, Any]]:
     registry = load_report_catalogue_registry()
-    registry_changed = ensure_default_template_in_library(technology, registry)
+    registry_changed = synchronize_template_file_names(technology, registry)
+    registry_changed = ensure_default_template_in_library(technology, registry) or registry_changed
     technology_registry = registry.get(technology, {})
     catalogues = technology_registry.get('catalogues', {})
     active_identifier = technology_registry.get('active', 'default')
@@ -287,7 +328,7 @@ def report_catalogue_options(technology: str) -> list[dict[str, Any]]:
     for identifier, metadata in sorted(catalogues.items(), key=lambda item: str(item[1].get('name', item[0])).casefold()):
         if not isinstance(metadata, dict):
             continue
-        path = named_catalogue_path(technology, identifier)
+        path = named_catalogue_path(technology, identifier, str(metadata.get('name') or identifier))
         if not path.exists():
             continue
         # The active template remains in the library as the canonical copy,
@@ -2452,7 +2493,7 @@ def import_report_catalogue(
         catalogues = technology_registry.setdefault('catalogues', {})
         if identifier in catalogues:
             raise ValueError(f"A {technology.upper()} template named '{catalogues[identifier].get('name', catalogue_name)}' already exists.")
-        destination = named_catalogue_path(technology, identifier)
+        destination = named_catalogue_path(technology, identifier, catalogue_name)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(content)
         catalogues[identifier] = {'name': catalogue_name}
@@ -2534,10 +2575,11 @@ def rename_report_catalogue(
             catalogues = technology_registry.setdefault('catalogues', {})
             source_path = default_report_slides_template_path(technology, technology_registry)
             new_identifier = catalogue_identifier(name)
-            destination_path = source_path.parent / f'{new_identifier}.csv'
-            previous_identifier = catalogue_identifier(source_path.stem)
-            library_source_path = named_catalogue_path(technology, previous_identifier)
-            library_destination_path = named_catalogue_path(technology, new_identifier)
+            destination_path = source_path.parent / template_filename(name)
+            previous_name = str(technology_registry.get('default_name') or source_path.stem)
+            previous_identifier = catalogue_identifier(previous_name)
+            library_source_path = named_catalogue_path(technology, previous_identifier, previous_name)
+            library_destination_path = named_catalogue_path(technology, new_identifier, name)
             if not source_path.exists():
                 raise ValueError('The default template CSV could not be found.')
             if destination_path.exists() and destination_path != source_path:
@@ -2561,16 +2603,18 @@ def rename_report_catalogue(
             if not isinstance(metadata, dict):
                 raise ValueError('Named template metadata was not found.')
             new_identifier = catalogue_identifier(name)
+            source_path = named_catalogue_path(technology, catalogue_id, str(metadata.get('name') or catalogue_id))
+            destination_path = named_catalogue_path(technology, new_identifier, name)
             if new_identifier != catalogue_id:
                 if new_identifier in catalogues:
                     raise ValueError(f"A {technology.upper()} template named '{catalogues[new_identifier].get('name', new_identifier)}' already exists.")
-                source_path = named_catalogue_path(technology, catalogue_id)
-                destination_path = named_catalogue_path(technology, new_identifier)
-                if not source_path.exists():
-                    raise ValueError('The named template CSV could not be found.')
-                if destination_path.exists():
-                    raise ValueError(f"The template file '{destination_path.name}' already exists.")
+            if not source_path.exists():
+                raise ValueError('The named template CSV could not be found.')
+            if destination_path.exists() and destination_path != source_path:
+                raise ValueError(f"The template file '{destination_path.name}' already exists.")
+            if destination_path != source_path:
                 source_path.rename(destination_path)
+            if new_identifier != catalogue_id:
                 catalogues[new_identifier] = catalogues.pop(catalogue_id)
                 metadata = catalogues[new_identifier]
                 if technology_registry.get('active') == catalogue_id:
@@ -2609,11 +2653,11 @@ def duplicate_report_catalogue(
     suffix = 1
     name = base_name
     identifier = catalogue_identifier(name)
-    while identifier in catalogues or named_catalogue_path(technology, identifier).exists():
+    while identifier in catalogues or named_catalogue_path(technology, identifier, name).exists():
         suffix += 1
         name = f"{base_name} {suffix}"
         identifier = catalogue_identifier(name)
-    destination = named_catalogue_path(technology, identifier)
+    destination = named_catalogue_path(technology, identifier, name)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(catalogue['path'].read_bytes())
     catalogues[identifier] = {'name': name}
@@ -2678,11 +2722,12 @@ def save_report_catalogue(
             # The selected default is edited through its active mirror. Keep
             # the canonical library copy byte-for-byte aligned with it.
             if catalogue['path'] == default_path:
-                library_path = named_catalogue_path(technology, catalogue_identifier(default_path.stem))
+                default_name = str(technology_registry.get('default_name') or catalogue['name'])
+                library_path = named_catalogue_path(technology, catalogue_identifier(default_name), default_name)
                 library_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(default_path, library_path)
                 technology_registry.setdefault('catalogues', {}).setdefault(
-                    catalogue_identifier(default_path.stem),
+                    catalogue_identifier(default_name),
                     {'name': str(technology_registry.get('default_name') or catalogue['name'])},
                 )
                 save_report_catalogue_registry(registry)
