@@ -485,6 +485,30 @@ def test_failed_vendor_mapping_keeps_the_cdr_available(client) -> None:
     assert 'Vendor mapping failed for CDR dataset 1' in client.get('/workspace?dataset_id=1').text
 
 
+def test_workspace_recovers_legacy_vendor_mapping_failures(client) -> None:
+    login(client)
+    client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'data'},
+        files={'dataset_files': ('legacy_cdr.csv', BytesIO(b'Operator,score\n3,91\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    import src.DashboardAnalytic as app_module
+
+    app_module.repository.update_dataset_profile(
+        1,
+        status='failed',
+        progress=100,
+        last_error='The selected CDR must contain Operator and Cell_ID_A to assign vendors.',
+    )
+
+    response = client.get('/workspace')
+    assert response.status_code == 200
+    dataset = next(item for item in client.get('/api/datasets/status').json()['datasets'] if item['id'] == 1)
+    assert dataset['status'] == 'ready'
+    assert client.get('/workspace/preview/1').status_code == 200
+
+
 def test_workspace_upload_can_map_selected_cdr_vendor_during_processing(client) -> None:
     login(client)
     mapping_response = client.post(

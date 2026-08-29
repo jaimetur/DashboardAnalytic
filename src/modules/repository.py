@@ -701,6 +701,8 @@ class Repository:
             'analyze_dataset_failed',
             'retry_dataset',
             'queue_vendor_mapping',
+            'recover_vendor_mapping_dataset',
+            'vendor_mapping_skipped',
             'map_dataset_vendors',
             'map_dataset_vendors_failed',
             'queue_vendor_clearing',

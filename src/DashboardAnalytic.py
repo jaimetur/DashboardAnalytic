@@ -77,6 +77,11 @@ INPUT_KIND_LABELS = {
 }
 UPLOAD_DATASET_KINDS = frozenset({'data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'smart_orchestrator_logs', 'generic'})
 CDR_DATASET_KINDS = frozenset({'data', 'voice', 'speech'})
+LEGACY_VENDOR_MAPPING_FAILURE_MARKERS = (
+    'to assign vendors',
+    'assign vendors',
+    'duplicate column name: vendor_2',
+)
 DATASET_NORMALIZATION_VERSION = 5
 MAPPING_PREVIEW_NORMALIZED_COLUMNS = frozenset({
     'dataset_kind', 'source_file', 'source_sheet', 'campaign', 'market', 'period', 'campaign_year', 'campaign_quarter',
@@ -877,7 +882,7 @@ def process_dataset(
 
         selected_kind = str(dataset['dataset_kind'] or '').strip().lower()
         forced_dataset_kind = selected_kind if selected_kind in UPLOAD_DATASET_KINDS else None
-        rebuild_dataset_artifacts(
+        rebuild_result = rebuild_dataset_artifacts(
             dataset_id,
             dataset_path,
             progress_callback=progress_update,
@@ -892,6 +897,11 @@ def process_dataset(
             'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
             'three_mapping_dataset_id': three_mapping_dataset_id,
         }))
+        if rebuild_result.get('vendor_mapping_error'):
+            repository.add_log(username, 'vendor_mapping_skipped', json.dumps({
+                'dataset_id': dataset_id,
+                'error': rebuild_result['vendor_mapping_error'],
+            }))
     except ProcessingStopped as exc:
         progress = int((repository.get_dataset(dataset_id) or {}).get('progress') or 0)
         repository.update_dataset_profile(
@@ -952,6 +962,7 @@ def rebuild_dataset_artifacts(
         df = add_three_gcid_column(df)
     dataset_kind = df['dataset_kind'].iloc[0] if 'dataset_kind' in df.columns and not df.empty else (forced_dataset_kind or infer_dataset_kind(df, dataset_path.name))
     auto_vendor_mapping_applied = False
+    auto_vendor_mapping_error: str | None = None
     if dataset_kind in CDR_DATASET_KINDS and (vodafone_mapping_dataset_id or three_mapping_dataset_id):
         if progress_callback:
             progress_callback(52)
@@ -963,12 +974,17 @@ def rebuild_dataset_artifacts(
             _reporting_dataset(three_mapping_dataset_id, 'mapping_three')
             if three_mapping_dataset_id else None
         )
-        df = assign_cdr_vendors(
-            df,
-            _reporting_frame(vodafone_mapping['id']) if vodafone_mapping else None,
-            _reporting_frame(three_mapping['id']) if three_mapping else None,
-        )
-        auto_vendor_mapping_applied = True
+        try:
+            df = assign_cdr_vendors(
+                df,
+                _reporting_frame(vodafone_mapping['id']) if vodafone_mapping else None,
+                _reporting_frame(three_mapping['id']) if three_mapping else None,
+            )
+            auto_vendor_mapping_applied = True
+        except Exception as exc:
+            # Mapping is optional during import. A mapping issue must not make
+            # an otherwise valid CDR unusable in Workspace or Dashboard.
+            auto_vendor_mapping_error = str(exc)
     store_cached_dataset_frame(dataset_path, df)
     repository.replace_dataset_rows(dataset_id, df)
     if progress_callback:
@@ -1021,6 +1037,7 @@ def rebuild_dataset_artifacts(
         'summary': summary,
         'analysis': analysis,
         'filter_options': filter_options,
+        'vendor_mapping_error': auto_vendor_mapping_error,
     }
 
 
@@ -1152,6 +1169,32 @@ def enqueue_vendor_mapping(
         vodafone_mapping_dataset_id,
         three_mapping_dataset_id,
     )
+
+
+def queue_legacy_vendor_mapping_recovery(
+    background_tasks: BackgroundTasks,
+    datasets: list[dict[str, Any]],
+    username: str,
+) -> bool:
+    """Recover CDRs failed by the former inline Vendor-mapping implementation."""
+    queued_recovery = False
+    for dataset in datasets:
+        error_text = str(dataset.get('last_error') or '').casefold()
+        if (
+            dataset.get('status') != 'failed'
+            or dataset.get('dataset_kind') not in CDR_DATASET_KINDS
+            or not any(marker in error_text for marker in LEGACY_VENDOR_MAPPING_FAILURE_MARKERS)
+        ):
+            continue
+        dataset_path = Path(dataset.get('stored_path') or '')
+        if not dataset_path.exists():
+            continue
+        # Rebuild from the original workbook with no mappings selected. This
+        # restores Preview/Dashboard availability without repeating the error.
+        enqueue_dataset_processing(background_tasks, int(dataset['id']), dataset_path, username)
+        repository.add_log(username, 'recover_vendor_mapping_dataset', json.dumps({'dataset_id': dataset['id']}))
+        queued_recovery = True
+    return queued_recovery
 
 
 def process_vendor_clearing(dataset_id: int, username: str) -> None:
@@ -1482,6 +1525,8 @@ def describe_workspace_log_entry(log: dict[str, Any]) -> str:
             return f"Vendor mapping applied to CDR dataset {details.get('dataset_id')}."
         if log['action'] == 'map_dataset_vendors_failed':
             return f"Vendor mapping failed for CDR dataset {details.get('dataset_id')}: {details.get('error', 'Unknown error')}"
+        if log['action'] == 'vendor_mapping_skipped':
+            return f"Vendor mapping was skipped for CDR dataset {details.get('dataset_id')}: {details.get('error', 'Unknown error')}"
         if log['action'] == 'clear_dataset_vendors':
             return f"Vendor mapping cleared from CDR dataset {details.get('dataset_id')}."
         if log['action'] == 'clear_dataset_vendors_failed':
@@ -1752,11 +1797,16 @@ def get_markdown_document(doc_name: str, user: SessionUser = Depends(current_use
 @app.get('/workspace', response_class=HTMLResponse)
 def workspace(
     request: Request,
+    background_tasks: BackgroundTasks,
     dataset_id: int | None = Query(default=None),
     input_kind: str | None = Query(default=None),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
     datasets, ready_datasets, input_kind_options, selected_dataset = build_dataset_view_state(dataset_id, input_kind)
+    if queue_legacy_vendor_mapping_recovery(background_tasks, datasets, user.username):
+        # Reflect the queued recovery in this response instead of leaving a
+        # legacy failed row unusable until the next manual refresh.
+        datasets, ready_datasets, input_kind_options, selected_dataset = build_dataset_view_state(dataset_id, input_kind)
     has_processing = any(dataset['status'] in {'queued', 'processing'} for dataset in datasets)
     workspace_logs = repository.list_workspace_logs(selected_dataset['id'] if selected_dataset else None)
     for log in workspace_logs:
