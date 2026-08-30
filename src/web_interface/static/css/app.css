@@ -170,19 +170,21 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-editor-picker-form label { flex: 1; }
 .catalogue-editor-picker-form button { flex: 0 0 auto; }
 .catalogue-editor-library { margin-top: 0; padding-top: 0; border-top: 0; }
-.catalogue-import-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 0.6rem; }
-.catalogue-import-row input { min-width: 0; }
+.catalogue-import-row { display: grid; grid-template-columns: minmax(110px, 0.38fr) minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 0.6rem; }
+.catalogue-import-row input, .catalogue-import-row select { min-width: 0; }
+.templates-library-heading { margin: 1.1rem 0 0; color: #5b1c22; font-size: 1.02rem; }
 .catalogue-workspace-table-wrap { margin-top: 0.9rem; }
 .catalogue-workspace-table { min-width: 720px; }
+.catalogue-workspace-table th, .catalogue-workspace-table td { vertical-align: middle; }
 .catalogue-default-cell { width: 5.5rem; text-align: center; }
 .catalogue-default-mark { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 999px; font-size: 1rem; font-weight: 800; line-height: 1; }
 .catalogue-default-mark.is-default { color: #08736d; background: rgba(8, 115, 109, 0.14); border: 1px solid rgba(8, 115, 109, 0.34); }
 .catalogue-default-mark.is-not-default { color: #87949d; background: rgba(135, 148, 157, 0.12); border: 1px solid rgba(135, 148, 157, 0.28); }
-.catalogue-rename-form, .catalogue-workspace-actions { display: flex; align-items: center; gap: 0.45rem; }
+.catalogue-rename-form, .catalogue-type-form, .catalogue-workspace-actions { display: flex; align-items: center; gap: 0.45rem; }
 .catalogue-rename-form { min-width: 280px; margin: 0; }
 .catalogue-rename-form input { min-width: 0; }
 .catalogue-rename-form button, .catalogue-workspace-actions button, .catalogue-workspace-actions .catalogue-export-button { min-height: 2rem; padding: 0.4rem 0.65rem; border-radius: 999px; font-size: 0.78rem; }
-.catalogue-workspace-actions { flex-wrap: wrap; }
+.catalogue-workspace-actions { flex-wrap: wrap; justify-content: flex-start; }
 .catalogue-workspace-actions form { margin: 0; }
 .admin-stack .catalogue-workspace-actions .catalogue-duplicate-button { background: linear-gradient(145deg, #10314a, #1f5d9c); border-color: rgba(16, 49, 74, 0.72); color: #fff; }
 .admin-stack .catalogue-workspace-actions .catalogue-duplicate-button:hover:not(:disabled) { background: linear-gradient(145deg, #0b293e, #174a7c); }

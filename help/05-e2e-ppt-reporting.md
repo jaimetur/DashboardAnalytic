@@ -40,7 +40,7 @@ For Vodafone and Three, the report derives vendor from the first and last value 
 
 Every NSA, SA, single-vendor and multivendor report uses the same `assets/ppt-templates/Template_CDR_analysis.pptx` (or the file with that name under `APP_PPT_TEMPLATES_DIR`). It is a master/layout-only template and intentionally contains no slides. For every distinct `Slide` number in the selected Slides Templates, the renderer creates one new slide from its named layout, ordered by slide number. Rows with the same number represent separate charts on that slide and fill its image placeholders from left to right and then top to bottom. Commentary placeholders remain blank for analyst input.
 
-An administrator can manage several named NSA and SA Slides Templates CSVs. A template can be set as the default, duplicated, renamed, deleted or exported, then edited directly in the browser. Every CDR row represents one chart image and declares its named PowerPoint `Layout`; the renderer creates the slide, populates its title and places generated charts in the layout's matching chart placeholders. Importing or selecting a new default template refreshes the tables below.
+An administrator can manage several named NSA and SA Slides Templates CSVs. The single importer selects the required `NSA` or `SA` type (NSA by default); a non-default library template can also be moved to the other type from its Type selector. A template can be set as the default, duplicated, renamed, deleted or exported, then edited directly in the browser. Its visible name is its physical CSV filename without `.csv`; duplicates use `- Copy`, then `- Copy 2`, and so on. Every CDR row represents one chart image and declares its named PowerPoint `Layout`; the renderer creates the slide, populates its title and places generated charts in the layout's matching chart placeholders. Importing or selecting a new default template refreshes the tables below.
 
 After generation, the timestamp-named PPTX downloads through the browser and the generation dialog closes. If the report contains no valid samples, re-check the selected technology, operator sheets and CDR inputs; the message indicates that the selected persisted rows did not match the relevant KPI and technology filter. For NSA, validate that the relevant RAT field actually contains an ENDC variant; for SA, validate the expected `NR` values.
 
@@ -79,43 +79,6 @@ Export the active NSA or SA Slides Template from Admin before editing it. The ta
 
 | Slide | Slide tittle | Slide Subtittle | Layout | Chart Tittle | CDR source | KPI | Chart type | Legend | Filters | Grouping_Rows | Grouping_Columns |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | NPPI Tech Forum<br>VodafoneThree & Ericsson<br>2026-08-06 | 2026 Q2 Net check 5G SA Campaign<br>Final Scoring and Gap Analysis<br>CDR KPI Analysis | Title Page | — | — | — | Title Slide | — | — | — | — |
-| 2 | Agenda | — | Title Only | — | — | — | Transition Slide | — | — | — | — |
-| 3 | Voice Failures | 7 Cities | Title and 2 columns | — | CDR-Voice | Call_Status | Count Stacked Horizontal Bars | — | Failed/Dropped; Classic call, MultiRAB, WhatsApp | Call family | Operator × Campaign |
-| 3 | Voice Failures | 7 Cities | Title and 2 columns | — | CDR-Voice | Failure_Technology | Count Stacked Horizontal Bars | — | Failed/Dropped; Classic call, MultiRAB, WhatsApp | Call family | Failure technology × Operator × Campaign |
-| 4 | Voice Failures (Vodafone UK) | 7 Cities | Title and 3 columns | — | CDR-Voice | Call_Status | Count Stacked Horizontal Bars | — | Failed/Dropped; Operator Vodafone UK | Call family | City × Campaign |
-| 4 | Voice Failures (Vodafone UK) | 7 Cities | Title and 3 columns | — | CDR-Voice | Failure_Technology | Count Stacked Horizontal Bars | — | Failed/Dropped; Operator Vodafone UK | Call family | Failure technology × Campaign |
-| 4 | Voice Failures (Vodafone UK) | 7 Cities | Title and 3 columns | — | CDR-Voice | Failure_Category | Count Stacked Horizontal Bars | — | Failed/Dropped; Operator Vodafone UK | Call family | Failure category × Campaign |
-| 5 | Completed Call Ratio | 7 cities | Title and 1 smaller column | — | CDR-Voice | Call_Status | 100% Stacked Vertical Bars | — | Classic call, MultiRAB, WhatsApp | Call family | Operator × Campaign |
-| 6 | POLQA <1.6 Rate | 7 cities | Title and 1 smaller column | — | CDR-Speech | LQ | 100% Stacked Vertical Bars | — | LQ < 1.6 vs ≥ 1.6 | Call family | Operator × Campaign |
-| 7 | POLQA <1.6 Rate Vodafone (Whatsapp) | 7 cities | Title and 3 columns | — | CDR-Speech | LQ | Threshold Stacked Vertical Bars | — | Operator Vodafone UK; WhatsApp; LQ < 1.6; NR band | NR band | — |
-| 7 | POLQA <1.6 Rate Vodafone (Whatsapp) | 7 cities | Title and 3 columns | — | CDR-Speech | LQ vs Playing_RSRP_NR_Avg | Scatter | — | Operator Vodafone UK; WhatsApp; NR samples | Radio strength | LQ state |
-| 7 | POLQA <1.6 Rate Vodafone (Whatsapp) | 7 cities | Title and 3 columns | — | CDR-Speech | LQ vs 4G_RSRP_Avg_A | Scatter | — | Operator Vodafone UK; WhatsApp; LTE samples | Radio strength | LQ state |
-| 8 | POLQA <1.6 Rate Three UK (Whatsapp) | 7 cities | Title and 2 columns | — | CDR-Speech | LQ | 100% Stacked Vertical Bars | — | Operator Three UK; WhatsApp; LQ < 1.6 vs ≥ 1.6 | Campaign | — |
-| 8 | POLQA <1.6 Rate Three UK (Whatsapp) | 7 cities | Title and 2 columns | — | CDR-Speech | LQ | CDF Line | — | Operator Three UK; WhatsApp | Campaign | — |
-| 9 | POLQA Avg MOS | 7 cities | Title and 8 Content | — | CDR-Voice | POLQA_LQ_Avg | CDF Line | — | Classic call or MultiRAB | Operator | Campaign |
-| 9 | POLQA Avg MOS | 7 cities | Title and 8 Content | — | CDR-Voice | POLQA_LQ_Avg | Average Vertical Bars | — | Classic call or MultiRAB | Operator | Campaign |
-| 9 | POLQA Avg MOS | 7 cities | Title and 8 Content | — | CDR-Speech | LQ | CDF Line | — | WhatsApp | Operator | Campaign |
-| 9 | POLQA Avg MOS | 7 cities | Title and 8 Content | — | CDR-Speech | LQ | Average Vertical Bars | — | WhatsApp | Operator | Campaign |
-| 10 | POLQA Avg MOS | London | Title and 8 Content | — | CDR-Voice | POLQA_LQ_Avg | CDF Line | — | Classic call or MultiRAB; location London | Operator | Campaign |
-| 10 | POLQA Avg MOS | London | Title and 8 Content | — | CDR-Voice | POLQA_LQ_Avg | Average Vertical Bars | — | Classic call or MultiRAB; location London | Operator | Campaign |
-| 10 | POLQA Avg MOS | London | Title and 8 Content | — | CDR-Speech | LQ | CDF Line | — | WhatsApp; location London | Operator | Campaign |
-| 10 | POLQA Avg MOS | London | Title and 8 Content | — | CDR-Speech | LQ | Average Vertical Bars | — | WhatsApp; location London | Operator | Campaign |
-| 11 | Netcheck CDR Data Analysis | 2026 Q2 NSA vs SA Campaign<br>7 Cities and London | Title Only | — | — | — | Transition Slide | — | — | — | — |
-| 12 | FDFS Success Ratio | — | Title and 2 columns | — | CDR-Data | Test_Result | 100% Stacked Vertical Bars | — | FDFS; Direction DL; 7 cities | Operator | Campaign |
-| 12 | FDFS Success Ratio | — | Title and 2 columns | — | CDR-Data | Test_Result | 100% Stacked Vertical Bars | — | FDFS; Direction UL; London | Operator | Campaign |
-| 13 | FDFS DL Throughput | 7 Cities | Title and 2 columns | — | CDR-Data | Mean_Data_Rate | CDF Line | — | FDFS; Direction DL | Operator | Campaign |
-| 13 | FDFS DL Throughput | 7 Cities | Title and 2 columns | — | CDR-Data | Data_Test_Duration | Average Vertical Bars | — | FDFS; Direction DL | Operator | Campaign |
-| 14 | FDFS UL Throughput | 7 Cities | Title and 2 columns | — | CDR-Data | Mean_Data_Rate | CDF Line | — | FDFS; Direction UL | Operator | Campaign |
-| 14 | FDFS UL Throughput | 7 Cities | Title and 2 columns | — | CDR-Data | Data_Test_Duration | Average Vertical Bars | — | FDFS; Direction UL | Operator | Campaign |
-| 15 | FDTT DL and UL Throughput | 7 Cities | Title and 2 columns | — | CDR-Data | FDTT_Sustainable_MDR | CDF Line | — | FDTT; Directions DL and UL | Operator | Campaign |
-| 15 | FDTT DL and UL Throughput | 7 Cities | Title and 2 columns | — | CDR-Data | FDTT_Sustainable_MDR | Distribution Stacked Vertical Bars | — | FDTT; Directions DL and UL; template rate buckets | Operator | Campaign × Rate bucket |
-| 16 | Interactivity KPIs | 7 Cities | Title and 8 Content | — | CDR-Data | Interactivity_RTT_Median | CDF Line | — | Interactivity tests | Operator | Campaign |
-| 16 | Interactivity KPIs | 7 Cities | Title and 8 Content | — | CDR-Data | Interactivity_RTT_Median | Median Vertical Bars | — | Interactivity tests | Operator | Campaign |
-| 16 | Interactivity KPIs | 7 Cities | Title and 8 Content | — | CDR-Data | Interactivity_Packet_Error_Ratio | CDF Line | — | Interactivity tests | Operator | Campaign |
-| 16 | Interactivity KPIs | 7 Cities | Title and 8 Content | — | CDR-Data | Interactivity_Packet_Error_Ratio | Average Vertical Bars | — | Interactivity tests | Operator | Campaign |
-| 17 | Browsing Time to 1MB | 7 cities | Title and 2 columns | — | CDR-Data | http_Browser_1MB_Reached_Duration | CDF Line | — | Browsing/HTTP tests | Operator | Campaign |
-| 17 | Browsing Time to 1MB | 7 cities | Title and 2 columns | — | CDR-Data | http_Browser_1MB_Reached_Duration | Average Vertical Bars | — | Browsing/HTTP tests | Operator | Campaign |
-| 18 | Conclusions | — | Title Only | — | — | — | Transition Slide | — | — | — | — |
+| 8 | First | — | Title and 1 column + Comments | — | CDR-Voice | Call_Status | 100% Stacked Vertical Bars | — | — | Operator | Campaign |
 
 <!-- SLIDES_TEMPLATES:END -->

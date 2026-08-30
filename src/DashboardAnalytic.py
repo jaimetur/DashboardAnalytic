@@ -2694,14 +2694,13 @@ def catalogue_filter_values(
     return JSONResponse({'values': sorted(values, key=str.casefold)[:200]})
 
 
-@app.post('/admin/report-catalogues/{technology}', response_class=HTMLResponse)
-def import_report_catalogue(
+def _import_report_catalogue(
     request: Request,
     technology: str,
-    catalogue_file: UploadFile | None = File(default=None),
-    catalogue_name: str = Form(''),
-    convert_catalogue: bool = Form(False),
-    user: SessionUser = Depends(admin_user),
+    catalogue_file: UploadFile | None,
+    catalogue_name: str,
+    convert_catalogue: bool,
+    user: SessionUser,
 ) -> HTMLResponse:
     technology = technology.strip().lower()
     if technology not in TEMPLATE_NAMES:
@@ -2748,6 +2747,32 @@ def import_report_catalogue(
     return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.post('/admin/report-catalogues/{technology}', response_class=HTMLResponse)
+def import_report_catalogue(
+    request: Request,
+    technology: str,
+    catalogue_file: UploadFile | None = File(default=None),
+    catalogue_name: str = Form(''),
+    convert_catalogue: bool = Form(False),
+    user: SessionUser = Depends(admin_user),
+) -> HTMLResponse:
+    """Compatibility endpoint for existing NSA/SA-specific imports."""
+    return _import_report_catalogue(request, technology, catalogue_file, catalogue_name, convert_catalogue, user)
+
+
+@app.post('/admin/slides-templates/import', response_class=HTMLResponse)
+def import_slides_template(
+    request: Request,
+    template_type: str = Form('nsa'),
+    catalogue_file: UploadFile | None = File(default=None),
+    catalogue_name: str = Form(''),
+    convert_catalogue: bool = Form(False),
+    user: SessionUser = Depends(admin_user),
+) -> HTMLResponse:
+    """Import one Slides Template after the user has selected its NSA/SA type."""
+    return _import_report_catalogue(request, template_type, catalogue_file, catalogue_name, convert_catalogue, user)
+
+
 @app.post('/admin/report-catalogues/{technology}/{catalogue_id}/activate', response_class=HTMLResponse)
 def activate_report_catalogue(
     request: Request,
@@ -2778,6 +2803,62 @@ def activate_report_catalogue(
 
 def _named_catalogue(technology: str, catalogue_id: str) -> dict[str, Any] | None:
     return next((item for item in report_catalogue_options(technology) if item['identifier'] == catalogue_id), None)
+
+
+@app.post('/admin/report-catalogues/{technology}/{catalogue_id}/type', response_class=HTMLResponse)
+def change_report_catalogue_type(
+    request: Request,
+    technology: str,
+    catalogue_id: str,
+    template_type: str = Form(...),
+    user: SessionUser = Depends(admin_user),
+) -> HTMLResponse:
+    """Move a non-default Slides Template between the NSA and SA libraries."""
+    technology = technology.strip().lower()
+    target_technology = template_type.strip().lower()
+    catalogue = _named_catalogue(technology, catalogue_id) if technology in TEMPLATE_NAMES else None
+    if not catalogue or target_technology not in TEMPLATE_NAMES:
+        return render_admin_template(request, user, error='Slides Template or target type was not found.', status_code=404)
+    if target_technology == technology:
+        return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+    if catalogue['active']:
+        return render_admin_template(
+            request,
+            user,
+            error='Set another template as default before changing the type of the current default template.',
+            status_code=400,
+        )
+    try:
+        registry = load_report_catalogue_registry()
+        source_registry = registry.setdefault(technology, {'active': 'default', 'catalogues': {}})
+        target_registry = registry.setdefault(target_technology, {'active': 'default', 'catalogues': {}})
+        source_catalogues = source_registry.setdefault('catalogues', {})
+        target_catalogues = target_registry.setdefault('catalogues', {})
+        metadata = source_catalogues.get(catalogue_id)
+        if not isinstance(metadata, dict):
+            raise ValueError('Named template metadata was not found.')
+        name = str(metadata.get('name') or catalogue['path'].stem).strip()
+        identifier = catalogue_identifier(name)
+        source_path = named_catalogue_path(technology, catalogue_id, name)
+        destination_path = named_catalogue_path(target_technology, identifier, name)
+        if identifier in target_catalogues or destination_path.exists():
+            raise ValueError(f"A {target_technology.upper()} template named '{name}' already exists.")
+        if not source_path.exists():
+            raise ValueError('The named template CSV could not be found.')
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.rename(destination_path)
+        source_catalogues.pop(catalogue_id)
+        target_catalogues[identifier] = {'name': name}
+        save_report_catalogue_registry(registry)
+        synchronize_reporting_catalogue_document()
+    except ValueError as exc:
+        return render_admin_template(request, user, error=str(exc), status_code=400)
+    repository.add_log(user.username, 'change_report_catalogue_type', json.dumps({
+        'source_type': technology,
+        'target_type': target_technology,
+        'catalogue': name,
+    }))
+    return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/admin/report-catalogues/{technology}/{catalogue_id}/rename', response_class=HTMLResponse)
@@ -2883,14 +2964,14 @@ def duplicate_report_catalogue(
     # duplicate label from it prevents a stale/default registry label from
     # turning every duplicate into the generic NSA/SA starter name.
     source_name = catalogue['path'].stem.strip() or str(catalogue['name']).strip()
-    base_name = f"{source_name} Copy"
-    suffix = 1
+    base_name = f"{source_name} - Copy"
+    suffix = 2
     name = base_name
     identifier = catalogue_identifier(name)
     while identifier in catalogues or named_catalogue_path(technology, identifier, name).exists():
-        suffix += 1
         name = f"{base_name} {suffix}"
         identifier = catalogue_identifier(name)
+        suffix += 1
     destination = named_catalogue_path(technology, identifier, name)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(catalogue['path'].read_bytes())

@@ -90,24 +90,21 @@
         <h2>Slides Templates Management</h2>
       </div>
     </div>
-    <p class="lede">Import or export the NSA and SA Slides Templates CSV formats. Stored workspace templates are selected and managed from the editor below.</p>
+    <h3 class="templates-library-heading">Import Slides Template</h3>
+    <p class="lede">Import a Slides Template CSV, select whether it is for NSA or SA, and manage the stored workspace templates below.</p>
     {% if catalogue_error %}<span hidden data-catalogue-import-error>{{ catalogue_error }}</span>{% endif %}
     {% if catalogue_notice %}<span hidden data-catalogue-import-notice>{{ catalogue_notice }}</span>{% endif %}
-    <div class="catalogue-management-grid">
-      {% for technology, catalogue in report_catalogs.items() %}
-      <section class="catalogue-management-section">
-        <div class="section-head tight-head">
-          <div><p class="eyebrow">{{ technology | upper }}</p><h3>{{ technology | upper }} Slides Templates</h3></div>
-        </div>
-        <form class="catalogue-import-row" action="/admin/report-catalogues/{{ technology }}" method="post" enctype="multipart/form-data" data-catalogue-import-form novalidate>
-          <input type="text" name="catalogue_name" aria-label="{{ technology | upper }} template name" placeholder="Template name (optional)" maxlength="80" data-catalogue-import-name>
-          <input type="file" name="catalogue_file" aria-label="{{ technology | upper }} template CSV" accept=".csv,text/csv" data-catalogue-import-file>
-          <input type="hidden" name="convert_catalogue" value="0" data-catalogue-convert>
-          <button type="submit">Import</button>
-        </form>
-      </section>
-      {% endfor %}
-    </div>
+    <form class="catalogue-import-row" action="/admin/slides-templates/import" method="post" enctype="multipart/form-data" data-catalogue-import-form novalidate>
+      <select name="template_type" aria-label="Slides Template type" title="Slides Template type">
+        <option value="nsa" selected>NSA</option>
+        <option value="sa">SA</option>
+      </select>
+      <input type="text" name="catalogue_name" aria-label="Template name" placeholder="Template name (optional)" maxlength="80" data-catalogue-import-name>
+      <input type="file" name="catalogue_file" aria-label="Slides Template CSV" accept=".csv,text/csv" data-catalogue-import-file>
+      <input type="hidden" name="convert_catalogue" value="0" data-catalogue-convert>
+      <button type="submit">Import</button>
+    </form>
+    <h3 class="templates-library-heading">Slides Templates Library</h3>
     <div class="table-wrap catalogue-workspace-table-wrap">
       <table class="catalogue-workspace-table">
         <thead><tr><th>Template name</th><th>Type</th><th>Default</th><th>Actions</th></tr></thead>
@@ -119,7 +116,20 @@
                 <input type="text" name="catalogue_name" value="{{ catalogue.name }}" aria-label="Name for {{ catalogue.name }}" maxlength="80" required data-catalogue-auto-rename>
               </form>
             </td>
-            <td>{{ catalogue.technology | upper }}</td>
+            <td>
+              {% if catalogue.active %}
+              <select aria-label="Type for {{ catalogue.name }}" disabled title="Set another default template before changing this type.">
+                <option value="{{ catalogue.technology }}" selected>{{ catalogue.technology | upper }}</option>
+              </select>
+              {% else %}
+              <form class="catalogue-type-form" action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/type" method="post">
+                <select name="template_type" aria-label="Type for {{ catalogue.name }}" onchange="this.form.requestSubmit()">
+                  <option value="nsa" {% if catalogue.technology == 'nsa' %}selected{% endif %}>NSA</option>
+                  <option value="sa" {% if catalogue.technology == 'sa' %}selected{% endif %}>SA</option>
+                </select>
+              </form>
+              {% endif %}
+            </td>
             <td class="catalogue-default-cell"><span class="catalogue-default-mark {% if catalogue.active %}is-default{% else %}is-not-default{% endif %}" aria-label="{% if catalogue.active %}Default template{% else %}Not the default template{% endif %}" title="{% if catalogue.active %}Default template{% else %}Not the default template{% endif %}">{% if catalogue.active %}✓{% else %}○{% endif %}</span></td>
             <td>
               <div class="catalogue-workspace-actions">

@@ -1366,14 +1366,32 @@ def test_admin_duplicates_template_using_the_source_template_name(client) -> Non
 
     assert duplicated.status_code == 303
     copied = next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'regional-nsa-template-copy')
-    assert copied['name'] == 'Regional NSA Template Copy'
-    assert copied['path'].name == 'Regional NSA Template Copy.csv'
+    assert copied['name'] == 'Regional NSA Template - Copy'
+    assert copied['path'].name == 'Regional NSA Template - Copy.csv'
 
 
 def test_template_registry_reconciles_an_unambiguous_manual_csv_rename(client) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
     import src.DashboardAnalytic as app_module
 
+    # Keep this reconciliation scenario independent from whichever templates
+    # are currently bundled with the project.
+    default_dir = app_module.settings.slides_templates_dir / 'default' / 'nsa'
+    current_default = next(default_dir.glob('*.csv'))
+    base_default = default_dir / 'Base template.csv'
+    current_default.rename(base_default)
+    library_dir = app_module.settings.slides_templates_dir / 'library' / 'nsa'
+    library_dir.mkdir(parents=True, exist_ok=True)
+    for path in library_dir.glob('*.csv'):
+        path.unlink()
+    registry = app_module.load_report_catalogue_registry()
+    registry['nsa'] = {
+        'active': 'default',
+        'catalogues': {'base-template': {'name': 'Base template'}},
+        'default_name': 'Base template',
+        'default_file': base_default.name,
+    }
+    app_module.save_report_catalogue_registry(registry)
     login(client)
     content = (
         ','.join(CATALOG_HEADERS)
@@ -1396,6 +1414,44 @@ def test_template_registry_reconciles_an_unambiguous_manual_csv_rename(client) -
     reconciled = next(item for item in options if item['identifier'] == 'historic-baseline')
     assert reconciled['name'] == 'Historic baseline'
     assert reconciled['path'] == renamed
+
+
+def test_admin_importer_selects_template_type_and_moves_a_named_template(client) -> None:
+    from src.modules.cdr_reporting import CATALOG_HEADERS
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    content = (
+        ','.join(CATALOG_HEADERS)
+        + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n'
+    ).encode('utf-8')
+    imported_sa = client.post(
+        '/admin/slides-templates/import',
+        data={'template_type': 'sa', 'catalogue_name': 'SA imported template'},
+        files={'catalogue_file': ('sa.csv', BytesIO(content), 'text/csv')},
+        follow_redirects=False,
+    )
+    assert imported_sa.status_code == 303
+    assert app_module.reporting_catalog_path('sa').name == 'SA imported template.csv'
+
+    # Add two NSA templates: the second becomes default, so the first remains
+    # a movable library item.
+    for name in ('Move me', 'NSA default replacement'):
+        response = client.post(
+            '/admin/report-catalogues/nsa',
+            data={'catalogue_name': name},
+            files={'catalogue_file': ('nsa.csv', BytesIO(content), 'text/csv')},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+    moved = client.post(
+        '/admin/report-catalogues/nsa/move-me/type',
+        data={'template_type': 'sa'},
+        follow_redirects=False,
+    )
+    assert moved.status_code == 303
+    assert app_module.named_catalogue_path('sa', 'move-me', 'Move me').exists()
+    assert not app_module.named_catalogue_path('nsa', 'move-me', 'Move me').exists()
 
 
 def test_docs_routes_expose_readme_changelog_and_help(client) -> None:

@@ -16,6 +16,7 @@
 - Added embedded Help with consistently numbered navigation and recommended reading (`00` to `09`), including the explicit **04. E2E Dashboard** and **05. E2E PowerPoint Reporting** sections.
 - Added processed-dataset previews, direct CDR-only **Show Dashboard** access and matching Dashboard **Preview Dataset** access.
 - Added workspace Slides Templates Management: named NSA/SA imports, conversion of compatible legacy CSVs, defaults, duplication, deletion, export and in-browser editing.
+- Added a unified Slides Templates importer with an NSA/SA type selector, plus per-template type reassignment for non-default library templates.
 
 #### 🚀 Enhancements:
 - Normalized historical UK Operator aliases only while rendering combined reports, so catalogue filters and groupings consistently consolidate `Vodafone`/`Vodafone UK` as **Vodafone**, O2 variants as **O2**, 3/Three variants as **3**, and EE variants as **EE** across campaigns.
@@ -30,7 +31,7 @@
 - Added a reporting catalogue selector that follows the NSA/SA workspace default while allowing a per-report override.
 - Expanded the in-browser Slides Templates Editor with contextual assistance, Filter Builder, searchable single/multi-select values, fixed action/Slide columns, row movement/insertion/removal, re-enumeration and scroll guidance.
 - Refactored PowerPoint and Slides Templates storage: the master deck lives in `assets/ppt-templates/`; `assets/slides-templates/library/` is the complete canonical NSA/SA template library (including defaults), `default/nsa/` and `default/sa/` hold only the active generation mirrors, and the root registry keeps names, defaults and file renames synchronized.
-- Unified Slides Template naming so the visible name is always the exact physical CSV filename (apart from `.csv`), reconciling unambiguous manual renames, removing legacy duplicate files, and preserving case and spaces across the library, default mirror, imports, renames and duplicates. Duplicates derive from their source name with **Copy** (and a number only when needed).
+- Unified Slides Template naming so the visible name is always the exact physical CSV filename (apart from `.csv`), reconciling unambiguous manual renames, removing legacy duplicate files, and preserving case and spaces across the library, default mirror, imports, renames and duplicates. Duplicates derive from their source name with **- Copy** (then **Copy 2**, etc.).
 - Standardized Administration and Help labels on **Template** terminology.
 - Renaming a named workspace catalogue now also renames its managed CSV file and preserves its default selection.
 - Added timestamped report filenames, `UpdateAll.py`, and removed obsolete release-document tooling.
@@ -42,6 +43,7 @@
 - Fixed master-layout placeholder assignment, inherited-chart cleanup, generated-report download completion and Help article navigation.
 - Fixed CDR/mapping ingestion for duplicate headers, legacy CSV encodings, VFUK/3UK GCIDs, alternate Cell ID fields (including Global CI/GCID/GCI/CGI/ECI variants) and NSA RAT spellings.
 - Fixed Reporting CDR selector contrast and one-item labels, while keeping a CDR ready after a failed Vendor mapping and recording the cause in Workspace Logs instead of disabling Preview and Dashboard access.
+- Aligned Slides Templates Management import controls and template-list actions on their shared vertical centerline, retaining left-aligned actions and adding clear **Import Slides Template** and **Slides Templates Library** headings.
 - Fixed mapped CDR Vendor persistence and preview order: the calculated `vendor` field now replaces source-name collisions, appears immediately after `source_sheet`, is highlighted in blue, and keeps internal `report_vendor` out of previews.
 - Preserved each dataset's original upload date when it is reprocessed; Workspace ordering and automatic latest CDR/VFUK/3UK selections now consistently use that immutable date, while **Updated** continues to reflect processing activity.
 - Added separate **Uploaded** and **Updated** columns to the Workspace dataset table, in that order.
