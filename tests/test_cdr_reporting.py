@@ -73,6 +73,26 @@ def test_workspace_vendor_assignment_writes_the_normalized_vendor_field() -> Non
 
     assert mapped['vendor'].tolist() == ['Vodafone_Ericsson', '3_Mixed Vendor', pd.NA]
     assert mapped['report_vendor'].tolist() == ['Vodafone_Ericsson', '3_Mixed Vendor', 'O2 (UK)']
+    assert mapped.columns[:2].tolist() == ['vendor', 'Operator']
+
+
+def test_workspace_vendor_assignment_replaces_source_vendor_collisions() -> None:
+    cdr = pd.DataFrame({
+        'source_sheet': ['Vodafone'],
+        'Vendor': ['legacy source value'],
+        'vendor__2': ['normalised source value'],
+        'Operator': ['3'],
+        'Cell_ID_A': ['200 -> 200'],
+    })
+    three_mapping = pd.DataFrame({'Cid__ECI': [200], 'Vendor': ['Nokia']})
+
+    mapped = assign_cdr_vendors(cdr, None, three_mapping)
+
+    assert mapped.columns[:2].tolist() == ['source_sheet', 'vendor']
+    assert 'Vendor' not in mapped.columns
+    assert 'vendor__2' not in mapped.columns
+    assert mapped.loc[0, 'vendor'] == '3_Nokia'
+    assert mapped.columns[-1] == 'report_vendor'
 
 
 def test_workspace_vendor_assignment_supports_a_single_selected_mapping() -> None:

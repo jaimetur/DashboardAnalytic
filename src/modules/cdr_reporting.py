@@ -605,6 +605,17 @@ def assign_cdr_vendors(
     Workspace.
     """
     result = df.copy()
+    # CDR workbooks can already expose a source ``Vendor`` column.  Dataset
+    # normalisation also creates a lower-case vendor field, which SQLite keeps
+    # as ``vendor__2`` to avoid a case-insensitive name collision.  That source
+    # field is not the calculated multivendor result, so remove every such
+    # collision before writing the canonical, user-facing ``vendor`` column.
+    vendor_collision_columns = [
+        str(column) for column in result.columns
+        if str(column).casefold() == 'vendor' or re.fullmatch(r'vendor__\d+', str(column).casefold())
+    ]
+    if vendor_collision_columns:
+        result = result.drop(columns=vendor_collision_columns)
     operator_column = _first_existing(result, ["operator", "Operator"])
     cell_column = _first_existing(result, [
         "Cell_ID_A", "Cell_IDs_A", "Cell_ID", "Cell ID A", "Cell IDs A",
@@ -648,7 +659,12 @@ def assign_cdr_vendors(
             report_groups.append(normalized_operator)
     result["vendor"] = assigned_vendors
     result["report_vendor"] = report_groups
-    return result
+    # Keep the calculated Vendor immediately after the source-sheet identifier
+    # (or first when no worksheet identifier exists).  ``report_vendor`` is an
+    # internal reporting comparison field and deliberately remains last.
+    leading_columns = [column for column in ('source_sheet', 'vendor') if column in result.columns]
+    remaining_columns = [column for column in result.columns if column not in {*leading_columns, 'report_vendor'}]
+    return result.loc[:, [*leading_columns, *remaining_columns, 'report_vendor']]
 
 
 def ensure_report_vendor_group(df: pd.DataFrame) -> pd.DataFrame:

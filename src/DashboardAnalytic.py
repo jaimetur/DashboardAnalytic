@@ -1097,6 +1097,40 @@ def persist_mapped_cdr_frame(dataset: dict[str, Any], frame: pd.DataFrame) -> No
     )
 
 
+def ensure_canonical_mapped_vendor_column(dataset: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Migrate already-mapped CDRs from the old ``vendor__2`` storage name."""
+    if not dataset or not dataset.get('is_ready') or not dataset.get('vendor_mapping_applied'):
+        return dataset
+    dataset_id = int(dataset['id'])
+    columns = repository.list_dataset_row_columns(dataset_id)
+    if 'vendor' in columns:
+        return dataset
+    legacy_vendor_column = next(
+        (column for column in columns if re.fullmatch(r'vendor__\d+', str(column).casefold())),
+        None,
+    )
+    if not legacy_vendor_column:
+        return dataset
+    frame = _reporting_frame(dataset_id)
+    calculated_vendor = frame[legacy_vendor_column].copy()
+    collisions = [
+        column for column in frame.columns
+        if str(column).casefold() == 'vendor' or re.fullmatch(r'vendor__\d+', str(column).casefold())
+    ]
+    frame = frame.drop(columns=collisions)
+    frame['vendor'] = calculated_vendor
+    leading_columns = [column for column in ('source_sheet', 'vendor') if column in frame.columns]
+    remaining_columns = [column for column in frame.columns if column not in {*leading_columns, 'report_vendor'}]
+    if 'report_vendor' in frame.columns:
+        frame = frame.loc[:, [*leading_columns, *remaining_columns, 'report_vendor']]
+    else:
+        frame = frame.loc[:, [*leading_columns, *remaining_columns]]
+    persist_mapped_cdr_frame(dataset, frame)
+    clear_dataset_analysis_cache(Path(dataset['stored_path']))
+    refreshed = repository.get_dataset(dataset_id)
+    return serialize_dataset_row(refreshed) if refreshed else dataset
+
+
 def process_vendor_mapping(
     dataset_id: int,
     username: str,
@@ -1862,6 +1896,7 @@ def preview_dataset(
     if not dataset['is_ready']:
         raise HTTPException(status_code=400, detail='Only processed datasets can be previewed.')
     dataset = ensure_mapping_gcid(dataset)
+    dataset = ensure_canonical_mapped_vendor_column(dataset) or dataset
 
     available_columns = repository.list_dataset_row_columns(dataset_id)
     vendor_preview_column = next(
@@ -1952,7 +1987,12 @@ def preview_dataset(
             'session_type', 'test_name', 'direction', 'event_start_time', 'status',
         ]
         preview_columns = [column for column in priority_columns if column in available_columns]
-        preview_columns.extend(column for column in available_columns if column not in preview_columns)
+        # report_vendor is a renderer-only comparison field. The analyst sees
+        # the calculated vendor column instead, highlighted near the start.
+        preview_columns.extend(
+            column for column in available_columns
+            if column not in preview_columns and column != 'report_vendor'
+        )
     preview_frame = repository.load_dataset_rows(dataset_id, preview_columns, preview_filters).head(row_limit)
     if 'GCID' in preview_frame.columns:
         preview_frame = preview_frame.copy()
@@ -1989,6 +2029,7 @@ def dashboard(
 ) -> HTMLResponse:
     datasets, ready_datasets, input_kind_options, selected_dataset = build_dataset_view_state(dataset_id, input_kind, CDR_DATASET_KINDS)
     selected_dataset = refresh_selected_dataset_if_stale(selected_dataset)
+    selected_dataset = ensure_canonical_mapped_vendor_column(selected_dataset)
     selected_dataset = enrich_selected_dataset_for_dashboard(selected_dataset)
     analysis, analyses, selected_metrics, filter_options, analysis_error, analysis_loaded = build_dashboard_payload(selected_dataset, request, user.username)
 
