@@ -32,6 +32,7 @@
 - Expanded the in-browser Slides Templates Editor with contextual assistance, Filter Builder, searchable single/multi-select values, fixed action/Slide columns, row movement/insertion/removal, re-enumeration and scroll guidance.
 - Refactored PowerPoint and Slides Templates storage: the master deck lives in `assets/ppt-templates/`; `assets/slides-templates/library/` is the complete canonical NSA/SA template library (including defaults), `default/nsa/` and `default/sa/` hold only the active generation mirrors, and the root registry keeps names, defaults and file renames synchronized.
 - Unified Slides Template naming so the visible name is always the exact physical CSV filename (apart from `.csv`), reconciling unambiguous manual renames, removing legacy duplicate files, and preserving case and spaces across the library, default mirror, imports, renames and duplicates. Duplicates derive from their source name with **- Copy** (then **Copy 2**, etc.).
+- Simplified the Slides Templates registry to one ordered list of physical template names plus one `default` name per technology; no empty metadata, duplicate names, active state or slug aliases are persisted.
 - Standardized Administration and Help labels on **Template** terminology.
 - Renaming a named workspace catalogue now also renames its managed CSV file and preserves its default selection.
 - Added timestamped report filenames, `UpdateAll.py`, and removed obsolete release-document tooling.
@@ -44,6 +45,7 @@
 - Fixed CDR/mapping ingestion for duplicate headers, legacy CSV encodings, VFUK/3UK GCIDs, alternate Cell ID fields (including Global CI/GCID/GCI/CGI/ECI variants) and NSA RAT spellings.
 - Fixed Reporting CDR selector contrast and one-item labels, while keeping a CDR ready after a failed Vendor mapping and recording the cause in Workspace Logs instead of disabling Preview and Dashboard access.
 - Aligned Slides Templates Management import controls and template-list actions on their shared vertical centerline, retaining left-aligned actions and adding clear **Import Slides Template** and **Slides Templates Library** headings.
+- Fixed inline Slides Template renames so the editor selector, action URLs and current editor selection update immediately without a page reload.
 - Fixed mapped CDR Vendor persistence and preview order: the calculated `vendor` field now replaces source-name collisions, appears immediately after `source_sheet`, is highlighted in blue, and keeps internal `report_vendor` out of previews.
 - Preserved each dataset's original upload date when it is reprocessed; Workspace ordering and automatic latest CDR/VFUK/3UK selections now consistently use that immutable date, while **Updated** continues to reflect processing activity.
 - Added separate **Uploaded** and **Updated** columns to the Workspace dataset table, in that order.

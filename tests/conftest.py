@@ -33,7 +33,8 @@ def client(tmp_path: Path) -> TestClient:
     for technology in ("nsa", "sa"):
         target = slides_templates_dir / "default" / technology
         target.mkdir(parents=True, exist_ok=True)
-        filename = registry.get(technology, {}).get("default_file") or f"{technology}-slide-template.csv"
+        default_name = registry.get(technology, {}).get("default") or f"{technology.upper()} Slide Template"
+        filename = f"{default_name}.csv"
         source = bundled_slides_templates / "default" / technology / filename
         if not source.exists():
             source = bundled_slides_templates / "library" / technology / filename

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import quote
 import warnings
 
 import pandas as pd
@@ -1235,16 +1236,16 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'data-catalogue-editor-table' not in admin.text
     assert '<th>Default</th>' in admin.text
     assert 'catalogue-default-mark is-default' in admin.text
-    assert 'value="nsa:baseline-q4"' in admin.text
+    assert 'value="nsa:Baseline Q4"' in admin.text
     assert '/admin/report-catalogues/export-selected' in admin.text
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Second'
     assert app_module.reporting_catalog_path('nsa').name == 'Updated Q4.csv'
-    assert app_module.named_catalogue_path('nsa', 'baseline-q4', 'Baseline Q4').exists()
+    assert app_module.named_catalogue_path('nsa', 'Baseline Q4').exists()
 
     reporting = client.get('/reporting')
-    assert 'value="nsa:default" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting.text
+    assert 'value="nsa:Updated Q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting.text
 
-    editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=baseline-q4')
+    editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=Baseline%20Q4')
     assert editor.status_code == 200
     assert 'Slides Templates Editor' in editor.text
     assert 'data-catalogue-editor-table' in editor.text
@@ -1256,32 +1257,32 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'data-catalogue-row-action="delete"' in editor.text
     assert 'data-catalogue-reenumerate' in editor.text
     assert editor.text.index('catalogue-row-actions-heading') < editor.text.index('>Slide</th>')
-    assert 'value="nsa:baseline-q4" selected' in editor.text
+    assert 'value="nsa:Baseline Q4" selected' in editor.text
     assert 'Title and 1 column + Comments' in editor.text
     assert '<optgroup label="Layouts">' in editor.text
     assert '<optgroup label="Chart types">' in editor.text
     assert '<optgroup label="CDR fields">' in editor.text
 
     edited = (','.join(CATALOG_HEADERS) + '\n8,Edited,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n')
-    saved = client.post('/admin/report-catalogues/nsa/baseline-q4/save', data={'catalogue_content': edited}, follow_redirects=False)
+    saved = client.post('/admin/report-catalogues/nsa/Baseline%20Q4/save', data={'catalogue_content': edited}, follow_redirects=False)
     assert saved.status_code == 303
-    saved_editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=baseline-q4')
+    saved_editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=Baseline%20Q4')
     assert '>Edited</td>' in saved_editor.text
 
-    activated = client.post('/admin/report-catalogues/nsa/baseline-q4/activate', follow_redirects=False)
+    activated = client.post('/admin/report-catalogues/nsa/Baseline%20Q4/activate', follow_redirects=False)
     assert activated.status_code == 303
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Edited'
     assert app_module.reporting_catalog_path('nsa').name == 'Baseline Q4.csv'
-    assert app_module.named_catalogue_path('nsa', 'updated-q4', 'Updated Q4').exists()
+    assert app_module.named_catalogue_path('nsa', 'Updated Q4').exists()
 
-    protected_delete = client.post('/admin/report-catalogues/nsa/default/delete')
+    protected_delete = client.post('/admin/report-catalogues/nsa/Baseline%20Q4/delete')
     assert protected_delete.status_code == 400
     assert 'The default template cannot be deleted.' in protected_delete.text
 
     reporting_after_activation = client.get('/reporting')
-    assert 'value="nsa:default" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting_after_activation.text
+    assert 'value="nsa:Baseline Q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting_after_activation.text
 
-    exported = client.get('/admin/report-catalogues/nsa/updated-q4/export')
+    exported = client.get('/admin/report-catalogues/nsa/Updated%20Q4/export')
     assert exported.status_code == 200
     assert b'Second' in exported.content
 
@@ -1289,15 +1290,16 @@ def test_admin_catalogue_rename_supports_background_json_save(client) -> None:
     import src.DashboardAnalytic as app_module
 
     login(client)
+    default_name = next(item['identifier'] for item in app_module.report_catalogue_options('nsa') if item['active'])
     response = client.post(
-        '/admin/report-catalogues/nsa/default/rename',
+        f'/admin/report-catalogues/nsa/{quote(default_name)}/rename',
         data={'catalogue_name': 'Renamed default'},
         headers={'accept': 'application/json'},
     )
 
     assert response.status_code == 200
-    assert response.json() == {'name': 'Renamed default'}
-    assert next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'default')['name'] == 'Renamed default'
+    assert response.json() == {'name': 'Renamed default', 'identifier': 'Renamed default'}
+    assert next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'Renamed default')['name'] == 'Renamed default'
 
 
 def test_admin_renaming_named_catalogue_renames_its_csv_file(client, tmp_path, monkeypatch) -> None:
@@ -1328,19 +1330,19 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client, tmp_path, m
     )
     assert replacement.status_code == 303
 
-    original_path = app_module.named_catalogue_path('nsa', 'original-catalogue', 'Original catalogue')
+    original_path = app_module.named_catalogue_path('nsa', 'Original catalogue')
     response = client.post(
-        '/admin/report-catalogues/nsa/original-catalogue/rename',
+        '/admin/report-catalogues/nsa/Original%20catalogue/rename',
         data={'catalogue_name': 'Renamed catalogue'},
         headers={'accept': 'application/json'},
     )
 
-    renamed_path = app_module.named_catalogue_path('nsa', 'renamed-catalogue', 'Renamed catalogue')
+    renamed_path = app_module.named_catalogue_path('nsa', 'Renamed catalogue')
     assert response.status_code == 200
-    assert response.json() == {'name': 'Renamed catalogue', 'identifier': 'renamed-catalogue'}
+    assert response.json() == {'name': 'Renamed catalogue', 'identifier': 'Renamed catalogue'}
     assert not original_path.exists()
     assert renamed_path.read_bytes() == content
-    assert not next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'renamed-catalogue')['active']
+    assert not next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'Renamed catalogue')['active']
 
 
 def test_admin_duplicates_template_using_the_source_template_name(client) -> None:
@@ -1360,12 +1362,10 @@ def test_admin_duplicates_template_using_the_source_template_name(client) -> Non
     )
     assert imported.status_code == 303
 
-    # Imported templates become the active/default mirror, whose action uses
-    # the ``default`` identifier while retaining the imported physical name.
-    duplicated = client.post('/admin/report-catalogues/nsa/default/duplicate', follow_redirects=False)
+    duplicated = client.post('/admin/report-catalogues/nsa/Regional%20NSA%20Template/duplicate', follow_redirects=False)
 
     assert duplicated.status_code == 303
-    copied = next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'regional-nsa-template-copy')
+    copied = next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'Regional NSA Template - Copy')
     assert copied['name'] == 'Regional NSA Template - Copy'
     assert copied['path'].name == 'Regional NSA Template - Copy.csv'
 
@@ -1411,7 +1411,7 @@ def test_template_registry_reconciles_an_unambiguous_manual_csv_rename(client) -
     original.rename(renamed)
 
     options = app_module.report_catalogue_options('nsa')
-    reconciled = next(item for item in options if item['identifier'] == 'historic-baseline')
+    reconciled = next(item for item in options if item['identifier'] == 'Historic baseline')
     assert reconciled['name'] == 'Historic baseline'
     assert reconciled['path'] == renamed
 
@@ -1445,13 +1445,13 @@ def test_admin_importer_selects_template_type_and_moves_a_named_template(client)
         )
         assert response.status_code == 303
     moved = client.post(
-        '/admin/report-catalogues/nsa/move-me/type',
+        '/admin/report-catalogues/nsa/Move%20me/type',
         data={'template_type': 'sa'},
         follow_redirects=False,
     )
     assert moved.status_code == 303
-    assert app_module.named_catalogue_path('sa', 'move-me', 'Move me').exists()
-    assert not app_module.named_catalogue_path('nsa', 'move-me', 'Move me').exists()
+    assert app_module.named_catalogue_path('sa', 'Move me').exists()
+    assert not app_module.named_catalogue_path('nsa', 'Move me').exists()
 
 
 def test_docs_routes_expose_readme_changelog_and_help(client) -> None:

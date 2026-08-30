@@ -748,18 +748,24 @@ document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
     const row = input.closest('tr');
     const technology = input.form?.action.match(/\/admin\/report-catalogues\/([^/]+)\//)?.[1];
     if (!row || !technology) return;
-    const oldSegment = `/admin/report-catalogues/${technology}/${previousIdentifier}/`;
-    const newSegment = `/admin/report-catalogues/${technology}/${identifier}/`;
+    const previousName = decodeURIComponent(previousIdentifier);
+    const oldSegment = `/admin/report-catalogues/${technology}/${encodeURIComponent(previousName)}/`;
+    const newSegment = `/admin/report-catalogues/${technology}/${encodeURIComponent(identifier)}/`;
+    const rawOldSegment = `/admin/report-catalogues/${technology}/${previousName}/`;
+    const rawNewSegment = `/admin/report-catalogues/${technology}/${identifier}/`;
     row.querySelectorAll('form[action], a[href]').forEach((element) => {
       const attribute = element.tagName === 'A' ? 'href' : 'action';
       const value = element.getAttribute(attribute);
-      if (value?.includes(oldSegment)) element.setAttribute(attribute, value.replace(oldSegment, newSegment));
+      if (value?.includes(rawOldSegment)) element.setAttribute(attribute, value.replace(rawOldSegment, rawNewSegment));
+      else if (value?.includes(oldSegment)) element.setAttribute(attribute, value.replace(oldSegment, newSegment));
     });
-    document.querySelectorAll(`option[value="${technology}:${previousIdentifier}"]`).forEach((option) => {
+    document.querySelectorAll('option').forEach((option) => {
+      if (option.value !== `${technology}:${previousName}`) return;
       option.value = `${technology}:${identifier}`;
+      option.textContent = option.textContent.replace(previousName, identifier);
     });
     const parameters = new URLSearchParams(window.location.search);
-    if (parameters.get('catalogue_technology') === technology && parameters.get('catalogue_id') === previousIdentifier) {
+    if (parameters.get('catalogue_technology') === technology && parameters.get('catalogue_id') === previousName) {
       parameters.set('catalogue_id', identifier);
       const query = parameters.toString();
       window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
