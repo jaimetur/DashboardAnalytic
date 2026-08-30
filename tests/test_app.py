@@ -227,6 +227,37 @@ def test_reupload_same_file_reuses_existing_dataset_entry(client) -> None:
     assert len(datasets) == 1
 
 
+def test_reupload_preserves_original_upload_date_for_dataset_ordering(client) -> None:
+    login(client)
+    payload = b"market,period,score\nES,2026-Q1,91\n"
+    client.post(
+        "/dashboard/upload",
+        data={"dataset_kinds": "data"},
+        files={"dataset_files": ("sample.csv", BytesIO(payload), "text/csv")},
+        follow_redirects=False,
+    )
+    import src.DashboardAnalytic as app_module
+
+    original_upload = '2025-01-02 03:04:05'
+    with app_module.repository.connection() as conn:
+        conn.execute('UPDATE datasets SET uploaded_at = ? WHERE id = 1', (original_upload,))
+    client.post(
+        "/dashboard/upload",
+        data={"dataset_kinds": "data"},
+        files={"dataset_files": ("sample.csv", BytesIO(payload), "text/csv")},
+        follow_redirects=False,
+    )
+
+    dataset = app_module.repository.get_dataset(1)
+    assert dataset is not None
+    assert dataset['uploaded_at'] == original_upload
+
+    workspace = client.get('/workspace')
+    assert '<th>Uploaded</th>' in workspace.text
+    assert '<th>Updated</th>' in workspace.text
+    assert workspace.text.index('<th>Uploaded</th>') < workspace.text.index('<th>Updated</th>')
+
+
 def test_admin_panel_is_available_for_admin(client) -> None:
     login(client)
     response = client.get("/admin")

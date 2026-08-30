@@ -42,6 +42,8 @@
 - Fixed CDR/mapping ingestion for duplicate headers, legacy CSV encodings, VFUK/3UK GCIDs, alternate Cell ID fields (including Global CI/GCID/GCI/CGI/ECI variants) and NSA RAT spellings.
 - Fixed Reporting CDR selector contrast and kept a CDR ready after a failed Vendor mapping, recording the cause in Workspace Logs instead of disabling Preview and Dashboard access.
 - Fixed mapped CDR Vendor persistence and preview order: the calculated `vendor` field now replaces source-name collisions, appears immediately after `source_sheet`, is highlighted in blue, and keeps internal `report_vendor` out of previews.
+- Preserved each dataset's original upload date when it is reprocessed; Workspace ordering and automatic latest CDR/VFUK/3UK selections now consistently use that immutable date, while **Updated** continues to reflect processing activity.
+- Added separate **Uploaded** and **Updated** columns to the Workspace dataset table, in that order.
 - Added automatic queued recovery for legacy CDRs previously left failed by Vendor mapping, rebuilding their original source without applying a mapping.
 - Fixed Workspace drag-and-drop, cache refreshes, profile-backed loading and Dashboard filter population/contrast.
 - Fixed live Workspace queue updates so newly processed CDRs immediately show the applicable **Map Vendors**, **Clear Vendors** and **Show Dashboard** actions: the Workspace now refreshes itself once when background processing reaches Ready, using the final server profile.

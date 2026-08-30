@@ -70,6 +70,7 @@
             <th>Size</th>
             <th>Status</th>
             <th>Progress</th>
+            <th>Uploaded</th>
             <th>Updated</th>
             <th>Actions</th>
           </tr>
@@ -98,6 +99,7 @@
                 {% endif %}
               </div>
             </td>
+            <td data-queue-uploaded>{{ dataset.uploaded_at }}</td>
             <td data-queue-updated>{{ dataset.updated_at or dataset.uploaded_at }}</td>
             <td>
               <div class="queue-actions">
@@ -152,7 +154,7 @@
           </tr>
           {% else %}
           <tr>
-            <td colspan="8"><article class="empty-state-inline">No datasets available.</article></td>
+            <td colspan="9"><article class="empty-state-inline">No datasets available.</article></td>
           </tr>
           {% endfor %}
         </tbody>

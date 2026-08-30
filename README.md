@@ -44,6 +44,8 @@ Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone
 
 All NSA, SA, single-vendor and multivendor reports use the single master/layout-only `assets/ppt-templates/Template_CDR_analysis.pptx`. The selected Slides Templates determine the technology-specific slide sequence, layouts and generated CDR charts; commentary placeholders remain blank for analyst input.
 
+Workspace preserves a dataset's original upload date when the same stored file is processed again. The separate **Updated** value reflects the latest processing activity, while the original upload date determines Workspace ordering and every automatic “latest dataset” selection for CDR and Multivendor Mapping controls.
+
 ### Multivendor calculation and remapping
 
 For Vodafone UK and Three, the report takes the first and last Global CI from the available CDR `Cell_ID_A`, `Cell_IDs_A`, `Cell_ID`, `Global CI`, `GCID`, `GCI`, `CGI` or `ECI` field; case and separator variations are accepted. Vodafone values are resolved only with the VFUK mapping and Three values only with the 3UK mapping. When a VFUK mapping is processed, Workspace materialises a `GCID` column for its `4G` rows as `eNodeB ID × 256 + Local Cell ID`, equivalent to the supplied hexadecimal Excel formula; it also materialises the existing `5G` convention as `gNodeB ID × 4096 + Local Cell ID`. A 3UK mapping materialises the same `GCID` value as its `Cid__ECI` (or `CId___ECI`) source field. Mapping previews show every source column, with `GCID` first and highlighted; the VFUK preview is deliberately limited to a selectable `4G` or `5G` sheet. O2 and EE retain the operator label because they have no multivendor segmentation in this workflow.

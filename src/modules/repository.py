@@ -319,10 +319,10 @@ class Repository:
                 conn.execute(
                     """
                     UPDATE datasets
-                    SET file_name = ?, uploaded_by = ?, uploaded_at = CURRENT_TIMESTAMP
+                    SET file_name = ?
                     WHERE id = ?
                     """,
-                    (file_name, uploaded_by, dataset_id),
+                    (file_name, dataset_id),
                 )
                 conn.execute(
                     """

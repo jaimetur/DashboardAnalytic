@@ -2039,6 +2039,7 @@ if (queueNode) {
     const statusPill = row.querySelector('[data-queue-status-pill]');
     const progressBar = row.querySelector('[data-queue-progress-bar]');
     const progressLabel = row.querySelector('[data-queue-progress-label]');
+    const uploaded = row.querySelector('[data-queue-uploaded]');
     const updated = row.querySelector('[data-queue-updated]');
     const actions = row.querySelector('.queue-actions');
     let errorNode = row.querySelector('[data-queue-error]');
@@ -2061,6 +2062,7 @@ if (queueNode) {
       progressBar.className = `progress-bar status-${dataset.status}`;
     }
     if (progressLabel) progressLabel.textContent = `${dataset.progress || 0}%`;
+    if (uploaded) uploaded.textContent = dataset.uploaded_at || '';
     if (updated) updated.textContent = dataset.updated_at || dataset.uploaded_at || '';
     // A profile can be in the small persistence window between status updates.
     // Keep the known row kind until the API supplies a replacement so ready CDR

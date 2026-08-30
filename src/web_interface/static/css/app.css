@@ -551,7 +551,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .toggle-switch input:checked + .toggle-slider::after { transform: translateX(24px); }
 .toggle-switch input:focus-visible + .toggle-slider { outline: 2px solid rgba(36, 90, 150, 0.5); outline-offset: 2px; }
 .queue-table-wrap { overflow-x: auto; }
-.queue-table { min-width: 1080px; }
+.queue-table { min-width: 1190px; }
 .queue-card { margin-top: 0.2rem; }
 .queue-dataset-name { font-weight: 700; margin-bottom: 0.2rem; }
 .queue-dataset-path { color: var(--muted); font-size: 0.82rem; word-break: break-all; }
