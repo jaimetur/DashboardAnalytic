@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, _apply_catalog_filters, _apply_catalog_grouping, _layout_chart_frames, _named_slide_layout, _render_failure_count, _render_status_100, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _layout_chart_frames, _named_slide_layout, _render_failure_count, _render_status_100, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
 
 
 def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> None:
@@ -20,6 +20,26 @@ def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> Non
     assert vendor_from_cells('Vodafone UK', 'first -> first', lookup) == 'Vodafone_Ericsson'
     assert vendor_from_cells('3', 'first -> unknown', lookup) == '3_Mixed Vendor'
     assert vendor_from_cells('O2', 'first -> unknown', lookup) == 'O2'
+
+
+def test_report_operator_aliases_share_filters_and_grouping_across_campaigns() -> None:
+    frame = pd.DataFrame({
+        "Operator": ["Vodafone", "Vodafone UK", "o2 - de", "O2(UK)", "Three", "three(uk)", "EE UK"],
+        "Campaign": ["UK_Q4_2025", "UK_Q2_2026", "UK_Q4_2025", "UK_Q2_2026", "UK_Q4_2025", "UK_Q2_2026", "UK_Q2_2026"],
+        "Call_Status": ["Completed"] * 7,
+    })
+    entry = CatalogEntry(
+        1, "", "", "", "", "CDR-Voice", "Call_Status", "100% Stacked Vertical Bars", "",
+        "Operator IN (Vodafone, O2, 3, EE)", "Operator", "Campaign",
+    )
+
+    normalised = normalise_report_operator_aliases(frame)
+    filtered = _apply_catalog_filters(normalised, entry, False, "Call_Status")
+    grouped, primary, series = _apply_catalog_grouping(filtered, entry, False, "Call_Status")
+
+    assert filtered["Operator"].tolist() == ["Vodafone UK", "Vodafone UK", "O2 (UK)", "O2 (UK)", "3", "3", "EE"]
+    assert set(grouped[primary]) == {"Vodafone UK", "O2 (UK)", "3", "EE"}
+    assert set(grouped[series]) == {"2025 Q4", "2026 Q2"}
 
 
 def test_session_classification_and_multivendor_enrichment() -> None:

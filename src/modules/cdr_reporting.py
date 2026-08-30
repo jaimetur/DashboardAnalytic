@@ -430,12 +430,41 @@ class ReportSelection:
 
 
 def _normalise_operator(value: object) -> str:
+    """Return the operator form used by the Vendor-mapping business formula."""
     text = str(value or "").strip()
-    if text.lower() in {"three", "3", "3 uk", "three uk"}:
+    key = re.sub(r"[^a-z0-9]+", "", text.casefold())
+    if key in {"3", "3uk", "three", "threeuk", "h3g", "h3guk"}:
         return "3"
-    if text.lower() in {"vodafone", "vodafone uk", "vodafone-uk"}:
+    if key in {"vodafone", "vodafoneuk", "vf", "vfuk"}:
         return "Vodafone UK"
     return text
+
+
+def _normalise_report_operator(value: object) -> str:
+    """Return the canonical report label for known historical UK aliases."""
+    text = _normalise_operator(value)
+    key = re.sub(r"[^a-z0-9]+", "", text.casefold())
+    if key.startswith("o2") or key in {"telefonica", "telefonicao2"}:
+        return "O2 (UK)"
+    if key in {"ee", "eeuk", "everythingeverywhere"}:
+        return "EE"
+    return text
+
+
+def normalise_report_operator_aliases(frame: pd.DataFrame) -> pd.DataFrame:
+    """Canonicalise report-only operator labels without mutating stored CDRs.
+
+    The normalisation applies to the physical ``Operator`` field used by
+    catalogue filters and to legacy operator-only values in ``report_vendor``.
+    Mapped values such as ``Vodafone_Ericsson`` are intentionally left intact.
+    """
+    result = frame.copy()
+    for column in result.columns:
+        if _normalise_catalog_name(str(column)) == "operator":
+            result[column] = result[column].map(_normalise_report_operator)
+    if "report_vendor" in result.columns:
+        result["report_vendor"] = result["report_vendor"].map(_normalise_report_operator)
+    return result
 
 
 def _split_global_cells(value: object) -> list[str]:
@@ -865,6 +894,7 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
         if not column:
             raise ValueError(f"Slide {entry.slide}: filter column '{condition.column}' does not exist in {entry.cdr_source}.")
         series = result[column]
+        is_operator_filter = _normalise_catalog_name(condition.column) == "operator"
         if condition.operator in {">", ">=", "<", "<=", "=", "!="}:
             target = condition.values[0]
             if (
@@ -878,6 +908,8 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
                     comparison = ~comparison
                 result = result.loc[comparison].copy()
                 continue
+            if is_operator_filter:
+                target = _normalise_report_operator(target)
             numeric = pd.to_numeric(series, errors="coerce")
             target_number = pd.to_numeric(pd.Series([target]), errors="coerce").iloc[0]
             if pd.notna(target_number):
@@ -887,11 +919,15 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
                 if comparison is None:
                     raise ValueError(f"Slide {entry.slide}: '{condition.operator}' requires a numeric value for '{condition.column}'.")
         elif condition.operator in {"CONTAINS", "NOT CONTAINS"}:
-            comparison = series.astype(str).str.contains(condition.values[0], case=False, na=False, regex=False)
+            target = _normalise_report_operator(condition.values[0]) if is_operator_filter else condition.values[0]
+            comparison = series.astype(str).str.contains(target, case=False, na=False, regex=False)
             if condition.operator == "NOT CONTAINS":
                 comparison = ~comparison
         else:  # IN / NOT IN
-            accepted = {item.casefold() for item in condition.values}
+            accepted = {
+                (_normalise_report_operator(item) if is_operator_filter else item).casefold()
+                for item in condition.values
+            }
             comparison = series.astype(str).str.casefold().isin(accepted)
             if condition.operator == "NOT IN":
                 comparison = ~comparison
@@ -1770,6 +1806,10 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
         raise FileNotFoundError(f"Reporting template not found: {template.name}")
     if not catalog:
         raise ValueError("A Slides Template is required to generate the report.")
+    # A report may concatenate campaigns that were exported using different
+    # operator spellings.  Apply aliases only to these in-memory report frames
+    # before filtering and grouping; Workspace datasets remain source-faithful.
+    frames = {source: normalise_report_operator_aliases(frame) for source, frame in frames.items()}
     presentation = Presentation(template)
     _remove_all_slides(presentation)
 
