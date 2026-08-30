@@ -46,6 +46,7 @@
 - Fixed Reporting CDR selector contrast and one-item labels, while keeping a CDR ready after a failed Vendor mapping and recording the cause in Workspace Logs instead of disabling Preview and Dashboard access.
 - Aligned Slides Templates Management import controls and template-list actions on their shared vertical centerline, retaining left-aligned actions and adding clear **Import Slides Template** and **Slides Templates Library** headings.
 - Fixed inline Slides Template renames so the editor selector, action URLs and current editor selection update immediately without a page reload.
+- Versioned the minimal default NSA/SA Slides Templates assets required by clean installations and CI, while retaining user-managed library templates as ignored local data.
 - Fixed mapped CDR Vendor persistence and preview order: the calculated `vendor` field now replaces source-name collisions, appears immediately after `source_sheet`, is highlighted in blue, and keeps internal `report_vendor` out of previews.
 - Preserved each dataset's original upload date when it is reprocessed; Workspace ordering and automatic latest CDR/VFUK/3UK selections now consistently use that immutable date, while **Updated** continues to reflect processing activity.
 - Added separate **Uploaded** and **Updated** columns to the Workspace dataset table, in that order.

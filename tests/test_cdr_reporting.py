@@ -360,7 +360,7 @@ def test_catalogue_call_family_uses_documented_netcheck_session_values() -> None
 
 
 def test_nsa_speech_catalogue_filters_produce_samples_and_use_latest_campaign() -> None:
-    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/NSA Slide Template.csv'), 'nsa')
+    entries = load_catalog_csv(Path(__file__).parent / 'fixtures' / 'NSA Slide Template.csv', 'nsa')
     speech = pd.DataFrame({
         'sample': ['volte', 'multirab', 'whatsapp-old', 'whatsapp-latest', 'whatsapp-sa', 'o2-latest'],
         'Session_Type': ['CALL', 'MultiRAB CALL', 'WhatsApp CALL', 'WhatsApp CALL', 'WhatsApp CALL', 'WhatsApp CALL'],
@@ -375,12 +375,12 @@ def test_nsa_speech_catalogue_filters_produce_samples_and_use_latest_campaign() 
     filtered_by_entry = {
         (entry.slide, entry.chart_type, index): _apply_catalog_filters(nsa, entry, False, 'LQ')
         for index, entry in enumerate(entries)
-        if entry.slide in {12, 13, 14}
+        if entry.slide in {7, 8, 9}
     }
 
     assert all(not frame.empty for frame in filtered_by_entry.values())
-    third_slide_thirteen = [frame for (slide, _chart, _index), frame in filtered_by_entry.items() if slide == 13][2]
-    assert third_slide_thirteen['sample'].tolist() == ['whatsapp-latest']
+    latest_whatsapp = [frame for (slide, _chart, _index), frame in filtered_by_entry.items() if slide == 8][2]
+    assert latest_whatsapp['sample'].tolist() == ['whatsapp-latest']
 
 
 def test_layout_chart_frames_are_always_ordered_by_visual_rows_then_columns() -> None:
@@ -420,25 +420,24 @@ def test_failure_count_uses_row_and_column_hierarchies_without_flattening() -> N
 
 
 def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> None:
-    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/NSA Slide Template.csv'), 'nsa')
+    entries = load_catalog_csv(Path(__file__).parent / 'fixtures' / 'NSA Slide Template.csv', 'nsa')
     slide_ten = [entry for entry in entries if entry.slide == 10]
     slide_thirteen = [entry for entry in entries if entry.slide == 13]
 
     assert len(slide_ten) == 2
-    assert {entry.layout for entry in slide_ten} == {'Title and 2 rows + Comments right'}
+    assert {entry.layout for entry in slide_ten} == {'Title and 2 columns + Comments'}
     assert len(slide_thirteen) == 3
     assert {entry.layout for entry in slide_thirteen} == {'Title and 3 columns + Comments'}
-    assert {slide: sum(entry.slide == slide for entry in entries) for slide in range(12, 22)} == {
-        12: 2, 13: 3, 14: 2, 15: 2, 16: 2,
-        17: 2, 18: 3, 19: 3, 20: 4, 21: 2,
+    assert {slide: sum(entry.slide == slide for entry in entries) for slide in range(12, 17)} == {
+        12: 2, 13: 3, 14: 3, 15: 4, 16: 2,
     }
 
 
 def test_catalogue_uses_explicit_title_and_transition_slides() -> None:
-    entries = load_catalog_csv(Path('assets/slides-templates/library/nsa/NSA Slide Template.csv'), 'nsa')
+    entries = load_catalog_csv(Path(__file__).parent / 'fixtures' / 'NSA Slide Template.csv', 'nsa')
     structural = [entry.chart_type for entry in entries if not entry.source_kind]
     title = next(entry for entry in entries if entry.slide == 1)
-    conclusions = next(entry for entry in entries if entry.slide == 22)
+    conclusions = next(entry for entry in entries if entry.slide == 17)
 
     assert set(structural) == {'Title Slide', 'Transition Slide'}
     assert (title.chart_type, title.layout) == ('Title Slide', 'Title Page')
@@ -537,7 +536,7 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert 'name="three_mapping_dataset_id"' not in page.text
     assert '<option value="multivendor" disabled>Multivendor</option>' in page.text
     assert 'name="slides_templates"' in page.text
-    assert 'value="nsa:default"' in page.text
+    assert 'value="nsa:NSA Slide Template"' in page.text
     assert 'data-download-form="1"' in page.text
 
 
@@ -584,7 +583,7 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
         'speech_dataset_id': 3,
         'technology': 'nsa',
         'report_scope': 'single',
-        'slides_templates': 'nsa:default',
+        'slides_templates': 'nsa:NSA Slide Template',
     })
 
     assert report.status_code == 200
@@ -622,7 +621,7 @@ def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, monkey
     payload = urlencode([
         ('data_dataset_id', '1'), ('data_dataset_id', '2'),
         ('voice_dataset_id', '3'), ('speech_dataset_id', '4'),
-        ('technology', 'nsa'), ('report_scope', 'single'), ('slides_templates', 'nsa:default'),
+            ('technology', 'nsa'), ('report_scope', 'single'), ('slides_templates', 'nsa:NSA Slide Template'),
     ])
     response = client.post(
         '/reporting/netcheck-cdr',

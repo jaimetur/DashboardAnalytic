@@ -1384,14 +1384,8 @@ def test_template_registry_reconciles_an_unambiguous_manual_csv_rename(client) -
     library_dir.mkdir(parents=True, exist_ok=True)
     for path in library_dir.glob('*.csv'):
         path.unlink()
-    registry = app_module.load_report_catalogue_registry()
-    registry['nsa'] = {
-        'active': 'default',
-        'catalogues': {'base-template': {'name': 'Base template'}},
-        'default_name': 'Base template',
-        'default_file': base_default.name,
-    }
-    app_module.save_report_catalogue_registry(registry)
+    app_module.repository.add_report_template('nsa', 'Base template')
+    app_module.repository.set_default_report_template('nsa', 'Base template')
     login(client)
     content = (
         ','.join(CATALOG_HEADERS)
@@ -1406,7 +1400,7 @@ def test_template_registry_reconciles_an_unambiguous_manual_csv_rename(client) -
         )
         assert response.status_code == 303
 
-    original = app_module.named_catalogue_path('nsa', 'first-template', 'First template')
+    original = app_module.named_catalogue_path('nsa', 'First template', 'First template')
     renamed = original.with_name('Historic baseline.csv')
     original.rename(renamed)
 

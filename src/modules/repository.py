@@ -77,6 +77,14 @@ CREATE TABLE IF NOT EXISTS report_runs (
     created_by TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS report_templates (
+    technology TEXT NOT NULL,
+    name TEXT NOT NULL,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (technology, name),
+    CHECK (technology IN ('nsa', 'sa'))
+);
 """
 
 
@@ -112,6 +120,7 @@ class Repository:
             conn.executescript(SCHEMA)
             self._ensure_dataset_profile_columns(conn)
             self._ensure_report_run_columns(conn)
+            self._ensure_report_template_columns(conn)
             self._cleanup_duplicate_datasets(conn)
             self._migrate_legacy_vendor_mapping_profiles(conn)
             conn.execute(
@@ -186,6 +195,64 @@ class Repository:
             conn.execute("ALTER TABLE report_runs ADD COLUMN vodafone_mapping_dataset_id INTEGER")
         if 'three_mapping_dataset_id' not in existing_columns:
             conn.execute("ALTER TABLE report_runs ADD COLUMN three_mapping_dataset_id INTEGER")
+
+    def _ensure_report_template_columns(self, conn: sqlite3.Connection) -> None:
+        """Keep exactly one promoted template per technology."""
+        for technology in ('nsa', 'sa'):
+            defaults = conn.execute(
+                "SELECT name FROM report_templates WHERE technology = ? AND is_default = 1 ORDER BY name",
+                (technology,),
+            ).fetchall()
+            for row in defaults[1:]:
+                conn.execute(
+                    "UPDATE report_templates SET is_default = 0 WHERE technology = ? AND name = ?",
+                    (technology, row['name']),
+                )
+
+    def list_report_templates(self, technology: str) -> list[sqlite3.Row]:
+        with self.connection() as conn:
+            return conn.execute(
+                "SELECT technology, name, is_default FROM report_templates WHERE technology = ? ORDER BY name COLLATE NOCASE",
+                (technology,),
+            ).fetchall()
+
+    def add_report_template(self, technology: str, name: str, *, is_default: bool = False) -> None:
+        with self.connection() as conn:
+            if is_default:
+                conn.execute("UPDATE report_templates SET is_default = 0 WHERE technology = ?", (technology,))
+            conn.execute(
+                "INSERT INTO report_templates (technology, name, is_default) VALUES (?, ?, ?)",
+                (technology, name, int(is_default)),
+            )
+
+    def set_default_report_template(self, technology: str, name: str) -> None:
+        with self.connection() as conn:
+            if not conn.execute(
+                "SELECT 1 FROM report_templates WHERE technology = ? AND name = ?", (technology, name)
+            ).fetchone():
+                raise ValueError('Slides Template was not found.')
+            conn.execute("UPDATE report_templates SET is_default = 0 WHERE technology = ?", (technology,))
+            conn.execute(
+                "UPDATE report_templates SET is_default = 1 WHERE technology = ? AND name = ?", (technology, name)
+            )
+
+    def rename_report_template(self, technology: str, name: str, new_name: str) -> None:
+        with self.connection() as conn:
+            conn.execute(
+                "UPDATE report_templates SET name = ? WHERE technology = ? AND name = ?",
+                (new_name, technology, name),
+            )
+
+    def move_report_template(self, technology: str, name: str, target_technology: str) -> None:
+        with self.connection() as conn:
+            conn.execute(
+                "UPDATE report_templates SET technology = ? WHERE technology = ? AND name = ?",
+                (target_technology, technology, name),
+            )
+
+    def delete_report_template(self, technology: str, name: str) -> None:
+        with self.connection() as conn:
+            conn.execute("DELETE FROM report_templates WHERE technology = ? AND name = ?", (technology, name))
 
     def dataset_rows_table_name(self, dataset_id: int) -> str:
         return f'dataset_rows_{int(dataset_id)}'

@@ -897,6 +897,7 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
             raise ValueError(f"Slide {entry.slide}: filter column '{condition.column}' does not exist in {entry.cdr_source}.")
         series = result[column]
         is_operator_filter = _normalise_catalog_name(condition.column) == "operator"
+        comparison_series = series.map(_normalise_report_operator) if is_operator_filter else series
         if condition.operator in {">", ">=", "<", "<=", "=", "!="}:
             target = condition.values[0]
             if (
@@ -917,12 +918,12 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
             if pd.notna(target_number):
                 comparison = {">": numeric > target_number, ">=": numeric >= target_number, "<": numeric < target_number, "<=": numeric <= target_number, "=": numeric == target_number, "!=": numeric != target_number}[condition.operator]
             else:
-                comparison = {"=": series.astype(str).str.casefold() == target.casefold(), "!=": series.astype(str).str.casefold() != target.casefold()}.get(condition.operator)
+                comparison = {"=": comparison_series.astype(str).str.casefold() == target.casefold(), "!=": comparison_series.astype(str).str.casefold() != target.casefold()}.get(condition.operator)
                 if comparison is None:
                     raise ValueError(f"Slide {entry.slide}: '{condition.operator}' requires a numeric value for '{condition.column}'.")
         elif condition.operator in {"CONTAINS", "NOT CONTAINS"}:
             target = _normalise_report_operator(condition.values[0]) if is_operator_filter else condition.values[0]
-            comparison = series.astype(str).str.contains(target, case=False, na=False, regex=False)
+            comparison = comparison_series.astype(str).str.contains(target, case=False, na=False, regex=False)
             if condition.operator == "NOT CONTAINS":
                 comparison = ~comparison
         else:  # IN / NOT IN
@@ -930,7 +931,7 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
                 (_normalise_report_operator(item) if is_operator_filter else item).casefold()
                 for item in condition.values
             }
-            comparison = series.astype(str).str.casefold().isin(accepted)
+            comparison = comparison_series.astype(str).str.casefold().isin(accepted)
             if condition.operator == "NOT IN":
                 comparison = ~comparison
         result = result.loc[comparison].copy()
@@ -1006,7 +1007,13 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         elif len(columns) == 1:
             frame[target] = frame[columns[0]].fillna("(blank)").astype(str)
         else:
-            frame[target] = frame[columns].fillna("(blank)").astype(str).agg(" · ".join, axis=1)
+            # On an empty frame pandas returns an empty DataFrame here rather
+            # than an empty Series. Preserve a valid column so no-data chart
+            # states do not interrupt the whole report.
+            if frame.empty:
+                frame[target] = pd.Series(index=frame.index, dtype="object")
+            else:
+                frame[target] = frame[columns].fillna("(blank)").astype(str).agg(" · ".join, axis=1)
 
     materialise(row_display_columns, primary)
     is_distribution = entry.chart_type.casefold() == "distribution stacked vertical bars"

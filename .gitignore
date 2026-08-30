@@ -14,9 +14,5 @@ data/exports/*
 !data/input/.gitkeep
 !data/output/.gitkeep
 !data/exports/.gitkeep
-/assets/slides-templates/slides-templates-library.json
-/assets/slides-templates/default/nsa/*
-/assets/slides-templates/default/sa/*
-/assets/slides-templates/library/nsa/*
-/assets/slides-templates/library/sa/*
+/assets/slides-templates
 .idea/
