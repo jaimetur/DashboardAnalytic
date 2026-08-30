@@ -1343,6 +1343,61 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client, tmp_path, m
     assert not next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'renamed-catalogue')['active']
 
 
+def test_admin_duplicates_template_using_the_source_template_name(client) -> None:
+    from src.modules.cdr_reporting import CATALOG_HEADERS
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    content = (
+        ','.join(CATALOG_HEADERS)
+        + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n'
+    ).encode('utf-8')
+    imported = client.post(
+        '/admin/report-catalogues/nsa',
+        data={'catalogue_name': 'Regional NSA Template'},
+        files={'catalogue_file': ('nsa.csv', BytesIO(content), 'text/csv')},
+        follow_redirects=False,
+    )
+    assert imported.status_code == 303
+
+    # Imported templates become the active/default mirror, whose action uses
+    # the ``default`` identifier while retaining the imported physical name.
+    duplicated = client.post('/admin/report-catalogues/nsa/default/duplicate', follow_redirects=False)
+
+    assert duplicated.status_code == 303
+    copied = next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'regional-nsa-template-copy')
+    assert copied['name'] == 'Regional NSA Template Copy'
+    assert copied['path'].name == 'Regional NSA Template Copy.csv'
+
+
+def test_template_registry_reconciles_an_unambiguous_manual_csv_rename(client) -> None:
+    from src.modules.cdr_reporting import CATALOG_HEADERS
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    content = (
+        ','.join(CATALOG_HEADERS)
+        + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n'
+    ).encode('utf-8')
+    for name in ('First template', 'Second template'):
+        response = client.post(
+            '/admin/report-catalogues/nsa',
+            data={'catalogue_name': name},
+            files={'catalogue_file': ('nsa.csv', BytesIO(content), 'text/csv')},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    original = app_module.named_catalogue_path('nsa', 'first-template', 'First template')
+    renamed = original.with_name('Historic baseline.csv')
+    original.rename(renamed)
+
+    options = app_module.report_catalogue_options('nsa')
+    reconciled = next(item for item in options if item['identifier'] == 'historic-baseline')
+    assert reconciled['name'] == 'Historic baseline'
+    assert reconciled['path'] == renamed
+
+
 def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     login(client)
 

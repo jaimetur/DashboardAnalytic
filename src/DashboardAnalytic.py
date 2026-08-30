@@ -202,10 +202,46 @@ def named_catalogue_path(technology: str, identifier: str, template_name: str | 
 
 
 def synchronize_template_file_names(technology: str, registry: dict[str, dict[str, Any]]) -> bool:
-    """Migrate legacy slugged filenames to their exact visible template names."""
+    """Keep every managed template's visible name and CSV filename identical.
+
+    The CSV stem is the canonical name.  Registry data is only an index used by
+    the UI, so it is reconciled from the default mirror and from unambiguous
+    manual file renames instead of allowing a second, divergent display name.
+    """
     technology_registry = registry.setdefault(technology, {'active': 'default', 'catalogues': {}})
     catalogues = technology_registry.setdefault('catalogues', {})
     changed = False
+    library_dir = settings.slides_templates_dir / 'library' / technology
+    library_dir.mkdir(parents=True, exist_ok=True)
+
+    # The active/default tree holds exactly one CSV. If somebody has renamed
+    # that file directly, its stem becomes the default template name as well.
+    configured_default_name = str(technology_registry.get('default_name') or '').strip()
+    current_default = default_report_slides_template_path(technology, technology_registry)
+    if not current_default.exists():
+        default_candidates = sorted(current_default.parent.glob('*.csv')) if current_default.parent.exists() else []
+        if len(default_candidates) == 1:
+            current_default = default_candidates[0]
+    if current_default.exists():
+        physical_default_name = current_default.stem.strip()
+        if physical_default_name and physical_default_name != configured_default_name:
+            previous_identifier = catalogue_identifier(configured_default_name) if configured_default_name else None
+            identifier = catalogue_identifier(physical_default_name)
+            previous_library = (
+                named_catalogue_path(technology, previous_identifier, configured_default_name)
+                if previous_identifier else None
+            )
+            canonical_library = named_catalogue_path(technology, identifier, physical_default_name)
+            if previous_library and previous_library.exists() and previous_library != canonical_library and not canonical_library.exists():
+                previous_library.rename(canonical_library)
+            if previous_identifier and previous_identifier in catalogues and previous_identifier != identifier:
+                catalogues[identifier] = catalogues.pop(previous_identifier)
+            catalogues.setdefault(identifier, {})['name'] = physical_default_name
+            technology_registry['default_name'] = physical_default_name
+            technology_registry['default_file'] = current_default.name
+            changed = True
+
+    missing_catalogues: list[tuple[str, dict[str, Any]]] = []
     for identifier, metadata in list(catalogues.items()):
         if not isinstance(metadata, dict):
             continue
@@ -215,6 +251,36 @@ def synchronize_template_file_names(technology: str, registry: dict[str, dict[st
         if target != legacy and legacy.exists() and not target.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
             legacy.rename(target)
+            changed = True
+        elif target != legacy and legacy.exists() and target.exists() and legacy.read_bytes() == target.read_bytes():
+            # Previous versions kept a slugged compatibility copy alongside
+            # the human-named CSV. Remove that redundant file so one template
+            # has one physical name.
+            legacy.unlink()
+            changed = True
+        if not target.exists():
+            missing_catalogues.append((identifier, metadata))
+
+    # A direct rename of one named CSV has no old path to follow. When exactly
+    # one registry entry and one library CSV are unmatched, the intent is
+    # unambiguous: re-key that entry from the CSV stem.
+    expected_files = {
+        named_catalogue_path(technology, identifier, str(metadata.get('name') or identifier))
+        for identifier, metadata in catalogues.items()
+        if isinstance(metadata, dict)
+    }
+    unclaimed_files = [path for path in sorted(library_dir.glob('*.csv')) if path not in expected_files]
+    if len(missing_catalogues) == len(unclaimed_files) == 1:
+        previous_identifier, metadata = missing_catalogues[0]
+        source_path = unclaimed_files[0]
+        name = source_path.stem.strip()
+        identifier = catalogue_identifier(name)
+        if identifier == previous_identifier or identifier not in catalogues:
+            if identifier != previous_identifier:
+                catalogues[identifier] = catalogues.pop(previous_identifier)
+                if technology_registry.get('active') == previous_identifier:
+                    technology_registry['active'] = identifier
+            metadata['name'] = name
             changed = True
 
     default_name = str(technology_registry.get('default_name') or '').strip()
@@ -247,7 +313,8 @@ def ensure_default_template_in_library(
     if not default_path.exists():
         return False
 
-    default_name = str(technology_registry.get('default_name') or default_path.stem)
+    # The physical default filename is authoritative; the registry mirrors it.
+    default_name = default_path.stem.strip() or str(technology_registry.get('default_name') or '')
     identifier = catalogue_identifier(default_name)
     library_path = named_catalogue_path(technology, identifier, default_name)
     changed = False
@@ -256,9 +323,10 @@ def ensure_default_template_in_library(
         shutil.copy2(default_path, library_path)
         changed = True
     if identifier not in catalogues:
-        catalogues[identifier] = {
-            'name': default_name,
-        }
+        catalogues[identifier] = {'name': default_name}
+        changed = True
+    elif catalogues[identifier].get('name') != default_name:
+        catalogues[identifier]['name'] = default_name
         changed = True
     return changed
 
@@ -2811,7 +2879,11 @@ def duplicate_report_catalogue(
     registry = load_report_catalogue_registry()
     technology_registry = registry.setdefault(technology, {'active': 'default', 'catalogues': {}})
     catalogues = technology_registry.setdefault('catalogues', {})
-    base_name = f"{catalogue['name']} copy"
+    # The physical CSV name is the canonical template name.  Deriving the
+    # duplicate label from it prevents a stale/default registry label from
+    # turning every duplicate into the generic NSA/SA starter name.
+    source_name = catalogue['path'].stem.strip() or str(catalogue['name']).strip()
+    base_name = f"{source_name} Copy"
     suffix = 1
     name = base_name
     identifier = catalogue_identifier(name)

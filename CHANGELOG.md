@@ -30,7 +30,7 @@
 - Added a reporting catalogue selector that follows the NSA/SA workspace default while allowing a per-report override.
 - Expanded the in-browser Slides Templates Editor with contextual assistance, Filter Builder, searchable single/multi-select values, fixed action/Slide columns, row movement/insertion/removal, re-enumeration and scroll guidance.
 - Refactored PowerPoint and Slides Templates storage: the master deck lives in `assets/ppt-templates/`; `assets/slides-templates/library/` is the complete canonical NSA/SA template library (including defaults), `default/nsa/` and `default/sa/` hold only the active generation mirrors, and the root registry keeps names, defaults and file renames synchronized.
-- Unified Slides Template naming so the visible template name is also the exact physical CSV filename, preserving case and spaces across library, default mirror, imports, renames and duplicates.
+- Unified Slides Template naming so the visible name is always the exact physical CSV filename (apart from `.csv`), reconciling unambiguous manual renames, removing legacy duplicate files, and preserving case and spaces across the library, default mirror, imports, renames and duplicates. Duplicates derive from their source name with **Copy** (and a number only when needed).
 - Standardized Administration and Help labels on **Template** terminology.
 - Renaming a named workspace catalogue now also renames its managed CSV file and preserves its default selection.
 - Added timestamped report filenames, `UpdateAll.py`, and removed obsolete release-document tooling.
