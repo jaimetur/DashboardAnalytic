@@ -37,8 +37,8 @@ def test_report_operator_aliases_share_filters_and_grouping_across_campaigns() -
     filtered = _apply_catalog_filters(normalised, entry, False, "Call_Status")
     grouped, primary, series = _apply_catalog_grouping(filtered, entry, False, "Call_Status")
 
-    assert filtered["Operator"].tolist() == ["Vodafone UK", "Vodafone UK", "O2 (UK)", "O2 (UK)", "3", "3", "EE"]
-    assert set(grouped[primary]) == {"Vodafone UK", "O2 (UK)", "3", "EE"}
+    assert filtered["Operator"].tolist() == ["Vodafone", "Vodafone", "O2", "O2", "3", "3", "EE"]
+    assert set(grouped[primary]) == {"Vodafone", "O2", "3", "EE"}
     assert set(grouped[series]) == {"2025 Q4", "2026 Q2"}
 
 

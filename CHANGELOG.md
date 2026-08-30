@@ -18,7 +18,7 @@
 - Added workspace Slides Templates Management: named NSA/SA imports, conversion of compatible legacy CSVs, defaults, duplication, deletion, export and in-browser editing.
 
 #### 🚀 Enhancements:
-- Normalized historical UK Operator aliases only while rendering combined reports, so catalogue filters and groupings consistently consolidate Vodafone/Vodafone UK, O2 variants, 3/Three variants and EE variants across campaigns.
+- Normalized historical UK Operator aliases only while rendering combined reports, so catalogue filters and groupings consistently consolidate `Vodafone`/`Vodafone UK` as **Vodafone**, O2 variants as **O2**, 3/Three variants as **3**, and EE variants as **EE** across campaigns.
 - Unified NSA, SA, single-vendor and multivendor rendering on the master/layout-only `Template_CDR_analysis.pptx`; the selected catalogue creates slides and fills layout placeholders in row-major order.
 - Made Slides Templates executable: source, KPI, generic chart type, filters, thresholds/buckets, legend, `Grouping_Rows`, `Grouping_Columns` and named layout now drive rendering. Structural **Title Slide** and **Transition Slide** rows are also supported.
 - Reworked NSA/SA catalogues against the NetCheck methodology, split multi-chart screenshots into separate rows/layouts, and completed the requested NSA KPI, source, filter and grouping definitions through slide 21.
@@ -41,7 +41,7 @@
 - Corrected catalogue grouping semantics across bars, CDF, scatter and tables; nested row/column hierarchies, distribution stacks and campaign labels now render consistently.
 - Fixed master-layout placeholder assignment, inherited-chart cleanup, generated-report download completion and Help article navigation.
 - Fixed CDR/mapping ingestion for duplicate headers, legacy CSV encodings, VFUK/3UK GCIDs, alternate Cell ID fields (including Global CI/GCID/GCI/CGI/ECI variants) and NSA RAT spellings.
-- Fixed Reporting CDR selector contrast and kept a CDR ready after a failed Vendor mapping, recording the cause in Workspace Logs instead of disabling Preview and Dashboard access.
+- Fixed Reporting CDR selector contrast and one-item labels, while keeping a CDR ready after a failed Vendor mapping and recording the cause in Workspace Logs instead of disabling Preview and Dashboard access.
 - Fixed mapped CDR Vendor persistence and preview order: the calculated `vendor` field now replaces source-name collisions, appears immediately after `source_sheet`, is highlighted in blue, and keeps internal `report_vendor` out of previews.
 - Preserved each dataset's original upload date when it is reprocessed; Workspace ordering and automatic latest CDR/VFUK/3UK selections now consistently use that immutable date, while **Updated** continues to reflect processing activity.
 - Added separate **Uploaded** and **Updated** columns to the Workspace dataset table, in that order.

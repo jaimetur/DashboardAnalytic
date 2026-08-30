@@ -444,8 +444,10 @@ def _normalise_report_operator(value: object) -> str:
     """Return the canonical report label for known historical UK aliases."""
     text = _normalise_operator(value)
     key = re.sub(r"[^a-z0-9]+", "", text.casefold())
+    if key in {"vodafone", "vodafoneuk", "vf", "vfuk"}:
+        return "Vodafone"
     if key.startswith("o2") or key in {"telefonica", "telefonicao2"}:
-        return "O2 (UK)"
+        return "O2"
     if key in {"ee", "eeuk", "everythingeverywhere"}:
         return "EE"
     return text

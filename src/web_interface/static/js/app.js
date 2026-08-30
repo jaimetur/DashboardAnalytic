@@ -1395,10 +1395,12 @@ function setupCustomMultiSelects() {
         triggerLabel.textContent = 'No values';
       } else if (selectedOptions.length === 0) {
         triggerLabel.textContent = 'None Selected';
+      } else if (selectedOptions.length === 1) {
+        // A one-item Reporting source selector is already fully selected, but
+        // its file name is more useful than the generic "All values" summary.
+        triggerLabel.textContent = selectedOptions[0];
       } else if (totalEnabled > 0 && selectedOptions.length === totalEnabled) {
         triggerLabel.textContent = 'All values';
-      } else if (selectedOptions.length === 1) {
-        triggerLabel.textContent = selectedOptions[0];
       } else {
         triggerLabel.textContent = `${selectedOptions.length}/${totalEnabled} selected`;
       }
