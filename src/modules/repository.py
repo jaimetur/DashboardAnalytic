@@ -425,40 +425,61 @@ class Repository:
     def _table_columns(self, conn: sqlite3.Connection, table_name: str) -> list[str]:
         return [row['name'] for row in conn.execute(f"PRAGMA table_info({self._quote_identifier(table_name)})").fetchall()]
 
+    REPORTING_CORE_COLUMNS = (
+        'Campaign', 'Operator', 'vendor', 'report_vendor', 'RAT', 'RAT_A', 'Sample_RAT_A',
+        'technology_primary', 'L1_Call_Mode_A', 'L2_Call_Mode_A', 'Session_Type',
+        'session_type', 'Type_of_Test', 'Test_Name', 'test_name', 'Test_Type', 'test_type',
+    )
+
+    def _ensure_reporting_table(self, conn: sqlite3.Connection, dataset_kind: str) -> tuple[str, list[str]]:
+        table_name = self.reporting_rows_table_name(dataset_kind)
+        quoted_table = self._quote_identifier(table_name)
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {quoted_table} (dataset_id INTEGER NOT NULL, source_row_id INTEGER NOT NULL)")
+        columns = self._table_columns(conn, table_name)
+        # Discard the short-lived first implementation, which copied every raw
+        # column and did not have a stable source-row key for incremental fills.
+        if 'source_row_id' not in columns:
+            conn.execute(f"DROP TABLE {quoted_table}")
+            conn.execute(f"CREATE TABLE {quoted_table} (dataset_id INTEGER NOT NULL, source_row_id INTEGER NOT NULL)")
+            columns = self._table_columns(conn, table_name)
+        return table_name, columns
+
+    def _ensure_reporting_columns(
+        self, conn: sqlite3.Connection, table_name: str, source_columns: list[str], requested_columns: list[str]
+    ) -> list[str]:
+        target_columns = self._table_columns(conn, table_name)
+        target_lookup = {column.casefold(): column for column in target_columns}
+        source_lookup = {column.casefold(): column for column in source_columns}
+        for requested in requested_columns:
+            source = source_lookup.get(str(requested).casefold())
+            if not source or source.casefold() in {'dataset_id', 'source_row_id'} or source.casefold() in target_lookup:
+                continue
+            conn.execute(f"ALTER TABLE {self._quote_identifier(table_name)} ADD COLUMN {self._quote_identifier(source)}")
+            target_columns.append(source)
+            target_lookup[source.casefold()] = source
+        return target_columns
+
     def replace_reporting_rows(self, dataset_id: int, dataset_kind: str, df: pd.DataFrame) -> None:
         """Replace one CDR's rows in the shared, queryable reporting table.
 
-        The shared tables deliberately have a union schema rather than JSON
-        payloads: fields remain normal SQLite columns and can be selected and
-        indexed efficiently by reports.
+        Only core reporting fields are stored at ingestion. Template-specific
+        columns are materialised on demand from the individual CDR table.
         """
         table_name = self.reporting_rows_table_name(dataset_kind)
         safe_df = self._sqlite_safe_frame(df)
         with self.connection() as conn:
+            table_name, existing = self._ensure_reporting_table(conn, dataset_kind)
             quoted_table = self._quote_identifier(table_name)
-            conn.execute(f"CREATE TABLE IF NOT EXISTS {quoted_table} (dataset_id INTEGER NOT NULL)")
-            existing = self._table_columns(conn, table_name)
-            existing_lookup = {column.casefold(): column for column in existing}
-            source_targets: dict[str, str] = {}
-            for column in safe_df.columns:
-                name = str(column)
-                target = existing_lookup.get(name.casefold())
-                if not target:
-                    conn.execute(f"ALTER TABLE {quoted_table} ADD COLUMN {self._quote_identifier(name)}")
-                    target = name
-                    existing.append(target)
-                    existing_lookup[name.casefold()] = target
-                source_targets[name] = target
+            existing = self._ensure_reporting_columns(conn, table_name, safe_df.columns.tolist(), list(self.REPORTING_CORE_COLUMNS))
+            source_lookup = {str(column).casefold(): str(column) for column in safe_df.columns}
             conn.execute(f"DELETE FROM {quoted_table} WHERE dataset_id = ?", (dataset_id,))
-            # Align every append to the union schema; absent source columns
-            # stay NULL and do not force a lossy synthetic JSON representation.
-            payload = pd.DataFrame(index=safe_df.index)
-            payload['dataset_id'] = int(dataset_id)
+            payload_columns: dict[str, Any] = {'dataset_id': int(dataset_id), 'source_row_id': range(1, len(safe_df) + 1)}
             for target in existing:
-                if target == 'dataset_id':
+                if target in {'dataset_id', 'source_row_id'}:
                     continue
-                source = next((name for name, mapped in source_targets.items() if mapped == target), None)
-                payload[target] = safe_df[source] if source else None
+                source = source_lookup.get(target.casefold())
+                payload_columns[target] = safe_df[source] if source else None
+            payload = pd.DataFrame(payload_columns, index=safe_df.index)
             payload.to_sql(table_name, conn, if_exists='append', index=False)
             self._create_reporting_row_indexes(conn, table_name, existing)
 
@@ -500,6 +521,47 @@ class Repository:
             return conn.execute(
                 f"SELECT 1 FROM {self._quote_identifier(table_name)} WHERE dataset_id = ? LIMIT 1", (dataset_id,)
             ).fetchone() is not None
+
+    def copy_dataset_rows_to_reporting(self, dataset_id: int, dataset_kind: str, columns: list[str] | None = None) -> None:
+        """Backfill a shared table entirely inside SQLite, without pandas RAM use."""
+        source_table = self.dataset_rows_table_name(dataset_id)
+        target_table = self.reporting_rows_table_name(dataset_kind)
+        with self.connection() as conn:
+            source_exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (source_table,)
+            ).fetchone()
+            if not source_exists:
+                return
+            target_table, target_columns = self._ensure_reporting_table(conn, dataset_kind)
+            quoted_target = self._quote_identifier(target_table)
+            source_columns = self._table_columns(conn, source_table)
+            desired = list(dict.fromkeys([*self.REPORTING_CORE_COLUMNS, *(columns or [])]))
+            previous_columns = {column.casefold() for column in target_columns}
+            source_lookup = {column.casefold(): column for column in source_columns}
+            needs_new_columns = any(
+                str(requested).casefold() in source_lookup and str(requested).casefold() not in previous_columns
+                for requested in desired
+            )
+            target_columns = self._ensure_reporting_columns(conn, target_table, source_columns, desired)
+            existing_rows = conn.execute(
+                f"SELECT 1 FROM {quoted_target} WHERE dataset_id = ? LIMIT 1", (dataset_id,)
+            ).fetchone()
+            if existing_rows and not needs_new_columns:
+                return
+            conn.execute(f"DELETE FROM {quoted_target} WHERE dataset_id = ?", (dataset_id,))
+            insert_columns = ['dataset_id', 'source_row_id', *(column for column in target_columns if column not in {'dataset_id', 'source_row_id'})]
+            select_columns = ['?', 'rowid']
+            for target in insert_columns[1:]:
+                if target == 'source_row_id':
+                    continue
+                source = source_lookup.get(target.casefold())
+                select_columns.append(self._quote_identifier(source) if source else 'NULL')
+            conn.execute(
+                f"INSERT INTO {quoted_target} ({', '.join(self._quote_identifier(column) for column in insert_columns)}) "
+                f"SELECT {', '.join(select_columns)} FROM {self._quote_identifier(source_table)}",
+                (dataset_id,),
+            )
+            self._create_reporting_row_indexes(conn, target_table, target_columns)
 
     def load_reporting_rows(self, dataset_kind: str, dataset_ids: list[int], columns: list[str]) -> pd.DataFrame:
         if not dataset_ids:

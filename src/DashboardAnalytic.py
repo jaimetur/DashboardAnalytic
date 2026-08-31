@@ -358,11 +358,7 @@ def synchronize_reporting_row_store() -> None:
         if dataset['status'] != 'ready' or kind not in CDR_DATASET_KINDS:
             continue
         dataset_id = int(dataset['id'])
-        if repository.reporting_rows_exist_for_dataset(dataset_id, kind):
-            continue
-        columns = repository.list_dataset_row_columns(dataset_id)
-        if columns:
-            repository.replace_reporting_rows(dataset_id, kind, repository.load_dataset_rows(dataset_id, columns, {}))
+        repository.copy_dataset_rows_to_reporting(dataset_id, kind)
 
 
 @asynccontextmanager
@@ -2034,6 +2030,8 @@ def _combined_reporting_frame(
     dataset_kind = str(datasets[0]['dataset_kind'])
     dataset_ids = [int(dataset['id']) for dataset in datasets]
     columns = reporting_query_columns(dataset_kind, catalog_entries, multivendor)
+    for dataset_id in dataset_ids:
+        repository.copy_dataset_rows_to_reporting(dataset_id, dataset_kind, columns)
     combined = repository.load_reporting_rows(dataset_kind, dataset_ids, columns)
     if combined.empty:
         raise ValueError(f'The selected {dataset_kind.title()} CDRs have no materialised reporting rows.')
