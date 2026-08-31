@@ -197,7 +197,7 @@ pytest -q
 
 ## Configuration model
 
-Environment variables control deployment paths and runtime secrets. `APP_DATABASE_PATH`, `APP_INPUT_DIR`, `APP_OUTPUT_DIR` and `APP_EXPORT_DIR` provide initial/legacy storage locations; after workspace initialisation, operational data is stored under `data/workspaces/<Workspace Name>/`. `APP_OUTPUT_DIR` remains only for migration compatibility and is not used by current workspaces. Version and release date do not come from `.env`; they are defined in [`src/version.py`](src/version.py).
+[`storage-paths.conf`](storage-paths.conf) in the project root controls the local `CONFIG_DIR`, `DATA_DIR` and `ASSETS_DIR` roots without editing Python. Environment variables take precedence, which keeps Docker and other deployments configurable. `APP_DATABASE_PATH`, `APP_INPUT_DIR`, `APP_OUTPUT_DIR` and `APP_EXPORT_DIR` provide individual initial/legacy overrides; after workspace initialisation, operational data is stored under `data/workspaces/<Workspace Name>/`. `APP_OUTPUT_DIR` remains only for migration compatibility and is not used by current workspaces. Version and release date do not come from `.env`; they are defined in [`src/version.py`](src/version.py).
 
 Important runtime variables:
 
@@ -205,6 +205,9 @@ Important runtime variables:
 - `APP_SECRET_KEY`
 - `APP_ADMIN_USERNAME`
 - `APP_ADMIN_PASSWORD`
+- `CONFIG_DIR`
+- `DATA_DIR`
+- `ASSETS_DIR`
 - `APP_DATABASE_PATH`
 - `APP_INPUT_DIR`
 - `APP_OUTPUT_DIR`
