@@ -1,6 +1,6 @@
 # Configuration
 
-Dashboard Analytic reads its storage roots first from [`storage-paths.conf`](../storage-paths.conf) in the project root, then applies environment-variable overrides. Edit that file for a local installation; for Docker deployments, set the overrides in `docker/.env`.
+Dashboard Analytic reads its storage roots first from [`storage-paths.conf`](../storage-paths.conf) in the project root, then applies environment-variable overrides. Edit that file for a local installation; for Docker deployments, set the overrides in `docker/.env`. If the file does not exist, the application uses `config/`, `data/` and `assets/` inside the project root.
 
 ## Application and access
 

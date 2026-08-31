@@ -17,6 +17,7 @@
 
 #### 🚀 Enhancements:
 - Added editable root-level `storage-paths.conf` for configuring `CONFIG_DIR`, `DATA_DIR` and `ASSETS_DIR` without editing Python; deployment environment variables retain precedence.
+- Kept project-local `config/`, `data/` and `assets/` as the automatic fallback when `storage-paths.conf` is absent.
 - Made Slides Templates executable: catalogue source, KPI, chart type, filters, thresholds/buckets, legend, grouping and named layout drive rendering, including structural Title and Transition slides.
 - Unified NSA, SA, single-vendor and multivendor generation on the master `Template_CDR_analysis.pptx`; catalogues create slides and populate layout placeholders. NSA/SA catalogues were also aligned with the NetCheck methodology.
 - Improved multivendor reporting with persisted VFUK/3UK GCID and Vendor calculations, UK operator-name normalisation at render time, and validation that all selected CDRs are mapped.
