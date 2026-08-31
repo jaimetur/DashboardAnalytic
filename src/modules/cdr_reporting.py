@@ -1082,6 +1082,35 @@ def _catalogue_display_label(category: object, series: object) -> str:
     return category_text if series_text == "(all)" else f"{category_text} · {series_text}"
 
 
+def _hierarchical_unique_keys(frame: pd.DataFrame, columns: list[str]) -> list[tuple[object, ...]]:
+    """Keep every child grouping value adjacent to its parent.
+
+    Source CDRs are commonly appended campaign by campaign.  Their natural row
+    order can therefore be ``Vodafone/2025, O2/2025, Vodafone/2026, O2/2026``.
+    That order would split the visible Vodafone group into two separate chart
+    sections.  Retain the first-seen order of each level, but traverse the
+    hierarchy depth-first so all campaign bars for one operator stay together.
+    """
+    keys = list(frame[columns].drop_duplicates().itertuples(index=False, name=None))
+    if len(columns) < 2:
+        return keys
+
+    ordered: list[tuple[object, ...]] = []
+
+    def visit(values: list[tuple[object, ...]], level: int) -> None:
+        if level == len(columns) - 1:
+            ordered.extend(values)
+            return
+        groups: dict[object, list[tuple[object, ...]]] = {}
+        for key in values:
+            groups.setdefault(key[level], []).append(key)
+        for children in groups.values():
+            visit(children, level + 1)
+
+    visit(keys, 0)
+    return ordered
+
+
 def _canvas(title: str) -> tuple[Image.Image, ImageDraw.ImageDraw]:
     image = Image.new("RGB", (1600, 900), "white")
     draw = ImageDraw.Draw(image)
@@ -1159,8 +1188,8 @@ def _render_status_100_hierarchy(
     legend_labels: tuple[str, ...] = (),
 ) -> BytesIO:
     """Render catalogue row groups as panes and column groups as nested headers."""
-    row_keys = list(data[row_hierarchy].drop_duplicates().itertuples(index=False, name=None)) if row_hierarchy else [()]
-    column_keys = list(data[column_hierarchy].drop_duplicates().itertuples(index=False, name=None))
+    row_keys = _hierarchical_unique_keys(data, row_hierarchy) if row_hierarchy else [()]
+    column_keys = _hierarchical_unique_keys(data, column_hierarchy)
     if not row_keys or not column_keys:
         return _empty_chart(title)
 
@@ -1285,8 +1314,8 @@ def _render_failure_count_hierarchy(
     legend_labels: tuple[str, ...] = (),
 ) -> BytesIO:
     """Render failure counts with catalogue rows and columns as separate axes."""
-    row_keys = list(failed[row_hierarchy].drop_duplicates().itertuples(index=False, name=None)) if row_hierarchy else [()]
-    column_keys = list(failed[column_hierarchy].drop_duplicates().itertuples(index=False, name=None))
+    row_keys = _hierarchical_unique_keys(failed, row_hierarchy) if row_hierarchy else [()]
+    column_keys = _hierarchical_unique_keys(failed, column_hierarchy)
     if not row_keys or not column_keys:
         return _empty_chart(title)
 
@@ -1418,7 +1447,7 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
         return _empty_chart(title)
     axis_columns = _chart_axis_hierarchy(frame, distribution=True) or [group, series]
     data = frame[[*axis_columns, stack]].dropna()
-    combinations = list(data[axis_columns].drop_duplicates().itertuples(index=False, name=None))
+    combinations = _hierarchical_unique_keys(data, axis_columns)
     buckets = list(data[stack].drop_duplicates())
     if not combinations or not buckets:
         return _empty_chart(title)

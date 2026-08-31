@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _layout_chart_frames, _named_slide_layout, _render_failure_count, _render_status_100, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _hierarchical_unique_keys, _layout_chart_frames, _named_slide_layout, _render_failure_count, _render_status_100, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
 
 
 def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> None:
@@ -378,6 +378,22 @@ def test_status_chart_uses_nested_columns_without_a_row_grouping() -> None:
     assert chart.getvalue() == b'nested-columns'
     assert hierarchy_renderer.call_args.args[2] == []
     assert hierarchy_renderer.call_args.args[3] == ['__catalog_column_0', '__catalog_column_1']
+
+
+def test_hierarchical_grouping_keeps_campaign_bars_together_per_operator() -> None:
+    frame = pd.DataFrame({
+        '__catalog_column_0': ['Vodafone', 'O2', 'Vodafone', 'O2'],
+        '__catalog_column_1': ['2025 Q4', '2025 Q4', '2026 Q1', '2026 Q1'],
+    })
+
+    keys = _hierarchical_unique_keys(frame, ['__catalog_column_0', '__catalog_column_1'])
+
+    assert keys == [
+        ('Vodafone', '2025 Q4'),
+        ('Vodafone', '2026 Q1'),
+        ('O2', '2025 Q4'),
+        ('O2', '2026 Q1'),
+    ]
 
 
 def test_nsa_speech_catalogue_filters_produce_samples_and_use_latest_campaign() -> None:
