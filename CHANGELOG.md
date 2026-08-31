@@ -13,6 +13,7 @@
 - Added multi-workspace support. Workspaces can be created, opened, closed, renamed, duplicated and removed; each keeps its database and files under `data/workspaces/<Workspace Name>/`. Log in opens the selected workspace, preselecting the most recently used one.
 - Added Database Management in Admin to browse, edit, filter and delete rows from tables in the active workspace database.
 - Added processed-dataset previews, direct CDR **Show Dashboard** access, and Dashboard **Preview Dataset** access.
+- Added Admin **Import/Export** ZIP packages for configuration, shared Slides Templates, individual workspaces and full-environment transfers. Imports detect the package type automatically and register imported workspaces locally.
 
 #### 🚀 Enhancements:
 - Made Slides Templates executable: catalogue source, KPI, chart type, filters, thresholds/buckets, legend, grouping and named layout drive rendering, including structural Title and Transition slides.
@@ -24,6 +25,8 @@
 - Expanded the Slides Templates Editor with contextual help, Filter Builder, searchable selections, fixed columns, row controls and scroll guidance.
 - Simplified template persistence: SQLite stores only each CSV's exact name, type and default state. Names preserve case and spaces, and renames/duplicates keep files and defaults in sync without JSON registries or slug aliases.
 - Improved CDR-only Dashboard analysis, adaptive filters, responsive module UI, dialogs, admin actions and Help navigation.
+- Moved Slides Templates to the shared `config/slides-templates/` library and removed unused workspace `output/` directories.
+- Made configuration transfers preserve the destination workspace registry; full-environment imports rebuild it from the transferred workspaces to avoid source-path conflicts.
 
 #### 🐛 Bug fixes:
 - Fixed catalogue defaults, deletion protection, editor selection, grouping semantics and reporting placeholder/chart generation.
@@ -39,6 +42,7 @@
 #### 📚 Documentation:
 - Replaced inherited documentation and the root-level roadmap with numbered Dashboard Analytic Help and an embedded index.
 - Expanded README and Help for ingestion, mapping, previews, Dashboard, reporting and Slides Templates.
+- Documented shared template storage, workspace data layout and Admin Import/Export transfer behaviour.
 
 ---
 

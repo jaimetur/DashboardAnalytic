@@ -5,6 +5,7 @@ from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote
 import warnings
+import zipfile
 
 import pandas as pd
 from fastapi import BackgroundTasks
@@ -70,6 +71,56 @@ def test_login_page_hides_default_access_section_when_no_default_users_exist(cli
     assert "Default Access:" not in response.text
     assert "admin / admin123" not in response.text
     assert "demo / demo123" not in response.text
+
+
+def test_admin_import_export_packages_detect_configuration_and_workspaces(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    admin_response = client.get('/admin')
+    assert admin_response.status_code == 200
+    assert 'Import/Export' in admin_response.text
+    assert 'Only Config' in admin_response.text
+    assert 'Config + Slides Templates' in admin_response.text
+    assert 'Workspace: Default Workspace' in admin_response.text
+
+    config_response = client.get('/admin/import-export/export?export_target=config')
+    assert config_response.status_code == 200
+    with zipfile.ZipFile(BytesIO(config_response.content)) as archive:
+        manifest = json.loads(archive.read('manifest.json'))
+        assert 'config/workspace-registry.db' not in archive.namelist()
+    assert manifest == {
+        'format': 'dashboard-analytic-export',
+        'includes_slides_templates': False,
+        'kind': 'config',
+        'version': 1,
+    }
+
+    workspace_response = client.get('/admin/import-export/export?export_target=workspace:default')
+    assert workspace_response.status_code == 200
+    imported_response = client.post(
+        '/admin/import-export/import',
+        files={'package': ('default-workspace.zip', BytesIO(workspace_response.content), 'application/zip')},
+        follow_redirects=False,
+    )
+    assert imported_response.status_code == 303
+    assert 'import_export_notice=' in imported_response.headers['location']
+    assert any(workspace.name == 'Default Workspace - Imported' for workspace in app_module.workspace_registry.list())
+
+    full_response = client.get('/admin/import-export/export?export_target=full-environment')
+    assert full_response.status_code == 200
+    with zipfile.ZipFile(BytesIO(full_response.content)) as archive:
+        full_manifest = json.loads(archive.read('manifest.json'))
+        assert full_manifest['kind'] == 'full-environment'
+        assert len(full_manifest['workspaces']) == 2
+        assert 'config/workspace-registry.db' not in archive.namelist()
+    full_import_response = client.post(
+        '/admin/import-export/import',
+        files={'package': ('full-environment.zip', BytesIO(full_response.content), 'application/zip')},
+        follow_redirects=False,
+    )
+    assert full_import_response.status_code == 303
+    assert len(app_module.workspace_registry.list()) == 4
 
 
 def test_admin_can_login_upload_and_see_automatic_dashboard(client) -> None:

@@ -15,7 +15,7 @@ Dashboard Analytic is a multi-user application for ingesting CDR-style datasets,
 - Extracts reusable base metrics such as setup time, duration, quality score, throughput, latency, jitter, packet loss, and handovers
 - Builds dataset profiles and stores their status, progress, filter options, default metrics, and KPI snapshot in SQLite
 - Shows a `Data Processing Queue` with dataset status, progress, and retry actions
-- Keeps every workspace's datasets, template copies, SQLite database and input/output/export files isolated
+- Keeps every workspace's datasets, SQLite database and input/export files isolated
 - Opens datasets from cached metadata, without forcing a full dataset reload on every page refresh
 - Applies adaptive filters and loads charts or tables only when the user requests `Update Dashboard`
 - Exports the active dashboard context to Word or PowerPoint
@@ -32,7 +32,7 @@ The top navigation separates the existing **E2E Dashboard** from **E2E PowerPoin
 - **NetCheck CDR Reports**: build a template-based PowerPoint from one or more processed Data, Voice and Speech CDRs. Select NSA or SA, stored Slides Templates and, when eligible, a multivendor scope based on vendors already mapped in Workspace.
 - **Smart Orchestrator Logs Reports**: visible as the future reporting destination for processed Smart Orchestrator Log sources; automated log reporting is not implemented yet.
 
-Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone and 3UK Three Multivendor Mapping files. It proposes each input type from its filename, supports per-file review for a batch and persists the confirmed type before processing. When ready VFUK and/or 3UK mappings already exist, CDR uploads also offer optional mapping selectors; mapping can also be run later from the CDR action. Reporting deliberately never maps CDRs itself. Vendor assignment follows the Vodafone/Three formula, including Vodafone's Ericsson/null mixed-vendor exception. Each workspace owns an editable Slides Templates library under `data/workspaces/<Workspace Name>/slides-templates/`; `config/slides-templates/` provides the seed library for new workspaces. The shared PowerPoint master is in `assets/ppt-templates/`.
+Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone and 3UK Three Multivendor Mapping files. It proposes each input type from its filename, supports per-file review for a batch and persists the confirmed type before processing. When ready VFUK and/or 3UK mappings already exist, CDR uploads also offer optional mapping selectors; mapping can also be run later from the CDR action. Reporting deliberately never maps CDRs itself. Vendor assignment follows the Vodafone/Three formula, including Vodafone's Ericsson/null mixed-vendor exception. Slides Templates are shared application configuration in `config/slides-templates/`; their metadata is indexed in each workspace database. The shared PowerPoint master is in `assets/ppt-templates/`.
 
 ### NetCheck CDR Reports workflow
 
@@ -72,6 +72,10 @@ For Vodafone UK and Three, the report takes the first and last Global CI from th
 9. Export the current dashboard analysis to Word or PowerPoint if needed, or open **E2E PowerPoint Reporting** to create a template-backed CDR report
 
 An import captures its workspace database when it is queued. It therefore continues in the server after closing that workspace or signing out; reopening the workspace later shows its final status.
+
+## Admin Import/Export
+
+Administrators can create portable ZIP packages from **Admin → Import/Export**. `Only Config` exports application configuration without the local workspace registry. `Config + Slides Templates` additionally includes the shared CSV templates. `Workspace: <name>` exports that workspace's database, uploaded files and generated exports; importing it always creates and registers a new local workspace. `Full Environment` combines configuration, templates and all workspaces, rebuilding the destination registry from the imported workspaces instead of reusing source-machine paths.
 
 ## Supported dataset behavior
 
@@ -193,7 +197,7 @@ pytest -q
 
 ## Configuration model
 
-Environment variables control deployment paths and runtime secrets. `APP_DATABASE_PATH`, `APP_INPUT_DIR`, `APP_OUTPUT_DIR` and `APP_EXPORT_DIR` provide the initial/legacy storage locations; after workspace initialisation, operational data is stored under `data/workspaces/<Workspace Name>/`. Version and release date do not come from `.env`; they are defined in [`src/version.py`](src/version.py).
+Environment variables control deployment paths and runtime secrets. `APP_DATABASE_PATH`, `APP_INPUT_DIR`, `APP_OUTPUT_DIR` and `APP_EXPORT_DIR` provide initial/legacy storage locations; after workspace initialisation, operational data is stored under `data/workspaces/<Workspace Name>/`. `APP_OUTPUT_DIR` remains only for migration compatibility and is not used by current workspaces. Version and release date do not come from `.env`; they are defined in [`src/version.py`](src/version.py).
 
 Important runtime variables:
 
@@ -304,15 +308,13 @@ Recommended stack layout:
   .env
   config/
     workspace-registry.db
-    slides-templates/          # seed library for new workspaces
+    slides-templates/          # shared editable Slides Templates library
   data/
     workspaces/
       <Workspace Name>/
         <Workspace Name>.db
         input/
-        output/
         exports/
-        slides-templates/
 ```
 
 ## Repository layout
@@ -330,7 +332,7 @@ Recommended stack layout:
 - `help/`
   - project documentation
 - `config/`
-  - application configuration, workspace registry and seed Slides Templates
+  - application configuration, local workspace registry and shared Slides Templates
 - `data/`
   - isolated workspace directories, databases and files
 

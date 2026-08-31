@@ -6,9 +6,9 @@ This help centre covers the Dashboard Analytic workflow: managed source ingestio
 
 Dashboard Analytic separates work into named, isolated workspaces and three connected product areas:
 
-- **Workspace** starts with Workspace Management. Create, open, close, rename, duplicate or remove a workspace, then upload NetCheck CDR Data, Voice and Speech workbooks, Smart Orchestrator Logs and operator-specific Multivendor Mappings. Every workspace has independent files, templates and database contents.
+- **Workspace** starts with Workspace Management. Create, open, close, rename, duplicate or remove a workspace, then upload NetCheck CDR Data, Voice and Speech workbooks, Smart Orchestrator Logs and operator-specific Multivendor Mappings. Every workspace has independent files and database contents; Slides Templates are shared configuration.
 - **E2E Dashboard** is the interactive analysis surface for one processed dataset. It provides adaptive filters, KPI summaries, percentile scorecards, CDF/comparison charts and exports of the active dashboard scope.
-- **E2E PowerPoint Reporting** produces the standard NSA or SA NetCheck CDR PowerPoint from the three processed CDR domains and selected workspace Slides Templates. A multivendor run uses Vendor values that were mapped and stored on the CDR beforehand.
+- **E2E PowerPoint Reporting** produces the standard NSA or SA NetCheck CDR PowerPoint from the three processed CDR domains and selected shared Slides Templates. A multivendor run uses Vendor values that were mapped and stored on the CDR beforehand.
 
 ## Recommended reading order
 

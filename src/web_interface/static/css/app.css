@@ -152,6 +152,14 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .admin-stack label:not(.toggle-switch) { color: #8b2429; font-weight: 700; }
 .admin-stack input:not([type="checkbox"]), .admin-stack select { border-color: rgba(139, 29, 36, 0.30); background: linear-gradient(135deg, #fffafa, #fff0ef); }
 .admin-create-user-panel { background: linear-gradient(135deg, rgba(255, 224, 223, 0.82), rgba(255, 244, 243, 0.96)); border-color: rgba(139, 29, 36, 0.20); }
+.import-export-panel { border-color: rgba(20, 81, 112, 0.24); background: linear-gradient(135deg, rgba(237, 247, 250, 0.94), rgba(255, 255, 255, 0.96)); }
+.import-export-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.import-export-grid .form-stack { padding: 1rem; border: 1px solid rgba(20, 81, 112, 0.16); border-radius: 14px; background: rgba(255, 255, 255, 0.68); }
+.import-export-grid h3 { margin: 0; color: #174966; }
+.admin-stack .import-export-action { background: linear-gradient(135deg, #155d83, #248caf); border-color: rgba(15, 73, 105, 0.64); }
+.admin-stack .import-export-action:hover:not(:disabled) { background: linear-gradient(135deg, #104966, #1c7190); }
+.import-export-notice { color: #075d59; background: rgba(11, 122, 117, 0.10); border-color: rgba(11, 122, 117, 0.26); }
+.import-export-error { color: #7d2731; background: rgba(201, 76, 75, 0.12); border-color: rgba(139, 29, 36, 0.26); }
 .database-management-panel { border-color: rgba(139, 29, 36, 0.22); background: linear-gradient(135deg, rgba(255, 247, 246, 0.94), rgba(255, 255, 255, 0.96)); }
 .admin-stack .database-management-panel { order: 1; }
 .admin-stack [data-panel-state-key="admin:datasets"] { order: 0; }
@@ -164,6 +172,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .database-management-toolbar .pill { margin-bottom: 0.1rem; }
 .admin-stack .database-refresh-button { background: linear-gradient(135deg, #08736d, #20a797); border-color: rgba(7, 93, 89, 0.62); color: #fff; }
 .admin-stack .database-refresh-button:hover:not(:disabled) { background: linear-gradient(135deg, #065e59, #168d80); }
+.admin-stack .database-refresh-button:disabled { background: linear-gradient(135deg, #9dcfc8, #b9e0db); border-color: rgba(7, 93, 89, 0.20); color: rgba(255,255,255,0.84); box-shadow: none; }
 .admin-stack .database-clear-filters-button { background: linear-gradient(135deg, #edf3f6, #d7e5eb); border-color: rgba(16, 49, 74, 0.24); color: #10314a; box-shadow: none; }
 .admin-stack .database-clear-filters-button:hover:not(:disabled) { background: linear-gradient(135deg, #dceaf0, #c5dae4); color: #08283d; }
 .admin-stack .database-clear-filters-button:disabled { background: linear-gradient(135deg, #edf1f3, #dce3e7); border-color: rgba(16, 49, 74, 0.14); color: #78909d; box-shadow: none; }
@@ -662,8 +671,11 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .queue-status-stopped { background: linear-gradient(135deg, #8f6d35, #c09549); }
 .active-row { background: rgba(11, 122, 117, 0.06); }
 .queue-table th:nth-child(1), .queue-table td:nth-child(1) { width: 60px; }
-.queue-table th:nth-child(7), .queue-table td:nth-child(7) { width: 138px; }
-.queue-progress-cell { min-width: 118px; display: grid; gap: 0.3rem; }
+.queue-table th:nth-child(7), .queue-table td:nth-child(7) { width: 118px; }
+.queue-table th:nth-child(8), .queue-table td:nth-child(8),
+.queue-table th:nth-child(9), .queue-table td:nth-child(9) { width: 116px; }
+.queue-table [data-queue-uploaded], .queue-table [data-queue-updated] { white-space: pre-line; overflow-wrap: normal; }
+.queue-progress-cell { min-width: 98px; display: grid; gap: 0.3rem; }
 .progress-shell { height: 10px; border-radius: 999px; background: rgba(16, 49, 74, 0.08); overflow: hidden; }
 .visual-progress-shell { height: 14px; background: linear-gradient(180deg, rgba(16,49,74,0.08), rgba(16,49,74,0.03)); box-shadow: inset 0 1px 2px rgba(16,49,74,0.06); }
 .progress-bar { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--brand), #149d94 52%, #53d7c8); box-shadow: 0 0 20px rgba(20,157,148,0.3); }

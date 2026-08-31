@@ -235,6 +235,37 @@
     {% endif %}
   </article>
 
+  <article class="panel import-export-panel">
+    <div class="section-head tight-head">
+      <div>
+        <p class="eyebrow">Portability and backup</p>
+        <h2>Import/Export</h2>
+      </div>
+    </div>
+    <p class="lede">Export portable configuration, one workspace or the complete environment. Import identifies the package type automatically.</p>
+    {% if import_export_notice %}<div class="alert import-export-notice">{{ import_export_notice }}</div>{% endif %}
+    {% if import_export_error %}<div class="alert import-export-error">{{ import_export_error }}</div>{% endif %}
+    <div class="import-export-grid">
+      <form class="form-stack" action="/admin/import-export/export" method="get">
+        <h3>Export</h3>
+        <label>Content to export
+          <select name="export_target" aria-label="Content to export">
+            {% for option in export_options %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
+          </select>
+        </label>
+        <button type="submit" class="import-export-action">Export ZIP</button>
+      </form>
+      <form class="form-stack" action="/admin/import-export/import" method="post" enctype="multipart/form-data">
+        <h3>Import</h3>
+        <label>Export package
+          <input type="file" name="package" accept=".zip,application/zip" required>
+        </label>
+        <p class="form-note">The package manifest identifies configuration, workspaces and full environments automatically. Configuration imports preserve this deployment's workspace registry; imported workspaces are added without replacing an existing one.</p>
+        <button type="submit" class="import-export-action">Import ZIP</button>
+      </form>
+    </div>
+  </article>
+
   <details class="panel collapsible-panel database-management-panel" open data-panel-state-key="admin:database-management">
     <summary class="collapsible-summary">
       <div>
@@ -283,9 +314,11 @@
         </table>
       </div>
       <div class="database-pagination" data-database-pagination hidden>
+        <button type="button" class="database-pagination-button" data-database-first>First</button>
         <button type="button" class="database-pagination-button" data-database-previous>Previous</button>
         <span data-database-page-label>Page 1</span>
         <button type="button" class="database-pagination-button" data-database-next>Next</button>
+        <button type="button" class="database-pagination-button" data-database-last>Last</button>
       </div>
       <p class="form-note">Tables are shown 100 rows at a time. Saving or deleting a row clears cached analysis so subsequent Dashboard and Reporting requests use the changed values.</p>
       {% else %}
@@ -424,8 +457,10 @@
   const table = document.querySelector('[data-database-editor-table]');
   const rowCount = document.querySelector('[data-database-row-count]');
   const pagination = document.querySelector('[data-database-pagination]');
+  const first = document.querySelector('[data-database-first]');
   const previous = document.querySelector('[data-database-previous]');
   const next = document.querySelector('[data-database-next]');
+  const last = document.querySelector('[data-database-last]');
   const pageLabel = document.querySelector('[data-database-page-label]');
   const filterPopover = document.querySelector('[data-database-filter-popover]');
   const filterTitle = document.querySelector('[data-database-filter-title]');
@@ -435,7 +470,7 @@
   const filterClose = document.querySelector('[data-database-filter-close]');
   const filterClear = document.querySelector('[data-database-filter-clear]');
   const filterApply = document.querySelector('[data-database-filter-apply]');
-  if (!panel || !select || !refresh || !clearFilters || !activeFilters || !table || !rowCount || !pagination || !previous || !next || !pageLabel || !filterPopover || !filterTitle || !filterSearch || !filterValues || !filterHelp || !filterClose || !filterClear || !filterApply) return;
+  if (!panel || !select || !refresh || !clearFilters || !activeFilters || !table || !rowCount || !pagination || !first || !previous || !next || !last || !pageLabel || !filterPopover || !filterTitle || !filterSearch || !filterValues || !filterHelp || !filterClose || !filterClear || !filterApply) return;
 
   // The menu must not be constrained by the scrollable table container. This
   // matches the Dataset Preview value-filter behaviour.
@@ -556,8 +591,10 @@
     const page = Math.floor(offset / pageSize) + 1;
     const pages = Math.max(1, Math.ceil(totalRows / pageSize));
     pageLabel.textContent = `Page ${page} of ${pages}`;
+    first.disabled = offset === 0;
     previous.disabled = offset === 0;
     next.disabled = offset + pageSize >= totalRows;
+    last.disabled = offset + pageSize >= totalRows;
     pagination.hidden = totalRows <= pageSize;
     renderActiveFilters();
   };
@@ -672,8 +709,13 @@
     if (!filterPopover.hidden && !(event.target instanceof Element && event.target.closest('[data-database-column-filter]'))) closeFilter();
   });
   window.addEventListener('resize', closeFilter);
+  first.addEventListener('click', () => { offset = 0; loadTable(); });
   previous.addEventListener('click', () => { offset = Math.max(0, offset - pageSize); loadTable(); });
   next.addEventListener('click', () => { offset += pageSize; loadTable(); });
+  last.addEventListener('click', () => {
+    offset = Math.max(0, (Math.ceil(totalRows / pageSize) - 1) * pageSize);
+    loadTable();
+  });
 })();
 </script>
 <script>

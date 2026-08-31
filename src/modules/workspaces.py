@@ -45,8 +45,6 @@ class WorkspaceRegistry:
 
     def initialize(self) -> None:
         self._migrate_legacy_registry_file()
-        created_default = False
-        default_slides_templates_dir: Path | None = None
         with self._connection() as conn:
             conn.execute(
                 """
@@ -65,10 +63,8 @@ class WorkspaceRegistry:
             )
             conn.execute("CREATE TABLE IF NOT EXISTS workspace_state (key TEXT PRIMARY KEY, value TEXT)")
             if not conn.execute("SELECT 1 FROM workspaces LIMIT 1").fetchone():
-                created_default = True
                 now = self._now()
                 default_root = self._workspace_root('Default Workspace')
-                default_slides_templates_dir = default_root / 'slides-templates'
                 conn.execute(
                     """INSERT INTO workspaces (
                         id, name, database_path, input_dir, output_dir, export_dir,
@@ -77,15 +73,16 @@ class WorkspaceRegistry:
                     (
                         'default', 'Default Workspace', str(default_root / 'Default Workspace.db'),
                         str(default_root / 'input'), str(default_root / 'output'),
-                        str(default_root / 'exports'), str(default_root / 'slides-templates'), now, now,
+                        str(default_root / 'exports'), str(self.legacy_slides_templates_dir), now, now,
                     ),
                 )
                 conn.execute("INSERT OR REPLACE INTO workspace_state (key, value) VALUES ('active_workspace_id', 'default')")
             elif not conn.execute("SELECT 1 FROM workspace_state WHERE key = 'active_workspace_id'").fetchone():
                 latest = conn.execute('SELECT id FROM workspaces ORDER BY last_opened_at DESC LIMIT 1').fetchone()
                 conn.execute("INSERT INTO workspace_state (key, value) VALUES ('active_workspace_id', ?)", (latest['id'] if latest else None,))
-        if created_default and default_slides_templates_dir and self.legacy_slides_templates_dir.exists():
-            shutil.copytree(self.legacy_slides_templates_dir, default_slides_templates_dir, dirs_exist_ok=True)
+            # Slides Templates are application configuration shared by every
+            # workspace, never workspace data.
+            conn.execute('UPDATE workspaces SET slides_templates_dir = ?', (str(self.legacy_slides_templates_dir),))
         self._migrate_default_database()
         self._migrate_workspace_directories()
 
@@ -182,7 +179,6 @@ class WorkspaceRegistry:
             input_dir = self._relocate_path(workspace.input_dir, old_root, new_root)
             output_dir = self._relocate_path(workspace.output_dir, old_root, new_root)
             export_dir = self._relocate_path(workspace.export_dir, old_root, new_root)
-            slides_templates_dir = self._relocate_path(workspace.slides_templates_dir, old_root, new_root)
             for source_path, target_path in (
                 (input_dir, new_root / 'input'), (output_dir, new_root / 'output'), (export_dir, new_root / 'exports'),
             ):
@@ -195,25 +191,7 @@ class WorkspaceRegistry:
                         output_dir = target_path
                     else:
                         export_dir = target_path
-            workspace_templates_dir = new_root / 'slides-templates'
-            has_workspace_templates = workspace_templates_dir.exists() and any(workspace_templates_dir.rglob('*.csv'))
-            if not has_workspace_templates:
-                # Older workspaces pointed to the shared application assets.
-                # Each workspace now owns its editable copy, so preserve an
-                # existing copy when available or rebuild it from the config
-                # seed if the legacy assets have already been removed.
-                template_source = next(
-                    (
-                        candidate
-                        for candidate in (slides_templates_dir, self.legacy_slides_templates_dir)
-                        if candidate.exists() and any(candidate.rglob('*.csv'))
-                    ),
-                    None,
-                )
-                if template_source:
-                    shutil.copytree(template_source, workspace_templates_dir, dirs_exist_ok=True)
-            if slides_templates_dir != workspace_templates_dir:
-                slides_templates_dir = workspace_templates_dir
+            slides_templates_dir = self.legacy_slides_templates_dir
             if input_dir != workspace.input_dir and new_database.exists():
                 with sqlite3.connect(new_database) as conn:
                     conn.execute(
@@ -266,7 +244,7 @@ class WorkspaceRegistry:
             now = self._now()
             data_root = self._workspace_root(normalized_name)
             db_path = data_root / f'{normalized_name}.db'
-            slides_templates_dir = data_root / 'slides-templates'
+            slides_templates_dir = self.legacy_slides_templates_dir
             try:
                 conn.execute(
                     """INSERT INTO workspaces (
@@ -278,10 +256,7 @@ class WorkspaceRegistry:
                 )
             except sqlite3.IntegrityError as exc:
                 raise ValueError(f'A workspace named "{normalized_name}" already exists.') from exc
-        # New workspaces start with the bundled/default slide templates but do
-        # not share their mutable template files with the existing workspace.
-        if self.legacy_slides_templates_dir.exists():
-            shutil.copytree(self.legacy_slides_templates_dir, slides_templates_dir, dirs_exist_ok=True)
+        data_root.mkdir(parents=True, exist_ok=True)
         return self.get(workspace_id)  # type: ignore[return-value]
 
     def duplicate(self, workspace_id: str) -> Workspace:
@@ -299,15 +274,12 @@ class WorkspaceRegistry:
         duplicate = self.create(duplicate_name)
         target_root = duplicate.database_path.parent
         try:
-            # ``create`` has prepared the target directories and a template
-            # snapshot. Replace that snapshot with an exact data copy, while
-            # SQLite's backup API gives the duplicate a consistent DB image.
+            # ``create`` has prepared the target root. Replace it with an
+            # exact data copy; Slides Templates remain global config.
             shutil.rmtree(target_root)
             for source_path, target_path in (
                 (source.input_dir, duplicate.input_dir),
-                (source.output_dir, duplicate.output_dir),
                 (source.export_dir, duplicate.export_dir),
-                (source.slides_templates_dir, duplicate.slides_templates_dir),
             ):
                 if source_path.exists():
                     shutil.copytree(source_path, target_path)

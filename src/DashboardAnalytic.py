@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
+import io
 import re
 import secrets
 import hashlib
 import shutil
 import sqlite3
 import warnings
+import tempfile
+import zipfile
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from threading import Lock
 from typing import Annotated
 from typing import Any
@@ -192,19 +195,23 @@ def named_catalogue_path(technology: str, identifier: str, template_name: str | 
 
 
 def synchronize_template_file_names(technology: str) -> None:
-    """Discover physical CSVs and persist their exact names in SQLite."""
+    """Synchronize the per-workspace index with the shared config CSVs."""
     library_dir = settings.slides_templates_dir / 'library' / technology
     library_dir.mkdir(parents=True, exist_ok=True)
     default_dir = settings.slides_templates_dir / 'default' / technology
     default_dir.mkdir(parents=True, exist_ok=True)
     existing = {str(row['name']): bool(row['is_default']) for row in repository.list_report_templates(technology)}
     default_files = sorted(default_dir.glob('*.csv'))
+    physical_names = {catalogue_registry_key(path.stem) for path in [*library_dir.glob('*.csv'), *default_files]}
+    for name in set(existing) - physical_names:
+        repository.delete_report_template(technology, name)
+        existing.pop(name, None)
     for path in [*sorted(library_dir.glob('*.csv')), *default_files]:
         name = catalogue_registry_key(path.stem)
         if name not in existing:
             repository.add_report_template(technology, name, is_default=False)
             existing[name] = False
-    if not any(existing.values()) and len(default_files) == 1:
+    if len(default_files) == 1:
         default_name = catalogue_registry_key(default_files[0].stem)
         repository.set_default_report_template(technology, default_name)
         library_path = named_catalogue_path(technology, default_name, default_name)
@@ -377,13 +384,11 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
     """Make one isolated workspace the target for all dataset operations."""
     global active_workspace
     workspace = workspace_registry.mark_opened(workspace_id)
-    for path in (workspace.database_path.parent, workspace.input_dir, workspace.output_dir, workspace.export_dir, workspace.slides_templates_dir):
+    for path in (workspace.database_path.parent, workspace.input_dir, workspace.export_dir):
         path.mkdir(parents=True, exist_ok=True)
     object.__setattr__(settings, 'database_path', workspace.database_path)
     object.__setattr__(settings, 'input_dir', workspace.input_dir)
-    object.__setattr__(settings, 'output_dir', workspace.output_dir)
     object.__setattr__(settings, 'export_dir', workspace.export_dir)
-    object.__setattr__(settings, 'slides_templates_dir', workspace.slides_templates_dir)
     repository.db_path = workspace.database_path
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
@@ -419,6 +424,26 @@ def migrate_legacy_slides_templates() -> None:
     shutil.move(str(LEGACY_SLIDES_TEMPLATES_DIR), str(DEFAULT_SLIDES_TEMPLATES_DIR))
 
 
+def migrate_uk_slides_templates_to_global_config() -> None:
+    """Move the user-designated UK library into the shared config location."""
+    source_root = PROJECT_ROOT / 'data' / 'workspaces' / 'UK' / 'slides-templates'
+    if not source_root.exists() or not any(source_root.rglob('*.csv')):
+        return
+    for technology in TEMPLATE_NAMES:
+        for area in ('library', 'default'):
+            source_dir = source_root / area / technology
+            source_files = sorted(source_dir.glob('*.csv')) if source_dir.exists() else []
+            if not source_files:
+                continue
+            target_dir = DEFAULT_SLIDES_TEMPLATES_DIR / area / technology
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for existing in target_dir.glob('*.csv'):
+                existing.unlink()
+            for source_file in source_files:
+                shutil.move(str(source_file), str(target_dir / source_file.name))
+    shutil.rmtree(source_root)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     migrate_legacy_slides_templates()
@@ -439,6 +464,7 @@ async def lifespan(_: FastAPI):
         settings.database_path.parent / 'workspaces.db',
     )
     workspace_registry.initialize()
+    migrate_uk_slides_templates_to_global_config()
     if (workspace_id := workspace_registry.active_id()):
         activate_workspace(workspace_id)
     yield
@@ -1481,6 +1507,180 @@ def build_default_access_accounts() -> list[dict[str, str]]:
     return available_accounts
 
 
+ARCHIVE_FORMAT = 'dashboard-analytic-export'
+ARCHIVE_VERSION = 1
+
+
+def _archive_database(archive: zipfile.ZipFile, database_path: Path, archive_name: str) -> None:
+    """Add a consistent SQLite snapshot, including databases currently in WAL mode."""
+    if not database_path.exists():
+        return
+    with tempfile.TemporaryDirectory(prefix='dashboard-analytic-export-') as temporary_dir:
+        snapshot = Path(temporary_dir) / 'snapshot.db'
+        with sqlite3.connect(database_path) as source, sqlite3.connect(snapshot) as target:
+            source.backup(target)
+        archive.write(snapshot, archive_name)
+
+
+def _archive_tree(archive: zipfile.ZipFile, source: Path, archive_prefix: str, *, exclude_slides_templates: bool = False) -> None:
+    if not source.exists():
+        return
+    for path in source.rglob('*'):
+        if not path.is_file() or path.name.endswith(('-wal', '-shm')):
+            continue
+        relative_path = path.relative_to(source)
+        if exclude_slides_templates and relative_path.parts and relative_path.parts[0] == 'slides-templates':
+            continue
+        archive.write(path, f'{archive_prefix}/{relative_path.as_posix()}')
+
+
+def _workspace_archive_metadata(workspace: Workspace) -> dict[str, str]:
+    return {'name': workspace.name, 'source_input_dir': str(workspace.input_dir)}
+
+
+def _archive_workspace(archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str) -> None:
+    _archive_database(archive, workspace.database_path, f'{archive_prefix}/database.sqlite')
+    _archive_tree(archive, workspace.input_dir, f'{archive_prefix}/input')
+    _archive_tree(archive, workspace.export_dir, f'{archive_prefix}/exports')
+
+
+def build_export_archive(target: str) -> tuple[bytes, str]:
+    """Create a portable ZIP package with a manifest used for automatic import."""
+    buffer = io.BytesIO()
+    # ``settings.database_path`` changes with the active workspace. The
+    # registry location remains the stable application configuration root.
+    config_root = workspace_registry.registry_path.parent
+    with zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        if target in {'config', 'config-with-templates'}:
+            include_templates = target == 'config-with-templates'
+            manifest = {
+                'format': ARCHIVE_FORMAT,
+                'version': ARCHIVE_VERSION,
+                'kind': 'config',
+                'includes_slides_templates': include_templates,
+            }
+            archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
+            for path in config_root.iterdir():
+                if path == workspace_registry.registry_path or path == settings.slides_templates_dir or not path.is_file() or path.name.endswith(('-wal', '-shm')):
+                    continue
+                if path.suffix == '.db':
+                    _archive_database(archive, path, f'config/{path.name}')
+                else:
+                    archive.write(path, f'config/{path.name}')
+            if include_templates:
+                _archive_tree(archive, settings.slides_templates_dir, 'config/slides-templates')
+            filename = 'dashboard-analytic-config-with-slides-templates.zip' if include_templates else 'dashboard-analytic-config.zip'
+        elif target.startswith('workspace:'):
+            workspace = workspace_registry.get(target.removeprefix('workspace:'))
+            if not workspace:
+                raise ValueError('Workspace not found.')
+            manifest = {
+                'format': ARCHIVE_FORMAT,
+                'version': ARCHIVE_VERSION,
+                'kind': 'workspace',
+                'workspace': _workspace_archive_metadata(workspace),
+            }
+            archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
+            _archive_workspace(archive, workspace, 'workspace')
+            filename = f'{workspace.name}.zip'
+        elif target == 'full-environment':
+            workspaces = workspace_registry.list()
+            manifest = {
+                'format': ARCHIVE_FORMAT,
+                'version': ARCHIVE_VERSION,
+                'kind': 'full-environment',
+                'includes_slides_templates': True,
+                'workspaces': [
+                    {**_workspace_archive_metadata(workspace), 'archive_path': f'workspaces/{index}'}
+                    for index, workspace in enumerate(workspaces, start=1)
+                ],
+            }
+            archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
+            for path in config_root.iterdir():
+                if path == workspace_registry.registry_path or path == settings.slides_templates_dir or not path.is_file() or path.name.endswith(('-wal', '-shm')):
+                    continue
+                if path.suffix == '.db':
+                    _archive_database(archive, path, f'config/{path.name}')
+                else:
+                    archive.write(path, f'config/{path.name}')
+            _archive_tree(archive, settings.slides_templates_dir, 'config/slides-templates')
+            for entry, workspace in zip(manifest['workspaces'], workspaces, strict=True):
+                _archive_workspace(archive, workspace, str(entry['archive_path']))
+            filename = 'dashboard-analytic-full-environment.zip'
+        else:
+            raise ValueError('Select a valid export option.')
+    return buffer.getvalue(), filename
+
+
+def _safe_extract_archive(archive: zipfile.ZipFile, destination: Path) -> None:
+    for member in archive.infolist():
+        candidate = PurePosixPath(member.filename)
+        if member.is_dir():
+            continue
+        if candidate.is_absolute() or '..' in candidate.parts or not candidate.parts:
+            raise ValueError('The import archive contains an invalid file path.')
+        target = destination.joinpath(*candidate.parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with archive.open(member) as source, target.open('wb') as output:
+            shutil.copyfileobj(source, output)
+
+
+def _unique_import_workspace_name(name: str) -> str:
+    base_name = ' '.join(name.split()) or 'Imported Workspace'
+    existing = {workspace.name.casefold() for workspace in workspace_registry.list()}
+    candidate = base_name
+    suffix = 2
+    while candidate.casefold() in existing:
+        candidate = f'{base_name} - Imported' if suffix == 2 else f'{base_name} - Imported {suffix}'
+        suffix += 1
+    return candidate
+
+
+def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | None) -> Workspace:
+    database_snapshot = payload / 'database.sqlite'
+    if not database_snapshot.exists():
+        raise ValueError('The workspace archive does not contain its database.')
+    source_name = workspace_info.get('name') if workspace_info else None
+    workspace = workspace_registry.create(_unique_import_workspace_name(str(source_name or 'Imported Workspace')))
+    try:
+        for source, destination in (
+            (payload / 'input', workspace.input_dir),
+            (payload / 'exports', workspace.export_dir),
+        ):
+            if source.exists():
+                shutil.copytree(source, destination, dirs_exist_ok=True)
+            else:
+                destination.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(database_snapshot, workspace.database_path)
+        source_input_dir = workspace_info.get('source_input_dir') if workspace_info else None
+        with sqlite3.connect(workspace.database_path) as connection:
+            if source_input_dir:
+                connection.execute('UPDATE datasets SET stored_path = REPLACE(stored_path, ?, ?)', (str(source_input_dir), str(workspace.input_dir)))
+            connection.execute('PRAGMA quick_check').fetchone()
+    except Exception:
+        workspace_registry.delete(workspace.id)
+        raise
+    return workspace
+
+
+def import_config_archive(staging_root: Path, manifest: dict[str, Any]) -> None:
+    config_payload = staging_root / 'config'
+    if not config_payload.exists():
+        raise ValueError('The configuration archive does not contain configuration files.')
+    # Apply only files included in the package. This preserves unrelated local
+    # configuration and makes a config import recoverable file-by-file.
+    for path in config_payload.rglob('*'):
+        if not path.is_file():
+            continue
+        relative_path = path.relative_to(config_payload)
+        if relative_path == Path(workspace_registry.registry_path.name):
+            continue
+        config_root = workspace_registry.registry_path.parent
+        target = settings.slides_templates_dir / relative_path.relative_to('slides-templates') if relative_path.parts[0] == 'slides-templates' else config_root / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+
+
 def would_remove_last_active_admin(target_user, normalized_role: str, will_be_active: bool) -> bool:
     if target_user['role'] != 'admin' or not target_user['active']:
         return False
@@ -1549,6 +1749,15 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             database_table_groups['Workspace records'].append({'name': table_name, 'label': friendly_tables[table_name]})
         else:
             database_table_groups['Other tables'].append({'name': table_name, 'label': table_name})
+    export_options = [
+        {'value': 'config', 'label': 'Only Config'},
+        {'value': 'config-with-templates', 'label': 'Config + Slides Templates'},
+        {'value': 'full-environment', 'label': 'Full Environment (Config + Slides Templates + All Workspaces)'},
+        *[
+            {'value': f'workspace:{workspace.id}', 'label': f'Workspace: {workspace.name}'}
+            for workspace in workspace_registry.list()
+        ],
+    ]
     return render_template(
         request,
         'admin.html',
@@ -1565,6 +1774,9 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             'catalogue_editor': catalogue_editor_payload(selected_technology, selected_catalogue) if active_workspace else None,
             'catalogue_notice': request.query_params.get('catalogue_notice') or None,
             'catalogue_error': request.query_params.get('catalogue_error') or None,
+            'export_options': export_options,
+            'import_export_notice': request.query_params.get('import_export_notice') or None,
+            'import_export_error': request.query_params.get('import_export_error') or None,
             'error': error,
         },
         status_code=status_code,
@@ -2860,6 +3072,72 @@ def export_report(
 @app.get('/admin', response_class=HTMLResponse)
 def admin_panel(request: Request, user: SessionUser = Depends(admin_user)) -> HTMLResponse:
     return render_admin_template(request, user)
+
+
+@app.get('/admin/import-export/export')
+def export_admin_package(
+    export_target: str = Query(...),
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    try:
+        content, filename = build_export_archive(export_target)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=content,
+        media_type='application/zip',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post('/admin/import-export/import')
+async def import_admin_package(
+    package: UploadFile = File(...),
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    try:
+        contents = await package.read()
+        with zipfile.ZipFile(io.BytesIO(contents)) as archive, tempfile.TemporaryDirectory(prefix='dashboard-analytic-import-') as temporary_dir:
+            try:
+                manifest = json.loads(archive.read('manifest.json').decode('utf-8'))
+            except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ValueError('The selected file is not a valid Dashboard Analytic export package.') from exc
+            if not isinstance(manifest, dict) or manifest.get('format') != ARCHIVE_FORMAT or manifest.get('version') != ARCHIVE_VERSION:
+                raise ValueError('The selected file is not a compatible Dashboard Analytic export package.')
+            staging_root = Path(temporary_dir)
+            _safe_extract_archive(archive, staging_root)
+            kind = manifest.get('kind')
+            if kind == 'workspace':
+                workspace_info = manifest.get('workspace')
+                workspace = import_workspace_archive(staging_root / 'workspace', workspace_info if isinstance(workspace_info, dict) else None)
+                notice = f'Workspace "{workspace.name}" imported successfully.'
+            elif kind == 'config':
+                import_config_archive(staging_root, manifest)
+                notice = 'Configuration imported successfully. Local workspaces were preserved.'
+            elif kind == 'full-environment':
+                import_config_archive(staging_root, manifest)
+                entries = manifest.get('workspaces')
+                if not isinstance(entries, list):
+                    raise ValueError('The full-environment package has no workspace list.')
+                imported_workspaces: list[Workspace] = []
+                for entry in entries:
+                    if not isinstance(entry, dict) or not re.fullmatch(r'workspaces/\d+', str(entry.get('archive_path') or '')):
+                        raise ValueError('The full-environment package contains an invalid workspace entry.')
+                    imported_workspaces.append(import_workspace_archive(staging_root / str(entry['archive_path']), entry))
+                notice = f'Full environment imported successfully ({len(imported_workspaces)} workspaces added).'
+            else:
+                raise ValueError('The export package type is not supported.')
+    except (ValueError, OSError, sqlite3.Error, zipfile.BadZipFile) as exc:
+        return RedirectResponse(
+            f'/admin?{urlencode({"import_export_error": str(exc)})}',
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    finally:
+        await package.close()
+    return RedirectResponse(
+        f'/admin?{urlencode({"import_export_notice": notice})}',
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.get('/admin/database/table')

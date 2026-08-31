@@ -2125,6 +2125,7 @@ if (queueNode) {
   };
   queueTypeFilter?.addEventListener('change', applyQueueTypeFilter);
   applyQueueTypeFilter();
+  const formatQueueTimestamp = (value) => String(value || '').replace('T', ' ').replace(' ', '\n');
 
   const updateQueueRow = (dataset) => {
     const row = document.querySelector(`[data-dataset-row][data-dataset-id="${dataset.id}"]`);
@@ -2158,8 +2159,8 @@ if (queueNode) {
       progressBar.className = `progress-bar status-${dataset.status}`;
     }
     if (progressLabel) progressLabel.textContent = `${dataset.progress || 0}%`;
-    if (uploaded) uploaded.textContent = dataset.uploaded_at || '';
-    if (updated) updated.textContent = dataset.updated_at || dataset.uploaded_at || '';
+    if (uploaded) uploaded.textContent = formatQueueTimestamp(dataset.uploaded_at);
+    if (updated) updated.textContent = formatQueueTimestamp(dataset.updated_at || dataset.uploaded_at);
     // A profile can be in the small persistence window between status updates.
     // Keep the known row kind until the API supplies a replacement so ready CDR
     // actions do not disappear while another upload is being processed.
