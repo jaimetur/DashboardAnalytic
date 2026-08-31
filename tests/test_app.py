@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote
@@ -134,6 +135,27 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     )
     assert full_import_response.status_code == 303
     assert len(app_module.workspace_registry.list()) == 1
+
+
+def test_admin_export_job_creates_a_disk_backed_download(client) -> None:
+    login(client)
+    started = client.post('/admin/import-export/export/jobs', data={'export_target': 'config'})
+    assert started.status_code == 200
+    status_url = started.json()['status_url']
+    payload = {}
+    for _ in range(100):
+        status_response = client.get(status_url)
+        assert status_response.status_code == 200
+        payload = status_response.json()
+        if payload['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.01)
+    assert payload['status'] == 'ready'
+    assert payload['size'] > 0
+    download = client.get(payload['download_url'])
+    assert download.status_code == 200
+    with zipfile.ZipFile(BytesIO(download.content)) as archive:
+        assert json.loads(archive.read('manifest.json'))['kind'] == 'config'
 
 
 def test_admin_can_login_upload_and_see_automatic_dashboard(client) -> None:

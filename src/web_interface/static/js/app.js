@@ -1730,6 +1730,63 @@ document.querySelectorAll('[data-import-export-form]').forEach((form) => {
   });
 });
 
+document.querySelectorAll('[data-export-package-form]').forEach((form) => {
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!(form instanceof HTMLFormElement)) return;
+    showLoadingOverlay(form.dataset.loadingLabel, form.dataset.loadingCopy);
+    try {
+      const response = await fetch(form.action, {
+        method: 'POST',
+        body: new FormData(form),
+        credentials: 'same-origin',
+        headers: {Accept: 'application/json'},
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.job_id || !payload.status_url) {
+        throw new Error(payload.detail || 'The export package could not be started.');
+      }
+      const pollExport = async () => {
+        const statusResponse = await fetch(payload.status_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}});
+        const status = await statusResponse.json().catch(() => ({}));
+        if (!statusResponse.ok) throw new Error(status.detail || 'The export status could not be read.');
+        if (status.status === 'ready' && status.download_url) {
+          hideLoadingOverlay();
+          const link = document.createElement('a');
+          link.href = status.download_url;
+          link.download = status.filename || 'dashboard-analytic-export.zip';
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          showInfoDialog('The package is ready. Your browser download has started and can be resumed if necessary.', {
+            title: 'Export Package Ready',
+            tone: 'info',
+          });
+          return;
+        }
+        if (status.status === 'failed') throw new Error(status.error || 'The export package could not be created.');
+        if (loadingCopy) loadingCopy.textContent = 'Preparing the export package on the server. Large workspaces can take several minutes; you may keep this page open.';
+        window.setTimeout(() => { pollExport().catch(handleExportError); }, 1200);
+      };
+      const handleExportError = (error) => {
+        hideLoadingOverlay();
+        showInfoDialog(error instanceof Error ? error.message : 'The export package could not be created.', {
+          title: 'Export Package Error',
+          tone: 'error',
+        });
+      };
+      pollExport().catch(handleExportError);
+    } catch (error) {
+      hideLoadingOverlay();
+      showInfoDialog(error instanceof Error ? error.message : 'The export package could not be started.', {
+        title: 'Export Package Error',
+        tone: 'error',
+      });
+    }
+  });
+});
+
 document.querySelectorAll('form[data-loading-label]').forEach((form) => {
   form.addEventListener('submit', (event) => {
     if (form.dataset.downloadForm === '1') {

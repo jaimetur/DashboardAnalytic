@@ -12,13 +12,14 @@ import tempfile
 import zipfile
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
-from threading import Lock
+from threading import Lock, Thread
 from typing import Annotated
 from typing import Any
 from typing import Callable
 from urllib.parse import urlencode
+from uuid import uuid4
 
 import pandas as pd
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
@@ -45,6 +46,9 @@ ANALYSIS_CACHE: dict[str, dict[str, Any]] = {}
 DATAFRAME_CACHE: dict[str, pd.DataFrame] = {}
 STOP_REQUESTS: set[int] = set()
 STOP_REQUESTS_LOCK = Lock()
+EXPORT_JOBS: dict[str, dict[str, Any]] = {}
+EXPORT_JOBS_LOCK = Lock()
+EXPORT_PACKAGE_TTL = timedelta(hours=24)
 LEGACY_SLIDES_TEMPLATES_DIR = PROJECT_ROOT / 'assets' / 'slides-templates'
 DEFAULT_SLIDES_TEMPLATES_DIR = PROJECT_ROOT / 'config' / 'slides-templates'
 application_config_dir = settings.database_path.parent
@@ -474,6 +478,8 @@ async def lifespan(_: FastAPI):
         legacy_workspace_registry_path(),
     )
     workspace_registry.initialize()
+    export_package_dir().mkdir(parents=True, exist_ok=True)
+    _cleanup_expired_export_packages()
     migrate_uk_slides_templates_to_global_config()
     if (workspace_id := workspace_registry.active_id()):
         activate_workspace(workspace_id)
@@ -1519,17 +1525,34 @@ def build_default_access_accounts() -> list[dict[str, str]]:
 
 ARCHIVE_FORMAT = 'dashboard-analytic-export'
 ARCHIVE_VERSION = 1
+UNCOMPRESSED_ARCHIVE_SUFFIXES = frozenset({
+    '.7z', '.avi', '.docx', '.gif', '.gz', '.jpeg', '.jpg', '.mp3', '.mp4', '.pdf', '.png', '.pptx', '.rar',
+    '.tar', '.tgz', '.webp', '.xlsx', '.xlsm', '.zip',
+})
 
 
-def _archive_database(archive: zipfile.ZipFile, database_path: Path, archive_name: str) -> None:
+def export_package_dir() -> Path:
+    """Keep temporary transfer packages outside individual workspaces."""
+    return workspace_registry.registry_path.parent.parent / 'transfer-packages'
+
+
+def _archive_compression(path: Path) -> int:
+    return zipfile.ZIP_STORED if path.suffix.casefold() in UNCOMPRESSED_ARCHIVE_SUFFIXES else zipfile.ZIP_DEFLATED
+
+
+def _archive_file(archive: zipfile.ZipFile, source: Path, archive_name: str) -> None:
+    archive.write(source, archive_name, compress_type=_archive_compression(source))
+
+
+def _archive_database(archive: zipfile.ZipFile, database_path: Path, archive_name: str, scratch_dir: Path | None = None) -> None:
     """Add a consistent SQLite snapshot, including databases currently in WAL mode."""
     if not database_path.exists():
         return
-    with tempfile.TemporaryDirectory(prefix='dashboard-analytic-export-') as temporary_dir:
+    with tempfile.TemporaryDirectory(prefix='dashboard-analytic-export-', dir=scratch_dir) as temporary_dir:
         snapshot = Path(temporary_dir) / 'snapshot.db'
         with sqlite3.connect(database_path) as source, sqlite3.connect(snapshot) as target:
             source.backup(target)
-        archive.write(snapshot, archive_name)
+        _archive_file(archive, snapshot, archive_name)
 
 
 def _archive_tree(archive: zipfile.ZipFile, source: Path, archive_prefix: str, *, exclude_slides_templates: bool = False) -> None:
@@ -1541,26 +1564,41 @@ def _archive_tree(archive: zipfile.ZipFile, source: Path, archive_prefix: str, *
         relative_path = path.relative_to(source)
         if exclude_slides_templates and relative_path.parts and relative_path.parts[0] == 'slides-templates':
             continue
-        archive.write(path, f'{archive_prefix}/{relative_path.as_posix()}')
+        _archive_file(archive, path, f'{archive_prefix}/{relative_path.as_posix()}')
 
 
 def _workspace_archive_metadata(workspace: Workspace) -> dict[str, str]:
     return {'name': workspace.name, 'source_input_dir': str(workspace.input_dir)}
 
 
-def _archive_workspace(archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str) -> None:
-    _archive_database(archive, workspace.database_path, f'{archive_prefix}/database.sqlite')
+def _archive_workspace(archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str, scratch_dir: Path | None = None) -> None:
+    _archive_database(archive, workspace.database_path, f'{archive_prefix}/database.sqlite', scratch_dir)
     _archive_tree(archive, workspace.input_dir, f'{archive_prefix}/input')
     _archive_tree(archive, workspace.export_dir, f'{archive_prefix}/exports')
 
 
-def build_export_archive(target: str) -> tuple[bytes, str]:
-    """Create a portable ZIP package with a manifest used for automatic import."""
-    buffer = io.BytesIO()
+def export_archive_filename(target: str) -> str:
+    if target == 'config':
+        return 'dashboard-analytic-config.zip'
+    if target == 'config-with-templates':
+        return 'dashboard-analytic-config-with-slides-templates.zip'
+    if target == 'full-environment':
+        return 'dashboard-analytic-full-environment.zip'
+    if target.startswith('workspace:'):
+        workspace = workspace_registry.get(target.removeprefix('workspace:'))
+        if workspace:
+            return f'{workspace.name}.zip'
+    raise ValueError('Select a valid export option.')
+
+
+def build_export_archive_file(target: str, destination: Path) -> str:
+    """Create a portable archive on disk, keeping large exports out of RAM."""
+    filename = export_archive_filename(target)
+    destination.parent.mkdir(parents=True, exist_ok=True)
     # ``settings.database_path`` changes with the active workspace and the
     # registry lives with workspace data, so retain the configured app root.
     config_root = application_config_dir
-    with zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
         if target in {'config', 'config-with-templates'}:
             include_templates = target == 'config-with-templates'
             manifest = {
@@ -1574,12 +1612,11 @@ def build_export_archive(target: str) -> tuple[bytes, str]:
                 if path == workspace_registry.registry_path or path == settings.slides_templates_dir or not path.is_file() or path.name.endswith(('-wal', '-shm')):
                     continue
                 if path.suffix == '.db':
-                    _archive_database(archive, path, f'config/{path.name}')
+                    _archive_database(archive, path, f'config/{path.name}', destination.parent)
                 else:
-                    archive.write(path, f'config/{path.name}')
+                    _archive_file(archive, path, f'config/{path.name}')
             if include_templates:
                 _archive_tree(archive, settings.slides_templates_dir, 'config/slides-templates')
-            filename = 'dashboard-analytic-config-with-slides-templates.zip' if include_templates else 'dashboard-analytic-config.zip'
         elif target.startswith('workspace:'):
             workspace = workspace_registry.get(target.removeprefix('workspace:'))
             if not workspace:
@@ -1591,8 +1628,7 @@ def build_export_archive(target: str) -> tuple[bytes, str]:
                 'workspace': _workspace_archive_metadata(workspace),
             }
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
-            _archive_workspace(archive, workspace, 'workspace')
-            filename = f'{workspace.name}.zip'
+            _archive_workspace(archive, workspace, 'workspace', destination.parent)
         elif target == 'full-environment':
             workspaces = workspace_registry.list()
             manifest = {
@@ -1610,16 +1646,95 @@ def build_export_archive(target: str) -> tuple[bytes, str]:
                 if path == workspace_registry.registry_path or path == settings.slides_templates_dir or not path.is_file() or path.name.endswith(('-wal', '-shm')):
                     continue
                 if path.suffix == '.db':
-                    _archive_database(archive, path, f'config/{path.name}')
+                    _archive_database(archive, path, f'config/{path.name}', destination.parent)
                 else:
-                    archive.write(path, f'config/{path.name}')
+                    _archive_file(archive, path, f'config/{path.name}')
             _archive_tree(archive, settings.slides_templates_dir, 'config/slides-templates')
             for entry, workspace in zip(manifest['workspaces'], workspaces, strict=True):
-                _archive_workspace(archive, workspace, str(entry['archive_path']))
-            filename = 'dashboard-analytic-full-environment.zip'
+                _archive_workspace(archive, workspace, str(entry['archive_path']), destination.parent)
         else:
             raise ValueError('Select a valid export option.')
-    return buffer.getvalue(), filename
+    return filename
+
+
+def build_export_archive(target: str) -> tuple[bytes, str]:
+    """Compatibility helper for small programmatic exports and tests."""
+    with tempfile.TemporaryDirectory(prefix='dashboard-analytic-export-') as temporary_dir:
+        destination = Path(temporary_dir) / 'package.zip'
+        filename = build_export_archive_file(target, destination)
+        return destination.read_bytes(), filename
+
+
+def _cleanup_expired_export_packages() -> None:
+    package_dir = export_package_dir()
+    if not package_dir.exists():
+        return
+    cutoff = datetime.now(timezone.utc).timestamp() - EXPORT_PACKAGE_TTL.total_seconds()
+    active_paths: set[Path] = set()
+    with EXPORT_JOBS_LOCK:
+        for job in EXPORT_JOBS.values():
+            if job.get('status') in {'queued', 'processing'}:
+                active_paths.add(Path(str(job['path'])))
+        stale_jobs = [job_id for job_id, job in EXPORT_JOBS.items() if job.get('status') in {'ready', 'failed'} and float(job.get('finished_at', 0)) < cutoff]
+        for job_id in stale_jobs:
+            EXPORT_JOBS.pop(job_id, None)
+    for path in package_dir.iterdir():
+        if path in active_paths or path.stat().st_mtime >= cutoff:
+            continue
+        if path.is_file():
+            path.unlink(missing_ok=True)
+
+
+def _run_export_job(job_id: str, target: str) -> None:
+    with EXPORT_JOBS_LOCK:
+        job = EXPORT_JOBS.get(job_id)
+        if not job:
+            return
+        job['status'] = 'processing'
+    destination = Path(str(job['path']))
+    partial_path = destination.with_suffix('.part')
+    try:
+        filename = build_export_archive_file(target, partial_path)
+        partial_path.replace(destination)
+        with EXPORT_JOBS_LOCK:
+            job.update({'status': 'ready', 'filename': filename, 'size': destination.stat().st_size, 'finished_at': datetime.now(timezone.utc).timestamp()})
+    except Exception as exc:
+        partial_path.unlink(missing_ok=True)
+        destination.unlink(missing_ok=True)
+        with EXPORT_JOBS_LOCK:
+            job.update({'status': 'failed', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
+
+
+def start_export_job(target: str) -> dict[str, Any]:
+    """Start a disk-backed ZIP build that continues independently of the page."""
+    filename = export_archive_filename(target)
+    _cleanup_expired_export_packages()
+    package_dir = export_package_dir()
+    package_dir.mkdir(parents=True, exist_ok=True)
+    job_id = uuid4().hex
+    destination = package_dir / f'{job_id}.zip'
+    job = {
+        'id': job_id,
+        'status': 'queued',
+        'filename': filename,
+        'path': str(destination),
+        'created_at': datetime.now(timezone.utc).timestamp(),
+    }
+    with EXPORT_JOBS_LOCK:
+        EXPORT_JOBS[job_id] = job
+    Thread(target=_run_export_job, args=(job_id, target), name=f'export-{job_id[:8]}', daemon=True).start()
+    return job
+
+
+def export_job_payload(job_id: str) -> dict[str, Any] | None:
+    with EXPORT_JOBS_LOCK:
+        job = EXPORT_JOBS.get(job_id)
+        if not job:
+            return None
+        payload = {key: value for key, value in job.items() if key not in {'path'}}
+    if payload['status'] == 'ready':
+        payload['download_url'] = f'/admin/import-export/export/jobs/{job_id}/download'
+    return payload
 
 
 def _safe_extract_archive(archive: zipfile.ZipFile, destination: Path) -> None:
@@ -3115,16 +3230,50 @@ def admin_panel(request: Request, user: SessionUser = Depends(admin_user)) -> HT
 def export_admin_package(
     export_target: str = Query(...),
     user: SessionUser = Depends(admin_user),
-) -> Response:
+) -> FileResponse:
     try:
-        content, filename = build_export_archive(export_target)
+        _cleanup_expired_export_packages()
+        destination = export_package_dir() / f'legacy-{uuid4().hex}.zip'
+        filename = build_export_archive_file(export_target, destination)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return Response(
-        content=content,
-        media_type='application/zip',
-        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
-    )
+    return FileResponse(destination, filename=filename, media_type='application/zip')
+
+
+@app.post('/admin/import-export/export/jobs')
+def create_admin_export_job(
+    export_target: str = Form(...),
+    user: SessionUser = Depends(admin_user),
+) -> JSONResponse:
+    try:
+        job = start_export_job(export_target)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return JSONResponse({
+        'job_id': job['id'],
+        'status': job['status'],
+        'status_url': f"/admin/import-export/export/jobs/{job['id']}",
+    })
+
+
+@app.get('/admin/import-export/export/jobs/{job_id}')
+def get_admin_export_job(job_id: str, user: SessionUser = Depends(admin_user)) -> JSONResponse:
+    if not (payload := export_job_payload(job_id)):
+        raise HTTPException(status_code=404, detail='The export job no longer exists. Start a new export.')
+    return JSONResponse(payload)
+
+
+@app.get('/admin/import-export/export/jobs/{job_id}/download')
+def download_admin_export_job(job_id: str, user: SessionUser = Depends(admin_user)) -> FileResponse:
+    if not (payload := export_job_payload(job_id)):
+        raise HTTPException(status_code=404, detail='The export job no longer exists. Start a new export.')
+    if payload['status'] != 'ready':
+        raise HTTPException(status_code=409, detail='The export package is still being prepared.')
+    with EXPORT_JOBS_LOCK:
+        path = Path(str(EXPORT_JOBS[job_id]['path']))
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail='The prepared export package is no longer available.')
+    return FileResponse(path, filename=str(payload['filename']), media_type='application/zip')
 
 
 @app.post('/admin/import-export/inspect')

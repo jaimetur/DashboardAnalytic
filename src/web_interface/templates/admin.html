@@ -245,7 +245,7 @@
     {% if import_export_notice %}<div class="alert import-export-notice">{{ import_export_notice }}</div>{% endif %}
     {% if import_export_error %}<div class="alert import-export-error">{{ import_export_error }}</div>{% endif %}
     <div class="import-export-grid">
-      <form class="form-stack" action="/admin/import-export/export" method="get" data-loading-label="Preparing export package" data-loading-copy="Please wait while Dashboard Analytic creates the selected export package." data-download-form="1">
+      <form class="form-stack" action="/admin/import-export/export/jobs" method="post" data-export-package-form data-loading-label="Preparing export package" data-loading-copy="Please wait while Dashboard Analytic creates the selected export package. You can keep this page open while it runs.">
         <h3>Export</h3>
         <label>Content to export
           <select name="export_target" aria-label="Content to export">

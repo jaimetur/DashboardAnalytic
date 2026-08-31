@@ -31,6 +31,7 @@
 - Added package preflight warnings and explicit confirmation before Import/Export overwrites configuration, shared templates or a same-named workspace.
 - Removed combined-CDR cleanup from Admin page load; it now runs after dataset deletion or from Database Management's **Clean orphaned rows** action.
 - Improved generated PowerPoint charts with larger legends, labels and axis ticks; hierarchical grouping now keeps child dimensions nested below their parent, and CDF campaign lines increase in width from oldest to newest.
+- Made Admin ZIP exports disk-backed background jobs with direct, resumable browser downloads, selective compression for already-compressed files and 24-hour cleanup of temporary packages; this supports very large workspaces without loading the archive into browser or server memory.
 
 #### 🐛 Bug fixes:
 - Fixed catalogue defaults, deletion protection, editor selection, grouping semantics and reporting placeholder/chart generation.

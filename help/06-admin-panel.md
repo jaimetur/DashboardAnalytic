@@ -33,7 +33,7 @@ Choose a stored template in the editor picker, then select **Edit**. The editabl
 
 ## Import/Export
 
-**Import/Export**, below the Slides Templates Editor, creates portable ZIP packages and detects their type automatically during import.
+**Import/Export**, below Database Management, creates portable ZIP packages and detects their type automatically during import. Exports are prepared as background jobs in `data/transfer-packages/`; the browser starts a direct download only once the ZIP is ready, avoiding browser-memory limits for large workspaces. Temporary packages are removed after 24 hours.
 
 - **Only Config** exports application configuration but deliberately excludes `workspace-registry.db`, so importing it preserves the destination deployment's workspace list.
 - **Config + Slides Templates** adds the shared `config/slides-templates/` CSV library.
