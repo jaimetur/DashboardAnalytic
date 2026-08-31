@@ -387,7 +387,6 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
     repository.db_path = workspace.database_path
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
-    STOP_REQUESTS.clear()
     active_workspace = workspace
     if initialize:
         repository.initialize(settings.admin_username, settings.admin_password)
@@ -403,7 +402,6 @@ def close_active_workspace() -> None:
         workspace_registry.close_active(active_workspace.id)
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
-    STOP_REQUESTS.clear()
     active_workspace = None
 
 
@@ -838,17 +836,19 @@ def process_dataset(
     username: str,
     vodafone_mapping_dataset_id: int | None = None,
     three_mapping_dataset_id: int | None = None,
+    task_repository: Repository | None = None,
 ) -> None:
-    dataset = repository.get_dataset(dataset_id)
+    task_repository = task_repository or repository
+    dataset = task_repository.get_dataset(dataset_id)
     if not dataset or not dataset_path.exists():
         clear_stop_request(dataset_id)
         return
     clear_stop_request(dataset_id)
-    repository.update_dataset_profile(dataset_id, status='processing', progress=10, last_error=None)
+    task_repository.update_dataset_profile(dataset_id, status='processing', progress=10, last_error=None)
     try:
         def progress_update(value: int) -> None:
             ensure_not_stopped(dataset_id)
-            repository.update_dataset_profile(dataset_id, progress=max(10, min(95, int(value))))
+            task_repository.update_dataset_profile(dataset_id, progress=max(10, min(95, int(value))))
 
         selected_kind = str(dataset['dataset_kind'] or '').strip().lower()
         forced_dataset_kind = selected_kind if selected_kind in UPLOAD_DATASET_KINDS else None
@@ -859,8 +859,9 @@ def process_dataset(
             forced_dataset_kind=forced_dataset_kind,
             vodafone_mapping_dataset_id=vodafone_mapping_dataset_id,
             three_mapping_dataset_id=three_mapping_dataset_id,
+            task_repository=task_repository,
         )
-        repository.add_log(username, 'process_dataset', json.dumps({
+        task_repository.add_log(username, 'process_dataset', json.dumps({
             'dataset_id': dataset_id,
             'file': dataset_path.name,
             'status': 'ready',
@@ -868,23 +869,23 @@ def process_dataset(
             'three_mapping_dataset_id': three_mapping_dataset_id,
         }))
         if rebuild_result.get('vendor_mapping_error'):
-            repository.add_log(username, 'vendor_mapping_skipped', json.dumps({
+            task_repository.add_log(username, 'vendor_mapping_skipped', json.dumps({
                 'dataset_id': dataset_id,
                 'error': rebuild_result['vendor_mapping_error'],
             }))
     except ProcessingStopped as exc:
-        progress = int((repository.get_dataset(dataset_id) or {}).get('progress') or 0)
-        repository.update_dataset_profile(
+        progress = int((task_repository.get_dataset(dataset_id) or {}).get('progress') or 0)
+        task_repository.update_dataset_profile(
             dataset_id,
             status='stopped',
             progress=max(0, min(99, progress)),
             last_error=str(exc),
             processed_at=now_iso(),
         )
-        repository.add_log(username, 'stop_dataset', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name}))
+        task_repository.add_log(username, 'stop_dataset', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name}))
     except Exception as exc:
-        repository.update_dataset_profile(dataset_id, status='failed', progress=100, last_error=str(exc), processed_at=now_iso())
-        repository.add_log(username, 'process_dataset_failed', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name, 'error': str(exc)}))
+        task_repository.update_dataset_profile(dataset_id, status='failed', progress=100, last_error=str(exc), processed_at=now_iso())
+        task_repository.add_log(username, 'process_dataset_failed', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name, 'error': str(exc)}))
     finally:
         clear_stop_request(dataset_id)
 
@@ -905,6 +906,9 @@ def enqueue_dataset_processing(
     for key in stale_dataset_keys:
         DATAFRAME_CACHE.pop(key, None)
     repository.update_dataset_profile(dataset_id, status='queued', progress=0, last_error=None, processed_at=None)
+    # BackgroundTasks runs after the response is sent. Capture the workspace
+    # database now, rather than resolving the mutable active workspace later.
+    task_repository = Repository(Path(repository.db_path))
     background_tasks.add_task(
         process_dataset,
         dataset_id,
@@ -912,6 +916,7 @@ def enqueue_dataset_processing(
         username,
         vodafone_mapping_dataset_id,
         three_mapping_dataset_id,
+        task_repository,
     )
 
 
@@ -922,7 +927,9 @@ def rebuild_dataset_artifacts(
     forced_dataset_kind: str | None = None,
     vodafone_mapping_dataset_id: int | None = None,
     three_mapping_dataset_id: int | None = None,
+    task_repository: Repository | None = None,
 ) -> dict[str, Any]:
+    task_repository = task_repository or repository
     df = load_dataset(dataset_path, progress_callback=progress_callback)
     if forced_dataset_kind in UPLOAD_DATASET_KINDS:
         df['dataset_kind'] = forced_dataset_kind
@@ -937,18 +944,18 @@ def rebuild_dataset_artifacts(
         if progress_callback:
             progress_callback(52)
         vodafone_mapping = (
-            _reporting_dataset(vodafone_mapping_dataset_id, 'mapping_vodafone')
+            _reporting_dataset(vodafone_mapping_dataset_id, 'mapping_vodafone', task_repository)
             if vodafone_mapping_dataset_id else None
         )
         three_mapping = (
-            _reporting_dataset(three_mapping_dataset_id, 'mapping_three')
+            _reporting_dataset(three_mapping_dataset_id, 'mapping_three', task_repository)
             if three_mapping_dataset_id else None
         )
         try:
             df = assign_cdr_vendors(
                 df,
-                _reporting_frame(vodafone_mapping['id']) if vodafone_mapping else None,
-                _reporting_frame(three_mapping['id']) if three_mapping else None,
+                _reporting_frame(vodafone_mapping['id'], task_repository) if vodafone_mapping else None,
+                _reporting_frame(three_mapping['id'], task_repository) if three_mapping else None,
             )
             auto_vendor_mapping_applied = True
         except Exception as exc:
@@ -956,21 +963,21 @@ def rebuild_dataset_artifacts(
             # an otherwise valid CDR unusable in Workspace or Dashboard.
             auto_vendor_mapping_error = str(exc)
     store_cached_dataset_frame(dataset_path, df)
-    repository.replace_dataset_rows(dataset_id, df)
+    task_repository.replace_dataset_rows(dataset_id, df)
     if dataset_kind in CDR_DATASET_KINDS:
-        repository.replace_reporting_rows(dataset_id, dataset_kind, df)
+        task_repository.replace_reporting_rows(dataset_id, dataset_kind, df)
     if progress_callback:
         progress_callback(62)
-    repository.update_dataset_profile(dataset_id, progress=62, dataset_kind=dataset_kind)
+    task_repository.update_dataset_profile(dataset_id, progress=62, dataset_kind=dataset_kind)
     summary = summarise_dataset(df)
     if progress_callback:
         progress_callback(72)
-    repository.update_dataset_profile(dataset_id, progress=72)
+    task_repository.update_dataset_profile(dataset_id, progress=72)
     available_metrics = derive_available_metrics(df)
     analysis = build_analysis(df, {'aggregation': 'all', 'extra_filters': {}}, '')
     if progress_callback:
         progress_callback(84)
-    repository.update_dataset_profile(dataset_id, progress=84)
+    task_repository.update_dataset_profile(dataset_id, progress=84)
     profile_df = restrict_frame_to_metric(df, analysis.selected_metric)
     filter_options = derive_filter_options(profile_df)
     available_aggregations = derive_available_aggregations(filter_options)
@@ -984,7 +991,7 @@ def rebuild_dataset_artifacts(
         and not df.empty
         and df['vendor'].fillna('').astype(str).str.strip().ne('').all()
     )
-    repository.update_dataset_profile(
+    task_repository.update_dataset_profile(
         dataset_id,
         status='ready',
         progress=100,
@@ -1500,12 +1507,17 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         for technology, payload in report_catalogs.items()
         for catalogue in payload['catalogues']
     ]
+    if active_workspace:
+        repository.remove_orphaned_dataset_row_tables()
+    admin_datasets = [serialize_dataset_row(dataset) for dataset in repository.list_datasets()] if active_workspace else []
+    add_workspace_vendor_capabilities(admin_datasets)
+    ready_admin_datasets = [dataset for dataset in admin_datasets if dataset['is_ready']]
     dataset_names = {
-        int(dataset['id']): f"{str(dataset['dataset_kind'] or 'Dataset').upper()} · {dataset['file_name']}"
-        for dataset in repository.list_datasets()
-    } if active_workspace else {}
+        int(dataset['id']): str(dataset['file_name'])
+        for dataset in admin_datasets
+    }
     database_table_groups: dict[str, list[dict[str, str]]] = {
-        'Workspace records': [], 'Individual dataset rows': [], 'Combined reporting rows': [], 'Other tables': [],
+        'Workspace records': [], 'Individual dataset rows': [], 'Combined CDR rows': [], 'Other tables': [],
     }
     friendly_tables = {
         'audit_logs': 'Audit log',
@@ -1520,12 +1532,12 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         reporting_match = re.fullmatch(r'reporting_rows_(data|voice|speech)', table_name)
         if dataset_match:
             dataset_id = int(dataset_match.group(1))
-            label = f"Dataset {dataset_id} rows · {dataset_names.get(dataset_id, 'source no longer registered')}"
-            database_table_groups['Individual dataset rows'].append({'name': table_name, 'label': label})
+            if dataset_name := dataset_names.get(dataset_id):
+                database_table_groups['Individual dataset rows'].append({'name': table_name, 'label': dataset_name})
         elif reporting_match:
-            database_table_groups['Combined reporting rows'].append({
+            database_table_groups['Combined CDR rows'].append({
                 'name': table_name,
-                'label': f"Combined CDR-{reporting_match.group(1).title()} reporting rows",
+                'label': f"Combined CDR-{reporting_match.group(1).title()}",
             })
         elif table_name in friendly_tables:
             database_table_groups['Workspace records'].append({'name': table_name, 'label': friendly_tables[table_name]})
@@ -1537,7 +1549,9 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         {
             'user': user,
             'users': repository.list_users(),
-            'datasets': repository.list_datasets(),
+            'datasets': admin_datasets,
+            'vodafone_mapping_datasets': [dataset for dataset in ready_admin_datasets if dataset.get('dataset_kind') == 'mapping_vodafone'],
+            'three_mapping_datasets': [dataset for dataset in ready_admin_datasets if dataset.get('dataset_kind') == 'mapping_three'],
             'logs': repository.list_logs(),
             'report_catalogs': report_catalogs,
             'workspace_catalogues': workspace_catalogues,
@@ -1578,6 +1592,8 @@ def describe_workspace_log_entry(log: dict[str, Any]) -> str:
             return f"Stop requested for dataset {details.get('dataset_id')}."
         if log['action'] == 'delete_dataset':
             return f"Dataset {details.get('dataset_id')} deleted."
+        if log['action'] == 'rename_dataset':
+            return f"Dataset {details.get('dataset_id')} renamed to {details.get('file', 'the new file name')}."
         if log['action'] == 'analyze_dataset':
             return f"Analysis requested for dataset {details.get('dataset_id')}."
     return str(log.get('details_text') or log.get('details') or '')
@@ -1729,13 +1745,16 @@ def index(request: Request) -> HTMLResponse:
 
 @app.get('/login', response_class=HTMLResponse)
 def login_page(request: Request) -> HTMLResponse:
+    workspaces = workspace_registry.list()
+    selected_workspace_id = active_workspace.id if active_workspace else workspace_registry.most_recent().id
     return render_template(
         request, 'login.html',
         {
             'error': None,
             'default_access_accounts': build_default_access_accounts(),
-            'workspaces': workspace_registry.list(),
+            'workspaces': workspaces,
             'active_workspace': active_workspace,
+            'selected_workspace_id': selected_workspace_id,
         },
     )
 
@@ -1751,22 +1770,26 @@ def login(
         try:
             activate_workspace(workspace_id)
         except ValueError as exc:
+            workspaces = workspace_registry.list()
             return render_template(
                 request, 'login.html',
                 {
                     'error': str(exc), 'default_access_accounts': build_default_access_accounts(),
-                    'workspaces': workspace_registry.list(), 'active_workspace': active_workspace,
+                    'workspaces': workspaces, 'active_workspace': active_workspace,
+                    'selected_workspace_id': active_workspace.id if active_workspace else workspace_registry.most_recent().id,
                 },
                 status_code=400,
             )
     record = repository.get_user(username)
     if not record or not record.active or not verify_password(password, record.password_hash):
+        workspaces = workspace_registry.list()
         return render_template(
             request,
             'login.html',
             {
                 'error': 'Invalid credentials', 'default_access_accounts': build_default_access_accounts(),
-                'workspaces': workspace_registry.list(), 'active_workspace': active_workspace,
+                'workspaces': workspaces, 'active_workspace': active_workspace,
+                'selected_workspace_id': active_workspace.id if active_workspace else workspace_registry.most_recent().id,
             },
             status_code=401,
         )
@@ -2187,8 +2210,13 @@ def dashboard(
     )
 
 
-def _reporting_dataset(dataset_id: int, expected_kind: str) -> dict[str, Any]:
-    dataset = repository.get_dataset(dataset_id)
+def _reporting_dataset(
+    dataset_id: int,
+    expected_kind: str,
+    task_repository: Repository | None = None,
+) -> dict[str, Any]:
+    task_repository = task_repository or repository
+    dataset = task_repository.get_dataset(dataset_id)
     if not dataset:
         raise HTTPException(status_code=400, detail=f'Selected {expected_kind} CDR was not found.')
     payload = serialize_dataset_row(dataset)
@@ -2207,8 +2235,9 @@ def _reporting_datasets(dataset_ids: list[int], expected_kind: str) -> list[dict
     return [_reporting_dataset(dataset_id, expected_kind) for dataset_id in unique_ids]
 
 
-def _reporting_frame(dataset_id: int) -> pd.DataFrame:
-    return repository.load_dataset_rows(dataset_id, repository.list_dataset_row_columns(dataset_id), {})
+def _reporting_frame(dataset_id: int, task_repository: Repository | None = None) -> pd.DataFrame:
+    task_repository = task_repository or repository
+    return task_repository.load_dataset_rows(dataset_id, task_repository.list_dataset_row_columns(dataset_id), {})
 
 
 def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multivendor: bool) -> list[str]:
@@ -2480,6 +2509,59 @@ async def upload_dataset(
     return RedirectResponse(f'/workspace?dataset_id={queued_dataset_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.post('/admin/datasets/{dataset_id}/rename')
+def rename_dataset_file(
+    dataset_id: int,
+    file_name: str = Form(...),
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    dataset_row = repository.get_dataset(dataset_id)
+    if not dataset_row:
+        raise HTTPException(status_code=404, detail='Dataset not found.')
+    dataset = serialize_dataset_row(dataset_row)
+    if dataset['status'] in {'queued', 'processing'}:
+        raise HTTPException(status_code=400, detail='A dataset cannot be renamed while it is queued or processing.')
+
+    new_name = file_name.strip()
+    old_path = Path(dataset['stored_path'])
+    if not new_name or new_name in {'.', '..'} or '/' in new_name or '\\' in new_name or Path(new_name).name != new_name:
+        raise HTTPException(status_code=400, detail='Enter a file name without folders or path separators.')
+    if Path(new_name).suffix.lower() != old_path.suffix.lower():
+        raise HTTPException(status_code=400, detail='Keep the original file extension when renaming a dataset.')
+    if not old_path.exists():
+        raise HTTPException(status_code=400, detail='The source file is missing, so this dataset cannot be renamed.')
+
+    new_path = old_path.with_name(new_name)
+    if new_path != old_path and new_path.exists():
+        raise HTTPException(status_code=400, detail='A file with that name already exists in this workspace.')
+    if new_path == old_path:
+        return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+
+    try:
+        old_path.rename(new_path)
+        try:
+            repository.rename_dataset_file(dataset_id, new_name, str(new_path))
+        except Exception:
+            new_path.rename(old_path)
+            raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f'Unable to rename the dataset file: {exc}') from exc
+
+    # Cache keys include file metadata, which is no longer available at the
+    # old path after the move. Clear both caches so no view can retain the
+    # previous source-file label or path.
+    ANALYSIS_CACHE.clear()
+    DATAFRAME_CACHE.clear()
+    repository.add_log(user.username, 'rename_dataset', json.dumps({
+        'dataset_id': dataset_id,
+        'previous_file': dataset['file_name'],
+        'file': new_name,
+    }))
+    return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+
+
 @app.post('/dashboard/retry/{dataset_id}')
 def retry_dataset(dataset_id: int, background_tasks: BackgroundTasks, user: SessionUser = Depends(current_user)) -> Response:
     dataset = repository.get_dataset(dataset_id)
@@ -2500,6 +2582,7 @@ def map_dataset_vendors(
     cdr_dataset_id: int | None = Form(default=None),
     vodafone_mapping_dataset_id: int | None = Form(default=None),
     three_mapping_dataset_id: int | None = Form(default=None),
+    return_to: str = Form(''),
     user: SessionUser = Depends(current_user),
 ) -> Response:
     selected_ids = list(dict.fromkeys(cdr_dataset_ids or ([] if cdr_dataset_id is None else [cdr_dataset_id])))
@@ -2547,7 +2630,8 @@ def map_dataset_vendors(
         'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
         'three_mapping_dataset_id': three_mapping_dataset_id,
     }))
-    return RedirectResponse(f'/workspace?dataset_id={selected_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
+    destination = '/admin' if return_to == 'admin' else f'/workspace?dataset_id={selected_ids[0]}'
+    return RedirectResponse(destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
 def _validate_clearable_vendor_datasets(dataset_ids: list[int]) -> list[dict[str, Any]]:
@@ -2570,6 +2654,7 @@ def clear_vendor_datasets(
     background_tasks: BackgroundTasks,
     cdr_dataset_ids: Annotated[list[int] | None, Form()] = None,
     cdr_dataset_id: int | None = Form(default=None),
+    return_to: str = Form(''),
     user: SessionUser = Depends(current_user),
 ) -> Response:
     selected_ids = list(dict.fromkeys(cdr_dataset_ids or ([] if cdr_dataset_id is None else [cdr_dataset_id])))
@@ -2579,7 +2664,8 @@ def clear_vendor_datasets(
     for dataset_id in selected_ids:
         enqueue_vendor_clearing(background_tasks, dataset_id, user.username)
     repository.add_log(user.username, 'queue_vendor_clearing', json.dumps({'dataset_ids': selected_ids}))
-    return RedirectResponse(f'/workspace?dataset_id={selected_ids[0]}', status_code=status.HTTP_303_SEE_OTHER)
+    destination = '/admin' if return_to == 'admin' else f'/workspace?dataset_id={selected_ids[0]}'
+    return RedirectResponse(destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/workspace/clear-vendors/{dataset_id}')
@@ -2611,7 +2697,7 @@ def stop_dataset(dataset_id: int, user: SessionUser = Depends(current_user)) -> 
 
 
 @app.post('/dashboard/delete/{dataset_id}')
-def delete_dataset(dataset_id: int, user: SessionUser = Depends(current_user)) -> Response:
+def delete_dataset(dataset_id: int, return_to: str = Form(''), user: SessionUser = Depends(current_user)) -> Response:
     dataset = repository.get_dataset(dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail='Dataset not found')
@@ -2634,7 +2720,7 @@ def delete_dataset(dataset_id: int, user: SessionUser = Depends(current_user)) -
     for key in stale_dataset_keys:
         DATAFRAME_CACHE.pop(key, None)
     repository.add_log(user.username, 'delete_dataset', json.dumps({'dataset_id': dataset_id, 'file': deleted['file_name']}))
-    return RedirectResponse('/workspace', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse('/admin' if return_to == 'admin' else '/workspace', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/dashboard/analyze', response_class=HTMLResponse)

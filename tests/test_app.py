@@ -7,6 +7,7 @@ from urllib.parse import quote
 import warnings
 
 import pandas as pd
+from fastapi import BackgroundTasks
 
 from src.modules.auth import hash_password
 from src.version import __release_date__
@@ -290,6 +291,7 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
     assert 'Campaign benchmark' in page.text
     assert 'Manage workspaces' in page.text
     assert 'data-workspace-open disabled>Open</button>' in page.text
+    assert page.text.index('>Campaign benchmark</option>') < page.text.index('>Default Workspace</option>')
     workspace_id = app_module.active_workspace.id
     renamed = client.post('/workspace/rename', data={'workspace_id': workspace_id, 'name': 'Campaign benchmark Q3'})
     assert renamed.status_code == 200
@@ -320,10 +322,37 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
     assert 'Data Ingestion' not in closed_workspace.text
     assert 'module-tab-disabled' in closed_workspace.text
     assert client.get('/dashboard', follow_redirects=False).status_code == 303
+    login_page = client.get('/login')
+    assert login_page.text.index('>Campaign benchmark Q3</option>') < login_page.text.index('>Default Workspace</option>')
+    assert '<option value="default" selected>Default Workspace</option>' in login_page.text
 
     deleted = client.post('/workspace/delete', data={'workspace_id': workspace_id}, follow_redirects=False)
     assert deleted.status_code == 303
     assert app_module.workspace_registry.get(workspace_id) is None
+
+
+def test_queued_import_continues_after_its_workspace_is_closed(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    source_path = app_module.settings.input_dir / 'continue-after-close.csv'
+    source_path.write_bytes(b'market,period,score\nES,2026-Q1,91\n')
+    dataset_id, _ = app_module.repository.add_dataset(source_path.name, str(source_path), 'admin')
+    app_module.repository.update_dataset_profile(dataset_id, dataset_kind='data')
+    workspace_database = app_module.repository.db_path
+
+    tasks = BackgroundTasks()
+    app_module.enqueue_dataset_processing(tasks, dataset_id, source_path, 'admin')
+    closed = client.post('/workspace/close', data={'workspace_id': 'default'}, follow_redirects=False)
+    assert closed.status_code == 303
+    assert app_module.active_workspace is None
+
+    queued_task = tasks.tasks[0]
+    queued_task.func(*queued_task.args, **queued_task.kwargs)
+
+    completed = app_module.Repository(workspace_database).get_dataset(dataset_id)
+    assert completed is not None
+    assert completed['status'] == 'ready'
 
 
 def test_admin_panel_is_available_for_admin(client) -> None:
@@ -342,11 +371,15 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
         data={"username": "database-editor", "password": "start123", "role": "user"},
         follow_redirects=False,
     )
+    app_module.repository.replace_dataset_rows(987, pd.DataFrame({"obsolete": ["row"]}))
+    assert app_module.repository.dataset_rows_table_exists(987)
     admin = client.get("/admin")
     assert admin.status_code == 200
-    assert "Databases Management" in admin.text
+    assert "Database Management" in admin.text
     assert 'data-database-table-select' in admin.text
     assert 'value="users"' in admin.text
+    assert 'dataset_rows_987' not in admin.text
+    assert not app_module.repository.dataset_rows_table_exists(987)
 
     users = client.get("/admin/database/table", params={"table": "users", "limit": 100})
     assert users.status_code == 200
@@ -388,6 +421,56 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
     )
     assert deleted.status_code == 200
     assert app_module.repository.get_user("database-editor") is None
+
+
+def test_admin_dataset_management_renames_dataset_file_and_materialised_source_labels(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    upload = client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'data'},
+        files={'dataset_files': ('original-cdr.csv', BytesIO(b'Campaign,LQ\nUK_Q2_SA_2026,3.8\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    assert upload.status_code == 303
+    before = app_module.repository.get_dataset(1)
+    assert before is not None
+    old_path = Path(before['stored_path'])
+    app_module.repository.copy_dataset_rows_to_reporting(1, 'data', ['source_file'])
+
+    renamed = client.post(
+        '/admin/datasets/1/rename', data={'file_name': 'renamed-cdr.csv'}, follow_redirects=False,
+    )
+    assert renamed.status_code == 303
+    after = app_module.repository.get_dataset(1)
+    assert after is not None
+    new_path = Path(after['stored_path'])
+    assert after['file_name'] == 'renamed-cdr.csv'
+    assert new_path.name == 'renamed-cdr.csv'
+    assert not old_path.exists()
+    assert new_path.exists()
+
+    with app_module.repository.connection() as conn:
+        dataset_source = conn.execute('SELECT DISTINCT source_file FROM "dataset_rows_1"').fetchall()
+        reporting_source = conn.execute(
+            'SELECT DISTINCT source_file FROM "reporting_rows_data" WHERE dataset_id = 1'
+        ).fetchall()
+    assert [row['source_file'] for row in dataset_source] == ['renamed-cdr.csv']
+    assert [row['source_file'] for row in reporting_source] == ['renamed-cdr.csv']
+
+    workspace = client.get('/workspace')
+    assert 'data-dataset-name-editor' not in workspace.text
+    admin = client.get('/admin')
+    assert 'Datasets Management' in admin.text
+    assert '<th>Uploaded</th>' in admin.text
+    assert '<th>Updated</th>' in admin.text
+    assert admin.text.index('<th>Uploaded</th>') < admin.text.index('<th>Updated</th>')
+    assert 'dataset-rename-1' in admin.text
+    assert 'data-admin-dataset-rename-save' in admin.text
+    assert 'Save name' not in admin.text
+    assert 'Show Dashboard' in admin.text
+    assert 'Preview' in admin.text
 
 
 def test_dashboard_upload_accepts_multiple_files(client) -> None:

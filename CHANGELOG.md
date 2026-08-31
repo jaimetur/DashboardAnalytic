@@ -19,6 +19,7 @@
 - Unified NSA, SA, single-vendor and multivendor generation on the master `Template_CDR_analysis.pptx`; catalogues create slides and populate layout placeholders. NSA/SA catalogues were also aligned with the NetCheck methodology.
 - Improved multivendor reporting with persisted VFUK/3UK GCID and Vendor calculations, UK operator-name normalisation at render time, and validation that all selected CDRs are mapped.
 - Accelerated repeated multi-campaign reports with shared SQLite CDR tables synchronised by `dataset_id`; reports query only the fields required by the selected template.
+- Added Admin Datasets Management with safe dataset-file renaming, source-path synchronisation and operational actions.
 - Improved previews and the database editor with materialised GCID, source-preserving fields, searchable Excel-style multi-value filters, contextual values across all pages and configurable row limits.
 - Expanded the Slides Templates Editor with contextual help, Filter Builder, searchable selections, fixed columns, row controls and scroll guidance.
 - Simplified template persistence: SQLite stores only each CSV's exact name, type and default state. Names preserve case and spaces, and renames/duplicates keep files and defaults in sync without JSON registries or slug aliases.
@@ -30,6 +31,7 @@
 - Fixed Vendor persistence and preview ordering, and kept CDRs usable after failed mapping while logging the failure.
 - Fixed inline template renames so selectors, URLs and the open editor refresh immediately; aligned template-management controls and feedback dialogs.
 - Fixed Workspace drag-and-drop, cache/profile refreshes, queue action updates and Dashboard filter population/contrast.
+- Fixed queued imports so they retain their originating workspace and continue after closing it or signing out.
 - Preserved original upload dates during reprocessing, separating **Uploaded** from **Updated** and keeping automatic latest-dataset selection stable.
 - Recovered legacy CDRs left failed by Vendor mapping by rebuilding their original source without a mapping.
 - Fixed Help navigation and mobile document overflow.

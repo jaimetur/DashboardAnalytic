@@ -12,6 +12,8 @@ The Workspace accepts CSV, XLSX, XLS and XLSM files. Uploaded data, metadata and
 
 If a status shows an error, correct the source and upload it again. Do not create a report from a failed or incomplete ingestion.
 
+Processing continues on the server after sign-out or after the workspace is closed. Each queued import retains the database of the workspace that received it, so reopening that workspace later shows the updated status. Stopping an import still requires the explicit **Stop** action.
+
 ## Queue, preview and dashboard
 
 The **Data Processing** queue starts with **All Types** selected and can be narrowed to any supported input type. After successful processing, select **Preview** to inspect a read-only sample of 100 rows by default (or a customised value) from the persisted dataset. The preview opens in a new tab and supports text filters plus Excel-style multi-value menus on column headers. CDR previews also provide multi-select Operator, Vendor, RAT/RAT_A, Session Type and Call Status controls, with all available values selected by default. For CDR Data, Voice and Speech inputs, **Show Dashboard** opens KPI analysis directly; mappings and Smart Orchestrator Logs remain available for their dedicated workflows without being sent to the CDR dashboard.

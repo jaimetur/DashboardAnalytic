@@ -103,7 +103,9 @@ class WorkspaceRegistry:
 
     @staticmethod
     def _now() -> str:
-        return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        # Opening several workspaces in quick succession must retain a stable
+        # chronology for the Login default, not collapse to the same second.
+        return datetime.now(timezone.utc).isoformat(timespec='microseconds')
 
     @staticmethod
     def _validate_name(name: str) -> str:
@@ -236,7 +238,7 @@ class WorkspaceRegistry:
 
     def list(self) -> list[Workspace]:
         with self._connection() as conn:
-            rows = conn.execute('SELECT * FROM workspaces ORDER BY last_opened_at DESC, name COLLATE NOCASE').fetchall()
+            rows = conn.execute('SELECT * FROM workspaces ORDER BY name COLLATE NOCASE').fetchall()
         return [self._row_to_workspace(row) for row in rows]
 
     def get(self, workspace_id: str) -> Workspace | None:
@@ -245,10 +247,11 @@ class WorkspaceRegistry:
         return self._row_to_workspace(row) if row else None
 
     def most_recent(self) -> Workspace:
-        workspace = next(iter(self.list()), None)
-        if not workspace:
+        with self._connection() as conn:
+            row = conn.execute('SELECT * FROM workspaces ORDER BY last_opened_at DESC, name COLLATE NOCASE LIMIT 1').fetchone()
+        if not row:
             raise RuntimeError('Workspace registry was not initialized')
-        return workspace
+        return self._row_to_workspace(row)
 
     def active_id(self) -> str | None:
         with self._connection() as conn:
@@ -322,7 +325,11 @@ class WorkspaceRegistry:
                 conn.execute('DELETE FROM workspaces WHERE id = ?', (duplicate.id,))
             shutil.rmtree(target_root, ignore_errors=True)
             raise
-        return duplicate
+        # A duplicate is created but not opened. Do not let it replace the
+        # actual last-opened workspace in Login's default selection.
+        with self._connection() as conn:
+            conn.execute("UPDATE workspaces SET last_opened_at = '' WHERE id = ?", (duplicate.id,))
+        return self.get(duplicate.id)  # type: ignore[return-value]
 
     def rename(self, workspace_id: str, name: str) -> Workspace:
         normalized_name = self._validate_name(name)

@@ -1797,7 +1797,9 @@ if (catalogueImportNotice?.textContent.trim()) {
   });
 }
 
-document.querySelectorAll('form[data-confirm]').forEach((form) => {
+function bindConfirmForm(form) {
+  if (form.dataset.confirmBound === '1') return;
+  form.dataset.confirmBound = '1';
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const accepted = await showConfirmDialog(form.dataset.confirm, {
@@ -1818,7 +1820,84 @@ document.querySelectorAll('form[data-confirm]').forEach((form) => {
       form.submit();
     }
   });
-});
+}
+
+document.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
+
+function sizeAdminDatasetNameColumn(panel = document) {
+  const table = panel.querySelector?.('.admin-datasets-table');
+  const nameColumn = table?.querySelector('[data-admin-dataset-name-column]');
+  const inputs = table?.querySelectorAll('[data-admin-dataset-name-input]');
+  if (!table || !nameColumn || !inputs?.length) return;
+
+  const probe = document.createElement('span');
+  const sample = inputs[0];
+  const styles = window.getComputedStyle(sample);
+  probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${styles.font};letter-spacing:${styles.letterSpacing};`;
+  document.body.appendChild(probe);
+  const longest = Math.max(...Array.from(inputs, (input) => {
+    probe.textContent = input.value;
+    return probe.getBoundingClientRect().width;
+  }));
+  probe.remove();
+  nameColumn.style.width = `${Math.ceil(longest + 82)}px`;
+}
+
+function bindAdminDatasetRenameForm(form) {
+  if (form.dataset.renameBound === '1') return;
+  form.dataset.renameBound = '1';
+  const input = form.querySelector('[data-admin-dataset-name-input]');
+  const save = form.querySelector('[data-admin-dataset-rename-save]');
+  if (!(input instanceof HTMLInputElement) || !(save instanceof HTMLButtonElement)) return;
+  const savedName = input.value;
+
+  input.addEventListener('focus', () => { save.hidden = false; });
+  input.addEventListener('blur', () => {
+    window.setTimeout(() => {
+      if (document.activeElement === input) return;
+      input.value = savedName;
+      save.hidden = true;
+    }, 120);
+  });
+  // Keep focus on the field while the button is pressed so blur does not hide
+  // the confirmation control before its form submission is dispatched.
+  save.addEventListener('mousedown', (event) => event.preventDefault());
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    showLoadingOverlay(
+      'Renaming dataset',
+      'Please wait while the dataset file, path and materialised references are updated.',
+    );
+    try {
+      const response = await fetch(form.action, {
+        method: 'POST', body: new FormData(form), credentials: 'same-origin', redirect: 'follow',
+      });
+      const content = await response.text();
+      if (!response.ok) {
+        let message = `The dataset could not be renamed (status ${response.status}).`;
+        try { message = JSON.parse(content).detail || message; } catch (_error) { /* Use fallback message. */ }
+        throw new Error(message);
+      }
+      const refreshedDocument = new DOMParser().parseFromString(content, 'text/html');
+      const refreshedPanel = refreshedDocument.querySelector('[data-panel-state-key="admin:datasets"]');
+      const currentPanel = form.closest('[data-panel-state-key="admin:datasets"]');
+      if (!refreshedPanel || !currentPanel) throw new Error('The refreshed Datasets Management panel is unavailable.');
+      refreshedPanel.open = currentPanel.open;
+      currentPanel.replaceWith(refreshedPanel);
+      refreshedPanel.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
+      refreshedPanel.querySelectorAll('[data-admin-dataset-rename-form]').forEach(bindAdminDatasetRenameForm);
+      window.requestAnimationFrame(() => sizeAdminDatasetNameColumn(refreshedPanel));
+    } catch (error) {
+      showInfoDialog(error instanceof Error ? error.message : 'The dataset could not be renamed.', {
+        title: 'Dataset Rename Failed', tone: 'error',
+      });
+    } finally {
+      hideLoadingOverlay();
+    }
+  });
+}
+
+document.querySelectorAll('[data-admin-dataset-rename-form]').forEach(bindAdminDatasetRenameForm);
 
 if (filePickerInput && filePickerText) {
   filePickerInput.addEventListener('change', () => {

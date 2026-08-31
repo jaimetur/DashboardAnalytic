@@ -276,6 +276,25 @@ class Repository:
             ).fetchall()
         return [str(row['name']) for row in rows]
 
+    def remove_orphaned_dataset_row_tables(self) -> list[str]:
+        """Remove legacy materialised tables whose dataset record no longer exists."""
+        with self.connection() as conn:
+            dataset_ids = {int(row['id']) for row in conn.execute('SELECT id FROM datasets').fetchall()}
+            table_names = [
+                str(row['name'])
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'dataset_rows_%'"
+                ).fetchall()
+            ]
+            orphaned = [
+                table_name for table_name in table_names
+                if table_name.removeprefix('dataset_rows_').isdigit()
+                and int(table_name.removeprefix('dataset_rows_')) not in dataset_ids
+            ]
+            for table_name in orphaned:
+                conn.execute(f'DROP TABLE {self._quote_identifier(table_name)}')
+        return orphaned
+
     def _database_table_metadata(self, conn: sqlite3.Connection, table_name: str) -> list[sqlite3.Row]:
         return conn.execute(f"PRAGMA table_info({self._quote_identifier(table_name)})").fetchall()
 
@@ -559,6 +578,48 @@ class Repository:
                 (dataset_id,),
             )
             return dataset_id, True
+
+    def rename_dataset_file(self, dataset_id: int, file_name: str, stored_path: str) -> sqlite3.Row:
+        """Update a dataset's source metadata and all materialised source-file labels."""
+        with self.connection() as conn:
+            dataset = conn.execute(
+                "SELECT id, file_name, stored_path FROM datasets WHERE id = ?", (dataset_id,)
+            ).fetchone()
+            if not dataset:
+                raise ValueError('Dataset not found.')
+            duplicate = conn.execute(
+                "SELECT id FROM datasets WHERE stored_path = ? AND id != ?", (stored_path, dataset_id)
+            ).fetchone()
+            if duplicate:
+                raise ValueError('Another dataset already uses that file path.')
+
+            conn.execute(
+                "UPDATE datasets SET file_name = ?, stored_path = ? WHERE id = ?",
+                (file_name, stored_path, dataset_id),
+            )
+
+            def update_source_file(table_name: str, *, scoped_to_dataset: bool) -> None:
+                exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,)
+                ).fetchone()
+                if not exists:
+                    return
+                columns = self._table_columns(conn, table_name)
+                source_column = next((column for column in columns if column.casefold() == 'source_file'), None)
+                if not source_column:
+                    return
+                where_clause = ' WHERE dataset_id = ?' if scoped_to_dataset else ''
+                parameters: tuple[Any, ...] = (file_name, dataset_id) if scoped_to_dataset else (file_name,)
+                conn.execute(
+                    f"UPDATE {self._quote_identifier(table_name)} "
+                    f"SET {self._quote_identifier(source_column)} = ?{where_clause}",
+                    parameters,
+                )
+
+            update_source_file(self.dataset_rows_table_name(dataset_id), scoped_to_dataset=False)
+            for dataset_kind in ('data', 'voice', 'speech'):
+                update_source_file(self.reporting_rows_table_name(dataset_kind), scoped_to_dataset=True)
+            return dataset
 
     def replace_dataset_rows(self, dataset_id: int, df: pd.DataFrame) -> None:
         table_name = self.dataset_rows_table_name(dataset_id)

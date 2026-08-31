@@ -42,7 +42,7 @@
       <label class="login-workspace-field">Workspace
         <select name="workspace_id" required>
           {% for workspace in workspaces %}
-          <option value="{{ workspace.id }}" {% if active_workspace and workspace.id == active_workspace.id %}selected{% endif %}>{{ workspace.name }}</option>
+          <option value="{{ workspace.id }}" {% if workspace.id == selected_workspace_id %}selected{% endif %}>{{ workspace.name }}</option>
           {% endfor %}
         </select>
       </label>

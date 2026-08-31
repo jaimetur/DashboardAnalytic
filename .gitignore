@@ -8,12 +8,6 @@ __pycache__/
 .env.local
 .coverage
 htmlcov/
-data/input/*
-data/output/*
-data/exports/*
-data/workspaces/
-!data/input/.gitkeep
-!data/output/.gitkeep
-!data/exports/.gitkeep
-/config/slides-templates/
-.idea/
+/data/
+/config/
+/.idea/

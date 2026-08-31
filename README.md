@@ -71,6 +71,8 @@ For Vodafone UK and Three, the report takes the first and last Global CI from th
 8. Review KPI cards, scorecards, charts, and aggregated tables
 9. Export the current dashboard analysis to Word or PowerPoint if needed, or open **E2E PowerPoint Reporting** to create a template-backed CDR report
 
+An import captures its workspace database when it is queued. It therefore continues in the server after closing that workspace or signing out; reopening the workspace later shows its final status.
+
 ## Supported dataset behavior
 
 ### Automatic ingestion

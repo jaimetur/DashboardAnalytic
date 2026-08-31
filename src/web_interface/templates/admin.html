@@ -239,7 +239,7 @@
     <summary class="collapsible-summary">
       <div>
         <p class="eyebrow">Active workspace database</p>
-        <h2>Databases Management</h2>
+        <h2>Database Management</h2>
       </div>
       <div class="summary-inline-actions">
         {% if active_workspace %}<span class="pill">{{ active_workspace.name }}</span>{% endif %}
@@ -298,17 +298,99 @@
     <summary class="collapsible-summary">
       <div>
         <p class="eyebrow">Datasets</p>
-        <h2>Uploaded sources</h2>
+        <h2>Datasets Management</h2>
       </div>
       <span class="collapse-chip">Collapse</span>
     </summary>
     <div class="table-wrap">
-      <table>
-        <thead><tr><th>ID</th><th>Name</th><th>Path</th><th>User</th><th>Uploaded</th></tr></thead>
-        <tbody>{% for row in datasets %}<tr><td>{{ row['id'] }}</td><td>{{ row['file_name'] }}</td><td>{{ row['stored_path'] }}</td><td>{{ row['uploaded_by'] }}</td><td>{{ row['uploaded_at'] }}</td></tr>{% endfor %}</tbody>
+      <table class="admin-datasets-table">
+        <colgroup>
+          <col><col data-admin-dataset-name-column><col data-admin-dataset-path-column><col><col><col><col>
+        </colgroup>
+        <thead><tr><th>ID</th><th>Name</th><th>Path</th><th>User</th><th>Uploaded</th><th>Updated</th><th>Actions</th></tr></thead>
+        <tbody>
+          {% for row in datasets %}
+          <tr>
+            <td>{{ row.id }}</td>
+            <td>
+              <form id="dataset-rename-{{ row.id }}" action="/admin/datasets/{{ row.id }}/rename" method="post" class="admin-dataset-rename-form" data-admin-dataset-rename-form>
+                <input class="table-input" type="text" name="file_name" value="{{ row.file_name }}" size="{{ row.file_name | length }}" required data-admin-dataset-name-input {% if row.status in ['queued', 'processing'] %}disabled title="A dataset cannot be renamed while it is queued or processing."{% endif %}>
+                <button type="submit" class="admin-dataset-rename-save" data-admin-dataset-rename-save aria-label="Save dataset name" title="Save dataset name" hidden>✓</button>
+              </form>
+            </td>
+            <td>{{ row.stored_path }}</td>
+            <td>{{ row.uploaded_by }}</td>
+            <td class="admin-dataset-timestamp">{{ (row.uploaded_at or '').replace('T', ' ').replace(' ', '\n') }}</td>
+            <td class="admin-dataset-timestamp">{{ (row.updated_at or row.uploaded_at or '').replace('T', ' ').replace(' ', '\n') }}</td>
+            <td>
+              <div class="table-actions admin-dataset-actions">
+                {% if row.status == 'ready' %}
+                <a class="ghost-link action-link-preview" href="/workspace/preview/{{ row.id }}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview</a>
+                {% if row.dataset_kind in ['data', 'voice', 'speech'] %}
+                <a class="ghost-link action-link-primary" href="/dashboard?dataset_id={{ row.id }}&input_kind={{ row.dataset_kind }}" data-dashboard-open-link data-dataset-id="{{ row.id }}" data-input-kind="{{ row.dataset_kind }}">Show Dashboard</a>
+                {% endif %}
+                {% if row.can_map_vendors %}
+                <button type="button" class="action-link-map-vendors" data-admin-vendor-map-open data-dataset-id="{{ row.id }}" data-dataset-name="{{ row.file_name }}">Map Vendors</button>
+                {% endif %}
+                {% if row.can_clear_vendors %}
+                <form method="post" action="/workspace/clear-vendors" data-confirm="Clear Vendor mapping for '{{ row.file_name }}'?" data-confirm-title="Clear Vendors" data-confirm-label="Clear Vendors">
+                  <input type="hidden" name="cdr_dataset_id" value="{{ row.id }}">
+                  <input type="hidden" name="return_to" value="admin">
+                  <button type="submit" class="action-link-clear-vendors">Clear Vendors</button>
+                </form>
+                {% endif %}
+                {% endif %}
+                {% if row.status != 'processing' %}
+                <form method="post" action="/dashboard/delete/{{ row.id }}" data-confirm="Delete dataset '{{ row.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
+                  <input type="hidden" name="return_to" value="admin">
+                  <button type="submit" class="danger-button">Delete</button>
+                </form>
+                {% else %}
+                <button type="button" class="danger-button" disabled title="Stop processing before deleting this dataset.">Delete</button>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6">No datasets available in the active workspace.</td></tr>
+          {% endfor %}
+        </tbody>
       </table>
     </div>
   </details>
+
+  <dialog class="vendor-mapping-dialog" data-admin-vendor-mapping-dialog aria-labelledby="admin-vendor-mapping-title">
+    <form method="post" action="/workspace/map-vendors">
+      <input type="hidden" name="cdr_dataset_id" value="" data-admin-vendor-mapping-dataset-id>
+      <input type="hidden" name="return_to" value="admin">
+      <p class="eyebrow">NetCheck CDR</p>
+      <h3 id="admin-vendor-mapping-title">Map Vendors</h3>
+      <p class="lede">Choose the available mapping sources for the selected CDR.</p>
+      <p class="form-note" data-admin-vendor-mapping-dataset-name></p>
+      <div class="vendor-mapping-fields">
+        {% if vodafone_mapping_datasets %}
+        <label>VFUK Multivendor Mapping
+          <select name="vodafone_mapping_dataset_id">
+            <option value="">No VFUK mapping</option>
+            {% for mapping in vodafone_mapping_datasets %}<option value="{{ mapping.id }}"{% if loop.first %} selected{% endif %}>{{ mapping.file_name }}</option>{% endfor %}
+          </select>
+        </label>
+        {% endif %}
+        {% if three_mapping_datasets %}
+        <label>3UK Multivendor Mapping
+          <select name="three_mapping_dataset_id">
+            <option value="">No 3UK mapping</option>
+            {% for mapping in three_mapping_datasets %}<option value="{{ mapping.id }}"{% if loop.first %} selected{% endif %}>{{ mapping.file_name }}</option>{% endfor %}
+          </select>
+        </label>
+        {% endif %}
+      </div>
+      <div class="vendor-mapping-actions">
+        <button type="button" class="ghost-link" data-admin-vendor-map-cancel>Cancel</button>
+        <button type="submit" class="action-link-map-vendors">Map Vendors</button>
+      </div>
+    </form>
+  </dialog>
 
   <details class="panel collapsible-panel" open data-panel-state-key="admin:audit">
     <summary class="collapsible-summary">
@@ -580,6 +662,56 @@
   window.addEventListener('resize', closeFilter);
   previous.addEventListener('click', () => { offset = Math.max(0, offset - pageSize); loadTable(); });
   next.addEventListener('click', () => { offset += pageSize; loadTable(); });
+})();
+</script>
+<script>
+(() => {
+  const dialog = document.querySelector('[data-admin-vendor-mapping-dialog]');
+  const datasetId = dialog?.querySelector('[data-admin-vendor-mapping-dataset-id]');
+  const datasetName = dialog?.querySelector('[data-admin-vendor-mapping-dataset-name]');
+  if (!dialog || !datasetId || !datasetName) return;
+
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest?.('[data-admin-vendor-map-open]');
+    if (!button) return;
+    datasetId.value = button.dataset.datasetId || '';
+    datasetName.textContent = button.dataset.datasetName || '';
+    dialog.showModal();
+  });
+  dialog.querySelector('[data-admin-vendor-map-cancel]')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    dialog.close();
+  });
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+})();
+</script>
+<script>
+(() => {
+  const table = document.querySelector('.admin-datasets-table');
+  const nameColumn = table?.querySelector('[data-admin-dataset-name-column]');
+  const inputs = table?.querySelectorAll('[data-admin-dataset-name-input]');
+  if (!table || !nameColumn || !inputs?.length) return;
+
+  const sizeNameColumn = () => {
+    const probe = document.createElement('span');
+    const sample = inputs[0];
+    const styles = window.getComputedStyle(sample);
+    probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${styles.font};letter-spacing:${styles.letterSpacing};`;
+    document.body.appendChild(probe);
+    const longest = Math.max(...Array.from(inputs, (input) => {
+      probe.textContent = input.value;
+      return probe.getBoundingClientRect().width;
+    }));
+    probe.remove();
+    // Text width plus input padding, the overlaid check and a small visual
+    // buffer so the widest filename is never clipped at the end.
+    nameColumn.style.width = `${Math.ceil(longest + 82)}px`;
+  };
+
+  window.requestAnimationFrame(sizeNameColumn);
+  window.addEventListener('resize', sizeNameColumn);
 })();
 </script>
 {% endblock %}
