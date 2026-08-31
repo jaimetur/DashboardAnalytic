@@ -1477,7 +1477,7 @@ def test_admin_imports_report_catalogue_and_synchronizes_help(client, tmp_path, 
     monkeypatch.setattr(app_module, 'REPORT_CATALOGUE_DOCUMENT', help_document)
     content = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,Completed Call Ratio,Voice quality,Title and 1 column + Comments,Completed call ratio,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Completed/Dropped/Failed,Call Family = VoLTE,Operator,Campaign\n'
+        + '\n8,Completed Call Ratio,Voice quality,Title and 1 column + Comments,Completed call ratio,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Call Family = VoLTE,Operator,Campaign,Completed/Dropped/Failed,\n'
     ).encode('utf-8')
 
     response = client.post(
@@ -1493,7 +1493,7 @@ def test_admin_imports_report_catalogue_and_synchronizes_help(client, tmp_path, 
 
     exported = client.get('/admin/report-catalogues/nsa/export')
     assert exported.status_code == 200
-    assert exported.content == content.rstrip(b'\n') + b',Top\n'
+    assert exported.content == content.rstrip(b'\n').rstrip(b',') + b',Top\n'
 
     confirmation = client.get('/admin?catalogue_notice=Imported%20Test%20baseline%20%28NSA%29.')
     assert 'data-catalogue-import-notice' in confirmation.text
@@ -1534,8 +1534,8 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     help_document = tmp_path / 'powerpoint-reporting.md'
     help_document.write_text('# Reporting\n\n<!-- SLIDES_TEMPLATES:START -->\nold\n<!-- SLIDES_TEMPLATES:END -->\n', encoding='utf-8')
     monkeypatch.setattr(app_module, 'REPORT_CATALOGUE_DOCUMENT', help_document)
-    first = (','.join(CATALOG_HEADERS) + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n').encode('utf-8')
-    second = (','.join(CATALOG_HEADERS) + '\n8,Second,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n').encode('utf-8')
+    first = (','.join(CATALOG_HEADERS) + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n').encode('utf-8')
+    second = (','.join(CATALOG_HEADERS) + '\n8,Second,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n').encode('utf-8')
 
     for name, content in [('Baseline Q4', first), ('Updated Q4', second)]:
         response = client.post(
@@ -1581,11 +1581,16 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert '<optgroup label="Chart types">' in editor.text
     assert '<optgroup label="CDR fields">' in editor.text
 
-    edited = (','.join(CATALOG_HEADERS) + '\n8,Edited,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n')
+    edited = (
+        ','.join(CATALOG_HEADERS)
+        + '\n9,Late,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,Right\n'
+        + '\n8,Edited,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,Right\n'
+    )
     saved = client.post('/admin/report-catalogues/nsa/Baseline%20Q4/save', data={'catalogue_content': edited}, follow_redirects=False)
     assert saved.status_code == 303
     saved_editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=Baseline%20Q4')
     assert '>Edited</td>' in saved_editor.text
+    assert saved_editor.text.index('>Edited</td>') < saved_editor.text.index('>Late</td>')
 
     activated = client.post('/admin/report-catalogues/nsa/Baseline%20Q4/activate', follow_redirects=False)
     assert activated.status_code == 303
@@ -1630,7 +1635,7 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client, tmp_path, m
     monkeypatch.setattr(app_module, 'REPORT_CATALOGUE_DOCUMENT', help_document)
     content = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n'
+        + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
     ).encode('utf-8')
     imported = client.post(
         '/admin/report-catalogues/nsa',
@@ -1670,7 +1675,7 @@ def test_admin_duplicates_template_using_the_source_template_name(client) -> Non
     login(client)
     content = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n'
+        + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
     ).encode('utf-8')
     imported = client.post(
         '/admin/report-catalogues/nsa',
@@ -1707,7 +1712,7 @@ def test_template_registry_reconciles_an_unambiguous_manual_csv_rename(client) -
     login(client)
     content = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n'
+        + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
     ).encode('utf-8')
     for name in ('First template', 'Second template'):
         response = client.post(
@@ -1735,7 +1740,7 @@ def test_admin_importer_selects_template_type_and_moves_a_named_template(client)
     login(client)
     content = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n'
+        + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
     ).encode('utf-8')
     imported_sa = client.post(
         '/admin/slides-templates/import',

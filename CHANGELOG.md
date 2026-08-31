@@ -34,11 +34,17 @@
 - Removed combined-CDR cleanup from Admin page load; it now runs after dataset deletion or from Database Management's **Clean orphaned rows** action.
 - Improved generated PowerPoint charts with larger legends, labels and axis ticks; hierarchical grouping now keeps child dimensions nested below their parent, and CDF campaign lines increase in width from oldest to newest.
 - Keep multi-level chart categories together even when CDRs are appended campaign by campaign: all child bars now appear beneath one parent label (for example, every Vodafone campaign before O2).
-- Added a `Legend Position` Slides Template column. Charts now place legends at Top, Bottom, Left or Right, using rows for top/bottom and columns for left/right; the existing shared-library templates are explicitly populated as Right for one-column layouts and Bottom for multi-chart layouts.
+- Added `Legend Position` to Slides Templates. Charts now place legends at Top, Bottom, Left or Right, using rows for top/bottom and columns for left/right; the shared-library templates are explicitly populated as Right for one-column layouts and Bottom for multi-chart layouts.
+- Renamed `Grouping_Rows` and `Grouping_Columns` to `Rows Aggregation` and `Column Aggregation`, and placed `Legend` immediately before `Legend Position` in the template CSV and editor.
+- Made Slides Templates Editor organise rows into ordered slide blocks and merge their shared title, subtitle and layout cells while preserving the full per-chart CSV contract on save.
+- Improved Slides Templates Editor readability with merged multi-chart slide numbers, alternating purple slide blocks and matched aggregation-column widths.
+- Let the Slides Templates Editor choose between adding a chart to the current slide or inserting a new, sequentially renumbered slide from the final row of a slide block.
+- Harmonised grouped slide-cell typography with single-chart slides and clarified the add-row dialog actions.
 - Made Admin ZIP exports disk-backed background jobs with direct, resumable browser downloads, selective compression for already-compressed files and 24-hour cleanup of temporary packages; this supports very large workspaces without loading the archive into browser or server memory.
 - Show an immediate upload-progress dialog when importing a ZIP, before a large package reaches the server for overwrite inspection.
 
 #### 🐛 Bug fixes:
+- Fixed Slides Templates Editor row normalisation so grouping, sorting and visual merging retain every chart-definition field instead of clearing them in the browser.
 - Removed the unused `assets/slides-templates` migration path; Slides Templates now use only the configured shared library.
 - Fixed external `CONFIG_DIR`, `DATA_DIR` and `ASSETS_DIR` deployments so startup recognises an already-migrated workspace database instead of attempting to overwrite it with the legacy configuration database.
 - Fixed catalogue defaults, deletion protection, editor selection, grouping semantics and reporting placeholder/chart generation.

@@ -343,6 +343,10 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
     if not catalogue:
         return None
     entries = load_catalog_csv(catalogue['path'], technology)
+    # CSVs are allowed to have been edited out of order. The editor always
+    # presents coherent slide blocks while preserving the chart order inside a
+    # slide when it is saved again.
+    entries = [entry for _index, entry in sorted(enumerate(entries), key=lambda item: (item[1].slide, item[0]))]
     rows = [
         {
             'Slide': entry.slide,
@@ -353,11 +357,11 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
             'CDR source': entry.cdr_source,
             'KPI': entry.kpi,
             'Chart type': entry.chart_type,
+            'Filters': entry.filters,
+            'Rows Aggregation': entry.grouping_rows,
+            'Column Aggregation': entry.grouping_columns,
             'Legend': entry.legend,
             'Legend Position': entry.legend_position.title(),
-            'Filters': entry.filters,
-            'Grouping_Rows': entry.grouping_rows,
-            'Grouping_Columns': entry.grouping_columns,
         }
         for entry in entries
     ]
@@ -3763,6 +3767,7 @@ def save_report_catalogue(
         return render_admin_template(request, user, error='Slides Template not found.', status_code=404)
     try:
         entries = parse_catalog_csv(catalogue_content, technology)
+        entries = [entry for _index, entry in sorted(enumerate(entries), key=lambda item: (item[1].slide, item[0]))]
         catalogue['path'].parent.mkdir(parents=True, exist_ok=True)
         catalogue['path'].write_bytes(catalogue_csv(entries))
         if catalogue['active']:

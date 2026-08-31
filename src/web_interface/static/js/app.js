@@ -423,8 +423,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const catalogueHeaders = Array.from(table.querySelectorAll('thead th[data-catalogue-field], thead th'))
     .map((cell) => cell.textContent.trim())
     .filter((header) => header && header !== 'Row actions');
-  const fieldColumns = new Set(['Filters', 'Grouping_Rows', 'Grouping_Columns', 'Legend']);
-  const groupingColumns = new Set(['Grouping_Rows', 'Grouping_Columns']);
+  const fieldColumns = new Set(['Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend']);
+  const groupingColumns = new Set(['Rows Aggregation', 'Column Aggregation']);
   const optionList = (field, cell) => {
     if (field === 'Layout') return suggestions.layouts || [];
     if (field === 'Chart type') return suggestions.chart_types || [];
@@ -445,8 +445,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (field === 'Legend') return 'Select one or more CDR fields to use as the displayed legend labels. Values are stored as a comma-separated list.';
     if (field === 'Legend Position') return 'Choose where the legend is drawn: Top or Bottom uses a horizontal row; Left or Right uses a vertical column.';
     if (field === 'Filters') return 'Build complete conditions from a processed CDR field, operator and real observed value. Conditions are joined with semicolons (AND), and the cell remains manually editable.';
-    if (field === 'Grouping_Rows') return 'Select one or more dimensions for the chart category axis or table rows. They are appended with ×.';
-    if (field === 'Grouping_Columns') return 'Select one or more dimensions for comparison series or table columns. They are appended with ×.';
+    if (field === 'Rows Aggregation') return 'Select one or more dimensions for the chart category axis or table rows. They are appended with ×.';
+    if (field === 'Column Aggregation') return 'Select one or more dimensions for comparison series or table columns. They are appended with ×.';
     return 'This value can be edited directly. Select Layout, Chart type, Filters or Grouping for contextual suggestions.';
   };
   const selectedSource = (cell) => cell?.closest('tr')?.querySelector('[data-catalogue-field="CDR source"]')?.textContent.trim().toLocaleLowerCase() || '';
@@ -589,12 +589,14 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       if (remove) remove.disabled = rows.length <= 1;
     });
   };
-  const rowValues = (row) => Object.fromEntries(
-    catalogueHeaders.map((header) => [
-      header,
-      row.querySelector(`[data-catalogue-field="${header}"]`)?.textContent.trim() || '',
-    ]),
+  const sharedSlideFields = ['Slide', 'Slide tittle', 'Slide Subtittle', 'Layout'];
+  const sharedValueKey = (field) => `catalogueShared${field.replace(/[^a-z0-9]+/gi, '')}`;
+  const rowValue = (row, field) => (
+    row.querySelector(`[data-catalogue-field="${field}"]`)?.textContent.trim()
+    ?? row.dataset[sharedValueKey(field)]
+    ?? ''
   );
+  const rowValues = (row) => Object.fromEntries(catalogueHeaders.map((header) => [header, rowValue(row, header)]));
   const createActionButton = (label, action, title, className = '') => {
     const button = document.createElement('button');
     button.type = 'button';
@@ -604,20 +606,10 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (className) button.className = className;
     return button;
   };
-  const createCatalogueRow = (sourceRow) => {
-    const source = sourceRow ? rowValues(sourceRow) : {};
+  const createCatalogueRow = (sourceRow, blankChartFields = false) => {
+    const source = sourceRow instanceof HTMLTableRowElement ? rowValues(sourceRow) : (sourceRow || {});
     const retained = ['Slide', 'Slide tittle', 'Slide Subtittle', 'Layout'];
     const row = document.createElement('tr');
-    catalogueHeaders.forEach((header) => {
-      const cell = document.createElement('td');
-      cell.contentEditable = 'true';
-      cell.spellcheck = false;
-      cell.dataset.catalogueField = header;
-      // A new sibling normally shares slide metadata/layout, while its chart
-      // definition starts empty so it cannot silently duplicate a KPI.
-      cell.textContent = retained.includes(header) ? (source[header] || '') : '';
-      row.append(cell);
-    });
     const actions = document.createElement('td');
     actions.className = 'catalogue-row-actions';
     actions.dataset.catalogueRowActions = '';
@@ -628,9 +620,72 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       createActionButton('−', 'delete', 'Delete row', 'catalogue-row-delete'),
     );
     row.append(actions);
+    catalogueHeaders.forEach((header) => {
+      const cell = document.createElement('td');
+      cell.contentEditable = 'true';
+      cell.spellcheck = false;
+      cell.dataset.catalogueField = header;
+      // Only a newly inserted sibling starts with blank chart fields. Rows
+      // rebuilt for grouping, sorting or saving must retain every definition.
+      cell.textContent = blankChartFields && !retained.includes(header) ? '' : (source[header] || '');
+      row.append(cell);
+    });
     return row;
   };
-  table.addEventListener('click', (event) => {
+  const sortCatalogueRows = (rows) => rows.map((row, position) => {
+    const slide = Number(row.Slide);
+    return {row, position, slide: Number.isInteger(slide) && slide > 0 ? slide : null};
+  }).sort((left, right) => {
+    if (left.slide === null && right.slide === null) return left.position - right.position;
+    if (left.slide === null) return 1;
+    if (right.slide === null) return -1;
+    return left.slide - right.slide || left.position - right.position;
+  }).map(({row}) => row);
+  const mergeSlideMetadataCells = () => {
+    const rows = Array.from(table.querySelectorAll('tbody tr'));
+    let start = 0;
+    let slideBlockIndex = 0;
+    while (start < rows.length) {
+      const slide = rowValue(rows[start], 'Slide');
+      let end = start + 1;
+      while (end < rows.length && rowValue(rows[end], 'Slide') === slide) end += 1;
+      const block = rows.slice(start, end);
+      const tone = slideBlockIndex % 2 === 0 ? 'catalogue-slide-tone-purple' : 'catalogue-slide-tone-pink';
+      block.forEach((row) => row.classList.add(tone));
+      if (slide && block.length > 1) {
+        sharedSlideFields.forEach((field) => {
+          const master = block[0].querySelector(`[data-catalogue-field="${field}"]`);
+          if (!master) return;
+          const value = master.textContent.trim();
+          const key = sharedValueKey(field);
+          block.forEach((row) => { row.dataset[key] = value; });
+          master.rowSpan = block.length;
+          master.classList.add('catalogue-shared-slide-cell');
+          master.addEventListener('input', () => {
+            block.forEach((row) => { row.dataset[key] = master.textContent.trim(); });
+          });
+          block.slice(1).forEach((row) => row.querySelector(`[data-catalogue-field="${field}"]`)?.remove());
+        });
+      }
+      start = end;
+      slideBlockIndex += 1;
+    }
+  };
+  const renderCatalogueRows = (rows) => {
+    const body = table.querySelector('tbody');
+    if (!body) return;
+    // Do not pass createCatalogueRow directly to map: map also supplies the
+    // row index, which must never be interpreted as blankChartFields.
+    body.replaceChildren(...sortCatalogueRows(rows).map((row) => createCatalogueRow(row)));
+    mergeSlideMetadataCells();
+    updateRowActionStates();
+  };
+  const normaliseCatalogueRows = () => {
+    const body = table.querySelector('tbody');
+    if (!body) return;
+    renderCatalogueRows(Array.from(body.querySelectorAll('tr')).map(rowValues));
+  };
+  table.addEventListener('click', async (event) => {
     const button = event.target.closest?.('[data-catalogue-row-action]');
     if (!button) return;
     event.preventDefault();
@@ -639,15 +694,27 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (!row || !body) return;
     const action = button.dataset.catalogueRowAction;
     if (action === 'insert') {
-      const inserted = createCatalogueRow(row);
-      body.insertBefore(inserted, row.nextElementSibling);
-      updateRowActionStates();
-      const target = inserted.querySelector('[data-catalogue-field="CDR source"]')
-        || inserted.querySelector('[data-catalogue-field="Slide"]');
-      if (target) {
-        target.focus();
-        selectCell(target);
+      const slide = rowValue(row, 'Slide');
+      const nextRow = row.nextElementSibling;
+      const isLastChartOfSlide = !nextRow || rowValue(nextRow, 'Slide') !== slide;
+      const choice = isLastChartOfSlide ? await showCatalogueInsertChoice(slide) : 'chart';
+      if (!choice) return;
+      if (choice === 'chart') {
+        const inserted = createCatalogueRow(row, true);
+        body.insertBefore(inserted, row.nextElementSibling);
+        normaliseCatalogueRows();
+        return;
       }
+      const currentSlide = Number(slide);
+      if (!Number.isInteger(currentSlide) || currentSlide < 1) return;
+      const rows = Array.from(body.querySelectorAll('tr')).map(rowValues);
+      const rowIndex = Array.from(body.querySelectorAll('tr')).indexOf(row);
+      rows.forEach((candidate) => {
+        const candidateSlide = Number(candidate.Slide);
+        if (Number.isInteger(candidateSlide) && candidateSlide > currentSlide) candidate.Slide = String(candidateSlide + 1);
+      });
+      rows.splice(rowIndex + 1, 0, {Slide: String(currentSlide + 1)});
+      renderCatalogueRows(rows);
       return;
     }
     if (action === 'up' && row.previousElementSibling) {
@@ -666,14 +733,14 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       }
       row.remove();
     }
-    updateRowActionStates();
+    normaliseCatalogueRows();
   });
-  updateRowActionStates();
+  normaliseCatalogueRows();
   reenumerate?.addEventListener('click', () => {
     const body = table.querySelector('tbody');
     if (!body) return;
     const rows = Array.from(body.querySelectorAll('tr')).map((row, position) => {
-      const value = row.querySelector('[data-catalogue-field="Slide"]')?.textContent.trim() || '';
+      const value = rowValue(row, 'Slide');
       const parsed = Number(value);
       return {
         row,
@@ -696,10 +763,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         reenumeratedSlides.set(slide, nextSlide);
         nextSlide += 1;
       }
+      const reenumerated = String(reenumeratedSlides.get(slide));
+      row.dataset[sharedValueKey('Slide')] = reenumerated;
       const slideCell = row.querySelector('[data-catalogue-field="Slide"]');
-      if (slideCell) slideCell.textContent = String(reenumeratedSlides.get(slide));
+      if (slideCell) slideCell.textContent = reenumerated;
     });
-    updateRowActionStates();
+    normaliseCatalogueRows();
   });
   table.addEventListener('focusin', (event) => {
     const cell = selectedCellFromEvent(event);
@@ -736,8 +805,9 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       const text = String(value || '').replace(/\r?\n/g, '\\n');
       return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
     };
+    normaliseCatalogueRows();
     const rows = Array.from(table.querySelectorAll('tbody tr')).map((row) => (
-      Array.from(row.querySelectorAll('[data-catalogue-field]')).map((cell) => escapeCsv(cell.textContent.trim())).join(',')
+      catalogueHeaders.map((header) => escapeCsv(rowValue(row, header))).join(',')
     ));
     contentField.value = [catalogueHeaders.map(escapeCsv).join(','), ...rows].join('\n');
   });
@@ -818,7 +888,7 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
   const convert = form.querySelector('[data-catalogue-convert]');
   const currentHeaders = [
     'Slide', 'Slide tittle', 'Slide Subtittle', 'Layout', 'Chart Tittle', 'CDR source',
-    'KPI', 'Chart type', 'Legend', 'Filters', 'Grouping_Rows', 'Grouping_Columns', 'Legend Position',
+    'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position',
   ];
   const normalizedHeader = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
   const hasCurrentSchema = async (selected) => {
@@ -904,6 +974,12 @@ const confirmTitle = document.getElementById('confirm-title');
 const confirmCopy = document.getElementById('confirm-copy');
 const confirmAccept = document.getElementById('confirm-accept');
 const confirmCancel = document.getElementById('confirm-cancel');
+const catalogueInsertOverlay = document.getElementById('catalogue-insert-overlay');
+const catalogueInsertTitle = document.getElementById('catalogue-insert-title');
+const catalogueInsertCopy = document.getElementById('catalogue-insert-copy');
+const catalogueInsertChart = document.getElementById('catalogue-insert-chart');
+const catalogueInsertSlide = document.getElementById('catalogue-insert-slide');
+const catalogueInsertCancel = document.getElementById('catalogue-insert-cancel');
 const infoOverlay = document.getElementById('info-overlay');
 const infoTitle = document.getElementById('info-title');
 const infoCopy = document.getElementById('info-copy');
@@ -1882,6 +1958,40 @@ function showConfirmDialog(message, options = {}) {
     confirmOverlay.addEventListener('click', handleBackdrop);
     window.addEventListener('keydown', handleKeydown);
     confirmAccept.focus();
+  });
+}
+
+function showCatalogueInsertChoice(slide) {
+  if (!catalogueInsertOverlay || !catalogueInsertTitle || !catalogueInsertCopy || !catalogueInsertChart || !catalogueInsertSlide || !catalogueInsertCancel) {
+    const response = window.prompt(`Slide ${slide}: type chart to add a chart, or slide to add a new slide.`, 'chart');
+    return Promise.resolve(response?.trim().toLocaleLowerCase() === 'slide' ? 'slide' : response?.trim().toLocaleLowerCase() === 'chart' ? 'chart' : null);
+  }
+  catalogueInsertTitle.textContent = `Add after slide ${slide}`;
+  catalogueInsertCopy.textContent = 'Add another chart to this slide, or insert a new blank slide after it. A new slide renumbers the following slides.';
+  catalogueInsertOverlay.hidden = false;
+  document.body.classList.add('loading-active');
+  return new Promise((resolve) => {
+    const close = (choice) => {
+      catalogueInsertOverlay.hidden = true;
+      document.body.classList.remove('loading-active');
+      catalogueInsertChart.removeEventListener('click', addChart);
+      catalogueInsertSlide.removeEventListener('click', addSlide);
+      catalogueInsertCancel.removeEventListener('click', cancel);
+      catalogueInsertOverlay.removeEventListener('click', backdrop);
+      window.removeEventListener('keydown', keyboard);
+      resolve(choice);
+    };
+    const addChart = () => close('chart');
+    const addSlide = () => close('slide');
+    const cancel = () => close(null);
+    const backdrop = (event) => { if (event.target === catalogueInsertOverlay) cancel(); };
+    const keyboard = (event) => { if (event.key === 'Escape') cancel(); };
+    catalogueInsertChart.addEventListener('click', addChart);
+    catalogueInsertSlide.addEventListener('click', addSlide);
+    catalogueInsertCancel.addEventListener('click', cancel);
+    catalogueInsertOverlay.addEventListener('click', backdrop);
+    window.addEventListener('keydown', keyboard);
+    catalogueInsertChart.focus();
   });
 }
 

@@ -28,9 +28,12 @@ TEMPLATE_NAMES = {
 CDR_REPORT_VERSION = "2026-08-31-v11"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
-CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns", "Legend Position")
-PREVIOUS_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns")
-OLDER_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "CDR source", "KPI", "Chart type", "Filters", "Grouping_Rows", "Grouping_Columns")
+CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position")
+# Import the two immediately preceding schemas too, so existing templates remain
+# usable after the aggregation columns were renamed and the legend was repositioned.
+PREVIOUS_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns", "Legend Position")
+OLDER_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns")
+LEGACY_ROWS_COLUMNS_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "CDR source", "KPI", "Chart type", "Filters", "Grouping_Rows", "Grouping_Columns")
 LEGACY_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "CDR source", "KPI", "Chart type", "Filters", "Grouping")
 CATALOG_SOURCE_KINDS = {"cdr-data": "data", "cdr-voice": "voice", "cdr-speech": "speech"}
 CHART_TYPES = {
@@ -63,10 +66,14 @@ CATALOG_HEADER_ALIASES = {
     "legendposition": "Legend Position",
     "filter": "Filters",
     "filters": "Filters",
-    "groupingrows": "Grouping_Rows",
-    "groupingrow": "Grouping_Rows",
-    "groupingcolumns": "Grouping_Columns",
-    "groupingcolumn": "Grouping_Columns",
+    "rowsaggregation": "Rows Aggregation",
+    "rowaggregation": "Rows Aggregation",
+    "groupingrows": "Rows Aggregation",
+    "groupingrow": "Rows Aggregation",
+    "columnaggregation": "Column Aggregation",
+    "columnsaggregation": "Column Aggregation",
+    "groupingcolumns": "Column Aggregation",
+    "groupingcolumn": "Column Aggregation",
     "grouping": "Grouping",
 }
 
@@ -192,7 +199,7 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
         text = content
     reader = csv.DictReader(io.StringIO(text))
     fieldnames = tuple(reader.fieldnames or ())
-    if fieldnames not in {CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_CATALOG_HEADERS}:
+    if fieldnames not in {CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_ROWS_COLUMNS_HEADERS, LEGACY_CATALOG_HEADERS}:
         raise ValueError("The report template must use exactly these columns: " + ", ".join(CATALOG_HEADERS))
     entries: list[CatalogEntry] = []
     for line_number, row in enumerate(reader, start=2):
@@ -216,8 +223,8 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
             legend=(row.get("Legend") or "").strip(),
             legend_position=parse_legend_position((row.get("Legend Position") or "").strip()),
             filters=(row.get("Filters") or "").strip(),
-            grouping_rows=(row.get("Grouping_Rows") or "").strip() or " × ".join(legacy_dimensions[:1]),
-            grouping_columns=(row.get("Grouping_Columns") or "").strip() or " × ".join(legacy_dimensions[1:]),
+            grouping_rows=((row.get("Rows Aggregation") or row.get("Grouping_Rows") or "").strip() or " × ".join(legacy_dimensions[:1])),
+            grouping_columns=((row.get("Column Aggregation") or row.get("Grouping_Columns") or "").strip() or " × ".join(legacy_dimensions[1:])),
         )
         if entry.structural_type:
             if not entry.slide_title:
@@ -248,7 +255,7 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
         if entry.source_kind and entry.chart_type.casefold() not in CHART_TYPES:
             raise ValueError(f"Catalog row {line_number} has unsupported Chart type '{entry.chart_type}'.")
         if entry.source_kind and not (entry.grouping_rows or entry.grouping_columns):
-            raise ValueError(f"Catalog row {line_number} requires Grouping_Rows or Grouping_Columns for a CDR source.")
+            raise ValueError(f"Catalog row {line_number} requires Rows Aggregation or Column Aggregation for a CDR source.")
         try:
             parse_catalog_filters(entry.filters)
             parse_catalog_grouping(entry.grouping_rows)
@@ -308,10 +315,10 @@ def convert_catalog_csv(content: bytes | str, technology: str) -> bytes:
         legacy_grouping = (row.get(header_map.get("Grouping", "")) or "").strip()
         if legacy_grouping:
             dimensions = parse_catalog_grouping(legacy_grouping).dimensions
-            if not converted["Grouping_Rows"]:
-                converted["Grouping_Rows"] = " × ".join(dimensions[:1])
-            if not converted["Grouping_Columns"]:
-                converted["Grouping_Columns"] = " × ".join(dimensions[1:])
+            if not converted["Rows Aggregation"]:
+                converted["Rows Aggregation"] = " × ".join(dimensions[:1])
+            if not converted["Column Aggregation"]:
+                converted["Column Aggregation"] = " × ".join(dimensions[1:])
         converted_rows.append(converted)
 
     # Older templates did not contain a Layout column. Its suitable default is
@@ -360,7 +367,7 @@ def catalogue_markdown(entries: list[CatalogEntry], technology: str) -> str:
     heading = "NSA" if technology == "nsa" else "SA"
     lines = [f"### {heading} template", "", "| " + " | ".join(CATALOG_HEADERS) + " |", "| " + " | ".join("---" for _ in CATALOG_HEADERS) + " |"]
     for entry in entries:
-        values = (str(entry.slide), entry.slide_title, entry.slide_subtitle or "—", entry.layout or "—", entry.chart_title or "—", entry.cdr_source or "—", entry.kpi or "—", entry.chart_type or "—", entry.legend or "—", entry.filters or "—", entry.grouping_rows or "—", entry.grouping_columns or "—", entry.legend_position.title())
+        values = (str(entry.slide), entry.slide_title, entry.slide_subtitle or "—", entry.layout or "—", entry.chart_title or "—", entry.cdr_source or "—", entry.kpi or "—", entry.chart_type or "—", entry.filters or "—", entry.grouping_rows or "—", entry.grouping_columns or "—", entry.legend or "—", entry.legend_position.title())
         lines.append("| " + " | ".join(value.replace("|", "\\|").replace("\n", "<br>") for value in values) + " |")
     return "\n".join(lines)
 
@@ -380,11 +387,11 @@ def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
             "CDR source": entry.cdr_source,
             "KPI": entry.kpi,
             "Chart type": entry.chart_type,
+            "Filters": entry.filters,
+            "Rows Aggregation": entry.grouping_rows,
+            "Column Aggregation": entry.grouping_columns,
             "Legend": entry.legend,
             "Legend Position": entry.legend_position.title(),
-            "Filters": entry.filters,
-            "Grouping_Rows": entry.grouping_rows,
-            "Grouping_Columns": entry.grouping_columns,
         })
     return output.getvalue().encode("utf-8")
 

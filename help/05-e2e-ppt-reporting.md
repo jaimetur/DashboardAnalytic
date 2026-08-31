@@ -50,18 +50,18 @@ The renderer follows the visual grammar of the supplied template for every autom
 
 The technology condition below is always applied before the slide-level filters: NSA contains an ENDC spelling in `RAT`, `RAT_A` or `Sample_RAT_A`; SA contains `NR` in the same fields.
 
-The current CSV schema is `Slide`, `Slide tittle`, `Slide Subtittle`, `Layout`, `Chart Tittle`, `CDR source`, `KPI`, `Chart type`, `Legend`, `Filters`, `Grouping_Rows`, `Grouping_Columns` and `Legend Position`. For automated rows, all chart-definition fields are executable. `Slide Subtittle` is rendered in the second line of a chart slide's title placeholder in smaller blue text; `Chart Tittle` is the chart heading; `Legend` can replace generated captions in comma-separated order. `Legend Position` accepts `Top`, `Bottom`, `Left` or `Right`; top/bottom produce a horizontal legend row, while left/right use a vertical legend column. Blank values default to `Top`.
+The current CSV schema is `Slide`, `Slide tittle`, `Slide Subtittle`, `Layout`, `Chart Tittle`, `CDR source`, `KPI`, `Chart type`, `Filters`, `Rows Aggregation`, `Column Aggregation`, `Legend` and `Legend Position`. For automated rows, all chart-definition fields are executable. `Slide Subtittle` is rendered in the second line of a chart slide's title placeholder in smaller blue text; `Chart Tittle` is the chart heading; `Legend` can replace generated captions in comma-separated order. `Legend Position` accepts `Top`, `Bottom`, `Left` or `Right`; top/bottom produce a horizontal legend row, while left/right use a vertical legend column. Blank values default to `Top`.
 
 Two structural `Chart type` values build non-KPI slides:
 
 - `Title Slide` creates the presentation cover, normally with the `Title Page` layout. `Slide tittle` and `Slide Subtittle` populate the layout's title and subtitle placeholders.
 - `Transition Slide` creates a section divider, normally with `Title Only` or another suitable transition layout. It accepts a title and optional subtitle.
 
-A structural slide occupies exactly one template row and cannot share its slide number with chart rows. Leave `Chart Tittle`, `CDR source`, `KPI`, `Legend`, `Filters`, `Grouping_Rows` and `Grouping_Columns` empty. The former `Not Automated (preserve)` value is retained only for legacy conversion: imported legacy rows are migrated to `Title Slide` or `Transition Slide`, because an empty template has no source slide to preserve.
+A structural slide occupies exactly one template row and cannot share its slide number with chart rows. Leave `Chart Tittle`, `CDR source`, `KPI`, `Filters`, `Rows Aggregation`, `Column Aggregation` and `Legend` empty. The former `Not Automated (preserve)` value is retained only for legacy conversion: imported legacy rows are migrated to `Title Slide` or `Transition Slide`, because an empty template has no source slide to preserve.
 
 Write filters as semicolon-separated expressions such as `Call Family IN (VoLTE, MultiRAB); Direction = DL` or `Type_of_Test = Interactivity`. Supported operators are `IN (...)`, `NOT IN (...)`, `CONTAINS`, `NOT CONTAINS`, `=`, `!=`, `<`, `<=`, `>` and `>=`. Use processed CDR column names (case-insensitive matching is supported). `Call Family` is a supported derived dimension: the NetCheck CDR values `CALL`, `MultiRAB CALL` and `WhatsApp CALL` are normalised to their test families, with the classic-call mode resolving VoLTE or VoNR where available. `Threshold = 1.6` configures `Threshold Stacked Vertical Bars`, while `Buckets = 1,5,20,100` configures `Rate Bucket` for `Distribution Stacked Vertical Bars`.
 
-Write each grouping hierarchy with `×`. `Grouping_Rows` defines the visible category/table-row hierarchy. `Grouping_Columns` defines comparison series and table columns; if it is empty, the renderer uses one `(all)` series and does not duplicate category labels. For distribution charts the final column dimension is the stack/bucket breakdown. This interpretation is consistent across CDF, scatter, mean/median bars, stacked status/failure/distribution bars and tables. `Operator` resolves to the calculated operator-vendor comparison field in multivendor reports. The valid automated chart types are `100% Stacked Vertical Bars`, `Count Stacked Horizontal Bars`, `CDF Line`, `Scatter`, `Table`, `Average Vertical Bars`, `Median Vertical Bars`, `Distribution Stacked Vertical Bars` and `Threshold Stacked Vertical Bars`; the structural types are `Title Slide` and `Transition Slide`.
+Write each aggregation hierarchy with `×`. `Rows Aggregation` defines the visible category/table-row hierarchy. `Column Aggregation` defines comparison series and table columns; if it is empty, the renderer uses one `(all)` series and does not duplicate category labels. For distribution charts the final column dimension is the stack/bucket breakdown. This interpretation is consistent across CDF, scatter, mean/median bars, stacked status/failure/distribution bars and tables. `Operator` resolves to the calculated operator-vendor comparison field in multivendor reports. The valid automated chart types are `100% Stacked Vertical Bars`, `Count Stacked Horizontal Bars`, `CDF Line`, `Scatter`, `Table`, `Average Vertical Bars`, `Median Vertical Bars`, `Distribution Stacked Vertical Bars` and `Threshold Stacked Vertical Bars`; the structural types are `Title Slide` and `Transition Slide`.
 
 The importer accepts the current schema and compatible legacy schemas. If the headers differ, it presents a conversion confirmation: compatible names are migrated, legacy `Grouping` is split into row/column grouping, new optional presentation fields remain blank, and a missing layout is assigned from the number of CDR charts on that slide. Any remaining invalid chart contract is presented in a floating import-failure dialog.
 
@@ -71,14 +71,14 @@ Export the active NSA or SA Slides Template from Admin before editing it. The ta
 
 ### NSA template
 
-| Slide | Slide tittle | Slide Subtittle | Layout | Chart Tittle | CDR source | KPI | Chart type | Legend | Filters | Grouping_Rows | Grouping_Columns | Legend Position |
+| Slide | Slide tittle | Slide Subtittle | Layout | Chart Tittle | CDR source | KPI | Chart type | Filters | Rows Aggregation | Column Aggregation | Legend | Legend Position |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 8 | First | — | Title and 1 column + Comments | — | CDR-Voice | Call_Status | 100% Stacked Vertical Bars | — | — | Operator | Campaign | Top |
+| 8 | First | — | Title and 1 column + Comments | — | CDR-Voice | Call_Status | 100% Stacked Vertical Bars | — | Operator | Campaign | — | Top |
 
 ### SA template
 
-| Slide | Slide tittle | Slide Subtittle | Layout | Chart Tittle | CDR source | KPI | Chart type | Legend | Filters | Grouping_Rows | Grouping_Columns | Legend Position |
+| Slide | Slide tittle | Slide Subtittle | Layout | Chart Tittle | CDR source | KPI | Chart type | Filters | Rows Aggregation | Column Aggregation | Legend | Legend Position |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 8 | First | — | Title and 1 column + Comments | — | CDR-Voice | Call_Status | 100% Stacked Vertical Bars | — | — | Operator | Campaign | Top |
+| 8 | First | — | Title and 1 column + Comments | — | CDR-Voice | Call_Status | 100% Stacked Vertical Bars | — | Operator | Campaign | — | Top |
 
 <!-- SLIDES_TEMPLATES:END -->

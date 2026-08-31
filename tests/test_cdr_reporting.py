@@ -196,7 +196,7 @@ def test_vodafone_mapping_derives_gcid_from_4g_enodeb_and_local_cell() -> None:
 def test_catalogue_csv_requires_the_report_chart_contract_columns() -> None:
     catalogue = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,Completed Call Ratio,Voice quality,Title and 1 column + Comments,Completed call ratio,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Completed/Dropped/Failed,Call Family = VoLTE,Operator,Campaign\n'
+        + '\n8,Completed Call Ratio,Voice quality,Title and 1 column + Comments,Completed call ratio,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Call Family = VoLTE,Operator,Campaign,Completed/Dropped/Failed,\n'
     ).encode('utf-8')
 
     entries = parse_catalog_csv(catalogue, 'nsa')
@@ -213,7 +213,7 @@ def test_catalogue_csv_requires_the_report_chart_contract_columns() -> None:
 def test_catalogue_parses_legend_position_and_accepts_prior_schema() -> None:
     current = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,Quality,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Completed/Dropped/Failed,,Operator,Campaign,Left\n'
+        + '\n8,Quality,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,Completed/Dropped/Failed,Left\n'
     )
     entry = parse_catalog_csv(current, 'nsa')[0]
 
@@ -222,9 +222,9 @@ def test_catalogue_parses_legend_position_and_accepts_prior_schema() -> None:
     with pytest.raises(ValueError, match='Legend Position'):
         parse_legend_position('Centre')
 
-    previous = ','.join(CATALOG_HEADERS[:-1]) + '\n8,Quality,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n'
+    previous = 'Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Legend,Filters,Grouping_Rows,Grouping_Columns' + '\n8,Quality,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n'
     assert parse_catalog_csv(previous, 'nsa')[0].legend_position == 'top'
-    two_columns = ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 2 columns + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign,\n'
+    two_columns = ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 2 columns + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
     assert parse_catalog_csv(two_columns, 'nsa')[0].legend_position == 'top'
 
 
@@ -243,11 +243,11 @@ def test_status_chart_draws_legend_at_the_catalogue_position() -> None:
 
 def test_catalogue_accepts_structural_slides_and_rejects_chart_configuration_on_them() -> None:
     title = parse_catalog_csv(
-        ','.join(CATALOG_HEADERS) + '\n1,Quarterly report,NSA analysis,Title Page,,,,Title Slide,,,,\n',
+        ','.join(CATALOG_HEADERS) + '\n1,Quarterly report,NSA analysis,Title Page,,,,Title Slide,,,,,\n',
         'nsa',
     )[0]
     transition = parse_catalog_csv(
-        ','.join(CATALOG_HEADERS) + '\n2,Voice analysis,Seven cities,Title Only,,,,Transition Slide,,,,\n',
+        ','.join(CATALOG_HEADERS) + '\n2,Voice analysis,Seven cities,Title Only,,,,Transition Slide,,,,,\n',
         'nsa',
     )[0]
 
@@ -255,7 +255,7 @@ def test_catalogue_accepts_structural_slides_and_rejects_chart_configuration_on_
     assert transition.structural_type == 'transition slide'
     with pytest.raises(ValueError, match='cannot define chart, CDR, KPI'):
         parse_catalog_csv(
-            ','.join(CATALOG_HEADERS) + '\n1,Quarterly report,,Title Page,,CDR-Data,LQ,Title Slide,,,,\n',
+            ','.join(CATALOG_HEADERS) + '\n1,Quarterly report,,Title Page,,CDR-Data,LQ,Title Slide,,,,,\n',
             'nsa',
         )
 
@@ -268,7 +268,7 @@ def test_catalogue_filter_and_grouping_contract_is_parsed_and_applied() -> None:
     ]
     assert grouping.dimensions == ('City', 'Operator', 'Campaign')
     entry = parse_catalog_csv(
-        ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,Quality by city,CDR-Speech,LQ,Average Vertical Bars,,Session_Type IN (VoLTE); LQ >= 1.6,City,Operator × Campaign\n',
+        ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,Quality by city,CDR-Speech,LQ,Average Vertical Bars,Session_Type IN (VoLTE); LQ >= 1.6,City,Operator × Campaign,,\n',
         'nsa',
     )[0]
     frame = pd.DataFrame({
@@ -286,7 +286,7 @@ def test_catalogue_filter_and_grouping_contract_is_parsed_and_applied() -> None:
 def test_multivendor_rendering_rewrites_operator_display_and_grouping_but_not_filters() -> None:
     entry = parse_catalog_csv(
         ','.join(CATALOG_HEADERS)
-        + '\n8,Operator comparison,Operator subtitle,Title and 1 column + Comments,Operator chart,CDR-Speech,LQ,Average Vertical Bars,Operator,Operator = Vodafone UK,Operator,Operator × Campaign\n',
+        + '\n8,Operator comparison,Operator subtitle,Title and 1 column + Comments,Operator chart,CDR-Speech,LQ,Average Vertical Bars,Operator = Vodafone UK,Operator,Operator × Campaign,Operator,\n',
         'nsa',
     )[0]
     rendered = prepare_multivendor_catalog_entry(entry)
@@ -313,7 +313,7 @@ def test_multivendor_rendering_rewrites_operator_display_and_grouping_but_not_fi
 
 def test_rows_only_grouping_uses_one_all_series_without_repeating_the_category() -> None:
     entry = parse_catalog_csv(
-        ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,Average Vertical Bars,,,Operator,\n',
+        ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,Average Vertical Bars,,Operator,,,\n',
         'nsa',
     )[0]
     frame = pd.DataFrame({'Operator': ['EE', 'O2'], 'LQ': [3.2, 3.8]})
@@ -326,7 +326,7 @@ def test_rows_only_grouping_uses_one_all_series_without_repeating_the_category()
 
 def test_campaign_grouping_displays_only_year_and_quarter() -> None:
     entry = parse_catalog_csv(
-        ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,Average Vertical Bars,,,Operator,Campaign\n',
+        ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,Average Vertical Bars,,Operator,Campaign,,\n',
         'nsa',
     )[0]
     frame = pd.DataFrame({
@@ -349,7 +349,7 @@ def test_catalogue_filter_contract_supports_not_in_and_not_contains() -> None:
         ('Campaign', 'NOT CONTAINS', ('legacy',)),
     ]
     entry = parse_catalog_csv(
-        ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,Average Vertical Bars,,Session_Type NOT IN (WhatsApp); Campaign NOT CONTAINS legacy,Operator,Campaign\n',
+        ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,Average Vertical Bars,Session_Type NOT IN (WhatsApp); Campaign NOT CONTAINS legacy,Operator,Campaign,,\n',
         'nsa',
     )[0]
     frame = pd.DataFrame({
@@ -362,7 +362,7 @@ def test_catalogue_filter_contract_supports_not_in_and_not_contains() -> None:
 def test_catalogue_call_family_uses_documented_netcheck_session_values() -> None:
     entry = parse_catalog_csv(
         ','.join(CATALOG_HEADERS)
-        + '\n8,Completed Call Ratio,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,"Call Family IN (VoLTE, MultiRAB, WhatsApp)",Call Family,Operator × Campaign\n',
+        + '\n8,Completed Call Ratio,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,"Call Family IN (VoLTE, MultiRAB, WhatsApp)",Call Family,Operator × Campaign,,\n',
         'nsa',
     )[0]
     frame = pd.DataFrame({
@@ -466,7 +466,7 @@ def test_layout_chart_frames_are_always_ordered_by_visual_rows_then_columns() ->
 def test_failure_count_uses_row_and_column_hierarchies_without_flattening() -> None:
     entry = parse_catalog_csv(
         ','.join(CATALOG_HEADERS)
-        + '\n9,Voice failures per Q/city,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,Failed/Dropped,,Call Family × G Level 4,Operator × Campaign\n',
+        + '\n9,Voice failures per Q/city,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,,Call Family × G Level 4,Operator × Campaign,Failed/Dropped,\n',
         'nsa',
     )[0]
     frame = pd.DataFrame({
@@ -515,7 +515,7 @@ def test_catalogue_uses_explicit_title_and_transition_slides() -> None:
 def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None:
     catalogue = (
         ','.join(CATALOG_HEADERS)
-        + '\n8,Completed Call Ratio,Voice quality,Title and 2 rows + Comments right,Status ratio,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Completed/Dropped/Failed,Call Family = VoLTE,Call Family,Operator × Campaign'
+        + '\n8,Completed Call Ratio,Voice quality,Title and 2 rows + Comments right,Status ratio,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Call Family = VoLTE,Call Family,Operator × Campaign,Completed/Dropped/Failed,'
         + '\n8,Completed Call Ratio,Voice quality,Title and 2 rows + Comments right,Setup time,CDR-Voice,Call_Setup_Time,Average Vertical Bars,,Call Family = VoLTE,Call Family,Operator × Campaign\n'
     ).encode('utf-8')
     frames = {
@@ -566,7 +566,7 @@ def test_layout_only_template_builds_one_new_slide_per_catalogue_number(tmp_path
     assert len(Presentation(template).slides) == 0
     catalogue = (
         ','.join(CATALOG_HEADERS)
-        + '\n1,Quarterly report,NSA analysis,Title Page,,,,Title Slide,,,,'
+        + '\n1,Quarterly report,NSA analysis,Title Page,,,,Title Slide,,,,,'
         + '\n2,Voice section,Seven cities,Title Only,,,,Transition Slide,,,,'
         + '\n8,Completed Call Ratio,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n'
     )

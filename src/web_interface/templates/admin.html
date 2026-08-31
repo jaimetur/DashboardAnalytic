@@ -144,7 +144,7 @@
         </tbody>
       </table>
     </div>
-    <p class="form-note">Required columns: Slide, Slide tittle, Slide Subtittle, Layout, Chart Tittle, CDR source, KPI, Chart type, Legend, Filters, Grouping_Rows, Grouping_Columns and Legend Position. Legend Position accepts Top, Bottom, Left or Right. Each slide number creates a new slide from its named layout. Use Title Slide or Transition Slide for structural rows without KPI/chart fields. Grouping_Rows defines chart categories/table rows; Grouping_Columns defines comparison series/table columns. Chart layouts need one image placeholder per CDR row and keep analyst comments blank.</p>
+    <p class="form-note">Required columns: Slide, Slide tittle, Slide Subtittle, Layout, Chart Tittle, CDR source, KPI, Chart type, Filters, Rows Aggregation, Column Aggregation, Legend and Legend Position. Legend Position accepts Top, Bottom, Left or Right. Each slide number creates a new slide from its named layout. Use Title Slide or Transition Slide for structural rows without KPI/chart fields. Rows Aggregation defines chart categories/table rows; Column Aggregation defines comparison series/table columns. Chart layouts need one image placeholder per CDR row and keep analyst comments blank.</p>
   </article>
 
   <article class="panel slides-templates-editor-panel" id="catalogue-editor">
@@ -175,7 +175,7 @@
       </form>
     </section>
     {% if catalogue_editor %}
-    <p class="lede">Select a cell to edit it manually or use the contextual suggestions on the right. Layout and Chart Type replace the selected value; Filters and Grouping fields append the selected columns so that several can be added at once. Use the row controls to insert, reorder or remove unsaved rows.</p>
+    <p class="lede">Rows are ordered by Slide and alternate by slide block. When a slide contains several charts, its shared slide number, title, subtitle and layout are shown once and apply to the full slide block; saving writes those values back to every chart row in the CSV. Select a cell to edit it manually or use the contextual suggestions on the right.</p>
     <div class="slides-templates-editor-grid" data-catalogue-editor data-editor-suggestions='{{ catalogue_editor.suggestions | tojson }}'>
       <form class="slides-templates-editor-table-wrap" action="/admin/report-catalogues/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/save" method="post" data-catalogue-editor-save>
         <input type="hidden" name="catalogue_content" value="" data-catalogue-editor-content>
