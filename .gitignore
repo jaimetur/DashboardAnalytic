@@ -14,5 +14,5 @@ data/exports/*
 !data/input/.gitkeep
 !data/output/.gitkeep
 !data/exports/.gitkeep
-/assets/slides-templates/library
+/assets/slides-templates/
 .idea/
