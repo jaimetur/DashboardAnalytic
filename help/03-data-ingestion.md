@@ -1,20 +1,20 @@
 # Data ingestion
 
-The Workspace accepts CSV, XLSX, XLS and XLSM files. Uploaded data is stored with its metadata in SQLite and its tabular contents are normalised under the configured output directory. Only processed datasets can be analysed or used in reports.
+The Workspace accepts CSV, XLSX, XLS and XLSM files. Uploaded data, metadata and normalised rows are stored in the open workspace only. Its files and SQLite database live under `data/workspaces/<Workspace Name>/`. Only processed datasets can be analysed or used in reports.
 
 ## Standard workflow
 
-1. Sign in and open **Workspace**.
-2. Upload the source file.
-3. Wait until its status is **Processed**.
-4. Confirm the detected type and source name; for a batch, review every proposed type independently.
+1. Sign in and select a workspace, or create one from **Workspaces Management**.
+2. Open the workspace and upload the source file.
+3. Confirm the detected type and source name; for a batch, review every proposed type independently.
+4. Wait until its status is **Processed**.
 5. Open E2E Dashboard or E2E PowerPoint Reporting and select the processed dataset.
 
 If a status shows an error, correct the source and upload it again. Do not create a report from a failed or incomplete ingestion.
 
 ## Queue, preview and dashboard
 
-The **Data Processing** queue starts with **All Types** selected and can be narrowed to any supported input type. After successful processing, select **Preview** to inspect a read-only sample of 100 rows by default (or a customized value) from the persisted dataset. The preview opens in a new tab and can filter displayed columns or rows with comma-separated text terms. CDR previews also provide multi-select Operator, Vendor, RAT/RAT_A, Session Type and Call Status controls, with all available values selected by default. For CDR Data, Voice and Speech inputs, **Show Dashboard** opens KPI analysis directly; mappings and Smart Orchestrator Logs remain available for their dedicated workflows without being sent to the CDR dashboard.
+The **Data Processing** queue starts with **All Types** selected and can be narrowed to any supported input type. After successful processing, select **Preview** to inspect a read-only sample of 100 rows by default (or a customised value) from the persisted dataset. The preview opens in a new tab and supports text filters plus Excel-style multi-value menus on column headers. CDR previews also provide multi-select Operator, Vendor, RAT/RAT_A, Session Type and Call Status controls, with all available values selected by default. For CDR Data, Voice and Speech inputs, **Show Dashboard** opens KPI analysis directly; mappings and Smart Orchestrator Logs remain available for their dedicated workflows without being sent to the CDR dashboard.
 
 ## Excel workbooks
 

@@ -4,7 +4,7 @@
 
 # Dashboard Analytic
 
-Dashboard Analytic is a multi-user web workspace for ingesting CDR-style datasets, profiling them automatically, extracting KPI-ready metrics, visualizing distributions and comparisons, and exporting the resulting analysis to Word or PowerPoint.
+Dashboard Analytic is a multi-user application for ingesting CDR-style datasets, profiling them automatically, visualising KPI analysis and producing dashboard or template-based PowerPoint outputs. Work is isolated in named workspaces.
 
 ## What the tool does today
 
@@ -15,10 +15,12 @@ Dashboard Analytic is a multi-user web workspace for ingesting CDR-style dataset
 - Extracts reusable base metrics such as setup time, duration, quality score, throughput, latency, jitter, packet loss, and handovers
 - Builds dataset profiles and stores their status, progress, filter options, default metrics, and KPI snapshot in SQLite
 - Shows a `Data Processing Queue` with dataset status, progress, and retry actions
-- Opens the workspace immediately from cached metadata, without forcing a full dataset reload on every page refresh
+- Keeps every workspace's datasets, template copies, SQLite database and input/output/export files isolated
+- Opens datasets from cached metadata, without forcing a full dataset reload on every page refresh
 - Applies adaptive filters and loads charts or tables only when the user requests `Update Dashboard`
 - Exports the active dashboard context to Word or PowerPoint
-- Provides read-only dataset previews in a separate tab, including row/column text filters and CDR-specific multi-select filters
+- Provides read-only dataset previews in a separate tab, including Excel-style column filters and CDR-specific multi-select filters
+- Lets administrators inspect, edit, filter and delete rows in the active workspace database
 - Exposes embedded Readme, Changelog and Help viewers rendered from Markdown
 
 ## E2E PowerPoint Reporting
@@ -27,17 +29,17 @@ The top navigation separates the existing **E2E Dashboard** from **E2E PowerPoin
 
 ### Modules
 
-- **NetCheck CDR Reports**: build a template-based PowerPoint from one processed Data, Voice and Speech CDR. Select NSA or SA, stored Slides Templates and, when eligible, a multivendor scope based on vendors already mapped in Workspace.
+- **NetCheck CDR Reports**: build a template-based PowerPoint from one or more processed Data, Voice and Speech CDRs. Select NSA or SA, stored Slides Templates and, when eligible, a multivendor scope based on vendors already mapped in Workspace.
 - **Smart Orchestrator Logs Reports**: visible as the future reporting destination for processed Smart Orchestrator Log sources; automated log reporting is not implemented yet.
 
-Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone and 3UK Three Multivendor Mapping files. It proposes each input type from its filename, including a per-file review when files are uploaded in a batch, and persists the confirmed type before processing. When ready VFUK and/or 3UK mappings already exist, each CDR upload also offers its own optional mapping selectors: the most recent matching mapping is preselected, or **No Map Vendor Column** keeps the CDR unmapped. Either operator mapping can be applied independently. Mapping can also be run later from the CDR action; Reporting deliberately does not perform mapping itself. Vendor assignment follows the provided Vodafone/Three formula, including Vodafone's Ericsson/null mixed-vendor exception. Managed Slides Templates are stored in `assets/slides-templates/` and the PowerPoint master in `assets/ppt-templates/`; their locations can be overridden with `APP_SLIDES_TEMPLATES_DIR` and `APP_PPT_TEMPLATES_DIR`.
+Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone and 3UK Three Multivendor Mapping files. It proposes each input type from its filename, supports per-file review for a batch and persists the confirmed type before processing. When ready VFUK and/or 3UK mappings already exist, CDR uploads also offer optional mapping selectors; mapping can also be run later from the CDR action. Reporting deliberately never maps CDRs itself. Vendor assignment follows the Vodafone/Three formula, including Vodafone's Ericsson/null mixed-vendor exception. Each workspace owns an editable Slides Templates library under `data/workspaces/<Workspace Name>/slides-templates/`; `config/slides-templates/` provides the seed library for new workspaces. The shared PowerPoint master is in `assets/ppt-templates/`.
 
 ### NetCheck CDR Reports workflow
 
 1. Upload the three NetCheck workbooks (Data, Voice and Speech) in **Workspace** and wait until each one is marked `Processed`.
 2. If a multivendor report is required, upload the **VFUK** and/or **3UK** mapping workbooks first. When importing each CDR, select the required mapping(s) from its optional VFUK/3UK selectors, or use **Map Vendors** later from the queue. That dialog preselects the newest ready mapping of each type and can queue several unmapped CDRs together without blocking the workspace. Each CDR stores the calculated Vendor values.
 3. Open **E2E PowerPoint Reporting → NetCheck CDR Reports**.
-4. Select exactly one processed CDR for each required input type.
+4. Select one or more processed CDRs for each required input type. CDRs of the same type are read from the shared reporting table, retaining campaign values for comparisons.
 5. Choose `NSA` or `SA`. NSA sessions are selected when the available RAT field contains `ENDC`; SA sessions are selected when it contains `NR`.
 6. Choose compatible Slides Templates and `Single-vendor` or `Multivendor`. Multivendor is enabled only when all three selected Data, Voice and Speech CDRs have a saved vendor mapping.
 7. Generate the PowerPoint report. The run stores its selected datasets, technology, scope and Slides Template in SQLite for auditability. Generated filenames use `yyyymmdd-hhmm`.
@@ -59,12 +61,12 @@ For Vodafone UK and Three, the report takes the first and last Global CI from th
 
 ## Current UI workflow
 
-1. Open the web workspace and sign in
-2. Upload a source file in `Data Ingestion`
-3. The dataset is queued, processed, and profiled automatically
-4. The queue updates the processing state and stores the resulting profile in the database
-5. Select a processed dataset in `Select Dataset`
-6. The dashboard opens instantly from cached metadata
+1. Sign in and select the workspace to open. The most recently opened workspace is preselected.
+2. In **Workspace Management**, create, open, close, rename, duplicate or remove workspaces as required. Closing the active workspace hides ingestion and queue operations and disables Dashboard and Reporting until one is opened.
+3. Upload a source file in `Data Ingestion`
+4. The dataset is queued, processed, and profiled automatically
+5. The queue updates the processing state and stores the resulting profile in the active workspace database
+6. Select a processed CDR in `Select Dataset`
 7. Use `Adaptive Filters` and press `Update Dashboard` to compute the full analysis
 8. Review KPI cards, scorecards, charts, and aggregated tables
 9. Export the current dashboard analysis to Word or PowerPoint if needed, or open **E2E PowerPoint Reporting** to create a template-backed CDR report
@@ -124,7 +126,7 @@ The workspace is intentionally split into two phases:
 
 Additional analysis caching is applied per dataset file, metric, and filter combination. This avoids re-reading the same dataset on repeated refreshes of the same analytical view.
 
-This does not replace long-term scalable storage or pre-aggregated analytics yet. It is a pragmatic cache layer for the current application model.
+For reporting, processed CDR rows are also synchronised into one shared table per CDR type. This avoids repeatedly concatenating the same campaign files and lets each report load only the fields required by its Slides Template.
 
 ## Authentication and roles
 
@@ -146,6 +148,7 @@ The `admin` panel provides:
 - audit log inspection
 - named NSA/SA template management, import conversion, default selection, duplication, deletion and export
 - an in-browser template editor with contextual assistance for layouts, chart types, fields, legends, grouping and filter conditions
+- Database Management for the active workspace, with paginated table browsing, server-side multi-value filtering, row editing and row deletion
 
 ## Embedded documentation
 
@@ -188,7 +191,7 @@ pytest -q
 
 ## Configuration model
 
-Environment variables control deployment paths and runtime secrets. Version and release date do not come from `.env`; they are defined in [`src/version.py`](src/version.py).
+Environment variables control deployment paths and runtime secrets. `APP_DATABASE_PATH`, `APP_INPUT_DIR`, `APP_OUTPUT_DIR` and `APP_EXPORT_DIR` provide the initial/legacy storage locations; after workspace initialisation, operational data is stored under `data/workspaces/<Workspace Name>/`. Version and release date do not come from `.env`; they are defined in [`src/version.py`](src/version.py).
 
 Important runtime variables:
 
@@ -278,6 +281,7 @@ APP_SECRET_KEY=change-me-dashboard-analytic
 APP_ADMIN_USERNAME=admin
 APP_ADMIN_PASSWORD=admin123
 APP_DATABASE_PATH=/app/config/app.db
+# Initial/legacy paths; active workspace data is stored under /app/data/workspaces/<Workspace Name>/.
 APP_INPUT_DIR=/app/data/input
 APP_OUTPUT_DIR=/app/data/output
 APP_EXPORT_DIR=/app/data/exports
@@ -297,10 +301,16 @@ Recommended stack layout:
   docker-compose.yml
   .env
   config/
+    workspace-registry.db
+    slides-templates/          # seed library for new workspaces
   data/
-    input/
-    output/
-    exports/
+    workspaces/
+      <Workspace Name>/
+        <Workspace Name>.db
+        input/
+        output/
+        exports/
+        slides-templates/
 ```
 
 ## Repository layout
@@ -318,9 +328,9 @@ Recommended stack layout:
 - `help/`
   - project documentation
 - `config/`
-  - SQLite database location in local runs
+  - application configuration, workspace registry and seed Slides Templates
 - `data/`
-  - input, output, and export folders for local runs
+  - isolated workspace directories, databases and files
 
 ## Main routes
 

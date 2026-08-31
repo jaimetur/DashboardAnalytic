@@ -14,9 +14,9 @@ The Administration view also exposes the datasets recorded by Workspace. Use it 
 
 ## Slides Templates Management
 
-**Slides Templates Management** keeps the complete canonical library in `assets/slides-templates/library/nsa/` and `library/sa/`, including the template currently selected as default. The active NSA or SA CSV is also mirrored in `assets/slides-templates/default/nsa/` or `default/sa/` for report generation, and the template registry is `assets/slides-templates/slides-templates-library.json`. The workspace list shows the template name, technology and current default. It supports **Set Default**, **Delete**, **Duplicate** and **Export**. A template has one human-facing name: its physical CSV is always exactly `<Template name>.csv`, preserving spaces and capitalization in both the library and default mirror. The default template is preselected in Reporting, while a user can still select another compatible template for a single report run.
+**Slides Templates Management** works on the open workspace's private template library under `data/workspaces/<Workspace Name>/slides-templates/`. `config/slides-templates/` is only the seed library copied into a new workspace. The list shows each template's exact CSV name, technology and default state. It supports **Set Default**, **Rename**, **Delete**, **Duplicate** and **Export**. A template has one human-facing name: its physical CSV is exactly `<Template name>.csv`, preserving spaces and capitalization. The default template is preselected in Reporting, while a user can still select another compatible template for one report run.
 
-When **Set Default** selects a named template, its canonical CSV remains in `library/<technology>/` and a same-named copy is written to `default/<technology>/`. The previous active copy is replaced only after its canonical library copy is confirmed, so the library always retains every definition and the default location contains only the active mirror.
+Each technology has one active template mirror for report generation; changing the default updates that mirror while retaining the source template in the workspace library. Template names, type and default state are stored in the workspace database, without a JSON registry or slug aliases.
 
 Import a UTF-8 CSV by giving it a name and selecting the target NSA or SA section. The current schema is `Slide`, `Slide tittle`, `Slide Subtittle`, `Layout`, `Chart Tittle`, `CDR source`, `KPI`, `Chart type`, `Legend`, `Filters`, `Grouping_Rows` and `Grouping_Columns`. Each distinct slide number creates a new slide from the named template layout; each CDR-source row represents one chart image. `Title Slide` and `Transition Slide` create structural slides and leave all KPI/chart fields empty. If an older compatible schema is supplied, the application asks in a floating dialog whether it should convert it. Conversion maps compatible headings, splits a former `Grouping` hierarchy into rows and columns, assigns missing layouts and migrates former preserve rows into structural slides. Validation failures are shown in a floating dialog and are also recorded in the audit log.
 
@@ -30,6 +30,12 @@ Choose a stored template in the editor picker, then select **Edit**. The editabl
 - **Filters** opens the Filter Builder. It loads existing conditions, allows adding/removing conditions, and offers CDR fields, operators and values. Conditions are joined with AND. `NOT IN` and `NOT CONTAINS` are supported.
 
 `Layout` must match a named layout in the selected PPT template and provide enough chart placeholders for the number of CDR rows in that slide. The title placeholder receives `Slide tittle` and its optional blue subtitle; the analyst-comments placeholder stays blank. During report generation the renderer removes inherited template chart examples and inserts calculated charts in the selected layout. Imports/default changes also refresh the NSA/SA Slides Templates tables in the PowerPoint Reporting help page.
+
+## Database Management
+
+**Database Management** is below the Slides Templates Editor and operates only on the active workspace database. Tables are grouped into workspace records, individual dataset rows, combined reporting rows and other internal tables. Dataset-row labels include the dataset ID, type and source name; combined reporting tables are used to accelerate multi-campaign reports and are not listed as Workspace datasets.
+
+Select a table to browse it in pages. Use a column's arrow to open an Excel-style menu directly beneath that header, search values from the whole table and select several values. Filters run on the database, so matching values are not limited to the current page. Active filters appear as removable chips. Individual rows can be edited and saved or permanently deleted. Use this area carefully: deleting or changing rows affects the open workspace immediately.
 
 ## Audit activity
 

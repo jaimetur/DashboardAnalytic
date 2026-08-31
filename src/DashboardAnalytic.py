@@ -5,6 +5,7 @@ import re
 import secrets
 import hashlib
 import shutil
+import sqlite3
 import warnings
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -30,6 +31,7 @@ from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_S
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
+from src.modules.workspaces import Workspace, WorkspaceRegistry
 from src.version import __app_name__, __release_date__, __version__
 from src.utils.filesystem import ensure_directories, safe_join
 
@@ -40,7 +42,17 @@ ANALYSIS_CACHE: dict[str, dict[str, Any]] = {}
 DATAFRAME_CACHE: dict[str, pd.DataFrame] = {}
 STOP_REQUESTS: set[int] = set()
 STOP_REQUESTS_LOCK = Lock()
+LEGACY_SLIDES_TEMPLATES_DIR = PROJECT_ROOT / 'assets' / 'slides-templates'
+DEFAULT_SLIDES_TEMPLATES_DIR = PROJECT_ROOT / 'config' / 'slides-templates'
 repository = Repository(settings.database_path)
+workspace_registry = WorkspaceRegistry(
+    settings.database_path.parent / 'workspace-registry.db',
+    settings.database_path,
+    settings.input_dir.parent,
+    settings.slides_templates_dir,
+    settings.database_path.parent / 'workspaces.db',
+)
+active_workspace: Workspace | None = None
 FILTER_DIMENSIONS = ['market', 'period', 'operator', 'vendor', 'test_name', 'region', 'city', 'session_type', 'direction', 'technology_primary', 'source_sheet']
 FILTER_DIMENSIONS_BY_KIND = {
     'voice': ['market', 'operator', 'vendor', 'region', 'city', 'session_type', 'technology_primary', 'source_sheet'],
@@ -361,22 +373,76 @@ def synchronize_reporting_row_store() -> None:
         repository.copy_dataset_rows_to_reporting(dataset_id, kind)
 
 
+def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspace:
+    """Make one isolated workspace the target for all dataset operations."""
+    global active_workspace
+    workspace = workspace_registry.mark_opened(workspace_id)
+    for path in (workspace.database_path.parent, workspace.input_dir, workspace.output_dir, workspace.export_dir, workspace.slides_templates_dir):
+        path.mkdir(parents=True, exist_ok=True)
+    object.__setattr__(settings, 'database_path', workspace.database_path)
+    object.__setattr__(settings, 'input_dir', workspace.input_dir)
+    object.__setattr__(settings, 'output_dir', workspace.output_dir)
+    object.__setattr__(settings, 'export_dir', workspace.export_dir)
+    object.__setattr__(settings, 'slides_templates_dir', workspace.slides_templates_dir)
+    repository.db_path = workspace.database_path
+    ANALYSIS_CACHE.clear()
+    DATAFRAME_CACHE.clear()
+    STOP_REQUESTS.clear()
+    active_workspace = workspace
+    if initialize:
+        repository.initialize(settings.admin_username, settings.admin_password)
+        synchronize_reporting_row_store()
+        for technology in TEMPLATE_NAMES:
+            synchronize_template_file_names(technology)
+    return workspace
+
+
+def close_active_workspace() -> None:
+    global active_workspace
+    if active_workspace:
+        workspace_registry.close_active(active_workspace.id)
+    ANALYSIS_CACHE.clear()
+    DATAFRAME_CACHE.clear()
+    STOP_REQUESTS.clear()
+    active_workspace = None
+
+
+def migrate_legacy_slides_templates() -> None:
+    """Move the editable template seed out of the application assets once."""
+    if settings.slides_templates_dir != DEFAULT_SLIDES_TEMPLATES_DIR:
+        return
+    if not LEGACY_SLIDES_TEMPLATES_DIR.exists() or LEGACY_SLIDES_TEMPLATES_DIR == DEFAULT_SLIDES_TEMPLATES_DIR:
+        return
+    if DEFAULT_SLIDES_TEMPLATES_DIR.exists():
+        shutil.copytree(LEGACY_SLIDES_TEMPLATES_DIR, DEFAULT_SLIDES_TEMPLATES_DIR, dirs_exist_ok=True)
+        shutil.rmtree(LEGACY_SLIDES_TEMPLATES_DIR)
+        return
+    DEFAULT_SLIDES_TEMPLATES_DIR.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(LEGACY_SLIDES_TEMPLATES_DIR), str(DEFAULT_SLIDES_TEMPLATES_DIR))
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    migrate_legacy_slides_templates()
     ensure_directories([
         settings.database_path.parent,
-        settings.input_dir,
-        settings.output_dir,
-        settings.export_dir,
         settings.template_dir,
         settings.slides_templates_dir,
         settings.ppt_templates_dir,
         settings.static_dir,
     ])
-    repository.initialize(settings.admin_username, settings.admin_password)
-    synchronize_reporting_row_store()
-    for technology in TEMPLATE_NAMES:
-        synchronize_template_file_names(technology)
+    # Capture the configured legacy paths once, then retain them as the
+    # original workspace while every newly-created workspace gets its own DB
+    # and data directories.
+    global workspace_registry
+    workspace_registry = WorkspaceRegistry(
+        settings.database_path.parent / 'workspace-registry.db', settings.database_path,
+        settings.input_dir.parent, settings.slides_templates_dir,
+        settings.database_path.parent / 'workspaces.db',
+    )
+    workspace_registry.initialize()
+    if (workspace_id := workspace_registry.active_id()):
+        activate_workspace(workspace_id)
     yield
 
 
@@ -1238,6 +1304,7 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'app_release_date': __release_date__,
         'asset_version': asset_version,
         'static_path': lambda asset_path: str(request.app.url_path_for('static', path=asset_path)),
+        'active_workspace': active_workspace,
         **context,
     }
     return templates.TemplateResponse(request, template_name, payload, status_code=status_code)
@@ -1419,19 +1486,51 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         candidate_technology, candidate_catalogue = selection.split(':', 1)
         if candidate_technology in TEMPLATE_NAMES and candidate_catalogue:
             selected_technology, selected_catalogue = candidate_technology, candidate_catalogue
-    report_catalogs = {
-        technology: {
-            'path': reporting_catalog_path(technology),
-            'source': 'Active template',
-            'catalogues': report_catalogue_options(technology),
+    report_catalogs: dict[str, dict[str, Any]] = {}
+    for technology in TEMPLATE_NAMES:
+        catalogues = report_catalogue_options(technology)
+        active_catalogue = next((catalogue for catalogue in catalogues if catalogue['active']), None)
+        report_catalogs[technology] = {
+            'path': active_catalogue['path'] if active_catalogue else None,
+            'source': 'Active template' if active_catalogue else 'No default template configured',
+            'catalogues': catalogues,
         }
-        for technology in TEMPLATE_NAMES
-    }
     workspace_catalogues = [
         {**catalogue, 'technology': technology}
         for technology, payload in report_catalogs.items()
         for catalogue in payload['catalogues']
     ]
+    dataset_names = {
+        int(dataset['id']): f"{str(dataset['dataset_kind'] or 'Dataset').upper()} · {dataset['file_name']}"
+        for dataset in repository.list_datasets()
+    } if active_workspace else {}
+    database_table_groups: dict[str, list[dict[str, str]]] = {
+        'Workspace records': [], 'Individual dataset rows': [], 'Combined reporting rows': [], 'Other tables': [],
+    }
+    friendly_tables = {
+        'audit_logs': 'Audit log',
+        'dataset_profiles': 'Dataset profiles',
+        'datasets': 'Datasets',
+        'report_runs': 'Generated reports',
+        'report_templates': 'Slides Templates registry',
+        'users': 'Users',
+    }
+    for table_name in repository.list_database_tables() if active_workspace else []:
+        dataset_match = re.fullmatch(r'dataset_rows_(\d+)', table_name)
+        reporting_match = re.fullmatch(r'reporting_rows_(data|voice|speech)', table_name)
+        if dataset_match:
+            dataset_id = int(dataset_match.group(1))
+            label = f"Dataset {dataset_id} rows · {dataset_names.get(dataset_id, 'source no longer registered')}"
+            database_table_groups['Individual dataset rows'].append({'name': table_name, 'label': label})
+        elif reporting_match:
+            database_table_groups['Combined reporting rows'].append({
+                'name': table_name,
+                'label': f"Combined CDR-{reporting_match.group(1).title()} reporting rows",
+            })
+        elif table_name in friendly_tables:
+            database_table_groups['Workspace records'].append({'name': table_name, 'label': friendly_tables[table_name]})
+        else:
+            database_table_groups['Other tables'].append({'name': table_name, 'label': table_name})
     return render_template(
         request,
         'admin.html',
@@ -1442,6 +1541,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             'logs': repository.list_logs(),
             'report_catalogs': report_catalogs,
             'workspace_catalogues': workspace_catalogues,
+            'database_table_groups': database_table_groups,
             'catalogue_editor': catalogue_editor_payload(selected_technology, selected_catalogue),
             'catalogue_notice': request.query_params.get('catalogue_notice') or None,
             'catalogue_error': request.query_params.get('catalogue_error') or None,
@@ -1629,17 +1729,45 @@ def index(request: Request) -> HTMLResponse:
 
 @app.get('/login', response_class=HTMLResponse)
 def login_page(request: Request) -> HTMLResponse:
-    return render_template(request, 'login.html', {'error': None, 'default_access_accounts': build_default_access_accounts()})
+    return render_template(
+        request, 'login.html',
+        {
+            'error': None,
+            'default_access_accounts': build_default_access_accounts(),
+            'workspaces': workspace_registry.list(),
+            'active_workspace': active_workspace,
+        },
+    )
 
 
 @app.post('/login', response_class=HTMLResponse)
-def login(request: Request, username: str = Form(...), password: str = Form(...)) -> Response:
+def login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    workspace_id: str | None = Form(default=None),
+) -> Response:
+    if workspace_id:
+        try:
+            activate_workspace(workspace_id)
+        except ValueError as exc:
+            return render_template(
+                request, 'login.html',
+                {
+                    'error': str(exc), 'default_access_accounts': build_default_access_accounts(),
+                    'workspaces': workspace_registry.list(), 'active_workspace': active_workspace,
+                },
+                status_code=400,
+            )
     record = repository.get_user(username)
     if not record or not record.active or not verify_password(password, record.password_hash):
         return render_template(
             request,
             'login.html',
-            {'error': 'Invalid credentials', 'default_access_accounts': build_default_access_accounts()},
+            {
+                'error': 'Invalid credentials', 'default_access_accounts': build_default_access_accounts(),
+                'workspaces': workspace_registry.list(), 'active_workspace': active_workspace,
+            },
             status_code=401,
         )
 
@@ -1745,6 +1873,20 @@ def workspace(
     input_kind: str | None = Query(default=None),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
+    if not active_workspace:
+        return render_template(
+            request,
+            'workspace.html',
+            {
+                'user': user, 'datasets': [], 'ready_datasets': [], 'selected_dataset': None,
+                'input_kind': None, 'input_kind_options': [], 'workspace_logs': [], 'error': None,
+                'has_processing': False, 'vodafone_mapping_datasets': [], 'three_mapping_datasets': [],
+                'mappable_cdr_datasets': [], 'clearable_cdr_datasets': [],
+                'workspaces': workspace_registry.list(), 'workspace_notice': request.query_params.get('workspace_notice'),
+                'workspace_warning': request.query_params.get('workspace_warning'),
+                'workspace_error': request.query_params.get('workspace_error'),
+            },
+        )
     datasets, ready_datasets, input_kind_options, selected_dataset = build_dataset_view_state(dataset_id, input_kind)
     if queue_legacy_vendor_mapping_recovery(background_tasks, datasets, user.username):
         # Reflect the queued recovery in this response instead of leaving a
@@ -1779,8 +1921,80 @@ def workspace(
             'three_mapping_datasets': three_mapping_datasets,
             'mappable_cdr_datasets': mappable_cdr_datasets,
             'clearable_cdr_datasets': clearable_cdr_datasets,
+            'workspaces': workspace_registry.list(),
+            'active_workspace': active_workspace,
+            'workspace_notice': request.query_params.get('workspace_notice'),
+            'workspace_warning': request.query_params.get('workspace_warning'),
+            'workspace_error': request.query_params.get('workspace_error'),
             },
     )
+
+
+def require_workspace_admin(user: SessionUser) -> None:
+    if user.role != 'admin':
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Only administrators can manage workspaces.')
+
+
+@app.post('/workspace/select')
+def select_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
+    try:
+        workspace = activate_workspace(workspace_id)
+    except ValueError as exc:
+        return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": f"Opened {workspace.name}."})}', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/workspace/close')
+def close_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
+    if not active_workspace or active_workspace.id != workspace_id:
+        return RedirectResponse('/workspace?workspace_warning=Only+the+open+workspace+can+be+closed.', status_code=status.HTTP_303_SEE_OTHER)
+    close_active_workspace()
+    return RedirectResponse('/workspace?workspace_notice=Workspace+closed.', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/workspace/create')
+def create_workspace(name: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
+    require_workspace_admin(user)
+    try:
+        workspace = workspace_registry.create(name)
+        activate_workspace(workspace.id)
+    except ValueError as exc:
+        return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": f"Created and opened {workspace.name}."})}', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/workspace/rename')
+def rename_workspace(workspace_id: str = Form(...), name: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
+    require_workspace_admin(user)
+    try:
+        workspace = workspace_registry.rename(workspace_id, name)
+        if active_workspace and active_workspace.id == workspace.id:
+            activate_workspace(workspace.id)
+    except ValueError as exc:
+        return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": f"Renamed workspace to {workspace.name}."})}', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/workspace/duplicate')
+def duplicate_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
+    require_workspace_admin(user)
+    try:
+        workspace = workspace_registry.duplicate(workspace_id)
+    except ValueError as exc:
+        return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": f"Created {workspace.name}."})}', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/workspace/delete')
+def delete_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
+    require_workspace_admin(user)
+    if active_workspace and active_workspace.id == workspace_id:
+        return RedirectResponse('/workspace?workspace_warning=Close+the+workspace+before+removing+it.', status_code=status.HTTP_303_SEE_OTHER)
+    try:
+        replacement = workspace_registry.delete(workspace_id)
+    except ValueError as exc:
+        return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse('/workspace?workspace_notice=Workspace+deleted.', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get('/workspace/preview/{dataset_id}', response_class=HTMLResponse)
@@ -1936,6 +2150,8 @@ def dashboard(
     input_kind: str | None = Query(default=None),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
+    if not active_workspace:
+        return RedirectResponse('/workspace?workspace_warning=Open+a+workspace+before+using+Dashboard.', status_code=status.HTTP_303_SEE_OTHER)
     datasets, ready_datasets, input_kind_options, selected_dataset = build_dataset_view_state(dataset_id, input_kind, CDR_DATASET_KINDS)
     selected_dataset = refresh_selected_dataset_if_stale(selected_dataset)
     selected_dataset = ensure_canonical_mapped_vendor_column(selected_dataset)
@@ -2040,6 +2256,8 @@ def _combined_reporting_frame(
 
 @app.get('/reporting', response_class=HTMLResponse)
 def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HTMLResponse:
+    if not active_workspace:
+        return RedirectResponse('/workspace?workspace_warning=Open+a+workspace+before+using+Reporting.', status_code=status.HTTP_303_SEE_OTHER)
     ready_datasets = [serialize_dataset_row(row) for row in repository.list_datasets() if row['status'] == 'ready']
     return render_template(
         request,
@@ -2550,6 +2768,124 @@ def export_report(
 @app.get('/admin', response_class=HTMLResponse)
 def admin_panel(request: Request, user: SessionUser = Depends(admin_user)) -> HTMLResponse:
     return render_admin_template(request, user)
+
+
+@app.get('/admin/database/table')
+def admin_database_table(
+    table: str = Query(...),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=250),
+    filters: str = Query('{}'),
+    user: SessionUser = Depends(admin_user),
+) -> JSONResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=409, detail='Open a workspace before viewing its database.')
+    try:
+        parsed_filters = json.loads(filters)
+        if not isinstance(parsed_filters, dict):
+            raise ValueError('Database filters must be an object.')
+        return JSONResponse(repository.database_table_page(table, offset=offset, limit=limit, filters=parsed_filters))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post('/admin/database/table/query')
+async def query_admin_database_table(request: Request, user: SessionUser = Depends(admin_user)) -> JSONResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=409, detail='Open a workspace before viewing its database.')
+    try:
+        payload = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail='Send a valid table query payload.') from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='Send a valid table query payload.')
+    table = str(payload.get('table') or '').strip()
+    filters = payload.get('filters') or {}
+    if not isinstance(filters, dict):
+        raise HTTPException(status_code=400, detail='Database filters must be an object.')
+    try:
+        return JSONResponse(repository.database_table_page(
+            table,
+            offset=int(payload.get('offset') or 0),
+            limit=int(payload.get('limit') or 100),
+            filters=filters,
+        ))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get('/admin/database/table/values')
+def admin_database_table_values(
+    table: str = Query(...),
+    column: str = Query(...),
+    filters: str = Query('{}'),
+    search: str = Query(''),
+    user: SessionUser = Depends(admin_user),
+) -> JSONResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=409, detail='Open a workspace before viewing its database.')
+    try:
+        parsed_filters = json.loads(filters)
+        if not isinstance(parsed_filters, dict):
+            raise ValueError('Database filters must be an object.')
+        return JSONResponse(repository.database_table_distinct_values(table, column, filters=parsed_filters, search=search))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post('/admin/database/table')
+async def update_admin_database_table(request: Request, user: SessionUser = Depends(admin_user)) -> JSONResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=409, detail='Open a workspace before editing its database.')
+    try:
+        payload = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail='Send a valid table update payload.') from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='Send a valid table update payload.')
+    table = str(payload.get('table') or '').strip()
+    updates = payload.get('updates')
+    try:
+        rowid = int(payload.get('rowid'))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='The selected row is invalid.') from exc
+    try:
+        repository.update_database_table_row(table, rowid, updates)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=400, detail=f'The update violates a database constraint: {exc}.') from exc
+    ANALYSIS_CACHE.clear()
+    DATAFRAME_CACHE.clear()
+    repository.add_log(user.username, 'database_table_update', f'Updated row {rowid} in {table}.')
+    return JSONResponse({'ok': True, 'message': 'Row saved.'})
+
+
+@app.post('/admin/database/table/delete')
+async def delete_admin_database_table_row(request: Request, user: SessionUser = Depends(admin_user)) -> JSONResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=409, detail='Open a workspace before editing its database.')
+    try:
+        payload = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail='Send a valid row deletion payload.') from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='Send a valid row deletion payload.')
+    table = str(payload.get('table') or '').strip()
+    try:
+        rowid = int(payload.get('rowid'))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='The selected row is invalid.') from exc
+    try:
+        repository.delete_database_table_row(table, rowid)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=400, detail=f'The row cannot be deleted because of a database constraint: {exc}.') from exc
+    ANALYSIS_CACHE.clear()
+    DATAFRAME_CACHE.clear()
+    repository.add_log(user.username, 'database_table_delete', f'Deleted row {rowid} from {table}.')
+    return JSONResponse({'ok': True, 'message': 'Row deleted.'})
 
 
 @app.get('/admin/catalogue-filter-values')

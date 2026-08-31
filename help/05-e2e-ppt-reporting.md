@@ -10,7 +10,7 @@ Upload and process the required files in Workspace first:
 - one or more `CDR-Voice` workbooks;
 - one or more `CDR-Speech` workbooks.
 
-The Reporting selectors default to the latest ready CDR of each type, but support multiple selection. Use Ctrl/Cmd-click to select additional workbooks. Selected Data CDRs are concatenated into the CDR-Data source, and the same happens independently for Voice and Speech. The combination uses the union of available columns, so a field that is absent from one campaign remains available for rows from campaigns that contain it. Existing `Campaign` values are retained, enabling comparisons such as 2025 Q4, 2026 Q1 and 2026 Q2 in the same report.
+The Reporting selectors default to the latest ready CDR of each type, but support multiple selection. Use Ctrl/Cmd-click to select additional workbooks. Selected Data, Voice and Speech CDRs are read from their respective shared reporting tables using the union of available columns, so repeated reports do not need to concatenate the original datasets again. Existing `Campaign` values are retained, enabling comparisons such as 2025 Q4, 2026 Q1 and 2026 Q2 in the same report.
 
 Before the report applies catalogue filters and groupings, it also consolidates recognised historical UK operator aliases in its in-memory data. Thus `Vodafone` and `Vodafone UK` appear as `Vodafone`; `O2(UK)` and `o2 - de` as `O2`; `3`, `Three` and `three(uk)` as `3`; and EE variants as `EE`. A catalogue filter such as `Operator IN (Vodafone, O2, 3, EE)` therefore matches all of those variants. This is a report-only compatibility layer and does not rename any Workspace dataset.
 
@@ -40,7 +40,7 @@ For Vodafone and Three, the report derives vendor from the first and last value 
 
 Every NSA, SA, single-vendor and multivendor report uses the same `assets/ppt-templates/Template_CDR_analysis.pptx` (or the file with that name under `APP_PPT_TEMPLATES_DIR`). It is a master/layout-only template and intentionally contains no slides. For every distinct `Slide` number in the selected Slides Templates, the renderer creates one new slide from its named layout, ordered by slide number. Rows with the same number represent separate charts on that slide and fill its image placeholders from left to right and then top to bottom. Commentary placeholders remain blank for analyst input.
 
-An administrator can manage several named NSA and SA Slides Templates CSVs. The single importer selects the required `NSA` or `SA` type (NSA by default); a non-default library template can also be moved to the other type from its Type selector. A template can be set as the default, duplicated, renamed, deleted or exported, then edited directly in the browser. Its visible name is its physical CSV filename without `.csv`; duplicates use `- Copy`, then `- Copy 2`, and so on. Every CDR row represents one chart image and declares its named PowerPoint `Layout`; the renderer creates the slide, populates its title and places generated charts in the layout's matching chart placeholders. Importing or selecting a new default template refreshes the tables below.
+An administrator can manage several named NSA and SA Slides Templates CSVs in the active workspace. The single importer selects the required `NSA` or `SA` type (NSA by default); a non-default library template can also be moved to the other type from its Type selector. A template can be set as the default, duplicated, renamed, deleted or exported, then edited directly in the browser. Its visible name is its physical CSV filename without `.csv`; duplicates use `- Copy`, then `- Copy 2`, and so on. Every CDR row represents one chart image and declares its named PowerPoint `Layout`; the renderer creates the slide, populates its title and places generated charts in the layout's matching chart placeholders. Importing or selecting a new default template refreshes the tables below.
 
 After generation, the timestamp-named PPTX downloads through the browser and the generation dialog closes. If the report contains no valid samples, re-check the selected technology, operator sheets and CDR inputs; the message indicates that the selected persisted rows did not match the relevant KPI and technology filter. For NSA, validate that the relevant RAT field actually contains an ENDC variant; for SA, validate the expected `NR` values.
 
@@ -67,7 +67,7 @@ The importer accepts the current schema and compatible legacy schemas. If the he
 
 <!-- SLIDES_TEMPLATES:START -->
 
-Export the active NSA or SA Slides Template from Admin before editing it. The tables below always reflect the active CSV files under `assets/slides-templates/default/`.
+Export the active NSA or SA Slides Template from Admin before editing it. The tables below always reflect the active CSV files under `config/slides-templates/default/`.
 
 ### NSA template
 

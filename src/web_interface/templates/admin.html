@@ -235,6 +235,65 @@
     {% endif %}
   </article>
 
+  <details class="panel collapsible-panel database-management-panel" open data-panel-state-key="admin:database-management">
+    <summary class="collapsible-summary">
+      <div>
+        <p class="eyebrow">Active workspace database</p>
+        <h2>Databases Management</h2>
+      </div>
+      <div class="summary-inline-actions">
+        {% if active_workspace %}<span class="pill">{{ active_workspace.name }}</span>{% endif %}
+        <span class="collapse-chip">Collapse</span>
+      </div>
+    </summary>
+    <div class="database-management-content" data-database-management>
+      {% if active_workspace %}
+      <p class="lede">Browse, edit or remove individual records in any table of <strong>{{ active_workspace.name }}</strong>. Primary-key values are protected so row identity remains stable.</p>
+      <div class="database-management-toolbar">
+        <label>Table
+          <select data-database-table-select>
+            <option value="">Select a table</option>
+            {% for group_name, tables in database_table_groups.items() %}
+            {% if tables %}<optgroup label="{{ group_name }}">{% for table in tables %}<option value="{{ table.name }}" title="{{ table.name }}">{{ table.label }}</option>{% endfor %}</optgroup>{% endif %}
+            {% endfor %}
+          </select>
+        </label>
+        <button type="button" data-database-refresh disabled>Refresh table</button>
+        <button type="button" class="ghost-link" data-database-clear-filters disabled>Clear filters</button>
+        <span class="pill" data-database-row-count>0 rows</span>
+      </div>
+      <div class="database-active-filters" data-database-active-filters hidden></div>
+      <section class="database-filter-popover" data-database-filter-popover hidden>
+        <div class="database-filter-popover-head">
+          <strong data-database-filter-title>Filter</strong>
+          <button type="button" class="ghost-link" data-database-filter-close>Close</button>
+        </div>
+        <input type="search" placeholder="Search all values" data-database-filter-search>
+        <div class="database-filter-values" data-database-filter-values></div>
+        <p class="table-help" data-database-filter-help></p>
+        <div class="database-filter-popover-actions">
+          <button type="button" class="ghost-link" data-database-filter-clear>Clear column</button>
+          <button type="button" data-database-filter-apply>Apply filter</button>
+        </div>
+      </section>
+      <div class="table-wrap database-editor-wrap">
+        <table class="database-editor-table" data-database-editor-table>
+          <thead><tr><th>Select a table</th></tr></thead>
+          <tbody><tr><td>Select a table to view its rows.</td></tr></tbody>
+        </table>
+      </div>
+      <div class="database-pagination" data-database-pagination hidden>
+        <button type="button" class="ghost-link" data-database-previous>Previous</button>
+        <span data-database-page-label>Page 1</span>
+        <button type="button" data-database-next>Next</button>
+      </div>
+      <p class="form-note">Tables are shown 100 rows at a time. Saving or deleting a row clears cached analysis so subsequent Dashboard and Reporting requests use the changed values.</p>
+      {% else %}
+      <p class="lede">Open a workspace from Workspace Management before viewing or editing its database.</p>
+      {% endif %}
+    </div>
+  </details>
+
   <details class="panel collapsible-panel" open data-panel-state-key="admin:datasets">
     <summary class="collapsible-summary">
       <div>
@@ -267,4 +326,260 @@
     </div>
   </details>
 </section>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+(() => {
+  const panel = document.querySelector('[data-database-management]');
+  const select = document.querySelector('[data-database-table-select]');
+  const refresh = document.querySelector('[data-database-refresh]');
+  const clearFilters = document.querySelector('[data-database-clear-filters]');
+  const activeFilters = document.querySelector('[data-database-active-filters]');
+  const table = document.querySelector('[data-database-editor-table]');
+  const rowCount = document.querySelector('[data-database-row-count]');
+  const pagination = document.querySelector('[data-database-pagination]');
+  const previous = document.querySelector('[data-database-previous]');
+  const next = document.querySelector('[data-database-next]');
+  const pageLabel = document.querySelector('[data-database-page-label]');
+  const filterPopover = document.querySelector('[data-database-filter-popover]');
+  const filterTitle = document.querySelector('[data-database-filter-title]');
+  const filterSearch = document.querySelector('[data-database-filter-search]');
+  const filterValues = document.querySelector('[data-database-filter-values]');
+  const filterHelp = document.querySelector('[data-database-filter-help]');
+  const filterClose = document.querySelector('[data-database-filter-close]');
+  const filterClear = document.querySelector('[data-database-filter-clear]');
+  const filterApply = document.querySelector('[data-database-filter-apply]');
+  if (!panel || !select || !refresh || !clearFilters || !activeFilters || !table || !rowCount || !pagination || !previous || !next || !pageLabel || !filterPopover || !filterTitle || !filterSearch || !filterValues || !filterHelp || !filterClose || !filterClear || !filterApply) return;
+
+  // The menu must not be constrained by the scrollable table container. This
+  // matches the Dataset Preview value-filter behaviour.
+  document.body.append(filterPopover);
+
+  const pageSize = 100;
+  let offset = 0;
+  let totalRows = 0;
+  let columns = [];
+  let snapshot = new Map();
+  let filters = {};
+  let filterColumn = '';
+  let filterSelection = new Set();
+  let filterSearchTimer = null;
+  const text = (value) => value === null || value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+  const escapeHtml = (value) => text(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
+  const showError = (message) => showInfoDialog(message, {title: 'Database Error', tone: 'error'});
+
+  const renderEmpty = (message) => {
+    table.innerHTML = `<thead><tr><th>Database table</th></tr></thead><tbody><tr><td>${escapeHtml(message)}</td></tr></tbody>`;
+    rowCount.textContent = '0 rows';
+    pagination.hidden = true;
+  };
+
+  const renderActiveFilters = () => {
+    const entries = Object.entries(filters).filter(([, values]) => Array.isArray(values) && values.length);
+    clearFilters.disabled = entries.length === 0;
+    activeFilters.hidden = entries.length === 0;
+    activeFilters.innerHTML = entries.map(([column, values]) => `<button type="button" class="database-filter-chip" data-database-remove-filter="${escapeHtml(column)}">${escapeHtml(column)} · ${values.length} selected ×</button>`).join('');
+    activeFilters.querySelectorAll('[data-database-remove-filter]').forEach((button) => button.addEventListener('click', () => {
+      delete filters[button.dataset.databaseRemoveFilter];
+      offset = 0;
+      loadTable();
+    }));
+  };
+
+  const filterContext = () => Object.fromEntries(Object.entries(filters).filter(([column]) => column !== filterColumn));
+
+  const renderFilterValues = (values, hasMore) => {
+    const available = [...new Set([...filterSelection, ...values])];
+    filterValues.innerHTML = available.length ? available.map((value) => {
+      const label = value === '__database_blank__' ? '(blank)' : value;
+      return `<label><input type="checkbox" value="${escapeHtml(value)}" ${filterSelection.has(value) ? 'checked' : ''}>${escapeHtml(label)}</label>`;
+    }).join('') : '<p class="table-help">No matching values.</p>';
+    filterValues.querySelectorAll('input[type="checkbox"]').forEach((input) => input.addEventListener('change', () => {
+      if (input.checked) filterSelection.add(input.value);
+      else filterSelection.delete(input.value);
+    }));
+    filterHelp.textContent = hasMore
+      ? 'Showing the first 200 matching values. Type to search all values in this column.'
+      : 'Values are queried across the whole table, not just the visible page.';
+  };
+
+  const loadFilterValues = async () => {
+    if (!filterColumn || !select.value) return;
+    filterValues.innerHTML = '<p class="table-help">Loading values…</p>';
+    const params = new URLSearchParams({
+      table: select.value,
+      column: filterColumn,
+      filters: JSON.stringify(filterContext()),
+      search: filterSearch.value,
+    });
+    try {
+      const response = await fetch(`/admin/database/table/values?${params.toString()}`, {credentials: 'same-origin'});
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || 'Filter values could not be loaded.');
+      renderFilterValues(payload.values || [], Boolean(payload.has_more));
+    } catch (error) {
+      filterValues.innerHTML = '<p class="table-help">Filter values could not be loaded.</p>';
+      showError(error instanceof Error ? error.message : 'Filter values could not be loaded.');
+    }
+  };
+
+  const openFilter = (column, anchor) => {
+    filterColumn = column;
+    filterSelection = new Set(filters[column] || []);
+    filterTitle.textContent = `Filter: ${column}`;
+    filterSearch.value = '';
+    filterPopover.hidden = false;
+    const anchorBox = anchor.getBoundingClientRect();
+    const width = Math.min(360, window.innerWidth - 20);
+    filterPopover.style.width = `${width}px`;
+    filterPopover.style.left = `${Math.max(10, Math.min(anchorBox.left, window.innerWidth - width - 10))}px`;
+    const preferredTop = anchorBox.bottom + 5;
+    const menuHeight = filterPopover.offsetHeight;
+    filterPopover.style.top = `${preferredTop + menuHeight <= window.innerHeight - 10 ? preferredTop : Math.max(10, anchorBox.top - menuHeight - 5)}px`;
+    loadFilterValues();
+    requestAnimationFrame(() => filterSearch.focus());
+  };
+
+  const closeFilter = () => {
+    filterPopover.hidden = true;
+    filterColumn = '';
+    filterSelection = new Set();
+  };
+
+  const renderTable = (payload) => {
+    columns = payload.columns || [];
+    const rows = payload.rows || [];
+    totalRows = Number(payload.total_rows || 0);
+    snapshot = new Map(rows.map((row) => [String(row.__database_rowid__), row]));
+    if (!columns.length) {
+      renderEmpty('This table has no columns.');
+      return;
+    }
+    const headers = columns.map((column) => `<th title="${escapeHtml(column.type || 'SQLite value')}"><span>${escapeHtml(column.name)}${column.primary_key ? ' · key' : ''}</span><button type="button" class="database-column-filter ${filters[column.name]?.length ? 'is-filtered' : ''}" data-database-column-filter="${escapeHtml(column.name)}" aria-label="Filter ${escapeHtml(column.name)}" title="Filter ${escapeHtml(column.name)}">⌄${filters[column.name]?.length ? ` ${filters[column.name].length}` : ''}</button></th>`).join('');
+    const body = rows.length ? rows.map((row) => {
+      const cells = columns.map((column) => `<td><input class="database-editor-cell" data-database-column="${escapeHtml(column.name)}" value="${escapeHtml(text(row[column.name]))}" ${column.primary_key ? 'disabled title="Primary-key values are protected"' : ''}></td>`).join('');
+      return `<tr data-database-rowid="${escapeHtml(row.__database_rowid__)}">${cells}<td class="database-editor-actions"><button type="button" data-database-save-row>Save</button><button type="button" class="database-editor-delete" data-database-delete-row>Delete</button></td></tr>`;
+    }).join('') : `<tr><td colspan="${columns.length + 1}">No rows in this table.</td></tr>`;
+    table.innerHTML = `<thead><tr>${headers}<th>Actions</th></tr></thead><tbody>${body}</tbody>`;
+    table.querySelectorAll('[data-database-column-filter]').forEach((button) => button.addEventListener('click', () => openFilter(button.dataset.databaseColumnFilter, button)));
+    table.querySelectorAll('[data-database-save-row]').forEach((button) => button.addEventListener('click', () => saveRow(button.closest('tr'))));
+    table.querySelectorAll('[data-database-delete-row]').forEach((button) => button.addEventListener('click', () => deleteRow(button.closest('tr'))));
+    rowCount.textContent = `${totalRows} row${totalRows === 1 ? '' : 's'}`;
+    const page = Math.floor(offset / pageSize) + 1;
+    const pages = Math.max(1, Math.ceil(totalRows / pageSize));
+    pageLabel.textContent = `Page ${page} of ${pages}`;
+    previous.disabled = offset === 0;
+    next.disabled = offset + pageSize >= totalRows;
+    pagination.hidden = totalRows <= pageSize;
+    renderActiveFilters();
+  };
+
+  const loadTable = async () => {
+    const selectedTable = select.value;
+    refresh.disabled = !selectedTable;
+    if (!selectedTable) {
+      renderEmpty('Select a table to view its rows.');
+      return;
+    }
+    refresh.disabled = true;
+    try {
+      const response = await fetch('/admin/database/table/query', {
+        method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({table: selectedTable, offset, limit: pageSize, filters}),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || 'The table could not be loaded.');
+      renderTable(payload);
+    } catch (error) {
+      renderEmpty('The table could not be loaded.');
+      showError(error instanceof Error ? error.message : 'The table could not be loaded.');
+    } finally {
+      refresh.disabled = !select.value;
+    }
+  };
+
+  const saveRow = async (row) => {
+    if (!(row instanceof HTMLTableRowElement) || !select.value) return;
+    const rowid = Number(row.dataset.databaseRowid);
+    const original = snapshot.get(String(rowid));
+    if (!Number.isInteger(rowid) || !original) return;
+    const updates = {};
+    row.querySelectorAll('[data-database-column]').forEach((input) => {
+      if (!(input instanceof HTMLInputElement) || input.disabled) return;
+      const column = input.dataset.databaseColumn;
+      if (column && input.value !== text(original[column])) updates[column] = input.value;
+    });
+    if (!Object.keys(updates).length) {
+      showInfoDialog('There are no changed values in this row.', {title: 'Database Management'});
+      return;
+    }
+    const button = row.querySelector('[data-database-save-row]');
+    if (button instanceof HTMLButtonElement) button.disabled = true;
+    try {
+      const response = await fetch('/admin/database/table', {
+        method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({table: select.value, rowid, updates}),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.detail || 'The row could not be saved.');
+      await loadTable();
+      showInfoDialog('Row saved.', {title: 'Database Updated', tone: 'info'});
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'The row could not be saved.');
+      if (button instanceof HTMLButtonElement) button.disabled = false;
+    }
+  };
+
+  const deleteRow = async (row) => {
+    if (!(row instanceof HTMLTableRowElement) || !select.value) return;
+    const rowid = Number(row.dataset.databaseRowid);
+    if (!Number.isInteger(rowid)) return;
+    const confirmed = await showConfirmDialog(
+      'This permanently deletes the selected row from the active workspace database.',
+      {title: 'Delete database row', confirmLabel: 'Delete'},
+    );
+    if (!confirmed) return;
+    const button = row.querySelector('[data-database-delete-row]');
+    if (button instanceof HTMLButtonElement) button.disabled = true;
+    try {
+      const response = await fetch('/admin/database/table/delete', {
+        method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({table: select.value, rowid}),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.detail || 'The row could not be deleted.');
+      if (offset > 0 && totalRows - 1 <= offset) offset = Math.max(0, offset - pageSize);
+      await loadTable();
+      showInfoDialog('Row deleted.', {title: 'Database Updated', tone: 'info'});
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'The row could not be deleted.');
+      if (button instanceof HTMLButtonElement) button.disabled = false;
+    }
+  };
+
+  select.addEventListener('change', () => { offset = 0; loadTable(); });
+  refresh.addEventListener('click', loadTable);
+  clearFilters.addEventListener('click', () => { filters = {}; offset = 0; closeFilter(); loadTable(); });
+  filterClose.addEventListener('click', closeFilter);
+  filterClear.addEventListener('click', () => { filterSelection.clear(); loadFilterValues(); });
+  filterApply.addEventListener('click', () => {
+    if (filterSelection.size) filters[filterColumn] = [...filterSelection];
+    else delete filters[filterColumn];
+    offset = 0;
+    closeFilter();
+    loadTable();
+  });
+  filterSearch.addEventListener('input', () => {
+    window.clearTimeout(filterSearchTimer);
+    filterSearchTimer = window.setTimeout(loadFilterValues, 180);
+  });
+  filterPopover.addEventListener('click', (event) => event.stopPropagation());
+  document.addEventListener('click', (event) => {
+    if (!filterPopover.hidden && !(event.target instanceof Element && event.target.closest('[data-database-column-filter]'))) closeFilter();
+  });
+  window.addEventListener('resize', closeFilter);
+  previous.addEventListener('click', () => { offset = Math.max(0, offset - pageSize); loadTable(); });
+  next.addEventListener('click', () => { offset += pageSize; loadTable(); });
+})();
+</script>
 {% endblock %}

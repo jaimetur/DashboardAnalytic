@@ -32,13 +32,20 @@
   <article class="panel login-auth-card">
     <div class="login-auth-head">
       <p class="eyebrow">Access</p>
-      <h3>Sign in</h3>
-      <p class="form-note">Use one of the workspace accounts to continue.</p>
+      <h3>Log in</h3>
+      <p class="form-note">Select Username, Password and Workspace to open.</p>
     </div>
     <form class="form-stack login-form" method="post" action="/login">
       {% if error %}<div class="alert">{{ error }}</div>{% endif %}
       <label>Username<input type="text" name="username" value="admin" required></label>
       <label>Password<input type="password" name="password" value="admin123" required></label>
+      <label class="login-workspace-field">Workspace
+        <select name="workspace_id" required>
+          {% for workspace in workspaces %}
+          <option value="{{ workspace.id }}" {% if active_workspace and workspace.id == active_workspace.id %}selected{% endif %}>{{ workspace.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
       <button type="submit">Open workspace</button>
     </form>
     {% if default_access_accounts %}

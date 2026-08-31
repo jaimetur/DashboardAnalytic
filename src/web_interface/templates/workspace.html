@@ -1,16 +1,85 @@
 {% extends 'base.html' %}
 {% block content %}
 <section class="dashboard-stack spacious-stack">
-  <article class="panel hero-panel upload-panel" style="background: linear-gradient(145deg, #10314a, #08736d) !important; color: #ffffff;">
+  <article class="panel hero-panel workspace-switcher-panel">
     <div class="section-head tight-head">
+      <div>
+        <p class="eyebrow">Workspace</p>
+        <h2>Workspaces Management</h2>
+      </div>
+      <div class="workspace-panel-meta">
+        <span class="pill workspace-count-pill">{{ workspaces | length }} workspaces</span>
+        <span class="pill live-pill">Active workspace: {{ active_workspace.name if active_workspace else 'None' }}</span>
+      </div>
+    </div>
+    <p class="lede">Datasets, processing history and reporting data are isolated in the selected workspace.</p>
+    {% if workspace_notice %}<span data-workspace-result data-workspace-result-tone="info" hidden>{{ workspace_notice }}</span>{% endif %}
+    {% if workspace_warning %}<span data-workspace-result data-workspace-result-tone="warning" hidden>{{ workspace_warning }}</span>{% endif %}
+    {% if workspace_error %}<span data-workspace-result data-workspace-result-tone="error" hidden>{{ workspace_error }}</span>{% endif %}
+    <div class="workspace-switcher-actions">
+      <form method="post" action="/workspace/select" class="workspace-select-form">
+        <label>Open workspace
+          <select name="workspace_id" data-workspace-select>
+            {% for item in workspaces %}
+            <option value="{{ item.id }}" {% if active_workspace and item.id == active_workspace.id %}selected{% endif %}>{{ item.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit" class="workspace-action-open" data-workspace-open {% if active_workspace %}disabled{% endif %}>Open</button>
+        <button type="submit" formaction="/workspace/close" class="workspace-action-close" data-workspace-close disabled>Close</button>
+      </form>
+      {% if user.role == 'admin' %}
+      <details class="workspace-management">
+        <summary>Manage workspaces</summary>
+        <div class="workspace-management-forms">
+          <form method="post" action="/workspace/create">
+            <label>New workspace
+              <input name="name" required maxlength="100" placeholder="e.g. 2026 Q3 benchmark">
+            </label>
+            <button type="submit">Create and open</button>
+          </form>
+        </div>
+        <div class="workspace-library">
+          {% for item in workspaces %}
+          <article class="workspace-library-row{% if active_workspace and item.id == active_workspace.id %} active-workspace-row{% endif %}">
+            <strong>{{ item.name }}</strong>
+            <form method="post" action="/workspace/rename">
+              <input type="hidden" name="workspace_id" value="{{ item.id }}">
+              <input aria-label="Rename {{ item.name }}" name="name" required maxlength="100" value="{{ item.name }}">
+              <button type="submit" class="workspace-action-rename">Rename</button>
+            </form>
+            <form method="post" action="/workspace/duplicate" data-loading-label="Duplicating workspace" data-loading-copy="Please wait while the workspace database, datasets and associated files are copied.">
+              <input type="hidden" name="workspace_id" value="{{ item.id }}">
+              <button type="submit" class="workspace-action-duplicate">Duplicate</button>
+            </form>
+            <form method="post" action="/workspace/delete" data-confirm="Remove workspace '{{ item.name }}' and all its datasets? This cannot be undone." data-confirm-title="Remove workspace" data-confirm-label="Remove workspace">
+              <input type="hidden" name="workspace_id" value="{{ item.id }}">
+              <button type="submit" class="workspace-action-remove" {% if active_workspace and item.id == active_workspace.id %}disabled{% endif %}>Remove</button>
+            </form>
+          </article>
+          {% endfor %}
+        </div>
+      </details>
+      {% endif %}
+    </div>
+  </article>
+
+  {% if active_workspace %}
+  <details class="panel collapsible-panel upload-panel" open data-panel-state-key="workspace:data-ingestion">
+    <summary class="collapsible-summary">
       <div>
         <p class="eyebrow">Workspace</p>
         <h2>Data Ingestion</h2>
       </div>
-      <span class="pill live-pill">Auto profile on upload</span>
-    </div>
-    <p class="lede">Bring the source files that feed every product workflow into one managed workspace: NetCheck CDR workbooks (Data, Voice and Speech), Smart Orchestrator Logs, and Vodafone UK (VFUK) or Three UK (3UK) Multivendor Mappings. Workspace proposes a type from each filename, lets you confirm it per file and, for CDRs, can apply selected processed VFUK and 3UK Vendor mappings during import.</p>
-    <form class="upload-dropzone" action="/dashboard/upload" method="post" enctype="multipart/form-data" data-loading-label="Uploading, processing and optionally mapping Vendor values" data-upload-type-form data-vodafone-mapping-options='{{ vodafone_mapping_datasets | default([]) | tojson }}' data-three-mapping-options='{{ three_mapping_datasets | default([]) | tojson }}'>
+      <div class="summary-inline-actions">
+        <span class="pill live-pill">Active workspace: {{ active_workspace.name }}</span>
+        <span class="pill live-pill">{{ datasets | length }} datasets</span>
+        <span class="collapse-chip">Collapse</span>
+      </div>
+    </summary>
+    <div class="upload-panel-content">
+      <p class="lede">Bring the source files that feed every product workflow into one managed workspace: NetCheck CDR workbooks (Data, Voice and Speech), Smart Orchestrator Logs, and Vodafone UK (VFUK) or Three UK (3UK) Multivendor Mappings. Workspace proposes a type from each filename, lets you confirm it per file and, for CDRs, can apply selected processed VFUK and 3UK Vendor mappings during import.</p>
+      <form class="upload-dropzone" action="/dashboard/upload" method="post" enctype="multipart/form-data" data-loading-label="Uploading, processing and optionally mapping Vendor values" data-upload-type-form data-vodafone-mapping-options='{{ vodafone_mapping_datasets | default([]) | tojson }}' data-three-mapping-options='{{ three_mapping_datasets | default([]) | tojson }}'>
       <label class="dropzone-field" data-upload-dropzone>
         <span class="dropzone-title">Drop workbooks or browse</span>
         <span class="dropzone-copy">Accepted: CSV, XLS, XLSX, XLSM</span>
@@ -26,12 +95,13 @@
         <div data-upload-type-items></div>
       </section>
       <button type="submit">Upload and process</button>
-    </form>
-    {% if selected_dataset and selected_dataset.is_ready %}
-    <p class="form-note">Workspace opened from cache. Open the processed dataset in <strong>Dashboard</strong> to work with filters, KPIs and charts.</p>
-    {% endif %}
-    {% if error %}<div class="alert upload-alert">{{ error }}</div>{% endif %}
-  </article>
+      </form>
+      {% if selected_dataset and selected_dataset.is_ready %}
+      <p class="form-note">Workspace opened from cache. Open the processed dataset in <strong>Dashboard</strong> to work with filters, KPIs and charts.</p>
+      {% endif %}
+      {% if error %}<div class="alert upload-alert">{{ error }}</div>{% endif %}
+    </div>
+  </details>
 
   <details class="panel collapsible-panel queue-card" open data-panel-state-key="workspace:data-processing" data-queue-status-url="/api/datasets/status" {% if has_processing %}data-queue-poll-ms="3000"{% endif %}>
     <summary class="collapsible-summary">
@@ -296,9 +366,40 @@
       </table>
     </div>
   </details>
+  {% endif %}
 </section>
 {% endblock %}
 {% block extra_scripts %}
+<script>
+(() => {
+  const result = document.querySelector('[data-workspace-result]');
+  const message = result?.textContent.trim();
+  if (!message || typeof showInfoDialog !== 'function') return;
+  const tone = result.dataset.workspaceResultTone || 'info';
+  const title = tone === 'error' ? 'Workspace Error' : tone === 'warning' ? 'Workspace Warning' : message.startsWith('Opened ') ? 'Workspace Opened' : message === 'Workspace closed.' ? 'Workspace Closed' : 'Workspace Updated';
+  const clearResultQuery = () => {
+    const url = new URL(window.location.href);
+    ['workspace_notice', 'workspace_warning', 'workspace_error'].forEach((key) => url.searchParams.delete(key));
+    history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  };
+  requestAnimationFrame(() => showInfoDialog(message, {title, tone, onClose: clearResultQuery}));
+})();
+</script>
+<script>
+(() => {
+  const select = document.querySelector('[data-workspace-select]');
+  const openButton = document.querySelector('[data-workspace-open]');
+  const closeButton = document.querySelector('[data-workspace-close]');
+  if (!select || !openButton || !closeButton) return;
+  const activeId = {{ (active_workspace.id if active_workspace else none) | tojson }};
+  const refreshOpenButton = () => {
+    openButton.disabled = !select.value || select.value === activeId;
+    closeButton.disabled = !activeId || select.value !== activeId;
+  };
+  select.addEventListener('change', refreshOpenButton);
+  refreshOpenButton();
+})();
+</script>
 <script>
 (() => {
   const form = document.querySelector('[data-upload-type-form]');

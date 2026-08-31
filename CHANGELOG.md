@@ -4,61 +4,39 @@
 ---
 
 ## Release: v0.2.0
-### Release Date: 2026-08-30
+### Release Date: 2026-08-31
 #### 🌟 New Features:
-- Split the product into the top-level **Workspace**, **E2E Dashboard** and **E2E PowerPoint Reporting** modules, with a future-ready **Smart Orchestrator Logs Reports** entry point.
-- Added per-file Workspace classification for NetCheck CDR Data, Voice and Speech, Smart Orchestrator Logs, VFUK and 3UK mappings, with filename detection and batch review.
-- Added optional CDR Vendor mapping during import: each CDR can select the latest ready VFUK and/or 3UK mapping, or retain **No Map Vendor Column**.
-- Added queued batch Vendor mapping from Workspace: select multiple unmapped CDRs, use the latest VFUK/3UK mappings by default, and follow each non-blocking task through the existing queue progress bar.
-- Added queued batch Vendor clearing: select one or more mapped CDRs and restore their source processing in the same non-blocking Workspace queue.
-- Added NetCheck CDR PowerPoint reporting from processed Data, Voice and Speech inputs, with report-run traceability and timestamped filenames.
-- Added multi-campaign reporting: select multiple CDRs for Data, Voice and/or Speech and the tool concatenates each source with its union of columns, preserving Campaign values for benchmark comparisons.
-- Added embedded Help with consistently numbered navigation and recommended reading (`00` to `09`), including the explicit **04. E2E Dashboard** and **05. E2E PowerPoint Reporting** sections.
-- Added processed-dataset previews, direct CDR-only **Show Dashboard** access and matching Dashboard **Preview Dataset** access.
-- Added workspace Slides Templates Management: named NSA/SA imports, conversion of compatible legacy CSVs, defaults, duplication, deletion, export and in-browser editing.
-- Added a unified Slides Templates importer with an NSA/SA type selector, plus per-template type reassignment for non-default library templates.
+- Reorganised the application into **Workspace**, **E2E Dashboard** and **E2E PowerPoint Reporting** modules, with a Smart Orchestrator Logs Reports entry point.
+- Added CDR ingestion classification and optional Vendor mapping for Data, Voice and Speech, including VFUK/3UK mappings, batch review, queued mapping and queued clearing.
+- Added template-driven NetCheck PowerPoint reporting, including multi-campaign Data/Voice/Speech reports, run traceability and timestamped outputs.
+- Added Slides Templates Management for NSA/SA: import and legacy conversion, defaults, type reassignment, duplicate/delete/export and in-browser editing.
+- Added multi-workspace support. Workspaces can be created, opened, closed, renamed, duplicated and removed; each keeps its database and files under `data/workspaces/<Workspace Name>/`. Log in opens the selected workspace, preselecting the most recently used one.
+- Added Database Management in Admin to browse, edit, filter and delete rows from tables in the active workspace database.
+- Added processed-dataset previews, direct CDR **Show Dashboard** access, and Dashboard **Preview Dataset** access.
 
 #### 🚀 Enhancements:
-- Normalized historical UK Operator aliases only while rendering combined reports, so catalogue filters and groupings consistently consolidate `Vodafone`/`Vodafone UK` as **Vodafone**, O2 variants as **O2**, 3/Three variants as **3**, and EE variants as **EE** across campaigns.
-- Unified NSA, SA, single-vendor and multivendor rendering on the master/layout-only `Template_CDR_analysis.pptx`; the selected catalogue creates slides and fills layout placeholders in row-major order.
-- Made Slides Templates executable: source, KPI, generic chart type, filters, thresholds/buckets, legend, `Grouping_Rows`, `Grouping_Columns` and named layout now drive rendering. Structural **Title Slide** and **Transition Slide** rows are also supported.
-- Reworked NSA/SA catalogues against the NetCheck methodology, split multi-chart screenshots into separate rows/layouts, and completed the requested NSA KPI, source, filter and grouping definitions through slide 21.
-- Improved multivendor processing: VFUK/3UK GCID lookups and the agreed first/last-cell Vendor formula are persisted on CDRs
-- Reporting enables Multivendor only when all selected CDRs are mapped and transforms Operator displays to Vendor without changing stored filters or catalogues.
-- Expanded mapping and CDR previews with materialised GCID, source-preserving fields, column/row search, Excel-style multi-value filters, CDR-specific filters and configurable row limits. Workspace now uses persisted profiles for faster loading.
-- Restricted Dashboard analysis to CDR datasets and meaningful KPI fields; improved adaptive-filter normalisation, responsive layouts, previews and exports.
-- Refined the responsive tabbed UI, module palettes, action controls, loading dialogs and Help navigation across Workspace, Dashboard, Reporting and Admin.
-- Added a reporting catalogue selector that follows the NSA/SA workspace default while allowing a per-report override.
-- Added shared SQLite reporting tables for CDR Data, Voice and Speech: processed and remapped rows are synchronised by `dataset_id`, multi-campaign reports query them directly without pandas concatenation, and load only fields used by the selected Slides Template.
-- Expanded the in-browser Slides Templates Editor with contextual assistance, Filter Builder, searchable single/multi-select values, fixed action/Slide columns, row movement/insertion/removal, re-enumeration and scroll guidance.
-- Refactored PowerPoint and Slides Templates storage: the master deck lives in `assets/ppt-templates/`; the complete template library and its active NSA/SA mirrors remain user-managed files, while template names, types and defaults are stored in SQLite.
-- Unified Slides Template naming so the visible name is always the exact physical CSV filename (apart from `.csv`), reconciling unambiguous manual renames, removing legacy duplicate files, and preserving case and spaces across the library, default mirror, imports, renames and duplicates. Duplicates derive from their source name with **- Copy** (then **Copy 2**, etc.).
-- Simplified Slides Templates persistence: SQLite stores only each template's exact physical name, type and default state; no JSON registry, duplicate metadata or slug aliases are used.
-- Standardized Administration and Help labels on **Template** terminology.
-- Renaming a named workspace catalogue now also renames its managed CSV file and preserves its default selection.
-- Added timestamped report filenames, `UpdateAll.py`, and removed obsolete release-document tooling.
+- Made Slides Templates executable: catalogue source, KPI, chart type, filters, thresholds/buckets, legend, grouping and named layout drive rendering, including structural Title and Transition slides.
+- Unified NSA, SA, single-vendor and multivendor generation on the master `Template_CDR_analysis.pptx`; catalogues create slides and populate layout placeholders. NSA/SA catalogues were also aligned with the NetCheck methodology.
+- Improved multivendor reporting with persisted VFUK/3UK GCID and Vendor calculations, UK operator-name normalisation at render time, and validation that all selected CDRs are mapped.
+- Accelerated repeated multi-campaign reports with shared SQLite CDR tables synchronised by `dataset_id`; reports query only the fields required by the selected template.
+- Improved previews and the database editor with materialised GCID, source-preserving fields, searchable Excel-style multi-value filters, contextual values across all pages and configurable row limits.
+- Expanded the Slides Templates Editor with contextual help, Filter Builder, searchable selections, fixed columns, row controls and scroll guidance.
+- Simplified template persistence: SQLite stores only each CSV's exact name, type and default state. Names preserve case and spaces, and renames/duplicates keep files and defaults in sync without JSON registries or slug aliases.
+- Improved CDR-only Dashboard analysis, adaptive filters, responsive module UI, dialogs, admin actions and Help navigation.
 
 #### 🐛 Bug fixes:
-- Consolidated catalogue import, conversion and status feedback into single-action floating dialogs; Admin actions and inline renames retain the current scroll position.
-- Corrected default-catalogue state, deletion protection, editor selection and Reporting defaults for datasets and catalogues.
-- Corrected catalogue grouping semantics across bars, CDF, scatter and tables; nested row/column hierarchies, distribution stacks and campaign labels now render consistently.
-- Fixed master-layout placeholder assignment, inherited-chart cleanup, generated-report download completion and Help article navigation.
-- Fixed CDR/mapping ingestion for duplicate headers, legacy CSV encodings, VFUK/3UK GCIDs, alternate Cell ID fields (including Global CI/GCID/GCI/CGI/ECI variants) and NSA RAT spellings.
-- Fixed Reporting CDR selector contrast and one-item labels, while keeping a CDR ready after a failed Vendor mapping and recording the cause in Workspace Logs instead of disabling Preview and Dashboard access.
-- Aligned Slides Templates Management import controls and template-list actions on their shared vertical centerline, retaining left-aligned actions and adding clear **Import Slides Template** and **Slides Templates Library** headings.
-- Fixed inline Slides Template renames so the editor selector, action URLs and current editor selection update immediately without a page reload.
-- Removed the dependency on versioned default Slides Templates and JSON registry files; test templates are isolated under test fixtures, and workspace templates remain ignored user data.
-- Fixed mapped CDR Vendor persistence and preview order: the calculated `vendor` field now replaces source-name collisions, appears immediately after `source_sheet`, is highlighted in blue, and keeps internal `report_vendor` out of previews.
-- Preserved each dataset's original upload date when it is reprocessed; Workspace ordering and automatic latest CDR/VFUK/3UK selections now consistently use that immutable date, while **Updated** continues to reflect processing activity.
-- Added separate **Uploaded** and **Updated** columns to the Workspace dataset table, in that order.
-- Added automatic queued recovery for legacy CDRs previously left failed by Vendor mapping, rebuilding their original source without applying a mapping.
-- Fixed Workspace drag-and-drop, cache refreshes, profile-backed loading and Dashboard filter population/contrast.
-- Fixed live Workspace queue updates so newly processed CDRs immediately show the applicable **Map Vendors**, **Clear Vendors** and **Show Dashboard** actions: the Workspace now refreshes itself once when background processing reaches Ready, using the final server profile.
-- Fixed mobile README/document overflow by constraining rendered images and the Markdown container, including the application logo.
+- Fixed catalogue defaults, deletion protection, editor selection, grouping semantics and reporting placeholder/chart generation.
+- Fixed CDR and mapping ingestion for duplicate headers, legacy encodings, alternate Cell ID fields, VFUK/3UK GCIDs and NSA RAT spellings.
+- Fixed Vendor persistence and preview ordering, and kept CDRs usable after failed mapping while logging the failure.
+- Fixed inline template renames so selectors, URLs and the open editor refresh immediately; aligned template-management controls and feedback dialogs.
+- Fixed Workspace drag-and-drop, cache/profile refreshes, queue action updates and Dashboard filter population/contrast.
+- Preserved original upload dates during reprocessing, separating **Uploaded** from **Updated** and keeping automatic latest-dataset selection stable.
+- Recovered legacy CDRs left failed by Vendor mapping by rebuilding their original source without a mapping.
+- Fixed Help navigation and mobile document overflow.
 
 #### 📚 Documentation:
-- Replaced inherited documentation and the root-level roadmap with a maintained numbered Dashboard Analytic Help set and embedded index.
-- Expanded README and Help for ingestion, CDR/multivendor mapping, previews, Dashboard, reporting, catalogue conversion/editor and grouping behaviour.
+- Replaced inherited documentation and the root-level roadmap with numbered Dashboard Analytic Help and an embedded index.
+- Expanded README and Help for ingestion, mapping, previews, Dashboard, reporting and Slides Templates.
 
 ---
 

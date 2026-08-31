@@ -11,8 +11,9 @@ htmlcov/
 data/input/*
 data/output/*
 data/exports/*
+data/workspaces/
 !data/input/.gitkeep
 !data/output/.gitkeep
 !data/exports/.gitkeep
-/assets/slides-templates/
+/config/slides-templates/
 .idea/

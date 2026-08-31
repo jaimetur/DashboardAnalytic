@@ -27,7 +27,7 @@ class Settings:
     input_dir: Path = project_path("APP_INPUT_DIR", "data/input")
     output_dir: Path = project_path("APP_OUTPUT_DIR", "data/output")
     export_dir: Path = project_path("APP_EXPORT_DIR", "data/exports")
-    slides_templates_dir: Path = project_path("APP_SLIDES_TEMPLATES_DIR", "assets/slides-templates")
+    slides_templates_dir: Path = project_path("APP_SLIDES_TEMPLATES_DIR", "config/slides-templates")
     ppt_templates_dir: Path = project_path("APP_PPT_TEMPLATES_DIR", "assets/ppt-templates")
     template_dir: Path = project_path("APP_TEMPLATE_DIR", "src/web_interface/templates")
     static_dir: Path = project_path("APP_STATIC_DIR", "src/web_interface/static")

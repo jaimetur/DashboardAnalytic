@@ -906,6 +906,8 @@ const infoOverlay = document.getElementById('info-overlay');
 const infoTitle = document.getElementById('info-title');
 const infoCopy = document.getElementById('info-copy');
 const infoClose = document.getElementById('info-close');
+const infoEyebrow = document.getElementById('info-eyebrow');
+const infoIcon = document.getElementById('info-icon');
 const filePickerInput = document.querySelector('[data-file-picker-input]');
 const filePickerText = document.querySelector('[data-file-picker-text]');
 const inputKindSelect = document.querySelector('[data-input-kind-select]');
@@ -1741,12 +1743,19 @@ function showInfoDialog(message, options = {}) {
     options.onClose?.();
     return;
   }
-  infoTitle.textContent = options.title || 'Information';
+  const tone = ['info', 'warning', 'error'].includes(options.tone) ? options.tone : 'info';
+  const toneLabels = {info: 'Information', warning: 'Warning', error: 'Error'};
+  const toneIcons = {info: 'i', warning: '!', error: '×'};
+  infoOverlay.dataset.tone = tone;
+  if (infoEyebrow) infoEyebrow.textContent = toneLabels[tone];
+  if (infoIcon) infoIcon.textContent = toneIcons[tone];
+  infoTitle.textContent = options.title || toneLabels[tone];
   infoCopy.textContent = message || '';
   infoOverlay.hidden = false;
   document.body.classList.add('loading-active');
   const close = () => {
     infoOverlay.hidden = true;
+    delete infoOverlay.dataset.tone;
     document.body.classList.remove('loading-active');
     infoClose.removeEventListener('click', close);
     infoOverlay.removeEventListener('click', handleBackdrop);

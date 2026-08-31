@@ -373,7 +373,7 @@ def update_catalogue_document(document: Path, nsa_entries: list[CatalogEntry], s
     content = document.read_text(encoding="utf-8")
     if start not in content or end not in content:
         raise ValueError("The PowerPoint reporting help document is missing its Slides Templates markers.")
-    block = "\n".join((start, "", "Export the active NSA or SA Slides Template from Admin before editing it. The tables below always reflect the active CSV files under `assets/slides-templates/default/`.", "", catalogue_markdown(nsa_entries, "nsa"), "", catalogue_markdown(sa_entries, "sa"), "", end))
+    block = "\n".join((start, "", "Export the active NSA or SA Slides Template from Admin before editing it. The tables below always reflect the active CSV files under `config/slides-templates/default/`.", "", catalogue_markdown(nsa_entries, "nsa"), "", catalogue_markdown(sa_entries, "sa"), "", end))
     document.write_text(re.sub(re.escape(start) + r".*?" + re.escape(end), block, content, flags=re.S), encoding="utf-8")
 
 # The PPT templates contain rasterised Tableau charts.  These rules are the

@@ -24,7 +24,7 @@ Inspect running services with `docker compose -f docker/docker-compose.yml ps` a
 
 ## Persistent data
 
-The database, uploaded sources, normalised outputs and exports must persist outside the container filesystem. The compose configuration mounts the relevant project directories; confirm that the host directories are writable by Docker and included in the environment backup policy.
+The workspace registry, template seed library, workspace databases, uploaded sources, normalised outputs and exports must persist outside the container filesystem. The compose configuration mounts both `config/` and `data/`; confirm that the host directories are writable by Docker and included in the backup policy. In particular, back up `config/workspace-registry.db` and the complete `data/workspaces/` tree.
 
 Before the first production start, set a private `APP_SECRET_KEY`, a non-default administrator password and the required storage paths in `docker/.env`. See [Configuration](01-configuration-file.md) for the variable reference.
 
@@ -33,5 +33,5 @@ Before the first production start, set a private `APP_SECRET_KEY`, a non-default
 1. Back up the persistent database and data directories.
 2. Pull or obtain the intended application revision.
 3. Rebuild and start the production compose stack.
-4. Log in, confirm the version and verify that existing workspace data is still available.
+4. Log in, open an existing workspace and verify that its datasets, templates and database data are available.
 5. Generate a small test export before processing production CDRs.

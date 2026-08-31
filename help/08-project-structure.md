@@ -10,11 +10,11 @@ DashboardAnalytic/
 │   ├── utils/                     # shared helpers
 │   └── web_interface/             # Jinja templates, JavaScript and CSS
 ├── assets/ppt-templates/          # bundled master PowerPoint template
-├── assets/slides-templates/       # NSA/SA Slides Templates CSVs and workspace library
+├── config/                        # application configuration, registry and template seed library
 ├── help/                          # Help-centre Markdown articles
 ├── tests/                         # automated tests
 ├── docker/                        # Compose definitions and environment configuration
-├── data/                          # runtime data when configured locally
+├── data/workspaces/               # isolated workspace databases and files
 └── README.md                      # project overview and quick start
 ```
 
@@ -22,8 +22,8 @@ DashboardAnalytic/
 
 - **Routes and pages:** `src/DashboardAnalytic.py` exposes API and document/help routes; `src/web_interface/templates/` contains the application, reporting and Help views.
 - **Reporting:** the reporting module loads processed CDR data, applies NSA/SA and persisted vendor logic, parses filters and row/column grouping from the selected Slides Templates, then fills the supplied PowerPoint layouts. The PowerPoint master is kept in `assets/ppt-templates/` so deployments do not depend on a user desktop.
-- **Slides Templates assets:** `assets/slides-templates/library/nsa/` and `library/sa/` are the complete canonical library, including each technology's default template. `assets/slides-templates/default/nsa/` and `default/sa/` contain only a same-named active mirror for report generation. The Admin editor and importer use this schema as the executable chart contract.
-- **Persistence:** the data modules keep workspace metadata and processed datasets available for later Dashboard and Reporting use.
+- **Workspaces and persistence:** `config/workspace-registry.db` stores only the workspace catalogue and active-state information. Each workspace lives at `data/workspaces/<Workspace Name>/`, with a same-named SQLite database plus `input/`, `output/`, `exports/` and `slides-templates/` directories. Dataset records, individual materialised rows and shared reporting rows are isolated in that database.
+- **Slides Templates configuration:** `config/slides-templates/` seeds new workspaces. Each workspace owns an editable library at `data/workspaces/<Workspace>/slides-templates/`; its `default/nsa/` and `default/sa/` folders contain the active report-generation mirrors. The Admin editor and importer use this schema as the executable chart contract.
 - **Help:** articles in `help/` are rendered by the in-app document viewer. The Help navigation is an explicit curated list, preventing generic documentation from appearing in the product UI.
 
 Keep generated outputs, database files and customer CDRs out of source-control commits.

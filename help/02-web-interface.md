@@ -6,19 +6,21 @@ The application follows one operational workflow: upload and process files in Wo
 
 | Area | Purpose |
 | --- | --- |
-| **Workspace** | Upload, classify and process datasets. It is the source-of-truth entry point for analysis and reporting. |
+| **Workspace** | Manage isolated workspaces, then upload, classify and process their datasets. It is the source-of-truth entry point for analysis and reporting. |
 | **E2E Dashboard** | Explore one processed dataset with adaptive filters, KPI summaries, scorecards, CDF/comparison charts and dashboard exports. |
 | **E2E PowerPoint Reporting** | Generate standardised NSA or SA NetCheck CDR PowerPoint reports from three processed CDR domains. It also shows the future Smart Orchestrator Logs Reports module. |
-| **Administration** | Manage users, inspect stored datasets and review audit activity; restricted to authorised administrators. |
+| **Administration** | Manage users and templates, inspect the active workspace database and review audit activity; restricted to authorised administrators. |
 | **Help** | Opens this documentation in the current application tab with its own navigation panel. |
 
 Workspace, Dashboard and Reporting are shown as application tabs directly above the content panel. Readme, Changelog, Help and (for administrators) Admin share that row on the right; only sign-out remains in the top navigation.
 
 ## Workspace
 
-Use **Upload** to add a supported source file. Workspace accepts NetCheck CDR Data, Voice and Speech workbooks, Smart Orchestrator Logs and separate VFUK/3UK Multivendor Mappings. It proposes a type from the filename; confirm or correct it before processing. When ready mappings already exist and a file is classified as a CDR, that file also shows optional VFUK and 3UK mapping selectors. The latest ready mapping of each type is proposed; choose **No Map Vendor Column** to skip it, or select only one mapping to enrich only that operator. When several files are selected, each has its own selectors in the review panel. The **Data Processing** queue can be narrowed by input type, with **All Types** selected initially and unavailable types disabled.
+Start in **Workspaces Management**. The selector defaults to the most recently opened workspace. Use **Open** or **Close** to control the active workspace; **Manage Workspace** creates, renames, duplicates or removes workspaces. A closed workspace disables Dashboard and Reporting and hides ingestion/queue operations. Each workspace stores its own database, files and editable Slides Templates.
 
-Once a dataset is processed, **Preview** opens a read-only sample in a new tab. It supports a configurable row limit, free-text row/column matching, and source-specific controls: CDR previews provide multi-select Operator, Vendor, RAT, Session Type and Call Status filters; mapping previews provide GCID/Vendor filtering and highlight those fields. CDR rows also expose **Show Dashboard**. When mappings are available, an unmapped CDR exposes **Map Vendors**; a mapped CDR exposes **Clear Vendors** for a clean remap. Check that the status is **Processed** before moving on: datasets still processing or showing an error are not valid report inputs.
+With a workspace open, use **Upload** to add a supported source file. Workspace accepts NetCheck CDR Data, Voice and Speech workbooks, Smart Orchestrator Logs and separate VFUK/3UK Multivendor Mappings. It proposes a type from the filename; confirm or correct it before processing. When ready mappings already exist and a file is classified as a CDR, that file also shows optional VFUK and 3UK mapping selectors. The latest ready mapping of each type is proposed; choose **No Map Vendor Column** to skip it, or select only one mapping to enrich only that operator. When several files are selected, each has its own selectors in the review panel. The **Data Processing** queue can be narrowed by input type, with **All Types** selected initially and unavailable types disabled.
+
+Once a dataset is processed, **Preview** opens a read-only sample in a new tab. It supports a configurable row limit, free-text row/column matching and Excel-style value menus on table headers; CDR previews also provide multi-select Operator, Vendor, RAT, Session Type and Call Status filters. Mapping previews provide GCID/Vendor filtering and highlight those fields. CDR rows also expose **Show Dashboard**. When mappings are available, an unmapped CDR exposes **Map Vendors**; a mapped CDR exposes **Clear Vendors** for a clean remap. Check that the status is **Processed** before moving on: datasets still processing or showing an error are not valid report inputs.
 
 ## E2E Dashboard
 

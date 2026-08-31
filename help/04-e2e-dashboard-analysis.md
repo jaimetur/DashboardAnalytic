@@ -1,6 +1,6 @@
 # 4. E2E Dashboard
 
-E2E Dashboard is the interactive layer for a processed NetCheck CDR dataset. It adapts to the available CDR columns, so filter values and KPIs can differ between Data, Voice and Speech sources.
+E2E Dashboard is the interactive layer for a processed NetCheck CDR dataset in the open workspace. It adapts to the available CDR columns, so filter values and KPIs can differ between Data, Voice and Speech sources. It is unavailable while no workspace is open.
 
 ## Typical analysis flow
 

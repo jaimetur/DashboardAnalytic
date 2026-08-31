@@ -35,8 +35,13 @@
       <nav class="module-tabs" aria-label="E2E modules">
         <div class="module-tabs-primary">
           <a class="module-tab module-tab-workspace{% if request.url.path == '/workspace' %} active{% endif %}" href="/workspace">Workspace</a>
+          {% if active_workspace %}
           <a class="module-tab module-tab-dashboard{% if request.url.path == '/dashboard' %} active{% endif %}" href="/dashboard"><span class="module-tab-label-desktop">E2E Dashboard</span><span class="module-tab-label-mobile">Dashboard</span></a>
           <a class="module-tab module-tab-reporting{% if request.url.path == '/reporting' %} active{% endif %}" href="/reporting"><span class="module-tab-label-desktop">E2E PowerPoint Reporting</span><span class="module-tab-label-mobile">Reporting</span></a>
+          {% else %}
+          <span class="module-tab module-tab-disabled" aria-disabled="true"><span class="module-tab-label-desktop">E2E Dashboard</span><span class="module-tab-label-mobile">Dashboard</span></span>
+          <span class="module-tab module-tab-disabled" aria-disabled="true"><span class="module-tab-label-desktop">E2E PowerPoint Reporting</span><span class="module-tab-label-mobile">Reporting</span></span>
+          {% endif %}
         </div>
         <div class="module-tabs-secondary" aria-label="Documentation and administration">
           <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/readme' %} active{% endif %}" href="/documents/view/readme">Readme</a>
@@ -73,8 +78,8 @@
   </div>
   <div id="info-overlay" class="confirm-overlay info-overlay" hidden>
     <div class="confirm-panel info-panel" role="dialog" aria-modal="true" aria-labelledby="info-title" aria-describedby="info-copy">
-      <div class="confirm-icon info-icon" aria-hidden="true">i</div>
-      <p class="eyebrow">Information</p>
+      <div id="info-icon" class="confirm-icon info-icon" aria-hidden="true">i</div>
+      <p id="info-eyebrow" class="eyebrow">Information</p>
       <h3 id="info-title">Update complete</h3>
       <p id="info-copy"></p>
       <div class="confirm-actions">

@@ -12,6 +12,9 @@ import pandas as pd
 from src.modules.auth import hash_password
 
 
+DATABASE_BLANK_FILTER = '__database_blank__'
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -259,6 +262,154 @@ class Repository:
 
     def _quote_identifier(self, identifier: str) -> str:
         return '"' + str(identifier).replace('"', '""') + '"'
+
+    def list_database_tables(self) -> list[str]:
+        """Return the editable user tables in the currently configured workspace database."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+                ORDER BY name COLLATE NOCASE
+                """
+            ).fetchall()
+        return [str(row['name']) for row in rows]
+
+    def _database_table_metadata(self, conn: sqlite3.Connection, table_name: str) -> list[sqlite3.Row]:
+        return conn.execute(f"PRAGMA table_info({self._quote_identifier(table_name)})").fetchall()
+
+    def _database_filter_clause(
+        self,
+        metadata: list[sqlite3.Row],
+        filters: dict[str, list[str]] | None,
+    ) -> tuple[str, list[str]]:
+        known_columns = {str(row['name']) for row in metadata}
+        clauses: list[str] = []
+        parameters: list[str] = []
+        for column, raw_values in (filters or {}).items():
+            if column not in known_columns:
+                raise ValueError('The filter contains an unknown column.')
+            if not isinstance(raw_values, list):
+                raise ValueError('Each database filter must contain a list of values.')
+            values = list(dict.fromkeys(str(value) for value in raw_values))
+            if not values:
+                continue
+            quoted_column = self._quote_identifier(column)
+            has_blank = DATABASE_BLANK_FILTER in values
+            concrete_values = [value for value in values if value != DATABASE_BLANK_FILTER]
+            alternatives: list[str] = []
+            if concrete_values:
+                alternatives.append(f"CAST({quoted_column} AS TEXT) IN ({', '.join('?' for _ in concrete_values)})")
+                parameters.extend(concrete_values)
+            if has_blank:
+                alternatives.append(f"({quoted_column} IS NULL OR TRIM(CAST({quoted_column} AS TEXT)) = '')")
+            clauses.append(f"({' OR '.join(alternatives)})")
+        return (' WHERE ' + ' AND '.join(clauses)) if clauses else '', parameters
+
+    def database_table_page(
+        self,
+        table_name: str,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        filters: dict[str, list[str]] | None = None,
+    ) -> dict[str, Any]:
+        """Return one bounded page of a workspace table, addressed by SQLite rowid."""
+        if table_name not in self.list_database_tables():
+            raise ValueError('The selected table does not exist in the active workspace database.')
+        page_size = max(1, min(int(limit), 250))
+        page_offset = max(0, int(offset))
+        quoted_table = self._quote_identifier(table_name)
+        with self.connection() as conn:
+            column_rows = self._database_table_metadata(conn, table_name)
+            where_clause, parameters = self._database_filter_clause(column_rows, filters)
+            columns = [
+                {
+                    'name': str(row['name']),
+                    'type': str(row['type'] or ''),
+                    'primary_key': bool(row['pk']),
+                    'not_null': bool(row['notnull']),
+                }
+                for row in column_rows
+            ]
+            rows = [
+                dict(row)
+                for row in conn.execute(
+                    f"SELECT rowid AS __database_rowid__, * FROM {quoted_table}{where_clause} ORDER BY rowid DESC LIMIT ? OFFSET ?",
+                    (*parameters, page_size, page_offset),
+                ).fetchall()
+            ]
+            total_rows = int(conn.execute(f"SELECT COUNT(*) AS total FROM {quoted_table}{where_clause}", parameters).fetchone()['total'])
+        return {'columns': columns, 'rows': rows, 'total_rows': total_rows, 'limit': page_size, 'offset': page_offset}
+
+    def database_table_distinct_values(
+        self,
+        table_name: str,
+        column_name: str,
+        *,
+        filters: dict[str, list[str]] | None = None,
+        search: str = '',
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        """Return globally distinct values for an Excel-like server-side filter."""
+        if table_name not in self.list_database_tables():
+            raise ValueError('The selected table does not exist in the active workspace database.')
+        quoted_table = self._quote_identifier(table_name)
+        result_limit = max(1, min(int(limit), 500))
+        with self.connection() as conn:
+            metadata = self._database_table_metadata(conn, table_name)
+            if column_name not in {str(row['name']) for row in metadata}:
+                raise ValueError('The selected filter column does not exist in the active workspace database.')
+            where_clause, parameters = self._database_filter_clause(metadata, filters)
+            quoted_column = self._quote_identifier(column_name)
+            normalized_search = str(search or '').strip()
+            if normalized_search:
+                search_clause = f"LOWER(CAST({quoted_column} AS TEXT)) LIKE LOWER(?)"
+                where_clause = f"{where_clause} AND {search_clause}" if where_clause else f" WHERE {search_clause}"
+                parameters.append(f'%{normalized_search}%')
+            rows = conn.execute(
+                f"SELECT {quoted_column} AS value FROM {quoted_table}{where_clause} GROUP BY {quoted_column} ORDER BY CAST({quoted_column} AS TEXT) COLLATE NOCASE LIMIT ?",
+                (*parameters, result_limit + 1),
+            ).fetchall()
+        has_more = len(rows) > result_limit
+        values = [DATABASE_BLANK_FILTER if row['value'] is None or str(row['value']).strip() == '' else str(row['value']) for row in rows[:result_limit]]
+        return {'values': values, 'has_more': has_more}
+
+    def update_database_table_row(self, table_name: str, rowid: int, updates: dict[str, Any]) -> None:
+        """Persist safe, non-key cell edits made by an administrator."""
+        if table_name not in self.list_database_tables():
+            raise ValueError('The selected table does not exist in the active workspace database.')
+        if not isinstance(updates, dict) or not updates:
+            raise ValueError('Enter at least one changed value before saving.')
+        quoted_table = self._quote_identifier(table_name)
+        with self.connection() as conn:
+            metadata = conn.execute(f"PRAGMA table_info({quoted_table})").fetchall()
+            columns = {str(row['name']): row for row in metadata}
+            unknown_columns = set(updates) - set(columns)
+            if unknown_columns:
+                raise ValueError('The update contains an unknown column.')
+            protected_columns = {str(row['name']) for row in metadata if row['pk']}
+            if protected_columns.intersection(updates):
+                raise ValueError('Primary-key values cannot be edited in Database Management.')
+            assignments = ', '.join(f"{self._quote_identifier(column)} = ?" for column in updates)
+            values = [updates[column] for column in updates]
+            result = conn.execute(
+                f"UPDATE {quoted_table} SET {assignments} WHERE rowid = ?",
+                (*values, int(rowid)),
+            )
+            if result.rowcount != 1:
+                raise ValueError('The row no longer exists. Refresh the table and try again.')
+
+    def delete_database_table_row(self, table_name: str, rowid: int) -> None:
+        """Delete one row selected in Database Management by its SQLite rowid."""
+        if table_name not in self.list_database_tables():
+            raise ValueError('The selected table does not exist in the active workspace database.')
+        quoted_table = self._quote_identifier(table_name)
+        with self.connection() as conn:
+            result = conn.execute(f"DELETE FROM {quoted_table} WHERE rowid = ?", (int(rowid),))
+            if result.rowcount != 1:
+                raise ValueError('The row no longer exists. Refresh the table and try again.')
 
     def _index_name(self, table_name: str, column_name: str, suffix: str) -> str:
         return f'idx_{table_name}_{column_name}_{suffix}'

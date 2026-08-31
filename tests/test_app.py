@@ -19,12 +19,14 @@ def login(client) -> None:
 def test_login_page_loads(client) -> None:
     response = client.get("/login")
     assert response.status_code == 200
-    assert "Sign in" in response.text
+    assert "Log in" in response.text
     assert "Dashboard Analytic" in response.text
     assert __release_date__ in response.text
     assert "Default Access:" in response.text
     assert "admin / admin123" in response.text
     assert "demo / demo123" in response.text
+    assert 'class="login-workspace-field">Workspace' in response.text
+    assert 'Default Workspace' in response.text
 
 
 def test_login_page_hides_missing_default_access_accounts(client) -> None:
@@ -261,11 +263,131 @@ def test_reupload_preserves_original_upload_date_for_dataset_ordering(client) ->
     assert workspace.text.index('<th>Uploaded</th>') < workspace.text.index('<th>Updated</th>')
 
 
+def test_workspace_management_isolates_dataset_databases_and_remembers_last_opened_workspace(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    assert app_module.workspace_registry.registry_path.name == 'workspace-registry.db'
+    payload = b"market,period,score\nES,2026-Q1,91\n"
+    client.post(
+        '/dashboard/upload', data={'dataset_kinds': 'data'},
+        files={'dataset_files': ('default.csv', BytesIO(payload), 'text/csv')},
+    )
+    default_db = app_module.repository.db_path
+    assert default_db.parent == app_module.settings.input_dir.parent
+    assert default_db.name == 'Default Workspace.db'
+
+    created = client.post('/workspace/create', data={'name': 'Campaign benchmark'}, follow_redirects=False)
+    assert created.status_code == 303
+    assert app_module.active_workspace is not None
+    assert app_module.active_workspace.name == 'Campaign benchmark'
+    assert app_module.repository.db_path != default_db
+    assert app_module.repository.db_path.name == 'Campaign benchmark.db'
+    assert app_module.repository.db_path.parent.name == 'Campaign benchmark'
+    assert app_module.repository.list_datasets() == []
+
+    page = client.get('/workspace')
+    assert 'Campaign benchmark' in page.text
+    assert 'Manage workspaces' in page.text
+    assert 'data-workspace-open disabled>Open</button>' in page.text
+    workspace_id = app_module.active_workspace.id
+    renamed = client.post('/workspace/rename', data={'workspace_id': workspace_id, 'name': 'Campaign benchmark Q3'})
+    assert renamed.status_code == 200
+    assert 'Campaign benchmark Q3' in renamed.text
+    assert app_module.repository.db_path.name == 'Campaign benchmark Q3.db'
+    assert app_module.repository.db_path.parent.name == 'Campaign benchmark Q3'
+    assert app_module.repository.db_path.exists()
+
+    selected = client.post('/workspace/select', data={'workspace_id': 'default'}, follow_redirects=False)
+    assert selected.status_code == 303
+    assert app_module.repository.db_path == default_db
+    assert len(app_module.repository.list_datasets()) == 1
+
+    duplicated = client.post('/workspace/duplicate', data={'workspace_id': 'default'}, follow_redirects=False)
+    assert duplicated.status_code == 303
+    copied_workspace = next(item for item in app_module.workspace_registry.list() if item.name == 'Default Workspace - Copy')
+    assert copied_workspace.database_path.name == 'Default Workspace - Copy.db'
+    with app_module.repository.connection() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM datasets').fetchone()[0] == 1
+
+    cannot_remove_open = client.post('/workspace/delete', data={'workspace_id': 'default'}, follow_redirects=False)
+    assert cannot_remove_open.headers['location'].startswith('/workspace?workspace_warning=')
+
+    closed = client.post('/workspace/close', data={'workspace_id': 'default'}, follow_redirects=False)
+    assert closed.status_code == 303
+    assert app_module.active_workspace is None
+    closed_workspace = client.get('/workspace')
+    assert 'Data Ingestion' not in closed_workspace.text
+    assert 'module-tab-disabled' in closed_workspace.text
+    assert client.get('/dashboard', follow_redirects=False).status_code == 303
+
+    deleted = client.post('/workspace/delete', data={'workspace_id': workspace_id}, follow_redirects=False)
+    assert deleted.status_code == 303
+    assert app_module.workspace_registry.get(workspace_id) is None
+
+
 def test_admin_panel_is_available_for_admin(client) -> None:
     login(client)
     response = client.get("/admin")
     assert response.status_code == 200
     assert "Admin panel" in response.text
+
+
+def test_admin_database_management_lists_and_updates_active_workspace_tables(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    client.post(
+        "/admin/users",
+        data={"username": "database-editor", "password": "start123", "role": "user"},
+        follow_redirects=False,
+    )
+    admin = client.get("/admin")
+    assert admin.status_code == 200
+    assert "Databases Management" in admin.text
+    assert 'data-database-table-select' in admin.text
+    assert 'value="users"' in admin.text
+
+    users = client.get("/admin/database/table", params={"table": "users", "limit": 100})
+    assert users.status_code == 200
+    payload = users.json()
+    assert any(column["name"] == "id" and column["primary_key"] for column in payload["columns"])
+    editor = next(row for row in payload["rows"] if row["username"] == "database-editor")
+
+    values = client.get(
+        "/admin/database/table/values",
+        params={"table": "users", "column": "username", "search": "database-editor"},
+    )
+    assert values.status_code == 200
+    assert values.json()["values"] == ["database-editor"]
+
+    filtered = client.post(
+        "/admin/database/table/query",
+        json={"table": "users", "offset": 0, "limit": 100, "filters": {"username": ["database-editor"]}},
+    )
+    assert filtered.status_code == 200
+    assert [row["username"] for row in filtered.json()["rows"]] == ["database-editor"]
+
+    saved = client.post(
+        "/admin/database/table",
+        json={"table": "users", "rowid": editor["__database_rowid__"], "updates": {"active": "0"}},
+    )
+    assert saved.status_code == 200
+    assert app_module.repository.get_user("database-editor").active is False
+
+    protected = client.post(
+        "/admin/database/table",
+        json={"table": "users", "rowid": editor["__database_rowid__"], "updates": {"id": "999"}},
+    )
+    assert protected.status_code == 400
+    assert "Primary-key values cannot be edited" in protected.json()["detail"]
+
+    deleted = client.post(
+        "/admin/database/table/delete",
+        json={"table": "users", "rowid": editor["__database_rowid__"]},
+    )
+    assert deleted.status_code == 200
+    assert app_module.repository.get_user("database-editor") is None
 
 
 def test_dashboard_upload_accepts_multiple_files(client) -> None:
