@@ -47,13 +47,22 @@ STOP_REQUESTS: set[int] = set()
 STOP_REQUESTS_LOCK = Lock()
 LEGACY_SLIDES_TEMPLATES_DIR = PROJECT_ROOT / 'assets' / 'slides-templates'
 DEFAULT_SLIDES_TEMPLATES_DIR = PROJECT_ROOT / 'config' / 'slides-templates'
+application_config_dir = settings.database_path.parent
+
+
+def legacy_workspace_registry_path() -> Path:
+    """Locate either historical registry filename while migrating to data/workspaces."""
+    current_legacy_path = application_config_dir / 'workspace-registry.db'
+    return current_legacy_path if current_legacy_path.exists() else application_config_dir / 'workspaces.db'
+
+
 repository = Repository(settings.database_path)
 workspace_registry = WorkspaceRegistry(
-    settings.database_path.parent / 'workspace-registry.db',
+    settings.input_dir.parent / 'workspaces' / 'workspace-registry.db',
     settings.database_path,
     settings.input_dir.parent,
     settings.slides_templates_dir,
-    settings.database_path.parent / 'workspaces.db',
+    legacy_workspace_registry_path(),
 )
 active_workspace: Workspace | None = None
 FILTER_DIMENSIONS = ['market', 'period', 'operator', 'vendor', 'test_name', 'region', 'city', 'session_type', 'direction', 'technology_primary', 'source_sheet']
@@ -457,11 +466,12 @@ async def lifespan(_: FastAPI):
     # Capture the configured legacy paths once, then retain them as the
     # original workspace while every newly-created workspace gets its own DB
     # and data directories.
-    global workspace_registry
+    global workspace_registry, application_config_dir
+    application_config_dir = settings.database_path.parent
     workspace_registry = WorkspaceRegistry(
-        settings.database_path.parent / 'workspace-registry.db', settings.database_path,
+        settings.input_dir.parent / 'workspaces' / 'workspace-registry.db', settings.database_path,
         settings.input_dir.parent, settings.slides_templates_dir,
-        settings.database_path.parent / 'workspaces.db',
+        legacy_workspace_registry_path(),
     )
     workspace_registry.initialize()
     migrate_uk_slides_templates_to_global_config()
@@ -1547,9 +1557,9 @@ def _archive_workspace(archive: zipfile.ZipFile, workspace: Workspace, archive_p
 def build_export_archive(target: str) -> tuple[bytes, str]:
     """Create a portable ZIP package with a manifest used for automatic import."""
     buffer = io.BytesIO()
-    # ``settings.database_path`` changes with the active workspace. The
-    # registry location remains the stable application configuration root.
-    config_root = workspace_registry.registry_path.parent
+    # ``settings.database_path`` changes with the active workspace and the
+    # registry lives with workspace data, so retain the configured app root.
+    config_root = application_config_dir
     with zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
         if target in {'config', 'config-with-templates'}:
             include_templates = target == 'config-with-templates'
@@ -1675,8 +1685,7 @@ def import_config_archive(staging_root: Path, manifest: dict[str, Any]) -> None:
         relative_path = path.relative_to(config_payload)
         if relative_path == Path(workspace_registry.registry_path.name):
             continue
-        config_root = workspace_registry.registry_path.parent
-        target = settings.slides_templates_dir / relative_path.relative_to('slides-templates') if relative_path.parts[0] == 'slides-templates' else config_root / relative_path
+        target = settings.slides_templates_dir / relative_path.relative_to('slides-templates') if relative_path.parts[0] == 'slides-templates' else application_config_dir / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
 

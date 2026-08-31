@@ -154,16 +154,23 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .admin-create-user-panel { background: linear-gradient(135deg, rgba(255, 224, 223, 0.82), rgba(255, 244, 243, 0.96)); border-color: rgba(139, 29, 36, 0.20); }
 .import-export-panel { border-color: rgba(20, 81, 112, 0.24); background: linear-gradient(135deg, rgba(237, 247, 250, 0.94), rgba(255, 255, 255, 0.96)); }
 .import-export-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
-.import-export-grid .form-stack { padding: 1rem; border: 1px solid rgba(20, 81, 112, 0.16); border-radius: 14px; background: rgba(255, 255, 255, 0.68); }
+.import-export-grid .form-stack { display: grid; grid-template-rows: auto auto 1fr auto; padding: 1rem; border: 1px solid rgba(20, 81, 112, 0.16); border-radius: 14px; background: rgba(255, 255, 255, 0.68); }
+.import-export-grid .form-note { margin: 0; padding: 0.72rem 0; align-self: end; }
 .import-export-grid h3 { margin: 0; color: #174966; }
-.admin-stack .import-export-action { background: linear-gradient(135deg, #155d83, #248caf); border-color: rgba(15, 73, 105, 0.64); }
+.admin-stack .import-export-action { justify-self: start; background: linear-gradient(135deg, #155d83, #248caf); border-color: rgba(15, 73, 105, 0.64); }
 .admin-stack .import-export-action:hover:not(:disabled) { background: linear-gradient(135deg, #104966, #1c7190); }
 .import-export-notice { color: #075d59; background: rgba(11, 122, 117, 0.10); border-color: rgba(11, 122, 117, 0.26); }
 .import-export-error { color: #7d2731; background: rgba(201, 76, 75, 0.12); border-color: rgba(139, 29, 36, 0.26); }
 .database-management-panel { border-color: rgba(139, 29, 36, 0.22); background: linear-gradient(135deg, rgba(255, 247, 246, 0.94), rgba(255, 255, 255, 0.96)); }
+.admin-stack [data-panel-state-key="admin:identity"], .admin-stack .report-catalogue-panel,
+.admin-stack .slides-templates-editor-panel, .admin-stack [data-panel-state-key="admin:datasets"] {
+  border-color: rgba(139, 29, 36, 0.22);
+  background: linear-gradient(135deg, rgba(255, 247, 246, 0.94), rgba(255, 255, 255, 0.96));
+}
 .admin-stack .database-management-panel { order: 1; }
 .admin-stack [data-panel-state-key="admin:datasets"] { order: 0; }
-.admin-stack [data-panel-state-key="admin:audit"] { order: 2; }
+.admin-stack .import-export-panel { order: 2; }
+.admin-stack [data-panel-state-key="admin:audit"] { order: 3; }
 .database-management-content { display: grid; gap: 1rem; }
 .database-management-content .lede { margin: 0; }
 .database-management-toolbar { display: flex; align-items: end; gap: 0.75rem; flex-wrap: wrap; }

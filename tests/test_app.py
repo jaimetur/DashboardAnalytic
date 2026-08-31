@@ -320,6 +320,7 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
 
     login(client)
     assert app_module.workspace_registry.registry_path.name == 'workspace-registry.db'
+    assert app_module.workspace_registry.registry_path == app_module.settings.input_dir.parent.parent / 'workspace-registry.db'
     payload = b"market,period,score\nES,2026-Q1,91\n"
     client.post(
         '/dashboard/upload', data={'dataset_kinds': 'data'},

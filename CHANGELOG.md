@@ -27,6 +27,7 @@
 - Improved CDR-only Dashboard analysis, adaptive filters, responsive module UI, dialogs, admin actions and Help navigation.
 - Moved Slides Templates to the shared `config/slides-templates/` library and removed unused workspace `output/` directories.
 - Made configuration transfers preserve the destination workspace registry; full-environment imports rebuild it from the transferred workspaces to avoid source-path conflicts.
+- Moved the workspace registry to `data/workspaces/workspace-registry.db`, with automatic migration from both historical `config` filenames.
 
 #### 🐛 Bug fixes:
 - Fixed catalogue defaults, deletion protection, editor selection, grouping semantics and reporting placeholder/chart generation.

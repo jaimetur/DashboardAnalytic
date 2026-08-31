@@ -17,14 +17,14 @@ Dashboard Analytic reads its runtime configuration from environment variables. F
 
 | Variable | Purpose |
 | --- | --- |
-| `APP_DATABASE_PATH` | Initial/legacy SQLite location. The application registry is stored alongside it as `workspace-registry.db`; each open workspace uses its own database. |
+| `APP_DATABASE_PATH` | Initial/legacy SQLite location. Each open workspace uses its own database; the workspace registry is stored at `data/workspaces/workspace-registry.db`. |
 | `APP_INPUT_DIR` | Initial/legacy input location used when migrating an existing installation. |
 | `APP_OUTPUT_DIR` | Initial/legacy output location retained only for migration compatibility; current workspaces do not use an `output/` directory. |
 | `APP_EXPORT_DIR` | Initial/legacy export location used when migrating an existing installation. |
 | `APP_SLIDES_TEMPLATES_DIR` | Optional override for the shared editable Slides Templates library. |
 | `APP_PPT_TEMPLATES_DIR` | Optional override for the bundled PowerPoint master-template directory. |
 
-The service process must have read/write access to the configured storage directories. In Docker, mount both `config/` and `data/`: the registry and shared Slides Templates live in `config/`, while every workspace is stored in `data/workspaces/<Workspace Name>/` with its database, `input/` and `exports/`. The version and release date displayed in the application are maintained in `src/version.py` and the changelog, not through an environment variable.
+The service process must have read/write access to the configured storage directories. In Docker, mount both `config/` and `data/`: shared Slides Templates live in `config/`, while the registry and every workspace are stored under `data/workspaces/`. Each workspace has its database, `input/` and `exports/` directories. The version and release date displayed in the application are maintained in `src/version.py` and the changelog, not through an environment variable.
 
 ## Recommended deployment setup
 

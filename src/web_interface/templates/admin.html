@@ -242,7 +242,6 @@
         <h2>Import/Export</h2>
       </div>
     </div>
-    <p class="lede">Export portable configuration, one workspace or the complete environment. Import identifies the package type automatically.</p>
     {% if import_export_notice %}<div class="alert import-export-notice">{{ import_export_notice }}</div>{% endif %}
     {% if import_export_error %}<div class="alert import-export-error">{{ import_export_error }}</div>{% endif %}
     <div class="import-export-grid">
@@ -253,11 +252,12 @@
             {% for option in export_options %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
           </select>
         </label>
+        <p class="form-note">Select the configuration, shared templates, one workspace or the complete environment to package.</p>
         <button type="submit" class="import-export-action">Export ZIP</button>
       </form>
       <form class="form-stack" action="/admin/import-export/import" method="post" enctype="multipart/form-data">
         <h3>Import</h3>
-        <label>Export package
+        <label>Import package
           <input type="file" name="package" accept=".zip,application/zip" required>
         </label>
         <p class="form-note">The package manifest identifies configuration, workspaces and full environments automatically. Configuration imports preserve this deployment's workspace registry; imported workspaces are added without replacing an existing one.</p>

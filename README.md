@@ -307,10 +307,10 @@ Recommended stack layout:
   docker-compose.yml
   .env
   config/
-    workspace-registry.db
     slides-templates/          # shared editable Slides Templates library
   data/
     workspaces/
+      workspace-registry.db    # local workspace catalogue and active state
       <Workspace Name>/
         <Workspace Name>.db
         input/
@@ -332,9 +332,9 @@ Recommended stack layout:
 - `help/`
   - project documentation
 - `config/`
-  - application configuration, local workspace registry and shared Slides Templates
+  - application configuration and shared Slides Templates
 - `data/`
-  - isolated workspace directories, databases and files
+  - workspace registry plus isolated workspace directories, databases and files
 
 ## Main routes
 
