@@ -5,11 +5,40 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+STORAGE_PATHS_FILE = PROJECT_ROOT / 'storage-paths.conf'
+STORAGE_ROOT_VARIABLES = frozenset({'CONFIG_DIR', 'DATA_DIR', 'ASSETS_DIR'})
+
+
+def load_storage_paths(path: Path = STORAGE_PATHS_FILE, environ: dict[str, str] | None = None) -> None:
+    """Load storage roots from the editable project-root configuration file.
+
+    Real environment variables retain precedence so Docker and deployment
+    tooling can override the local defaults without modifying the file.
+    """
+    environment = os.environ if environ is None else environ
+    if not path.is_file():
+        return
+    for line_number, raw_line in enumerate(path.read_text(encoding='utf-8').splitlines(), start=1):
+        line = raw_line.split('#', 1)[0].strip()
+        if not line:
+            continue
+        if '=' not in line:
+            raise ValueError(f'{path.name}:{line_number} must use KEY = value syntax.')
+        key, value = (part.strip() for part in line.split('=', 1))
+        if key not in STORAGE_ROOT_VARIABLES:
+            raise ValueError(f'{path.name}:{line_number} has unsupported setting {key!r}.')
+        value = value.strip('"\'')
+        if not value:
+            raise ValueError(f'{path.name}:{line_number} requires a path value.')
+        environment.setdefault(key, value)
+
+
+load_storage_paths()
 
 
 def project_path(env_var: str, default: str) -> Path:
     raw_value = os.getenv(env_var, default)
-    path = Path(raw_value)
+    path = Path(os.path.expandvars(os.path.expanduser(raw_value)))
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
@@ -35,8 +64,8 @@ class Settings:
 
     # These three roots can point outside the project. Individual APP_* paths
     # remain available when a deployment needs a more specific override.
-    config_dir: Path = project_path("CONFIG_DIR", "/Users/jaimetur/DashboardAnalytic/config")
-    data_dir: Path = project_path("DATA_DIR", "/Users/jaimetur/DashboardAnalytic/data")
+    config_dir: Path = project_path("CONFIG_DIR", "config")
+    data_dir: Path = project_path("DATA_DIR", "data")
     assets_dir: Path = project_path("ASSETS_DIR", "assets")
 
     database_path: Path = configured_path("APP_DATABASE_PATH", config_dir, "app.db")

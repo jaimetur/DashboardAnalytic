@@ -3,7 +3,24 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from src.config import load_storage_paths
 from src.modules.workspaces import WorkspaceRegistry
+
+
+def test_storage_paths_file_loads_roots_without_overriding_environment(tmp_path: Path) -> None:
+    paths_file = tmp_path / 'storage-paths.conf'
+    paths_file.write_text(
+        'CONFIG_DIR = /shared/config\nDATA_DIR = /shared/data\nASSETS_DIR = assets\n', encoding='utf-8'
+    )
+    environment = {'DATA_DIR': '/deployment/data'}
+
+    load_storage_paths(paths_file, environment)
+
+    assert environment == {
+        'CONFIG_DIR': '/shared/config',
+        'DATA_DIR': '/deployment/data',
+        'ASSETS_DIR': 'assets',
+    }
 
 
 def test_registry_keeps_existing_workspace_database_when_migrating_external_roots(tmp_path: Path) -> None:

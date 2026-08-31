@@ -1,6 +1,6 @@
 # Configuration
 
-Dashboard Analytic reads its runtime configuration from environment variables. For Docker deployments, set them in `docker/.env`; for local runs, export them in the shell or use the project environment file if your local setup provides one.
+Dashboard Analytic reads its storage roots first from [`storage-paths.conf`](../storage-paths.conf) in the project root, then applies environment-variable overrides. Edit that file for a local installation; for Docker deployments, set the overrides in `docker/.env`.
 
 ## Application and access
 
@@ -27,7 +27,7 @@ Dashboard Analytic reads its runtime configuration from environment variables. F
 | `APP_SLIDES_TEMPLATES_DIR` | Optional override for the shared editable Slides Templates library. |
 | `APP_PPT_TEMPLATES_DIR` | Optional override for the bundled PowerPoint master-template directory. |
 
-Set `CONFIG_DIR`, `DATA_DIR` and `ASSETS_DIR` when the three roots live outside the project; the more specific `APP_*` variables above override an individual location when necessary. The service process must have read/write access to the configured storage directories. In Docker, mount both `config/` and `data/`: shared Slides Templates live in `config/`, while the registry and every workspace are stored under `data/workspaces/`. Each workspace has its database, `input/` and `exports/` directories. The version and release date displayed in the application are maintained in `src/version.py` and the changelog, not through an environment variable.
+Edit `storage-paths.conf` to set `CONFIG_DIR`, `DATA_DIR` and `ASSETS_DIR` when the three roots live outside the project; its comments describe the simple `KEY = value` format. Environment variables with the same name, and the more specific `APP_*` variables above, take precedence when necessary. The service process must have read/write access to the configured storage directories. In Docker, mount both `config/` and `data/`: shared Slides Templates live in `config/`, while the registry and every workspace are stored under `data/workspaces/`. Each workspace has its database, `input/` and `exports/` directories. The version and release date displayed in the application are maintained in `src/version.py` and the changelog, not through an environment variable.
 
 ## Recommended deployment setup
 
