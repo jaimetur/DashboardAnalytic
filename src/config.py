@@ -35,8 +35,8 @@ class Settings:
 
     # These three roots can point outside the project. Individual APP_* paths
     # remain available when a deployment needs a more specific override.
-    config_dir: Path = project_path("CONFIG_DIR", "config")
-    data_dir: Path = project_path("DATA_DIR", "data")
+    config_dir: Path = project_path("CONFIG_DIR", "/Users/jaimetur/DashboardAnalytic/config")
+    data_dir: Path = project_path("DATA_DIR", "/Users/jaimetur/DashboardAnalytic/data")
     assets_dir: Path = project_path("ASSETS_DIR", "assets")
 
     database_path: Path = configured_path("APP_DATABASE_PATH", config_dir, "app.db")
