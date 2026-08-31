@@ -50,7 +50,7 @@ The renderer follows the visual grammar of the supplied template for every autom
 
 The technology condition below is always applied before the slide-level filters: NSA contains an ENDC spelling in `RAT`, `RAT_A` or `Sample_RAT_A`; SA contains `NR` in the same fields.
 
-The current CSV schema is `Slide`, `Slide tittle`, `Slide Subtittle`, `Layout`, `Chart Tittle`, `CDR source`, `KPI`, `Chart type`, `Legend`, `Filters`, `Grouping_Rows` and `Grouping_Columns`. For automated rows, all chart-definition fields are executable. `Slide Subtittle` is rendered in the second line of a chart slide's title placeholder in smaller blue text; `Chart Tittle` is the chart heading; `Legend` can replace generated captions in comma-separated order.
+The current CSV schema is `Slide`, `Slide tittle`, `Slide Subtittle`, `Layout`, `Chart Tittle`, `CDR source`, `KPI`, `Chart type`, `Legend`, `Filters`, `Grouping_Rows`, `Grouping_Columns` and `Legend Position`. For automated rows, all chart-definition fields are executable. `Slide Subtittle` is rendered in the second line of a chart slide's title placeholder in smaller blue text; `Chart Tittle` is the chart heading; `Legend` can replace generated captions in comma-separated order. `Legend Position` accepts `Top`, `Bottom`, `Left` or `Right`; top/bottom produce a horizontal legend row, while left/right use a vertical legend column.
 
 Two structural `Chart type` values build non-KPI slides:
 
@@ -71,14 +71,14 @@ Export the active NSA or SA Slides Template from Admin before editing it. The ta
 
 ### NSA template
 
-| Slide | Slide tittle | Slide Subtittle | Layout | Chart Tittle | CDR source | KPI | Chart type | Legend | Filters | Grouping_Rows | Grouping_Columns |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 8 | First | — | Title and 1 column + Comments | — | CDR-Voice | Call_Status | 100% Stacked Vertical Bars | — | — | Operator | Campaign |
+| Slide | Slide tittle | Slide Subtittle | Layout | Chart Tittle | CDR source | KPI | Chart type | Legend | Filters | Grouping_Rows | Grouping_Columns | Legend Position |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 8 | First | — | Title and 1 column + Comments | — | CDR-Voice | Call_Status | 100% Stacked Vertical Bars | — | — | Operator | Campaign | Top |
 
 ### SA template
 
-| Slide | Slide tittle | Slide Subtittle | Layout | Chart Tittle | CDR source | KPI | Chart type | Legend | Filters | Grouping_Rows | Grouping_Columns |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 8 | First | — | Title and 1 column + Comments | — | CDR-Voice | Call_Status | 100% Stacked Vertical Bars | — | — | Operator | Campaign |
+| Slide | Slide tittle | Slide Subtittle | Layout | Chart Tittle | CDR source | KPI | Chart type | Legend | Filters | Grouping_Rows | Grouping_Columns | Legend Position |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 8 | First | — | Title and 1 column + Comments | — | CDR-Voice | Call_Status | 100% Stacked Vertical Bars | — | — | Operator | Campaign | Top |
 
 <!-- SLIDES_TEMPLATES:END -->

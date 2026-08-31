@@ -428,6 +428,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const optionList = (field, cell) => {
     if (field === 'Layout') return suggestions.layouts || [];
     if (field === 'Chart type') return suggestions.chart_types || [];
+    if (field === 'Legend Position') return suggestions.legend_positions || [];
     if (field === 'CDR source') return Object.keys(suggestions.columns || {}).map((source) => source.replace(/^cdr-/, 'CDR-').replace(/(^|-)\w/g, (letter) => letter.toUpperCase()));
     if (fieldColumns.has(field) || field === 'KPI') {
       const row = cell.closest('tr');
@@ -442,6 +443,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (field === 'CDR source') return 'Choose the CDR source used to create this chart. It replaces the current value.';
     if (field === 'KPI') return 'Choose a processed field from the CDR source. It replaces the current value.';
     if (field === 'Legend') return 'Select one or more CDR fields to use as the displayed legend labels. Values are stored as a comma-separated list.';
+    if (field === 'Legend Position') return 'Choose where the legend is drawn: Top or Bottom uses a horizontal row; Left or Right uses a vertical column.';
     if (field === 'Filters') return 'Build complete conditions from a processed CDR field, operator and real observed value. Conditions are joined with semicolons (AND), and the cell remains manually editable.';
     if (field === 'Grouping_Rows') return 'Select one or more dimensions for the chart category axis or table rows. They are appended with ×.';
     if (field === 'Grouping_Columns') return 'Select one or more dimensions for comparison series or table columns. They are appended with ×.';
@@ -714,7 +716,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (!selected.length) return;
     const field = activeCell.dataset.catalogueField || '';
     const current = activeCell.textContent.trim();
-    if (field === 'Layout' || field === 'Chart type' || field === 'CDR source' || field === 'KPI') {
+    if (field === 'Layout' || field === 'Chart type' || field === 'CDR source' || field === 'KPI' || field === 'Legend Position') {
       activeCell.textContent = selected[0];
     } else if (field === 'Filters') {
       const clauses = selected.map((value) => `${value} = `).join('; ');
@@ -816,7 +818,7 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
   const convert = form.querySelector('[data-catalogue-convert]');
   const currentHeaders = [
     'Slide', 'Slide tittle', 'Slide Subtittle', 'Layout', 'Chart Tittle', 'CDR source',
-    'KPI', 'Chart type', 'Legend', 'Filters', 'Grouping_Rows', 'Grouping_Columns',
+    'KPI', 'Chart type', 'Legend', 'Filters', 'Grouping_Rows', 'Grouping_Columns', 'Legend Position',
   ];
   const normalizedHeader = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
   const hasCurrentSchema = async (selected) => {

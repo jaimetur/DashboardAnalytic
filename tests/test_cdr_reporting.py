@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _hierarchical_unique_keys, _layout_chart_frames, _named_slide_layout, _render_failure_count, _render_status_100, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _hierarchical_unique_keys, _layout_chart_frames, _named_slide_layout, _render_failure_count, _render_status_100, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
 
 
 def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> None:
@@ -208,6 +208,35 @@ def test_catalogue_csv_requires_the_report_chart_contract_columns() -> None:
     assert entries[0].legend == 'Completed/Dropped/Failed'
     assert entries[0].source_kind == 'voice'
     assert entries[0].chart_type == '100% Stacked Vertical Bars'
+
+
+def test_catalogue_parses_legend_position_and_accepts_prior_schema() -> None:
+    current = (
+        ','.join(CATALOG_HEADERS)
+        + '\n8,Quality,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Completed/Dropped/Failed,,Operator,Campaign,Left\n'
+    )
+    entry = parse_catalog_csv(current, 'nsa')[0]
+
+    assert entry.legend_position == 'left'
+    assert parse_legend_position('Bottom') == 'bottom'
+    with pytest.raises(ValueError, match='Legend Position'):
+        parse_legend_position('Centre')
+
+    previous = ','.join(CATALOG_HEADERS[:-1]) + '\n8,Quality,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n'
+    assert parse_catalog_csv(previous, 'nsa')[0].legend_position == 'top'
+
+
+def test_status_chart_draws_legend_at_the_catalogue_position() -> None:
+    frame = pd.DataFrame({
+        'Operator': ['Vodafone'],
+        'Campaign': ['2026 Q1'],
+        'Call_Status': ['Completed'],
+    })
+
+    with patch('src.modules.cdr_reporting._draw_chart_legend') as draw_legend:
+        _render_status_100('Status', frame, 'Operator', 'Campaign', legend_position='left')
+
+    assert draw_legend.call_args.args[2] == 'left'
 
 
 def test_catalogue_accepts_structural_slides_and_rejects_chart_configuration_on_them() -> None:

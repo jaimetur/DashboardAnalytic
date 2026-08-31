@@ -354,6 +354,7 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
             'KPI': entry.kpi,
             'Chart type': entry.chart_type,
             'Legend': entry.legend,
+            'Legend Position': entry.legend_position.title(),
             'Filters': entry.filters,
             'Grouping_Rows': entry.grouping_rows,
             'Grouping_Columns': entry.grouping_columns,
@@ -369,6 +370,7 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
         'suggestions': {
             'layouts': catalogue_layout_names(technology),
             'chart_types': sorted(CHART_TYPES | STRUCTURAL_SLIDE_TYPES, key=str.casefold),
+            'legend_positions': ['Top', 'Bottom', 'Left', 'Right'],
             'columns': columns,
         },
     }

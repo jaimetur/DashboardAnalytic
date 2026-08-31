@@ -25,11 +25,12 @@ TEMPLATE_NAMES = {
     "nsa": "Template_CDR_analysis.pptx",
     "sa": "Template_CDR_analysis.pptx",
 }
-CDR_REPORT_VERSION = "2026-08-31-v10"
+CDR_REPORT_VERSION = "2026-08-31-v11"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
-CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns")
-PREVIOUS_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "CDR source", "KPI", "Chart type", "Filters", "Grouping_Rows", "Grouping_Columns")
+CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns", "Legend Position")
+PREVIOUS_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns")
+OLDER_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "CDR source", "KPI", "Chart type", "Filters", "Grouping_Rows", "Grouping_Columns")
 LEGACY_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "CDR source", "KPI", "Chart type", "Filters", "Grouping")
 CATALOG_SOURCE_KINDS = {"cdr-data": "data", "cdr-voice": "voice", "cdr-speech": "speech"}
 CHART_TYPES = {
@@ -59,6 +60,7 @@ CATALOG_HEADER_ALIASES = {
     "kpi": "KPI",
     "charttype": "Chart type",
     "legend": "Legend",
+    "legendposition": "Legend Position",
     "filter": "Filters",
     "filters": "Filters",
     "groupingrows": "Grouping_Rows",
@@ -110,6 +112,7 @@ class CatalogEntry:
     filters: str
     grouping_rows: str
     grouping_columns: str
+    legend_position: str = "top"
 
     @property
     def source_kind(self) -> str | None:
@@ -160,6 +163,22 @@ def parse_catalog_grouping(value: str) -> GroupingSpec:
     return GroupingSpec(dimensions)
 
 
+def parse_legend_position(value: str) -> str:
+    """Return the canonical legend position declared by a Slides Template row."""
+    normalized = value.strip().casefold()
+    if not normalized:
+        return "top"
+    aliases = {
+        "top": "top", "above": "top", "arriba": "top",
+        "bottom": "bottom", "below": "bottom", "abajo": "bottom",
+        "left": "left", "izquierda": "left",
+        "right": "right", "derecha": "right",
+    }
+    if normalized not in aliases:
+        raise ValueError("Legend Position must be Top, Bottom, Left or Right.")
+    return aliases[normalized]
+
+
 def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntry]:
     """Validate the editable report-template CSV and return its chart rows."""
     if technology not in TEMPLATE_NAMES:
@@ -173,7 +192,7 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
         text = content
     reader = csv.DictReader(io.StringIO(text))
     fieldnames = tuple(reader.fieldnames or ())
-    if fieldnames not in {CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, LEGACY_CATALOG_HEADERS}:
+    if fieldnames not in {CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_CATALOG_HEADERS}:
         raise ValueError("The report template must use exactly these columns: " + ", ".join(CATALOG_HEADERS))
     entries: list[CatalogEntry] = []
     for line_number, row in enumerate(reader, start=2):
@@ -195,6 +214,7 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
             kpi=(row.get("KPI") or "").strip(),
             chart_type=(row.get("Chart type") or "").strip(),
             legend=(row.get("Legend") or "").strip(),
+            legend_position=parse_legend_position((row.get("Legend Position") or "").strip()),
             filters=(row.get("Filters") or "").strip(),
             grouping_rows=(row.get("Grouping_Rows") or "").strip() or " × ".join(legacy_dimensions[:1]),
             grouping_columns=(row.get("Grouping_Columns") or "").strip() or " × ".join(legacy_dimensions[1:]),
@@ -233,6 +253,7 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
             parse_catalog_filters(entry.filters)
             parse_catalog_grouping(entry.grouping_rows)
             parse_catalog_grouping(entry.grouping_columns)
+            parse_legend_position(entry.legend_position)
         except ValueError as exc:
             raise ValueError(f"Catalog row {line_number}: {exc}") from exc
         entries.append(entry)
@@ -339,7 +360,7 @@ def catalogue_markdown(entries: list[CatalogEntry], technology: str) -> str:
     heading = "NSA" if technology == "nsa" else "SA"
     lines = [f"### {heading} template", "", "| " + " | ".join(CATALOG_HEADERS) + " |", "| " + " | ".join("---" for _ in CATALOG_HEADERS) + " |"]
     for entry in entries:
-        values = (str(entry.slide), entry.slide_title, entry.slide_subtitle or "—", entry.layout or "—", entry.chart_title or "—", entry.cdr_source or "—", entry.kpi or "—", entry.chart_type or "—", entry.legend or "—", entry.filters or "—", entry.grouping_rows or "—", entry.grouping_columns or "—")
+        values = (str(entry.slide), entry.slide_title, entry.slide_subtitle or "—", entry.layout or "—", entry.chart_title or "—", entry.cdr_source or "—", entry.kpi or "—", entry.chart_type or "—", entry.legend or "—", entry.filters or "—", entry.grouping_rows or "—", entry.grouping_columns or "—", entry.legend_position.title())
         lines.append("| " + " | ".join(value.replace("|", "\\|").replace("\n", "<br>") for value in values) + " |")
     return "\n".join(lines)
 
@@ -360,6 +381,10 @@ def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
             "KPI": entry.kpi,
             "Chart type": entry.chart_type,
             "Legend": entry.legend,
+            # An empty cell remains the backwards-compatible spelling of the
+            # default Top position. This avoids rewriting every older CSV just
+            # because it has been opened and exported.
+            "Legend Position": "" if entry.legend_position == "top" else entry.legend_position.title(),
             "Filters": entry.filters,
             "Grouping_Rows": entry.grouping_rows,
             "Grouping_Columns": entry.grouping_columns,
@@ -1076,6 +1101,37 @@ def _legend_caption(labels: tuple[str, ...], index: int, fallback: object) -> st
     return labels[index] if index < len(labels) else str(fallback)
 
 
+def _draw_chart_legend(
+    draw: ImageDraw.ImageDraw,
+    items: list[tuple[str, str, int]],
+    position: str,
+    *,
+    font_size: int = 15,
+    line_markers: bool = False,
+) -> None:
+    """Draw a catalogue legend in a row (top/bottom) or column (left/right)."""
+    horizontal = position in {"top", "bottom"}
+    if horizontal:
+        start_x, start_y = 100, (80 if position == "top" else 838)
+        for index, (caption, colour, width) in enumerate(items):
+            x = start_x + (index % 5) * 275
+            y = start_y + (index // 5) * 26
+            if line_markers:
+                draw.line((x, y + 9, x + 28, y + 9), fill=colour, width=width)
+            else:
+                draw.rectangle((x, y, x + 18, y + 18), fill=colour)
+            draw.text((x + 27, y - 1), caption[:28], fill="#34495A", font=_font(font_size))
+        return
+    x, start_y = (26 if position == "left" else 1400), 126
+    for index, (caption, colour, width) in enumerate(items):
+        y = start_y + index * 28
+        if line_markers:
+            draw.line((x, y + 9, x + 28, y + 9), fill=colour, width=width)
+        else:
+            draw.rectangle((x, y, x + 18, y + 18), fill=colour)
+        draw.text((x + 25, y - 1), caption[:20], fill="#34495A", font=_font(font_size))
+
+
 def _catalogue_display_label(category: object, series: object) -> str:
     """Keep row categories visible while using column groups as comparisons."""
     category_text, series_text = str(category), str(series)
@@ -1125,7 +1181,7 @@ def _empty_chart(title: str) -> BytesIO:
     return output
 
 
-def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, period: str | None, quality: bool = False, threshold: float = 1.6, metric: str | None = None, legend_labels: tuple[str, ...] = ()) -> BytesIO:
+def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, period: str | None, quality: bool = False, threshold: float = 1.6, metric: str | None = None, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
     if frame.empty or not group or not period:
         return _empty_chart(title)
     image, draw = _canvas(title)
@@ -1148,9 +1204,9 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
     row_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_row_")]
     column_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_column_")]
     if column_hierarchy:
-        return _render_status_100_hierarchy(title, data, row_hierarchy, column_hierarchy, states, colours, legend_labels)
+        return _render_status_100_hierarchy(title, data, row_hierarchy, column_hierarchy, states, colours, legend_labels, legend_position)
     if len(row_hierarchy) > 1:
-        return _render_status_100_hierarchy(title, data, [], row_hierarchy, states, colours, legend_labels)
+        return _render_status_100_hierarchy(title, data, [], row_hierarchy, states, colours, legend_labels, legend_position)
     combos = [(str(g), str(p)) for g, p in data[[group, period]].drop_duplicates().itertuples(index=False)]
     if not combos:
         return _empty_chart(title)
@@ -1173,8 +1229,7 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
         value_y = chart_top + chart_height - (y / 100 * chart_height)
         draw.line((chart_left - 20, value_y, chart_left + chart_width, value_y), fill="#E4E9ED", width=1)
         draw.text((70, value_y - 8), f"{y}%", fill="#62727E", font=_font(16))
-    for index, (state, colour) in enumerate(zip(states, colours, strict=True)):
-        draw.rectangle((1470, 130 + index * 32, 1490, 150 + index * 32), fill=colour); draw.text((1500, 129 + index * 32), _legend_caption(legend_labels, index, state), fill="#34495A", font=_font(17))
+    _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colour, 2) for index, (state, colour) in enumerate(zip(states, colours, strict=True))], legend_position, font_size=16)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
@@ -1186,6 +1241,7 @@ def _render_status_100_hierarchy(
     states: tuple[str, ...],
     colours: tuple[str, ...],
     legend_labels: tuple[str, ...] = (),
+    legend_position: str = "top",
 ) -> BytesIO:
     """Render catalogue row groups as panes and column groups as nested headers."""
     row_keys = _hierarchical_unique_keys(data, row_hierarchy) if row_hierarchy else [()]
@@ -1253,15 +1309,12 @@ def _render_status_100_hierarchy(
         centre = chart_left + (column_index + 0.5) * column_width
         draw.text((centre - min(len(lower_caption) * 3.5, 62), chart_top + chart_height + 10), lower_caption[:20], fill="#62727E", font=_font(14))
 
-    for index, (state, colour) in enumerate(zip(states, colours, strict=True)):
-        x = chart_left + index * 185
-        draw.rectangle((x, 82, x + 18, 99), fill=colour)
-        draw.text((x + 25, 81), _legend_caption(legend_labels, index, state), fill="#34495A", font=_font(15))
+    _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colour, 2) for index, (state, colour) in enumerate(zip(states, colours, strict=True))], legend_position)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0)
     return output
 
 
-def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, period: str | None, legend_labels: tuple[str, ...] = ()) -> BytesIO:
+def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, period: str | None, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
     if frame.empty or not group:
         return _empty_chart(title)
     status = _column(frame, ("Call_Status", "Test_Result", "status"))
@@ -1280,9 +1333,9 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
         key=lambda column: int(column.rsplit("_", 1)[1]),
     )
     if column_hierarchy:
-        return _render_failure_count_hierarchy(title, failed, row_hierarchy, column_hierarchy, legend_labels)
+        return _render_failure_count_hierarchy(title, failed, row_hierarchy, column_hierarchy, legend_labels, legend_position)
     if len(row_hierarchy) > 1:
-        return _render_failure_count_hierarchy(title, failed, [], row_hierarchy, legend_labels)
+        return _render_failure_count_hierarchy(title, failed, [], row_hierarchy, legend_labels, legend_position)
     has_series = bool(period) and not failed[period].fillna("(all)").astype(str).eq("(all)").all()
     fields = [group, period] if has_series else [group]
     counts = failed.groupby([*fields, "__catalog_failure_state"], dropna=False).size().unstack(fill_value=0)
@@ -1299,9 +1352,7 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
                 draw.rectangle((x, y, x + width, y + 25), fill=colours[state])
                 if width > 26: draw.text((x + 5, y + 5), str(count), fill="white", font=_font(13, True))
             x += width
-    for index, state in enumerate(("Failed", "Dropped")):
-        x = 1050 + index * 160
-        draw.rectangle((x, 82, x + 20, 100), fill=colours[state]); draw.text((x + 27, 82), _legend_caption(legend_labels, index, state), fill="#34495A", font=_font(13))
+    _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colours[state], 2) for index, state in enumerate(("Failed", "Dropped"))], legend_position, font_size=13)
     draw.text((390, 820), "# of failed / dropped sessions", fill="#62727E", font=_font(16))
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
@@ -1312,6 +1363,7 @@ def _render_failure_count_hierarchy(
     row_hierarchy: list[str],
     column_hierarchy: list[str],
     legend_labels: tuple[str, ...] = (),
+    legend_position: str = "top",
 ) -> BytesIO:
     """Render failure counts with catalogue rows and columns as separate axes."""
     row_keys = _hierarchical_unique_keys(failed, row_hierarchy) if row_hierarchy else [()]
@@ -1388,10 +1440,7 @@ def _render_failure_count_hierarchy(
                 x += segment_width
 
     draw.line((chart_left + chart_width, chart_top - 24, chart_left + chart_width, chart_top + chart_height + 25), fill="#D5DDE2", width=1)
-    for index, state in enumerate(("Failed", "Dropped")):
-        x = chart_left + index * 180
-        draw.rectangle((x, 82, x + 18, 99), fill=colours[state])
-        draw.text((x + 25, 81), _legend_caption(legend_labels, index, state), fill="#34495A", font=_font(13))
+    _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colours[state], 2) for index, state in enumerate(("Failed", "Dropped"))], legend_position, font_size=13)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0)
     return output
 
@@ -1442,7 +1491,7 @@ def _draw_hierarchical_axis_labels(
         draw.text((centre - min(len(text) * 4, 68), bottom + 11), text, fill="#62727E", font=_font(14))
 
 
-def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | None, series: str | None, stack: str, legend_labels: tuple[str, ...] = ()) -> BytesIO:
+def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | None, series: str | None, stack: str, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
     if frame.empty or not group or not series or stack not in frame.columns:
         return _empty_chart(title)
     axis_columns = _chart_axis_hierarchy(frame, distribution=True) or [group, series]
@@ -1463,9 +1512,7 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
             draw.rectangle((x, y, x + bar_width, y + segment), fill=_colour(bucket, bucket_index))
             running += segment
     _draw_hierarchical_axis_labels(draw, combinations, left, width, top, top + height)
-    for index, bucket in enumerate(buckets[:8]):
-        x = left + index * 150
-        draw.rectangle((x, 82, x + 20, 100), fill=_colour(bucket, index)); draw.text((x + 27, 82), _legend_caption(legend_labels, index, bucket), fill="#34495A", font=_font(15))
+    _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, bucket), _colour(bucket, index), 2) for index, bucket in enumerate(buckets[:8])], legend_position)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
@@ -1484,7 +1531,7 @@ def _combine_charts(title: str, charts: list[BytesIO]) -> BytesIO:
     return output
 
 
-def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period: str | None, metric: str | None, legend_labels: tuple[str, ...] = ()) -> BytesIO:
+def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period: str | None, metric: str | None, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
     if frame.empty or not group or not metric: return _empty_chart(title)
     data = frame[[group, metric] + ([period] if period else [])].copy(); data[metric] = pd.to_numeric(data[metric], errors="coerce"); data = data.dropna()
     if data.empty: return _empty_chart(title)
@@ -1501,6 +1548,7 @@ def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period:
             campaigns = sorted(subset[period].dropna().astype(str).unique(), key=_campaign_sort_key)
             for rank, campaign in enumerate(campaigns):
                 campaign_widths[(str(category), campaign)] = min(8, 4 + rank * 2)
+    legend_items: list[tuple[str, str, int]] = []
     for index, (category, series_value) in enumerate(combinations[:10]):
         values = data[
             (data[group].astype(str) == str(category))
@@ -1510,11 +1558,9 @@ def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period:
         label = _catalogue_display_label(category, series_value) if period else str(category)
         points = [(left + (value - low) / (high - low) * width, top + height - ((n + 1) / len(values)) * height) for n, value in enumerate(values)]
         line_width = campaign_widths.get((str(category), str(series_value)), 4)
-        draw.line(points, fill=_colour(label, index), width=line_width)
-        legend_x = left + (index % 5) * 250
-        legend_y = 86 + (index // 5) * 23
-        draw.line((legend_x, legend_y + 8, legend_x + 28, legend_y + 8), fill=_colour(label, index), width=line_width)
-        draw.text((legend_x + 35, legend_y), _legend_caption(legend_labels, index, label)[:19], fill="#34495A", font=_font(15))
+        colour = _colour(label, index)
+        draw.line(points, fill=colour, width=line_width)
+        legend_items.append((_legend_caption(legend_labels, index, label), colour, line_width))
     for tick in range(0, 101, 20):
         y = top + height - tick / 100 * height; draw.line((left, y, left + width, y), fill="#E4E9ED", width=1); draw.text((20, y - 8), f"{tick}%", fill="#62727E", font=_font(15))
     for tick in range(0, 6):
@@ -1523,22 +1569,22 @@ def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period:
         draw.line((x, top + height, x, top + height + 7), fill="#62727E", width=1)
         draw.text((x - 16, top + height + 7), f"{value:.1f}", fill="#62727E", font=_font(14))
     draw.text((left + width / 2 - 70, top + height + 29), metric.replace("_", " "), fill="#62727E", font=_font(17))
+    _draw_chart_legend(draw, legend_items, legend_position, line_markers=True)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
-def _render_scatter(title: str, frame: pd.DataFrame, group: str | None, metric: str | None, x_metric: str | None, legend_labels: tuple[str, ...] = ()) -> BytesIO:
+def _render_scatter(title: str, frame: pd.DataFrame, group: str | None, metric: str | None, x_metric: str | None, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
     if frame.empty or not group or not metric or not x_metric: return _empty_chart(title)
     data = frame[[group, metric, x_metric]].copy(); data[metric] = pd.to_numeric(data[metric], errors="coerce"); data[x_metric] = pd.to_numeric(data[x_metric], errors="coerce"); data = data.dropna()
     if data.empty: return _empty_chart(title)
     image, draw = _canvas(title); left, top, width, height = 130, 120, 1220, 600
     x_low, x_high = float(data[x_metric].min()), float(data[x_metric].max()); y_low, y_high = float(data[metric].min()), float(data[metric].max()); x_high = x_high if x_high > x_low else x_low + 1; y_high = y_high if y_high > y_low else y_low + 1
+    legend_items: list[tuple[str, str, int]] = []
     for index, (label, subset) in enumerate(data.groupby(group)):
         for x_value, y_value in subset[[x_metric, metric]].itertuples(index=False):
             x = left + (x_value - x_low) / (x_high - x_low) * width; y = top + height - (y_value - y_low) / (y_high - y_low) * height
             draw.ellipse((x - 4, y - 4, x + 4, y + 4), fill=_colour(label, index))
-        legend_y = 120 + index * 26
-        draw.ellipse((1380, legend_y, 1392, legend_y + 12), fill=_colour(label, index))
-        draw.text((1400, legend_y - 2), _legend_caption(legend_labels, index, label)[:20], fill="#34495A", font=_font(14))
+        legend_items.append((_legend_caption(legend_labels, index, label), _colour(label, index), 2))
     for tick in range(0, 6):
         x = left + width * tick / 5; y = top + height - height * tick / 5
         x_value = x_low + (x_high - x_low) * tick / 5; y_value = y_low + (y_high - y_low) * tick / 5
@@ -1547,6 +1593,7 @@ def _render_scatter(title: str, frame: pd.DataFrame, group: str | None, metric: 
         draw.text((x - 16, top + height + 7), f"{x_value:.0f}", fill="#62727E", font=_font(12))
         draw.text((75, y - 7), f"{y_value:.1f}", fill="#62727E", font=_font(12))
     draw.text((left + width / 2 - 120, top + height + 28), x_metric.replace("_", " "), fill="#62727E", font=_font(16)); draw.text((40, 95), metric.replace("_", " "), fill="#62727E", font=_font(16))
+    _draw_chart_legend(draw, legend_items, legend_position, font_size=14)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
@@ -1641,6 +1688,7 @@ def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame
     spec = _catalog_spec(entry)
     chart_title = entry.chart_title or entry.slide_title
     legend_labels = _legend_labels(entry.legend)
+    legend_position = entry.legend_position
     frame, group, period = _source_for_spec(frames, spec, multivendor)
     metric = _metric_column(frame, spec)
     try:
@@ -1653,13 +1701,13 @@ def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame
     if chart_type != "distribution stacked vertical bars" and "__catalog_stack" in frame.columns:
         frame[period] = frame[period].astype(str) + " · " + frame["__catalog_stack"].astype(str)
     if spec["kind"] == "status_100":
-        return _render_status_100(chart_title, frame, group, period, legend_labels=legend_labels)
+        return _render_status_100(chart_title, frame, group, period, legend_labels=legend_labels, legend_position=legend_position)
     if spec["kind"] == "quality_100":
-        return _render_status_100(chart_title, frame, group, period, True, spec.get("threshold", 1.6), metric, legend_labels)
+        return _render_status_100(chart_title, frame, group, period, True, spec.get("threshold", 1.6), metric, legend_labels, legend_position)
     if spec["kind"] == "failure_count":
-        return _render_failure_count(chart_title, frame, group, period, legend_labels)
+        return _render_failure_count(chart_title, frame, group, period, legend_labels, legend_position)
     if chart_type == "distribution stacked vertical bars":
-        return _render_stacked_distribution(chart_title, frame, group, period, "__catalog_stack", legend_labels)
+        return _render_stacked_distribution(chart_title, frame, group, period, "__catalog_stack", legend_labels, legend_position)
     # Non-stacked visuals have one visual series per row/column combination. A
     # rows-only chart remains a single category series rather than becoming the
     # misleading ``Operator · Operator`` label used by the earlier renderer.
@@ -1668,12 +1716,12 @@ def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame
         for category, series in frame[[group, period]].fillna("(blank)").itertuples(index=False, name=None)
     ]
     if spec["kind"] == "scatter":
-        return _render_scatter(chart_title, frame, "__catalog_label", metric, _column(frame, spec.get("x_metric", ())), legend_labels)
+        return _render_scatter(chart_title, frame, "__catalog_label", metric, _column(frame, spec.get("x_metric", ())), legend_labels, legend_position)
     if chart_type == "table":
         return _render_table(chart_title, frame, group, period, metric)
     if "vertical bars" in chart_type:
         return _render_mean_column(chart_title, frame, group, period, metric, aggregation="median" if chart_type == "median vertical bars" else "mean")
-    return _render_cdf_line(chart_title, frame, group, period, metric, legend_labels)
+    return _render_cdf_line(chart_title, frame, group, period, metric, legend_labels, legend_position)
 
 
 def _chart_for_spec(title: str, frames: dict[str, pd.DataFrame], spec: dict, multivendor: bool) -> BytesIO:

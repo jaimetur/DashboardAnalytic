@@ -1493,7 +1493,7 @@ def test_admin_imports_report_catalogue_and_synchronizes_help(client, tmp_path, 
 
     exported = client.get('/admin/report-catalogues/nsa/export')
     assert exported.status_code == 200
-    assert exported.content == content
+    assert exported.content == content.rstrip(b'\n') + b',\n'
 
     confirmation = client.get('/admin?catalogue_notice=Imported%20Test%20baseline%20%28NSA%29.')
     assert 'data-catalogue-import-notice' in confirmation.text
