@@ -109,7 +109,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .action-link-disabled { background: linear-gradient(135deg, #e3e8ec, #d5dde4); border-color: rgba(126, 139, 152, 0.24); color: #7a8792; cursor: not-allowed; font-weight: 600; box-shadow: none; }
 .eyebrow { margin: 0 0 0.35rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--brand-2); font-size: 0.78rem; }
 .hero-copy, .panel { background: var(--panel); border: 1px solid rgba(255,255,255,0.55); box-shadow: var(--shadow); border-radius: var(--radius); backdrop-filter: blur(14px); }
-.lede { color: var(--muted); max-width: 62ch; }
+.lede { width: 100%; max-width: none; color: var(--muted); }
 .panel { padding: 1.55rem; }
 .narrow-form button { margin-top: 0.55rem; }
 .form-note { color: var(--muted); font-size: 0.92rem; }
