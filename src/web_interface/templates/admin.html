@@ -258,8 +258,8 @@
             {% endfor %}
           </select>
         </label>
-        <button type="button" data-database-refresh disabled>Refresh table</button>
-        <button type="button" class="ghost-link" data-database-clear-filters disabled>Clear filters</button>
+        <button type="button" class="database-refresh-button" data-database-refresh disabled>Refresh table</button>
+        <button type="button" class="database-clear-filters-button" data-database-clear-filters disabled>Clear filters</button>
         <span class="pill" data-database-row-count>0 rows</span>
       </div>
       <div class="database-active-filters" data-database-active-filters hidden></div>
@@ -283,9 +283,9 @@
         </table>
       </div>
       <div class="database-pagination" data-database-pagination hidden>
-        <button type="button" class="ghost-link" data-database-previous>Previous</button>
+        <button type="button" class="database-pagination-button" data-database-previous>Previous</button>
         <span data-database-page-label>Page 1</span>
-        <button type="button" data-database-next>Next</button>
+        <button type="button" class="database-pagination-button" data-database-next>Next</button>
       </div>
       <p class="form-note">Tables are shown 100 rows at a time. Saving or deleting a row clears cached analysis so subsequent Dashboard and Reporting requests use the changed values.</p>
       {% else %}
@@ -302,6 +302,7 @@
       </div>
       <span class="collapse-chip">Collapse</span>
     </summary>
+    {% if active_workspace %}
     <div class="table-wrap">
       <table class="admin-datasets-table">
         <colgroup>
@@ -357,6 +358,9 @@
         </tbody>
       </table>
     </div>
+    {% else %}
+    <p class="lede">Open a workspace from Workspace Management before managing its datasets.</p>
+    {% endif %}
   </details>
 
   <dialog class="vendor-mapping-dialog" data-admin-vendor-mapping-dialog aria-labelledby="admin-vendor-mapping-title">
@@ -440,6 +444,7 @@
   const pageSize = 100;
   let offset = 0;
   let totalRows = 0;
+  let allRows = 0;
   let columns = [];
   let snapshot = new Map();
   let filters = {};
@@ -452,7 +457,7 @@
 
   const renderEmpty = (message) => {
     table.innerHTML = `<thead><tr><th>Database table</th></tr></thead><tbody><tr><td>${escapeHtml(message)}</td></tr></tbody>`;
-    rowCount.textContent = '0 rows';
+    rowCount.textContent = '0/0 rows';
     pagination.hidden = true;
   };
 
@@ -532,6 +537,7 @@
     columns = payload.columns || [];
     const rows = payload.rows || [];
     totalRows = Number(payload.total_rows || 0);
+    allRows = Number(payload.all_rows ?? totalRows);
     snapshot = new Map(rows.map((row) => [String(row.__database_rowid__), row]));
     if (!columns.length) {
       renderEmpty('This table has no columns.');
@@ -546,7 +552,7 @@
     table.querySelectorAll('[data-database-column-filter]').forEach((button) => button.addEventListener('click', () => openFilter(button.dataset.databaseColumnFilter, button)));
     table.querySelectorAll('[data-database-save-row]').forEach((button) => button.addEventListener('click', () => saveRow(button.closest('tr'))));
     table.querySelectorAll('[data-database-delete-row]').forEach((button) => button.addEventListener('click', () => deleteRow(button.closest('tr'))));
-    rowCount.textContent = `${totalRows} row${totalRows === 1 ? '' : 's'}`;
+    rowCount.textContent = `${totalRows}/${allRows} rows`;
     const page = Math.floor(offset / pageSize) + 1;
     const pages = Math.max(1, Math.ceil(totalRows / pageSize));
     pageLabel.textContent = `Page ${page} of ${pages}`;
@@ -639,7 +645,13 @@
     }
   };
 
-  select.addEventListener('change', () => { offset = 0; loadTable(); });
+  select.addEventListener('change', () => {
+    offset = 0;
+    filters = {};
+    closeFilter();
+    renderActiveFilters();
+    loadTable();
+  });
   refresh.addEventListener('click', loadTable);
   clearFilters.addEventListener('click', () => { filters = {}; offset = 0; closeFilter(); loadTable(); });
   filterClose.addEventListener('click', closeFilter);

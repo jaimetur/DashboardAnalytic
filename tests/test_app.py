@@ -362,6 +362,21 @@ def test_admin_panel_is_available_for_admin(client) -> None:
     assert "Admin panel" in response.text
 
 
+def test_login_and_admin_remain_available_after_closing_the_active_workspace(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    app_module.close_active_workspace()
+
+    login_page = client.get('/login')
+    assert login_page.status_code == 200
+
+    admin = client.get('/admin')
+    assert admin.status_code == 200
+    assert 'Open a workspace from Workspace Management before managing its datasets.' in admin.text
+    assert 'Open a workspace from Workspace Management before viewing or editing its database.' in admin.text
+
+
 def test_admin_database_management_lists_and_updates_active_workspace_tables(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -372,6 +387,7 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
         follow_redirects=False,
     )
     app_module.repository.replace_dataset_rows(987, pd.DataFrame({"obsolete": ["row"]}))
+    app_module.repository.replace_reporting_rows(987, 'data', pd.DataFrame({"Campaign": ["legacy"]}))
     assert app_module.repository.dataset_rows_table_exists(987)
     admin = client.get("/admin")
     assert admin.status_code == 200
@@ -380,6 +396,7 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
     assert 'value="users"' in admin.text
     assert 'dataset_rows_987' not in admin.text
     assert not app_module.repository.dataset_rows_table_exists(987)
+    assert app_module.repository.database_table_page('reporting_rows_data')['total_rows'] == 0
 
     users = client.get("/admin/database/table", params={"table": "users", "limit": 100})
     assert users.status_code == 200
@@ -400,6 +417,8 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
     )
     assert filtered.status_code == 200
     assert [row["username"] for row in filtered.json()["rows"]] == ["database-editor"]
+    assert filtered.json()["total_rows"] == 1
+    assert filtered.json()["all_rows"] > filtered.json()["total_rows"]
 
     saved = client.post(
         "/admin/database/table",

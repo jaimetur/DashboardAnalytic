@@ -1465,6 +1465,10 @@ async def save_upload_file(upload_file: UploadFile, destination: Path) -> None:
 
 
 def build_default_access_accounts() -> list[dict[str, str]]:
+    # Credentials are stored per workspace. Once it is closed the repository
+    # still points at its former path, which may have been moved or removed.
+    if not active_workspace:
+        return []
     defaults = [
         {'username': settings.admin_username, 'password': settings.admin_password},
         {'username': 'demo', 'password': 'demo123'},
@@ -1494,14 +1498,15 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         if candidate_technology in TEMPLATE_NAMES and candidate_catalogue:
             selected_technology, selected_catalogue = candidate_technology, candidate_catalogue
     report_catalogs: dict[str, dict[str, Any]] = {}
-    for technology in TEMPLATE_NAMES:
-        catalogues = report_catalogue_options(technology)
-        active_catalogue = next((catalogue for catalogue in catalogues if catalogue['active']), None)
-        report_catalogs[technology] = {
-            'path': active_catalogue['path'] if active_catalogue else None,
-            'source': 'Active template' if active_catalogue else 'No default template configured',
-            'catalogues': catalogues,
-        }
+    if active_workspace:
+        for technology in TEMPLATE_NAMES:
+            catalogues = report_catalogue_options(technology)
+            active_catalogue = next((catalogue for catalogue in catalogues if catalogue['active']), None)
+            report_catalogs[technology] = {
+                'path': active_catalogue['path'] if active_catalogue else None,
+                'source': 'Active template' if active_catalogue else 'No default template configured',
+                'catalogues': catalogues,
+            }
     workspace_catalogues = [
         {**catalogue, 'technology': technology}
         for technology, payload in report_catalogs.items()
@@ -1509,6 +1514,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
     ]
     if active_workspace:
         repository.remove_orphaned_dataset_row_tables()
+        repository.remove_orphaned_reporting_rows()
     admin_datasets = [serialize_dataset_row(dataset) for dataset in repository.list_datasets()] if active_workspace else []
     add_workspace_vendor_capabilities(admin_datasets)
     ready_admin_datasets = [dataset for dataset in admin_datasets if dataset['is_ready']]
@@ -1548,15 +1554,15 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         'admin.html',
         {
             'user': user,
-            'users': repository.list_users(),
+            'users': repository.list_users() if active_workspace else [],
             'datasets': admin_datasets,
             'vodafone_mapping_datasets': [dataset for dataset in ready_admin_datasets if dataset.get('dataset_kind') == 'mapping_vodafone'],
             'three_mapping_datasets': [dataset for dataset in ready_admin_datasets if dataset.get('dataset_kind') == 'mapping_three'],
-            'logs': repository.list_logs(),
+            'logs': repository.list_logs() if active_workspace else [],
             'report_catalogs': report_catalogs,
             'workspace_catalogues': workspace_catalogues,
             'database_table_groups': database_table_groups,
-            'catalogue_editor': catalogue_editor_payload(selected_technology, selected_catalogue),
+            'catalogue_editor': catalogue_editor_payload(selected_technology, selected_catalogue) if active_workspace else None,
             'catalogue_notice': request.query_params.get('catalogue_notice') or None,
             'catalogue_error': request.query_params.get('catalogue_error') or None,
             'error': error,

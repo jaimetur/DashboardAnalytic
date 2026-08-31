@@ -295,6 +295,24 @@ class Repository:
                 conn.execute(f'DROP TABLE {self._quote_identifier(table_name)}')
         return orphaned
 
+    def remove_orphaned_reporting_rows(self) -> int:
+        """Remove combined CDR rows whose source dataset is no longer registered."""
+        deleted_rows = 0
+        with self.connection() as conn:
+            for dataset_kind in ('data', 'voice', 'speech'):
+                table_name = self.reporting_rows_table_name(dataset_kind)
+                exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,)
+                ).fetchone()
+                if not exists:
+                    continue
+                result = conn.execute(
+                    f"DELETE FROM {self._quote_identifier(table_name)} "
+                    "WHERE dataset_id IS NULL OR dataset_id NOT IN (SELECT id FROM datasets)"
+                )
+                deleted_rows += max(0, int(result.rowcount))
+        return deleted_rows
+
     def _database_table_metadata(self, conn: sqlite3.Connection, table_name: str) -> list[sqlite3.Row]:
         return conn.execute(f"PRAGMA table_info({self._quote_identifier(table_name)})").fetchall()
 
@@ -360,7 +378,17 @@ class Repository:
                 ).fetchall()
             ]
             total_rows = int(conn.execute(f"SELECT COUNT(*) AS total FROM {quoted_table}{where_clause}", parameters).fetchone()['total'])
-        return {'columns': columns, 'rows': rows, 'total_rows': total_rows, 'limit': page_size, 'offset': page_offset}
+            all_rows = total_rows if not where_clause else int(
+                conn.execute(f"SELECT COUNT(*) AS total FROM {quoted_table}").fetchone()['total']
+            )
+        return {
+            'columns': columns,
+            'rows': rows,
+            'total_rows': total_rows,
+            'all_rows': all_rows,
+            'limit': page_size,
+            'offset': page_offset,
+        }
 
     def database_table_distinct_values(
         self,
