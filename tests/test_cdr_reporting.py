@@ -359,6 +359,27 @@ def test_catalogue_call_family_uses_documented_netcheck_session_values() -> None
     assert hierarchy_renderer.call_args.args[3] == ['__catalog_column_0', '__catalog_column_1']
 
 
+def test_status_chart_uses_nested_columns_without_a_row_grouping() -> None:
+    entry = CatalogEntry(
+        8, 'Completed Call Ratio', '', 'Title and 1 column + Comments', '', 'CDR-Voice',
+        'Call_Status', '100% Stacked Vertical Bars', '', '', '', 'Operator × Campaign',
+    )
+    frame = pd.DataFrame({
+        'Operator': ['Vodafone', 'Vodafone', 'O2', 'O2'],
+        'Campaign': ['2025 Q4', '2026 Q1', '2025 Q4', '2026 Q1'],
+        'Call_Status': ['Completed', 'Failed', 'Completed', 'Dropped'],
+    })
+    grouped, primary, series = _apply_catalog_grouping(frame, entry, False, 'Call_Status')
+
+    with patch('src.modules.cdr_reporting._render_status_100_hierarchy') as hierarchy_renderer:
+        hierarchy_renderer.return_value = BytesIO(b'nested-columns')
+        chart = _render_status_100('Completed Call Ratio', grouped, primary, series)
+
+    assert chart.getvalue() == b'nested-columns'
+    assert hierarchy_renderer.call_args.args[2] == []
+    assert hierarchy_renderer.call_args.args[3] == ['__catalog_column_0', '__catalog_column_1']
+
+
 def test_nsa_speech_catalogue_filters_produce_samples_and_use_latest_campaign() -> None:
     entries = load_catalog_csv(Path(__file__).parent / 'fixtures' / 'NSA Slide Template.csv', 'nsa')
     speech = pd.DataFrame({

@@ -66,6 +66,7 @@ label { display: grid; gap: 0.45rem; color: var(--muted); }
 .topnav { display: flex; gap: 0.8rem; flex-wrap: wrap; justify-content: flex-end; align-self: flex-start; margin-top: 1.5rem; }
 .topnav .topnav-link, .pill, .ghost-link { padding: 0.65rem 0.95rem; border-radius: 999px; background: rgba(255, 255, 255, 0.72); border: 1px solid var(--line); }
 .topnav-link { display: inline-flex; align-items: center; justify-content: center; font-weight: 600; box-shadow: 0 8px 20px rgba(18, 32, 43, 0.08); }
+.topnav .topnav-workspace-badge { background: linear-gradient(135deg, #d9ecff, #c3ddf4); border-color: rgba(36, 90, 150, 0.30); color: #174f88; }
 .topnav .topnav-user-badge-admin { background: linear-gradient(135deg, #c84a4a, #e06a5a); border-color: rgba(200, 74, 74, 0.28); color: rgba(255, 255, 255, 0.96); box-shadow: 0 12px 28px rgba(200, 74, 74, 0.24); }
 .topnav .topnav-user-badge-user { background: linear-gradient(135deg, #0b7a75, #1aa29b); border-color: rgba(11, 122, 117, 0.28); color: rgba(255, 255, 255, 0.96); box-shadow: 0 12px 28px rgba(11, 122, 117, 0.22); }
 a.topnav-link-doc { background: linear-gradient(135deg, #f3f5f7, #e8edf2); border-color: rgba(126, 139, 152, 0.24); color: #44515d; }

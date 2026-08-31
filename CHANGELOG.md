@@ -30,6 +30,7 @@
 - Moved the workspace registry to `data/workspaces/workspace-registry.db`, with automatic migration from both historical `config` filenames.
 - Added package preflight warnings and explicit confirmation before Import/Export overwrites configuration, shared templates or a same-named workspace.
 - Removed combined-CDR cleanup from Admin page load; it now runs after dataset deletion or from Database Management's **Clean orphaned rows** action.
+- Improved generated PowerPoint charts with larger legends, labels and axis ticks; hierarchical grouping now keeps child dimensions nested below their parent, and CDF campaign lines increase in width from oldest to newest.
 
 #### 🐛 Bug fixes:
 - Fixed catalogue defaults, deletion protection, editor selection, grouping semantics and reporting placeholder/chart generation.

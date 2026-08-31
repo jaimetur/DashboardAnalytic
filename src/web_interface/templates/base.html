@@ -25,6 +25,7 @@
       </div>
       {% if user %}
       <nav class="topnav">
+        <span class="topnav-link topnav-workspace-badge">Active workspace: {{ active_workspace.name if active_workspace else 'None' }}</span>
         <span class="topnav-link topnav-user-badge topnav-user-badge-{{ user.role }}">User: {{ user.username }}</span>
         <a class="topnav-link topnav-link-logout" href="/logout">Logout</a>
       </nav>
