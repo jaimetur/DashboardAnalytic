@@ -177,12 +177,18 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .database-management-toolbar label { display: grid; gap: 0.35rem; min-width: min(100%, 280px); color: #8b2429; font-size: 0.85rem; font-weight: 700; }
 .database-management-toolbar select { min-width: 260px; }
 .database-management-toolbar .pill { margin-bottom: 0.1rem; }
+.database-workspace-pill { background: linear-gradient(135deg, #e5f0ff, #c7ddf3); border-color: rgba(36, 90, 150, 0.32); color: #174f88; }
+.database-management-actions { display: flex; justify-content: flex-start; gap: 0.7rem; flex-wrap: wrap; }
+.database-management-actions form { margin: 0; }
 .admin-stack .database-refresh-button { background: linear-gradient(135deg, #08736d, #20a797); border-color: rgba(7, 93, 89, 0.62); color: #fff; }
 .admin-stack .database-refresh-button:hover:not(:disabled) { background: linear-gradient(135deg, #065e59, #168d80); }
 .admin-stack .database-refresh-button:disabled { background: linear-gradient(135deg, #9dcfc8, #b9e0db); border-color: rgba(7, 93, 89, 0.20); color: rgba(255,255,255,0.84); box-shadow: none; }
 .admin-stack .database-clear-filters-button { background: linear-gradient(135deg, #edf3f6, #d7e5eb); border-color: rgba(16, 49, 74, 0.24); color: #10314a; box-shadow: none; }
 .admin-stack .database-clear-filters-button:hover:not(:disabled) { background: linear-gradient(135deg, #dceaf0, #c5dae4); color: #08283d; }
 .admin-stack .database-clear-filters-button:disabled { background: linear-gradient(135deg, #edf1f3, #dce3e7); border-color: rgba(16, 49, 74, 0.14); color: #78909d; box-shadow: none; }
+.admin-stack .database-cleanup-button { background: linear-gradient(135deg, #8b6417, #c28a24); border-color: rgba(112, 76, 10, 0.60); color: #fff; }
+.admin-stack .database-cleanup-button:hover:not(:disabled) { background: linear-gradient(135deg, #715013, #a7751d); }
+.database-cleanup-notice { color: #075d59; background: rgba(11, 122, 117, 0.10); border-color: rgba(11, 122, 117, 0.26); }
 .database-active-filters { display: flex; flex-wrap: wrap; gap: 0.45rem; }
 .database-filter-chip { padding: 0.38rem 0.65rem; border-radius: 999px; background: #f4dfe0; border: 1px solid #d99fa4; color: #7d2731; box-shadow: none; font-size: 0.77rem; }
 .database-filter-popover { position: fixed; z-index: 20; display: grid; gap: 0.65rem; width: min(520px, calc(100vw - 24px)); max-width: 520px; max-height: calc(100vh - 24px); padding: 0.9rem; border: 1px solid rgba(139, 29, 36, 0.30); border-radius: 14px; background: #fffaf9; box-shadow: 0 14px 28px rgba(102, 18, 22, 0.16); }

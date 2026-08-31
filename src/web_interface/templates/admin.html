@@ -274,13 +274,14 @@
         <h2>Database Management</h2>
       </div>
       <div class="summary-inline-actions">
-        {% if active_workspace %}<span class="pill">{{ active_workspace.name }}</span>{% endif %}
+        {% if active_workspace %}<span class="pill database-workspace-pill">Workspace: {{ active_workspace.name }}</span>{% endif %}
         <span class="collapse-chip">Collapse</span>
       </div>
     </summary>
     <div class="database-management-content" data-database-management>
       {% if active_workspace %}
       <p class="lede">Browse, edit or remove individual records in any table of <strong>{{ active_workspace.name }}</strong>. Primary-key values are protected so row identity remains stable.</p>
+      {% if database_notice %}<div class="alert database-cleanup-notice">{{ database_notice }}</div>{% endif %}
       <div class="database-management-toolbar">
         <label>Table
           <select data-database-table-select>
@@ -291,7 +292,6 @@
           </select>
         </label>
         <button type="button" class="database-refresh-button" data-database-refresh disabled>Refresh table</button>
-        <button type="button" class="database-clear-filters-button" data-database-clear-filters disabled>Clear filters</button>
         <span class="pill" data-database-row-count>0 rows</span>
       </div>
       <div class="database-active-filters" data-database-active-filters hidden></div>
@@ -322,6 +322,10 @@
         <button type="button" class="database-pagination-button" data-database-last>Last</button>
       </div>
       <p class="form-note">Tables are shown 100 rows at a time. Saving or deleting a row clears cached analysis so subsequent Dashboard and Reporting requests use the changed values.</p>
+      <div class="database-management-actions">
+        <button type="button" class="database-clear-filters-button" data-database-clear-filters disabled>Clear filters</button>
+        <form action="/admin/database/cleanup" method="post" data-loading-label="Cleaning database" data-loading-copy="Please wait while orphaned dataset and combined CDR rows are removed."><button type="submit" class="database-cleanup-button">Clean orphaned rows</button></form>
+      </div>
       {% else %}
       <p class="lede">Open a workspace from Workspace Management before viewing or editing its database.</p>
       {% endif %}

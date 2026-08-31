@@ -458,8 +458,13 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
     assert admin.status_code == 200
     assert "Database Management" in admin.text
     assert 'data-database-table-select' in admin.text
+    assert 'Workspace: Default Workspace' in admin.text
+    assert 'Clean orphaned rows' in admin.text
     assert 'value="users"' in admin.text
-    assert 'dataset_rows_987' not in admin.text
+    assert app_module.repository.dataset_rows_table_exists(987)
+    assert app_module.repository.database_table_page('reporting_rows_data')['total_rows'] == 1
+    cleanup = client.post('/admin/database/cleanup', follow_redirects=False)
+    assert cleanup.status_code == 303
     assert not app_module.repository.dataset_rows_table_exists(987)
     assert app_module.repository.database_table_page('reporting_rows_data')['total_rows'] == 0
 

@@ -1747,9 +1747,6 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         for technology, payload in report_catalogs.items()
         for catalogue in payload['catalogues']
     ]
-    if active_workspace:
-        repository.remove_orphaned_dataset_row_tables()
-        repository.remove_orphaned_reporting_rows()
     admin_datasets = [serialize_dataset_row(dataset) for dataset in repository.list_datasets()] if active_workspace else []
     add_workspace_vendor_capabilities(admin_datasets)
     ready_admin_datasets = [dataset for dataset in admin_datasets if dataset['is_ready']]
@@ -1806,6 +1803,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             'report_catalogs': report_catalogs,
             'workspace_catalogues': workspace_catalogues,
             'database_table_groups': database_table_groups,
+            'database_notice': request.query_params.get('database_notice') or None,
             'catalogue_editor': catalogue_editor_payload(selected_technology, selected_catalogue) if active_workspace else None,
             'catalogue_notice': request.query_params.get('catalogue_notice') or None,
             'catalogue_error': request.query_params.get('catalogue_error') or None,
@@ -2966,6 +2964,10 @@ def delete_dataset(dataset_id: int, return_to: str = Form(''), user: SessionUser
         dataset_path.unlink()
     repository.drop_dataset_rows(dataset_id)
     repository.drop_reporting_rows(dataset_id, dataset_payload.get('dataset_kind'))
+    # Keep the combined stores compact after a dataset is removed, without
+    # imposing a full-table cleanup on every Admin page load.
+    repository.remove_orphaned_dataset_row_tables()
+    repository.remove_orphaned_reporting_rows()
     stale_keys = [key for key in ANALYSIS_CACHE if str(dataset_path.resolve()) in key]
     for key in stale_keys:
         ANALYSIS_CACHE.pop(key, None)
@@ -3190,6 +3192,25 @@ async def import_admin_package(
         await package.close()
     return RedirectResponse(
         f'/admin?{urlencode({"import_export_notice": notice})}',
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post('/admin/database/cleanup')
+def cleanup_admin_database(user: SessionUser = Depends(admin_user)) -> Response:
+    if not active_workspace:
+        return RedirectResponse(
+            f'/admin?{urlencode({"database_notice": "Open a workspace before cleaning its database."})}',
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    removed_tables = repository.remove_orphaned_dataset_row_tables()
+    removed_rows = repository.remove_orphaned_reporting_rows()
+    repository.add_log(user.username, 'cleanup_database', json.dumps({
+        'dataset_row_tables': len(removed_tables),
+        'reporting_rows': removed_rows,
+    }))
+    return RedirectResponse(
+        f'/admin?{urlencode({"database_notice": f"Database cleanup complete: {len(removed_tables)} stale tables and {removed_rows} combined rows removed."})}',
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
