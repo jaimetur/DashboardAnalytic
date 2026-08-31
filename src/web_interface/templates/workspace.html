@@ -376,7 +376,7 @@
   const message = result?.textContent.trim();
   if (!message || typeof showInfoDialog !== 'function') return;
   const tone = result.dataset.workspaceResultTone || 'info';
-  const title = tone === 'error' ? 'Workspace Error' : tone === 'warning' ? 'Workspace Warning' : message.startsWith('Opened ') ? 'Workspace Opened' : message === 'Workspace closed.' ? 'Workspace Closed' : 'Workspace Updated';
+  const title = tone === 'error' ? 'Workspace Error' : tone === 'warning' ? 'Workspace Warning' : message.startsWith('Created and opened ') ? 'Workspace Created' : message.startsWith('Opened ') ? 'Workspace Opened' : message === 'Workspace closed.' ? 'Workspace Closed' : 'Workspace Updated';
   const clearResultQuery = () => {
     const url = new URL(window.location.href);
     ['workspace_notice', 'workspace_warning', 'workspace_error'].forEach((key) => url.searchParams.delete(key));
