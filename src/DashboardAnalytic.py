@@ -49,8 +49,6 @@ STOP_REQUESTS_LOCK = Lock()
 EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 EXPORT_JOBS_LOCK = Lock()
 EXPORT_PACKAGE_TTL = timedelta(hours=24)
-LEGACY_SLIDES_TEMPLATES_DIR = PROJECT_ROOT / 'assets' / 'slides-templates'
-#DEFAULT_SLIDES_TEMPLATES_DIR = PROJECT_ROOT / 'config' / 'slides-templates'
 DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
 application_config_dir = settings.database_path.parent
 
@@ -424,20 +422,6 @@ def close_active_workspace() -> None:
     active_workspace = None
 
 
-def migrate_legacy_slides_templates() -> None:
-    """Move the editable template seed out of the application assets once."""
-    if settings.slides_templates_dir != DEFAULT_SLIDES_TEMPLATES_DIR:
-        return
-    if not LEGACY_SLIDES_TEMPLATES_DIR.exists() or LEGACY_SLIDES_TEMPLATES_DIR == DEFAULT_SLIDES_TEMPLATES_DIR:
-        return
-    if DEFAULT_SLIDES_TEMPLATES_DIR.exists():
-        shutil.copytree(LEGACY_SLIDES_TEMPLATES_DIR, DEFAULT_SLIDES_TEMPLATES_DIR, dirs_exist_ok=True)
-        shutil.rmtree(LEGACY_SLIDES_TEMPLATES_DIR)
-        return
-    DEFAULT_SLIDES_TEMPLATES_DIR.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(LEGACY_SLIDES_TEMPLATES_DIR), str(DEFAULT_SLIDES_TEMPLATES_DIR))
-
-
 def migrate_uk_slides_templates_to_global_config() -> None:
     """Move the user-designated UK library into the shared config location."""
     source_root = PROJECT_ROOT / 'data' / 'workspaces' / 'UK' / 'slides-templates'
@@ -460,7 +444,6 @@ def migrate_uk_slides_templates_to_global_config() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    migrate_legacy_slides_templates()
     ensure_directories([
         settings.database_path.parent,
         settings.template_dir,

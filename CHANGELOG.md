@@ -36,6 +36,7 @@
 - Made Admin ZIP exports disk-backed background jobs with direct, resumable browser downloads, selective compression for already-compressed files and 24-hour cleanup of temporary packages; this supports very large workspaces without loading the archive into browser or server memory.
 
 #### 🐛 Bug fixes:
+- Removed the unused `assets/slides-templates` migration path; Slides Templates now use only the configured shared library.
 - Fixed external `CONFIG_DIR`, `DATA_DIR` and `ASSETS_DIR` deployments so startup recognises an already-migrated workspace database instead of attempting to overwrite it with the legacy configuration database.
 - Fixed catalogue defaults, deletion protection, editor selection, grouping semantics and reporting placeholder/chart generation.
 - Fixed CDR and mapping ingestion for duplicate headers, legacy encodings, alternate Cell ID fields, VFUK/3UK GCIDs and NSA RAT spellings.
