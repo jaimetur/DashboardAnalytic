@@ -245,22 +245,23 @@
     {% if import_export_notice %}<div class="alert import-export-notice">{{ import_export_notice }}</div>{% endif %}
     {% if import_export_error %}<div class="alert import-export-error">{{ import_export_error }}</div>{% endif %}
     <div class="import-export-grid">
-      <form class="form-stack" action="/admin/import-export/export" method="get">
+      <form class="form-stack" action="/admin/import-export/export" method="get" data-loading-label="Preparing export package" data-loading-copy="Please wait while Dashboard Analytic creates the selected export package." data-download-form="1">
         <h3>Export</h3>
         <label>Content to export
           <select name="export_target" aria-label="Content to export">
             {% for option in export_options %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
           </select>
         </label>
-        <p class="form-note">Select the configuration, shared templates, one workspace or the complete environment to package.</p>
+        <p class="form-note">Choose whether to package application configuration only, configuration with the shared Slides Templates library, one selected workspace with its database and files, or the complete environment with every workspace.</p>
         <button type="submit" class="import-export-action">Export ZIP</button>
       </form>
-      <form class="form-stack" action="/admin/import-export/import" method="post" enctype="multipart/form-data">
+      <form class="form-stack" action="/admin/import-export/import" method="post" enctype="multipart/form-data" data-import-export-form>
         <h3>Import</h3>
         <label>Import package
           <input type="file" name="package" accept=".zip,application/zip" required>
         </label>
-        <p class="form-note">The package manifest identifies configuration, workspaces and full environments automatically. Configuration imports preserve this deployment's workspace registry; imported workspaces are added without replacing an existing one.</p>
+        <input type="hidden" name="confirmed_import" value="0" data-import-export-confirmed>
+        <p class="form-note">The package manifest identifies configuration, workspaces and full environments automatically. A warning explains what will be overwritten before import proceeds; configuration imports preserve this deployment's workspace registry.</p>
         <button type="submit" class="import-export-action">Import ZIP</button>
       </form>
     </div>

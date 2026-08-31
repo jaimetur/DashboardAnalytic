@@ -75,7 +75,7 @@ An import captures its workspace database when it is queued. It therefore contin
 
 ## Admin Import/Export
 
-Administrators can create portable ZIP packages from **Admin → Import/Export**. `Only Config` exports application configuration without the local workspace registry. `Config + Slides Templates` additionally includes the shared CSV templates. `Workspace: <name>` exports that workspace's database, uploaded files and generated exports; importing it always creates and registers a new local workspace. `Full Environment` combines configuration, templates and all workspaces, rebuilding the destination registry from the imported workspaces instead of reusing source-machine paths.
+Administrators can create portable ZIP packages from **Admin → Import/Export**. `Only Config` exports application configuration without the local workspace registry. `Config + Slides Templates` additionally includes the shared CSV templates. `Workspace: <name>` exports that workspace's database, uploaded files and generated exports. `Full Environment` combines configuration, templates and all workspaces, rebuilding the destination registry from the imported workspaces instead of reusing source-machine paths. Before import, the application inspects the package and requires confirmation showing whether configuration, templates or same-named workspaces will be overwritten. An active workspace must be closed before it can be replaced.
 
 ## Supported dataset behavior
 

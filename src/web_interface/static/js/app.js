@@ -1549,11 +1549,19 @@ function resolveDownloadFilename(response, fallbackName) {
 }
 
 async function submitDownloadForm(form) {
-  showLoadingOverlay(form.dataset.loadingLabel);
+  showLoadingOverlay(form.dataset.loadingLabel, form.dataset.loadingCopy);
   try {
-    const response = await fetch(form.action, {
-      method: String(form.method || 'post').toUpperCase(),
-      body: new FormData(form),
+    const method = String(form.method || 'post').toUpperCase();
+    const formData = new FormData(form);
+    const requestUrl = method === 'GET'
+      ? `${form.action}${form.action.includes('?') ? '&' : '?'}${new URLSearchParams(formData).toString()}`
+      : form.action;
+    const response = await fetch(requestUrl, method === 'GET' ? {
+      method,
+      credentials: 'same-origin',
+    } : {
+      method,
+      body: formData,
       credentials: 'same-origin',
     });
     if (!response.ok) {
@@ -1562,7 +1570,9 @@ async function submitDownloadForm(form) {
       return;
     }
     const blob = await response.blob();
-    const fallbackName = form.action.includes('/powerpoint') ? 'report.pptx' : 'report.docx';
+    const fallbackName = form.action.includes('/import-export/export')
+      ? 'dashboard-analytic-export.zip'
+      : (form.action.includes('/powerpoint') ? 'report.pptx' : 'report.docx');
     const filename = resolveDownloadFilename(response, fallbackName);
     const blobUrl = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1652,6 +1662,73 @@ function maybeSyncPersistedGlobalDashboardSelectors() {
 }
 
 maybeSyncPersistedGlobalDashboardSelectors();
+
+function importWarningDetails(payload) {
+  const kind = String(payload.kind || '');
+  const collisions = Array.isArray(payload.workspace_collisions) ? payload.workspace_collisions : [];
+  if (kind === 'config') {
+    return payload.includes_slides_templates
+      ? {
+        title: 'Overwrite configuration and templates?',
+        message: 'This will overwrite the configuration files and shared Slides Templates included in the package. The local workspace registry and existing workspaces will be preserved.',
+      }
+      : {
+        title: 'Overwrite configuration?',
+        message: 'This will overwrite the configuration files included in the package. The local workspace registry and existing workspaces will be preserved.',
+      };
+  }
+  if (kind === 'workspace') {
+    const name = collisions[0];
+    return name
+      ? {
+        title: 'Overwrite workspace?',
+        message: `Workspace "${name}" already exists and will be permanently replaced by the imported workspace.`,
+      }
+      : {
+        title: 'Import workspace?',
+        message: 'A new workspace will be created from this package.',
+      };
+  }
+  const collisionCopy = collisions.length
+    ? ` The following existing workspaces will be permanently replaced: ${collisions.join(', ')}.`
+    : ' New workspaces will be created from the package.';
+  return {
+    title: 'Overwrite full environment?',
+    message: `This will overwrite the configuration files and shared Slides Templates included in the package.${collisionCopy} The local workspace registry will be rebuilt from the imported workspaces.`,
+  };
+}
+
+document.querySelectorAll('[data-import-export-form]').forEach((form) => {
+  const confirmed = form.querySelector('[data-import-export-confirmed]');
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!(form instanceof HTMLFormElement) || !(confirmed instanceof HTMLInputElement)) return;
+    confirmed.value = '0';
+    try {
+      const response = await fetch('/admin/import-export/inspect', {
+        method: 'POST',
+        body: new FormData(form),
+        credentials: 'same-origin',
+        headers: {Accept: 'application/json'},
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'The selected file is not a valid export package.');
+      const warning = importWarningDetails(payload);
+      const accepted = await showConfirmDialog(warning.message, {
+        title: warning.title,
+        confirmLabel: 'Import and overwrite',
+      });
+      if (!accepted) return;
+      confirmed.value = '1';
+      showLoadingOverlay('Importing package', 'Please wait while Dashboard Analytic imports the selected package.');
+      HTMLFormElement.prototype.submit.call(form);
+    } catch (error) {
+      showInfoDialog(error instanceof Error ? error.message : 'The selected file could not be inspected.', {
+        title: 'Import Package Error',
+      });
+    }
+  });
+});
 
 document.querySelectorAll('form[data-loading-label]').forEach((form) => {
   form.addEventListener('submit', (event) => {

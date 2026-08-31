@@ -360,14 +360,17 @@ class WorkspaceRegistry:
                 raise ValueError('Only the open workspace can be closed.')
             conn.execute("UPDATE workspace_state SET value = NULL WHERE key = 'active_workspace_id'")
 
-    def delete(self, workspace_id: str) -> Workspace:
+    def remove(self, workspace_id: str) -> Workspace:
         workspace = self.get(workspace_id)
         if not workspace:
             raise ValueError('Workspace not found.')
-        workspaces = self.list()
         with self._connection() as conn:
             conn.execute('DELETE FROM workspaces WHERE id = ?', (workspace_id,))
         # Both targets are deterministic paths registered by create(), never
         # a path supplied by the request.
         shutil.rmtree(workspace.database_path.parent, ignore_errors=True)
+        return workspace
+
+    def delete(self, workspace_id: str) -> Workspace:
+        self.remove(workspace_id)
         return self.most_recent()

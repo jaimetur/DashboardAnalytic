@@ -1646,12 +1646,18 @@ def _unique_import_workspace_name(name: str) -> str:
     return candidate
 
 
-def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | None) -> Workspace:
+def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | None, *, replace_existing: bool = False) -> Workspace:
     database_snapshot = payload / 'database.sqlite'
     if not database_snapshot.exists():
         raise ValueError('The workspace archive does not contain its database.')
     source_name = workspace_info.get('name') if workspace_info else None
-    workspace = workspace_registry.create(_unique_import_workspace_name(str(source_name or 'Imported Workspace')))
+    requested_name = str(source_name or 'Imported Workspace')
+    existing_workspace = next((workspace for workspace in workspace_registry.list() if workspace.name.casefold() == requested_name.casefold()), None)
+    if existing_workspace and replace_existing:
+        if active_workspace and active_workspace.id == existing_workspace.id:
+            raise ValueError(f'Close workspace "{existing_workspace.name}" before replacing it through import.')
+        workspace_registry.remove(existing_workspace.id)
+    workspace = workspace_registry.create(requested_name if replace_existing or not existing_workspace else _unique_import_workspace_name(requested_name))
     try:
         for source, destination in (
             (payload / 'input', workspace.input_dir),
@@ -1668,7 +1674,7 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
                 connection.execute('UPDATE datasets SET stored_path = REPLACE(stored_path, ?, ?)', (str(source_input_dir), str(workspace.input_dir)))
             connection.execute('PRAGMA quick_check').fetchone()
     except Exception:
-        workspace_registry.delete(workspace.id)
+        workspace_registry.remove(workspace.id)
         raise
     return workspace
 
@@ -1688,6 +1694,26 @@ def import_config_archive(staging_root: Path, manifest: dict[str, Any]) -> None:
         target = settings.slides_templates_dir / relative_path.relative_to('slides-templates') if relative_path.parts[0] == 'slides-templates' else application_config_dir / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
+
+
+def read_import_manifest(contents: bytes) -> dict[str, Any]:
+    try:
+        with zipfile.ZipFile(io.BytesIO(contents)) as archive:
+            manifest = json.loads(archive.read('manifest.json').decode('utf-8'))
+    except (KeyError, UnicodeDecodeError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
+        raise ValueError('The selected file is not a valid Dashboard Analytic export package.') from exc
+    if not isinstance(manifest, dict) or manifest.get('format') != ARCHIVE_FORMAT or manifest.get('version') != ARCHIVE_VERSION:
+        raise ValueError('The selected file is not a compatible Dashboard Analytic export package.')
+    return manifest
+
+
+def import_workspace_collisions(manifest: dict[str, Any]) -> list[str]:
+    kind = manifest.get('kind')
+    entries = [manifest.get('workspace')] if kind == 'workspace' else manifest.get('workspaces') if kind == 'full-environment' else []
+    if not isinstance(entries, list):
+        entries = [entries]
+    existing_names = {workspace.name.casefold(): workspace.name for workspace in workspace_registry.list()}
+    return [existing_names[str(entry.get('name')).casefold()] for entry in entries if isinstance(entry, dict) and str(entry.get('name') or '').casefold() in existing_names]
 
 
 def would_remove_last_active_admin(target_user, normalized_role: str, will_be_active: bool) -> bool:
@@ -3099,26 +3125,45 @@ def export_admin_package(
     )
 
 
+@app.post('/admin/import-export/inspect')
+async def inspect_admin_import_package(
+    package: UploadFile = File(...),
+    user: SessionUser = Depends(admin_user),
+) -> JSONResponse:
+    try:
+        manifest = read_import_manifest(await package.read())
+        kind = str(manifest.get('kind') or '')
+        if kind not in {'config', 'workspace', 'full-environment'}:
+            raise ValueError('The export package type is not supported.')
+        return JSONResponse({
+            'kind': kind,
+            'includes_slides_templates': bool(manifest.get('includes_slides_templates')),
+            'workspace_collisions': import_workspace_collisions(manifest),
+        })
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        await package.close()
+
+
 @app.post('/admin/import-export/import')
 async def import_admin_package(
     package: UploadFile = File(...),
+    confirmed_import: bool = Form(False),
     user: SessionUser = Depends(admin_user),
 ) -> Response:
     try:
         contents = await package.read()
         with zipfile.ZipFile(io.BytesIO(contents)) as archive, tempfile.TemporaryDirectory(prefix='dashboard-analytic-import-') as temporary_dir:
-            try:
-                manifest = json.loads(archive.read('manifest.json').decode('utf-8'))
-            except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise ValueError('The selected file is not a valid Dashboard Analytic export package.') from exc
-            if not isinstance(manifest, dict) or manifest.get('format') != ARCHIVE_FORMAT or manifest.get('version') != ARCHIVE_VERSION:
-                raise ValueError('The selected file is not a compatible Dashboard Analytic export package.')
+            manifest = read_import_manifest(contents)
+            if not confirmed_import:
+                raise ValueError('Confirm the import warning before applying this package.')
             staging_root = Path(temporary_dir)
             _safe_extract_archive(archive, staging_root)
             kind = manifest.get('kind')
             if kind == 'workspace':
                 workspace_info = manifest.get('workspace')
-                workspace = import_workspace_archive(staging_root / 'workspace', workspace_info if isinstance(workspace_info, dict) else None)
+                workspace = import_workspace_archive(staging_root / 'workspace', workspace_info if isinstance(workspace_info, dict) else None, replace_existing=True)
                 notice = f'Workspace "{workspace.name}" imported successfully.'
             elif kind == 'config':
                 import_config_archive(staging_root, manifest)
@@ -3132,7 +3177,7 @@ async def import_admin_package(
                 for entry in entries:
                     if not isinstance(entry, dict) or not re.fullmatch(r'workspaces/\d+', str(entry.get('archive_path') or '')):
                         raise ValueError('The full-environment package contains an invalid workspace entry.')
-                    imported_workspaces.append(import_workspace_archive(staging_root / str(entry['archive_path']), entry))
+                    imported_workspaces.append(import_workspace_archive(staging_root / str(entry['archive_path']), entry, replace_existing=True))
                 notice = f'Full environment imported successfully ({len(imported_workspaces)} workspaces added).'
             else:
                 raise ValueError('The export package type is not supported.')
