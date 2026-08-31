@@ -224,6 +224,8 @@ def test_catalogue_parses_legend_position_and_accepts_prior_schema() -> None:
 
     previous = ','.join(CATALOG_HEADERS[:-1]) + '\n8,Quality,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n'
     assert parse_catalog_csv(previous, 'nsa')[0].legend_position == 'top'
+    two_columns = ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 2 columns + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign,\n'
+    assert parse_catalog_csv(two_columns, 'nsa')[0].legend_position == 'top'
 
 
 def test_status_chart_draws_legend_at_the_catalogue_position() -> None:

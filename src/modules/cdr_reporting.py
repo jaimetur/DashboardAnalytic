@@ -381,10 +381,7 @@ def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
             "KPI": entry.kpi,
             "Chart type": entry.chart_type,
             "Legend": entry.legend,
-            # An empty cell remains the backwards-compatible spelling of the
-            # default Top position. This avoids rewriting every older CSV just
-            # because it has been opened and exported.
-            "Legend Position": "" if entry.legend_position == "top" else entry.legend_position.title(),
+            "Legend Position": entry.legend_position.title(),
             "Filters": entry.filters,
             "Grouping_Rows": entry.grouping_rows,
             "Grouping_Columns": entry.grouping_columns,
