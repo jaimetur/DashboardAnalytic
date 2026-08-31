@@ -64,6 +64,7 @@
       <table class="queue-table">
         <thead>
           <tr>
+            <th>ID</th>
             <th>Dataset</th>
             <th>Input Type</th>
             <th>Rows</th>
@@ -78,6 +79,7 @@
         <tbody>
           {% for dataset in datasets %}
           <tr class="{% if selected_dataset and selected_dataset.id == dataset.id %}active-row{% endif %}" data-dataset-row data-dataset-id="{{ dataset.id }}" data-dataset-kind="{{ dataset.dataset_kind or 'generic' }}" data-queue-status="{{ dataset.status }}">
+            <td data-queue-id>{{ dataset.id }}</td>
             <td>
               <div class="queue-dataset-name" data-queue-file-name>{{ dataset.file_name }}</div>
               <div class="queue-dataset-path" data-queue-file-path>{{ dataset.stored_path }}</div>
@@ -154,7 +156,7 @@
           </tr>
           {% else %}
           <tr>
-            <td colspan="9"><article class="empty-state-inline">No datasets available.</article></td>
+            <td colspan="10"><article class="empty-state-inline">No datasets available.</article></td>
           </tr>
           {% endfor %}
         </tbody>

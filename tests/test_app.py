@@ -254,6 +254,8 @@ def test_reupload_preserves_original_upload_date_for_dataset_ordering(client) ->
     assert dataset['uploaded_at'] == original_upload
 
     workspace = client.get('/workspace')
+    assert workspace.text.index('<th>ID</th>') < workspace.text.index('<th>Dataset</th>')
+    assert '<td data-queue-id>1</td>' in workspace.text
     assert '<th>Uploaded</th>' in workspace.text
     assert '<th>Updated</th>' in workspace.text
     assert workspace.text.index('<th>Uploaded</th>') < workspace.text.index('<th>Updated</th>')
