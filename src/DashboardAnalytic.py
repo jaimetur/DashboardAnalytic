@@ -26,7 +26,7 @@ from starlette.datastructures import QueryParams
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, render_cdr_report, update_catalogue_document
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, update_catalogue_document
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
@@ -351,6 +351,20 @@ def synchronize_reporting_catalogue_document() -> None:
     )
 
 
+def synchronize_reporting_row_store() -> None:
+    """Backfill shared CDR tables from existing per-dataset materialisations."""
+    for dataset in repository.list_datasets():
+        kind = str(dataset['dataset_kind'] or '').casefold()
+        if dataset['status'] != 'ready' or kind not in CDR_DATASET_KINDS:
+            continue
+        dataset_id = int(dataset['id'])
+        if repository.reporting_rows_exist_for_dataset(dataset_id, kind):
+            continue
+        columns = repository.list_dataset_row_columns(dataset_id)
+        if columns:
+            repository.replace_reporting_rows(dataset_id, kind, repository.load_dataset_rows(dataset_id, columns, {}))
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     ensure_directories([
@@ -364,6 +378,7 @@ async def lifespan(_: FastAPI):
         settings.static_dir,
     ])
     repository.initialize(settings.admin_username, settings.admin_password)
+    synchronize_reporting_row_store()
     for technology in TEMPLATE_NAMES:
         synchronize_template_file_names(technology)
     yield
@@ -880,6 +895,8 @@ def rebuild_dataset_artifacts(
             auto_vendor_mapping_error = str(exc)
     store_cached_dataset_frame(dataset_path, df)
     repository.replace_dataset_rows(dataset_id, df)
+    if dataset_kind in CDR_DATASET_KINDS:
+        repository.replace_reporting_rows(dataset_id, dataset_kind, df)
     if progress_callback:
         progress_callback(62)
     repository.update_dataset_profile(dataset_id, progress=62, dataset_kind=dataset_kind)
@@ -958,6 +975,9 @@ def persist_mapped_cdr_frame(dataset: dict[str, Any], frame: pd.DataFrame) -> No
     """Replace a materialized CDR after vendor mapping and refresh its profile."""
     dataset_id = int(dataset['id'])
     repository.replace_dataset_rows(dataset_id, frame)
+    dataset_kind = str(dataset.get('dataset_kind') or '').casefold()
+    if dataset_kind in CDR_DATASET_KINDS:
+        repository.replace_reporting_rows(dataset_id, dataset_kind, frame)
     summary = summarise_dataset(frame)
     available_metrics = derive_available_metrics(frame)
     analysis = build_analysis(frame, {'aggregation': 'all', 'extra_filters': {}}, '')
@@ -1979,12 +1999,44 @@ def _reporting_frame(dataset_id: int) -> pd.DataFrame:
     return repository.load_dataset_rows(dataset_id, repository.list_dataset_row_columns(dataset_id), {})
 
 
-def _combined_reporting_frame(datasets: list[dict[str, Any]], technology: str) -> pd.DataFrame:
-    """Union CDR columns while retaining every row from the selected campaigns."""
-    frames = [_reporting_frame(int(dataset['id'])) for dataset in datasets]
-    # ``sort=False`` retains a useful source-column order and concat performs
-    # the required union when campaign exports differ slightly in their fields.
-    combined = pd.concat(frames, ignore_index=True, sort=False) if len(frames) > 1 else frames[0].copy()
+def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multivendor: bool) -> list[str]:
+    """Select only fields that can affect the chosen CDR report.
+
+    The remaining per-CDR columns stay available in Workspace, but a report no
+    longer transfers every historical source field just to render its charts.
+    """
+    requested = {
+        'Operator', 'Campaign', 'vendor', 'report_vendor',
+        'RAT', 'RAT_A', 'Sample_RAT_A', 'technology_primary',
+        'L1_Call_Mode_A', 'L2_Call_Mode_A', 'Session_Type', 'session_type',
+        'Type_of_Test', 'Test_Name', 'test_name', 'Test_Type', 'test_type',
+    }
+    for entry in catalog_entries:
+        if entry.source_kind != dataset_kind:
+            continue
+        requested.add(entry.kpi)
+        requested.add(entry.legend)
+        requested.update(parse_catalog_grouping(entry.grouping_rows).dimensions)
+        requested.update(parse_catalog_grouping(entry.grouping_columns).dimensions)
+        requested.update(condition.column for condition in parse_catalog_filters(entry.filters))
+    # Derived grouping/filter labels resolve from their source fields above;
+    # empty presentation fields are not database column requests.
+    return sorted(column for column in requested if str(column).strip())
+
+
+def _combined_reporting_frame(
+    datasets: list[dict[str, Any]],
+    technology: str,
+    catalog_entries: list[Any],
+    multivendor: bool,
+) -> pd.DataFrame:
+    """Load selected campaigns in one query from their shared CDR table."""
+    dataset_kind = str(datasets[0]['dataset_kind'])
+    dataset_ids = [int(dataset['id']) for dataset in datasets]
+    columns = reporting_query_columns(dataset_kind, catalog_entries, multivendor)
+    combined = repository.load_reporting_rows(dataset_kind, dataset_ids, columns)
+    if combined.empty:
+        raise ValueError(f'The selected {dataset_kind.title()} CDRs have no materialised reporting rows.')
     return classify_sessions(combined, technology)
 
 
@@ -2028,10 +2080,6 @@ def generate_netcheck_cdr_report(
         'voice': _reporting_datasets(voice_dataset_id, 'voice'),
         'speech': _reporting_datasets(speech_dataset_id, 'speech'),
     }
-    try:
-        frames = {kind: _combined_reporting_frame(datasets, technology) for kind, datasets in selected.items()}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if multivendor and not all(
         dataset.get('vendor_mapping_applied')
         for datasets in selected.values()
@@ -2056,6 +2104,13 @@ def generate_netcheck_cdr_report(
         catalog_entries = load_catalog_csv(catalog_path, technology)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Unable to load the selected {technology.upper()} report template: {exc}") from exc
+    try:
+        frames = {
+            kind: _combined_reporting_frame(datasets, technology, catalog_entries, multivendor)
+            for kind, datasets in selected.items()
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     generated_at = datetime.now().strftime('%Y%m%d-%H%M')
     file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{generated_at}.pptx"
     destination = safe_join(settings.export_dir, file_name)
@@ -2355,6 +2410,7 @@ def delete_dataset(dataset_id: int, user: SessionUser = Depends(current_user)) -
     if dataset_path.exists():
         dataset_path.unlink()
     repository.drop_dataset_rows(dataset_id)
+    repository.drop_reporting_rows(dataset_id, dataset_payload.get('dataset_kind'))
     stale_keys = [key for key in ANALYSIS_CACHE if str(dataset_path.resolve()) in key]
     for key in stale_keys:
         ANALYSIS_CACHE.pop(key, None)

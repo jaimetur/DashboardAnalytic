@@ -417,6 +417,112 @@ class Repository:
             safe_df.to_sql(table_name, conn, index=False)
             self._create_dataset_row_indexes(conn, table_name, safe_df.columns.tolist())
 
+    def reporting_rows_table_name(self, dataset_kind: str) -> str:
+        if dataset_kind not in {'data', 'voice', 'speech'}:
+            raise ValueError('A reporting table is only available for CDR Data, Voice or Speech.')
+        return f'reporting_rows_{dataset_kind}'
+
+    def _table_columns(self, conn: sqlite3.Connection, table_name: str) -> list[str]:
+        return [row['name'] for row in conn.execute(f"PRAGMA table_info({self._quote_identifier(table_name)})").fetchall()]
+
+    def replace_reporting_rows(self, dataset_id: int, dataset_kind: str, df: pd.DataFrame) -> None:
+        """Replace one CDR's rows in the shared, queryable reporting table.
+
+        The shared tables deliberately have a union schema rather than JSON
+        payloads: fields remain normal SQLite columns and can be selected and
+        indexed efficiently by reports.
+        """
+        table_name = self.reporting_rows_table_name(dataset_kind)
+        safe_df = self._sqlite_safe_frame(df)
+        with self.connection() as conn:
+            quoted_table = self._quote_identifier(table_name)
+            conn.execute(f"CREATE TABLE IF NOT EXISTS {quoted_table} (dataset_id INTEGER NOT NULL)")
+            existing = self._table_columns(conn, table_name)
+            existing_lookup = {column.casefold(): column for column in existing}
+            source_targets: dict[str, str] = {}
+            for column in safe_df.columns:
+                name = str(column)
+                target = existing_lookup.get(name.casefold())
+                if not target:
+                    conn.execute(f"ALTER TABLE {quoted_table} ADD COLUMN {self._quote_identifier(name)}")
+                    target = name
+                    existing.append(target)
+                    existing_lookup[name.casefold()] = target
+                source_targets[name] = target
+            conn.execute(f"DELETE FROM {quoted_table} WHERE dataset_id = ?", (dataset_id,))
+            # Align every append to the union schema; absent source columns
+            # stay NULL and do not force a lossy synthetic JSON representation.
+            payload = pd.DataFrame(index=safe_df.index)
+            payload['dataset_id'] = int(dataset_id)
+            for target in existing:
+                if target == 'dataset_id':
+                    continue
+                source = next((name for name, mapped in source_targets.items() if mapped == target), None)
+                payload[target] = safe_df[source] if source else None
+            payload.to_sql(table_name, conn, if_exists='append', index=False)
+            self._create_reporting_row_indexes(conn, table_name, existing)
+
+    def _create_reporting_row_indexes(self, conn: sqlite3.Connection, table_name: str, columns: list[str]) -> None:
+        quoted_table = self._quote_identifier(table_name)
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS {self._quote_identifier(self._index_name(table_name, 'dataset_id', 'rows'))} "
+            f"ON {quoted_table} (dataset_id)"
+        )
+        self._create_dataset_row_indexes(conn, table_name, columns)
+
+    def drop_reporting_rows(self, dataset_id: int, dataset_kind: str | None = None) -> None:
+        kinds = [dataset_kind] if dataset_kind in {'data', 'voice', 'speech'} else ['data', 'voice', 'speech']
+        with self.connection() as conn:
+            for kind in kinds:
+                table_name = self.reporting_rows_table_name(kind)
+                exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,)
+                ).fetchone()
+                if exists:
+                    conn.execute(f"DELETE FROM {self._quote_identifier(table_name)} WHERE dataset_id = ?", (dataset_id,))
+
+    def list_reporting_row_columns(self, dataset_kind: str) -> list[str]:
+        table_name = self.reporting_rows_table_name(dataset_kind)
+        with self.connection() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,)
+            ).fetchone()
+            return self._table_columns(conn, table_name) if exists else []
+
+    def reporting_rows_exist_for_dataset(self, dataset_id: int, dataset_kind: str) -> bool:
+        table_name = self.reporting_rows_table_name(dataset_kind)
+        with self.connection() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,)
+            ).fetchone()
+            if not exists:
+                return False
+            return conn.execute(
+                f"SELECT 1 FROM {self._quote_identifier(table_name)} WHERE dataset_id = ? LIMIT 1", (dataset_id,)
+            ).fetchone() is not None
+
+    def load_reporting_rows(self, dataset_kind: str, dataset_ids: list[int], columns: list[str]) -> pd.DataFrame:
+        if not dataset_ids:
+            return pd.DataFrame()
+        table_name = self.reporting_rows_table_name(dataset_kind)
+        existing_columns = set(self.list_reporting_row_columns(dataset_kind))
+        selected_columns: list[tuple[str, str]] = []
+        for column in columns:
+            resolved = self._resolve_dataset_row_column_name(existing_columns, column)
+            if resolved:
+                selected_columns.append((column, resolved))
+        if not selected_columns:
+            return pd.DataFrame()
+        placeholders = ', '.join('?' for _ in dataset_ids)
+        select_clause = ', '.join(
+            f"{self._quote_identifier(actual)} AS {self._quote_identifier(requested)}"
+            if actual != requested else self._quote_identifier(actual)
+            for requested, actual in selected_columns
+        )
+        query = f"SELECT {select_clause} FROM {self._quote_identifier(table_name)} WHERE dataset_id IN ({placeholders})"
+        with self.connection() as conn:
+            return pd.read_sql_query(query, conn, params=[int(dataset_id) for dataset_id in dataset_ids])
+
     def _create_dataset_row_indexes(self, conn: sqlite3.Connection, table_name: str, columns: list[str]) -> None:
         normalized_columns = {str(column).strip().lower(): column for column in columns}
         indexed_dimensions = [

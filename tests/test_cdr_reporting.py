@@ -631,4 +631,6 @@ def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, monkey
 
     assert response.status_code == 200
     assert captured['data']['Campaign'].tolist() == ['2026 Q1', '2026 Q2']
-    assert {'Data_Q1', 'Data_Q2'}.issubset(captured['data'].columns)
+    # The shared CDR table preserves the union schema, while the renderer now
+    # receives only fields referenced by the selected Slides Template.
+    assert {'Data_Q1', 'Data_Q2'}.issubset(app_module.repository.list_reporting_row_columns('data'))

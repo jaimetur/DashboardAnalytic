@@ -29,6 +29,7 @@
 - Restricted Dashboard analysis to CDR datasets and meaningful KPI fields; improved adaptive-filter normalisation, responsive layouts, previews and exports.
 - Refined the responsive tabbed UI, module palettes, action controls, loading dialogs and Help navigation across Workspace, Dashboard, Reporting and Admin.
 - Added a reporting catalogue selector that follows the NSA/SA workspace default while allowing a per-report override.
+- Added shared SQLite reporting tables for CDR Data, Voice and Speech: processed and remapped rows are synchronised by `dataset_id`, multi-campaign reports query them directly without pandas concatenation, and load only fields used by the selected Slides Template.
 - Expanded the in-browser Slides Templates Editor with contextual assistance, Filter Builder, searchable single/multi-select values, fixed action/Slide columns, row movement/insertion/removal, re-enumeration and scroll guidance.
 - Refactored PowerPoint and Slides Templates storage: the master deck lives in `assets/ppt-templates/`; the complete template library and its active NSA/SA mirrors remain user-managed files, while template names, types and defaults are stored in SQLite.
 - Unified Slides Template naming so the visible name is always the exact physical CSV filename (apart from `.csv`), reconciling unambiguous manual renames, removing legacy duplicate files, and preserving case and spaces across the library, default mirror, imports, renames and duplicates. Duplicates derive from their source name with **- Copy** (then **Copy 2**, etc.).
