@@ -1706,8 +1706,15 @@ document.querySelectorAll('[data-import-export-form]').forEach((form) => {
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!(form instanceof HTMLFormElement) || !(confirmed instanceof HTMLInputElement)) return;
+    if (!form.reportValidity()) return;
     confirmed.value = '0';
+    showLoadingOverlay(
+      'Uploading import package',
+      'Uploading the selected ZIP package for inspection. Large workspace packages can take several minutes; the import warning will appear as soon as the upload is ready.',
+    );
     try {
+      // Let the browser paint the progress dialog before starting a potentially large upload.
+      await new Promise((resolve) => window.requestAnimationFrame(resolve));
       const response = await fetch('/admin/import-export/inspect', {
         method: 'POST',
         body: new FormData(form),
@@ -1717,6 +1724,7 @@ document.querySelectorAll('[data-import-export-form]').forEach((form) => {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || 'The selected file is not a valid export package.');
       const warning = importWarningDetails(payload);
+      hideLoadingOverlay();
       const accepted = await showConfirmDialog(warning.message, {
         title: warning.title,
         confirmLabel: 'Import and overwrite',
@@ -1726,6 +1734,7 @@ document.querySelectorAll('[data-import-export-form]').forEach((form) => {
       showLoadingOverlay('Importing package', 'Please wait while Dashboard Analytic imports the selected package.');
       HTMLFormElement.prototype.submit.call(form);
     } catch (error) {
+      hideLoadingOverlay();
       showInfoDialog(error instanceof Error ? error.message : 'The selected file could not be inspected.', {
         title: 'Import Package Error',
       });
