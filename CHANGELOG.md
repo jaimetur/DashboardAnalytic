@@ -34,6 +34,7 @@
 - Made Admin ZIP exports disk-backed background jobs with direct, resumable browser downloads, selective compression for already-compressed files and 24-hour cleanup of temporary packages; this supports very large workspaces without loading the archive into browser or server memory.
 
 #### 🐛 Bug fixes:
+- Fixed external `CONFIG_DIR`, `DATA_DIR` and `ASSETS_DIR` deployments so startup recognises an already-migrated workspace database instead of attempting to overwrite it with the legacy configuration database.
 - Fixed catalogue defaults, deletion protection, editor selection, grouping semantics and reporting placeholder/chart generation.
 - Fixed CDR and mapping ingestion for duplicate headers, legacy encodings, alternate Cell ID fields, VFUK/3UK GCIDs and NSA RAT spellings.
 - Fixed Vendor persistence and preview ordering, and kept CDRs usable after failed mapping while logging the failure.

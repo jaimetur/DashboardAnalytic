@@ -50,7 +50,8 @@ EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 EXPORT_JOBS_LOCK = Lock()
 EXPORT_PACKAGE_TTL = timedelta(hours=24)
 LEGACY_SLIDES_TEMPLATES_DIR = PROJECT_ROOT / 'assets' / 'slides-templates'
-DEFAULT_SLIDES_TEMPLATES_DIR = PROJECT_ROOT / 'config' / 'slides-templates'
+#DEFAULT_SLIDES_TEMPLATES_DIR = PROJECT_ROOT / 'config' / 'slides-templates'
+DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
 application_config_dir = settings.database_path.parent
 
 

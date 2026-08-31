@@ -151,12 +151,17 @@ class WorkspaceRegistry:
         if not source.exists() and self.legacy_database_path.exists():
             source = self.legacy_database_path
         if source != target and source.exists():
-            self._move_database_bundle(source, target)
-            if source.parent.parent == self.legacy_data_dir / 'workspaces':
-                try:
-                    source.parent.rmdir()
-                except OSError:
-                    pass
+            # A copied/moved deployment can legitimately retain the historic
+            # config DB while the renamed workspace database already exists in
+            # the new data root. The workspace DB is the migrated destination;
+            # do not try to overwrite it or fail application startup.
+            if not target.exists():
+                self._move_database_bundle(source, target)
+                if source.parent.parent == self.legacy_data_dir / 'workspaces':
+                    try:
+                        source.parent.rmdir()
+                    except OSError:
+                        pass
         with self._connection() as conn:
             conn.execute('UPDATE workspaces SET database_path = ? WHERE id = ?', (str(target), 'default'))
 
@@ -194,10 +199,14 @@ class WorkspaceRegistry:
             slides_templates_dir = self.legacy_slides_templates_dir
             if input_dir != workspace.input_dir and new_database.exists():
                 with sqlite3.connect(new_database) as conn:
-                    conn.execute(
-                        'UPDATE datasets SET stored_path = REPLACE(stored_path, ?, ?)',
-                        (str(workspace.input_dir), str(input_dir)),
-                    )
+                    has_datasets = conn.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'datasets'"
+                    ).fetchone()
+                    if has_datasets:
+                        conn.execute(
+                            'UPDATE datasets SET stored_path = REPLACE(stored_path, ?, ?)',
+                            (str(workspace.input_dir), str(input_dir)),
+                        )
             with self._connection() as conn:
                 conn.execute(
                     '''UPDATE workspaces

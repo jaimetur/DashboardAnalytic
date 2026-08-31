@@ -1433,6 +1433,9 @@ function setupCustomMultiSelects() {
         }
       });
       dispatchNativeChange();
+      menu.hidden = true;
+      syncTrigger();
+      trigger.focus();
     };
 
     actionButton.addEventListener('click', selectAllOrNone);
