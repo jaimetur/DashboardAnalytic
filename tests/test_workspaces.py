@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from src.config import load_storage_paths
+from src.modules.repository import Repository
 from src.modules.workspaces import WorkspaceRegistry
 
 
@@ -57,3 +58,40 @@ def test_registry_keeps_existing_workspace_database_with_external_roots(tmp_path
     assert workspace is not None
     assert workspace.database_path == target_database
     assert target_database.exists()
+
+
+def test_workspace_accesses_are_consolidated_into_users_table(tmp_path: Path) -> None:
+    workspace_db = tmp_path / 'workspace.db'
+    application_db = tmp_path / 'application.db'
+    with sqlite3.connect(application_db) as conn:
+        conn.executescript(
+            '''
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE user_workspace_access (
+                user_id INTEGER NOT NULL,
+                workspace_id TEXT NOT NULL,
+                PRIMARY KEY (user_id, workspace_id)
+            );
+            INSERT INTO users (id, username, password_hash, role, active, created_at)
+            VALUES (7, 'analyst', 'hash', 'user', 1, '2026-01-01 00:00:00');
+            INSERT INTO user_workspace_access (user_id, workspace_id) VALUES (7, 'germany');
+            '''
+        )
+
+    repository = Repository(workspace_db, application_db)
+    repository.initialize()
+
+    assert repository.list_user_workspace_ids(7) == ['germany']
+    with sqlite3.connect(application_db) as conn:
+        columns = {row[1] for row in conn.execute('PRAGMA table_info(users)')}
+        assert 'workspace_ids_json' in columns
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'user_workspace_access'"
+        ).fetchone() is None

@@ -691,6 +691,14 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
    Raise Workspaces Management while its access picker is open so the menu can
    extend over the next panel instead of being painted underneath it. */
 .workspace-switcher-panel:has(.workspace-user-picker[open]) { z-index: 10; }
+/* The Users panel is collapsible and normally clips its contents.  Its
+   Workspace Access picker is an overlay, so let it escape only while open. */
+.admin-stack .collapsible-panel.workspace-user-picker-open,
+.admin-stack .collapsible-panel:has(.workspace-user-picker[open]) {
+  position: relative;
+  z-index: 10;
+  overflow: visible;
+}
 .workspace-switcher-panel .lede { margin: -0.35rem 0 0; }
 .workspace-switcher-actions { display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap; }
 .workspace-select-form, .workspace-management-forms, .workspace-management-forms form { display: flex; align-items: end; gap: 0.7rem; flex-wrap: wrap; }
@@ -770,6 +778,14 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .admin-stack .workspace-user-picker[open] > summary { border-color: rgba(139,29,36,0.52); border-bottom-left-radius: 0; border-bottom-right-radius: 0; background: #fff0ef; }
 .admin-stack .workspace-user-picker-chevron { border-color: #9d2b35; }
 .admin-stack .workspace-user-picker-menu { position: absolute; top: calc(100% - 1px); left: 0; z-index: 60; display: grid; width: max-content; min-width: 100%; max-width: 17rem; max-height: 14rem; overflow: auto; padding: 0.35rem; border: 1px solid rgba(139,29,36,0.52); border-radius: 0 0 9px 9px; background: #fffafa; box-shadow: 0 16px 30px rgba(65,18,27,0.24); }
+.workspace-user-picker-menu.workspace-user-picker-menu-portal { position: fixed; z-index: 1000; display: grid; overflow: auto; padding: 0.35rem; border: 1px solid rgba(139,29,36,0.52); border-radius: 0 0 9px 9px; background: #fffafa; color: #7d2731; box-shadow: 0 16px 30px rgba(65,18,27,0.24); }
+.workspace-user-picker-menu.workspace-user-picker-menu-portal .workspace-user-picker-search { box-sizing: border-box; min-width: 0; width: 100%; padding: 0.48rem 0.58rem; border: 1px solid rgba(139,29,36,0.30); border-radius: 7px; background: #fff; color: #7d2731; font-size: 0.78rem; }
+.workspace-user-picker-menu.workspace-user-picker-menu-portal .workspace-user-picker-toggle { width: 100%; padding: 0.46rem 0.52rem; border: 0; border-radius: 7px; background: #fde4e1; color: #8d2631; font-size: 0.75rem; font-weight: 700; text-align: left; box-shadow: none; }
+.workspace-user-picker-menu.workspace-user-picker-menu-portal label { display: flex; align-items: center; gap: 0.6rem; width: auto; padding: 0.42rem 0.48rem; border-radius: 7px; color: #7d2731; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+.workspace-user-picker-menu.workspace-user-picker-menu-portal label:hover { background: #fde4e1; }
+.workspace-user-picker-menu.workspace-user-picker-menu-portal label[hidden] { display: none !important; }
+.workspace-user-picker-menu.workspace-user-picker-menu-portal label input[type="checkbox"] { flex: 0 0 1rem; min-width: 1rem; max-width: 1rem; width: 1rem; height: 1rem; margin: 0; padding: 0; accent-color: #9d2b35; }
+.workspace-user-picker-menu.workspace-user-picker-menu-portal label span { min-width: 0; color: #7d2731; }
 .admin-stack .workspace-user-picker-search { box-sizing: border-box; min-width: 0; width: 100%; padding: 0.48rem 0.58rem; border: 1px solid rgba(139,29,36,0.30); border-radius: 7px; background: #fff; color: #7d2731; font-size: 0.78rem; }
 .admin-stack .workspace-user-picker-toggle { width: 100%; padding: 0.46rem 0.52rem; border: 0; border-radius: 7px; background: #fde4e1; color: #8d2631; font-size: 0.75rem; font-weight: 700; text-align: left; box-shadow: none; }
 .admin-stack .workspace-user-picker-toggle:hover { background: #f8d2cd; color: #711622; }

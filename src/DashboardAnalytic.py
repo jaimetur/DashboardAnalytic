@@ -492,7 +492,10 @@ def asset_version(relative_path: str) -> str:
     asset_path = settings.static_dir / relative_path
     if not asset_path.exists():
         return __version__
-    return str(asset_path.stat().st_mtime_ns)
+    # Some synced development folders preserve a file's modification time when
+    # it changes.  A content fingerprint prevents browsers from reusing an old
+    # JavaScript or CSS response after an interface update.
+    return hashlib.blake2b(asset_path.read_bytes(), digest_size=8).hexdigest()
 
 
 def parse_extra_filters(raw_filters: str) -> dict[str, Any]:
@@ -2480,13 +2483,14 @@ def close_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(c
 
 
 @app.post('/workspace/create')
-def create_workspace(name: str = Form(...), user_ids: list[int] = Form(default=[]), user: SessionUser = Depends(current_user)) -> Response:
+def create_workspace(name: str = Form(...), usernames: list[str] = Form(default=[]), user: SessionUser = Depends(current_user)) -> Response:
     require_workspace_admin(user)
     try:
         workspace = workspace_registry.create(name)
+        selected_usernames = {item.strip().casefold() for item in usernames if item.strip()}
         for account in repository.list_users():
             is_creator = str(account['username']).casefold() == user.username.casefold()
-            is_selected_by_super_admin = user.role == 'super-admin' and int(account['id']) in user_ids
+            is_selected_by_super_admin = user.role == 'super-admin' and str(account['username']).casefold() in selected_usernames
             if is_creator or is_selected_by_super_admin:
                 repository.set_user_workspace_access(
                     int(account['id']),
@@ -2537,7 +2541,7 @@ def delete_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(
 def update_workspace_access(
     request: Request,
     workspace_id: str = Form(...),
-    user_ids: list[int] = Form(default=[]),
+    usernames: list[str] = Form(default=[]),
     user: SessionUser = Depends(admin_user),
 ) -> Response:
     require_super_admin(user)
@@ -2545,14 +2549,7 @@ def update_workspace_access(
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return JSONResponse({'detail': 'Workspace not found.'}, status_code=404)
         return RedirectResponse('/workspace?workspace_error=Workspace+not+found.', status_code=status.HTTP_303_SEE_OTHER)
-    for row in repository.list_users():
-        if int(row['id']) in user_ids:
-            ids = repository.list_user_workspace_ids(int(row['id']))
-            if workspace_id not in ids:
-                repository.set_user_workspace_access(int(row['id']), [*ids, workspace_id])
-        else:
-            ids = [item for item in repository.list_user_workspace_ids(int(row['id'])) if item != workspace_id]
-            repository.set_user_workspace_access(int(row['id']), ids)
+    repository.set_workspace_user_access(workspace_id, usernames)
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JSONResponse({'ok': True, 'notice': 'Workspace access updated.'})
     return RedirectResponse('/workspace?workspace_notice=Workspace+access+updated.', status_code=status.HTTP_303_SEE_OTHER)

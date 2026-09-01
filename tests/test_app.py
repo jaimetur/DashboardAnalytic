@@ -527,6 +527,30 @@ def test_reupload_preserves_original_upload_date_for_dataset_ordering(client) ->
     assert workspace.text.index('<th>Uploaded</th>') < workspace.text.index('<th>Updated</th>')
 
 
+def test_workspace_management_saves_user_access_for_the_selected_workspace(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login_super(client)
+    created = client.post('/workspace/create', data={'name': 'Germany'}, follow_redirects=False)
+    assert created.status_code == 303
+    germany = next(item for item in app_module.workspace_registry.list() if item.name == 'Germany')
+    demo = next(row for row in app_module.repository.list_users() if row['username'] == 'demo')
+
+    response = client.post(
+        '/workspace/access',
+        data={'workspace_id': germany.id, 'usernames': [str(demo['username'])]},
+        headers={'X-Requested-With': 'XMLHttpRequest'},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {'ok': True, 'notice': 'Workspace access updated.'}
+    assert app_module.repository.list_user_workspace_ids(int(demo['id'])) == [germany.id]
+    users_page = client.get('/admin')
+    demo_row = users_page.text.split(f'aria-label="Filter workspaces for {demo["username"]}"', 1)[1].split('</details>', 1)[0]
+    assert f'value="{germany.id}"' in demo_row
+    assert 'checked' in demo_row
+
+
 def test_workspace_management_isolates_dataset_databases_and_remembers_last_opened_workspace(client) -> None:
     import src.DashboardAnalytic as app_module
 

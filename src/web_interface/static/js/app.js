@@ -1434,8 +1434,30 @@ function setupWorkspaceUserPickers() {
     picker.dataset.workspaceUserPickerReady = '1';
     const search = picker.querySelector('.workspace-user-picker-search');
     const toggle = picker.querySelector('.workspace-user-picker-toggle');
+    const menu = picker.querySelector('.workspace-user-picker-menu');
     const options = Array.from(picker.querySelectorAll('.workspace-user-picker-menu label'));
     const checkboxes = options.map((option) => option.querySelector('input[type="checkbox"]')).filter((checkbox) => checkbox && !checkbox.disabled);
+    const portalize = Boolean(picker.closest('.table-wrap')) && Boolean(menu);
+    const menuHome = menu?.parentNode;
+    const menuNextSibling = menu?.nextSibling;
+
+    const positionPortalMenu = () => {
+      if (!portalize || !menu || !picker.open) return;
+      const bounds = picker.getBoundingClientRect();
+      const availableHeight = Math.max(8 * 16, window.innerHeight - bounds.bottom - 16);
+      Object.assign(menu.style, {
+        left: `${Math.max(8, bounds.left)}px`,
+        top: `${bounds.bottom - 1}px`,
+        width: `${Math.max(bounds.width, 184)}px`,
+        maxHeight: `${Math.min(224, availableHeight)}px`,
+      });
+    };
+    const restorePortalMenu = () => {
+      if (!portalize || !menu || !menuHome || !menu.classList.contains('workspace-user-picker-menu-portal')) return;
+      menuHome.insertBefore(menu, menuNextSibling);
+      menu.classList.remove('workspace-user-picker-menu-portal');
+      menu.removeAttribute('style');
+    };
 
     const filter = () => {
       const query = (search?.value || '').trim().toLocaleLowerCase();
@@ -1452,17 +1474,34 @@ function setupWorkspaceUserPickers() {
       filter();
     });
     picker.addEventListener('toggle', () => {
+      const parentPanel = picker.closest('.collapsible-panel');
+      if (parentPanel) {
+        parentPanel.classList.toggle(
+          'workspace-user-picker-open',
+          Boolean(parentPanel.querySelector('.workspace-user-picker[open]')),
+        );
+      }
       if (picker.open && search) {
+        if (portalize && menu) {
+          menu.classList.add('workspace-user-picker-menu-portal');
+          document.body.append(menu);
+          positionPortalMenu();
+        }
         search.value = '';
         filter();
         window.setTimeout(() => search.focus(), 0);
+      } else {
+        restorePortalMenu();
       }
     });
     document.addEventListener('click', (event) => {
-      if (picker.open && !picker.contains(event.target)) {
+      const clickInPortalMenu = Boolean(menu?.classList.contains('workspace-user-picker-menu-portal') && menu.contains(event.target));
+      if (picker.open && !picker.contains(event.target) && !clickInPortalMenu) {
         picker.open = false;
       }
     });
+    window.addEventListener('resize', positionPortalMenu);
+    document.addEventListener('scroll', positionPortalMenu, true);
   });
 }
 

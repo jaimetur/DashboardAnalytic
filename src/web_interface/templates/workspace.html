@@ -41,7 +41,7 @@
               <div class="workspace-user-picker-menu">
                 <input class="workspace-user-picker-search" type="search" placeholder="Filter users…" aria-label="Filter available users">
                 <button class="workspace-user-picker-toggle" type="button">Select All / None</button>
-                {% for account in workspace_users %}<label><input type="checkbox" name="user_ids" value="{{ account.id }}"><span>{{ account.username }}</span></label>{% endfor %}
+                {% for account in workspace_users %}<label><input type="checkbox" name="usernames" value="{{ account.username }}"><span>{{ account.username }}</span></label>{% endfor %}
               </div>
             </details>{% endif %}
             <button type="submit">Create and open</button>
@@ -67,7 +67,7 @@
                 <div class="workspace-user-picker-menu">
                   <input class="workspace-user-picker-search" type="search" placeholder="Filter users…" aria-label="Filter available users">
                   <button class="workspace-user-picker-toggle" type="button">Select All / None</button>
-                  {% for account in workspace_users %}<label><input type="checkbox" name="user_ids" value="{{ account.id }}" {% if item.id in account.workspace_ids %}checked{% endif %}><span>{{ account.username }}</span></label>{% endfor %}
+                  {% for account in workspace_users %}<label><input type="checkbox" name="usernames" value="{{ account.username }}" {% if item.id in account.workspace_ids %}checked{% endif %}><span>{{ account.username }}</span></label>{% endfor %}
                 </div>
               </details>
               <button type="submit" class="workspace-action-access">Save</button>

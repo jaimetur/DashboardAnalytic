@@ -97,7 +97,8 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    workspace_ids_json TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS report_templates (
@@ -106,13 +107,6 @@ CREATE TABLE IF NOT EXISTS report_templates (
     is_default INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (technology, name),
     CHECK (technology IN ('nsa', 'sa'))
-);
-
-CREATE TABLE IF NOT EXISTS user_workspace_access (
-    user_id INTEGER NOT NULL,
-    workspace_id TEXT NOT NULL,
-    PRIMARY KEY (user_id, workspace_id),
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS application_state (
@@ -201,6 +195,7 @@ class Repository:
         with self.global_connection() as conn:
             conn.executescript(GLOBAL_SCHEMA)
             self._ensure_report_template_columns(conn)
+            self._ensure_user_workspace_columns(conn)
             # Seed the three local accounts exactly once, for a brand-new
             # empty application database.  Later starts must never recreate
             # deleted or renamed accounts, nor reset roles or passwords.
@@ -223,37 +218,100 @@ class Repository:
                     "INSERT INTO application_state (key, value) VALUES ('bootstrap_users_created', '1')"
                 )
 
+    @staticmethod
+    def _workspace_ids_from_json(value: object) -> list[str]:
+        try:
+            values = json.loads(str(value or '[]'))
+        except (TypeError, ValueError):
+            values = []
+        if not isinstance(values, list):
+            return []
+        return sorted({str(item).strip() for item in values if str(item).strip()})
+
+    @classmethod
+    def _workspace_ids_json(cls, workspace_ids: list[str]) -> str:
+        return json.dumps(sorted({str(item).strip() for item in workspace_ids if str(item).strip()}))
+
+    def _ensure_user_workspace_columns(self, conn: sqlite3.Connection) -> None:
+        user_columns = {str(row['name']) for row in conn.execute('PRAGMA table_info(users)').fetchall()}
+        if 'workspace_ids_json' not in user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN workspace_ids_json TEXT NOT NULL DEFAULT '[]'")
+        old_table = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'user_workspace_access'"
+        ).fetchone()
+        if not old_table:
+            return
+        for row in conn.execute(
+            'SELECT user_id, workspace_id FROM user_workspace_access ORDER BY user_id, workspace_id'
+        ).fetchall():
+            current = conn.execute(
+                'SELECT workspace_ids_json FROM users WHERE id = ?', (int(row['user_id']),)
+            ).fetchone()
+            if not current:
+                continue
+            workspace_ids = self._workspace_ids_from_json(current['workspace_ids_json'])
+            workspace_ids.append(str(row['workspace_id']))
+            conn.execute(
+                'UPDATE users SET workspace_ids_json = ? WHERE id = ?',
+                (self._workspace_ids_json(workspace_ids), int(row['user_id'])),
+            )
+        conn.execute('DROP TABLE user_workspace_access')
+
     def list_user_workspace_ids(self, user_id: int) -> list[str]:
         with self.global_connection() as conn:
             conn.executescript(GLOBAL_SCHEMA)
-            return [str(row['workspace_id']) for row in conn.execute('SELECT workspace_id FROM user_workspace_access WHERE user_id = ? ORDER BY workspace_id', (user_id,)).fetchall()]
+            self._ensure_user_workspace_columns(conn)
+            row = conn.execute('SELECT workspace_ids_json FROM users WHERE id = ?', (user_id,)).fetchone()
+            return self._workspace_ids_from_json(row['workspace_ids_json']) if row else []
 
     def user_has_workspace_access(self, username: str, workspace_id: str) -> bool:
         with self.global_connection() as conn:
             conn.executescript(GLOBAL_SCHEMA)
+            self._ensure_user_workspace_columns(conn)
             row = conn.execute(
-                'SELECT 1 FROM user_workspace_access a JOIN users u ON u.id = a.user_id '
-                'WHERE u.username COLLATE NOCASE = ? AND a.workspace_id = ?',
-                (username.strip(), workspace_id),
+                'SELECT workspace_ids_json FROM users WHERE username COLLATE NOCASE = ?',
+                (username.strip(),),
             ).fetchone()
-        return bool(row)
+        return bool(row) and str(workspace_id) in self._workspace_ids_from_json(row['workspace_ids_json'])
 
     def set_user_workspace_access(self, user_id: int, workspace_ids: list[str]) -> None:
         unique_ids = sorted({str(item).strip() for item in workspace_ids if str(item).strip()})
         with self.global_connection() as conn:
             conn.executescript(GLOBAL_SCHEMA)
-            conn.execute('DELETE FROM user_workspace_access WHERE user_id = ?', (user_id,))
-            conn.executemany('INSERT INTO user_workspace_access (user_id, workspace_id) VALUES (?, ?)', [(user_id, item) for item in unique_ids])
+            self._ensure_user_workspace_columns(conn)
+            conn.execute('UPDATE users SET workspace_ids_json = ? WHERE id = ?', (json.dumps(unique_ids), user_id))
+
+    def set_workspace_user_access(self, workspace_id: str, usernames: list[str]) -> None:
+        """Replace one workspace's membership using current, case-insensitive usernames."""
+        normalized_workspace_id = str(workspace_id).strip()
+        selected_usernames = {str(username).strip().casefold() for username in usernames if str(username).strip()}
+        with self.global_connection() as conn:
+            conn.executescript(GLOBAL_SCHEMA)
+            self._ensure_user_workspace_columns(conn)
+            for row in conn.execute('SELECT id, username, workspace_ids_json FROM users').fetchall():
+                workspace_ids = self._workspace_ids_from_json(row['workspace_ids_json'])
+                workspace_ids = [item for item in workspace_ids if item != normalized_workspace_id]
+                if str(row['username']).casefold() in selected_usernames:
+                    workspace_ids.append(normalized_workspace_id)
+                conn.execute(
+                    'UPDATE users SET workspace_ids_json = ? WHERE id = ?',
+                    (self._workspace_ids_json(workspace_ids), int(row['id'])),
+                )
 
     def grant_all_workspace_access(self, workspace_id: str) -> None:
         with self.global_connection() as conn:
             conn.executescript(GLOBAL_SCHEMA)
-            conn.execute('INSERT OR IGNORE INTO user_workspace_access (user_id, workspace_id) SELECT id, ? FROM users', (workspace_id,))
+            self._ensure_user_workspace_columns(conn)
+            for row in conn.execute('SELECT id, workspace_ids_json FROM users').fetchall():
+                workspace_ids = self._workspace_ids_from_json(row['workspace_ids_json'])
+                workspace_ids.append(str(workspace_id))
+                conn.execute('UPDATE users SET workspace_ids_json = ? WHERE id = ?', (self._workspace_ids_json(workspace_ids), int(row['id'])))
 
     def has_workspace_access_entries(self) -> bool:
         with self.global_connection() as conn:
             conn.executescript(GLOBAL_SCHEMA)
-            return conn.execute('SELECT 1 FROM user_workspace_access LIMIT 1').fetchone() is not None
+            self._ensure_user_workspace_columns(conn)
+            return any(self._workspace_ids_from_json(row['workspace_ids_json']) for row in conn.execute('SELECT workspace_ids_json FROM users'))
 
     def _ensure_dataset_profile_columns(self, conn: sqlite3.Connection) -> None:
         existing_columns = {row['name'] for row in conn.execute("PRAGMA table_info(dataset_profiles)").fetchall()}
@@ -707,7 +765,6 @@ class Repository:
 
     def delete_user(self, user_id: int) -> None:
         with self.global_connection() as conn:
-            conn.execute("DELETE FROM user_workspace_access WHERE user_id = ?", (user_id,))
             cursor = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
             if cursor.rowcount == 0:
                 raise ValueError("User not found")
@@ -733,7 +790,16 @@ class Repository:
 
     def remove_workspace_access(self, workspace_id: str) -> None:
         with self.global_connection() as conn:
-            conn.execute("DELETE FROM user_workspace_access WHERE workspace_id = ?", (str(workspace_id),))
+            self._ensure_user_workspace_columns(conn)
+            for row in conn.execute('SELECT id, workspace_ids_json FROM users').fetchall():
+                workspace_ids = [
+                    item for item in self._workspace_ids_from_json(row['workspace_ids_json'])
+                    if item != str(workspace_id)
+                ]
+                conn.execute(
+                    'UPDATE users SET workspace_ids_json = ? WHERE id = ?',
+                    (self._workspace_ids_json(workspace_ids), int(row['id'])),
+                )
 
     def list_active_users_by_usernames(self, usernames: list[str]) -> list[str]:
         normalized = [username.strip() for username in usernames if username and username.strip()]
