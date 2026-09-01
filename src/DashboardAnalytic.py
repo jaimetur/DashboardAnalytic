@@ -2484,10 +2484,14 @@ def create_workspace(name: str = Form(...), user_ids: list[int] = Form(default=[
     require_workspace_admin(user)
     try:
         workspace = workspace_registry.create(name)
-        if user.role == 'super-admin':
-            for account in repository.list_users():
-                if int(account['id']) in user_ids:
-                    repository.set_user_workspace_access(int(account['id']), [*repository.list_user_workspace_ids(int(account['id'])), workspace.id])
+        for account in repository.list_users():
+            is_creator = str(account['username']).casefold() == user.username.casefold()
+            is_selected_by_super_admin = user.role == 'super-admin' and int(account['id']) in user_ids
+            if is_creator or is_selected_by_super_admin:
+                repository.set_user_workspace_access(
+                    int(account['id']),
+                    [*repository.list_user_workspace_ids(int(account['id'])), workspace.id],
+                )
         activate_workspace(workspace.id)
     except ValueError as exc:
         return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
