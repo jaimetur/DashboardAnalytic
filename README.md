@@ -48,7 +48,7 @@ All NSA, SA, single-vendor and multivendor reports use the single master/layout-
 
 Workspace preserves a dataset's original upload date when the same stored file is processed again. The separate **Updated** value reflects the latest processing activity, while the original upload date determines Workspace ordering and every automatic “latest dataset” selection for CDR and Multivendor Mapping controls.
 
-When a report combines historical campaigns, reporting normalises known UK operator aliases in memory before catalogue filters and groupings run. For example, `Vodafone`/`Vodafone UK` become `Vodafone`; `O2(UK)`/`o2 - de` become `O2`; `3`/`Three`/`three(uk)` become `3`; and EE variants become `EE`. This report-only step also makes `Operator IN (Vodafone, O2, 3, EE)` match the corresponding historical spellings; it never changes the stored CDR data.
+When a report combines historical campaigns, reporting normalises known UK operator aliases in memory before template filters and groupings run. For example, `Vodafone`/`Vodafone UK` become `Vodafone`; `O2(UK)`/`o2 - de` become `O2`; `3`/`Three`/`three(uk)` become `3`; and EE variants become `EE`. This report-only step also makes `Operator IN (Vodafone, O2, 3, EE)` match the corresponding historical spellings; it never changes the stored CDR data.
 
 ### Multivendor calculation and remapping
 
@@ -305,7 +305,7 @@ Recommended stack layout:
     slides-templates/          # shared editable Slides Templates library
   data/
     workspaces/
-      workspace-registry.db    # local workspace catalogue and active state
+      workspace-registry.db    # local workspace registry and active state
       <Workspace Name>/
         <Workspace Name>.db
         input/

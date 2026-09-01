@@ -287,7 +287,7 @@ def reporting_catalog_entries(technology: str):
 
 
 def catalogue_editor_columns() -> dict[str, list[str]]:
-    """Offer the processed CDR fields that can be used in the catalogue editor."""
+    """Offer the processed CDR fields that can be used in the template editor."""
     common = {'Operator', 'Campaign', 'source_sheet', 'vendor', 'RAT_A', 'RAT'}
     derived = {'Call Family', 'Test Family', 'Rate Bucket', 'Threshold', 'Buckets'}
     columns: dict[str, set[str]] = {
@@ -305,7 +305,7 @@ def catalogue_editor_columns() -> dict[str, list[str]]:
 
 
 def catalogue_editor_filter_values(columns: dict[str, list[str]]) -> dict[str, dict[str, list[str]]]:
-    """Expose a bounded set of real processed values for catalogue filter assistance."""
+    """Expose a bounded set of real processed values for template filter assistance."""
     values: dict[str, dict[str, set[str]]] = {source: {} for source in columns}
     for dataset in repository.list_datasets():
         kind = str(dataset['dataset_kind'] or '').casefold()
@@ -1942,10 +1942,14 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         {**dict(row), 'created_at': format_local_timestamp(row['created_at'])}
         for row in (repository.list_users() if active_workspace else [])
     ]
-    admin_logs = [
-        {**dict(row), 'created_at': format_local_timestamp(row['created_at'])}
-        for row in (repository.list_logs() if active_workspace else [])
-    ]
+    admin_logs = []
+    for row in (repository.list_logs() if active_workspace else []):
+        log = dict(row)
+        log['action'] = str(log.get('action') or '').replace('_report_catalogue', '_report_template')
+        log['details'] = re.sub(r'"catalogue_name"\s*:', '"template_name":', str(log.get('details') or ''))
+        log['details'] = re.sub(r'"catalogue"\s*:', '"template":', log['details'])
+        log['created_at'] = format_local_timestamp(log.get('created_at'))
+        admin_logs.append(log)
     return render_template(
         request,
         'admin.html',
@@ -3718,16 +3722,16 @@ def _import_report_catalogue(
         promote_report_template_to_default(technology, identifier)
         synchronize_reporting_catalogue_document()
     except Exception as exc:
-        repository.add_log(user.username, 'import_report_catalogue_failed', json.dumps({
+        repository.add_log(user.username, 'import_report_template_failed', json.dumps({
             'technology': technology,
             'file': catalogue_file.filename,
             'error': str(exc),
         }))
         query = urlencode({'catalogue_error': str(exc)})
         return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)
-    repository.add_log(user.username, 'import_report_catalogue', json.dumps({
+    repository.add_log(user.username, 'import_report_template', json.dumps({
         'technology': technology,
-        'catalogue_name': catalogue_name,
+        'template_name': catalogue_name,
         'file': catalogue_file.filename,
         'chart_rows': sum(1 for entry in entries if entry.source_kind),
     }))
@@ -3776,9 +3780,9 @@ def activate_report_catalogue(
         return render_admin_template(request, user, error='Slides Template not found.', status_code=404)
     promote_report_template_to_default(technology, catalogue_id)
     synchronize_reporting_catalogue_document()
-    repository.add_log(user.username, 'activate_report_catalogue', json.dumps({
+    repository.add_log(user.username, 'activate_report_template', json.dumps({
         'technology': technology,
-        'catalogue': available[catalogue_id]['name'],
+        'template': available[catalogue_id]['name'],
     }))
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
@@ -3829,10 +3833,10 @@ def change_report_catalogue_type(
         synchronize_reporting_catalogue_document()
     except ValueError as exc:
         return render_admin_template(request, user, error=str(exc), status_code=400)
-    repository.add_log(user.username, 'change_report_catalogue_type', json.dumps({
+    repository.add_log(user.username, 'change_report_template_type', json.dumps({
         'source_type': technology,
         'target_type': target_technology,
-        'catalogue': name,
+        'template': name,
     }))
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
@@ -3883,7 +3887,7 @@ def rename_report_catalogue(
         if 'application/json' in request.headers.get('accept', ''):
             return JSONResponse({'error': str(exc)}, status_code=400)
         return render_admin_template(request, user, error=str(exc), status_code=400)
-    repository.add_log(user.username, 'rename_report_catalogue', json.dumps({'technology': technology, 'catalogue': catalogue_id, 'name': name}))
+    repository.add_log(user.username, 'rename_report_template', json.dumps({'technology': technology, 'template': catalogue_id, 'name': name}))
     if 'application/json' in request.headers.get('accept', ''):
         payload = {'name': name}
         payload['identifier'] = name
@@ -3919,7 +3923,7 @@ def duplicate_report_catalogue(
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(catalogue['path'].read_bytes())
     repository.add_report_template(technology, identifier)
-    repository.add_log(user.username, 'duplicate_report_catalogue', json.dumps({'technology': technology, 'source': catalogue_id, 'catalogue': name}))
+    repository.add_log(user.username, 'duplicate_report_template', json.dumps({'technology': technology, 'source': catalogue_id, 'template': name}))
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -3940,7 +3944,7 @@ def delete_report_catalogue(
         return render_admin_template(request, user, error='The default template cannot be deleted.', status_code=400)
     catalogue['path'].unlink(missing_ok=True)
     repository.delete_report_template(technology, catalogue_id)
-    repository.add_log(user.username, 'delete_report_catalogue', json.dumps({'technology': technology, 'catalogue': catalogue['name']}))
+    repository.add_log(user.username, 'delete_report_template', json.dumps({'technology': technology, 'template': catalogue['name']}))
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -3975,9 +3979,9 @@ def save_report_catalogue(
             synchronize_reporting_catalogue_document()
     except ValueError as exc:
         return render_admin_template(request, user, error=str(exc), status_code=400)
-    repository.add_log(user.username, 'save_report_catalogue', json.dumps({
+    repository.add_log(user.username, 'save_report_template', json.dumps({
         'technology': technology,
-        'catalogue': catalogue['name'],
+        'template': catalogue['name'],
         'chart_rows': sum(1 for entry in entries if entry.source_kind),
     }))
     query = urlencode({'catalogue_technology': technology, 'catalogue_id': catalogue_id})

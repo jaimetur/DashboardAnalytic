@@ -139,7 +139,7 @@ def parse_catalog_filters(value: str) -> tuple[FilterCondition, ...]:
     for clause in (part.strip() for part in value.split(";") if part.strip()):
         match = re.fullmatch(r"(.+?)\s+(NOT\s+CONTAINS|NOT\s+IN|CONTAINS|IN|>=|<=|!=|=|>|<)\s+(.+)", clause, flags=re.I)
         if not match:
-            # Compatibility for the initial supplied catalogues. New catalogues must use the syntax above.
+            # Compatibility for the initial supplied templates. New templates must use the syntax above.
             continue
         column, operator, raw_values = (part.strip() for part in match.groups())
         operator = re.sub(r"\s+", " ", operator).upper()
@@ -373,7 +373,7 @@ def catalogue_markdown(entries: list[CatalogEntry], technology: str) -> str:
 
 
 def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
-    """Serialize the active catalogue using the current editable CSV schema."""
+    """Serialize the active template using the current editable CSV schema."""
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=CATALOG_HEADERS, lineterminator="\n")
     writer.writeheader()
@@ -486,7 +486,7 @@ def normalise_report_operator_aliases(frame: pd.DataFrame) -> pd.DataFrame:
     """Canonicalise report-only operator labels without mutating stored CDRs.
 
     The normalisation applies to the physical ``Operator`` field used by
-    catalogue filters and to legacy operator-only values in ``report_vendor``.
+    template filters and to legacy operator-only values in ``report_vendor``.
     Mapped values such as ``Vodafone_Ericsson`` are intentionally left intact.
     """
     result = frame.copy()
@@ -751,7 +751,7 @@ def ensure_report_vendor_group(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _replace_word(value: str, source: str, replacement: str) -> str:
-    """Replace a catalogue word while retaining the source word's casing."""
+    """Replace a template word while retaining the source word's casing."""
     def replace_match(match: re.Match[str]) -> str:
         word = match.group(0)
         if word.isupper():
@@ -770,7 +770,7 @@ def _replace_operator_label(value: str, replacement: str) -> str:
 def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
     """Apply the report-only multivendor wording and grouping interpretation.
 
-    The stored catalogue remains an operator-oriented template.  For a
+    The stored template remains an operator-oriented definition.  For a
     multivendor run, only grouping dimensions, display legends and titles are
     transformed.  Filters deliberately remain untouched so an ``Operator``
     condition continues to filter the physical CDR Operator column.
@@ -825,7 +825,7 @@ def _catalog_column(
     bucket_edges: list[float] | None = None,
     operator_as_vendor: bool = True,
 ) -> str | None:
-    """Resolve a catalogue field name against a source column or supported semantic dimension."""
+    """Resolve a template field name against a source column or supported semantic dimension."""
     normalized = _normalise_catalog_name(name)
     if normalized == "operator":
         return _group_column(frame, multivendor) if operator_as_vendor else _column(frame, ("Operator", "operator"))
@@ -1097,7 +1097,7 @@ def _colour(label: object, index: int = 0) -> str:
 
 
 def _legend_labels(value: str) -> tuple[str, ...]:
-    """Return explicit display captions declared in the catalogue Legend field."""
+    """Return explicit display captions declared in the template Legend field."""
     return tuple(label.strip() for label in value.split(",") if label.strip())
 
 
@@ -1113,7 +1113,7 @@ def _draw_chart_legend(
     font_size: int = 15,
     line_markers: bool = False,
 ) -> None:
-    """Draw a catalogue legend in a row (top/bottom) or column (left/right)."""
+    """Draw a template legend in a row (top/bottom) or column (left/right)."""
     horizontal = position in {"top", "bottom"}
     if horizontal:
         start_x, start_y = 100, (80 if position == "top" else 838)
@@ -1247,7 +1247,7 @@ def _render_status_100_hierarchy(
     legend_labels: tuple[str, ...] = (),
     legend_position: str = "top",
 ) -> BytesIO:
-    """Render catalogue row groups as panes and column groups as nested headers."""
+    """Render template row groups as panes and column groups as nested headers."""
     row_keys = _hierarchical_unique_keys(data, row_hierarchy) if row_hierarchy else [()]
     column_keys = _hierarchical_unique_keys(data, column_hierarchy)
     if not row_keys or not column_keys:
@@ -1259,7 +1259,7 @@ def _render_status_100_hierarchy(
     column_width = chart_width / len(column_keys)
     bar_width = max(18, min(86, column_width * 0.68))
 
-    # The first column level is the upper header (Operator in the catalogue
+    # The first column level is the upper header (Operator in the template
     # contract); lower levels, such as Campaign, are shown below every column.
     outer_values = [str(key[0]) for key in column_keys]
     start = 0
@@ -1369,7 +1369,7 @@ def _render_failure_count_hierarchy(
     legend_labels: tuple[str, ...] = (),
     legend_position: str = "top",
 ) -> BytesIO:
-    """Render failure counts with catalogue rows and columns as separate axes."""
+    """Render failure counts with template rows and columns as separate axes."""
     row_keys = _hierarchical_unique_keys(failed, row_hierarchy) if row_hierarchy else [()]
     column_keys = _hierarchical_unique_keys(failed, column_hierarchy)
     if not row_keys or not column_keys:
@@ -1450,7 +1450,7 @@ def _render_failure_count_hierarchy(
 
 
 def _chart_axis_hierarchy(frame: pd.DataFrame, *, distribution: bool = False) -> list[str]:
-    """Return visible catalogue hierarchy levels in their declared order."""
+    """Return visible template hierarchy levels in their declared order."""
     rows = sorted(
         (column for column in frame.columns if column.startswith("__catalog_row_")),
         key=lambda column: int(column.rsplit("_", 1)[1]),
@@ -1627,7 +1627,7 @@ def _render_mean_column(title: str, frame: pd.DataFrame, group: str | None, seri
 
 
 def _render_table(title: str, frame: pd.DataFrame, group: str | None, series: str | None, metric: str | None) -> BytesIO:
-    """Render a compact mean-value table grouped exactly as declared in the catalogue."""
+    """Render a compact mean-value table grouped exactly as declared in the template."""
     if frame.empty or not group or not metric:
         return _empty_chart(title)
     data = frame[[group, series, metric]].copy() if series else frame[[group, metric]].copy()
@@ -1789,7 +1789,7 @@ def _set_slide_header(slide, title: str, subtitle: str) -> None:
         )
     if title_shape is not None and (title or subtitle):
         # The template title placeholder is the single header surface. Keep the
-        # catalogue subtitle inside it as a second paragraph rather than adding
+        # template subtitle inside it as a second paragraph rather than adding
         # a separate text box below the placeholder.
         text_frame = title_shape.text_frame
         text_frame.clear()
@@ -1889,7 +1889,7 @@ def _combined_frame(frames: list[tuple[int, int, int, int]]) -> tuple[int, int, 
 
 
 def _named_slide_layout(presentation: Presentation, layout_name: str):
-    """Resolve a catalogue layout name against the template slide master."""
+    """Resolve a template layout name against the template slide master."""
     expected = layout_name.strip().casefold()
     for layout in presentation.slide_layouts:
         if layout.name.strip().casefold() == expected:
@@ -1983,7 +1983,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
         header = slide_entries[0]
         structural = header.structural_type
         if not structural and header.chart_type.strip().casefold() in PRESERVED_CHART_TYPES:
-            structural = "title slide" if number == min(catalogue_slides) else "transition slide"
+                structural = "title slide" if number == min(catalogue_slides) else "transition slide"
 
         if structural:
             layout_name = header.layout or ("Title Page" if structural == "title slide" else "Title Only")
@@ -2001,7 +2001,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
             )
         layouts = {entry.layout for entry in chart_entries}
         if len(layouts) != 1:
-            raise ValueError(f"Slide {number} uses more than one Layout in the active catalogue.")
+            raise ValueError(f"Slide {number} uses more than one Layout in the active template.")
         layout_name = layouts.pop()
         layout = _named_slide_layout(presentation, layout_name)
         if layout is None:
@@ -2010,7 +2010,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
         if len(placement_frames) < len(chart_entries):
             raise ValueError(
                 f"Slide {number}: layout '{layout_name}' has {len(placement_frames)} chart placeholders, "
-                f"but the catalogue defines {len(chart_entries)} charts."
+                f"but the template defines {len(chart_entries)} charts."
             )
         slide = presentation.slides.add_slide(layout)
         _set_slide_header(slide, header.slide_title, header.slide_subtitle)

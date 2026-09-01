@@ -21,7 +21,7 @@ class Workspace:
 
 
 class WorkspaceRegistry:
-    """Persistent workspace catalogue kept separate from workspace data."""
+    """Persistent workspace registry kept separate from workspace data."""
 
     def __init__(
         self,
