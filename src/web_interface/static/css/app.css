@@ -67,7 +67,18 @@ label { display: grid; gap: 0.45rem; color: var(--muted); }
 .topnav .topnav-link, .pill, .ghost-link { padding: 0.65rem 0.95rem; border-radius: 999px; background: rgba(255, 255, 255, 0.72); border: 1px solid var(--line); }
 .topnav-link { display: inline-flex; align-items: center; justify-content: center; font-weight: 600; box-shadow: 0 8px 20px rgba(18, 32, 43, 0.08); }
 .topnav button.topnav-user-badge { font: inherit; cursor: pointer; }
-.topnav .topnav-workspace-badge { position: absolute; top: 1.5rem; left: 50%; transform: translateX(-50%); background: linear-gradient(145deg, rgba(16, 49, 74, 0.92), rgba(11, 122, 117, 0.86)); border-color: rgba(11, 122, 117, 0.58); color: #fff; font-weight: 700; box-shadow: 0 12px 28px rgba(7, 93, 89, 0.26); white-space: nowrap; }
+.topnav-workspace-switcher { position: absolute; top: 1.5rem; left: 50%; z-index: 30; transform: translateX(-50%); }
+.topnav .topnav-workspace-badge { display: flex; justify-content: space-between; gap: 0.65rem; min-width: 15rem; background: linear-gradient(145deg, rgba(16, 49, 74, 0.92), rgba(11, 122, 117, 0.86)); border-color: rgba(11, 122, 117, 0.58); color: #fff; font-weight: 700; box-shadow: 0 12px 28px rgba(7, 93, 89, 0.26); cursor: pointer; list-style: none; white-space: nowrap; }
+.topnav .topnav-workspace-badge::-webkit-details-marker { display: none; }
+.topnav-workspace-chevron { flex: 0 0 auto; width: 0.5rem; height: 0.5rem; margin-top: 0.08rem; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); transition: transform 0.18s ease; }
+.topnav-workspace-switcher[open] .topnav-workspace-chevron { transform: rotate(-135deg) translate(-0.1rem, -0.1rem); }
+.topnav-workspace-menu { position: absolute; top: calc(100% + 0.4rem); left: 0; right: 0; display: grid; gap: 0.4rem; min-width: 100%; padding: 0.65rem; border: 1px solid rgba(11, 122, 117, 0.34); border-radius: 14px; background: rgba(248, 255, 253, 0.98); box-shadow: 0 20px 42px rgba(7, 54, 57, 0.24); }
+.topnav-workspace-menu p { margin: 0.08rem 0 0.22rem; color: #175a57; font-size: 0.74rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.topnav-workspace-menu form { display: grid; gap: 0.35rem; }
+.topnav-workspace-menu button { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0.58rem 0.65rem; border: 0; border-radius: 9px; background: #e4f4f0; color: #0f4d4a; font-size: 0.82rem; font-weight: 700; text-align: left; box-shadow: none; }
+.topnav-workspace-menu button:hover:not(:disabled) { background: #ccebe3; color: #073f3c; }
+.topnav-workspace-menu button:disabled { opacity: 1; background: #0b7a75; color: #fff; cursor: default; }
+.topnav-workspace-menu button span { font-size: 0.7rem; font-weight: 600; opacity: 0.88; }
 .topnav .topnav-user-badge-admin { background: linear-gradient(135deg, #c84a4a, #e06a5a); border-color: rgba(200, 74, 74, 0.28); color: rgba(255, 255, 255, 0.96); box-shadow: 0 12px 28px rgba(200, 74, 74, 0.24); }
 .topnav .topnav-user-badge-user { background: linear-gradient(135deg, #0b7a75, #1aa29b); border-color: rgba(11, 122, 117, 0.28); color: rgba(255, 255, 255, 0.96); box-shadow: 0 12px 28px rgba(11, 122, 117, 0.22); }
 a.topnav-link-doc { background: linear-gradient(135deg, #f3f5f7, #e8edf2); border-color: rgba(126, 139, 152, 0.24); color: #44515d; }
@@ -923,7 +934,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
   .topbar { flex-direction: column; align-items: flex-start; }
   .brand-mark { width: 48px; height: 48px; }
   .topnav { justify-content: flex-start; margin-top: 0; }
-  .topnav .topnav-workspace-badge { position: static; transform: none; }
+  .topnav-workspace-switcher { position: relative; top: auto; left: auto; transform: none; }
   .module-tabs { margin-bottom: -0.2rem; }
   .module-tabs-primary { margin-left: 0.35rem; }
   .module-tabs-secondary { margin-left: auto; margin-right: 0.35rem; padding-left: 0.45rem; }

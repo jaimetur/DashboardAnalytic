@@ -1399,6 +1399,7 @@ def super_admin_user(user: SessionUser = Depends(current_user)) -> SessionUser:
 
 
 def render_template(request: Request, template_name: str, context: dict[str, Any], status_code: int = 200) -> HTMLResponse:
+    template_user = context.get('user')
     payload = {
         'request': request,
         'app_name': __app_name__,
@@ -1407,6 +1408,7 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'asset_version': asset_version,
         'static_path': lambda asset_path: str(request.app.url_path_for('static', path=asset_path)),
         'active_workspace': active_workspace,
+        'header_workspaces': accessible_workspaces(template_user) if isinstance(template_user, SessionUser) else [],
         **context,
     }
     response = templates.TemplateResponse(request, template_name, payload, status_code=status_code)
