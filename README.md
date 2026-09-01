@@ -139,12 +139,14 @@ For reporting, processed CDR rows are also synchronised into one shared table pe
 Supported roles:
 
 - `admin`
+- `super-admin` (can assign and change user/workspace access)
 - `user`
 
 Default local accounts:
 
-- `admin / admin123`
-- `demo / demo123`
+- `super / super123` (`super-admin`)
+- `admin / admin123` (`admin`)
+- `demo / demo123` (`user`)
 
 The `admin` panel provides:
 
@@ -153,6 +155,8 @@ The `admin` panel provides:
 - dataset listing
 - audit log inspection
 - named NSA/SA template management, import conversion, default selection, duplication, deletion and export
+
+`admin` users can manage `admin` and `user` accounts, but only `super-admin` users can create, promote or modify `super-admin` accounts and assign workspace access. Removing a user or workspace also removes every corresponding access relationship.
 - an in-browser template editor with contextual assistance for layouts, chart types, fields, legends, grouping and filter conditions
 - Database Management for the active workspace, with paginated table browsing, server-side multi-value filtering, row editing and row deletion
 
@@ -203,8 +207,6 @@ Important runtime variables:
 
 - `APP_PORT`
 - `APP_SECRET_KEY`
-- `APP_ADMIN_USERNAME`
-- `APP_ADMIN_PASSWORD`
 - `APP_CONFIG_DIR`
 - `APP_DATA_DIR`
 - `APP_ASSETS_DIR`
@@ -281,8 +283,6 @@ Example `.env` values:
 APP_NAME=Dashboard Analytic
 APP_PORT=7278
 APP_SECRET_KEY=change-me-dashboard-analytic
-APP_ADMIN_USERNAME=admin
-APP_ADMIN_PASSWORD=admin123
 APP_CONFIG_DIR=/app/config
 APP_DATA_DIR=/app/data
 APP_ASSETS_DIR=/app/assets

@@ -1428,6 +1428,44 @@ function setupSearchableSingleSelects() {
   });
 }
 
+function setupWorkspaceUserPickers() {
+  document.querySelectorAll('[data-workspace-user-picker]').forEach((picker) => {
+    if (picker.dataset.workspaceUserPickerReady === '1') return;
+    picker.dataset.workspaceUserPickerReady = '1';
+    const search = picker.querySelector('.workspace-user-picker-search');
+    const toggle = picker.querySelector('.workspace-user-picker-toggle');
+    const options = Array.from(picker.querySelectorAll('.workspace-user-picker-menu label'));
+    const checkboxes = options.map((option) => option.querySelector('input[type="checkbox"]')).filter((checkbox) => checkbox && !checkbox.disabled);
+
+    const filter = () => {
+      const query = (search?.value || '').trim().toLocaleLowerCase();
+      options.forEach((option) => {
+        option.hidden = Boolean(query) && !option.textContent.toLocaleLowerCase().includes(query);
+      });
+    };
+    search?.addEventListener('input', filter);
+    search?.addEventListener('keyup', filter);
+    search?.addEventListener('search', filter);
+    toggle?.addEventListener('click', () => {
+      const shouldSelectAll = checkboxes.some((checkbox) => !checkbox.checked);
+      checkboxes.forEach((checkbox) => { checkbox.checked = shouldSelectAll; });
+      filter();
+    });
+    picker.addEventListener('toggle', () => {
+      if (picker.open && search) {
+        search.value = '';
+        filter();
+        window.setTimeout(() => search.focus(), 0);
+      }
+    });
+    document.addEventListener('click', (event) => {
+      if (picker.open && !picker.contains(event.target)) {
+        picker.open = false;
+      }
+    });
+  });
+}
+
 function setupCustomMultiSelects() {
   document.querySelectorAll('select[multiple]').forEach((select) => {
     if (select.dataset.multiselectReady === '1') return;
@@ -1701,6 +1739,7 @@ if (window.location.pathname === '/workspace') {
 
 setupPersistentControls();
 setupPersistentPanelState();
+setupWorkspaceUserPickers();
 setupCustomMultiSelects();
 setupSearchableSingleSelects();
 

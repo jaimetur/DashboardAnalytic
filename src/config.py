@@ -61,8 +61,6 @@ class Settings:
     app_port: int = int(os.getenv("APP_PORT", "7278"))
     dev_port: int = int(os.getenv("APP_DEV_PORT", "7279"))
     secret_key: str = os.getenv("APP_SECRET_KEY", "change-me-dashoboard-analytic")
-    admin_username: str = os.getenv("APP_ADMIN_USERNAME", "admin")
-    admin_password: str = os.getenv("APP_ADMIN_PASSWORD", "admin123")
     template_dir: Path = project_path("APP_TEMPLATE_DIR", "src/web_interface/templates")
     static_dir: Path = project_path("APP_STATIC_DIR", "src/web_interface/static")
     allowed_extensions: tuple[str, ...] = (".csv", ".xlsx", ".xls", ".xlsm")

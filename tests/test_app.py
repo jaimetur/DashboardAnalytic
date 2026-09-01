@@ -19,6 +19,11 @@ def login(client) -> None:
     assert response.status_code == 303
 
 
+def login_super(client) -> None:
+    response = client.post("/login", data={"username": "super", "password": "super123"}, follow_redirects=False)
+    assert response.status_code == 303
+
+
 def test_login_page_loads(client) -> None:
     response = client.get("/login")
     assert response.status_code == 200
@@ -26,16 +31,41 @@ def test_login_page_loads(client) -> None:
     assert "Dashboard Analytic" in response.text
     assert __release_date__ in response.text
     assert "Default Access:" in response.text
-    assert "admin / admin123" in response.text
-    assert "demo / demo123" in response.text
+    assert "<strong class=\"login-default-role login-default-role-super-admin\">Role: super-admin</strong>" in response.text
+    assert "<strong class=\"login-default-role login-default-role-admin\">Role: admin</strong>" in response.text
+    assert "<strong class=\"login-default-role login-default-role-user\">Role: user</strong>" in response.text
     assert 'class="login-workspace-field">Workspace' in response.text
     assert 'Default Workspace' in response.text
+
+
+def test_new_environment_creates_the_three_bootstrap_roles(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    roles = {row['username']: row['role'] for row in app_module.repository.list_users()}
+    assert roles['super'] == 'super-admin'
+    assert roles['admin'] == 'admin'
+    assert roles['demo'] == 'user'
+
+
+def test_bootstrap_users_are_not_recreated_after_the_first_start(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    with app_module.repository.global_connection() as conn:
+        conn.execute("DELETE FROM users WHERE username = ?", ('super',))
+        conn.execute("UPDATE users SET username = ? WHERE username = ?", ('renamed-admin', 'admin'))
+
+    app_module.repository.initialize()
+
+    assert app_module.repository.get_user('super') is None
+    assert app_module.repository.get_user('admin') is None
+    assert app_module.repository.get_user('renamed-admin') is not None
+    assert app_module.repository.get_user('demo') is not None
 
 
 def test_login_page_hides_missing_default_access_accounts(client) -> None:
     import src.DashboardAnalytic as app_module
 
-    with app_module.repository.connection() as conn:
+    with app_module.repository.global_connection() as conn:
         conn.execute("DELETE FROM users WHERE username = ?", ("demo",))
 
     response = client.get("/login")
@@ -48,7 +78,7 @@ def test_login_page_hides_missing_default_access_accounts(client) -> None:
 def test_login_page_hides_default_access_when_password_differs_from_default(client) -> None:
     import src.DashboardAnalytic as app_module
 
-    with app_module.repository.connection() as conn:
+    with app_module.repository.global_connection() as conn:
         conn.execute(
             "UPDATE users SET password_hash = ? WHERE username = ?",
             (hash_password("changed-password"), "demo"),
@@ -64,8 +94,8 @@ def test_login_page_hides_default_access_when_password_differs_from_default(clie
 def test_login_page_hides_default_access_section_when_no_default_users_exist(client) -> None:
     import src.DashboardAnalytic as app_module
 
-    with app_module.repository.connection() as conn:
-        conn.execute("DELETE FROM users WHERE username IN (?, ?)", ("admin", "demo"))
+    with app_module.repository.global_connection() as conn:
+        conn.execute("DELETE FROM users WHERE username IN (?, ?, ?)", ("super", "admin", "demo"))
 
     response = client.get("/login")
     assert response.status_code == 200
@@ -447,6 +477,7 @@ def test_admin_panel_is_available_for_admin(client) -> None:
     response = client.get("/admin")
     assert response.status_code == 200
     assert "Admin panel" in response.text
+    assert 'value="super-admin" aria-label="Role for super" readonly' in response.text
 
 
 def test_login_and_admin_remain_available_after_closing_the_active_workspace(client) -> None:
@@ -1357,29 +1388,29 @@ def test_admin_cannot_delete_current_signed_in_user(client) -> None:
     assert "You cannot delete the current signed-in admin user" in response.text
 
 
-def test_admin_cannot_demote_or_deactivate_last_active_admin(client) -> None:
-    login(client)
+def test_super_admin_cannot_demote_or_deactivate_last_active_super_admin(client) -> None:
+    login_super(client)
 
     import src.DashboardAnalytic as app_module
 
-    admin_row = next(row for row in app_module.repository.list_users() if row["username"] == "admin")
+    admin_row = next(row for row in app_module.repository.list_users() if row["username"] == "super")
     response = client.post(
         f"/admin/users/{admin_row['id']}/update",
-        data={"username": "admin", "password": "", "role": "user"},
+        data={"username": "super", "password": "", "role": "user"},
     )
     assert response.status_code == 400
-    assert "At least one active admin user must remain" in response.text
+    assert "At least one active super-admin must remain" in response.text
 
     response = client.post(
         f"/admin/users/{admin_row['id']}/update",
-        data={"username": "admin", "password": "", "role": "admin"},
+        data={"username": "super", "password": "", "role": "admin"},
     )
     assert response.status_code == 400
-    assert "At least one active admin user must remain" in response.text
+    assert "At least one active super-admin must remain" in response.text
 
 
-def test_admin_cannot_delete_last_active_admin_even_if_not_current_user(client) -> None:
-    login(client)
+def test_admin_cannot_delete_super_admin_even_if_not_current_user(client) -> None:
+    login_super(client)
 
     import src.DashboardAnalytic as app_module
 
@@ -1392,7 +1423,7 @@ def test_admin_cannot_delete_last_active_admin_even_if_not_current_user(client) 
 
     users = app_module.repository.list_users()
     backup_admin = next(row for row in users if row["username"] == "backup-admin")
-    admin_row = next(row for row in users if row["username"] == "admin")
+    admin_row = next(row for row in users if row["username"] == "super")
 
     switch_session = client.post(
         "/login",
@@ -1409,8 +1440,48 @@ def test_admin_cannot_delete_last_active_admin_even_if_not_current_user(client) 
     assert disable_backup.status_code == 303
 
     response = client.post(f"/admin/users/{admin_row['id']}/delete")
-    assert response.status_code == 400
-    assert "At least one active admin user must remain" in response.text
+    assert response.status_code == 403
+    assert "Only super-admins can assign or modify super-admin accounts" in response.text
+
+
+def test_admin_cannot_assign_or_modify_super_admin_roles(client) -> None:
+    login(client)
+
+    create_super = client.post(
+        "/admin/users",
+        data={"username": "forbidden-super", "password": "password123", "role": "super-admin"},
+    )
+    assert create_super.status_code == 400
+    assert "Only super-admins can create super-admin users" in create_super.text
+
+    created = client.post(
+        "/admin/users",
+        data={"username": "managed-user", "password": "password123", "role": "user"},
+        follow_redirects=False,
+    )
+    assert created.status_code == 303
+
+    import src.DashboardAnalytic as app_module
+
+    managed_user = next(row for row in app_module.repository.list_users() if row["username"] == "managed-user")
+    promoted = client.post(
+        f"/admin/users/{managed_user['id']}/update",
+        data={"username": "managed-user", "password": "", "role": "super-admin", "active": "1"},
+    )
+    assert promoted.status_code == 403
+    assert "Only super-admins can assign or modify super-admin accounts" in promoted.text
+
+    super_row = next(row for row in app_module.repository.list_users() if row["username"] == "super")
+    modified_super = client.post(
+        f"/admin/users/{super_row['id']}/update",
+        data={"username": "super", "password": "", "role": "admin", "active": "1"},
+    )
+    assert modified_super.status_code == 403
+    assert "Only super-admins can assign or modify super-admin accounts" in modified_super.text
+
+    deleted_super = client.post(f"/admin/users/{super_row['id']}/delete")
+    assert deleted_super.status_code == 403
+    assert "Only super-admins can assign or modify super-admin accounts" in deleted_super.text
 
 
 def test_top_navigation_shows_document_links(client) -> None:

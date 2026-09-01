@@ -4,7 +4,7 @@ The Administration area is for authorised users who manage access and operationa
 
 ## User management
 
-Administrators can create accounts, change a username or role, replace a password, enable or disable an account, and delete accounts where permitted. Safeguards prevent the last active administrator from being removed, deactivated or demoted. Use individual accounts rather than sharing the initial administrator credentials, and remove access when it is no longer needed.
+Administrators can create accounts, change a username, replace a password, enable or disable an account, and delete accounts where permitted. The `super-admin` role additionally controls user/workspace access and role assignment; regular administrators cannot change those permissions. Safeguards prevent the last active administrator from being removed, deactivated or demoted.
 
 The **Users** table is the authoritative operational view: submit the row action after editing its username, password, role or active state. Leave a password field empty when its current password should be retained. The red action buttons across this area identify access-management changes.
 

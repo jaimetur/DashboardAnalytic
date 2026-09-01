@@ -12,8 +12,8 @@ For Docker deployments, configure the container timezone with the `TZ` variable 
 | `APP_PORT` | Port exposed by the production service. |
 | `APP_DEV_PORT` | Port used by the development service. |
 | `APP_SECRET_KEY` | Secret used to protect signed session data. Use a unique, private value outside local development. |
-| `APP_ADMIN_USERNAME` | Initial administrator account name. |
-| `APP_ADMIN_PASSWORD` | Initial administrator password. Change the default before sharing the deployment. |
+
+On the first startup of a newly created application database, the application creates these local accounts: `super / super123` (`super-admin`), `admin / admin123` (`admin`) and `demo / demo123` (`user`). They are not recreated, renamed or reset on later starts. Change their passwords immediately after deployment from the User badge or the Admin panel.
 
 ## Persistent storage
 
@@ -29,9 +29,9 @@ Edit `storage-paths.conf` to set `APP_CONFIG_DIR`, `APP_DATA_DIR` and `APP_ASSET
 ## Recommended deployment setup
 
 1. Copy the Docker environment example to `docker/.env` if it is not already present.
-2. Set a strong `APP_SECRET_KEY` and administrator password.
+2. Set a strong `APP_SECRET_KEY`.
 3. Select persistent host paths or named volumes for `config/` and `data/`.
-4. Start the stack and log in with the configured administrator account.
+4. Start the stack, log in with `super / super123` and change the default passwords.
 5. Verify that an uploaded CDR remains visible after restarting the service.
 
 Do not commit real passwords, secret keys or customer data to source control.

@@ -34,13 +34,14 @@ def client(tmp_path: Path) -> TestClient:
         encoding="utf-8",
     )
 
-    object.__setattr__(settings, "database_path", config_dir / "app.db")
+    object.__setattr__(settings, "database_path", config_dir / "application.db")
     object.__setattr__(settings, "input_dir", input_dir)
     object.__setattr__(settings, "output_dir", output_dir)
     object.__setattr__(settings, "export_dir", export_dir)
     object.__setattr__(settings, "slides_templates_dir", slides_templates_dir)
     object.__setattr__(settings, "ppt_templates_dir", ppt_templates_dir)
     app_module.repository.db_path = settings.database_path
+    app_module.repository.set_global_database(settings.database_path)
     app_module.SESSIONS.clear()
 
     with TestClient(app_module.app) as test_client:

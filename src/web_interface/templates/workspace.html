@@ -28,7 +28,7 @@
         <button type="submit" class="workspace-action-open" data-workspace-open {% if active_workspace %}disabled{% endif %}>Open</button>
         <button type="submit" formaction="/workspace/close" class="workspace-action-close" data-workspace-close disabled>Close</button>
       </form>
-      {% if user.role == 'admin' %}
+      {% if user.role in ['admin', 'super-admin'] %}
       <details class="workspace-management">
         <summary>Manage workspaces</summary>
         <div class="workspace-management-forms">
@@ -36,6 +36,14 @@
             <label>New workspace
               <input name="name" required maxlength="100" placeholder="e.g. 2026 Q3 benchmark">
             </label>
+            {% if user.role == 'super-admin' %}<details class="workspace-user-picker" data-workspace-user-picker>
+              <summary><span>Users with access</span><span class="workspace-user-picker-chevron" aria-hidden="true"></span></summary>
+              <div class="workspace-user-picker-menu">
+                <input class="workspace-user-picker-search" type="search" placeholder="Filter users…" aria-label="Filter available users">
+                <button class="workspace-user-picker-toggle" type="button">Select All / None</button>
+                {% for account in workspace_users %}<label><input type="checkbox" name="user_ids" value="{{ account.id }}"><span>{{ account.username }}</span></label>{% endfor %}
+              </div>
+            </details>{% endif %}
             <button type="submit">Create and open</button>
           </form>
         </div>
@@ -52,6 +60,18 @@
               <input type="hidden" name="workspace_id" value="{{ item.id }}">
               <button type="submit" class="workspace-action-duplicate">Duplicate</button>
             </form>
+            {% if user.role == 'super-admin' %}<form method="post" action="/workspace/access" class="workspace-access-editor">
+              <input type="hidden" name="workspace_id" value="{{ item.id }}">
+              <details class="workspace-user-picker" data-workspace-user-picker>
+                <summary><span>Users with access</span><span class="workspace-user-picker-chevron" aria-hidden="true"></span></summary>
+                <div class="workspace-user-picker-menu">
+                  <input class="workspace-user-picker-search" type="search" placeholder="Filter users…" aria-label="Filter available users">
+                  <button class="workspace-user-picker-toggle" type="button">Select All / None</button>
+                  {% for account in workspace_users %}<label><input type="checkbox" name="user_ids" value="{{ account.id }}" {% if item.id in account.workspace_ids %}checked{% endif %}><span>{{ account.username }}</span></label>{% endfor %}
+                </div>
+              </details>
+              <button type="submit" class="workspace-action-access">Save</button>
+            </form>{% endif %}
             <form method="post" action="/workspace/delete" data-confirm="Remove workspace '{{ item.name }}' and all its datasets? This cannot be undone." data-confirm-title="Remove workspace" data-confirm-label="Remove workspace">
               <input type="hidden" name="workspace_id" value="{{ item.id }}">
               <button type="submit" class="workspace-action-remove" {% if active_workspace and item.id == active_workspace.id %}disabled{% endif %}>Remove</button>

@@ -106,6 +106,18 @@ CREATE TABLE IF NOT EXISTS report_templates (
     PRIMARY KEY (technology, name),
     CHECK (technology IN ('nsa', 'sa'))
 );
+
+CREATE TABLE IF NOT EXISTS user_workspace_access (
+    user_id INTEGER NOT NULL,
+    workspace_id TEXT NOT NULL,
+    PRIMARY KEY (user_id, workspace_id),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS application_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -156,6 +168,35 @@ class Repository:
         self.global_db_path = path
         self.global_db_path.parent.mkdir(parents=True, exist_ok=True)
 
+    def recover_global_metadata(self, source_path: Path) -> int:
+        """Recover users/templates from a pre-application global database.
+
+        The old deployment stored these tables in files such as app.db or
+        workspaces.db.  Keep the source untouched and copy rows idempotently
+        so an upgrade cannot silently lose existing accounts.
+        """
+        source_path = Path(source_path)
+        if not source_path.exists() or source_path.resolve() == self.global_db_path.resolve():
+            return 0
+        copied = 0
+        try:
+            with sqlite3.connect(source_path) as source, self.global_connection() as target:
+                source.row_factory = sqlite3.Row
+                tables = {row['name'] for row in source.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                target.executescript(GLOBAL_SCHEMA)
+                if 'users' in tables:
+                    rows = source.execute("SELECT username, password_hash, role, active, created_at FROM users").fetchall()
+                    for row in rows:
+                        target.execute("INSERT OR IGNORE INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, ?, ?, ?)", tuple(row))
+                    copied += len(rows)
+                if 'report_templates' in tables:
+                    rows = source.execute("SELECT technology, name, is_default FROM report_templates").fetchall()
+                    for row in rows:
+                        target.execute("INSERT OR IGNORE INTO report_templates (technology, name, is_default) VALUES (?, ?, ?)", tuple(row))
+        except sqlite3.DatabaseError:
+            return 0
+        return copied
+
     def migrate_workspace_metadata(self, database_path: Path) -> None:
         """Move pre-global users/template metadata out of one workspace DB."""
         if not database_path.exists() or database_path == self.global_db_path:
@@ -174,7 +215,7 @@ class Repository:
                 source.execute('DROP TABLE report_templates')
             source.commit()
 
-    def initialize(self, admin_username: str, admin_password: str) -> None:
+    def initialize(self) -> None:
         with self.connection() as conn:
             conn.executescript(SCHEMA)
             self._ensure_dataset_profile_columns(conn)
@@ -192,20 +233,55 @@ class Repository:
         with self.global_connection() as conn:
             conn.executescript(GLOBAL_SCHEMA)
             self._ensure_report_template_columns(conn)
-            # One-time migration for databases created before users/templates
-            # were moved out of individual workspaces. New workspace databases
-            # never create these tables.
-            existing = conn.execute("SELECT username FROM users WHERE username = ?", (admin_username,)).fetchone()
-            if not existing:
+            # Seed the three local accounts exactly once, for a brand-new
+            # empty application database.  Later starts must never recreate
+            # deleted or renamed accounts, nor reset roles or passwords.
+            bootstrap_done = conn.execute(
+                "SELECT 1 FROM application_state WHERE key = 'bootstrap_users_created'"
+            ).fetchone()
+            has_users = conn.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+            if not bootstrap_done and not has_users:
+                for username, password, role in (
+                    ('super', 'super123', 'super-admin'),
+                    ('admin', 'admin123', 'admin'),
+                    ('demo', 'demo123', 'user'),
+                ):
+                    conn.execute(
+                        "INSERT INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, ?, 1, ?)",
+                        (username, hash_password(password), role, local_now_iso()),
+                    )
+            if not bootstrap_done:
                 conn.execute(
-                    "INSERT INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, 'admin', 1, ?)",
-                    (admin_username, hash_password(admin_password), local_now_iso()),
+                    "INSERT INTO application_state (key, value) VALUES ('bootstrap_users_created', '1')"
                 )
-            if not conn.execute("SELECT 1 FROM users WHERE username = 'demo'").fetchone():
-                conn.execute(
-                    "INSERT INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, 'user', 1, ?)",
-                    ('demo', hash_password('demo123'), local_now_iso()),
-                )
+
+    def list_user_workspace_ids(self, user_id: int) -> list[str]:
+        with self.global_connection() as conn:
+            conn.executescript(GLOBAL_SCHEMA)
+            return [str(row['workspace_id']) for row in conn.execute('SELECT workspace_id FROM user_workspace_access WHERE user_id = ? ORDER BY workspace_id', (user_id,)).fetchall()]
+
+    def user_has_workspace_access(self, username: str, workspace_id: str) -> bool:
+        with self.global_connection() as conn:
+            conn.executescript(GLOBAL_SCHEMA)
+            row = conn.execute('SELECT 1 FROM user_workspace_access a JOIN users u ON u.id = a.user_id WHERE u.username = ? AND a.workspace_id = ?', (username, workspace_id)).fetchone()
+        return bool(row)
+
+    def set_user_workspace_access(self, user_id: int, workspace_ids: list[str]) -> None:
+        unique_ids = sorted({str(item).strip() for item in workspace_ids if str(item).strip()})
+        with self.global_connection() as conn:
+            conn.executescript(GLOBAL_SCHEMA)
+            conn.execute('DELETE FROM user_workspace_access WHERE user_id = ?', (user_id,))
+            conn.executemany('INSERT INTO user_workspace_access (user_id, workspace_id) VALUES (?, ?)', [(user_id, item) for item in unique_ids])
+
+    def grant_all_workspace_access(self, workspace_id: str) -> None:
+        with self.global_connection() as conn:
+            conn.executescript(GLOBAL_SCHEMA)
+            conn.execute('INSERT OR IGNORE INTO user_workspace_access (user_id, workspace_id) SELECT id, ? FROM users', (workspace_id,))
+
+    def has_workspace_access_entries(self) -> bool:
+        with self.global_connection() as conn:
+            conn.executescript(GLOBAL_SCHEMA)
+            return conn.execute('SELECT 1 FROM user_workspace_access LIMIT 1').fetchone() is not None
 
     def _ensure_dataset_profile_columns(self, conn: sqlite3.Connection) -> None:
         existing_columns = {row['name'] for row in conn.execute("PRAGMA table_info(dataset_profiles)").fetchall()}
@@ -645,6 +721,7 @@ class Repository:
 
     def delete_user(self, user_id: int) -> None:
         with self.global_connection() as conn:
+            conn.execute("DELETE FROM user_workspace_access WHERE user_id = ?", (user_id,))
             cursor = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
             if cursor.rowcount == 0:
                 raise ValueError("User not found")
@@ -656,9 +733,21 @@ class Repository:
     def count_active_admin_users(self) -> int:
         with self.global_connection() as conn:
             row = conn.execute(
-                "SELECT COUNT(*) AS total FROM users WHERE role = 'admin' AND active = 1",
+                "SELECT COUNT(*) AS total FROM users WHERE role IN ('admin', 'super-admin') AND active = 1",
             ).fetchone()
         return int(row['total']) if row else 0
+
+    def count_super_admin_users(self, *, active_only: bool = False) -> int:
+        query = "SELECT COUNT(*) AS total FROM users WHERE role = 'super-admin'"
+        if active_only:
+            query += ' AND active = 1'
+        with self.global_connection() as conn:
+            row = conn.execute(query).fetchone()
+        return int(row['total']) if row else 0
+
+    def remove_workspace_access(self, workspace_id: str) -> None:
+        with self.global_connection() as conn:
+            conn.execute("DELETE FROM user_workspace_access WHERE workspace_id = ?", (str(workspace_id),))
 
     def list_active_users_by_usernames(self, usernames: list[str]) -> list[str]:
         normalized = [username.strip() for username in usernames if username and username.strip()]

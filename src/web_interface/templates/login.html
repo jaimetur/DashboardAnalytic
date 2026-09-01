@@ -37,8 +37,8 @@
     </div>
     <form class="form-stack login-form" method="post" action="/login">
       {% if error %}<div class="alert">{{ error }}</div>{% endif %}
-      <label>Username<input type="text" name="username" value="admin" required></label>
-      <label>Password<input type="password" name="password" value="admin123" required></label>
+      <label>Username<input type="text" name="username" value="super" required></label>
+      <label>Password<input type="password" name="password" value="super123" required></label>
       <label class="login-workspace-field">Workspace
         <select name="workspace_id" required>
           {% for workspace in workspaces %}
@@ -52,7 +52,7 @@
     <p class="login-defaults-label">Default Access:</p>
     <div class="login-defaults">
       {% for account in default_access_accounts %}
-      <span class="pill">{{ account.username }} / {{ account.password }}</span>
+      <div class="login-default-account"><span class="pill">{{ account.username }} / {{ account.password }}</span><strong class="login-default-role login-default-role-{{ account.role }}">Role: {{ account.role }}</strong></div>
       {% endfor %}
     </div>
     {% endif %}

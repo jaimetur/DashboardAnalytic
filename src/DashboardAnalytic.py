@@ -402,7 +402,7 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
     workspace = workspace_registry.mark_opened(workspace_id)
     # Authentication and shared Slides Template metadata belong to the
     # application configuration database, not to the selected workspace.
-    repository.set_global_database(settings.database_path.parent / 'application.db')
+    repository.set_global_database(application_config_dir / 'application.db')
     for path in (workspace.database_path.parent, workspace.input_dir, workspace.output_dir, workspace.export_dir):
         path.mkdir(parents=True, exist_ok=True)
     object.__setattr__(settings, 'database_path', workspace.database_path)
@@ -414,7 +414,7 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
     DATAFRAME_CACHE.clear()
     active_workspace = workspace
     if initialize:
-        repository.initialize(settings.admin_username, settings.admin_password)
+        repository.initialize()
         synchronize_reporting_row_store()
         for technology in TEMPLATE_NAMES:
             synchronize_template_file_names(technology)
@@ -471,8 +471,17 @@ async def lifespan(_: FastAPI):
     )
     workspace_registry.initialize()
     repository.set_global_database(settings.database_path.parent / 'application.db')
+    # Recover accounts/templates left by installations that used the former
+    # config-level databases before the global application database existed.
+    old_config_roots = {settings.database_path.parent, PROJECT_ROOT / 'config'}
+    for old_name in ('workspaces.db', 'app.db', 'app 2.db'):
+        for old_root in old_config_roots:
+            repository.recover_global_metadata(old_root / old_name)
+    migrate_access = not repository.has_workspace_access_entries()
     for workspace in workspace_registry.list():
         repository.migrate_workspace_metadata(workspace.database_path)
+        if migrate_access:
+            repository.grant_all_workspace_access(workspace.id)
     export_package_dir().mkdir(parents=True, exist_ok=True)
     _cleanup_expired_export_packages()
     migrate_uk_slides_templates_to_global_config()
@@ -1377,8 +1386,14 @@ def change_password(
 
 
 def admin_user(user: SessionUser = Depends(current_user)) -> SessionUser:
-    if user.role != 'admin':
+    if user.role not in {'admin', 'super-admin'}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Admin access required')
+    return user
+
+
+def super_admin_user(user: SessionUser = Depends(current_user)) -> SessionUser:
+    if user.role != 'super-admin':
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Super-admin access required')
     return user
 
 
@@ -1549,14 +1564,15 @@ def build_default_access_accounts() -> list[dict[str, str]]:
     if not active_workspace:
         return []
     defaults = [
-        {'username': settings.admin_username, 'password': settings.admin_password},
+        {'username': 'super', 'password': 'super123'},
+        {'username': 'admin', 'password': 'admin123'},
         {'username': 'demo', 'password': 'demo123'},
     ]
     available_accounts: list[dict[str, str]] = []
     for item in defaults:
         record = repository.get_user(item['username'])
         if record and record.active and verify_password(item['password'], record.password_hash):
-            available_accounts.append(item)
+            available_accounts.append({**item, 'role': record.role})
     return available_accounts
 
 
@@ -1809,6 +1825,7 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
         if active_workspace and active_workspace.id == existing_workspace.id:
             raise ValueError(f'Close workspace "{existing_workspace.name}" before replacing it through import.')
         workspace_registry.remove(existing_workspace.id)
+        repository.remove_workspace_access(existing_workspace.id)
     workspace = workspace_registry.create(requested_name if replace_existing or not existing_workspace else _unique_import_workspace_name(requested_name))
     try:
         for source, destination in (
@@ -1827,6 +1844,7 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
             connection.execute('PRAGMA quick_check').fetchone()
     except Exception:
         workspace_registry.remove(workspace.id)
+        repository.remove_workspace_access(workspace.id)
         raise
     return workspace
 
@@ -1869,11 +1887,22 @@ def import_workspace_collisions(manifest: dict[str, Any]) -> list[str]:
 
 
 def would_remove_last_active_admin(target_user, normalized_role: str, will_be_active: bool) -> bool:
-    if target_user['role'] != 'admin' or not target_user['active']:
+    if target_user['role'] not in {'admin', 'super-admin'} or not target_user['active']:
         return False
-    if normalized_role == 'admin' and will_be_active:
+    if normalized_role in {'admin', 'super-admin'} and will_be_active:
         return False
     return repository.count_active_admin_users() <= 1
+
+
+def would_remove_required_super_admin(target_user, normalized_role: str, will_be_active: bool) -> bool:
+    """Keep one super-admin record and one active super-admin available."""
+    if target_user['role'] != 'super-admin':
+        return False
+    removing_super_role = normalized_role != 'super-admin'
+    removing_active_super_admin = bool(target_user['active']) and (removing_super_role or not will_be_active)
+    if removing_super_role and repository.count_super_admin_users() <= 1:
+        return True
+    return removing_active_super_admin and repository.count_super_admin_users(active_only=True) <= 1
 
 
 def render_admin_template(request: Request, user: SessionUser, error: str | None = None, status_code: int = 200) -> HTMLResponse:
@@ -1945,8 +1974,8 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         ],
     ]
     admin_users = [
-        {**dict(row), 'created_at': format_local_timestamp(row['created_at'])}
-        for row in (repository.list_users() if active_workspace else [])
+        {**dict(row), 'created_at': format_local_timestamp(row['created_at']), 'workspace_ids': repository.list_user_workspace_ids(int(row['id']))}
+        for row in repository.list_users()
     ]
     admin_logs = []
     for row in (repository.list_logs() if active_workspace else []):
@@ -1962,6 +1991,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         {
             'user': user,
             'users': admin_users,
+            'workspaces': workspace_registry.list(),
             'datasets': admin_datasets,
             'vodafone_mapping_datasets': [dataset for dataset in ready_admin_datasets if dataset.get('dataset_kind') == 'mapping_vodafone'],
             'three_mapping_datasets': [dataset for dataset in ready_admin_datasets if dataset.get('dataset_kind') == 'mapping_three'],
@@ -2183,20 +2213,6 @@ def login(
     password: str = Form(...),
     workspace_id: str | None = Form(default=None),
 ) -> Response:
-    if workspace_id:
-        try:
-            activate_workspace(workspace_id)
-        except ValueError as exc:
-            workspaces = workspace_registry.list()
-            return render_template(
-                request, 'login.html',
-                {
-                    'error': str(exc), 'default_access_accounts': build_default_access_accounts(),
-                    'workspaces': workspaces, 'active_workspace': active_workspace,
-                    'selected_workspace_id': active_workspace.id if active_workspace else workspace_registry.most_recent().id,
-                },
-                status_code=400,
-            )
     record = repository.get_user(username)
     if not record or not record.active or not verify_password(password, record.password_hash):
         workspaces = workspace_registry.list()
@@ -2210,6 +2226,23 @@ def login(
             },
             status_code=401,
         )
+
+    if workspace_id:
+        if record.role not in {'admin', 'super-admin'} and not repository.user_has_workspace_access(record.username, workspace_id):
+            return render_template(request, 'login.html', {
+                'error': 'You do not have access to that workspace.',
+                'default_access_accounts': build_default_access_accounts(),
+                'workspaces': workspace_registry.list(), 'active_workspace': active_workspace,
+                'selected_workspace_id': workspace_id,
+            }, status_code=403)
+        try:
+            activate_workspace(workspace_id)
+        except ValueError as exc:
+            return render_template(request, 'login.html', {
+                'error': str(exc), 'default_access_accounts': build_default_access_accounts(),
+                'workspaces': workspace_registry.list(), 'active_workspace': active_workspace,
+                'selected_workspace_id': workspace_id,
+            }, status_code=400)
 
     user = SessionUser(username=record.username, role=record.role)
     response = RedirectResponse('/workspace', status_code=status.HTTP_303_SEE_OTHER)
@@ -2313,6 +2346,10 @@ def workspace(
     input_kind: str | None = Query(default=None),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
+    workspace_users = [
+        {**dict(row), 'workspace_ids': repository.list_user_workspace_ids(int(row['id']))}
+        for row in (repository.list_users() if user.role in {'admin', 'super-admin'} else [])
+    ]
     if not active_workspace:
         return render_template(
             request,
@@ -2322,7 +2359,7 @@ def workspace(
                 'input_kind': None, 'input_kind_options': [], 'workspace_logs': [], 'error': None,
                 'has_processing': False, 'vodafone_mapping_datasets': [], 'three_mapping_datasets': [],
                 'mappable_cdr_datasets': [], 'clearable_cdr_datasets': [],
-                'workspaces': workspace_registry.list(), 'workspace_notice': request.query_params.get('workspace_notice'),
+                'workspaces': accessible_workspaces(user), 'workspace_users': workspace_users, 'workspace_notice': request.query_params.get('workspace_notice'),
                 'workspace_warning': request.query_params.get('workspace_warning'),
                 'workspace_error': request.query_params.get('workspace_error'),
             },
@@ -2362,7 +2399,8 @@ def workspace(
             'three_mapping_datasets': three_mapping_datasets,
             'mappable_cdr_datasets': mappable_cdr_datasets,
             'clearable_cdr_datasets': clearable_cdr_datasets,
-            'workspaces': workspace_registry.list(),
+            'workspaces': accessible_workspaces(user),
+            'workspace_users': workspace_users,
             'active_workspace': active_workspace,
             'workspace_notice': request.query_params.get('workspace_notice'),
             'workspace_warning': request.query_params.get('workspace_warning'),
@@ -2372,12 +2410,26 @@ def workspace(
 
 
 def require_workspace_admin(user: SessionUser) -> None:
-    if user.role != 'admin':
+    if user.role not in {'admin', 'super-admin'}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Only administrators can manage workspaces.')
+
+
+def require_super_admin(user: SessionUser) -> None:
+    if user.role != 'super-admin':
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Only super-admins can manage workspace access.')
+
+
+def accessible_workspaces(user: SessionUser) -> list[Workspace]:
+    workspaces = workspace_registry.list()
+    if user.role in {'admin', 'super-admin'}:
+        return workspaces
+    return [item for item in workspaces if repository.user_has_workspace_access(user.username, item.id)]
 
 
 @app.post('/workspace/select')
 def select_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
+    if user.role not in {'admin', 'super-admin'} and not repository.user_has_workspace_access(user.username, workspace_id):
+        return RedirectResponse('/workspace?workspace_error=You+do+not+have+access+to+that+workspace.', status_code=status.HTTP_303_SEE_OTHER)
     try:
         workspace = activate_workspace(workspace_id)
     except ValueError as exc:
@@ -2394,10 +2446,14 @@ def close_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(c
 
 
 @app.post('/workspace/create')
-def create_workspace(name: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
+def create_workspace(name: str = Form(...), user_ids: list[int] = Form(default=[]), user: SessionUser = Depends(current_user)) -> Response:
     require_workspace_admin(user)
     try:
         workspace = workspace_registry.create(name)
+        if user.role == 'super-admin':
+            for account in repository.list_users():
+                if int(account['id']) in user_ids:
+                    repository.set_user_workspace_access(int(account['id']), [*repository.list_user_workspace_ids(int(account['id'])), workspace.id])
         activate_workspace(workspace.id)
     except ValueError as exc:
         return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
@@ -2433,9 +2489,24 @@ def delete_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(
         return RedirectResponse('/workspace?workspace_warning=Close+the+workspace+before+removing+it.', status_code=status.HTTP_303_SEE_OTHER)
     try:
         replacement = workspace_registry.delete(workspace_id)
+        repository.remove_workspace_access(workspace_id)
     except ValueError as exc:
         return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse('/workspace?workspace_notice=Workspace+deleted.', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/workspace/access')
+def update_workspace_access(workspace_id: str = Form(...), user_ids: list[int] = Form(default=[]), user: SessionUser = Depends(admin_user)) -> Response:
+    require_super_admin(user)
+    for row in repository.list_users():
+        if int(row['id']) in user_ids:
+            ids = repository.list_user_workspace_ids(int(row['id']))
+            if workspace_id not in ids:
+                repository.set_user_workspace_access(int(row['id']), [*ids, workspace_id])
+        else:
+            ids = [item for item in repository.list_user_workspace_ids(int(row['id'])) if item != workspace_id]
+            repository.set_user_workspace_access(int(row['id']), ids)
+    return RedirectResponse('/workspace?workspace_notice=Workspace+access+updated.', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get('/workspace/preview/{dataset_id}', response_class=HTMLResponse)
@@ -4051,10 +4122,20 @@ def create_user(
     username: str = Form(...),
     password: str = Form(...),
     role: str = Form(...),
+    workspace_ids: list[str] = Form(default=[]),
     user: SessionUser = Depends(admin_user),
 ) -> HTMLResponse:
     try:
-        repository.create_user(username, password, role)
+        normalized_role = role.strip().lower()
+        if normalized_role not in {'admin', 'user', 'super-admin'}:
+            raise ValueError('Unsupported role')
+        if user.role != 'super-admin' and normalized_role not in {'admin', 'user'}:
+            raise ValueError('Only super-admins can create super-admin users.')
+        repository.create_user(username, password, normalized_role)
+        created = repository.get_user_by_id(max(int(row['id']) for row in repository.list_users() if row['username'] == username.strip()))
+        if created:
+            if user.role == 'super-admin':
+                repository.set_user_workspace_access(int(created['id']), workspace_ids)
         repository.add_log(user.username, 'create_user', username)
         return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
     except Exception as exc:
@@ -4069,18 +4150,35 @@ def update_user_account(
     password: str = Form(''),
     role: str = Form(...),
     active: str | None = Form(default=None),
+    workspace_ids: list[str] = Form(default=[]),
     user: SessionUser = Depends(admin_user),
 ) -> Response:
     normalized_username = username.strip()
     normalized_role = role.strip().lower()
     if not normalized_username:
         return render_admin_template(request, user, error='Username cannot be empty', status_code=400)
-    if normalized_role not in {'admin', 'user'}:
-        return render_admin_template(request, user, error='Unsupported role', status_code=400)
     target_user = repository.get_user_by_id(target_user_id)
     if not target_user:
         return render_admin_template(request, user, error='User not found', status_code=404)
+    if normalized_role not in {'admin', 'user', 'super-admin'}:
+        return render_admin_template(request, user, error='Unsupported role', status_code=400)
+    if user.role != 'super-admin' and (
+        target_user['role'] == 'super-admin' or normalized_role == 'super-admin'
+    ):
+        return render_admin_template(
+            request,
+            user,
+            error='Only super-admins can assign or modify super-admin accounts.',
+            status_code=403,
+        )
     will_be_active = active == '1'
+    if would_remove_required_super_admin(target_user, normalized_role, will_be_active):
+        return render_admin_template(
+            request,
+            user,
+            error='At least one active super-admin must remain. Create or activate another super-admin before changing or deactivating this account.',
+            status_code=400,
+        )
     if would_remove_last_active_admin(target_user, normalized_role, will_be_active):
         return render_admin_template(
             request,
@@ -4096,6 +4194,8 @@ def update_user_account(
             will_be_active,
             password.strip() or None,
         )
+        if user.role == 'super-admin':
+            repository.set_user_workspace_access(target_user_id, workspace_ids)
         repository.add_log(
             user.username,
             'update_user',
@@ -4115,9 +4215,30 @@ def delete_user_account(
     target_user = repository.get_user_by_id(target_user_id)
     if not target_user:
         return render_admin_template(request, user, error='User not found', status_code=404)
+    if user.role != 'super-admin' and target_user['role'] == 'super-admin':
+        return render_admin_template(
+            request,
+            user,
+            error='Only super-admins can assign or modify super-admin accounts.',
+            status_code=403,
+        )
     if target_user['username'] == user.username:
         return render_admin_template(request, user, error='You cannot delete the current signed-in admin user', status_code=400)
-    if target_user['role'] == 'admin' and target_user['active'] and repository.count_active_admin_users() <= 1:
+    if target_user['role'] == 'super-admin' and repository.count_super_admin_users() <= 1:
+        return render_admin_template(
+            request,
+            user,
+            error='At least one super-admin must remain. Create another super-admin before deleting this account.',
+            status_code=400,
+        )
+    if target_user['role'] == 'super-admin' and target_user['active'] and repository.count_super_admin_users(active_only=True) <= 1:
+        return render_admin_template(
+            request,
+            user,
+            error='At least one active super-admin must remain. Create or activate another super-admin before deleting this account.',
+            status_code=400,
+        )
+    if target_user['role'] in {'admin', 'super-admin'} and target_user['active'] and repository.count_active_admin_users() <= 1:
         return render_admin_template(
             request,
             user,
