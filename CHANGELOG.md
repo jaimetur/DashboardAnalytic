@@ -16,7 +16,7 @@
 - Added Admin **Import/Export** ZIP packages for configuration, shared Slides Templates, individual workspaces and full-environment transfers. Imports detect the package type automatically and register imported workspaces locally.
 
 #### 🚀 Enhancements:
-- Added editable root-level `storage-paths.conf` for configuring `CONFIG_DIR`, `DATA_DIR` and `ASSETS_DIR` without editing Python; deployment environment variables retain precedence.
+- Added editable root-level `storage-paths.conf` for configuring `APP_CONFIG_DIR`, `APP_DATA_DIR` and `APP_ASSETS_DIR` without editing Python; deployment environment variables retain precedence.
 - Kept project-local `config/`, `data/` and `assets/` as the automatic fallback when `storage-paths.conf` is absent.
 - Made Slides Templates executable: catalogue source, KPI, chart type, filters, thresholds/buckets, legend, grouping and named layout drive rendering, including structural Title and Transition slides.
 - Unified NSA, SA, single-vendor and multivendor generation on the master `Template_CDR_analysis.pptx`; catalogues create slides and populate layout placeholders. NSA/SA catalogues were also aligned with the NetCheck methodology.
@@ -50,7 +50,6 @@
 #### 🐛 Bug fixes:
 - Fixed Slides Templates Editor row normalisation so grouping, sorting and visual merging retain every chart-definition field instead of clearing them in the browser.
 - Removed the unused `assets/slides-templates` migration path; Slides Templates now use only the configured shared library.
-- Fixed external `CONFIG_DIR`, `DATA_DIR` and `ASSETS_DIR` deployments so startup recognises an already-migrated workspace database instead of attempting to overwrite it with the legacy configuration database.
 - Fixed catalogue defaults, deletion protection, editor selection, grouping semantics and reporting placeholder/chart generation.
 - Fixed CDR and mapping ingestion for duplicate headers, legacy encodings, alternate Cell ID fields, VFUK/3UK GCIDs and NSA RAT spellings.
 - Fixed Vendor persistence and preview ordering, and kept CDRs usable after failed mapping while logging the failure.
