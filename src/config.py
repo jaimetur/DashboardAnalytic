@@ -78,6 +78,6 @@ class Settings:
     ppt_templates_dir: Path = assets_dir / "ppt-templates"
     input_dir: Path = data_dir / "input"
     output_dir: Path = data_dir / "output"
-    export_dir: Path = data_dir / "exports"
+    export_dir: Path = data_dir / "output" / "reports"
 
 settings = Settings()

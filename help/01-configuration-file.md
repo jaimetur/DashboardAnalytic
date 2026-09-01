@@ -24,7 +24,7 @@ For Docker deployments, configure the container timezone with the `TZ` variable 
 | `APP_ASSETS_DIR` | Root directory for bundled assets and PowerPoint master templates. Defaults to `assets/` under the project. |
 | *(derived paths)* | Databases and shared Slides Templates derive from `APP_CONFIG_DIR`; the workspace registry and workspace data derive from `APP_DATA_DIR`. |
 
-Edit `storage-paths.conf` to set `APP_CONFIG_DIR`, `APP_DATA_DIR` and `APP_ASSETS_DIR` when the three roots live outside the project; its comments describe the simple `KEY = value` format. The service process must have read/write access to the configured storage directories. In Docker, mount both `config/` and `data/`: shared Slides Templates live in `config/`, while the registry and every workspace are stored under `data/workspaces/`. Each workspace has its database, `input/` and `exports/` directories. The version and release date displayed in the application are maintained in `src/version.py` and the changelog, not through an environment variable.
+Edit `storage-paths.conf` to set `APP_CONFIG_DIR`, `APP_DATA_DIR` and `APP_ASSETS_DIR` when the three roots live outside the project; its comments describe the simple `KEY = value` format. The service process must have read/write access to the configured storage directories. In Docker, mount both `config/` and `data/`: shared Slides Templates live in `config/`, while the registry and every workspace are stored under `data/workspaces/`. Each workspace has its database, `input/` and `output/reports/` directories. The version and release date displayed in the application are maintained in `src/version.py` and the changelog, not through an environment variable.
 
 ## Recommended deployment setup
 

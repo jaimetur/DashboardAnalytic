@@ -73,7 +73,7 @@ class WorkspaceRegistry:
                     (
                         'default', 'Default Workspace', str(default_root / 'Default Workspace.db'),
                         str(default_root / 'input'), str(default_root / 'output'),
-                        str(default_root / 'exports'), str(self.legacy_slides_templates_dir), now, now,
+                        str(default_root / 'output' / 'reports'), str(self.legacy_slides_templates_dir), now, now,
                     ),
                 )
                 conn.execute("INSERT OR REPLACE INTO workspace_state (key, value) VALUES ('active_workspace_id', 'default')")
@@ -85,6 +85,26 @@ class WorkspaceRegistry:
             conn.execute('UPDATE workspaces SET slides_templates_dir = ?', (str(self.legacy_slides_templates_dir),))
         self._migrate_default_database()
         self._migrate_workspace_directories()
+        self._migrate_workspace_exports()
+
+    def _migrate_workspace_exports(self) -> None:
+        """Move report exports into output/reports and stop creating exports/."""
+        for workspace in self.list():
+            root = self._workspace_root(workspace.name)
+            target = root / 'output' / 'reports'
+            source = workspace.export_dir
+            target.mkdir(parents=True, exist_ok=True)
+            if source != target and source.exists():
+                for item in source.iterdir():
+                    destination = target / item.name
+                    if not destination.exists():
+                        shutil.move(str(item), str(destination))
+                try:
+                    source.rmdir()
+                except OSError:
+                    pass
+            with self._connection() as conn:
+                conn.execute('UPDATE workspaces SET export_dir = ? WHERE id = ?', (str(target), workspace.id))
 
     def _migrate_legacy_registry_file(self) -> None:
         """Retain registry state while replacing the ambiguous old filename."""
@@ -261,7 +281,7 @@ class WorkspaceRegistry:
                         slides_templates_dir, created_at, last_opened_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (workspace_id, normalized_name, str(db_path), str(data_root / 'input'), str(data_root / 'output'),
-                     str(data_root / 'exports'), str(slides_templates_dir), now, now),
+                     str(data_root / 'output' / 'reports'), str(slides_templates_dir), now, now),
                 )
             except sqlite3.IntegrityError as exc:
                 raise ValueError(f'A workspace named "{normalized_name}" already exists.') from exc
