@@ -66,14 +66,14 @@
           <tr data-user-row>
             <td>
               {{ row['id'] }}
-              <form id="user-update-{{ row['id'] }}" action="/admin/users/{{ row['id'] }}/update" method="post" data-user-auto-save></form>
+              <form id="user-update-{{ row['id'] }}" action="/admin/users/{{ row['id'] }}/update" method="post" autocomplete="off" data-user-auto-save></form>
               <form id="user-delete-{{ row['id'] }}" action="/admin/users/{{ row['id'] }}/delete" method="post" data-confirm="Delete user {{ row['username'] }}? This action cannot be undone."></form>
               <form id="user-password-reset-{{ row['id'] }}" action="/admin/users/{{ row['id'] }}/reset-password" method="post" data-user-password-reset data-reset-username="{{ row['username'] }}"></form>
             </td>
-            <td><input class="table-input" type="text" name="username" value="{{ row['username'] }}" form="user-update-{{ row['id'] }}" required {% if user.role != 'super-admin' and row['role'] == 'super-admin' %}disabled{% endif %}></td>
+            <td><input class="table-input" type="text" name="username" value="{{ row['username'] }}" form="user-update-{{ row['id'] }}" autocomplete="off" readonly data-user-autofill-guard required {% if user.role != 'super-admin' and row['role'] == 'super-admin' %}disabled{% endif %}></td>
             <td>
               <div class="user-password-editor">
-                <input class="table-input" type="password" name="password" value="" placeholder="••••••••" autocomplete="new-password" form="user-update-{{ row['id'] }}" data-user-password {% if user.role != 'super-admin' and row['role'] == 'super-admin' %}disabled{% endif %}>
+                <input class="table-input" type="password" name="password" value="" placeholder="••••••••" autocomplete="new-password" readonly form="user-update-{{ row['id'] }}" data-user-password data-user-autofill-guard {% if user.role != 'super-admin' and row['role'] == 'super-admin' %}disabled{% endif %}>
                 <button type="button" class="user-password-toggle" data-user-password-toggle aria-label="Show newly entered password" title="Show newly entered password" hidden>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.2 12s3.5-6 9.8-6 9.8 6 9.8 6-3.5 6-9.8 6-9.8-6-9.8-6Z"></path><circle cx="12" cy="12" r="2.8"></circle></svg>
                 </button>
@@ -825,6 +825,40 @@
 (() => {
   const forms = document.querySelectorAll('form[data-user-auto-save]');
   const isEditable = (element) => !element.disabled && ['INPUT', 'SELECT'].includes(element.tagName);
+
+  const restoreUsersFromServerMarkup = () => {
+    // Safari and Chromium may restore old form values from their navigation
+    // cache after the server has rendered a newer user list.  The default
+    // values are the values delivered by this response, so use them as the
+    // authoritative state for this administrative table.
+    forms.forEach((form) => {
+      const username = document.querySelector(`[form="${form.id}"][name="username"]`);
+      const password = document.querySelector(`[form="${form.id}"][name="password"]`);
+      const role = document.querySelector(`[form="${form.id}"][name="role"]`);
+      const active = document.querySelector(`[form="${form.id}"][name="active"]`);
+      if (username instanceof HTMLInputElement) username.value = username.defaultValue;
+      if (password instanceof HTMLInputElement) password.value = '';
+      if (role instanceof HTMLSelectElement) {
+        Array.from(role.options).forEach((option) => { option.selected = option.defaultSelected; });
+      }
+      if (active instanceof HTMLInputElement) active.checked = active.defaultChecked;
+      document.querySelectorAll(`[form="${form.id}"][name="workspace_ids"]`).forEach((box) => {
+        if (box instanceof HTMLInputElement) box.checked = box.defaultChecked;
+      });
+    });
+  };
+
+  restoreUsersFromServerMarkup();
+  window.addEventListener('pageshow', () => {
+    window.requestAnimationFrame(restoreUsersFromServerMarkup);
+  });
+
+  // Browser credential managers can otherwise overwrite a username in this
+  // multi-user administration table with a saved login.  Keep inputs readonly
+  // until the administrator deliberately focuses one to edit it.
+  document.querySelectorAll('[data-user-autofill-guard]').forEach((control) => {
+    control.addEventListener('focus', () => control.removeAttribute('readonly'));
+  });
 
   const applyUser = (form, user) => {
     if (!user) return;

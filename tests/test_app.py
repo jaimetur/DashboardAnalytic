@@ -660,11 +660,12 @@ def test_admin_panel_is_available_for_admin(client) -> None:
     assert response.status_code == 200
     assert "Admin panel" in response.text
     assert 'value="super-admin" aria-label="Role for super" readonly' in response.text
-    assert 'name="username" value="super" form="user-update-1" required disabled' in response.text
-    assert 'name="password" value="" placeholder="••••••••" autocomplete="new-password" form="user-update-1" data-user-password disabled' in response.text
+    assert 'name="username" value="super" form="user-update-1" autocomplete="off" readonly data-user-autofill-guard required disabled' in response.text
+    assert 'name="password" value="" placeholder="••••••••" autocomplete="new-password" readonly form="user-update-1" data-user-password data-user-autofill-guard disabled' in response.text
     assert 'data-user-password-toggle' in response.text
     assert '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.2 12' in response.text
     assert 'Keep current' not in response.text
+    assert 'restoreUsersFromServerMarkup' in response.text
     assert 'form="user-update-1" disabled title="Only super-admins can modify super-admin accounts">Save</button>' not in response.text
 
 

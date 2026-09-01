@@ -6,75 +6,58 @@
 ## Release: v0.2.0
 ### Release Date: 2026-08-31
 #### 🌟 New Features:
-- Added modular Workspace, Dashboard and PowerPoint Reporting areas, including Smart Orchestrator Logs reports.
+- Added modular Workspace, Dashboard and PowerPoint Reporting areas, including the Smart Orchestrator Logs reporting entry point.
 - Redesigned the web UI with dedicated Workspace, Dashboard, Reporting and Admin panels.
-- Added CDR ingestion for Data, Voice and Speech with VFUK/3UK vendor mapping and review queues.
-- Added template-driven NSA/SA and multivendor PowerPoint reports with persistent job history.
-- Added shared Slides Templates Management and an editor with import, defaults, duplication, deletion and export.
-- Added multi-workspace lifecycle management (create, open, close, rename, duplicate and remove).
-- Added Admin Database Management with table browsing, row editing/deletion and Excel-style filters.
-- Added Admin Import/Export ZIP packages for configuration, templates, workspaces and full environments.
-- Restricted configuration and workspace Import/Export to `super-admin`; `admin` users can transfer only the shared Slides Templates package.
+- Added Data, Voice and Speech CDR ingestion with VFUK/3UK vendor mapping and review queues.
+- Added template-driven NSA/SA and multivendor PowerPoint reporting.
+- Added multi-campaign CDR comparison reports across Data, Voice and Speech.
+- Added shared Slides Templates Management and Editor with import, export, defaults, duplication and deletion.
+- Added independent workspace lifecycle management: create, open, close, rename, duplicate and remove.
+- Added Database Management for browsing, editing and deleting records, with paginated Excel-style column filters.
+- Added Import/Export ZIP packages for configuration, Slides Templates, individual workspaces and full environments.
+- Restricted configuration and workspace Import/Export to `super-admin`; `admin` users can transfer only shared Slides Templates.
+- Added global user, role and workspace-access administration, including the `super-admin` role.
 - Added self-service password changes from the header User badge.
-- Added processed-dataset preview and direct Preview/Show Dashboard actions from workspace and Admin.
-- Added Generated Reports Jobs with Download and Delete actions, progress tracking and report metadata.
-- Added configurable Data, Voice and Speech CDR comparison reports, including multiple campaigns and multivendor output.
+- Added processed-dataset preview and direct Preview/Show Dashboard actions in Workspace and Admin.
+- Added persistent Generated Reports Jobs with progress, metadata, Download and Delete actions.
 
 #### 🚀 Enhancements:
-- Added root-level `storage-paths.conf` and `APP_CONFIG_DIR`, `APP_DATA_DIR` and `APP_ASSETS_DIR` overrides.
-- Made templates drive report titles, charts, filters, aggregations, legends and layout; added `Legend Position` and renamed aggregation columns.
-- Grouped and ordered multi-chart slides in the editor while preserving the complete CSV format on save.
-- Optimised repeated CDR reports with shared materialised tables and column selection based on the report.
+- Added root-level `storage-paths.conf` with `APP_CONFIG_DIR`, `APP_DATA_DIR` and `APP_ASSETS_DIR` overrides.
+- Consolidated global users and Slides Template registry data in `config/application.db`.
+- Moved templates, workspace databases, reports and registry files to dedicated configuration/data locations.
+- Expanded template definitions with chart titles, filters, row/column aggregations, legends and `Legend Position`.
+- Ordered and visually grouped multi-chart slides in the Editor while preserving complete CSV data on save.
+- Optimised repeated CDR reports with shared materialised tables and report-specific column loading.
 - Improved Dashboard and preview performance, adaptive filters, vendor persistence and large-dataset handling.
-- Added safe dataset renaming and synchronised source paths and references.
-- Moved templates to `config/slides-templates/`, workspace databases and reports to their workspace directories, and the registry to `data/workspaces/`.
-- Made imports and exports disk-backed background jobs with progress, preflight warnings and overwrite confirmation for large packages.
-- Added generated-report metadata (template, type, vendor mode, datasets and user), local server dates and compact icon actions.
-- Improved PowerPoint chart readability, hierarchical grouping, CDF campaign styling and legend placement.
-- Added cleanup of orphaned combined-CDR rows after dataset deletion or from Database Management.
-- Added Excel-like preview filtering by column values, plus pre-filters for Operator, Vendor, RAT, Session Type and Call Status.
-- Added colour-coded Source Sheet, Vendor and GCID fields in dataset previews.
-- Added Slides Templates Editor cell assistance that parses the current value, contextual help, searchable selectors, row insertion and multi-chart slide grouping.
-- Added reusable blank PowerPoint layouts and CSV-defined slide/chart templates for report generation.
-- Added persistent background processing for imports, report generation and large ZIP transfers, independent of the active session.
-- Added alternating report-job rows, compact icon actions and server-local report dates.
-- Improved Login default access with role-labelled bootstrap accounts shown one per line only while their default credentials remain valid.
+- Added safe dataset renaming with synchronised source paths and references.
+- Added orphaned combined-CDR row cleanup after dataset deletion and from Database Management.
+- Added Excel-like preview filtering and pre-filters for Operator, Vendor, RAT, Session Type and Call Status.
+- Added colour cues for Source Sheet, Vendor and GCID fields in dataset previews.
+- Added Slides Templates Editor cell assistance, contextual help, searchable selectors and row insertion.
+- Added reusable blank PowerPoint layouts and CSV-defined slide/chart templates.
+- Improved PowerPoint readability, hierarchical grouping, campaign-weighted CDFs and configurable legend placement.
+- Made imports, exports, large ZIP transfers and report generation disk-backed background jobs with progress, overwrite warnings and session-independent execution.
+- Expanded Generated Reports Jobs with report metadata, local server dates, alternating rows and compact Download/Delete actions.
+- Improved user administration with searchable workspace-access pickers, automatic validated saves, password masking/reset controls and role-labelled default access.
+- Improved Database Management labels by separating Config Tables from Workspace Tables.
+- Renamed template audit-log terminology from `catalogue` to `template`.
 
 #### 🐛 Bug fixes:
-- Preserved chart-definition fields during template normalisation, sorting and visual merging.
-- Fixed templates defaults, renames, deletion protection, editor selection and report placeholder generation.
-- Fixed ingestion and mapping for duplicate headers, alternate encodings, Cell ID variants and vendor fields.
-- Kept CDR datasets available after failed mappings and recovered previously failed imports.
-- Fixed queue ownership and background processing across workspace close and logout.
-- Preserved upload dates while tracking updates and latest-dataset selection.
-- Fixed Dashboard filter restoration, cache refreshes, empty states and mobile document overflow.
-- Fixed Docker packaging so the master PowerPoint template is included in deployed images.
-- Fixed template migration and editor normalisation so KPI, chart type, filters, aggregations, legends and layout values are retained.
-- Fixed report generation for missing sources, empty tables, duplicate columns, mixed encodings and legacy dataset metadata.
-- Fixed multi-level grouping so child campaign bars remain nested under one operator label.
-- Fixed report-job filenames, output discovery and historical-job loading after migration to `output/reports`.
-- Fixed Admin loading when no default templates or workspace database is present.
-- Fixed host-specific absolute storage paths in the checked-in configuration from breaking CI or deployments where that filesystem root is unavailable.
-- Standardised timestamp persistence and display on the server's local timezone across dataset queues, profiles, logs, users, workspaces and report jobs.
-- Configured Docker timezone handling through `TZ` (default `Europe/Madrid`) so NAS timestamps match the intended local time.
-- Stopped creating per-workspace `exports/` directories; report and dashboard exports now use `output/reports/`, with automatic migration of existing files.
-- Renamed report-template audit-log actions and fields from `catalogue` to `template`, including display of historical entries.
-- Moved global authentication users and shared Slides Template metadata into `config/application.db`; configuration exports now include them, while workspace databases contain only workspace data.
-- Added the `super-admin` role for workspace-permission administration. Access links are cleaned when a user or workspace is deleted.
-- Added isolated workspace-access pickers in Workspace Management and Admin, with compact dropdowns, aligned checkboxes, live user filtering, Select All / None and outside-click closing; permission editing is limited to `super-admin` users.
-- Matched Admin workspace-access selectors to the Users input palette and labelled the Create User workspace picker.
-- Matched the Create User workspace picker height to Role and expanded its menu in-flow so it does not cover the Users panel.
-- Enforced a permanent `super-admin` safeguard: a newly created application database seeds `super / super123` as `super-admin`, `admin / admin123` as `admin`, and `demo / demo123` as `user` only once; the last super-admin cannot be deleted, demoted or deactivated, and only super-admins can assign or modify super-admin roles and workspace access.
-- Displayed Admin user-management validation failures in warning dialogs and aligned the Create User Workspace Access label with the standard field labels.
-- Classified `users` and the Slides Template registry as **Config Tables** in Database Management, and renamed **Workspace records** to **Workspace Tables**.
-- Removed the obsolete `config/app.db` path and legacy migration branch. `config/application.db` is now the sole global configuration database.
-- Prevented obsolete user records and stale SQLite WAL sidecars from overriding user edits or configuration imports; importing configuration now replaces global users, roles and IDs exactly.
-- Made usernames case-insensitive for login, password changes and workspace access, and blocked case-only duplicate accounts.
-- Clarified Login when valid credentials lack permission for the selected workspace with a dedicated warning.
-- Restricted implicit workspace access to `super-admin`; normal `admin` and `user` accounts now require an explicit assignment.
-- Replaced the Users-table Save action with automatic, validated updates on field exit and added an in-place password visibility control while editing.
-- Kept stored passwords permanently masked in Users and added role-aware Reset Password defaults (`super123`, `admin123`, `demo123` or `Ericsson123`).
-- Added per-user workspace access control. Administrators can assign users when creating or managing a workspace, and configure workspace access while creating or editing users.
+- Preserved all chart-definition values during template migration, normalisation, sorting and visual merging; fixed defaults, renames, deletion protection, editor selection and report placeholder generation.
+- Fixed CDR ingestion and mapping for duplicate headers, alternate encodings, Cell ID variants and vendor fields; failed mappings no longer hide datasets and failed imports can recover.
+- Fixed dataset queue ownership, upload/update dates and background processing when a workspace closes or a user logs out.
+- Fixed Dashboard filter restoration, cache invalidation, empty states and mobile document overflow.
+- Fixed report generation for missing sources, empty tables, duplicate columns, mixed encodings and legacy metadata; child campaign bars now remain nested under their operator.
+- Fixed report-job file discovery and historical-job loading after the move to `output/reports/`, and prevented obsolete workspace `exports/` directories from being recreated.
+- Fixed Docker packaging of the master PowerPoint template and local-time handling through `TZ` (default `Europe/Madrid`).
+- Fixed host-specific storage paths from breaking CI or other deployments, and standardised local-time persistence/display for queues, profiles, logs, users, workspaces and report jobs.
+- Fixed Admin loading with no active workspace or default template.
+- Removed obsolete `config/app.db` and legacy workspace copies of global tables; `config/application.db` is the sole global configuration database.
+- Prevented stale SQLite sidecars and obsolete user records from overriding configuration imports; users, roles, IDs and workspace access now restore exactly.
+- Fixed case-insensitive usernames across login, password changes and workspace access, including case-only duplicate prevention and a clear warning for unauthorised workspace login.
+- Enforced workspace-access and super-admin safeguards: only super-admins have implicit workspace access, protected roles cannot be altered by lower roles, and the last active super-admin cannot be removed, demoted or deactivated.
+- Fixed workspace-access picker visibility, clipping, alignment and save synchronisation between Workspace Management and Users.
+- Fixed the Users table showing browser-restored form values instead of current database records after configuration imports or navigation restores.
 
 #### 📚 Documentation:
 - Reworked the Help, README and configuration documentation for the current workspace, template, reporting and transfer workflows.
