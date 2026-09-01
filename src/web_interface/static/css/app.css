@@ -312,6 +312,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .slides-templates-editor-table-wrap .form-actions { display: flex; align-items: center; gap: 0.65rem; margin-top: 0.9rem; flex-wrap: wrap; }
 .report-jobs-table { min-width: 1120px; }
 .report-jobs-table th, .report-jobs-table td { vertical-align: middle; }
+.report-jobs-table tbody tr:nth-child(odd) { background: rgba(229, 220, 247, 0.46); }
+.report-jobs-table tbody tr:nth-child(even) { background: rgba(247, 239, 246, 0.72); }
+.report-jobs-table tbody tr:hover { background: rgba(211, 198, 237, 0.62); }
 .report-jobs-table td:nth-child(2), .report-jobs-table td:nth-child(5), .report-jobs-table td:nth-child(6) { white-space: nowrap; }
 .report-jobs-table td:nth-child(3) { min-width: 245px; }
 .report-jobs-table td:nth-child(4) { min-width: 310px; }
