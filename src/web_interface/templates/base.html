@@ -20,14 +20,14 @@
             <img class="brand-mark" src="{{ static_path('img/brand-mark-192.png') }}?v={{ asset_version('img/brand-mark-192.png') }}" alt="{{ app_name }} logo" width="56" height="56">
             <h1>{{ app_name }}</h1>
           </div>
-          <span class="title-badge">v{{ app_version }} · {{ app_release_date }}</span>
+          <a class="title-badge" href="/documents/view/changelog" title="Open the Changelog">v{{ app_version }} · {{ app_release_date }}</a>
         </div>
       </div>
       {% if user %}
       <nav class="topnav">
         <details class="topnav-workspace-switcher">
-          <summary class="topnav-link topnav-workspace-badge" aria-label="Change active workspace">
-            <span>Active workspace: {{ active_workspace.name if active_workspace else 'None' }}</span>
+          <summary class="topnav-link topnav-workspace-badge" aria-label="Change active workspace" title="Click to switch the active workspace">
+            <span>Active workspace: {{ active_workspace.name if active_workspace else 'None' }}{% if active_workspace_size %} ({{ active_workspace_size }}){% endif %}</span>
             <span class="topnav-workspace-chevron" aria-hidden="true"></span>
           </summary>
           <div class="topnav-workspace-menu">
@@ -35,7 +35,7 @@
             <p>Open workspace</p>
             <form action="/workspace/select" method="post">
               {% for workspace in header_workspaces %}
-              <button type="submit" name="workspace_id" value="{{ workspace.id }}" {% if active_workspace and workspace.id == active_workspace.id %}disabled aria-current="true"{% endif %}>{{ workspace.name }}{% if active_workspace and workspace.id == active_workspace.id %}<span>Active</span>{% endif %}</button>
+              <button type="submit" name="workspace_id" value="{{ workspace.id }}" class="workspace-switcher-option{% if not header_workspace_access.get(workspace.id, false) %} is-unavailable{% elif active_workspace and workspace.id == active_workspace.id %} is-active{% endif %}" {% if not header_workspace_access.get(workspace.id, false) or (active_workspace and workspace.id == active_workspace.id) %}disabled{% endif %} {% if active_workspace and workspace.id == active_workspace.id %}aria-current="true"{% endif %}>{{ workspace.name }} ({{ header_workspace_sizes.get(workspace.id, '0 MB') }}){% if not header_workspace_access.get(workspace.id, false) %}<span>No access</span>{% elif active_workspace and workspace.id == active_workspace.id %}<span>Active</span>{% endif %}</button>
               {% endfor %}
             </form>
             {% else %}
@@ -43,8 +43,8 @@
             {% endif %}
           </div>
         </details>
-        <span role="button" tabindex="0" data-change-password-open><span class="topnav-link topnav-user-badge topnav-user-badge-{{ user.role }}">User: {{ user.username }} ({{ user.role }})</span></span>
-        <a class="topnav-link topnav-link-logout" href="/logout">Logout</a>
+        <span role="button" tabindex="0" data-change-password-open title="Click to change your password"><span class="topnav-link topnav-user-badge topnav-user-badge-{{ user.role }}">User: {{ user.username }} ({{ user.role }})</span></span>
+        <a class="topnav-link topnav-link-logout" href="/logout" title="Log out of Dashboard Analytic">Logout</a>
       </nav>
       {% endif %}
     </header>
@@ -52,20 +52,20 @@
       {% if user %}
       <nav class="module-tabs" aria-label="E2E modules">
         <div class="module-tabs-primary">
-          <a class="module-tab module-tab-workspace{% if request.url.path == '/workspace' %} active{% endif %}" href="/workspace">Workspace</a>
+          <a class="module-tab module-tab-workspace{% if request.url.path == '/workspace' %} active{% endif %}" href="/workspace" title="Open Workspace management">Workspace</a>
           {% if active_workspace %}
-          <a class="module-tab module-tab-dashboard{% if request.url.path == '/dashboard' %} active{% endif %}" href="/dashboard"><span class="module-tab-label-desktop">E2E Dashboard</span><span class="module-tab-label-mobile">Dashboard</span></a>
-          <a class="module-tab module-tab-reporting{% if request.url.path == '/reporting' %} active{% endif %}" href="/reporting"><span class="module-tab-label-desktop">E2E PowerPoint Reporting</span><span class="module-tab-label-mobile">Reporting</span></a>
+          <a class="module-tab module-tab-dashboard{% if request.url.path == '/dashboard' %} active{% endif %}" href="/dashboard" title="Open E2E Dashboard"><span class="module-tab-label-desktop">E2E Dashboard</span><span class="module-tab-label-mobile">Dashboard</span></a>
+          <a class="module-tab module-tab-reporting{% if request.url.path == '/reporting' %} active{% endif %}" href="/reporting" title="Open E2E Reporting"><span class="module-tab-label-desktop">E2E Reporting</span><span class="module-tab-label-mobile">Reporting</span></a>
           {% else %}
-          <span class="module-tab module-tab-disabled" aria-disabled="true"><span class="module-tab-label-desktop">E2E Dashboard</span><span class="module-tab-label-mobile">Dashboard</span></span>
-          <span class="module-tab module-tab-disabled" aria-disabled="true"><span class="module-tab-label-desktop">E2E PowerPoint Reporting</span><span class="module-tab-label-mobile">Reporting</span></span>
+          <span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use E2E Dashboard"><span class="module-tab-label-desktop">E2E Dashboard</span><span class="module-tab-label-mobile">Dashboard</span></span>
+          <span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use E2E Reporting"><span class="module-tab-label-desktop">E2E Reporting</span><span class="module-tab-label-mobile">Reporting</span></span>
           {% endif %}
         </div>
         <div class="module-tabs-secondary" aria-label="Documentation and administration">
-          <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/readme' %} active{% endif %}" href="/documents/view/readme">Readme</a>
-          <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/changelog' %} active{% endif %}" href="/documents/view/changelog">Changelog</a>
-          <a class="module-tab module-tab-utility{% if request.url.path.startswith('/documents/view/help') %} active{% endif %}" href="/documents/view/help">Help</a>
-          {% if user.role in ['admin', 'super-admin'] %}<a class="module-tab module-tab-admin{% if request.url.path == '/admin' %} active{% endif %}" href="/admin">Admin</a>{% endif %}
+          <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/readme' %} active{% endif %}" href="/documents/view/readme" title="Open Readme">Readme</a>
+          <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/changelog' %} active{% endif %}" href="/documents/view/changelog" title="Open Changelog">Changelog</a>
+          <a class="module-tab module-tab-utility{% if request.url.path.startswith('/documents/view/help') %} active{% endif %}" href="/documents/view/help" title="Open Help">Help</a>
+          {% if user.role in ['admin', 'super-admin'] %}<a class="module-tab module-tab-admin{% if request.url.path == '/admin' %} active{% endif %}" href="/admin" title="Open Admin">Admin</a>{% endif %}
         </div>
       </nav>
       {% endif %}

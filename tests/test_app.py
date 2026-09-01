@@ -534,9 +534,10 @@ def test_reupload_preserves_original_upload_date_for_dataset_ordering(client) ->
     assert '<th>Uploaded</th>' in workspace.text
     assert '<th>Updated</th>' in workspace.text
     assert workspace.text.index('<th>Uploaded</th>') < workspace.text.index('<th>Updated</th>')
+    assert 'Default Workspace (' in workspace.text
 
 
-def test_workspace_management_saves_user_access_for_the_selected_workspace(client) -> None:
+def test_workspace_management_save_updates_name_and_user_access(client) -> None:
     import src.DashboardAnalytic as app_module
 
     login_super(client)
@@ -546,18 +547,36 @@ def test_workspace_management_saves_user_access_for_the_selected_workspace(clien
     demo = next(row for row in app_module.repository.list_users() if row['username'] == 'demo')
 
     response = client.post(
-        '/workspace/access',
-        data={'workspace_id': germany.id, 'usernames': [str(demo['username'])]},
+        '/workspace/save',
+        data={'workspace_id': germany.id, 'name': 'Germany Q3', 'usernames': [str(demo['username'])]},
         headers={'X-Requested-With': 'XMLHttpRequest'},
     )
 
     assert response.status_code == 200
-    assert response.json() == {'ok': True, 'notice': 'Workspace access updated.'}
+    assert response.json() == {
+        'ok': True,
+        'notice': 'Workspace name and access updated.',
+        'workspace': {'id': germany.id, 'name': 'Germany Q3'},
+    }
+    assert app_module.workspace_registry.get(germany.id).name == 'Germany Q3'
     assert app_module.repository.list_user_workspace_ids(int(demo['id'])) == [germany.id]
+    workspace_page = client.get('/workspace')
+    assert '<th>Workspace</th>' in workspace_page.text
+    assert '<th>Size</th>' in workspace_page.text
+    assert 'Save access' not in workspace_page.text
+    assert 'class="workspace-action-save"' in workspace_page.text
     users_page = client.get('/admin')
     demo_row = users_page.text.split(f'aria-label="Filter workspaces for {demo["username"]}"', 1)[1].split('</details>', 1)[0]
     assert f'value="{germany.id}"' in demo_row
     assert 'checked' in demo_row
+
+    unchanged_name = client.post(
+        '/workspace/save',
+        data={'workspace_id': germany.id, 'name': 'Germany Q3', 'usernames': []},
+        headers={'X-Requested-With': 'XMLHttpRequest'},
+    )
+    assert unchanged_name.status_code == 200
+    assert app_module.repository.list_user_workspace_ids(int(demo['id'])) == []
 
 
 def test_workspace_management_isolates_dataset_databases_and_remembers_last_opened_workspace(client) -> None:
@@ -590,7 +609,7 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
     assert 'Campaign benchmark' in page.text
     assert 'Manage workspaces' in page.text
     assert 'data-workspace-open disabled>Open</button>' in page.text
-    assert page.text.index('>Campaign benchmark</option>') < page.text.index('>Default Workspace</option>')
+    assert page.text.index('>Campaign benchmark (') < page.text.index('>Default Workspace (')
     workspace_id = app_module.active_workspace.id
     renamed = client.post('/workspace/rename', data={'workspace_id': workspace_id, 'name': 'Campaign benchmark Q3'})
     assert renamed.status_code == 200
@@ -658,6 +677,24 @@ def test_workspace_remove_preserves_files_unless_explicitly_requested(client) ->
     assert removed_with_files.status_code == 303
     assert app_module.workspace_registry.get(second.id) is None
     assert not second_root.exists()
+
+
+def test_workspace_management_lists_restricted_workspaces_without_enabling_actions(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    restricted = app_module.workspace_registry.create('Restricted workspace')
+
+    page = client.get('/workspace')
+    assert page.status_code == 200
+    assert f'value="{restricted.id}" data-workspace-access="false" disabled' in page.text
+    assert 'Restricted workspace (' in page.text
+    assert 'workspace-no-access-row' in page.text
+    assert 'No access' in page.text
+
+    assert client.post('/workspace/select', data={'workspace_id': restricted.id}, follow_redirects=False).status_code == 303
+    assert client.post('/workspace/duplicate', data={'workspace_id': restricted.id}, follow_redirects=False).status_code == 403
+    assert client.post('/workspace/delete', data={'workspace_id': restricted.id}, follow_redirects=False).status_code == 403
 
 
 def test_queued_import_continues_after_its_workspace_is_closed(client) -> None:
@@ -1774,11 +1811,12 @@ def test_top_navigation_shows_document_links(client) -> None:
     assert 'class="module-tabs-secondary"' in response.text
     assert 'module-hero-dashboard' not in response.text
     assert 'class="module-tab module-tab-workspace active" href="/workspace"' in response.text
-    assert '<span class="module-tab-label-desktop">E2E PowerPoint Reporting</span>' in response.text
+    assert '<span class="module-tab-label-desktop">E2E Reporting</span>' in response.text
+    assert 'title="Open Changelog"' in response.text
     assert '<span class="module-tab-label-mobile">Reporting</span>' in response.text
     assert '<span class="module-tab-label-mobile">Dashboard</span>' in response.text
     assert 'href="/logout"' in response.text
-    assert '<span class="topnav-link topnav-user-badge topnav-user-badge-admin">User: admin</span>' in response.text
+    assert '<span class="topnav-link topnav-user-badge topnav-user-badge-admin">User: admin (admin)</span>' in response.text
 
     dashboard = client.get("/dashboard")
     assert dashboard.status_code == 200

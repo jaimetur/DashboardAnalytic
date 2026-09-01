@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import io
+import os
 import re
 import secrets
 import hashlib
@@ -15,6 +16,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from threading import Lock, Thread
+from time import monotonic
 from typing import Annotated
 from typing import Any
 from typing import Callable
@@ -66,6 +68,9 @@ workspace_registry = WorkspaceRegistry(
     legacy_workspace_registry_path(),
 )
 active_workspace: Workspace | None = None
+_workspace_size_cache: dict[str, tuple[float, int]] = {}
+_workspace_size_cache_lock = Lock()
+_WORKSPACE_SIZE_CACHE_SECONDS = 15.0
 FILTER_DIMENSIONS = ['market', 'period', 'operator', 'vendor', 'test_name', 'region', 'city', 'session_type', 'direction', 'technology_primary', 'source_sheet']
 FILTER_DIMENSIONS_BY_KIND = {
     'voice': ['market', 'operator', 'vendor', 'region', 'city', 'session_type', 'technology_primary', 'source_sheet'],
@@ -428,6 +433,53 @@ def close_active_workspace() -> None:
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
     active_workspace = None
+
+
+def workspace_disk_usage(workspace: Workspace) -> int:
+    """Return the bytes used by a managed workspace, with a short-lived cache."""
+    root = workspace.database_path.parent
+    cache_key = str(root.resolve())
+    now = monotonic()
+    with _workspace_size_cache_lock:
+        cached = _workspace_size_cache.get(cache_key)
+        if cached and now - cached[0] < _WORKSPACE_SIZE_CACHE_SECONDS:
+            return cached[1]
+
+    total = 0
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_symlink():
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            pending.append(Path(entry.path))
+                        elif entry.is_file(follow_symlinks=False):
+                            total += entry.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        # A concurrent upload, report job or cleanup can move
+                        # a file while the display value is being calculated.
+                        continue
+        except OSError:
+            continue
+
+    with _workspace_size_cache_lock:
+        _workspace_size_cache[cache_key] = (now, total)
+    return total
+
+
+def format_workspace_size(size_bytes: int) -> str:
+    if size_bytes >= 1024 ** 3:
+        value = size_bytes / (1024 ** 3)
+        unit = 'GB'
+    else:
+        value = size_bytes / (1024 ** 2)
+        unit = 'MB'
+    formatted = f'{value:.1f}'.rstrip('0').rstrip('.')
+    return f'{formatted} {unit}'
 
 
 def migrate_uk_slides_templates_to_global_config() -> None:
@@ -1400,6 +1452,8 @@ def super_admin_user(user: SessionUser = Depends(current_user)) -> SessionUser:
 
 def render_template(request: Request, template_name: str, context: dict[str, Any], status_code: int = 200) -> HTMLResponse:
     template_user = context.get('user')
+    header_workspaces = workspace_registry.list() if isinstance(template_user, SessionUser) else []
+    header_workspace_access = workspace_access_map(template_user, header_workspaces) if isinstance(template_user, SessionUser) else {}
     payload = {
         'request': request,
         'app_name': __app_name__,
@@ -1408,7 +1462,10 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'asset_version': asset_version,
         'static_path': lambda asset_path: str(request.app.url_path_for('static', path=asset_path)),
         'active_workspace': active_workspace,
-        'header_workspaces': accessible_workspaces(template_user) if isinstance(template_user, SessionUser) else [],
+        'active_workspace_size': format_workspace_size(workspace_disk_usage(active_workspace)) if active_workspace else None,
+        'header_workspaces': header_workspaces,
+        'header_workspace_access': header_workspace_access,
+        'header_workspace_sizes': {item.id: format_workspace_size(workspace_disk_usage(item)) for item in header_workspaces},
         **context,
     }
     response = templates.TemplateResponse(request, template_name, payload, status_code=status_code)
@@ -2424,6 +2481,9 @@ def workspace(
         {**dict(row), 'workspace_ids': repository.list_user_workspace_ids(int(row['id']))}
         for row in (repository.list_users() if user.role in {'admin', 'super-admin'} else [])
     ]
+    workspaces = workspace_registry.list()
+    workspace_access = workspace_access_map(user, workspaces)
+    workspace_sizes = {item.id: format_workspace_size(workspace_disk_usage(item)) for item in workspaces}
     if not active_workspace:
         return render_template(
             request,
@@ -2433,7 +2493,7 @@ def workspace(
                 'input_kind': None, 'input_kind_options': [], 'workspace_logs': [], 'error': None,
                 'has_processing': False, 'vodafone_mapping_datasets': [], 'three_mapping_datasets': [],
                 'mappable_cdr_datasets': [], 'clearable_cdr_datasets': [],
-                'workspaces': accessible_workspaces(user), 'workspace_users': workspace_users, 'workspace_notice': request.query_params.get('workspace_notice'),
+                'workspaces': workspaces, 'workspace_access': workspace_access, 'workspace_sizes': workspace_sizes, 'workspace_users': workspace_users, 'workspace_notice': request.query_params.get('workspace_notice'),
                 'workspace_warning': request.query_params.get('workspace_warning'),
                 'workspace_error': request.query_params.get('workspace_error'),
             },
@@ -2473,7 +2533,9 @@ def workspace(
             'three_mapping_datasets': three_mapping_datasets,
             'mappable_cdr_datasets': mappable_cdr_datasets,
             'clearable_cdr_datasets': clearable_cdr_datasets,
-            'workspaces': accessible_workspaces(user),
+            'workspaces': workspaces,
+            'workspace_access': workspace_access,
+            'workspace_sizes': workspace_sizes,
             'workspace_users': workspace_users,
             'active_workspace': active_workspace,
             'workspace_notice': request.query_params.get('workspace_notice'),
@@ -2498,6 +2560,17 @@ def accessible_workspaces(user: SessionUser) -> list[Workspace]:
     if user.role == 'super-admin':
         return workspaces
     return [item for item in workspaces if repository.user_has_workspace_access(user.username, item.id)]
+
+
+def workspace_access_map(user: SessionUser, workspaces: list[Workspace]) -> dict[str, bool]:
+    if user.role == 'super-admin':
+        return {workspace.id: True for workspace in workspaces}
+    return {workspace.id: repository.user_has_workspace_access(user.username, workspace.id) for workspace in workspaces}
+
+
+def require_workspace_access(user: SessionUser, workspace_id: str) -> None:
+    if user.role != 'super-admin' and not repository.user_has_workspace_access(user.username, workspace_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='You do not have access to that workspace.')
 
 
 @app.post('/workspace/select')
@@ -2542,6 +2615,7 @@ def create_workspace(name: str = Form(...), usernames: list[str] = Form(default=
 @app.post('/workspace/rename')
 def rename_workspace(workspace_id: str = Form(...), name: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
     require_workspace_admin(user)
+    require_workspace_access(user, workspace_id)
     try:
         workspace = workspace_registry.rename(workspace_id, name)
         if active_workspace and active_workspace.id == workspace.id:
@@ -2551,9 +2625,41 @@ def rename_workspace(workspace_id: str = Form(...), name: str = Form(...), user:
     return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": f"Renamed workspace to {workspace.name}."})}', status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.post('/workspace/save')
+def save_workspace(
+    request: Request,
+    workspace_id: str = Form(...),
+    name: str = Form(...),
+    usernames: list[str] = Form(default=[]),
+    user: SessionUser = Depends(current_user),
+) -> Response:
+    require_workspace_admin(user)
+    require_workspace_access(user, workspace_id)
+    try:
+        current_workspace = workspace_registry.get(workspace_id)
+        if not current_workspace:
+            raise ValueError('Workspace not found.')
+        # Saving access must not attempt a filesystem rename when the name is
+        # unchanged: the managed directory already exists by design.
+        workspace = current_workspace if name == current_workspace.name else workspace_registry.rename(workspace_id, name)
+        if user.role == 'super-admin':
+            repository.set_workspace_user_access(workspace.id, usernames)
+        if active_workspace and active_workspace.id == workspace.id:
+            activate_workspace(workspace.id)
+    except ValueError as exc:
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JSONResponse({'detail': str(exc)}, status_code=400)
+        return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
+    notice = 'Workspace name and access updated.' if user.role == 'super-admin' else 'Workspace name updated.'
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JSONResponse({'ok': True, 'notice': notice, 'workspace': {'id': workspace.id, 'name': workspace.name}})
+    return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": notice})}', status_code=status.HTTP_303_SEE_OTHER)
+
+
 @app.post('/workspace/duplicate')
 def duplicate_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
     require_workspace_admin(user)
+    require_workspace_access(user, workspace_id)
     try:
         workspace = workspace_registry.duplicate(workspace_id)
     except ValueError as exc:
@@ -2568,6 +2674,7 @@ def delete_workspace(
     user: SessionUser = Depends(current_user),
 ) -> Response:
     require_workspace_admin(user)
+    require_workspace_access(user, workspace_id)
     if active_workspace and active_workspace.id == workspace_id:
         return RedirectResponse('/workspace?workspace_warning=Close+the+workspace+before+removing+it.', status_code=status.HTTP_303_SEE_OTHER)
     try:

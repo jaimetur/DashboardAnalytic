@@ -966,6 +966,20 @@ document.querySelectorAll('.collapsible-panel').forEach((panel) => {
   panel.addEventListener('toggle', updateChip);
 });
 
+(() => {
+  const workspaceSwitchers = document.querySelectorAll('.topnav-workspace-switcher');
+  if (!workspaceSwitchers.length) return;
+  document.addEventListener('click', (event) => {
+    workspaceSwitchers.forEach((switcher) => {
+      if (switcher.open && !switcher.contains(event.target)) switcher.open = false;
+    });
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    workspaceSwitchers.forEach((switcher) => { switcher.open = false; });
+  });
+})();
+
 const loadingOverlay = document.getElementById('loading-overlay');
 const loadingTitle = document.getElementById('loading-title');
 const loadingCopy = document.getElementById('loading-copy');
