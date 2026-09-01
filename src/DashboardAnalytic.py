@@ -1632,18 +1632,22 @@ def _archive_workspace(archive: zipfile.ZipFile, workspace: Workspace, archive_p
 
 
 def export_archive_filename(target: str) -> str:
+    # The generated package is unique on the server, but a static download
+    # filename makes it too easy to re-import an older browser download.
+    # Include seconds so each visible download can be identified unambiguously.
+    generated_at = datetime.now().strftime('%Y%m%d-%H%M%S')
     if target == 'config':
-        return 'dashboard-analytic-config.zip'
+        return f'dashboard-analytic-config_{generated_at}.zip'
     if target == 'slides-templates':
-        return 'dashboard-analytic-slides-templates.zip'
+        return f'dashboard-analytic-slides-templates_{generated_at}.zip'
     if target == 'config-with-templates':
-        return 'dashboard-analytic-config-with-slides-templates.zip'
+        return f'dashboard-analytic-config-with-slides-templates_{generated_at}.zip'
     if target == 'full-environment':
-        return 'dashboard-analytic-full-environment.zip'
+        return f'dashboard-analytic-full-environment_{generated_at}.zip'
     if target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
         if workspace:
-            return f'{workspace.name}.zip'
+            return f'{workspace.name}_{generated_at}.zip'
     raise ValueError('Select a valid export option.')
 
 
