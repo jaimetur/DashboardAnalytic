@@ -14,6 +14,7 @@
 - Added multi-workspace lifecycle management (create, open, close, rename, duplicate and remove).
 - Added Admin Database Management with table browsing, row editing/deletion and Excel-style filters.
 - Added Admin Import/Export ZIP packages for configuration, templates, workspaces and full environments.
+- Restricted configuration and workspace Import/Export to `super-admin`; `admin` users can transfer only the shared Slides Templates package.
 - Added self-service password changes from the header User badge.
 - Added processed-dataset preview and direct Preview/Show Dashboard actions from workspace and Admin.
 - Added Generated Reports Jobs with Download and Delete actions, progress tracking and report metadata.

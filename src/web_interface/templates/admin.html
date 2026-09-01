@@ -268,13 +268,15 @@
     {% endif %}
   </article>
 
-  <article class="panel import-export-panel">
-    <div class="section-head tight-head">
+  <details class="panel collapsible-panel import-export-panel" open data-panel-state-key="admin:import-export">
+    <summary class="collapsible-summary">
       <div>
         <p class="eyebrow">Portability and backup</p>
         <h2>Import/Export</h2>
       </div>
-    </div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <div class="import-export-content">
     {% if import_export_notice %}<div class="alert import-export-notice">{{ import_export_notice }}</div>{% endif %}
     {% if import_export_error %}<div class="alert import-export-error">{{ import_export_error }}</div>{% endif %}
     <div class="import-export-grid">
@@ -285,7 +287,7 @@
             {% for option in export_options %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
           </select>
         </label>
-        <p class="form-note">Choose whether to package application configuration only, configuration with the shared Slides Templates library, one selected workspace with its database and files, or the complete environment with every workspace.</p>
+        <p class="form-note">{% if user.role == 'super-admin' %}Choose configuration, Slides Templates, one workspace or the complete environment.{% else %}Only shared Slides Templates can be exported by an admin account.{% endif %}</p>
         <button type="submit" class="import-export-action">Export ZIP</button>
       </form>
       <form class="form-stack" action="/admin/import-export/import" method="post" enctype="multipart/form-data" data-import-export-form>
@@ -294,11 +296,12 @@
           <input type="file" name="package" accept=".zip,application/zip" required>
         </label>
         <input type="hidden" name="confirmed_import" value="0" data-import-export-confirmed>
-        <p class="form-note">The package manifest identifies configuration, workspaces and full environments automatically. A warning explains what will be overwritten before import proceeds; configuration imports preserve this deployment's workspace registry.</p>
+        <p class="form-note">{% if user.role == 'super-admin' %}The package manifest identifies templates, configuration, workspaces and full environments automatically. A warning explains what will be overwritten before import proceeds.{% else %}Only Slides Templates packages can be imported by an admin account.{% endif %}</p>
         <button type="submit" class="import-export-action">Import ZIP</button>
       </form>
     </div>
-  </article>
+    </div>
+  </details>
 
   <details class="panel collapsible-panel database-management-panel" open data-panel-state-key="admin:database-management">
     <summary class="collapsible-summary">

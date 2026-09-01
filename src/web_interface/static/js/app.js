@@ -1797,6 +1797,12 @@ function importWarningDetails(payload) {
         message: 'This will overwrite the configuration files included in the package. The local workspace registry and existing workspaces will be preserved.',
       };
   }
+  if (kind === 'slides-templates') {
+    return {
+      title: 'Overwrite Slides Templates?',
+      message: 'This will overwrite the shared Slides Templates included in the package.',
+    };
+  }
   if (kind === 'workspace') {
     const name = collisions[0];
     return name

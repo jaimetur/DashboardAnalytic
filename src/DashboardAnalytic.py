@@ -1633,6 +1633,8 @@ def _archive_workspace(archive: zipfile.ZipFile, workspace: Workspace, archive_p
 def export_archive_filename(target: str) -> str:
     if target == 'config':
         return 'dashboard-analytic-config.zip'
+    if target == 'slides-templates':
+        return 'dashboard-analytic-slides-templates.zip'
     if target == 'config-with-templates':
         return 'dashboard-analytic-config-with-slides-templates.zip'
     if target == 'full-environment':
@@ -1670,6 +1672,15 @@ def build_export_archive_file(target: str, destination: Path) -> str:
                     _archive_file(archive, path, f'config/{path.name}')
             if include_templates:
                 _archive_tree(archive, settings.slides_templates_dir, 'config/slides-templates')
+        elif target == 'slides-templates':
+            manifest = {
+                'format': ARCHIVE_FORMAT,
+                'version': ARCHIVE_VERSION,
+                'kind': 'slides-templates',
+                'includes_slides_templates': True,
+            }
+            archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
+            _archive_tree(archive, settings.slides_templates_dir, 'slides-templates')
         elif target.startswith('workspace:'):
             workspace = workspace_registry.get(target.removeprefix('workspace:'))
             if not workspace:
@@ -1768,6 +1779,7 @@ def start_export_job(target: str) -> dict[str, Any]:
     destination = package_dir / f'{job_id}.zip'
     job = {
         'id': job_id,
+        'target': target,
         'status': 'queued',
         'filename': filename,
         'path': str(destination),
@@ -1849,6 +1861,18 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
     return workspace
 
 
+def import_slides_templates_archive(staging_root: Path) -> None:
+    templates_payload = staging_root / 'slides-templates'
+    if not templates_payload.exists():
+        raise ValueError('The Slides Templates archive does not contain template files.')
+    for path in templates_payload.rglob('*'):
+        if not path.is_file():
+            continue
+        target = settings.slides_templates_dir / path.relative_to(templates_payload)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+
+
 def import_config_archive(staging_root: Path, manifest: dict[str, Any]) -> None:
     config_payload = staging_root / 'config'
     if not config_payload.exists():
@@ -1884,6 +1908,15 @@ def import_workspace_collisions(manifest: dict[str, Any]) -> list[str]:
         entries = [entries]
     existing_names = {workspace.name.casefold(): workspace.name for workspace in workspace_registry.list()}
     return [existing_names[str(entry.get('name')).casefold()] for entry in entries if isinstance(entry, dict) and str(entry.get('name') or '').casefold() in existing_names]
+
+
+def require_import_export_permission(user: SessionUser, target: str) -> None:
+    if user.role == 'super-admin' or target == 'slides-templates':
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail='Only super-admins can import or export configuration and workspaces.',
+    )
 
 
 def would_remove_last_active_admin(target_user, normalized_role: str, will_be_active: bool) -> bool:
@@ -1964,15 +1997,18 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             database_table_groups['Workspace Tables'].append({'name': table_name, 'label': friendly_tables[table_name]})
         else:
             database_table_groups['Other tables'].append({'name': table_name, 'label': table_name})
-    export_options = [
-        {'value': 'config', 'label': 'Only Config'},
-        {'value': 'config-with-templates', 'label': 'Config + Slides Templates'},
-        {'value': 'full-environment', 'label': 'Full Environment (Config + Slides Templates + All Workspaces)'},
-        *[
-            {'value': f'workspace:{workspace.id}', 'label': f'Workspace: {workspace.name}'}
-            for workspace in workspace_registry.list()
-        ],
-    ]
+    export_options = [{'value': 'slides-templates', 'label': 'Only Slides Templates'}]
+    if user.role == 'super-admin':
+        export_options = [
+            {'value': 'config', 'label': 'Only Config'},
+            *export_options,
+            {'value': 'config-with-templates', 'label': 'Config + Slides Templates'},
+            {'value': 'full-environment', 'label': 'Full Environment (Config + Slides Templates + All Workspaces)'},
+            *[
+                {'value': f'workspace:{workspace.id}', 'label': f'Workspace: {workspace.name}'}
+                for workspace in workspace_registry.list()
+            ],
+        ]
     admin_users = [
         {**dict(row), 'created_at': format_local_timestamp(row['created_at']), 'workspace_ids': repository.list_user_workspace_ids(int(row['id']))}
         for row in repository.list_users()
@@ -3495,6 +3531,7 @@ def export_admin_package(
     export_target: str = Query(...),
     user: SessionUser = Depends(admin_user),
 ) -> FileResponse:
+    require_import_export_permission(user, export_target)
     try:
         _cleanup_expired_export_packages()
         destination = export_package_dir() / f'legacy-{uuid4().hex}.zip'
@@ -3509,6 +3546,7 @@ def create_admin_export_job(
     export_target: str = Form(...),
     user: SessionUser = Depends(admin_user),
 ) -> JSONResponse:
+    require_import_export_permission(user, export_target)
     try:
         job = start_export_job(export_target)
     except ValueError as exc:
@@ -3524,6 +3562,7 @@ def create_admin_export_job(
 def get_admin_export_job(job_id: str, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     if not (payload := export_job_payload(job_id)):
         raise HTTPException(status_code=404, detail='The export job no longer exists. Start a new export.')
+    require_import_export_permission(user, str(payload['target']))
     return JSONResponse(payload)
 
 
@@ -3531,6 +3570,7 @@ def get_admin_export_job(job_id: str, user: SessionUser = Depends(admin_user)) -
 def download_admin_export_job(job_id: str, user: SessionUser = Depends(admin_user)) -> FileResponse:
     if not (payload := export_job_payload(job_id)):
         raise HTTPException(status_code=404, detail='The export job no longer exists. Start a new export.')
+    require_import_export_permission(user, str(payload['target']))
     if payload['status'] != 'ready':
         raise HTTPException(status_code=409, detail='The export package is still being prepared.')
     with EXPORT_JOBS_LOCK:
@@ -3548,8 +3588,9 @@ async def inspect_admin_import_package(
     try:
         manifest = read_import_manifest(await package.read())
         kind = str(manifest.get('kind') or '')
-        if kind not in {'config', 'workspace', 'full-environment'}:
+        if kind not in {'config', 'workspace', 'full-environment', 'slides-templates'}:
             raise ValueError('The export package type is not supported.')
+        require_import_export_permission(user, kind)
         return JSONResponse({
             'kind': kind,
             'includes_slides_templates': bool(manifest.get('includes_slides_templates')),
@@ -3576,6 +3617,7 @@ async def import_admin_package(
             staging_root = Path(temporary_dir)
             _safe_extract_archive(archive, staging_root)
             kind = manifest.get('kind')
+            require_import_export_permission(user, str(kind))
             if kind == 'workspace':
                 workspace_info = manifest.get('workspace')
                 workspace = import_workspace_archive(staging_root / 'workspace', workspace_info if isinstance(workspace_info, dict) else None, replace_existing=True)
@@ -3583,6 +3625,9 @@ async def import_admin_package(
             elif kind == 'config':
                 import_config_archive(staging_root, manifest)
                 notice = 'Configuration imported successfully. Local workspaces were preserved.'
+            elif kind == 'slides-templates':
+                import_slides_templates_archive(staging_root)
+                notice = 'Slides Templates imported successfully.'
             elif kind == 'full-environment':
                 import_config_archive(staging_root, manifest)
                 entries = manifest.get('workspaces')

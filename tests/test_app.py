@@ -107,7 +107,7 @@ def test_login_page_hides_default_access_section_when_no_default_users_exist(cli
 def test_admin_import_export_packages_detect_configuration_and_workspaces(client) -> None:
     import src.DashboardAnalytic as app_module
 
-    login(client)
+    login_super(client)
     admin_response = client.get('/admin')
     assert admin_response.status_code == 200
     assert 'Import/Export' in admin_response.text
@@ -168,7 +168,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
 
 
 def test_admin_export_job_creates_a_disk_backed_download(client) -> None:
-    login(client)
+    login_super(client)
     started = client.post('/admin/import-export/export/jobs', data={'export_target': 'config'})
     assert started.status_code == 200
     status_url = started.json()['status_url']
@@ -186,6 +186,36 @@ def test_admin_export_job_creates_a_disk_backed_download(client) -> None:
     assert download.status_code == 200
     with zipfile.ZipFile(BytesIO(download.content)) as archive:
         assert json.loads(archive.read('manifest.json'))['kind'] == 'config'
+
+
+def test_admin_import_export_is_limited_to_slides_templates(client) -> None:
+    login(client)
+
+    panel = client.get('/admin')
+    assert panel.status_code == 200
+    assert 'data-panel-state-key="admin:import-export"' in panel.text
+    assert 'Only Slides Templates' in panel.text
+    assert 'Only Config' not in panel.text
+
+    blocked_export = client.get('/admin/import-export/export?export_target=config')
+    assert blocked_export.status_code == 403
+
+    templates_export = client.get('/admin/import-export/export?export_target=slides-templates')
+    assert templates_export.status_code == 200
+    with zipfile.ZipFile(BytesIO(templates_export.content)) as archive:
+        assert json.loads(archive.read('manifest.json'))['kind'] == 'slides-templates'
+
+    config_package = BytesIO()
+    with zipfile.ZipFile(config_package, 'w') as archive:
+        archive.writestr('manifest.json', json.dumps({
+            'format': 'dashboard-analytic-export', 'version': 1, 'kind': 'config',
+        }))
+    config_package.seek(0)
+    blocked_import = client.post(
+        '/admin/import-export/inspect',
+        files={'package': ('config.zip', config_package, 'application/zip')},
+    )
+    assert blocked_import.status_code == 403
 
 
 def test_admin_can_login_upload_and_see_automatic_dashboard(client) -> None:
