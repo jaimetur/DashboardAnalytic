@@ -54,6 +54,7 @@
 - Fixed Admin loading when no default templates or workspace database is present.
 - Fixed host-specific absolute storage paths in the checked-in configuration from breaking CI or deployments where that filesystem root is unavailable.
 - Standardised timestamp persistence and display on the server's local timezone across dataset queues, profiles, logs, users, workspaces and report jobs.
+- Configured Docker timezone handling through `TZ` (default `Europe/Madrid`) so NAS timestamps match the intended local time.
 
 #### 📚 Documentation:
 - Reworked the Help, README and configuration documentation for the current workspace, template, reporting and transfer workflows.

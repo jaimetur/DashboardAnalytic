@@ -6,6 +6,8 @@ services:
     container_name: ${CONTAINER_NAME}-dev
     env_file:
       - .env
+    environment:
+      TZ: ${TZ:-Europe/Madrid}
     ports:
       - "${APP_DEV_PORT}:7278"
     volumes:

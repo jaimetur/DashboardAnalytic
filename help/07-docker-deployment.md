@@ -2,6 +2,8 @@
 
 Docker Compose is the supported way to run Dashboard Analytic as a service. The compose files use `docker/.env` for runtime configuration. The Docker image includes the bundled PowerPoint master at `assets/ppt-templates/Template_CDR_analysis.pptx`.
 
+Set the `TZ` variable in `docker/.env` to the server's IANA timezone (the default is `Europe/Madrid`). This controls the timezone used by the container for timestamps shown and stored by the application.
+
 ## Development
 
 Run the development stack with a rebuild when dependencies or source code change:
