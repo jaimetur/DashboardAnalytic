@@ -26,7 +26,7 @@
       {% if user %}
       <nav class="topnav">
         <span class="topnav-link topnav-workspace-badge">Active workspace: {{ active_workspace.name if active_workspace else 'None' }}</span>
-        <span class="topnav-link topnav-user-badge topnav-user-badge-{{ user.role }}">User: {{ user.username }}</span>
+        <span role="button" tabindex="0" data-change-password-open><span class="topnav-link topnav-user-badge topnav-user-badge-{{ user.role }}">User: {{ user.username }}</span></span>
         <a class="topnav-link topnav-link-logout" href="/logout">Logout</a>
       </nav>
       {% endif %}
@@ -101,6 +101,24 @@
       </div>
     </div>
   </div>
+  {% if user %}
+  <div id="change-password-overlay" class="confirm-overlay" hidden>
+    <div class="confirm-panel" role="dialog" aria-modal="true" aria-labelledby="change-password-title">
+      <p class="eyebrow">Account security</p>
+      <h3 id="change-password-title">Change password</h3>
+      <form data-change-password-form>
+        <label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>
+        <label>New password<input type="password" name="new_password" autocomplete="new-password" required></label>
+        <label>Repeat new password<input type="password" name="new_password_confirmation" autocomplete="new-password" required></label>
+        <p class="form-note" data-change-password-error hidden></p>
+        <div class="confirm-actions">
+          <button type="button" class="ghost-link confirm-cancel change-password-cancel" data-change-password-cancel>Cancel</button>
+          <button type="submit" class="action-link-primary">Change password</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
   <script src="{{ static_path('js/app.js') }}?v={{ asset_version('js/app.js') }}"></script>
   {% block extra_scripts %}{% endblock %}
 </body>

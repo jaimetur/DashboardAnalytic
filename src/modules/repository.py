@@ -567,6 +567,15 @@ class Repository:
                     (username, role, int(active), user_id),
                 )
 
+    def update_password(self, username: str, password: str) -> None:
+        with self.connection() as conn:
+            result = conn.execute(
+                "UPDATE users SET password_hash = ? WHERE username = ?",
+                (hash_password(password), username),
+            )
+            if result.rowcount != 1:
+                raise ValueError('User not found')
+
     def delete_user(self, user_id: int) -> None:
         with self.connection() as conn:
             cursor = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))

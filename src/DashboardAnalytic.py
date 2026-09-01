@@ -1330,6 +1330,31 @@ def current_user(request: Request) -> SessionUser:
     return user
 
 
+@app.post('/account/change-password')
+def change_password(
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    new_password_confirmation: str = Form(...),
+    user: SessionUser = Depends(current_user),
+) -> JSONResponse:
+    if not current_password or not new_password:
+        raise HTTPException(status_code=400, detail='All password fields are required.')
+    if new_password != new_password_confirmation:
+        raise HTTPException(status_code=400, detail='The new passwords do not match.')
+    record = repository.get_user(user.username)
+    if not record or not record.active:
+        raise HTTPException(status_code=403, detail='The current user is not active.')
+    try:
+        valid_current = verify_password(current_password, record.password_hash)
+    except (TypeError, ValueError):
+        valid_current = False
+    if not valid_current:
+        raise HTTPException(status_code=400, detail='The current password is incorrect.')
+    repository.update_password(user.username, new_password)
+    repository.add_log(user.username, 'change_password', 'Password changed from the account badge.')
+    return JSONResponse({'changed': True})
+
+
 def admin_user(user: SessionUser = Depends(current_user)) -> SessionUser:
     if user.role != 'admin':
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Admin access required')

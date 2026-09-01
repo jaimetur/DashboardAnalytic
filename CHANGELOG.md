@@ -46,6 +46,7 @@
 - Made Admin ZIP exports disk-backed background jobs with direct, resumable browser downloads, selective compression for already-compressed files and 24-hour cleanup of temporary packages; this supports very large workspaces without loading the archive into browser or server memory.
 - Show an immediate upload-progress dialog when importing a ZIP, before a large package reaches the server for overwrite inspection.
 - Standardized configurable storage roots as `APP_CONFIG_DIR`, `APP_DATA_DIR` and `APP_ASSETS_DIR`; all database, template and workspace paths now derive from these three roots.
+- Added self-service password changes from the header User badge with current-password verification, matching confirmation and a success dialog.
 
 #### 🐛 Bug fixes:
 - Fixed Slides Templates Editor row normalisation so grouping, sorting and visual merging retain every chart-definition field instead of clearing them in the browser.

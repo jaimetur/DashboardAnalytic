@@ -2028,6 +2028,38 @@ function showInfoDialog(message, options = {}) {
   infoClose.focus();
 }
 
+(() => {
+  const openButton = document.querySelector('[data-change-password-open]');
+  const overlay = document.getElementById('change-password-overlay');
+  const form = document.querySelector('[data-change-password-form]');
+  const cancel = document.querySelector('[data-change-password-cancel]');
+  const error = document.querySelector('[data-change-password-error]');
+  if (!openButton || !overlay || !form || !cancel) return;
+  const close = () => { overlay.hidden = true; form.reset(); if (error) error.hidden = true; };
+  const open = () => { overlay.hidden = false; form.querySelector('input')?.focus(); };
+  openButton.addEventListener('click', open);
+  openButton.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } });
+  cancel.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (error) error.hidden = true;
+    const submit = form.querySelector('button[type="submit"]');
+    if (submit) submit.disabled = true;
+    try {
+      const response = await fetch('/account/change-password', {method: 'POST', body: new FormData(form), headers: {'Accept': 'application/json'}});
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'The password could not be changed.');
+      close();
+      showInfoDialog('Your password has been changed successfully.', {title: 'Password changed', tone: 'info'});
+    } catch (requestError) {
+      if (error) { error.textContent = requestError.message; error.hidden = false; }
+    } finally {
+      if (submit) submit.disabled = false;
+    }
+  });
+})();
+
 function clearCatalogueImportQuery() {
   const url = new URL(window.location.href);
   url.searchParams.delete('catalogue_notice');
