@@ -618,7 +618,7 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert 'name="slides_templates"' in page.text
     assert 'value="nsa:NSA Slide Template"' in page.text
     assert 'data-report-job-form' in page.text
-    assert 'Generated Report Jobs' in page.text
+    assert 'Generated Reports Jobs' in page.text
 
 
 def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client) -> None:
@@ -671,7 +671,7 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
     job = wait_for_report_job(client, report.json()['job_id'])
     assert job['status'] == 'ready'
     assert job['slides'] == 17
-    assert re.search(r'NetCheck_CDR_NSA_single_vendor_\d{8}-\d{4}_.+\.pptx', job['report_name'])
+    assert re.search(r'NetCheck_CDR_NSA_single_vendor_\d{8}-\d{6}\.pptx', job['report_name'])
     download = client.get(job['download_url'])
     assert download.status_code == 200
     assert download.headers['content-type'].startswith('application/vnd.openxmlformats-officedocument.presentationml.presentation')

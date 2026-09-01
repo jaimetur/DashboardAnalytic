@@ -10,16 +10,16 @@ from src.modules.workspaces import WorkspaceRegistry
 def test_storage_paths_file_loads_roots_without_overriding_environment(tmp_path: Path) -> None:
     paths_file = tmp_path / 'storage-paths.conf'
     paths_file.write_text(
-        'CONFIG_DIR = /shared/config\nDATA_DIR = /shared/data\nASSETS_DIR = assets\n', encoding='utf-8'
+        'APP_CONFIG_DIR = /shared/config\nAPP_DATA_DIR = /shared/data\nAPP_ASSETS_DIR = assets\n', encoding='utf-8'
     )
-    environment = {'DATA_DIR': '/deployment/data'}
+    environment = {'APP_DATA_DIR': '/deployment/data'}
 
     load_storage_paths(paths_file, environment)
 
     assert environment == {
-        'CONFIG_DIR': '/shared/config',
-        'DATA_DIR': '/deployment/data',
-        'ASSETS_DIR': 'assets',
+        'APP_CONFIG_DIR': '/shared/config',
+        'APP_DATA_DIR': '/deployment/data',
+        'APP_ASSETS_DIR': 'assets',
     }
 
 

@@ -2844,20 +2844,10 @@ def generate_netcheck_cdr_report(
         catalog_entries = load_catalog_csv(catalog_path, technology)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Unable to load the selected {technology.upper()} report template: {exc}") from exc
-    generated_at = datetime.now().strftime('%Y%m%d-%H%M')
-    # Keep a deterministic descriptor after the timestamp for compatibility
-    # with existing report consumers; unlike the former implementation it is
-    # not a random identifier.
-    file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{generated_at}_generated.pptx"
+    generated_at = datetime.now().strftime('%Y%m%d-%H%M%S')
+    file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{generated_at}.pptx"
     reports_dir = Path(settings.output_dir) / 'reports'
     destination = safe_join(reports_dir, file_name)
-    # Avoid replacing a report created in the same minute without adding a
-    # random suffix to normal report names.
-    duplicate_number = 2
-    while destination.exists():
-        file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{generated_at}_generated_{duplicate_number}.pptx"
-        destination = safe_join(reports_dir, file_name)
-        duplicate_number += 1
     dataset_ids = {kind: [int(dataset['id']) for dataset in datasets] for kind, datasets in selected.items()}
     report_id = repository.create_report_job(
         report_type='netcheck_cdr', technology=technology, scope=report_scope,
