@@ -30,6 +30,17 @@ def load_storage_paths(path: Path = STORAGE_PATHS_FILE, environ: dict[str, str] 
         value = value.strip('"\'')
         if not value:
             raise ValueError(f'{path.name}:{line_number} requires a path value.')
+        # The checked-in file may contain an absolute path from the machine
+        # where it was edited (for example ``/Users/...`` on macOS).  Ignore
+        # such a host-specific value when its filesystem root is unavailable,
+        # so CI and container deployments fall back to project-local paths.
+        configured_path = Path(os.path.expandvars(os.path.expanduser(value)))
+        if path.resolve() == STORAGE_PATHS_FILE.resolve() and configured_path.is_absolute():
+            top_level = configured_path.anchor
+            if len(configured_path.parts) > 1:
+                top_level = str(Path(configured_path.anchor) / configured_path.parts[1])
+            if not Path(top_level).exists():
+                continue
         environment.setdefault(key, value)
 
 

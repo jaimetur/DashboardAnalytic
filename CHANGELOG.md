@@ -52,6 +52,7 @@
 - Fixed multi-level grouping so child campaign bars remain nested under one operator label.
 - Fixed report-job filenames, output discovery and historical-job loading after migration to `output/reports`.
 - Fixed Admin loading when no default templates or workspace database is present.
+- Fixed host-specific absolute storage paths in the checked-in configuration from breaking CI or deployments where that filesystem root is unavailable.
 
 #### 📚 Documentation:
 - Reworked the Help, README and configuration documentation for the current workspace, template, reporting and transfer workflows.
