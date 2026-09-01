@@ -2692,6 +2692,20 @@ def _report_job_output_path(row: Any) -> Path | None:
     return None
 
 
+def _local_report_date(value: Any) -> str:
+    """Format persisted UTC timestamps in the server's local timezone."""
+    raw = str(value or '').strip()
+    if not raw:
+        return ''
+    try:
+        parsed = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone().strftime('%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return raw
+
+
 def serialize_report_job(row: Any) -> dict[str, Any]:
     """Expose a report job without relying on the mutable active workspace."""
     try:
@@ -2708,7 +2722,7 @@ def serialize_report_job(row: Any) -> dict[str, Any]:
     slide_count = int(row['slide_count'] or 0)
     return {
         'id': report_id,
-        'date': str(row['created_at']),
+        'date': _local_report_date(row['created_at']),
         'report_name': str(row['output_file']),
         'datasets': ' · '.join(labels) or 'Historical report',
         'template': str(row['template_name'] or '—'),
@@ -2825,8 +2839,8 @@ def generate_netcheck_cdr_report(
         catalog_entries = load_catalog_csv(catalog_path, technology)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Unable to load the selected {technology.upper()} report template: {exc}") from exc
-    generated_at = datetime.now().strftime('%Y%m%d-%H%M')
-    file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{generated_at}_{uuid4().hex[:8]}.pptx"
+    generated_at = datetime.now().strftime('%Y%m%d-%H%M%S')
+    file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{generated_at}.pptx"
     destination = safe_join(Path(settings.output_dir) / 'reports', file_name)
     dataset_ids = {kind: [int(dataset['id']) for dataset in datasets] for kind, datasets in selected.items()}
     report_id = repository.create_report_job(
