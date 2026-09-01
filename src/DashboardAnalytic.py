@@ -471,6 +471,11 @@ async def lifespan(_: FastAPI):
     )
     workspace_registry.initialize()
     repository.set_global_database(settings.database_path.parent / 'application.db')
+    # Versions before the global configuration database could leave copies of
+    # users/template metadata inside workspace databases.  Clean every
+    # workspace at startup so only config/application.db can own that state.
+    for workspace in workspace_registry.list():
+        Repository(workspace.database_path, repository.global_db_path).remove_legacy_global_tables()
     migrate_access = not repository.has_workspace_access_entries()
     for workspace in workspace_registry.list():
         if migrate_access:

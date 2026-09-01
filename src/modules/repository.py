@@ -171,6 +171,15 @@ class Repository:
         source = Path(snapshot_path)
         if not source.is_file():
             raise ValueError('The configuration archive does not contain application.db.')
+        try:
+            with sqlite3.connect(f'file:{source}?mode=ro', uri=True) as conn:
+                users_table = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'users'"
+                ).fetchone()
+        except sqlite3.DatabaseError as exc:
+            raise ValueError('The configuration archive contains an invalid application.db.') from exc
+        if not users_table:
+            raise ValueError('The configuration archive application.db does not contain the users table.')
         destination = self.global_db_path
         temporary = destination.with_name(f'.{destination.name}.importing')
         shutil.copy2(source, temporary)
@@ -178,7 +187,28 @@ class Repository:
             Path(f'{destination}{suffix}').unlink(missing_ok=True)
         temporary.replace(destination)
 
+    def remove_legacy_global_tables(self) -> list[str]:
+        """Remove global-only tables left inside an old workspace database.
+
+        Users, template registry data and workspace access are now owned only
+        by ``config/application.db``.  Old workspace copies must never be
+        available to confuse manual inspection or a future code path.
+        """
+        if self.db_path.resolve() == self.global_db_path.resolve() or not self.db_path.exists():
+            return []
+        removed: list[str] = []
+        with self.connection() as conn:
+            for table_name in ('user_workspace_access', 'report_templates', 'users'):
+                exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,)
+                ).fetchone()
+                if exists:
+                    conn.execute(f'DROP TABLE {self._quote_identifier(table_name)}')
+                    removed.append(table_name)
+        return removed
+
     def initialize(self) -> None:
+        self.remove_legacy_global_tables()
         with self.connection() as conn:
             conn.executescript(SCHEMA)
             self._ensure_dataset_profile_columns(conn)
