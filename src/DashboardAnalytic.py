@@ -527,7 +527,15 @@ async def lifespan(_: FastAPI):
     # users/template metadata inside workspace databases.  Clean every
     # workspace at startup so only config/application.db can own that state.
     for workspace in workspace_registry.list():
-        Repository(workspace.database_path, repository.global_db_path).remove_legacy_global_tables()
+        workspace_repository = Repository(workspace.database_path, repository.global_db_path)
+        workspace_repository.remove_legacy_global_tables()
+        interrupted_datasets, interrupted_reports = workspace_repository.fail_interrupted_background_jobs()
+        if interrupted_datasets or interrupted_reports:
+            workspace_repository.add_log(
+                'system',
+                'recover_interrupted_background_jobs',
+                json.dumps({'datasets': interrupted_datasets, 'reports': interrupted_reports}),
+            )
     migrate_access = not repository.has_workspace_access_entries()
     for workspace in workspace_registry.list():
         if migrate_access:
@@ -3043,6 +3051,7 @@ def serialize_report_job(row: Any) -> dict[str, Any]:
         'download_url': f'/reporting/jobs/{report_id}/download' if output_available else None,
         'open_url': f'/reporting/jobs/{report_id}/open' if output_available else None,
         'delete_url': f'/reporting/jobs/{report_id}/delete',
+        'retry_url': f'/reporting/jobs/{report_id}/retry' if status_value == 'failed' else None,
     }
 
 
@@ -3206,6 +3215,59 @@ def delete_report_job(report_id: int, user: SessionUser = Depends(current_user))
     if path is not None:
         path.unlink()
     return JSONResponse({'deleted': report_id})
+
+
+@app.post('/reporting/jobs/{report_id}/retry')
+def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=409, detail='Open a workspace before retrying a report.')
+    previous = repository.get_report_run(report_id)
+    if not previous:
+        raise HTTPException(status_code=404, detail='Report job not found.')
+    if str(previous['status'] or '').casefold() != 'failed':
+        raise HTTPException(status_code=400, detail='Only failed report jobs can be retried.')
+    try:
+        dataset_ids = json.loads(previous['dataset_ids_json'] or '{}')
+        selected = {
+            kind: _reporting_datasets([int(value) for value in dataset_ids.get(kind, [])], kind)
+            for kind in ('data', 'voice', 'speech')
+        }
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail='The failed report does not contain a valid dataset selection.') from exc
+    technology = str(previous['technology'] or '').strip().lower()
+    if technology not in TEMPLATE_NAMES:
+        raise HTTPException(status_code=400, detail='The failed report has an unsupported technology.')
+    multivendor = str(previous['scope'] or '').casefold() == 'multivendor'
+    if multivendor and not all(dataset.get('vendor_mapping_applied') for datasets in selected.values() for dataset in datasets):
+        raise HTTPException(status_code=400, detail='Retry requires every selected CDR to retain its Workspace Vendor mapping.')
+    template_option = next(
+        (option for option in report_catalogue_options(technology) if option['name'] == str(previous['template_name'] or '')),
+        None,
+    )
+    if not template_option:
+        raise HTTPException(status_code=400, detail='The Slides Template used by this report is no longer available.')
+    try:
+        catalog_entries = load_catalog_csv(template_option['path'], technology)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f'Unable to load the selected {technology.upper()} report template: {exc}') from exc
+    generated_at = datetime.now().strftime('%Y%m%d-%H%M%S')
+    file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{generated_at}.pptx"
+    destination = safe_join(Path(settings.output_dir) / 'reports', file_name)
+    new_report_id = repository.create_report_job(
+        report_type=str(previous['report_type'] or 'netcheck_cdr'), technology=technology, scope=str(previous['scope'] or 'single'),
+        data_dataset_id=selected['data'][0]['id'], voice_dataset_id=selected['voice'][0]['id'], speech_dataset_id=selected['speech'][0]['id'],
+        dataset_ids={kind: [int(dataset['id']) for dataset in datasets] for kind, datasets in selected.items()},
+        dataset_names=_report_dataset_names(selected), slide_count=len({entry.slide for entry in catalog_entries}),
+        template_name=template_option['name'], output_file=file_name, output_path=destination, created_by=user.username,
+    )
+    task_repository = Repository(Path(repository.db_path))
+    Thread(
+        target=_run_netcheck_report_job,
+        args=(new_report_id, task_repository, selected, technology, multivendor, catalog_entries, settings.ppt_templates_dir / TEMPLATE_NAMES[technology], destination, user.username, template_option['name']),
+        name=f'report-{new_report_id}', daemon=True,
+    ).start()
+    repository.add_log(user.username, 'retry_report_job', json.dumps({'previous_report_id': report_id, 'report_id': new_report_id}))
+    return JSONResponse({'job_id': new_report_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
 
 
 @app.get('/api/datasets/status')

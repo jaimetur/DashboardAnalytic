@@ -360,6 +360,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-job-download-button:hover:not(.action-link-disabled) { background: linear-gradient(145deg, #4f2d82, #7549b0); border-color: rgba(79, 45, 130, 0.78); color: #fff; box-shadow: 0 10px 22px rgba(79, 45, 130, 0.32); transform: translateY(-1px); }
 .report-job-download-button.action-link-disabled { background: linear-gradient(135deg, #e3e8ec, #d5dde4); border-color: rgba(126, 139, 152, 0.24); color: #7a8792; box-shadow: none; cursor: not-allowed; }
 .report-job-actions .danger-button { min-height: 0; width: 2rem; height: 2rem; padding: 0; font-size: 1rem; line-height: 1; font-weight: 800; }
+.report-job-retry-button { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; min-height: 0; padding: 0; border: 1px solid rgba(11, 122, 117, 0.62); border-radius: 999px; background: linear-gradient(145deg, #08736d, #20a797); color: #fff; font-size: 1.15rem; line-height: 1; font-weight: 800; box-shadow: 0 8px 18px rgba(8,115,109,0.18); }
+.report-job-retry-button:hover { background: linear-gradient(145deg, #075d58, #168b7e); border-color: rgba(7,93,88,0.78); box-shadow: 0 10px 22px rgba(7,93,88,0.3); transform: translateY(-1px); }
 .report-job-actions .danger-button { background: linear-gradient(145deg, #8d1d2c, #d24e5b); border-color: rgba(141, 29, 44, 0.70); color: #fff; }
 .reporting-stack .report-job-actions .danger-button:hover:not(:disabled) { background: linear-gradient(145deg, #711622, #b63a48); border-color: rgba(113, 22, 34, 0.82); color: #fff; box-shadow: 0 10px 22px rgba(113, 22, 34, 0.28); }
 .catalogue-editor-scroll-hint { margin-left: 0.2rem; color: #536b78; font-size: 0.78rem; font-weight: 700; }

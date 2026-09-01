@@ -1483,6 +1483,41 @@ class Repository:
         with self.connection() as conn:
             conn.execute(f"UPDATE report_runs SET {', '.join(assignments)} WHERE id = ?", values)
 
+    def fail_interrupted_background_jobs(self) -> tuple[list[int], list[int]]:
+        """Fail jobs left running when the application process stopped.
+
+        In-process workers cannot survive an application restart.  Persisted
+        queued/processing rows must therefore become retryable failures rather
+        than looking like live work forever.
+        """
+        message = 'Interrupted because the application restarted. Retry the job to run it again.'
+        now = local_now_iso()
+        with self.connection() as conn:
+            tables = {str(row['name']) for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
+            dataset_rows = conn.execute(
+                "SELECT dataset_id FROM dataset_profiles WHERE status IN ('queued', 'processing')"
+            ).fetchall() if 'dataset_profiles' in tables else []
+            report_rows = conn.execute(
+                "SELECT id FROM report_runs WHERE status IN ('queued', 'processing')"
+            ).fetchall() if 'report_runs' in tables else []
+            dataset_ids = [int(row['dataset_id']) for row in dataset_rows]
+            report_ids = [int(row['id']) for row in report_rows]
+            if dataset_ids:
+                placeholders = ','.join('?' for _ in dataset_ids)
+                conn.execute(
+                    f"UPDATE dataset_profiles SET status = 'failed', progress = 100, last_error = ?, processed_at = ?, updated_at = ? "
+                    f"WHERE dataset_id IN ({placeholders})",
+                    (message, now, now, *dataset_ids),
+                )
+            if report_ids:
+                placeholders = ','.join('?' for _ in report_ids)
+                conn.execute(
+                    f"UPDATE report_runs SET status = 'failed', progress = 100, last_error = ?, updated_at = ?, finished_at = ? "
+                    f"WHERE id IN ({placeholders})",
+                    (message, now, now, *report_ids),
+                )
+        return dataset_ids, report_ids
+
     def get_report_run(self, report_id: int) -> sqlite3.Row | None:
         with self.connection() as conn:
             return conn.execute("SELECT * FROM report_runs WHERE id = ?", (report_id,)).fetchone()

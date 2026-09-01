@@ -654,6 +654,8 @@ def test_workspace_remove_preserves_files_unless_explicitly_requested(client) ->
 
     login(client)
     first = app_module.workspace_registry.create('Preserve files')
+    admin = next(row for row in app_module.repository.list_users() if row['username'] == 'admin')
+    app_module.repository.set_user_workspace_access(int(admin['id']), [first.id])
     first_root = first.database_path.parent
     (first_root / 'input').mkdir()
     (first_root / 'input' / 'source.csv').write_text('value\n1\n', encoding='utf-8')
@@ -665,6 +667,7 @@ def test_workspace_remove_preserves_files_unless_explicitly_requested(client) ->
     assert not first.database_path.exists()
 
     second = app_module.workspace_registry.create('Delete files')
+    app_module.repository.set_user_workspace_access(int(admin['id']), [second.id])
     second_root = second.database_path.parent
     (second_root / 'output').mkdir()
     (second_root / 'output' / 'report.pptx').write_bytes(b'report')
@@ -677,6 +680,33 @@ def test_workspace_remove_preserves_files_unless_explicitly_requested(client) ->
     assert removed_with_files.status_code == 303
     assert app_module.workspace_registry.get(second.id) is None
     assert not second_root.exists()
+
+
+def test_interrupted_background_jobs_become_retryable_failures(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    source = app_module.settings.input_dir / 'interrupted.csv'
+    source.write_text('value\n1\n', encoding='utf-8')
+    dataset_id, _ = app_module.repository.add_dataset(source.name, str(source), 'admin')
+    app_module.repository.update_dataset_profile(dataset_id, status='processing', progress=45)
+    report_id = app_module.repository.create_report_job(
+        report_type='netcheck_cdr', technology='nsa', scope='single',
+        data_dataset_id=dataset_id, voice_dataset_id=dataset_id, speech_dataset_id=dataset_id,
+        dataset_ids={'data': [dataset_id], 'voice': [dataset_id], 'speech': [dataset_id]},
+        dataset_names={'data': [source.name], 'voice': [source.name], 'speech': [source.name]},
+        slide_count=1, template_name='NSA Slide Template', output_file='interrupted.pptx',
+        output_path=app_module.settings.output_dir / 'reports' / 'interrupted.pptx', created_by='admin',
+    )
+
+    datasets, reports = app_module.repository.fail_interrupted_background_jobs()
+
+    assert datasets == [dataset_id]
+    assert reports == [report_id]
+    assert app_module.repository.get_dataset(dataset_id)['status'] == 'failed'
+    report = app_module.repository.get_report_run(report_id)
+    assert report['status'] == 'failed'
+    assert 'application restarted' in report['last_error']
+    assert app_module.serialize_report_job(report)['retry_url'] == f'/reporting/jobs/{report_id}/retry'
 
 
 def test_workspace_management_lists_restricted_workspaces_without_enabling_actions(client) -> None:
@@ -1050,7 +1080,7 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     assert preview.status_code == 200
     assert '>3_Nokia<' in preview.text
 
-    workspace_after_mapping = client.get('/workspace').text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
+    workspace_after_mapping = client.get('/workspace').text.split('<table class="queue-table">', 1)[1].split('</tbody>', 1)[0]
     assert 'data-dataset-id="1"' in workspace_after_mapping
     assert 'Map Vendors</button>' not in workspace_after_mapping
     assert 'Clear Vendors</button>' in workspace_after_mapping
@@ -1061,7 +1091,7 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
 
     clear_response = client.post('/workspace/clear-vendors/1', follow_redirects=False)
     assert clear_response.status_code == 303
-    workspace_after_clear = client.get('/workspace').text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
+    workspace_after_clear = client.get('/workspace').text.split('<table class="queue-table">', 1)[1].split('</tbody>', 1)[0]
     assert 'Map Vendors</button>' in workspace_after_clear
     assert 'Clear Vendors</button>' not in workspace_after_clear
 

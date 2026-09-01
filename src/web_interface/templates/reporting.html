@@ -74,6 +74,7 @@
             <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%</span></div></td>
             <td><div class="report-job-actions">
               {% if job.download_url %}<a class="report-job-download-button" href="{{ job.download_url }}" download title="Download report" aria-label="Download report">↓</a>{% else %}<span class="report-job-download-button action-link-disabled" title="Report download unavailable" aria-label="Report download unavailable">↓</span>{% endif %}
+              {% if job.retry_url %}<button type="button" class="report-job-retry-button" title="Retry report" aria-label="Retry report" data-report-job-retry="{{ job.retry_url }}" data-report-job-name="{{ job.report_name }}">↻</button>{% endif %}
               <button type="button" class="danger-button" title="Delete report" aria-label="Delete report" data-report-job-delete="{{ job.delete_url }}" data-report-job-name="{{ job.report_name }}">✕</button>
             </div></td>
           </tr>
@@ -190,6 +191,17 @@
           disabled.setAttribute('aria-label', 'Report download unavailable');
           actions.append(disabled);
         }
+        if (job.retry_url) {
+          const retry = document.createElement('button');
+          retry.type = 'button';
+          retry.className = 'report-job-retry-button';
+          retry.textContent = '↻';
+          retry.title = 'Retry report';
+          retry.setAttribute('aria-label', 'Retry report');
+          retry.dataset.reportJobRetry = job.retry_url;
+          retry.dataset.reportJobName = job.report_name;
+          actions.append(retry);
+        }
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'danger-button';
@@ -244,6 +256,24 @@
       }
     });
     jobsBody?.addEventListener('click', async (event) => {
+      const retry = event.target.closest('[data-report-job-retry]');
+      if (retry) {
+        const accepted = await showConfirmDialog('Retry report \'' + retry.dataset.reportJobName + '\' ? A new report job will be created.', {title: 'Retry report', confirmLabel: 'Retry'});
+        if (!accepted) return;
+        showLoadingOverlay('Retrying PowerPoint report', 'The report will be generated on the server. You can leave this page while it runs.');
+        try {
+          const response = await fetch(retry.dataset.reportJobRetry, {method: 'POST', credentials: 'same-origin'});
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload.detail || 'Unable to retry the report.');
+          hideLoadingOverlay();
+          showInfoDialog('Report job #' + payload.job_id + ' has been queued.', {title: 'Report retry queued'});
+          pollReportJobs();
+        } catch (error) {
+          hideLoadingOverlay();
+          showInfoDialog(error.message || 'Unable to retry the report.', {title: 'Report retry failed', tone: 'error'});
+        }
+        return;
+      }
       const remove = event.target.closest('[data-report-job-delete]');
       if (!remove) return;
       const accepted = await showConfirmDialog(`Delete report '${remove.dataset.reportJobName}'? The generated file will also be removed.`, {title: 'Delete report', confirmLabel: 'Delete'});

@@ -41,6 +41,7 @@
 - Improved user administration with searchable workspace-access pickers, automatic validated saves, password masking/reset controls and role-labelled default access.
 - Improved Database Management labels by separating Config Tables from Workspace Tables.
 - Renamed template audit-log terminology from `catalogue` to `template`.
+- Mark interrupted dataset-processing and report-generation jobs as retryable failures after an application restart, with Report Job retry actions.
 
 #### 🐛 Bug fixes:
 - Preserved all chart-definition values during template migration, normalisation, sorting and visual merging; fixed defaults, renames, deletion protection, editor selection and report placeholder generation.
