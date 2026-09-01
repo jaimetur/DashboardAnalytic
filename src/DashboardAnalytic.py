@@ -2626,17 +2626,88 @@ def _combined_reporting_frame(
     technology: str,
     catalog_entries: list[Any],
     multivendor: bool,
+    task_repository: Repository | None = None,
 ) -> pd.DataFrame:
     """Load selected campaigns in one query from their shared CDR table."""
+    task_repository = task_repository or repository
     dataset_kind = str(datasets[0]['dataset_kind'])
     dataset_ids = [int(dataset['id']) for dataset in datasets]
     columns = reporting_query_columns(dataset_kind, catalog_entries, multivendor)
     for dataset_id in dataset_ids:
-        repository.copy_dataset_rows_to_reporting(dataset_id, dataset_kind, columns)
-    combined = repository.load_reporting_rows(dataset_kind, dataset_ids, columns)
+        task_repository.copy_dataset_rows_to_reporting(dataset_id, dataset_kind, columns)
+    combined = task_repository.load_reporting_rows(dataset_kind, dataset_ids, columns)
     if combined.empty:
         raise ValueError(f'The selected {dataset_kind.title()} CDRs have no materialised reporting rows.')
     return classify_sessions(combined, technology)
+
+
+def _report_dataset_names(selected: dict[str, list[dict[str, Any]]]) -> dict[str, list[str]]:
+    return {kind: [str(dataset['file_name']) for dataset in datasets] for kind, datasets in selected.items()}
+
+
+def serialize_report_job(row: Any) -> dict[str, Any]:
+    """Expose a report job without relying on the mutable active workspace."""
+    try:
+        dataset_names = json.loads(row['dataset_names_json'] or '{}')
+    except (TypeError, json.JSONDecodeError):
+        dataset_names = {}
+    labels = [
+        f"{kind.title()}: {', '.join(str(name) for name in names)}"
+        for kind, names in dataset_names.items() if names
+    ]
+    report_id = int(row['id'])
+    status_value = str(row['status'] or 'ready')
+    output_path = Path(str(row['output_path'] or ''))
+    output_available = status_value == 'ready' and output_path.is_file()
+    return {
+        'id': report_id,
+        'date': str(row['created_at']),
+        'report_name': str(row['output_file']),
+        'datasets': ' · '.join(labels) or 'Historical report',
+        'slides': int(row['slide_count'] or 0),
+        'status': status_value,
+        'progress': int(row['progress'] or 0),
+        'error': str(row['last_error'] or ''),
+        'download_url': f'/reporting/jobs/{report_id}/download' if output_available else None,
+        'open_url': f'/reporting/jobs/{report_id}/open' if output_available else None,
+        'delete_url': f'/reporting/jobs/{report_id}/delete',
+    }
+
+
+def _run_netcheck_report_job(
+    report_id: int, task_repository: Repository, selected: dict[str, list[dict[str, Any]]],
+    technology: str, multivendor: bool, catalog_entries: list[Any], template: Path,
+    destination: Path, username: str, catalogue_name: str,
+) -> None:
+    """Generate a report independently of the request/session that started it."""
+    try:
+        task_repository.update_report_job(report_id, status='processing', progress=5, last_error='')
+        frames: dict[str, pd.DataFrame] = {}
+        for index, (kind, datasets) in enumerate(selected.items(), start=1):
+            frames[kind] = _combined_reporting_frame(
+                datasets, technology, catalog_entries, multivendor, task_repository,
+            )
+            task_repository.update_report_job(report_id, status='processing', progress=10 + index * 15)
+        if multivendor:
+            frames = {kind: ensure_report_vendor_group(frame) for kind, frame in frames.items()}
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        task_repository.update_report_job(report_id, status='processing', progress=60)
+        render_cdr_report(destination, template, frames, technology, multivendor, catalog_entries)
+        task_repository.update_report_job(report_id, status='ready', progress=100, last_error='', finished=True)
+        task_repository.add_log(username, 'export_netcheck_cdr_report', json.dumps({
+            'report_id': report_id,
+            'datasets': {kind: [dataset['id'] for dataset in datasets] for kind, datasets in selected.items()},
+            'technology': technology,
+            'scope': 'multivendor' if multivendor else 'single',
+            'slides_templates': catalogue_name,
+            'file': destination.name,
+        }))
+    except Exception as exc:
+        destination.unlink(missing_ok=True)
+        task_repository.update_report_job(report_id, status='failed', progress=100, last_error=str(exc), finished=True)
+        task_repository.add_log(username, 'export_netcheck_cdr_report_failed', json.dumps({
+            'report_id': report_id, 'error': str(exc),
+        }))
 
 
 @app.get('/reporting', response_class=HTMLResponse)
@@ -2656,6 +2727,7 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
                 technology: report_catalogue_options(technology)
                 for technology in TEMPLATE_NAMES
             },
+            'report_jobs': [serialize_report_job(row) for row in repository.list_report_runs()],
         },
     )
 
@@ -2669,7 +2741,7 @@ def generate_netcheck_cdr_report(
     report_scope: str = Form('single'),
     slides_templates: str = Form(''),
     user: SessionUser = Depends(current_user),
-) -> FileResponse:
+) -> JSONResponse:
     technology = technology.strip().lower()
     if technology not in TEMPLATE_NAMES:
         raise HTTPException(status_code=400, detail='Choose NSA or SA for the CDR report.')
@@ -2687,9 +2759,6 @@ def generate_netcheck_cdr_report(
         for dataset in datasets
     ):
         raise HTTPException(status_code=400, detail='Multivendor reporting requires every selected Data, Voice and Speech CDR to have a Workspace Vendor mapping.')
-    if multivendor:
-        frames = {kind: ensure_report_vendor_group(frame) for kind, frame in frames.items()}
-
     template = settings.ppt_templates_dir / TEMPLATE_NAMES[technology]
     available_catalogues = {item['identifier']: item for item in report_catalogue_options(technology)}
     selected_catalogue = next((item for item in available_catalogues.values() if item['active']), None)
@@ -2705,38 +2774,65 @@ def generate_netcheck_cdr_report(
         catalog_entries = load_catalog_csv(catalog_path, technology)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Unable to load the selected {technology.upper()} report template: {exc}") from exc
-    try:
-        frames = {
-            kind: _combined_reporting_frame(datasets, technology, catalog_entries, multivendor)
-            for kind, datasets in selected.items()
-        }
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     generated_at = datetime.now().strftime('%Y%m%d-%H%M')
-    file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{generated_at}.pptx"
-    destination = safe_join(settings.export_dir, file_name)
-    try:
-        render_cdr_report(destination, template, frames, technology, multivendor, catalog_entries)
-    except (ValueError, FileNotFoundError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    repository.add_log(user.username, 'export_netcheck_cdr_report', json.dumps({
-        'datasets': {kind: [dataset['id'] for dataset in datasets] for kind, datasets in selected.items()},
-        'technology': technology,
-        'scope': report_scope,
-        'slides_templates': selected_catalogue['name'],
-        'file': destination.name,
-    }))
-    repository.add_report_run(
+    file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{generated_at}_{uuid4().hex[:8]}.pptx"
+    destination = safe_join(Path(settings.export_dir), file_name)
+    dataset_ids = {kind: [int(dataset['id']) for dataset in datasets] for kind, datasets in selected.items()}
+    report_id = repository.create_report_job(
         report_type='netcheck_cdr', technology=technology, scope=report_scope,
-        # The report-run table predates multi-campaign reports and keeps the
-        # first dataset of each type as its representative link. The audit log
-        # directly above retains the complete selections.
         data_dataset_id=selected['data'][0]['id'], voice_dataset_id=selected['voice'][0]['id'], speech_dataset_id=selected['speech'][0]['id'],
-        vodafone_mapping_dataset_id=None, three_mapping_dataset_id=None,
-        template_name=template.name, output_file=destination.name,
-        created_by=user.username,
+        dataset_ids=dataset_ids, dataset_names=_report_dataset_names(selected),
+        slide_count=len({entry.slide for entry in catalog_entries}), template_name=selected_catalogue['name'],
+        output_file=file_name, output_path=destination, created_by=user.username,
     )
-    return FileResponse(destination, filename=file_name, media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation')
+    task_repository = Repository(Path(repository.db_path))
+    Thread(
+        target=_run_netcheck_report_job,
+        args=(report_id, task_repository, selected, technology, multivendor, catalog_entries, template, destination, user.username, selected_catalogue['name']),
+        name=f'report-{report_id}', daemon=True,
+    ).start()
+    return JSONResponse({'job_id': report_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
+
+
+@app.get('/api/reporting/jobs')
+def reporting_jobs(user: SessionUser = Depends(current_user)) -> JSONResponse:
+    return JSONResponse({'jobs': [serialize_report_job(row) for row in repository.list_report_runs()]})
+
+
+def _report_job_file(report_id: int) -> tuple[dict[str, Any], Path]:
+    report = repository.get_report_run(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail='Report job not found.')
+    payload = serialize_report_job(report)
+    if payload['status'] != 'ready':
+        raise HTTPException(status_code=409, detail='The report is still being generated.')
+    path = Path(str(report['output_path'] or ''))
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail='The generated report file is no longer available.')
+    return payload, path
+
+
+@app.get('/reporting/jobs/{report_id}/download')
+def download_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> FileResponse:
+    payload, path = _report_job_file(report_id)
+    return FileResponse(path, filename=payload['report_name'], media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation')
+
+
+@app.get('/reporting/jobs/{report_id}/open')
+def open_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> FileResponse:
+    payload, path = _report_job_file(report_id)
+    return FileResponse(path, filename=payload['report_name'], media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation', content_disposition_type='inline')
+
+
+@app.post('/reporting/jobs/{report_id}/delete')
+def delete_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    report = repository.delete_report_run(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail='Report job not found.')
+    path = Path(str(report['output_path'] or ''))
+    if path.is_file():
+        path.unlink()
+    return JSONResponse({'deleted': report_id})
 
 
 @app.get('/api/datasets/status')

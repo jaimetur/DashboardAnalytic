@@ -78,7 +78,16 @@ CREATE TABLE IF NOT EXISTS report_runs (
     template_name TEXT NOT NULL,
     output_file TEXT NOT NULL,
     created_by TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    dataset_ids_json TEXT NOT NULL DEFAULT '{}',
+    dataset_names_json TEXT NOT NULL DEFAULT '{}',
+    slide_count INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'ready',
+    progress INTEGER NOT NULL DEFAULT 100,
+    last_error TEXT,
+    output_path TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS report_templates (
@@ -198,6 +207,21 @@ class Repository:
             conn.execute("ALTER TABLE report_runs ADD COLUMN vodafone_mapping_dataset_id INTEGER")
         if 'three_mapping_dataset_id' not in existing_columns:
             conn.execute("ALTER TABLE report_runs ADD COLUMN three_mapping_dataset_id INTEGER")
+        migrations = {
+            'dataset_ids_json': "TEXT NOT NULL DEFAULT '{}'",
+            'dataset_names_json': "TEXT NOT NULL DEFAULT '{}'",
+            'slide_count': 'INTEGER NOT NULL DEFAULT 0',
+            'status': "TEXT NOT NULL DEFAULT 'ready'",
+            'progress': 'INTEGER NOT NULL DEFAULT 100',
+            'last_error': 'TEXT',
+            'output_path': 'TEXT',
+            'updated_at': 'TEXT',
+            'finished_at': 'TEXT',
+        }
+        for column, definition in migrations.items():
+            if column not in existing_columns:
+                conn.execute(f"ALTER TABLE report_runs ADD COLUMN {column} {definition}")
+        conn.execute("UPDATE report_runs SET updated_at = COALESCE(updated_at, created_at)")
 
     def _ensure_report_template_columns(self, conn: sqlite3.Connection) -> None:
         """Keep exactly one promoted template per technology."""
@@ -1161,6 +1185,62 @@ class Repository:
             return list(conn.execute(
                 "SELECT * FROM report_runs ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall())
+
+    def create_report_job(
+        self, *, report_type: str, technology: str, scope: str,
+        data_dataset_id: int, voice_dataset_id: int, speech_dataset_id: int,
+        dataset_ids: dict[str, list[int]], dataset_names: dict[str, list[str]],
+        slide_count: int, template_name: str, output_file: str, output_path: Path,
+        created_by: str,
+    ) -> int:
+        with self.connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO report_runs (
+                    report_type, technology, scope, data_dataset_id, voice_dataset_id, speech_dataset_id,
+                    template_name, output_file, created_by, dataset_ids_json, dataset_names_json,
+                    slide_count, status, progress, output_path, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, CURRENT_TIMESTAMP)
+                """,
+                (
+                    report_type, technology, scope, data_dataset_id, voice_dataset_id, speech_dataset_id,
+                    template_name, output_file, created_by, json.dumps(dataset_ids), json.dumps(dataset_names),
+                    slide_count, str(output_path),
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def update_report_job(
+        self, report_id: int, *, status: str | None = None, progress: int | None = None,
+        last_error: str | None = None, finished: bool = False,
+    ) -> None:
+        assignments = ['updated_at = CURRENT_TIMESTAMP']
+        values: list[Any] = []
+        if status is not None:
+            assignments.append('status = ?')
+            values.append(status)
+        if progress is not None:
+            assignments.append('progress = ?')
+            values.append(max(0, min(100, int(progress))))
+        if last_error is not None:
+            assignments.append('last_error = ?')
+            values.append(last_error)
+        if finished:
+            assignments.append("finished_at = CURRENT_TIMESTAMP")
+        values.append(report_id)
+        with self.connection() as conn:
+            conn.execute(f"UPDATE report_runs SET {', '.join(assignments)} WHERE id = ?", values)
+
+    def get_report_run(self, report_id: int) -> sqlite3.Row | None:
+        with self.connection() as conn:
+            return conn.execute("SELECT * FROM report_runs WHERE id = ?", (report_id,)).fetchone()
+
+    def delete_report_run(self, report_id: int) -> sqlite3.Row | None:
+        with self.connection() as conn:
+            report = conn.execute("SELECT * FROM report_runs WHERE id = ?", (report_id,)).fetchone()
+            if report:
+                conn.execute("DELETE FROM report_runs WHERE id = ?", (report_id,))
+            return report
 
     def list_logs(self) -> list[sqlite3.Row]:
         with self.connection() as conn:

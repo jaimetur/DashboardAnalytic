@@ -16,7 +16,7 @@
       <div><p class="eyebrow">NetCheck CDR Reports</p><h2>NSA and SA CDR PowerPoint Reports</h2></div>
       <span class="pill live-pill">Available</span>
     </div>
-    <form action="/reporting/netcheck-cdr" method="post" class="form-grid" data-loading-label="Generating NetCheck CDR report" data-download-form="1">
+    <form action="/reporting/netcheck-cdr" method="post" class="form-grid" data-report-job-form>
       <label>CDR Data <span class="form-label-hint">Select one or more</span>
         <select name="data_dataset_id" required multiple size="4" aria-describedby="cdr-selection-help">
           {% for dataset in data_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
@@ -56,6 +56,33 @@
     <div class="section-head tight-head"><div><p class="eyebrow">Smart Orchestrator Logs Reports</p><h2>Log reporting</h2></div><span class="pill">Coming soon</span></div>
     <p class="lede">This entry point reserves the reporting workflow for processed Smart Orchestrator Log sources. It is visible now to make the product structure explicit; automated log reporting will be added in a future release.</p>
   </article>
+
+  <article class="panel reporting-panel reporting-jobs-panel" data-report-jobs-panel>
+    <div class="section-head tight-head">
+      <div><p class="eyebrow">PowerPoint reporting</p><h2>Generated Report Jobs</h2></div>
+      <span class="pill" data-report-jobs-count>{{ report_jobs | length }} jobs</span>
+    </div>
+    <p class="lede">Report generation continues on the server after leaving Reporting or signing out. Download is enabled when a job is ready.</p>
+    <div class="table-wrap">
+      <table class="report-jobs-table">
+        <thead><tr><th>ID</th><th>Date</th><th>Report Name</th><th>Datasets</th><th>Slides</th><th>Status</th><th>Progress</th><th>Actions</th></tr></thead>
+        <tbody data-report-jobs-body>
+          {% for job in report_jobs %}
+          <tr>
+            <td>{{ job.id }}</td><td>{{ job.date }}</td><td>{{ job.report_name }}</td><td>{{ job.datasets }}</td><td>{{ job.slides }}</td>
+            <td title="{{ job.error }}">{{ job.status | title }}</td>
+            <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%</span></div></td>
+            <td><div class="report-job-actions">
+              {% if job.download_url %}<a class="action-link-primary" href="{{ job.download_url }}" download>Download</a><a class="ghost-link" href="{{ job.open_url }}" target="_blank" rel="noopener">Open</a>{% else %}<span class="action-link-disabled">Download</span><span class="action-link-disabled">Open</span>{% endif %}
+              <button type="button" class="danger-button" data-report-job-delete="{{ job.delete_url }}" data-report-job-name="{{ job.report_name }}">Delete</button>
+            </div></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="form-note" data-report-jobs-empty {% if report_jobs %}hidden{% endif %}>No report jobs have been created in this workspace.</p>
+  </article>
 </section>
 {% endblock %}
 {% block extra_scripts %}
@@ -86,6 +113,120 @@
     technology?.addEventListener('change', updateCatalogues);
     updateScope();
     updateCatalogues();
+
+    const reportForm = document.querySelector('[data-report-job-form]');
+    const jobsBody = document.querySelector('[data-report-jobs-body]');
+    const jobsCount = document.querySelector('[data-report-jobs-count]');
+    const jobsEmpty = document.querySelector('[data-report-jobs-empty]');
+    const statusLabel = (job) => String(job.status || '').replace(/^./, (letter) => letter.toUpperCase());
+    const cell = (value, title = '') => {
+      const node = document.createElement('td');
+      node.textContent = value;
+      if (title) node.title = title;
+      return node;
+    };
+    const reportActionLink = (label, href, primary = false) => {
+      const link = document.createElement('a');
+      link.textContent = label;
+      link.className = primary ? 'action-link-primary' : 'ghost-link';
+      link.href = href;
+      if (label === 'Download') link.download = '';
+      if (label === 'Open') { link.target = '_blank'; link.rel = 'noopener'; }
+      return link;
+    };
+    const renderReportJobs = (jobs) => {
+      if (!jobsBody) return;
+      jobsBody.replaceChildren(...jobs.map((job) => {
+        const row = document.createElement('tr');
+        row.append(cell(job.id), cell(job.date), cell(job.report_name), cell(job.datasets), cell(job.slides), cell(statusLabel(job), job.error || ''));
+        const progressCell = document.createElement('td');
+        const progress = document.createElement('div');
+        progress.className = 'report-job-progress';
+        const meter = document.createElement('progress');
+        meter.max = 100;
+        meter.value = Number(job.progress || 0);
+        const percentage = document.createElement('span');
+        percentage.textContent = `${Number(job.progress || 0)}%`;
+        progress.append(meter, percentage);
+        progressCell.append(progress);
+        const actionsCell = document.createElement('td');
+        const actions = document.createElement('div');
+        actions.className = 'report-job-actions';
+        if (job.download_url) {
+          actions.append(reportActionLink('Download', job.download_url, true), reportActionLink('Open', job.open_url));
+        } else {
+          ['Download', 'Open'].forEach((label) => {
+            const disabled = document.createElement('span');
+            disabled.className = 'action-link-disabled';
+            disabled.textContent = label;
+            actions.append(disabled);
+          });
+        }
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'danger-button';
+        remove.textContent = 'Delete';
+        remove.dataset.reportJobDelete = job.delete_url;
+        remove.dataset.reportJobName = job.report_name;
+        actions.append(remove);
+        actionsCell.append(actions);
+        row.append(progressCell, actionsCell);
+        return row;
+      }));
+      if (jobsCount) jobsCount.textContent = `${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'}`;
+      if (jobsEmpty) jobsEmpty.hidden = jobs.length > 0;
+    };
+    let pollingReportJobs = false;
+    const refreshReportJobs = async () => {
+      if (!jobsBody) return [];
+      const response = await fetch('/api/reporting/jobs', {credentials: 'same-origin'});
+      if (!response.ok) throw new Error('Unable to refresh report jobs.');
+      const payload = await response.json();
+      const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+      renderReportJobs(jobs);
+      return jobs;
+    };
+    const pollReportJobs = async () => {
+      if (pollingReportJobs) return;
+      pollingReportJobs = true;
+      try {
+        const jobs = await refreshReportJobs();
+        if (jobs.some((job) => ['queued', 'processing'].includes(job.status))) window.setTimeout(pollReportJobs, 2000);
+      } catch (_error) {
+        window.setTimeout(pollReportJobs, 5000);
+      } finally {
+        pollingReportJobs = false;
+      }
+    };
+    reportForm?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      showLoadingOverlay('Queueing PowerPoint report', 'The report will be generated on the server. You can leave this page while it runs.');
+      try {
+        const response = await fetch(reportForm.action, {method: 'POST', body: new FormData(reportForm), credentials: 'same-origin'});
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || 'Unable to queue the report.');
+        hideLoadingOverlay();
+        showInfoDialog(`Report job #${payload.job_id} has been queued. Download will become available when generation finishes.`, {title: 'Report job queued'});
+        pollReportJobs();
+      } catch (error) {
+        hideLoadingOverlay();
+        showInfoDialog(error.message || 'Unable to queue the report.', {title: 'Report job failed', tone: 'error'});
+      }
+    });
+    jobsBody?.addEventListener('click', async (event) => {
+      const remove = event.target.closest('[data-report-job-delete]');
+      if (!remove) return;
+      const accepted = await showConfirmDialog(`Delete report '${remove.dataset.reportJobName}'? The generated file will also be removed.`, {title: 'Delete report', confirmLabel: 'Delete'});
+      if (!accepted) return;
+      const response = await fetch(remove.dataset.reportJobDelete, {method: 'POST', credentials: 'same-origin'});
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        showInfoDialog(payload.detail || 'Unable to delete the report.', {title: 'Delete report', tone: 'error'});
+        return;
+      }
+      pollReportJobs();
+    });
+    pollReportJobs();
   })();
 </script>
 {% endblock %}

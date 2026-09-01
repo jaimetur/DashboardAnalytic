@@ -309,6 +309,15 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-insert-slide-button { background: linear-gradient(145deg, #dcefe2, #bde0c8); border-color: rgba(72, 135, 93, 0.55); color: #286642; }
 .catalogue-insert-slide-button:hover { background: linear-gradient(145deg, #cae5d2, #aad7b8); color: #1e5636; }
 .slides-templates-editor-table-wrap .form-actions { display: flex; align-items: center; gap: 0.65rem; margin-top: 0.9rem; flex-wrap: wrap; }
+.report-jobs-table { min-width: 1120px; }
+.report-jobs-table th, .report-jobs-table td { vertical-align: middle; }
+.report-jobs-table td:nth-child(2), .report-jobs-table td:nth-child(5), .report-jobs-table td:nth-child(6) { white-space: nowrap; }
+.report-jobs-table td:nth-child(3) { min-width: 245px; }
+.report-jobs-table td:nth-child(4) { min-width: 310px; }
+.report-job-progress { display: flex; align-items: center; gap: 0.45rem; min-width: 122px; font-variant-numeric: tabular-nums; }
+.report-job-progress progress { width: 82px; accent-color: #4b208a; }
+.report-job-actions { display: flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+.report-job-actions .danger-button { padding: 0.34rem 0.58rem; }
 .catalogue-editor-scroll-hint { margin-left: 0.2rem; color: #536b78; font-size: 0.78rem; font-weight: 700; }
 .admin-stack .catalogue-reenumerate-button { background: linear-gradient(145deg, #d9d0ef, #bba8dc); border-color: rgba(116, 87, 164, 0.62); color: #49366c; box-shadow: 0 8px 18px rgba(95, 69, 142, 0.16); }
 .admin-stack .catalogue-reenumerate-button:hover:not(:disabled) { background: linear-gradient(145deg, #cbc0e6, #a891d1); color: #392855; }

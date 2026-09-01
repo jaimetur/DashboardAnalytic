@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 import pandas as pd
 import pytest
 from io import BytesIO
@@ -11,6 +12,17 @@ from pptx import Presentation
 from pptx.dml.color import RGBColor
 
 from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _hierarchical_unique_keys, _layout_chart_frames, _named_slide_layout, _render_failure_count, _render_status_100, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+
+
+def wait_for_report_job(client, job_id: int) -> dict:
+    for _ in range(100):
+        response = client.get('/api/reporting/jobs')
+        assert response.status_code == 200
+        job = next(item for item in response.json()['jobs'] if item['id'] == job_id)
+        if job['status'] not in {'queued', 'processing'}:
+            return job
+        time.sleep(0.02)
+    raise AssertionError(f'Report job {job_id} did not finish in time.')
 
 
 def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> None:
@@ -605,7 +617,8 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert '<option value="multivendor" disabled>Multivendor</option>' in page.text
     assert 'name="slides_templates"' in page.text
     assert 'value="nsa:NSA Slide Template"' in page.text
-    assert 'data-download-form="1"' in page.text
+    assert 'data-report-job-form' in page.text
+    assert 'Generated Report Jobs' in page.text
 
 
 def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client) -> None:
@@ -654,10 +667,21 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
         'slides_templates': 'nsa:NSA Slide Template',
     })
 
-    assert report.status_code == 200
-    assert report.headers['content-type'].startswith('application/vnd.openxmlformats-officedocument.presentationml.presentation')
-    assert report.content[:2] == b'PK'
-    assert re.search(r'NetCheck_CDR_NSA_single_vendor_\d{8}-\d{4}\.pptx', report.headers['content-disposition'])
+    assert report.status_code == 202
+    job = wait_for_report_job(client, report.json()['job_id'])
+    assert job['status'] == 'ready'
+    assert job['slides'] == 17
+    assert re.search(r'NetCheck_CDR_NSA_single_vendor_\d{8}-\d{4}_.+\.pptx', job['report_name'])
+    download = client.get(job['download_url'])
+    assert download.status_code == 200
+    assert download.headers['content-type'].startswith('application/vnd.openxmlformats-officedocument.presentationml.presentation')
+    assert download.content[:2] == b'PK'
+    opened = client.get(job['open_url'])
+    assert opened.status_code == 200
+    assert opened.headers['content-disposition'].startswith('inline;')
+    deleted = client.post(job['delete_url'])
+    assert deleted.status_code == 200
+    assert client.get(job['download_url']).status_code == 404
 
 
 def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, monkeypatch) -> None:
@@ -697,7 +721,9 @@ def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, monkey
         headers={'content-type': 'application/x-www-form-urlencoded'},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
+    job = wait_for_report_job(client, response.json()['job_id'])
+    assert job['status'] == 'ready'
     assert captured['data']['Campaign'].tolist() == ['2026 Q1', '2026 Q2']
     # The shared CDR table and renderer materialise only fields required by
     # the chosen Slides Template; unrelated source metrics stay individual.
