@@ -162,7 +162,7 @@
           {% for catalogue in workspace_catalogues %}
           <tr>
             <td>
-              <form class="catalogue-rename-form" action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/rename" method="post">
+              <form class="catalogue-rename-form" action="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/rename" method="post">
                 <input type="text" name="catalogue_name" value="{{ catalogue.name }}" aria-label="Name for {{ catalogue.name }}" maxlength="80" required data-catalogue-auto-rename>
               </form>
             </td>
@@ -172,7 +172,7 @@
                 <option value="{{ catalogue.technology }}" selected>{{ catalogue.technology | upper }}</option>
               </select>
               {% else %}
-              <form class="catalogue-type-form" action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/type" method="post">
+              <form class="catalogue-type-form" action="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/type" method="post">
                 <select name="template_type" aria-label="Type for {{ catalogue.name }}" onchange="this.form.requestSubmit()">
                   <option value="nsa" {% if catalogue.technology == 'nsa' %}selected{% endif %}>NSA</option>
                   <option value="sa" {% if catalogue.technology == 'sa' %}selected{% endif %}>SA</option>
@@ -185,11 +185,11 @@
             <td class="catalogue-default-cell"><span class="catalogue-default-mark {% if catalogue.active %}is-default{% else %}is-not-default{% endif %}" aria-label="{% if catalogue.active %}Default template{% else %}Not the default template{% endif %}" title="{% if catalogue.active %}Default template{% else %}Not the default template{% endif %}">{% if catalogue.active %}✓{% else %}○{% endif %}</span></td>
             <td>
               <div class="catalogue-workspace-actions">
-                {% if catalogue.active %}<button type="button" class="catalogue-set-default-button" disabled>Set Default</button>{% else %}<form action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/activate" method="post"><button type="submit" class="catalogue-set-default-button">Set Default</button></form>{% endif %}
+                {% if catalogue.active %}<button type="button" class="catalogue-set-default-button" disabled>Set Default</button>{% else %}<form action="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/activate" method="post"><button type="submit" class="catalogue-set-default-button">Set Default</button></form>{% endif %}
                 <a class="catalogue-edit-button" href="/admin?catalogue_technology={{ catalogue.technology }}&amp;catalogue_id={{ catalogue.identifier }}#catalogue-editor">Edit</a>
-                <form action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/duplicate" method="post"><button type="submit" class="catalogue-duplicate-button">Duplicate</button></form>
-                {% if not catalogue.active %}<form action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/delete" method="post" data-confirm="Delete template {{ catalogue.name }}? This cannot be undone."><button type="submit" class="danger-button">Delete</button></form>{% else %}<button type="button" class="danger-button" disabled title="The default template cannot be deleted">Delete</button>{% endif %}
-                <a class="catalogue-export-button" href="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/export">Export</a>
+                <form action="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/duplicate" method="post"><button type="submit" class="catalogue-duplicate-button">Duplicate</button></form>
+                {% if not catalogue.active %}<form action="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/delete" method="post" data-confirm="Delete template {{ catalogue.name }}? This cannot be undone."><button type="submit" class="danger-button">Delete</button></form>{% else %}<button type="button" class="danger-button" disabled title="The default template cannot be deleted">Delete</button>{% endif %}
+                <a class="catalogue-export-button" href="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/export">Export</a>
               </div>
             </td>
           </tr>
@@ -197,6 +197,9 @@
         </tbody>
       </table>
     </div>
+    <form class="catalogue-new-template-form" action="/admin/slides-templates/new" method="post">
+      <button type="submit" class="catalogue-new-template-button">New Template</button>
+    </form>
     <p class="form-note">Required columns: Slide, Slide tittle, Slide Subtittle, Layout, Chart Tittle, CDR source, KPI, Chart type, Filters, Rows Aggregation, Column Aggregation, Legend and Legend Position. Legend Position accepts Top, Bottom, Left or Right. Each slide number creates a new slide from its named layout. Use Title Slide or Transition Slide for structural rows without KPI/chart fields. Rows Aggregation defines chart categories/table rows; Column Aggregation defines comparison series/table columns. Chart layouts need one image placeholder per CDR row and keep analyst comments blank.</p>
     </div>
   </details>
@@ -214,7 +217,7 @@
       <p class="catalogue-library-title">Workspace templates</p>
       <form class="catalogue-editor-picker-form" action="/admin" method="get">
         <label>Template to edit
-          <select name="catalogue_selection" aria-label="Template to edit" required>
+          <select name="catalogue_selection" aria-label="Template to edit" required data-no-persist>
             <option value="" {% if not catalogue_editor %}selected{% endif %}>Choose a template to edit</option>
             {% for technology, catalogue in report_catalogs.items() %}
             <optgroup label="{{ technology | upper }} templates">
@@ -226,13 +229,13 @@
           </select>
         </label>
         <button type="submit">Edit</button>
-        <button type="submit" formaction="/admin/report-catalogues/export-selected" class="catalogue-export-button">Export</button>
+        <button type="submit" formaction="/admin/report-templates/export-selected" class="catalogue-export-button">Export</button>
       </form>
     </section>
     {% if catalogue_editor %}
     <p class="lede">Rows are ordered by Slide and alternate by slide block. When a slide contains several charts, its shared slide number, title, subtitle and layout are shown once and apply to the full slide block; saving writes those values back to every chart row in the CSV. Select a cell to edit it manually or use the contextual suggestions on the right.</p>
     <div class="slides-templates-editor-grid" data-catalogue-editor data-editor-suggestions='{{ catalogue_editor.suggestions | tojson }}'>
-      <form class="slides-templates-editor-table-wrap" action="/admin/report-catalogues/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/save" method="post" data-catalogue-editor-save>
+      <form class="slides-templates-editor-table-wrap" action="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/save" method="post" data-catalogue-editor-save>
         <input type="hidden" name="catalogue_content" value="" data-catalogue-editor-content>
         <div class="table-wrap">
           <table class="slides-templates-editor-table" data-catalogue-editor-table>
@@ -1068,4 +1071,11 @@
   });
 })();
 </script>
+{% if catalogue_editor %}
+<script>
+  // An explicit template selection must take precedence over a previously
+  // collapsed editor panel saved in this browser.
+  document.getElementById('catalogue-editor').open = true;
+</script>
+{% endif %}
 {% endblock %}

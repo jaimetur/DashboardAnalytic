@@ -689,6 +689,10 @@ def test_interrupted_background_jobs_become_retryable_failures(client) -> None:
     source.write_text('value\n1\n', encoding='utf-8')
     dataset_id, _ = app_module.repository.add_dataset(source.name, str(source), 'admin')
     app_module.repository.update_dataset_profile(dataset_id, status='processing', progress=45)
+    queued_source = app_module.settings.input_dir / 'interrupted-queued.csv'
+    queued_source.write_text('value\n2\n', encoding='utf-8')
+    queued_dataset_id, _ = app_module.repository.add_dataset(queued_source.name, str(queued_source), 'admin')
+    app_module.repository.update_dataset_profile(queued_dataset_id, status='queued', progress=0)
     report_id = app_module.repository.create_report_job(
         report_type='netcheck_cdr', technology='nsa', scope='single',
         data_dataset_id=dataset_id, voice_dataset_id=dataset_id, speech_dataset_id=dataset_id,
@@ -700,9 +704,12 @@ def test_interrupted_background_jobs_become_retryable_failures(client) -> None:
 
     datasets, reports = app_module.repository.fail_interrupted_background_jobs()
 
-    assert datasets == [dataset_id]
+    assert datasets == [dataset_id, queued_dataset_id]
     assert reports == [report_id]
     assert app_module.repository.get_dataset(dataset_id)['status'] == 'failed'
+    queued_dataset = app_module.repository.get_dataset(queued_dataset_id)
+    assert queued_dataset['status'] == 'failed'
+    assert 'application restarted' in queued_dataset['last_error']
     report = app_module.repository.get_report_run(report_id)
     assert report['status'] == 'failed'
     assert 'application restarted' in report['last_error']
@@ -1895,7 +1902,7 @@ def test_admin_imports_report_catalogue_and_synchronizes_help(client, tmp_path, 
     ).encode('utf-8')
 
     response = client.post(
-        '/admin/report-catalogues/nsa',
+        '/admin/report-templates/nsa',
         data={'catalogue_name': 'Test baseline'},
         files={'catalogue_file': ('nsa-slides-template.csv', BytesIO(content), 'text/csv')},
         follow_redirects=False,
@@ -1905,7 +1912,7 @@ def test_admin_imports_report_catalogue_and_synchronizes_help(client, tmp_path, 
     assert app_module.reporting_catalog_path('nsa').read_bytes() == content
     assert 'Completed Call Ratio' in help_document.read_text(encoding='utf-8')
 
-    exported = client.get('/admin/report-catalogues/nsa/export')
+    exported = client.get('/admin/report-templates/nsa/export')
     assert exported.status_code == 200
     assert exported.content == content.rstrip(b'\n').rstrip(b',') + b',Top\n'
 
@@ -1928,7 +1935,7 @@ def test_admin_import_converts_a_legacy_catalogue_when_requested(client, tmp_pat
     ).encode('utf-8')
 
     response = client.post(
-        '/admin/report-catalogues/nsa',
+        '/admin/report-templates/nsa',
         data={'catalogue_name': 'Legacy baseline', 'convert_catalogue': '1'},
         files={'catalogue_file': ('legacy.csv', BytesIO(legacy), 'text/csv')},
         follow_redirects=False,
@@ -1953,7 +1960,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
 
     for name, content in [('Baseline Q4', first), ('Updated Q4', second)]:
         response = client.post(
-            '/admin/report-catalogues/nsa',
+            '/admin/report-templates/nsa',
             data={'catalogue_name': name},
             files={'catalogue_file': ('nsa.csv', BytesIO(content), 'text/csv')},
             follow_redirects=False,
@@ -1969,7 +1976,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert '<th>Default</th>' in admin.text
     assert 'catalogue-default-mark is-default' in admin.text
     assert 'value="nsa:Baseline Q4"' in admin.text
-    assert '/admin/report-catalogues/export-selected' in admin.text
+    assert '/admin/report-templates/export-selected' in admin.text
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Second'
     assert app_module.reporting_catalog_path('nsa').name == 'Updated Q4.csv'
     assert app_module.named_catalogue_path('nsa', 'Baseline Q4').exists()
@@ -2000,26 +2007,26 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
         + '\n9,Late,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,Right\n'
         + '\n8,Edited,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,Right\n'
     )
-    saved = client.post('/admin/report-catalogues/nsa/Baseline%20Q4/save', data={'catalogue_content': edited}, follow_redirects=False)
+    saved = client.post('/admin/report-templates/nsa/Baseline%20Q4/save', data={'catalogue_content': edited}, follow_redirects=False)
     assert saved.status_code == 303
     saved_editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=Baseline%20Q4')
     assert '>Edited</td>' in saved_editor.text
     assert saved_editor.text.index('>Edited</td>') < saved_editor.text.index('>Late</td>')
 
-    activated = client.post('/admin/report-catalogues/nsa/Baseline%20Q4/activate', follow_redirects=False)
+    activated = client.post('/admin/report-templates/nsa/Baseline%20Q4/activate', follow_redirects=False)
     assert activated.status_code == 303
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Edited'
     assert app_module.reporting_catalog_path('nsa').name == 'Baseline Q4.csv'
     assert app_module.named_catalogue_path('nsa', 'Updated Q4').exists()
 
-    protected_delete = client.post('/admin/report-catalogues/nsa/Baseline%20Q4/delete')
+    protected_delete = client.post('/admin/report-templates/nsa/Baseline%20Q4/delete')
     assert protected_delete.status_code == 400
     assert 'The default template cannot be deleted.' in protected_delete.text
 
     reporting_after_activation = client.get('/reporting')
     assert 'value="nsa:Baseline Q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting_after_activation.text
 
-    exported = client.get('/admin/report-catalogues/nsa/Updated%20Q4/export')
+    exported = client.get('/admin/report-templates/nsa/Updated%20Q4/export')
     assert exported.status_code == 200
     assert b'Second' in exported.content
 
@@ -2029,7 +2036,7 @@ def test_admin_catalogue_rename_supports_background_json_save(client) -> None:
     login(client)
     default_name = next(item['identifier'] for item in app_module.report_catalogue_options('nsa') if item['active'])
     response = client.post(
-        f'/admin/report-catalogues/nsa/{quote(default_name)}/rename',
+        f'/admin/report-templates/nsa/{quote(default_name)}/rename',
         data={'catalogue_name': 'Renamed default'},
         headers={'accept': 'application/json'},
     )
@@ -2052,7 +2059,7 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client, tmp_path, m
         + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
     ).encode('utf-8')
     imported = client.post(
-        '/admin/report-catalogues/nsa',
+        '/admin/report-templates/nsa',
         data={'catalogue_name': 'Original catalogue'},
         files={'catalogue_file': ('nsa.csv', BytesIO(content), 'text/csv')},
         follow_redirects=False,
@@ -2060,7 +2067,7 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client, tmp_path, m
     assert imported.status_code == 303
 
     replacement = client.post(
-        '/admin/report-catalogues/nsa',
+        '/admin/report-templates/nsa',
         data={'catalogue_name': 'Replacement template'},
         files={'catalogue_file': ('replacement.csv', BytesIO(content), 'text/csv')},
         follow_redirects=False,
@@ -2069,7 +2076,7 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client, tmp_path, m
 
     original_path = app_module.named_catalogue_path('nsa', 'Original catalogue')
     response = client.post(
-        '/admin/report-catalogues/nsa/Original%20catalogue/rename',
+        '/admin/report-templates/nsa/Original%20catalogue/rename',
         data={'catalogue_name': 'Renamed catalogue'},
         headers={'accept': 'application/json'},
     )
@@ -2092,14 +2099,14 @@ def test_admin_duplicates_template_using_the_source_template_name(client) -> Non
         + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
     ).encode('utf-8')
     imported = client.post(
-        '/admin/report-catalogues/nsa',
+        '/admin/report-templates/nsa',
         data={'catalogue_name': 'Regional NSA Template'},
         files={'catalogue_file': ('nsa.csv', BytesIO(content), 'text/csv')},
         follow_redirects=False,
     )
     assert imported.status_code == 303
 
-    duplicated = client.post('/admin/report-catalogues/nsa/Regional%20NSA%20Template/duplicate', follow_redirects=False)
+    duplicated = client.post('/admin/report-templates/nsa/Regional%20NSA%20Template/duplicate', follow_redirects=False)
 
     assert duplicated.status_code == 303
     copied = next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'Regional NSA Template - Copy')
@@ -2130,7 +2137,7 @@ def test_template_registry_reconciles_an_unambiguous_manual_csv_rename(client) -
     ).encode('utf-8')
     for name in ('First template', 'Second template'):
         response = client.post(
-            '/admin/report-catalogues/nsa',
+            '/admin/report-templates/nsa',
             data={'catalogue_name': name},
             files={'catalogue_file': ('nsa.csv', BytesIO(content), 'text/csv')},
             follow_redirects=False,
@@ -2169,14 +2176,14 @@ def test_admin_importer_selects_template_type_and_moves_a_named_template(client)
     # a movable library item.
     for name in ('Move me', 'NSA default replacement'):
         response = client.post(
-            '/admin/report-catalogues/nsa',
+            '/admin/report-templates/nsa',
             data={'catalogue_name': name},
             files={'catalogue_file': ('nsa.csv', BytesIO(content), 'text/csv')},
             follow_redirects=False,
         )
         assert response.status_code == 303
     moved = client.post(
-        '/admin/report-catalogues/nsa/Move%20me/type',
+        '/admin/report-templates/nsa/Move%20me/type',
         data={'template_type': 'sa'},
         follow_redirects=False,
     )

@@ -278,6 +278,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .templates-library-heading { margin: 1.1rem 0 0; color: #5b1c22; font-size: 1.02rem; }
 .catalogue-workspace-table-wrap { margin-top: 0.9rem; }
 .catalogue-workspace-table { min-width: 900px; }
+.catalogue-new-template-form { margin: 0.85rem 0 0; }
+.admin-stack .catalogue-new-template-button { background: linear-gradient(145deg, #5b2b99, #9b6ddd); border-color: rgba(75, 32, 138, 0.72); color: #fff; }
+.admin-stack .catalogue-new-template-button:hover:not(:disabled) { background: linear-gradient(145deg, #482079, #7e4fc1); }
 .catalogue-workspace-table th, .catalogue-workspace-table td { vertical-align: middle; }
 .catalogue-timestamp { width: 9.6rem; white-space: nowrap; color: #455964; font-size: 0.78rem; }
 .catalogue-default-cell { width: 5.5rem; text-align: center; }

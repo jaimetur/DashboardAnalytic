@@ -20,6 +20,7 @@
 - Added self-service password changes from the header User badge.
 - Added processed-dataset preview and direct Preview/Show Dashboard actions in Workspace and Admin.
 - Added persistent Generated Reports Jobs with progress, metadata, Download and Delete actions.
+- Added blank Slides Template creation from the library, ready for direct renaming and editing.
 
 #### 🚀 Enhancements:
 - Added root-level `storage-paths.conf` with `APP_CONFIG_DIR`, `APP_DATA_DIR` and `APP_ASSETS_DIR` overrides.
@@ -42,6 +43,9 @@
 - Improved Database Management labels by separating Config Tables from Workspace Tables.
 - Renamed template audit-log terminology from `catalogue` to `template`.
 - Mark interrupted dataset-processing and report-generation jobs as retryable failures after an application restart, with Report Job retry actions.
+- Added Created and Last Updated timestamps plus direct Edit actions to the Slides Templates Library, and standardised its HTTP routes on `report-templates`.
+- Kept the current module open when switching the active workspace from the header.
+- Serialised dataset processing per workspace so retries wait as queued work while another dataset is processing.
 
 #### 🐛 Bug fixes:
 - Preserved all chart-definition values during template migration, normalisation, sorting and visual merging; fixed defaults, renames, deletion protection, editor selection and report placeholder generation.
@@ -59,6 +63,8 @@
 - Enforced workspace-access and super-admin safeguards: only super-admins have implicit workspace access, protected roles cannot be altered by lower roles, and the last active super-admin cannot be removed, demoted or deactivated.
 - Fixed workspace-access picker visibility, clipping, alignment and save synchronisation between Workspace Management and Users.
 - Fixed the Users table showing browser-restored form values instead of current database records after configuration imports or navigation restores.
+- Fixed blank Slides Templates so they open as an editable empty canvas, and fixed the editor selector to always show the template actually opened.
+- Fixed queued dataset and report jobs left by an application restart so they become retryable failures instead of remaining stalled.
 
 #### 📚 Documentation:
 - Reworked the Help, README and configuration documentation for the current workspace, template, reporting and transfer workflows.

@@ -48,6 +48,8 @@ ANALYSIS_CACHE: dict[str, dict[str, Any]] = {}
 DATAFRAME_CACHE: dict[str, pd.DataFrame] = {}
 STOP_REQUESTS: set[int] = set()
 STOP_REQUESTS_LOCK = Lock()
+DATASET_PROCESSING_LOCKS: dict[str, Lock] = {}
+DATASET_PROCESSING_LOCKS_LOCK = Lock()
 EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 EXPORT_JOBS_LOCK = Lock()
 EXPORT_PACKAGE_TTL = timedelta(hours=24)
@@ -347,7 +349,16 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
     catalogue = next((item for item in report_catalogue_options(technology) if item['identifier'] == catalogue_id), None)
     if not catalogue:
         return None
-    entries = load_catalog_csv(catalogue['path'], technology)
+    try:
+        entries = load_catalog_csv(catalogue['path'], technology)
+    except ValueError as exc:
+        # A newly created template deliberately contains only the current CSV
+        # headers.  It is valid to open that blank canvas in the editor, while
+        # the report-generation parser continues to reject a template that
+        # has not yet been configured with any slides.
+        if str(exc) != 'The report template does not contain any rows.':
+            raise
+        entries = []
     # CSVs are allowed to have been edited out of order. The editor always
     # presents coherent slide blocks while preserving the chart order inside a
     # slide when it is saved again.
@@ -370,6 +381,8 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
         }
         for entry in entries
     ]
+    if not rows:
+        rows = [{header: ('1' if header == 'Slide' else '') for header in CATALOG_HEADERS}]
     columns = catalogue_editor_columns()
     return {
         'technology': technology,
@@ -965,55 +978,70 @@ def process_dataset(
     task_repository: Repository | None = None,
 ) -> None:
     task_repository = task_repository or repository
-    dataset = task_repository.get_dataset(dataset_id)
-    if not dataset or not dataset_path.exists():
+    # FastAPI background tasks can be submitted from separate requests at the
+    # same time.  Serialize them per workspace DB: a task waits visibly as
+    # Queued, then becomes Processing only after the preceding task finishes.
+    workspace_key = str(task_repository.db_path.resolve())
+    with DATASET_PROCESSING_LOCKS_LOCK:
+        workspace_lock = DATASET_PROCESSING_LOCKS.setdefault(workspace_key, Lock())
+    with workspace_lock:
+        dataset = task_repository.get_dataset(dataset_id)
+        if not dataset or not dataset_path.exists():
+            if dataset:
+                task_repository.update_dataset_profile(
+                    dataset_id,
+                    status='failed',
+                    progress=100,
+                    last_error='The source file is missing. Reupload the dataset before retrying.',
+                    processed_at=now_iso(),
+                )
+            clear_stop_request(dataset_id)
+            return
         clear_stop_request(dataset_id)
-        return
-    clear_stop_request(dataset_id)
-    task_repository.update_dataset_profile(dataset_id, status='processing', progress=10, last_error=None)
-    try:
-        def progress_update(value: int) -> None:
-            ensure_not_stopped(dataset_id)
-            task_repository.update_dataset_profile(dataset_id, progress=max(10, min(95, int(value))))
+        task_repository.update_dataset_profile(dataset_id, status='processing', progress=10, last_error=None)
+        try:
+            def progress_update(value: int) -> None:
+                ensure_not_stopped(dataset_id)
+                task_repository.update_dataset_profile(dataset_id, progress=max(10, min(95, int(value))))
 
-        selected_kind = str(dataset['dataset_kind'] or '').strip().lower()
-        forced_dataset_kind = selected_kind if selected_kind in UPLOAD_DATASET_KINDS else None
-        rebuild_result = rebuild_dataset_artifacts(
-            dataset_id,
-            dataset_path,
-            progress_callback=progress_update,
-            forced_dataset_kind=forced_dataset_kind,
-            vodafone_mapping_dataset_id=vodafone_mapping_dataset_id,
-            three_mapping_dataset_id=three_mapping_dataset_id,
-            task_repository=task_repository,
-        )
-        task_repository.add_log(username, 'process_dataset', json.dumps({
-            'dataset_id': dataset_id,
-            'file': dataset_path.name,
-            'status': 'ready',
-            'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
-            'three_mapping_dataset_id': three_mapping_dataset_id,
-        }))
-        if rebuild_result.get('vendor_mapping_error'):
-            task_repository.add_log(username, 'vendor_mapping_skipped', json.dumps({
+            selected_kind = str(dataset['dataset_kind'] or '').strip().lower()
+            forced_dataset_kind = selected_kind if selected_kind in UPLOAD_DATASET_KINDS else None
+            rebuild_result = rebuild_dataset_artifacts(
+                dataset_id,
+                dataset_path,
+                progress_callback=progress_update,
+                forced_dataset_kind=forced_dataset_kind,
+                vodafone_mapping_dataset_id=vodafone_mapping_dataset_id,
+                three_mapping_dataset_id=three_mapping_dataset_id,
+                task_repository=task_repository,
+            )
+            task_repository.add_log(username, 'process_dataset', json.dumps({
                 'dataset_id': dataset_id,
-                'error': rebuild_result['vendor_mapping_error'],
+                'file': dataset_path.name,
+                'status': 'ready',
+                'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
+                'three_mapping_dataset_id': three_mapping_dataset_id,
             }))
-    except ProcessingStopped as exc:
-        progress = int((task_repository.get_dataset(dataset_id) or {}).get('progress') or 0)
-        task_repository.update_dataset_profile(
-            dataset_id,
-            status='stopped',
-            progress=max(0, min(99, progress)),
-            last_error=str(exc),
-            processed_at=now_iso(),
-        )
-        task_repository.add_log(username, 'stop_dataset', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name}))
-    except Exception as exc:
-        task_repository.update_dataset_profile(dataset_id, status='failed', progress=100, last_error=str(exc), processed_at=now_iso())
-        task_repository.add_log(username, 'process_dataset_failed', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name, 'error': str(exc)}))
-    finally:
-        clear_stop_request(dataset_id)
+            if rebuild_result.get('vendor_mapping_error'):
+                task_repository.add_log(username, 'vendor_mapping_skipped', json.dumps({
+                    'dataset_id': dataset_id,
+                    'error': rebuild_result['vendor_mapping_error'],
+                }))
+        except ProcessingStopped as exc:
+            progress = int((task_repository.get_dataset(dataset_id) or {}).get('progress') or 0)
+            task_repository.update_dataset_profile(
+                dataset_id,
+                status='stopped',
+                progress=max(0, min(99, progress)),
+                last_error=str(exc),
+                processed_at=now_iso(),
+            )
+            task_repository.add_log(username, 'stop_dataset', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name}))
+        except Exception as exc:
+            task_repository.update_dataset_profile(dataset_id, status='failed', progress=100, last_error=str(exc), processed_at=now_iso())
+            task_repository.add_log(username, 'process_dataset_failed', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name, 'error': str(exc)}))
+        finally:
+            clear_stop_request(dataset_id)
 
 
 def enqueue_dataset_processing(
@@ -2589,14 +2617,23 @@ def require_workspace_access(user: SessionUser, workspace_id: str) -> None:
 
 
 @app.post('/workspace/select')
-def select_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
+def select_workspace(
+    workspace_id: str = Form(...),
+    return_to: str = Form('/workspace'),
+    user: SessionUser = Depends(current_user),
+) -> Response:
+    # The header switcher should refresh the module currently being viewed,
+    # never send the user to Workspace merely because the active data source
+    # changed.  Restrict the destination to application modules so this form
+    # cannot become an open redirect.
+    target = return_to if return_to in {'/workspace', '/dashboard', '/reporting', '/admin'} else '/workspace'
     if user.role != 'super-admin' and not repository.user_has_workspace_access(user.username, workspace_id):
-        return RedirectResponse('/workspace?workspace_error=You+do+not+have+access+to+that+workspace.', status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(f'{target}?workspace_error=You+do+not+have+access+to+that+workspace.', status_code=status.HTTP_303_SEE_OTHER)
     try:
-        workspace = activate_workspace(workspace_id)
+        activate_workspace(workspace_id)
     except ValueError as exc:
-        return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
-    return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": f"Opened {workspace.name}."})}', status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(f'{target}?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/workspace/close')
@@ -4089,7 +4126,7 @@ def _import_report_catalogue(
     return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/admin/report-catalogues/{technology}', response_class=HTMLResponse)
+@app.post('/admin/report-templates/{technology}', response_class=HTMLResponse)
 def import_report_catalogue(
     request: Request,
     technology: str,
@@ -4115,7 +4152,7 @@ def import_slides_template(
     return _import_report_catalogue(request, template_type, catalogue_file, catalogue_name, convert_catalogue, user)
 
 
-@app.post('/admin/report-catalogues/{technology}/{catalogue_id}/activate', response_class=HTMLResponse)
+@app.post('/admin/report-templates/{technology}/{catalogue_id}/activate', response_class=HTMLResponse)
 def activate_report_catalogue(
     request: Request,
     technology: str,
@@ -4141,7 +4178,7 @@ def _named_catalogue(technology: str, catalogue_id: str) -> dict[str, Any] | Non
     return next((item for item in report_catalogue_options(technology) if item['identifier'] == catalogue_id), None)
 
 
-@app.post('/admin/report-catalogues/{technology}/{catalogue_id}/type', response_class=HTMLResponse)
+@app.post('/admin/report-templates/{technology}/{catalogue_id}/type', response_class=HTMLResponse)
 def change_report_catalogue_type(
     request: Request,
     technology: str,
@@ -4191,7 +4228,7 @@ def change_report_catalogue_type(
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/admin/report-catalogues/{technology}/{catalogue_id}/rename', response_class=HTMLResponse)
+@app.post('/admin/report-templates/{technology}/{catalogue_id}/rename', response_class=HTMLResponse)
 def rename_report_catalogue(
     request: Request,
     technology: str,
@@ -4245,7 +4282,7 @@ def rename_report_catalogue(
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/admin/report-catalogues/{technology}/{catalogue_id}/duplicate', response_class=HTMLResponse)
+@app.post('/admin/report-templates/{technology}/{catalogue_id}/duplicate', response_class=HTMLResponse)
 def duplicate_report_catalogue(
     request: Request,
     technology: str,
@@ -4277,7 +4314,32 @@ def duplicate_report_catalogue(
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/admin/report-catalogues/{technology}/{catalogue_id}/delete', response_class=HTMLResponse)
+@app.post('/admin/slides-templates/new', response_class=HTMLResponse)
+def create_empty_report_catalogue(
+    user: SessionUser = Depends(admin_user),
+) -> HTMLResponse:
+    """Create a blank NSA template that can immediately be renamed or edited."""
+    technology = 'nsa'
+    names = {str(row['name']) for row in repository.list_report_templates(technology)}
+    base_name = 'New Template'
+    name = base_name
+    suffix = 2
+    while name in names or named_catalogue_path(technology, name, name).exists():
+        name = f'{base_name} {suffix}'
+        suffix += 1
+    destination = named_catalogue_path(technology, name, name)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(catalogue_csv([]))
+    repository.add_report_template(technology, name)
+    repository.add_log(user.username, 'create_report_template', json.dumps({
+        'technology': technology,
+        'template': name,
+    }))
+    query = urlencode({'catalogue_technology': technology, 'catalogue_id': name})
+    return RedirectResponse(f'/admin?{query}#catalogue-editor', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/admin/report-templates/{technology}/{catalogue_id}/delete', response_class=HTMLResponse)
 def delete_report_catalogue(
     request: Request,
     technology: str,
@@ -4298,7 +4360,7 @@ def delete_report_catalogue(
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/admin/report-catalogues/{technology}/{catalogue_id}/save', response_class=HTMLResponse)
+@app.post('/admin/report-templates/{technology}/{catalogue_id}/save', response_class=HTMLResponse)
 def save_report_catalogue(
     request: Request,
     technology: str,
@@ -4339,7 +4401,7 @@ def save_report_catalogue(
     return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.get('/admin/report-catalogues/{technology}/export')
+@app.get('/admin/report-templates/{technology}/export')
 def export_report_catalogue(technology: str, user: SessionUser = Depends(admin_user)) -> Response:
     technology = technology.strip().lower()
     if technology not in TEMPLATE_NAMES:
@@ -4352,7 +4414,7 @@ def export_report_catalogue(technology: str, user: SessionUser = Depends(admin_u
     )
 
 
-@app.get('/admin/report-catalogues/export-selected')
+@app.get('/admin/report-templates/export-selected')
 def export_selected_report_catalogue(
     catalogue_selection: str,
     user: SessionUser = Depends(admin_user),
@@ -4373,7 +4435,7 @@ def export_selected_report_catalogue(
     )
 
 
-@app.get('/admin/report-catalogues/{technology}/{catalogue_id}/export')
+@app.get('/admin/report-templates/{technology}/{catalogue_id}/export')
 def export_named_report_catalogue(technology: str, catalogue_id: str, user: SessionUser = Depends(admin_user)) -> Response:
     technology = technology.strip().lower()
     if technology not in TEMPLATE_NAMES:

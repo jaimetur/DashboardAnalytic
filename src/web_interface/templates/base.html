@@ -34,6 +34,7 @@
             {% if header_workspaces %}
             <p>Open workspace</p>
             <form action="/workspace/select" method="post">
+              <input type="hidden" name="return_to" value="{{ request.url.path }}">
               {% for workspace in header_workspaces %}
               <button type="submit" name="workspace_id" value="{{ workspace.id }}" class="workspace-switcher-option{% if not header_workspace_access.get(workspace.id, false) %} is-unavailable{% elif active_workspace and workspace.id == active_workspace.id %} is-active{% endif %}" {% if not header_workspace_access.get(workspace.id, false) or (active_workspace and workspace.id == active_workspace.id) %}disabled{% endif %} {% if active_workspace and workspace.id == active_workspace.id %}aria-current="true"{% endif %}>{{ workspace.name }} ({{ header_workspace_sizes.get(workspace.id, '0 MB') }}){% if not header_workspace_access.get(workspace.id, false) %}<span>No access</span>{% elif active_workspace and workspace.id == active_workspace.id %}<span>Active</span>{% endif %}</button>
               {% endfor %}

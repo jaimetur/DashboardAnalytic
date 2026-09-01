@@ -818,13 +818,13 @@ document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
   const updateCatalogueIdentifier = (previousIdentifier, identifier) => {
     if (!previousIdentifier || !identifier || previousIdentifier === identifier) return;
     const row = input.closest('tr');
-    const technology = input.form?.action.match(/\/admin\/report-catalogues\/([^/]+)\//)?.[1];
+    const technology = input.form?.action.match(/\/admin\/report-templates\/([^/]+)\//)?.[1];
     if (!row || !technology) return;
     const previousName = decodeURIComponent(previousIdentifier);
-    const oldSegment = `/admin/report-catalogues/${technology}/${encodeURIComponent(previousName)}/`;
-    const newSegment = `/admin/report-catalogues/${technology}/${encodeURIComponent(identifier)}/`;
-    const rawOldSegment = `/admin/report-catalogues/${technology}/${previousName}/`;
-    const rawNewSegment = `/admin/report-catalogues/${technology}/${identifier}/`;
+    const oldSegment = `/admin/report-templates/${technology}/${encodeURIComponent(previousName)}/`;
+    const newSegment = `/admin/report-templates/${technology}/${encodeURIComponent(identifier)}/`;
+    const rawOldSegment = `/admin/report-templates/${technology}/${previousName}/`;
+    const rawNewSegment = `/admin/report-templates/${technology}/${identifier}/`;
     row.querySelectorAll('form[action], a[href]').forEach((element) => {
       const attribute = element.tagName === 'A' ? 'href' : 'action';
       const value = element.getAttribute(attribute);
@@ -860,7 +860,7 @@ document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
       savedValue = String(payload.name || name).trim();
       input.value = savedValue;
       input.setAttribute('aria-label', `Name for ${savedValue}`);
-      const previousIdentifier = input.form.action.match(/\/admin\/report-catalogues\/[^/]+\/([^/]+)\/rename$/)?.[1];
+      const previousIdentifier = input.form.action.match(/\/admin\/report-templates\/[^/]+\/([^/]+)\/rename$/)?.[1];
       updateCatalogueIdentifier(previousIdentifier, payload.identifier);
     } catch (error) {
       input.value = savedValue;
@@ -877,7 +877,7 @@ document.querySelectorAll('.catalogue-editor-picker-form').forEach((form) => {
   form.addEventListener('submit', () => preserveAdminScrollPosition());
 });
 
-document.querySelectorAll('form[action*="/admin/report-catalogues/"]').forEach((form) => {
+document.querySelectorAll('form[action*="/admin/report-templates/"]').forEach((form) => {
   if (form.classList.contains('catalogue-rename-form')) return;
   form.addEventListener('submit', () => preserveAdminScrollPosition());
 });
@@ -1246,6 +1246,7 @@ function formatAggregationOverrides(overrides) {
 
 function canPersistControl(control) {
   if (!control || !persistencePathnames.has(window.location.pathname)) return false;
+  if (control.hasAttribute('data-no-persist')) return false;
   if (!control.name || control.disabled) return false;
   const tagName = String(control.tagName || '').toLowerCase();
   const type = String(control.type || '').toLowerCase();
@@ -2215,7 +2216,7 @@ function bindConfirmForm(form) {
       if (form.dataset.confirmLoadingLabel) {
         showLoadingOverlay(form.dataset.confirmLoadingLabel, form.dataset.confirmLoadingCopy);
       }
-      if (form.action.includes('/admin/report-catalogues/')) {
+      if (form.action.includes('/admin/report-templates/')) {
         preserveAdminScrollPosition();
       }
       form.submit();
