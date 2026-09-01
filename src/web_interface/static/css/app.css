@@ -115,6 +115,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .narrow-form button { margin-top: 0.55rem; }
 .form-note { color: var(--muted); font-size: 0.92rem; }
 .alert { background: rgba(225, 95, 58, 0.13); color: #9d3417; padding: 0.9rem 1rem; border-radius: 14px; margin-top: 1rem; }
+.alert-warning { background: rgba(213, 143, 31, 0.16); color: #80520a; border: 1px solid rgba(181, 114, 14, 0.28); }
 .dashboard-stack { display: grid; }
 .spacious-stack { gap: 2.2rem; }
 .roomy-grid { gap: 1.8rem; }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import shutil
 from datetime import datetime
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -118,6 +119,9 @@ CREATE TABLE IF NOT EXISTS application_state (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_nocase
+ON users(username COLLATE NOCASE);
 """
 
 
@@ -168,52 +172,17 @@ class Repository:
         self.global_db_path = path
         self.global_db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def recover_global_metadata(self, source_path: Path) -> int:
-        """Recover users/templates from a pre-application global database.
-
-        The old deployment stored these tables in files such as app.db or
-        workspaces.db.  Keep the source untouched and copy rows idempotently
-        so an upgrade cannot silently lose existing accounts.
-        """
-        source_path = Path(source_path)
-        if not source_path.exists() or source_path.resolve() == self.global_db_path.resolve():
-            return 0
-        copied = 0
-        try:
-            with sqlite3.connect(source_path) as source, self.global_connection() as target:
-                source.row_factory = sqlite3.Row
-                tables = {row['name'] for row in source.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                target.executescript(GLOBAL_SCHEMA)
-                if 'users' in tables:
-                    rows = source.execute("SELECT username, password_hash, role, active, created_at FROM users").fetchall()
-                    for row in rows:
-                        target.execute("INSERT OR IGNORE INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, ?, ?, ?)", tuple(row))
-                    copied += len(rows)
-                if 'report_templates' in tables:
-                    rows = source.execute("SELECT technology, name, is_default FROM report_templates").fetchall()
-                    for row in rows:
-                        target.execute("INSERT OR IGNORE INTO report_templates (technology, name, is_default) VALUES (?, ?, ?)", tuple(row))
-        except sqlite3.DatabaseError:
-            return 0
-        return copied
-
-    def migrate_workspace_metadata(self, database_path: Path) -> None:
-        """Move pre-global users/template metadata out of one workspace DB."""
-        if not database_path.exists() or database_path == self.global_db_path:
-            return
-        with sqlite3.connect(database_path) as source, self.global_connection() as target:
-            source.row_factory = sqlite3.Row
-            tables = {row['name'] for row in source.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-            target.executescript(GLOBAL_SCHEMA)
-            if 'users' in tables:
-                for row in source.execute("SELECT username, password_hash, role, active, created_at FROM users").fetchall():
-                    target.execute("INSERT OR IGNORE INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, ?, ?, ?)", tuple(row))
-                source.execute('DROP TABLE users')
-            if 'report_templates' in tables:
-                for row in source.execute("SELECT technology, name, is_default FROM report_templates").fetchall():
-                    target.execute("INSERT OR IGNORE INTO report_templates (technology, name, is_default) VALUES (?, ?, ?)", tuple(row))
-                source.execute('DROP TABLE report_templates')
-            source.commit()
+    def replace_global_database_snapshot(self, snapshot_path: Path) -> None:
+        """Replace the global database and discard stale SQLite sidecars."""
+        source = Path(snapshot_path)
+        if not source.is_file():
+            raise ValueError('The configuration archive does not contain application.db.')
+        destination = self.global_db_path
+        temporary = destination.with_name(f'.{destination.name}.importing')
+        shutil.copy2(source, temporary)
+        for suffix in ('-wal', '-shm'):
+            Path(f'{destination}{suffix}').unlink(missing_ok=True)
+        temporary.replace(destination)
 
     def initialize(self) -> None:
         with self.connection() as conn:
@@ -229,7 +198,6 @@ class Repository:
                 """,
                 (local_now_iso(),),
             )
-        self.migrate_workspace_metadata(self.db_path)
         with self.global_connection() as conn:
             conn.executescript(GLOBAL_SCHEMA)
             self._ensure_report_template_columns(conn)
@@ -263,7 +231,11 @@ class Repository:
     def user_has_workspace_access(self, username: str, workspace_id: str) -> bool:
         with self.global_connection() as conn:
             conn.executescript(GLOBAL_SCHEMA)
-            row = conn.execute('SELECT 1 FROM user_workspace_access a JOIN users u ON u.id = a.user_id WHERE u.username = ? AND a.workspace_id = ?', (username, workspace_id)).fetchone()
+            row = conn.execute(
+                'SELECT 1 FROM user_workspace_access a JOIN users u ON u.id = a.user_id '
+                'WHERE u.username COLLATE NOCASE = ? AND a.workspace_id = ?',
+                (username.strip(), workspace_id),
+            ).fetchone()
         return bool(row)
 
     def set_user_workspace_access(self, user_id: int, workspace_ids: list[str]) -> None:
@@ -673,8 +645,8 @@ class Repository:
     def get_user(self, username: str) -> UserRecord | None:
         with self.global_connection() as conn:
             row = conn.execute(
-                "SELECT username, password_hash, role, active FROM users WHERE username = ?",
-                (username,),
+                "SELECT username, password_hash, role, active FROM users WHERE username COLLATE NOCASE = ?",
+                (username.strip(),),
             ).fetchone()
         if not row:
             return None
@@ -688,33 +660,47 @@ class Repository:
             ).fetchone()
 
     def create_user(self, username: str, password: str, role: str) -> None:
+        normalized_username = username.strip()
         with self.global_connection() as conn:
+            duplicate = conn.execute(
+                "SELECT id FROM users WHERE username COLLATE NOCASE = ?",
+                (normalized_username,),
+            ).fetchone()
+            if duplicate:
+                raise ValueError('A user with that username already exists.')
             conn.execute(
                 "INSERT INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, ?, 1, ?)",
-                (username, hash_password(password), role, local_now_iso()),
+                (normalized_username, hash_password(password), role, local_now_iso()),
             )
 
     def update_user(self, user_id: int, username: str, role: str, active: bool, password: str | None = None) -> None:
+        normalized_username = username.strip()
         with self.global_connection() as conn:
             existing = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
             if not existing:
                 raise ValueError("User not found")
+            duplicate = conn.execute(
+                "SELECT id FROM users WHERE username COLLATE NOCASE = ? AND id != ?",
+                (normalized_username, user_id),
+            ).fetchone()
+            if duplicate:
+                raise ValueError('A user with that username already exists.')
             if password:
                 conn.execute(
                     "UPDATE users SET username = ?, password_hash = ?, role = ?, active = ? WHERE id = ?",
-                    (username, hash_password(password), role, int(active), user_id),
+                    (normalized_username, hash_password(password), role, int(active), user_id),
                 )
             else:
                 conn.execute(
                     "UPDATE users SET username = ?, role = ?, active = ? WHERE id = ?",
-                    (username, role, int(active), user_id),
+                    (normalized_username, role, int(active), user_id),
                 )
 
     def update_password(self, username: str, password: str) -> None:
         with self.global_connection() as conn:
             result = conn.execute(
-                "UPDATE users SET password_hash = ? WHERE username = ?",
-                (hash_password(password), username),
+                "UPDATE users SET password_hash = ? WHERE username COLLATE NOCASE = ?",
+                (hash_password(password), username.strip()),
             )
             if result.rowcount != 1:
                 raise ValueError('User not found')
@@ -756,11 +742,11 @@ class Repository:
         placeholders = ','.join('?' for _ in normalized)
         with self.global_connection() as conn:
             rows = conn.execute(
-                f"SELECT username FROM users WHERE active = 1 AND username IN ({placeholders})",
+                f"SELECT username FROM users WHERE active = 1 AND username COLLATE NOCASE IN ({placeholders})",
                 normalized,
             ).fetchall()
-        existing = {row['username'] for row in rows}
-        return [username for username in normalized if username in existing]
+        existing = {str(row['username']).casefold() for row in rows}
+        return [username for username in normalized if username.casefold() in existing]
 
     def add_dataset(self, file_name: str, stored_path: str, uploaded_by: str) -> tuple[int, bool]:
         with self.connection() as conn:

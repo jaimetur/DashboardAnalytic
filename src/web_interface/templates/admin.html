@@ -69,9 +69,9 @@
               <form id="user-update-{{ row['id'] }}" action="/admin/users/{{ row['id'] }}/update" method="post"></form>
               <form id="user-delete-{{ row['id'] }}" action="/admin/users/{{ row['id'] }}/delete" method="post" data-confirm="Delete user {{ row['username'] }}? This action cannot be undone."></form>
             </td>
-            <td><input class="table-input" type="text" name="username" value="{{ row['username'] }}" form="user-update-{{ row['id'] }}" required></td>
+            <td><input class="table-input" type="text" name="username" value="{{ row['username'] }}" form="user-update-{{ row['id'] }}" required {% if user.role != 'super-admin' and row['role'] == 'super-admin' %}disabled{% endif %}></td>
             <td>
-              <input class="table-input" type="password" name="password" value="" placeholder="Keep current" form="user-update-{{ row['id'] }}">
+              <input class="table-input" type="password" name="password" value="" placeholder="Keep current" form="user-update-{{ row['id'] }}" {% if user.role != 'super-admin' and row['role'] == 'super-admin' %}disabled{% endif %}>
               <div class="table-help">Leave blank to keep current password</div>
             </td>
             <td>

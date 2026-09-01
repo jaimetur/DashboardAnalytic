@@ -104,6 +104,69 @@ def test_login_page_hides_default_access_section_when_no_default_users_exist(cli
     assert "demo / demo123" not in response.text
 
 
+def test_login_username_is_case_insensitive_and_rejects_case_duplicates(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    admin = next(row for row in app_module.repository.list_users() if row['username'] == 'admin')
+    app_module.repository.set_user_workspace_access(int(admin['id']), ['default'])
+    mixed_case_login = client.post(
+        '/login',
+        data={'username': 'AdMiN', 'password': 'admin123', 'workspace_id': 'default'},
+        follow_redirects=False,
+    )
+    assert mixed_case_login.status_code == 303
+
+    assert app_module.repository.get_user('ADMIN').username == 'admin'
+    demo = next(row for row in app_module.repository.list_users() if row['username'] == 'demo')
+    app_module.repository.set_user_workspace_access(int(demo['id']), ['default'])
+    assert app_module.repository.user_has_workspace_access('DeMo', 'default')
+
+    duplicate = client.post(
+        '/admin/users',
+        data={'username': 'ADMIN', 'password': 'other-password', 'role': 'user'},
+    )
+    assert duplicate.status_code == 400
+    assert 'already exists' in duplicate.text
+
+
+def test_login_warns_when_valid_user_cannot_access_selected_workspace(client) -> None:
+    response = client.post(
+        '/login',
+        data={'username': 'demo', 'password': 'demo123', 'workspace_id': 'default'},
+    )
+    assert response.status_code == 403
+    assert 'You do not have access to that workspace.' in response.text
+    assert 'class="alert alert-warning" role="alert"' in response.text
+
+
+def test_only_super_admin_has_implicit_workspace_access(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    denied_admin = client.post(
+        '/login',
+        data={'username': 'admin', 'password': 'admin123', 'workspace_id': 'default'},
+    )
+    assert denied_admin.status_code == 403
+    assert 'You do not have access to that workspace.' in denied_admin.text
+
+    admin = next(row for row in app_module.repository.list_users() if row['username'] == 'admin')
+    app_module.repository.set_user_workspace_access(int(admin['id']), ['default'])
+    granted_admin = client.post(
+        '/login',
+        data={'username': 'admin', 'password': 'admin123', 'workspace_id': 'default'},
+        follow_redirects=False,
+    )
+    assert granted_admin.status_code == 303
+
+    app_module.repository.set_user_workspace_access(int(admin['id']), [])
+    super_admin = client.post(
+        '/login',
+        data={'username': 'super', 'password': 'super123', 'workspace_id': 'default'},
+        follow_redirects=False,
+    )
+    assert super_admin.status_code == 303
+
+
 def test_admin_import_export_packages_detect_configuration_and_workspaces(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -165,6 +228,57 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     )
     assert full_import_response.status_code == 303
     assert len(app_module.workspace_registry.list()) == 1
+
+
+def test_config_import_replaces_global_users_and_preserves_user_ids(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login_super(client)
+    created = client.post(
+        '/admin/users',
+        data={'username': 'exported-user', 'password': 'exported123', 'role': 'user'},
+        follow_redirects=False,
+    )
+    assert created.status_code == 303
+    expected_users = [
+        (int(row['id']), row['username'], row['role'], bool(row['active']))
+        for row in app_module.repository.list_users()
+    ]
+
+    exported = client.get('/admin/import-export/export?export_target=config')
+    assert exported.status_code == 200
+
+    exported_user = next(row for row in app_module.repository.list_users() if row['username'] == 'exported-user')
+    changed_password = client.post(
+        f"/admin/users/{exported_user['id']}/update",
+        data={'username': 'exported-user', 'password': 'local-change123', 'role': 'user', 'active': '1'},
+        follow_redirects=False,
+    )
+    assert changed_password.status_code == 303
+
+    local_only = client.post(
+        '/admin/users',
+        data={'username': 'local-only-user', 'password': 'local123', 'role': 'user'},
+        follow_redirects=False,
+    )
+    assert local_only.status_code == 303
+    assert app_module.repository.get_user('local-only-user') is not None
+
+    imported = client.post(
+        '/admin/import-export/import',
+        data={'confirmed_import': 'true'},
+        files={'package': ('configuration.zip', BytesIO(exported.content), 'application/zip')},
+        follow_redirects=False,
+    )
+    assert imported.status_code == 303
+    assert app_module.repository.get_user('local-only-user') is None
+    restored_user = app_module.repository.get_user('exported-user')
+    assert restored_user is not None
+    assert app_module.verify_password('exported123', restored_user.password_hash)
+    assert [
+        (int(row['id']), row['username'], row['role'], bool(row['active']))
+        for row in app_module.repository.list_users()
+    ] == expected_users
 
 
 def test_admin_export_job_creates_a_disk_backed_download(client) -> None:
@@ -509,6 +623,8 @@ def test_admin_panel_is_available_for_admin(client) -> None:
     assert response.status_code == 200
     assert "Admin panel" in response.text
     assert 'value="super-admin" aria-label="Role for super" readonly' in response.text
+    assert 'name="username" value="super" form="user-update-1" required disabled' in response.text
+    assert 'name="password" value="" placeholder="Keep current" form="user-update-1" disabled' in response.text
 
 
 def test_login_and_admin_remain_available_after_closing_the_active_workspace(client) -> None:
@@ -1385,6 +1501,7 @@ def test_admin_can_update_user_identity_fields(client) -> None:
 
     updated = app_module.repository.get_user("analyst-updated")
     assert updated is not None
+    assert next(row for row in app_module.repository.list_users() if row['username'] == 'analyst-updated')['id'] == analyst['id']
     assert updated.role == "admin"
     assert updated.active is False
     assert app_module.verify_password("newpass456", updated.password_hash)
@@ -1505,10 +1622,13 @@ def test_admin_cannot_assign_or_modify_super_admin_roles(client) -> None:
     super_row = next(row for row in app_module.repository.list_users() if row["username"] == "super")
     modified_super = client.post(
         f"/admin/users/{super_row['id']}/update",
-        data={"username": "super", "password": "", "role": "admin", "active": "1"},
+        data={"username": "renamed-super", "password": "forbidden-password", "role": "admin", "active": "1"},
     )
     assert modified_super.status_code == 403
     assert "Only super-admins can assign or modify super-admin accounts" in modified_super.text
+    assert app_module.repository.get_user('renamed-super') is None
+    assert app_module.repository.get_user('super') is not None
+    assert app_module.verify_password('super123', app_module.repository.get_user('super').password_hash)
 
     deleted_super = client.post(f"/admin/users/{super_row['id']}/delete")
     assert deleted_super.status_code == 403

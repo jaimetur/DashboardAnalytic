@@ -471,15 +471,8 @@ async def lifespan(_: FastAPI):
     )
     workspace_registry.initialize()
     repository.set_global_database(settings.database_path.parent / 'application.db')
-    # Recover accounts/templates left by installations that used the former
-    # config-level databases before the global application database existed.
-    old_config_roots = {settings.database_path.parent, PROJECT_ROOT / 'config'}
-    for old_name in ('workspaces.db', 'app.db', 'app 2.db'):
-        for old_root in old_config_roots:
-            repository.recover_global_metadata(old_root / old_name)
     migrate_access = not repository.has_workspace_access_entries()
     for workspace in workspace_registry.list():
-        repository.migrate_workspace_metadata(workspace.database_path)
         if migrate_access:
             repository.grant_all_workspace_access(workspace.id)
     export_package_dir().mkdir(parents=True, exist_ok=True)
@@ -1887,7 +1880,11 @@ def import_config_archive(staging_root: Path, manifest: dict[str, Any]) -> None:
             continue
         target = settings.slides_templates_dir / relative_path.relative_to('slides-templates') if relative_path.parts[0] == 'slides-templates' else application_config_dir / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, target)
+        if target.resolve() == repository.global_db_path.resolve():
+            repository.replace_global_database_snapshot(path)
+        else:
+            shutil.copy2(path, target)
+    repository.initialize()
 
 
 def read_import_manifest(contents: bytes) -> dict[str, Any]:
@@ -2264,9 +2261,10 @@ def login(
         )
 
     if workspace_id:
-        if record.role not in {'admin', 'super-admin'} and not repository.user_has_workspace_access(record.username, workspace_id):
+        if record.role != 'super-admin' and not repository.user_has_workspace_access(record.username, workspace_id):
             return render_template(request, 'login.html', {
                 'error': 'You do not have access to that workspace.',
+                'error_tone': 'warning',
                 'default_access_accounts': build_default_access_accounts(),
                 'workspaces': workspace_registry.list(), 'active_workspace': active_workspace,
                 'selected_workspace_id': workspace_id,
@@ -2457,14 +2455,14 @@ def require_super_admin(user: SessionUser) -> None:
 
 def accessible_workspaces(user: SessionUser) -> list[Workspace]:
     workspaces = workspace_registry.list()
-    if user.role in {'admin', 'super-admin'}:
+    if user.role == 'super-admin':
         return workspaces
     return [item for item in workspaces if repository.user_has_workspace_access(user.username, item.id)]
 
 
 @app.post('/workspace/select')
 def select_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
-    if user.role not in {'admin', 'super-admin'} and not repository.user_has_workspace_access(user.username, workspace_id):
+    if user.role != 'super-admin' and not repository.user_has_workspace_access(user.username, workspace_id):
         return RedirectResponse('/workspace?workspace_error=You+do+not+have+access+to+that+workspace.', status_code=status.HTTP_303_SEE_OTHER)
     try:
         workspace = activate_workspace(workspace_id)

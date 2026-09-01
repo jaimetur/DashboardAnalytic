@@ -36,7 +36,7 @@
       <p class="form-note">Select Username, Password and Workspace to open.</p>
     </div>
     <form class="form-stack login-form" method="post" action="/login">
-      {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+      {% if error %}<div class="alert{% if error_tone == 'warning' %} alert-warning{% endif %}" role="alert">{{ error }}</div>{% endif %}
       <label>Username<input type="text" name="username" value="super" required></label>
       <label>Password<input type="password" name="password" value="super123" required></label>
       <label class="login-workspace-field">Workspace

@@ -60,7 +60,7 @@
 - Stopped creating per-workspace `exports/` directories; report and dashboard exports now use `output/reports/`, with automatic migration of existing files.
 - Renamed report-template audit-log actions and fields from `catalogue` to `template`, including display of historical entries.
 - Moved global authentication users and shared Slides Template metadata into `config/application.db`; configuration exports now include them, while workspace databases contain only workspace data.
-- Added the `super-admin` role for workspace-permission administration. Access links are cleaned when a user or workspace is deleted, and existing accounts/templates can be recovered from pre-`application.db` configuration databases.
+- Added the `super-admin` role for workspace-permission administration. Access links are cleaned when a user or workspace is deleted.
 - Added isolated workspace-access pickers in Workspace Management and Admin, with compact dropdowns, aligned checkboxes, live user filtering, Select All / None and outside-click closing; permission editing is limited to `super-admin` users.
 - Matched Admin workspace-access selectors to the Users input palette and labelled the Create User workspace picker.
 - Matched the Create User workspace picker height to Role and expanded its menu in-flow so it does not cover the Users panel.
@@ -68,6 +68,10 @@
 - Displayed Admin user-management validation failures in warning dialogs and aligned the Create User Workspace Access label with the standard field labels.
 - Classified `users` and the Slides Template registry as **Config Tables** in Database Management, and renamed **Workspace records** to **Workspace Tables**.
 - Removed the obsolete `config/app.db` path and legacy migration branch. `config/application.db` is now the sole global configuration database.
+- Prevented obsolete user records and stale SQLite WAL sidecars from overriding user edits or configuration imports; importing configuration now replaces global users, roles and IDs exactly.
+- Made usernames case-insensitive for login, password changes and workspace access, and blocked case-only duplicate accounts.
+- Clarified Login when valid credentials lack permission for the selected workspace with a dedicated warning.
+- Restricted implicit workspace access to `super-admin`; normal `admin` and `user` accounts now require an explicit assignment.
 - Added per-user workspace access control. Administrators can assign users when creating or managing a workspace, and configure workspace access while creating or editing users.
 
 #### 📚 Documentation:
