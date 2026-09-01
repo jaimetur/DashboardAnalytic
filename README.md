@@ -197,7 +197,7 @@ pytest -q
 
 ## Configuration model
 
-[`storage-paths.conf`](storage-paths.conf) in the project root controls the local `CONFIG_DIR`, `DATA_DIR` and `ASSETS_DIR` roots without editing Python. Environment variables take precedence, which keeps Docker and other deployments configurable. `APP_DATABASE_PATH`, `APP_INPUT_DIR`, `APP_OUTPUT_DIR` and `APP_EXPORT_DIR` provide individual initial/legacy overrides; after workspace initialisation, operational data is stored under `data/workspaces/<Workspace Name>/`. `APP_OUTPUT_DIR` remains only for migration compatibility and is not used by current workspaces. Version and release date do not come from `.env`; they are defined in [`src/version.py`](src/version.py).
+[`storage-paths.conf`](storage-paths.conf) in the project root controls the local `APP_CONFIG_DIR`, `APP_DATA_DIR` and `APP_ASSETS_DIR` roots without editing Python. Environment variables take precedence, which keeps Docker and other deployments configurable. Databases and shared Slides Templates derive from the config root, PowerPoint masters from the assets root, and workspace data from the data root. Version and release date do not come from `.env`; they are defined in [`src/version.py`](src/version.py).
 
 Important runtime variables:
 
@@ -205,15 +205,9 @@ Important runtime variables:
 - `APP_SECRET_KEY`
 - `APP_ADMIN_USERNAME`
 - `APP_ADMIN_PASSWORD`
-- `CONFIG_DIR`
-- `DATA_DIR`
-- `ASSETS_DIR`
-- `APP_DATABASE_PATH`
-- `APP_INPUT_DIR`
-- `APP_OUTPUT_DIR`
-- `APP_EXPORT_DIR`
-- `APP_SLIDES_TEMPLATES_DIR`
-- `APP_PPT_TEMPLATES_DIR`
+- `APP_CONFIG_DIR`
+- `APP_DATA_DIR`
+- `APP_ASSETS_DIR`
 - `HOST_CONFIG_DIR`
 - `HOST_DATA_DIR`
 - `IMAGE_REPOSITORY`
@@ -289,11 +283,9 @@ APP_PORT=7278
 APP_SECRET_KEY=change-me-dashboard-analytic
 APP_ADMIN_USERNAME=admin
 APP_ADMIN_PASSWORD=admin123
-APP_DATABASE_PATH=/app/config/app.db
-# Initial/legacy paths; active workspace data is stored under /app/data/workspaces/<Workspace Name>/.
-APP_INPUT_DIR=/app/data/input
-APP_OUTPUT_DIR=/app/data/output
-APP_EXPORT_DIR=/app/data/exports
+APP_CONFIG_DIR=/app/config
+APP_DATA_DIR=/app/data
+APP_ASSETS_DIR=/app/assets
 
 HOST_CONFIG_DIR=/volume1/docker/stacks/dashboardanalytic/config
 HOST_DATA_DIR=/volume1/docker/stacks/dashboardanalytic/data

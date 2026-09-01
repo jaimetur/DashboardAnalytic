@@ -6,7 +6,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 STORAGE_PATHS_FILE = PROJECT_ROOT / 'storage-paths.conf'
-STORAGE_ROOT_VARIABLES = frozenset({'CONFIG_DIR', 'DATA_DIR', 'ASSETS_DIR'})
+STORAGE_ROOT_VARIABLES = frozenset({'APP_CONFIG_DIR', 'APP_DATA_DIR', 'APP_ASSETS_DIR'})
 
 
 def load_storage_paths(path: Path = STORAGE_PATHS_FILE, environ: dict[str, str] | None = None) -> None:
@@ -42,12 +42,6 @@ def project_path(env_var: str, default: str) -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
-def configured_path(env_var: str, base_dir: Path, default_name: str) -> Path:
-    """Use an explicit path override, otherwise resolve below its storage root."""
-    override = os.getenv(env_var)
-    return project_path(env_var, override) if override else base_dir / default_name
-
-
 @dataclass(frozen=True)
 class Settings:
     app_name: str = os.getenv("APP_NAME", "Dashboard Analytic")
@@ -62,17 +56,17 @@ class Settings:
     static_dir: Path = project_path("APP_STATIC_DIR", "src/web_interface/static")
     allowed_extensions: tuple[str, ...] = (".csv", ".xlsx", ".xls", ".xlsm")
 
-    # These three roots can point outside the project. Individual APP_* paths
-    # remain available when a deployment needs a more specific override.
-    config_dir: Path = project_path("CONFIG_DIR", "config")
-    data_dir: Path = project_path("DATA_DIR", "data")
-    assets_dir: Path = project_path("ASSETS_DIR", "assets")
+    # These three roots are the only storage-path settings. All application
+    # databases, templates and workspace directories derive from them.
+    config_dir: Path = project_path("APP_CONFIG_DIR", "config")
+    data_dir: Path = project_path("APP_DATA_DIR", "data")
+    assets_dir: Path = project_path("APP_ASSETS_DIR", "assets")
 
-    database_path: Path = configured_path("APP_DATABASE_PATH", config_dir, "app.db")
-    slides_templates_dir: Path = configured_path("APP_SLIDES_TEMPLATES_DIR", config_dir, "slides-templates")
-    ppt_templates_dir: Path = configured_path("APP_PPT_TEMPLATES_DIR", assets_dir, "ppt-templates")
-    input_dir: Path = configured_path("APP_INPUT_DIR", data_dir, "input")
-    output_dir: Path = configured_path("APP_OUTPUT_DIR", data_dir, "output")
-    export_dir: Path = configured_path("APP_EXPORT_DIR", data_dir, "exports")
+    database_path: Path = config_dir / "app.db"
+    slides_templates_dir: Path = config_dir / "slides-templates"
+    ppt_templates_dir: Path = assets_dir / "ppt-templates"
+    input_dir: Path = data_dir / "input"
+    output_dir: Path = data_dir / "output"
+    export_dir: Path = data_dir / "exports"
 
 settings = Settings()
