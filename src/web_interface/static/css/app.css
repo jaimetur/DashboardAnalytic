@@ -321,7 +321,10 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-job-progress { display: flex; align-items: center; gap: 0.45rem; min-width: 122px; font-variant-numeric: tabular-nums; }
 .report-job-progress progress { width: 82px; accent-color: #4b208a; }
 .report-job-actions { display: flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+.report-job-download-button { display: inline-flex; align-items: center; justify-content: center; padding: 0.34rem 0.58rem; border: 1px solid rgba(116, 87, 164, 0.62); border-radius: 999px; background: linear-gradient(145deg, #6d46a8, #9870d0); color: #fff; font-size: 0.78rem; font-weight: 700; box-shadow: 0 8px 18px rgba(95, 69, 142, 0.18); }
+.report-job-download-button:hover:not(.action-link-disabled) { background: linear-gradient(145deg, #59368e, #8057ba); }
 .report-job-actions .danger-button { padding: 0.34rem 0.58rem; }
+.report-job-actions .danger-button { background: linear-gradient(145deg, #8d1d2c, #d24e5b); border-color: rgba(141, 29, 44, 0.70); color: #fff; }
 .catalogue-editor-scroll-hint { margin-left: 0.2rem; color: #536b78; font-size: 0.78rem; font-weight: 700; }
 .admin-stack .catalogue-reenumerate-button { background: linear-gradient(145deg, #d9d0ef, #bba8dc); border-color: rgba(116, 87, 164, 0.62); color: #49366c; box-shadow: 0 8px 18px rgba(95, 69, 142, 0.16); }
 .admin-stack .catalogue-reenumerate-button:hover:not(:disabled) { background: linear-gradient(145deg, #cbc0e6, #a891d1); color: #392855; }

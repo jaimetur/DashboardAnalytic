@@ -73,7 +73,7 @@
             <td title="{{ job.error }}">{{ job.status | title }}</td>
             <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%</span></div></td>
             <td><div class="report-job-actions">
-              {% if job.download_url %}<a class="action-link-primary" href="{{ job.download_url }}" download>Download</a><a class="ghost-link" href="{{ job.open_url }}" target="_blank" rel="noopener">Open</a>{% else %}<span class="action-link-disabled">Download</span><span class="action-link-disabled">Open</span>{% endif %}
+              {% if job.download_url %}<a class="report-job-download-button" href="{{ job.download_url }}" download>Download</a>{% else %}<span class="report-job-download-button action-link-disabled">Download</span>{% endif %}
               <button type="button" class="danger-button" data-report-job-delete="{{ job.delete_url }}" data-report-job-name="{{ job.report_name }}">Delete</button>
             </div></td>
           </tr>
@@ -131,7 +131,6 @@
       link.className = primary ? 'action-link-primary' : 'ghost-link';
       link.href = href;
       if (label === 'Download') link.download = '';
-      if (label === 'Open') { link.target = '_blank'; link.rel = 'noopener'; }
       return link;
     };
     const renderReportJobs = (jobs) => {
@@ -153,14 +152,14 @@
         const actions = document.createElement('div');
         actions.className = 'report-job-actions';
         if (job.download_url) {
-          actions.append(reportActionLink('Download', job.download_url, true), reportActionLink('Open', job.open_url));
+          const download = reportActionLink('Download', job.download_url, true);
+          download.className = 'report-job-download-button';
+          actions.append(download);
         } else {
-          ['Download', 'Open'].forEach((label) => {
-            const disabled = document.createElement('span');
-            disabled.className = 'action-link-disabled';
-            disabled.textContent = label;
-            actions.append(disabled);
-          });
+          const disabled = document.createElement('span');
+          disabled.className = 'report-job-download-button action-link-disabled';
+          disabled.textContent = 'Download';
+          actions.append(disabled);
         }
         const remove = document.createElement('button');
         remove.type = 'button';
