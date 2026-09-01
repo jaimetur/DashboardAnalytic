@@ -6,76 +6,61 @@
 ## Release: v0.2.0
 ### Release Date: 2026-08-31
 #### 🌟 New Features:
-- Reorganised the application into **Workspace**, **E2E Dashboard** and **E2E PowerPoint Reporting** modules, with a Smart Orchestrator Logs Reports entry point.
-- Added CDR ingestion classification and optional Vendor mapping for Data, Voice and Speech, including VFUK/3UK mappings, batch review, queued mapping and queued clearing.
-- Added template-driven NetCheck PowerPoint reporting, including multi-campaign Data/Voice/Speech reports, run traceability and timestamped outputs.
-- Added Slides Templates Management for NSA/SA: import and legacy conversion, defaults, type reassignment, duplicate/delete/export and in-browser editing.
-- Added multi-workspace support. Workspaces can be created, opened, closed, renamed, duplicated and removed; each keeps its database and files under `data/workspaces/<Workspace Name>/`. Log in opens the selected workspace, preselecting the most recently used one.
-- Added Database Management in Admin to browse, edit, filter and delete rows from tables in the active workspace database.
-- Added processed-dataset previews, direct CDR **Show Dashboard** access, and Dashboard **Preview Dataset** access.
-- Added Admin **Import/Export** ZIP packages for configuration, shared Slides Templates, individual workspaces and full-environment transfers. Imports detect the package type automatically and register imported workspaces locally.
+- Added modular Workspace, Dashboard and PowerPoint Reporting areas, including Smart Orchestrator Logs reports.
+- Redesigned the web UI with dedicated Workspace, Dashboard, Reporting and Admin panels.
+- Added CDR ingestion for Data, Voice and Speech with VFUK/3UK vendor mapping and review queues.
+- Added template-driven NSA/SA and multivendor PowerPoint reports with persistent job history.
+- Added shared Slides Templates Management and an editor with import, defaults, duplication, deletion and export.
+- Added multi-workspace lifecycle management (create, open, close, rename, duplicate and remove).
+- Added Admin Database Management with table browsing, row editing/deletion and Excel-style filters.
+- Added Admin Import/Export ZIP packages for configuration, templates, workspaces and full environments.
+- Added self-service password changes from the header User badge.
+- Added processed-dataset preview and direct Preview/Show Dashboard actions from workspace and Admin.
+- Added Generated Reports Jobs with Download and Delete actions, progress tracking and report metadata.
+- Added configurable Data, Voice and Speech CDR comparison reports, including multiple campaigns and multivendor output.
 
 #### 🚀 Enhancements:
-- Added editable root-level `storage-paths.conf` for configuring `APP_CONFIG_DIR`, `APP_DATA_DIR` and `APP_ASSETS_DIR` without editing Python; deployment environment variables retain precedence.
-- Kept project-local `config/`, `data/` and `assets/` as the automatic fallback when `storage-paths.conf` is absent.
-- Made Slides Templates executable: catalogue source, KPI, chart type, filters, thresholds/buckets, legend, grouping and named layout drive rendering, including structural Title and Transition slides.
-- Unified NSA, SA, single-vendor and multivendor generation on the master `Template_CDR_analysis.pptx`; catalogues create slides and populate layout placeholders. NSA/SA catalogues were also aligned with the NetCheck methodology.
-- Improved multivendor reporting with persisted VFUK/3UK GCID and Vendor calculations, UK operator-name normalisation at render time, and validation that all selected CDRs are mapped.
-- Accelerated repeated multi-campaign reports with shared SQLite CDR tables synchronised by `dataset_id`; reports query only the fields required by the selected template.
-- Added Admin Datasets Management with safe dataset-file renaming, source-path synchronisation and operational actions.
-- Improved previews and the database editor with materialised GCID, source-preserving fields, searchable Excel-style multi-value filters, contextual values across all pages and configurable row limits.
-- Expanded the Slides Templates Editor with contextual help, Filter Builder, searchable selections, fixed columns, row controls and scroll guidance.
-- Simplified template persistence: SQLite stores only each CSV's exact name, type and default state. Names preserve case and spaces, and renames/duplicates keep files and defaults in sync without JSON registries or slug aliases.
-- Improved CDR-only Dashboard analysis, adaptive filters, responsive module UI, dialogs, admin actions and Help navigation.
-- Moved Slides Templates to the shared `config/slides-templates/` library and removed unused workspace `output/` directories.
-- Made configuration transfers preserve the destination workspace registry; full-environment imports rebuild it from the transferred workspaces to avoid source-path conflicts.
-- Moved the workspace registry to `data/workspaces/workspace-registry.db`, with automatic migration from both historical `config` filenames.
-- Added package preflight warnings and explicit confirmation before Import/Export overwrites configuration, shared templates or a same-named workspace.
-- Removed combined-CDR cleanup from Admin page load; it now runs after dataset deletion or from Database Management's **Clean orphaned rows** action.
-- Improved generated PowerPoint charts with larger legends, labels and axis ticks; hierarchical grouping now keeps child dimensions nested below their parent, and CDF campaign lines increase in width from oldest to newest.
-- Keep multi-level chart categories together even when CDRs are appended campaign by campaign: all child bars now appear beneath one parent label (for example, every Vodafone campaign before O2).
-- Added `Legend Position` to Slides Templates. Charts now place legends at Top, Bottom, Left or Right, using rows for top/bottom and columns for left/right; the shared-library templates are explicitly populated as Right for one-column layouts and Bottom for multi-chart layouts.
-- Renamed `Grouping_Rows` and `Grouping_Columns` to `Rows Aggregation` and `Column Aggregation`, and placed `Legend` immediately before `Legend Position` in the template CSV and editor.
-- Made Slides Templates Editor organise rows into ordered slide blocks and merge their shared title, subtitle and layout cells while preserving the full per-chart CSV contract on save.
-- Improved Slides Templates Editor readability with merged multi-chart slide numbers, alternating purple slide blocks and matched aggregation-column widths.
-- Refined Generated Reports Jobs styling: Download now has a clear hover state, Delete keeps its red hover treatment, and Date/Report Name columns wrap safely without overlapping adjacent data.
-- Let the Slides Templates Editor choose between adding a chart to the current slide or inserting a new, sequentially renumbered slide from the final row of a slide block.
-- Harmonised grouped slide-cell typography with single-chart slides and clarified the add-row dialog actions.
-- Moved NetCheck PowerPoint generation into persistent background jobs and added Reporting job history with progress plus Download, Open and Delete actions.
-- Renamed the history panel to **Generated Reports Jobs**, showing all persisted jobs for the active workspace, including compatible historical entries.
-- Store new PowerPoint reports under each workspace's `output/reports` directory while continuing to discover older files from `exports`.
-- Made Admin ZIP exports disk-backed background jobs with direct, resumable browser downloads, selective compression for already-compressed files and 24-hour cleanup of temporary packages; this supports very large workspaces without loading the archive into browser or server memory.
-- Show an immediate upload-progress dialog when importing a ZIP, before a large package reaches the server for overwrite inspection.
-- Standardized configurable storage roots as `APP_CONFIG_DIR`, `APP_DATA_DIR` and `APP_ASSETS_DIR`; all database, template and workspace paths now derive from these three roots.
-- Added self-service password changes from the header User badge with current-password verification, matching confirmation and a success dialog.
-- Fixed Docker image builds so the bundled `assets/ppt-templates/Template_CDR_analysis.pptx` master is included in production and development containers.
-- Added alternating row colours and hover highlighting to the Generated Reports Jobs table.
-- Added Template, Type, Multivendor and Generated by columns to Generated Reports Jobs.
-- Simplified generated report filenames by removing random suffixes and display report dates in the server's local timezone.
-- Replaced the report-job Open action with a visible purple Download button and a red Delete button.
-- Formatted the Generated Reports Jobs Datasets column with one dataset per line grouped by Data, Voice and Speech.
-- Reordered Generated Reports Jobs to place Generated by after ID and refined Date, Report Name and Template column widths.
-- Reordered report metadata so Type and Multivendor follow Report Name, rendered Status with Queue and Status badges, and compacted Delete actions.
-- Placed Template and Slides immediately after Multivendor and matched Delete typography and padding to Download.
-- Replaced report-job Download and Delete labels with compact, titled download and remove icons.
+- Added root-level `storage-paths.conf` and `APP_CONFIG_DIR`, `APP_DATA_DIR` and `APP_ASSETS_DIR` overrides.
+- Made templates drive report titles, charts, filters, aggregations, legends and layout; added `Legend Position` and renamed aggregation columns.
+- Grouped and ordered multi-chart slides in the editor while preserving the complete CSV format on save.
+- Optimised repeated CDR reports with shared materialised tables and column selection based on the report.
+- Improved Dashboard and preview performance, adaptive filters, vendor persistence and large-dataset handling.
+- Added safe dataset renaming and synchronised source paths and references.
+- Moved templates to `config/slides-templates/`, workspace databases and reports to their workspace directories, and the registry to `data/workspaces/`.
+- Made imports and exports disk-backed background jobs with progress, preflight warnings and overwrite confirmation for large packages.
+- Added generated-report metadata (template, type, vendor mode, datasets and user), local server dates and compact icon actions.
+- Improved PowerPoint chart readability, hierarchical grouping, CDF campaign styling and legend placement.
+- Added cleanup of orphaned combined-CDR rows after dataset deletion or from Database Management.
+- Added Excel-like preview filtering by column values, plus pre-filters for Operator, Vendor, RAT, Session Type and Call Status.
+- Added colour-coded Source Sheet, Vendor and GCID fields in dataset previews.
+- Added Slides Templates Editor cell assistance that parses the current value, contextual help, searchable selectors, row insertion and multi-chart slide grouping.
+- Added reusable blank PowerPoint layouts and CSV-defined slide/chart templates for report generation.
+- Added persistent background processing for imports, report generation and large ZIP transfers, independent of the active session.
+- Added alternating report-job rows, compact icon actions and server-local report dates.
 
 #### 🐛 Bug fixes:
-- Fixed Slides Templates Editor row normalisation so grouping, sorting and visual merging retain every chart-definition field instead of clearing them in the browser.
-- Removed the unused `assets/slides-templates` migration path; Slides Templates now use only the configured shared library.
-- Fixed catalogue defaults, deletion protection, editor selection, grouping semantics and reporting placeholder/chart generation.
-- Fixed CDR and mapping ingestion for duplicate headers, legacy encodings, alternate Cell ID fields, VFUK/3UK GCIDs and NSA RAT spellings.
-- Fixed Vendor persistence and preview ordering, and kept CDRs usable after failed mapping while logging the failure.
-- Fixed inline template renames so selectors, URLs and the open editor refresh immediately; aligned template-management controls and feedback dialogs.
-- Fixed Workspace drag-and-drop, cache/profile refreshes, queue action updates and Dashboard filter population/contrast.
-- Fixed queued imports so they retain their originating workspace and continue after closing it or signing out.
-- Preserved original upload dates during reprocessing, separating **Uploaded** from **Updated** and keeping automatic latest-dataset selection stable.
-- Recovered legacy CDRs left failed by Vendor mapping by rebuilding their original source without a mapping.
-- Fixed Help navigation and mobile document overflow.
+- Preserved chart-definition fields during template normalisation, sorting and visual merging.
+- Fixed templates defaults, renames, deletion protection, editor selection and report placeholder generation.
+- Fixed ingestion and mapping for duplicate headers, alternate encodings, Cell ID variants and vendor fields.
+- Kept CDR datasets available after failed mappings and recovered previously failed imports.
+- Fixed queue ownership and background processing across workspace close and logout.
+- Preserved upload dates while tracking updates and latest-dataset selection.
+- Fixed Dashboard filter restoration, cache refreshes, empty states and mobile document overflow.
+- Fixed Docker packaging so the master PowerPoint template is included in deployed images.
+- Fixed template migration and editor normalisation so KPI, chart type, filters, aggregations, legends and layout values are retained.
+- Fixed report generation for missing sources, empty tables, duplicate columns, mixed encodings and legacy dataset metadata.
+- Fixed multi-level grouping so child campaign bars remain nested under one operator label.
+- Fixed report-job filenames, output discovery and historical-job loading after migration to `output/reports`.
+- Fixed Admin loading when no default templates or workspace database is present.
 
 #### 📚 Documentation:
-- Replaced inherited documentation and the root-level roadmap with numbered Dashboard Analytic Help and an embedded index.
-- Expanded README and Help for ingestion, mapping, previews, Dashboard, reporting and Slides Templates.
-- Documented shared template storage, workspace data layout and Admin Import/Export transfer behaviour.
+- Reworked the Help, README and configuration documentation for the current workspace, template, reporting and transfer workflows.
+
+#### 🔎 Summary vs v0.1.0:
+- v0.1.0 provided the initial single-workspace KPI dashboard and basic file ingestion; v0.2.0 adds independent multi-workspace storage and lifecycle management.
+- Reporting evolved from basic exports into templates-driven NSA/SA, campaign-comparison and multivendor PowerPoint jobs with persistent history.
+- Administration expanded from user management into template, dataset, database and environment Import/Export management.
+- Preview, filtering, caching, background processing and large-file transfers were substantially improved for operational datasets.
 
 ---
 
