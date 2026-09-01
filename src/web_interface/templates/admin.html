@@ -63,16 +63,21 @@
         <thead><tr><th>ID</th><th>Username</th><th>Password</th><th>Role</th><th>Active</th><th>Workspaces</th><th>Created</th><th>Actions</th></tr></thead>
         <tbody>
           {% for row in users %}
-          <tr>
+          <tr data-user-row>
             <td>
               {{ row['id'] }}
-              <form id="user-update-{{ row['id'] }}" action="/admin/users/{{ row['id'] }}/update" method="post"></form>
+              <form id="user-update-{{ row['id'] }}" action="/admin/users/{{ row['id'] }}/update" method="post" data-user-auto-save></form>
               <form id="user-delete-{{ row['id'] }}" action="/admin/users/{{ row['id'] }}/delete" method="post" data-confirm="Delete user {{ row['username'] }}? This action cannot be undone."></form>
+              <form id="user-password-reset-{{ row['id'] }}" action="/admin/users/{{ row['id'] }}/reset-password" method="post" data-user-password-reset data-reset-username="{{ row['username'] }}"></form>
             </td>
             <td><input class="table-input" type="text" name="username" value="{{ row['username'] }}" form="user-update-{{ row['id'] }}" required {% if user.role != 'super-admin' and row['role'] == 'super-admin' %}disabled{% endif %}></td>
             <td>
-              <input class="table-input" type="password" name="password" value="" placeholder="Keep current" form="user-update-{{ row['id'] }}" {% if user.role != 'super-admin' and row['role'] == 'super-admin' %}disabled{% endif %}>
-              <div class="table-help">Leave blank to keep current password</div>
+              <div class="user-password-editor">
+                <input class="table-input" type="password" name="password" value="" placeholder="••••••••" autocomplete="new-password" form="user-update-{{ row['id'] }}" data-user-password {% if user.role != 'super-admin' and row['role'] == 'super-admin' %}disabled{% endif %}>
+                <button type="button" class="user-password-toggle" data-user-password-toggle aria-label="Show newly entered password" title="Show newly entered password" hidden>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.2 12s3.5-6 9.8-6 9.8 6 9.8 6-3.5 6-9.8 6-9.8-6-9.8-6Z"></path><circle cx="12" cy="12" r="2.8"></circle></svg>
+                </button>
+              </div>
             </td>
             <td>
               {% if user.role != 'super-admin' and row['role'] == 'super-admin' %}
@@ -105,8 +110,8 @@
             <td>{{ row['created_at'] }}</td>
             <td>
               <div class="table-actions">
-                <button type="submit" form="user-update-{{ row['id'] }}" {% if user.role != 'super-admin' and row['role'] == 'super-admin' %}disabled title="Only super-admins can modify super-admin accounts"{% endif %}>Save</button>
-                <button type="submit" form="user-delete-{{ row['id'] }}" class="danger-button" {% if row['username'] == user.username %}disabled title="You cannot delete the current signed-in admin user"{% elif user.role != 'super-admin' and row['role'] == 'super-admin' %}disabled title="Only super-admins can modify super-admin accounts"{% endif %}>Delete</button>
+                <button type="submit" form="user-password-reset-{{ row['id'] }}" class="user-password-reset" {% if user.role != 'super-admin' and row['role'] == 'super-admin' %}disabled title="Only super-admins can modify super-admin accounts"{% endif %}>Reset Password</button>
+                <button type="submit" form="user-delete-{{ row['id'] }}" class="danger-button user-delete-button" {% if row['username'] == user.username %}disabled title="You cannot delete the current signed-in admin user"{% elif user.role != 'super-admin' and row['role'] == 'super-admin' %}disabled title="Only super-admins can modify super-admin accounts"{% endif %}>Delete</button>
               </div>
             </td>
           </tr>
@@ -814,6 +819,155 @@
   const error = document.querySelector('[data-admin-error]');
   if (!error?.textContent.trim()) return;
   showInfoDialog(error.textContent.trim(), {title: 'User management warning', tone: 'warning'});
+})();
+</script>
+<script>
+(() => {
+  const forms = document.querySelectorAll('form[data-user-auto-save]');
+  const isEditable = (element) => !element.disabled && ['INPUT', 'SELECT'].includes(element.tagName);
+
+  const applyUser = (form, user) => {
+    if (!user) return;
+    const username = document.querySelector(`[form="${form.id}"][name="username"]`);
+    const role = document.querySelector(`[form="${form.id}"][name="role"]`);
+    const active = document.querySelector(`[form="${form.id}"][name="active"]`);
+    const password = document.querySelector(`[form="${form.id}"][name="password"]`);
+    if (username instanceof HTMLInputElement) username.value = user.username;
+    if (role instanceof HTMLSelectElement) role.value = user.role;
+    if (active instanceof HTMLInputElement) active.checked = Boolean(user.active);
+    if (password instanceof HTMLInputElement) password.value = '';
+    document.querySelectorAll(`[form="${form.id}"][name="workspace_ids"]`).forEach((box) => {
+      if (box instanceof HTMLInputElement) box.checked = (user.workspace_ids || []).includes(box.value);
+    });
+  };
+
+  forms.forEach((form) => {
+    let saving = false;
+    let resave = false;
+    let scheduled = false;
+    let editedField = '';
+    const password = document.querySelector(`[form="${form.id}"][data-user-password]`);
+    const passwordToggle = form.closest('tr')?.querySelector('[data-user-password-toggle]');
+    const state = () => Array.from(new FormData(form).entries())
+      .filter(([name]) => name !== 'password')
+      .map(([name, value]) => `${name}=${value}`)
+      .sort()
+      .join('&');
+    let savedState = state();
+
+    const save = async () => {
+      if (saving) { resave = true; return; }
+      const submittedState = state();
+      const hasNewPassword = password instanceof HTMLInputElement && password.value.length > 0;
+      if (submittedState === savedState && !hasNewPassword) return;
+      saving = true;
+      try {
+        const formData = new FormData(form);
+        formData.set('edited_field', editedField);
+        const response = await fetch(form.action, {
+          method: 'POST', body: formData, credentials: 'same-origin',
+          headers: {'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json'},
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          applyUser(form, payload.user);
+          throw new Error(payload.detail || 'The user could not be updated.');
+        }
+        if (state() === submittedState) {
+          applyUser(form, payload.user);
+          savedState = state();
+        } else {
+          resave = true;
+        }
+      } catch (error) {
+        showInfoDialog(error instanceof Error ? error.message : 'The user could not be updated.', {
+          title: 'User update failed', tone: 'warning',
+        });
+      } finally {
+        saving = false;
+        if (resave) { resave = false; save(); }
+      }
+    };
+    const scheduleSave = (event) => {
+      editedField = event.currentTarget instanceof HTMLInputElement || event.currentTarget instanceof HTMLSelectElement
+        ? event.currentTarget.name
+        : '';
+      if (scheduled) return;
+      scheduled = true;
+      window.setTimeout(() => { scheduled = false; save(); }, 0);
+    };
+
+    document.querySelectorAll(`[form="${form.id}"]`).forEach((control) => {
+      if (!isEditable(control)) return;
+      if (control instanceof HTMLInputElement && ['text', 'password'].includes(control.type)) {
+        control.addEventListener('blur', scheduleSave);
+      } else {
+        control.addEventListener('change', scheduleSave);
+      }
+    });
+
+    if (password instanceof HTMLInputElement && passwordToggle instanceof HTMLButtonElement) {
+      let passwordEdited = false;
+      password.value = '';
+      const updatePasswordToggle = () => {
+        const editingPassword = document.activeElement === password || document.activeElement === passwordToggle;
+        passwordToggle.hidden = !editingPassword || !passwordEdited || password.value.length === 0;
+      };
+      password.addEventListener('focus', () => {
+        if (!passwordEdited) password.value = '';
+        updatePasswordToggle();
+      });
+      password.addEventListener('input', () => { passwordEdited = true; updatePasswordToggle(); });
+      password.addEventListener('blur', () => {
+        window.setTimeout(() => { if (document.activeElement !== passwordToggle) passwordToggle.hidden = true; }, 0);
+      });
+      passwordToggle.addEventListener('pointerdown', (event) => event.preventDefault());
+      passwordToggle.addEventListener('click', () => {
+        const reveal = password.type === 'password';
+        password.type = reveal ? 'text' : 'password';
+        passwordToggle.title = reveal ? 'Hide password' : 'Show password';
+        passwordToggle.setAttribute('aria-label', passwordToggle.title);
+      });
+    }
+  });
+
+  document.querySelectorAll('form[data-user-password-reset]').forEach((form) => {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const username = form.dataset.resetUsername || 'this user';
+      const accepted = await showConfirmDialog(
+        `Reset the password for ${username} to its default value?`,
+        {title: 'Reset password', confirmLabel: 'Reset password'},
+      );
+      if (!accepted) return;
+
+      showLoadingOverlay('Resetting password', `Resetting the password for ${username}.`);
+      try {
+        const response = await fetch(form.action, {
+          method: 'POST', credentials: 'same-origin',
+          headers: {'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json'},
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.detail || 'The password could not be reset.');
+
+        const row = form.closest('[data-user-row]');
+        const password = row?.querySelector('[data-user-password]');
+        const passwordToggle = row?.querySelector('[data-user-password-toggle]');
+        if (password instanceof HTMLInputElement) {
+          password.value = '';
+          password.type = 'password';
+        }
+        if (passwordToggle instanceof HTMLButtonElement) passwordToggle.hidden = true;
+        hideLoadingOverlay();
+        showInfoDialog(`Password reset for ${payload.user?.username || username}.`, {title: 'Password reset'});
+      } catch (error) {
+        hideLoadingOverlay();
+        showInfoDialog(error instanceof Error ? error.message : 'The password could not be reset.', {
+          title: 'Password reset failed', tone: 'error',
+        });
+      }
+    });
+  });
 })();
 </script>
 {% endblock %}

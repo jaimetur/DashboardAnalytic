@@ -680,10 +680,10 @@ class Repository:
             if not existing:
                 raise ValueError("User not found")
             duplicate = conn.execute(
-                "SELECT id FROM users WHERE username COLLATE NOCASE = ? AND id != ?",
-                (normalized_username, user_id),
+                "SELECT id FROM users WHERE username COLLATE NOCASE = ?",
+                (normalized_username,),
             ).fetchone()
-            if duplicate:
+            if duplicate and int(duplicate['id']) != int(user_id):
                 raise ValueError('A user with that username already exists.')
             if password:
                 conn.execute(

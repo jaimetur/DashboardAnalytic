@@ -116,6 +116,15 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .form-note { color: var(--muted); font-size: 0.92rem; }
 .alert { background: rgba(225, 95, 58, 0.13); color: #9d3417; padding: 0.9rem 1rem; border-radius: 14px; margin-top: 1rem; }
 .alert-warning { background: rgba(213, 143, 31, 0.16); color: #80520a; border: 1px solid rgba(181, 114, 14, 0.28); }
+.user-password-editor { position: relative; width: 100%; }
+.user-password-editor .table-input { min-width: 0; width: 100%; padding-right: 2.45rem; }
+.user-password-toggle { position: absolute; top: 50%; right: 0.38rem; display: inline-grid; place-items: center; width: 1.7rem; min-width: 1.7rem; height: 1.7rem; min-height: 1.7rem; padding: 0.2rem; transform: translateY(-50%); border-radius: 7px; background: transparent; border: 0; color: var(--brand-3); box-shadow: none; }
+.user-password-toggle svg { width: 1.08rem; height: 1.08rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.user-password-toggle[hidden] { display: none !important; }
+.user-password-toggle:hover { background: rgba(16, 49, 74, 0.08); color: #08736d; }
+.user-password-reset, .user-delete-button { min-height: auto; padding: 0.34rem 0.52rem; font-size: 0.76rem; line-height: 1.1; }
+.user-password-reset { background: linear-gradient(135deg, #228a5d, #49aa76); border-color: rgba(27, 117, 76, 0.64); color: #fff; }
+.user-password-reset:hover:not(:disabled) { background: linear-gradient(135deg, #176b47, #338f5f); }
 .dashboard-stack { display: grid; }
 .spacious-stack { gap: 2.2rem; }
 .roomy-grid { gap: 1.8rem; }
@@ -152,6 +161,10 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .admin-stack button:disabled { background: linear-gradient(135deg, #a46b6e, #c99a9c); border-color: rgba(116, 18, 24, 0.25); color: rgba(255,255,255,0.78); }
 .admin-stack .danger-button { background: linear-gradient(135deg, #651018, #9c242b); }
 .admin-stack .danger-button:hover:not(:disabled) { background: linear-gradient(135deg, #4c0b11, #7d171f); }
+.admin-stack .user-password-toggle { background: transparent; border: 0; color: var(--brand-3); box-shadow: none; }
+.admin-stack .user-password-toggle:hover:not(:disabled) { background: rgba(16, 49, 74, 0.08); color: #08736d; }
+.admin-stack .user-password-reset { background: linear-gradient(135deg, #945214, #d18730); border-color: rgba(119, 62, 10, 0.68); color: #fff; }
+.admin-stack .user-password-reset:hover:not(:disabled) { background: linear-gradient(135deg, #743e0d, #af6820); }
 .admin-stack label:not(.toggle-switch) { color: #8b2429; font-weight: 700; }
 .admin-stack input:not([type="checkbox"]), .admin-stack select { border-color: rgba(139, 29, 36, 0.30); background: linear-gradient(135deg, #fffafa, #fff0ef); }
 .admin-create-user-panel { border-color: rgba(139, 29, 36, 0.22); background: linear-gradient(135deg, rgba(255, 247, 246, 0.94), rgba(255, 255, 255, 0.96)); }
@@ -469,6 +482,11 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .login-auth-card { padding: 2rem; display: grid; gap: 1rem; align-content: start; min-height: 540px; height: 100%; background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(244, 248, 250, 0.94)); }
 .login-auth-head h3 { margin: 0; font-size: 2rem; }
 .login-form { gap: 1rem; }
+.login-password-editor { display: flex; align-items: center; gap: 0.45rem; }
+.login-password-editor input { min-width: 0; flex: 1; }
+.login-password-toggle { display: inline-grid; place-items: center; flex: 0 0 auto; width: 2.6rem; min-width: 2.6rem; height: 2.6rem; min-height: 2.6rem; padding: 0.38rem; border-radius: 12px; background: transparent; border: 1px solid var(--line); color: var(--brand-3); box-shadow: none; }
+.login-password-toggle svg { width: 1.22rem; height: 1.22rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.login-password-toggle:hover { background: rgba(16, 49, 74, 0.08); color: #08736d; }
 .login-workspace-field { margin-top: 1.7rem; }
 .login-form button { margin-top: 0.6rem; }
 .login-defaults-label { margin: 0; color: var(--muted); font-size: 0.92rem; font-weight: 600; }
@@ -668,7 +686,11 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .toggle-switch input:checked + .toggle-slider::after { transform: translateX(24px); }
 .toggle-switch input:focus-visible + .toggle-slider { outline: 2px solid rgba(36, 90, 150, 0.5); outline-offset: 2px; }
 .queue-table-wrap { overflow-x: auto; }
-.workspace-switcher-panel { display: grid; gap: 0.9rem; }
+.workspace-switcher-panel { position: relative; z-index: 1; display: grid; gap: 0.9rem; overflow: visible; }
+/* Each panel uses backdrop filtering, which creates its own stacking context.
+   Raise Workspaces Management while its access picker is open so the menu can
+   extend over the next panel instead of being painted underneath it. */
+.workspace-switcher-panel:has(.workspace-user-picker[open]) { z-index: 10; }
 .workspace-switcher-panel .lede { margin: -0.35rem 0 0; }
 .workspace-switcher-actions { display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap; }
 .workspace-select-form, .workspace-management-forms, .workspace-management-forms form { display: flex; align-items: end; gap: 0.7rem; flex-wrap: wrap; }

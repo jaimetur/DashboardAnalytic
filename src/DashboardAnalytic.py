@@ -2534,8 +2534,17 @@ def delete_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(
 
 
 @app.post('/workspace/access')
-def update_workspace_access(workspace_id: str = Form(...), user_ids: list[int] = Form(default=[]), user: SessionUser = Depends(admin_user)) -> Response:
+def update_workspace_access(
+    request: Request,
+    workspace_id: str = Form(...),
+    user_ids: list[int] = Form(default=[]),
+    user: SessionUser = Depends(admin_user),
+) -> Response:
     require_super_admin(user)
+    if not workspace_registry.get(workspace_id):
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JSONResponse({'detail': 'Workspace not found.'}, status_code=404)
+        return RedirectResponse('/workspace?workspace_error=Workspace+not+found.', status_code=status.HTTP_303_SEE_OTHER)
     for row in repository.list_users():
         if int(row['id']) in user_ids:
             ids = repository.list_user_workspace_ids(int(row['id']))
@@ -2544,6 +2553,8 @@ def update_workspace_access(workspace_id: str = Form(...), user_ids: list[int] =
         else:
             ids = [item for item in repository.list_user_workspace_ids(int(row['id'])) if item != workspace_id]
             repository.set_user_workspace_access(int(row['id']), ids)
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JSONResponse({'ok': True, 'notice': 'Workspace access updated.'})
     return RedirectResponse('/workspace?workspace_notice=Workspace+access+updated.', status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -4198,41 +4209,50 @@ def update_user_account(
     role: str = Form(...),
     active: str | None = Form(default=None),
     workspace_ids: list[str] = Form(default=[]),
+    edited_field: str = Form(default=''),
     user: SessionUser = Depends(admin_user),
 ) -> Response:
-    normalized_username = username.strip()
+    def wants_json() -> bool:
+        return request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+
+    def payload_for(row) -> dict[str, Any] | None:
+        if not row:
+            return None
+        return {
+            'id': int(row['id']),
+            'username': row['username'],
+            'role': row['role'],
+            'active': bool(row['active']),
+            'workspace_ids': repository.list_user_workspace_ids(int(row['id'])),
+        }
+
+    def failure(message: str, status_code: int, row=None) -> Response:
+        if wants_json():
+            return JSONResponse({'detail': message, 'user': payload_for(row)}, status_code=status_code)
+        return render_admin_template(request, user, error=message, status_code=status_code)
+
     normalized_role = role.strip().lower()
-    if not normalized_username:
-        return render_admin_template(request, user, error='Username cannot be empty', status_code=400)
     target_user = repository.get_user_by_id(target_user_id)
     if not target_user:
-        return render_admin_template(request, user, error='User not found', status_code=404)
+        return failure('User not found', 404)
+    normalized_username = username.strip() if not edited_field or edited_field == 'username' else str(target_user['username'])
+    if not normalized_username:
+        return failure('Username cannot be empty', 400, target_user)
     if normalized_role not in {'admin', 'user', 'super-admin'}:
-        return render_admin_template(request, user, error='Unsupported role', status_code=400)
+        return failure('Unsupported role', 400, target_user)
     if user.role != 'super-admin' and (
         target_user['role'] == 'super-admin' or normalized_role == 'super-admin'
     ):
-        return render_admin_template(
-            request,
-            user,
-            error='Only super-admins can assign or modify super-admin accounts.',
-            status_code=403,
-        )
+        return failure('Only super-admins can assign or modify super-admin accounts.', 403, target_user)
     will_be_active = active == '1'
     if would_remove_required_super_admin(target_user, normalized_role, will_be_active):
-        return render_admin_template(
-            request,
-            user,
-            error='At least one active super-admin must remain. Create or activate another super-admin before changing or deactivating this account.',
-            status_code=400,
+        return failure(
+            'At least one active super-admin must remain. Create or activate another super-admin before changing or deactivating this account.',
+            400,
+            target_user,
         )
     if would_remove_last_active_admin(target_user, normalized_role, will_be_active):
-        return render_admin_template(
-            request,
-            user,
-            error='At least one active admin user must remain. You cannot demote or deactivate the last active admin.',
-            status_code=400,
-        )
+        return failure('At least one active admin user must remain. You cannot demote or deactivate the last active admin.', 400, target_user)
     try:
         repository.update_user(
             target_user_id,
@@ -4248,9 +4268,12 @@ def update_user_account(
             'update_user',
             json.dumps({'user_id': target_user_id, 'username': normalized_username, 'role': normalized_role, 'active': will_be_active}),
         )
+        updated_user = repository.get_user_by_id(target_user_id)
+        if wants_json():
+            return JSONResponse({'ok': True, 'user': payload_for(updated_user)})
         return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
     except Exception as exc:
-        return render_admin_template(request, user, error=str(exc), status_code=400)
+        return failure(str(exc), 400, repository.get_user_by_id(target_user_id))
 
 
 @app.post('/admin/users/{target_user_id}/delete', response_class=HTMLResponse)
@@ -4302,6 +4325,37 @@ def delete_user_account(
         return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
     except Exception as exc:
         return render_admin_template(request, user, error=str(exc), status_code=400)
+
+
+@app.post('/admin/users/{target_user_id}/reset-password', response_class=HTMLResponse)
+def reset_user_password(
+    request: Request,
+    target_user_id: int,
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    wants_json = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+
+    def failure(message: str, status_code: int) -> Response:
+        if wants_json:
+            return JSONResponse({'detail': message}, status_code=status_code)
+        return render_admin_template(request, user, error=message, status_code=status_code)
+
+    target_user = repository.get_user_by_id(target_user_id)
+    if not target_user:
+        return failure('User not found', 404)
+    if user.role != 'super-admin' and target_user['role'] == 'super-admin':
+        return failure('Only super-admins can assign or modify super-admin accounts.', 403)
+    default_passwords = {
+        'super': 'super123',
+        'admin': 'admin123',
+        'demo': 'demo123',
+    }
+    reset_password = default_passwords.get(str(target_user['username']).casefold(), 'Ericsson123')
+    repository.update_password(str(target_user['username']), reset_password)
+    repository.add_log(user.username, 'reset_user_password', json.dumps({'user_id': target_user_id, 'username': target_user['username']}))
+    if wants_json:
+        return JSONResponse({'ok': True, 'user': {'id': int(target_user['id']), 'username': target_user['username']}})
+    return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 
 templates.env.globals['format_extra_filters'] = format_extra_filters

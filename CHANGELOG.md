@@ -72,6 +72,8 @@
 - Made usernames case-insensitive for login, password changes and workspace access, and blocked case-only duplicate accounts.
 - Clarified Login when valid credentials lack permission for the selected workspace with a dedicated warning.
 - Restricted implicit workspace access to `super-admin`; normal `admin` and `user` accounts now require an explicit assignment.
+- Replaced the Users-table Save action with automatic, validated updates on field exit and added an in-place password visibility control while editing.
+- Kept stored passwords permanently masked in Users and added role-aware Reset Password defaults (`super123`, `admin123`, `demo123` or `Ericsson123`).
 - Added per-user workspace access control. Administrators can assign users when creating or managing a workspace, and configure workspace access while creating or editing users.
 
 #### 📚 Documentation:

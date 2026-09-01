@@ -60,7 +60,7 @@
               <input type="hidden" name="workspace_id" value="{{ item.id }}">
               <button type="submit" class="workspace-action-duplicate">Duplicate</button>
             </form>
-            {% if user.role == 'super-admin' %}<form method="post" action="/workspace/access" class="workspace-access-editor">
+            {% if user.role == 'super-admin' %}<form method="post" action="/workspace/access" class="workspace-access-editor" data-workspace-access-save>
               <input type="hidden" name="workspace_id" value="{{ item.id }}">
               <details class="workspace-user-picker" data-workspace-user-picker>
                 <summary><span>Users with access</span><span class="workspace-user-picker-chevron" aria-hidden="true"></span></summary>
@@ -593,6 +593,40 @@
   });
   dialog.addEventListener('click', (event) => {
     if (event.target === dialog) dialog.close();
+  });
+})();
+</script>
+<script>
+(() => {
+  document.querySelectorAll('form[data-workspace-access-save]').forEach((form) => {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const submitter = event.submitter instanceof HTMLButtonElement ? event.submitter : null;
+      const originalLabel = submitter?.textContent || 'Save';
+      if (submitter) {
+        submitter.disabled = true;
+        submitter.textContent = 'Saving…';
+      }
+      try {
+        const response = await fetch(form.action, {
+          method: 'POST', body: new FormData(form), credentials: 'same-origin',
+          headers: {'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json'},
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.detail || 'Workspace access could not be updated.');
+        form.querySelector('[data-workspace-user-picker]')?.removeAttribute('open');
+        showInfoDialog(payload.notice || 'Workspace access updated.', {title: 'Workspace access updated'});
+      } catch (error) {
+        showInfoDialog(error instanceof Error ? error.message : 'Workspace access could not be updated.', {
+          title: 'Workspace access update failed', tone: 'error',
+        });
+      } finally {
+        if (submitter) {
+          submitter.disabled = false;
+          submitter.textContent = originalLabel;
+        }
+      }
+    });
   });
 })();
 </script>

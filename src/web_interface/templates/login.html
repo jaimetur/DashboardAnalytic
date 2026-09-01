@@ -38,7 +38,14 @@
     <form class="form-stack login-form" method="post" action="/login">
       {% if error %}<div class="alert{% if error_tone == 'warning' %} alert-warning{% endif %}" role="alert">{{ error }}</div>{% endif %}
       <label>Username<input type="text" name="username" value="super" required></label>
-      <label>Password<input type="password" name="password" value="super123" required></label>
+      <label>Password
+        <span class="login-password-editor">
+          <input type="password" name="password" value="super123" required data-login-password>
+          <button type="button" class="login-password-toggle" data-login-password-toggle aria-label="Show password" title="Show password">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.2 12s3.5-6 9.8-6 9.8 6 9.8 6-3.5 6-9.8 6-9.8-6-9.8-6Z"></path><circle cx="12" cy="12" r="2.8"></circle></svg>
+          </button>
+        </span>
+      </label>
       <label class="login-workspace-field">Workspace
         <select name="workspace_id" required>
           {% for workspace in workspaces %}
@@ -58,4 +65,19 @@
     {% endif %}
   </article>
 </section>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+(() => {
+  const password = document.querySelector('[data-login-password]');
+  const toggle = document.querySelector('[data-login-password-toggle]');
+  if (!(password instanceof HTMLInputElement) || !(toggle instanceof HTMLButtonElement)) return;
+  toggle.addEventListener('click', () => {
+    const reveal = password.type === 'password';
+    password.type = reveal ? 'text' : 'password';
+    toggle.title = reveal ? 'Hide password' : 'Show password';
+    toggle.setAttribute('aria-label', toggle.title);
+  });
+})();
+</script>
 {% endblock %}

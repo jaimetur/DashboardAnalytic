@@ -35,6 +35,8 @@ def test_login_page_loads(client) -> None:
     assert "<strong class=\"login-default-role login-default-role-admin\">Role: admin</strong>" in response.text
     assert "<strong class=\"login-default-role login-default-role-user\">Role: user</strong>" in response.text
     assert 'class="login-workspace-field">Workspace' in response.text
+    assert 'data-login-password-toggle' in response.text
+    assert '<span class="login-password-editor">' in response.text
     assert 'Default Workspace' in response.text
 
 
@@ -626,7 +628,11 @@ def test_admin_panel_is_available_for_admin(client) -> None:
     assert "Admin panel" in response.text
     assert 'value="super-admin" aria-label="Role for super" readonly' in response.text
     assert 'name="username" value="super" form="user-update-1" required disabled' in response.text
-    assert 'name="password" value="" placeholder="Keep current" form="user-update-1" disabled' in response.text
+    assert 'name="password" value="" placeholder="••••••••" autocomplete="new-password" form="user-update-1" data-user-password disabled' in response.text
+    assert 'data-user-password-toggle' in response.text
+    assert '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.2 12' in response.text
+    assert 'Keep current' not in response.text
+    assert 'form="user-update-1" disabled title="Only super-admins can modify super-admin accounts">Save</button>' not in response.text
 
 
 def test_login_and_admin_remain_available_after_closing_the_active_workspace(client) -> None:
@@ -1497,9 +1503,12 @@ def test_admin_can_update_user_identity_fields(client) -> None:
     update_response = client.post(
         f"/admin/users/{analyst['id']}/update",
         data={"username": "analyst-updated", "password": "newpass456", "role": "admin"},
-        follow_redirects=False,
+        headers={'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json'},
     )
-    assert update_response.status_code == 303
+    assert update_response.status_code == 200
+    assert update_response.json()['user'] == {
+        'id': analyst['id'], 'username': 'analyst-updated', 'role': 'admin', 'active': False, 'workspace_ids': [],
+    }
 
     updated = app_module.repository.get_user("analyst-updated")
     assert updated is not None
@@ -1507,6 +1516,28 @@ def test_admin_can_update_user_identity_fields(client) -> None:
     assert updated.role == "admin"
     assert updated.active is False
     assert app_module.verify_password("newpass456", updated.password_hash)
+
+
+def test_automatic_user_field_update_preserves_the_canonical_username(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login_super(client)
+    created = client.post(
+        '/admin/users',
+        data={'username': 'analyst', 'password': 'start123', 'role': 'user'},
+        follow_redirects=False,
+    )
+    assert created.status_code == 303
+    analyst = next(row for row in app_module.repository.list_users() if row['username'] == 'analyst')
+
+    response = client.post(
+        f"/admin/users/{analyst['id']}/update",
+        data={'username': 'admin', 'password': '', 'role': 'admin', 'active': '1', 'edited_field': 'role'},
+        headers={'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json'},
+    )
+    assert response.status_code == 200
+    assert response.json()['user']['username'] == 'analyst'
+    assert response.json()['user']['role'] == 'admin'
 
 
 def test_admin_can_delete_user(client) -> None:
@@ -1525,6 +1556,31 @@ def test_admin_can_delete_user(client) -> None:
     delete_response = client.post(f"/admin/users/{user_row['id']}/delete", follow_redirects=False)
     assert delete_response.status_code == 303
     assert app_module.repository.get_user("temporary") is None
+
+
+def test_password_reset_uses_the_expected_account_defaults(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login_super(client)
+    custom = client.post(
+        '/admin/users',
+        data={'username': 'analyst', 'password': 'initial-password', 'role': 'user'},
+        follow_redirects=False,
+    )
+    assert custom.status_code == 303
+
+    expected_passwords = {
+        'super': 'super123',
+        'admin': 'admin123',
+        'demo': 'demo123',
+        'analyst': 'Ericsson123',
+    }
+    for username, expected_password in expected_passwords.items():
+        record = next(row for row in app_module.repository.list_users() if row['username'] == username)
+        app_module.repository.update_password(username, 'different-password')
+        response = client.post(f"/admin/users/{record['id']}/reset-password", follow_redirects=False)
+        assert response.status_code == 303
+        assert app_module.verify_password(expected_password, app_module.repository.get_user(username).password_hash)
 
 
 def test_admin_cannot_delete_current_signed_in_user(client) -> None:
