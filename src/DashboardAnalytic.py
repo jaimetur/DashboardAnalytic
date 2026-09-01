@@ -1997,18 +1997,18 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             database_table_groups['Workspace Tables'].append({'name': table_name, 'label': friendly_tables[table_name]})
         else:
             database_table_groups['Other tables'].append({'name': table_name, 'label': table_name})
-    export_options = [{'value': 'slides-templates', 'label': 'Only Slides Templates'}]
-    if user.role == 'super-admin':
-        export_options = [
-            {'value': 'config', 'label': 'Only Config'},
-            *export_options,
-            {'value': 'config-with-templates', 'label': 'Config + Slides Templates'},
-            {'value': 'full-environment', 'label': 'Full Environment (Config + Slides Templates + All Workspaces)'},
-            *[
-                {'value': f'workspace:{workspace.id}', 'label': f'Workspace: {workspace.name}'}
-                for workspace in workspace_registry.list()
-            ],
-        ]
+    export_options = [
+        {'value': 'config', 'label': 'Config'},
+        {'value': 'slides-templates', 'label': 'Slides Templates'},
+        {'value': 'config-with-templates', 'label': 'Config + Slides Templates'},
+        {'value': 'full-environment', 'label': 'Full Environment (Config + Slides Templates + All Workspaces)'},
+        *[
+            {'value': f'workspace:{workspace.id}', 'label': f'Workspace: {workspace.name}'}
+            for workspace in workspace_registry.list()
+        ],
+    ]
+    if user.role != 'super-admin':
+        export_options = [{**option, 'disabled': option['value'] != 'slides-templates'} for option in export_options]
     admin_users = [
         {**dict(row), 'created_at': format_local_timestamp(row['created_at']), 'workspace_ids': repository.list_user_workspace_ids(int(row['id']))}
         for row in repository.list_users()

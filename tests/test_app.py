@@ -111,7 +111,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     admin_response = client.get('/admin')
     assert admin_response.status_code == 200
     assert 'Import/Export' in admin_response.text
-    assert 'Only Config' in admin_response.text
+    assert 'Config</option>' in admin_response.text
     assert 'Config + Slides Templates' in admin_response.text
     assert 'Workspace: Default Workspace' in admin_response.text
 
@@ -194,8 +194,9 @@ def test_admin_import_export_is_limited_to_slides_templates(client) -> None:
     panel = client.get('/admin')
     assert panel.status_code == 200
     assert 'data-panel-state-key="admin:import-export"' in panel.text
-    assert 'Only Slides Templates' in panel.text
-    assert 'Only Config' not in panel.text
+    assert 'Slides Templates</option>' in panel.text
+    assert 'value="config" disabled>Config</option>' in panel.text
+    assert 'value="workspace:default" disabled>Workspace: Default Workspace</option>' in panel.text
 
     blocked_export = client.get('/admin/import-export/export?export_target=config')
     assert blocked_export.status_code == 403

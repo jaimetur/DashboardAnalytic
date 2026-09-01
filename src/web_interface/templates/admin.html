@@ -284,7 +284,7 @@
         <h3>Export</h3>
         <label>Content to export
           <select name="export_target" aria-label="Content to export">
-            {% for option in export_options %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
+            {% for option in export_options %}<option value="{{ option.value }}" {% if option.disabled | default(false) %}disabled{% endif %}>{{ option.label }}</option>{% endfor %}
           </select>
         </label>
         <p class="form-note">{% if user.role == 'super-admin' %}Choose configuration, Slides Templates, one workspace or the complete environment.{% else %}Only shared Slides Templates can be exported by an admin account.{% endif %}</p>
