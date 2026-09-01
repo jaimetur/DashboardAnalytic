@@ -249,6 +249,8 @@ def test_config_import_replaces_global_users_and_preserves_user_ids(client) -> N
 
     exported = client.get('/admin/import-export/export?export_target=config')
     assert exported.status_code == 200
+    with zipfile.ZipFile(BytesIO(exported.content)) as archive:
+        assert 'config/application.db' in archive.namelist()
 
     exported_user = next(row for row in app_module.repository.list_users() if row['username'] == 'exported-user')
     changed_password = client.post(
@@ -266,6 +268,12 @@ def test_config_import_replaces_global_users_and_preserves_user_ids(client) -> N
     assert local_only.status_code == 303
     assert app_module.repository.get_user('local-only-user') is not None
 
+    # Simulate a different deployment whose application database contains
+    # conflicting records.  Importing configuration must replace it exactly,
+    # including user IDs and roles, rather than merge it with the source.
+    with app_module.repository.global_connection() as conn:
+        conn.execute("UPDATE users SET username = 'destination-user', role = 'admin' WHERE username = 'exported-user'")
+
     imported = client.post(
         '/admin/import-export/import',
         data={'confirmed_import': 'true'},
@@ -274,6 +282,7 @@ def test_config_import_replaces_global_users_and_preserves_user_ids(client) -> N
     )
     assert imported.status_code == 303
     assert app_module.repository.get_user('local-only-user') is None
+    assert app_module.repository.get_user('destination-user') is None
     restored_user = app_module.repository.get_user('exported-user')
     assert restored_user is not None
     assert app_module.verify_password('exported123', restored_user.password_hash)

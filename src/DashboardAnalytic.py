@@ -1649,6 +1649,30 @@ def build_export_archive_file(target: str, destination: Path) -> str:
     # ``settings.database_path`` changes with the active workspace and the
     # registry lives with workspace data, so retain the configured app root.
     config_root = application_config_dir
+    def archive_configuration(archive: zipfile.ZipFile, *, include_templates: bool) -> None:
+        """Archive application configuration, with its database as a known payload.
+
+        ``application.db`` owns users, roles, workspace access and the shared
+        Slides Template registry.  Do not rely on the currently selected
+        workspace when deciding which database to export.
+        """
+        application_database = application_config_dir / 'application.db'
+        if not application_database.is_file():
+            raise FileNotFoundError('The application configuration database was not found.')
+        _archive_database(archive, application_database, 'config/application.db', destination.parent)
+        for path in config_root.iterdir():
+            if (
+                path == application_database
+                or path == workspace_registry.registry_path
+                or path == settings.slides_templates_dir
+                or not path.is_file()
+                or path.name.endswith(('-wal', '-shm'))
+            ):
+                continue
+            _archive_file(archive, path, f'config/{path.name}')
+        if include_templates:
+            _archive_tree(archive, settings.slides_templates_dir, 'config/slides-templates')
+
     with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
         if target in {'config', 'config-with-templates'}:
             include_templates = target == 'config-with-templates'
@@ -1659,15 +1683,7 @@ def build_export_archive_file(target: str, destination: Path) -> str:
                 'includes_slides_templates': include_templates,
             }
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
-            for path in config_root.iterdir():
-                if path == workspace_registry.registry_path or path == settings.slides_templates_dir or not path.is_file() or path.name.endswith(('-wal', '-shm')):
-                    continue
-                if path.suffix == '.db':
-                    _archive_database(archive, path, f'config/{path.name}', destination.parent)
-                else:
-                    _archive_file(archive, path, f'config/{path.name}')
-            if include_templates:
-                _archive_tree(archive, settings.slides_templates_dir, 'config/slides-templates')
+            archive_configuration(archive, include_templates=include_templates)
         elif target == 'slides-templates':
             manifest = {
                 'format': ARCHIVE_FORMAT,
@@ -1702,14 +1718,7 @@ def build_export_archive_file(target: str, destination: Path) -> str:
                 ],
             }
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
-            for path in config_root.iterdir():
-                if path == workspace_registry.registry_path or path == settings.slides_templates_dir or not path.is_file() or path.name.endswith(('-wal', '-shm')):
-                    continue
-                if path.suffix == '.db':
-                    _archive_database(archive, path, f'config/{path.name}', destination.parent)
-                else:
-                    _archive_file(archive, path, f'config/{path.name}')
-            _archive_tree(archive, settings.slides_templates_dir, 'config/slides-templates')
+            archive_configuration(archive, include_templates=True)
             for entry, workspace in zip(manifest['workspaces'], workspaces, strict=True):
                 _archive_workspace(archive, workspace, str(entry['archive_path']), destination.parent)
         else:
@@ -1873,20 +1882,31 @@ def import_config_archive(staging_root: Path, manifest: dict[str, Any]) -> None:
     config_payload = staging_root / 'config'
     if not config_payload.exists():
         raise ValueError('The configuration archive does not contain configuration files.')
-    # Apply only files included in the package. This preserves unrelated local
-    # configuration and makes a config import recoverable file-by-file.
+    application_database_payload = config_payload / 'application.db'
+    if not application_database_payload.is_file():
+        raise ValueError('The configuration archive does not contain application.db.')
+
+    # Users, roles, workspace access and shared template metadata must be
+    # restored as one exact application database snapshot.  In particular,
+    # never infer the target from the active workspace: that can otherwise
+    # leave the destination users in place while only ancillary files import.
+    application_database = application_config_dir / 'application.db'
+    repository.set_global_database(application_database)
+    repository.replace_global_database_snapshot(application_database_payload)
+
+    # Apply only the other files included in the package. This preserves
+    # unrelated local configuration and makes a config import recoverable
+    # file-by-file.
     for path in config_payload.rglob('*'):
         if not path.is_file():
             continue
         relative_path = path.relative_to(config_payload)
-        if relative_path == Path(workspace_registry.registry_path.name):
+        if relative_path in {Path('application.db'), Path(workspace_registry.registry_path.name)}:
             continue
         target = settings.slides_templates_dir / relative_path.relative_to('slides-templates') if relative_path.parts[0] == 'slides-templates' else application_config_dir / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
-        if target.resolve() == repository.global_db_path.resolve():
-            repository.replace_global_database_snapshot(path)
-        else:
-            shutil.copy2(path, target)
+        shutil.copy2(path, target)
+    repository.set_global_database(application_database)
     repository.initialize()
 
 
