@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS report_templates (
     technology TEXT NOT NULL,
     name TEXT NOT NULL,
     is_default INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (technology, name),
     CHECK (technology IN ('nsa', 'sa'))
 );
@@ -415,7 +417,15 @@ class Repository:
         conn.execute("UPDATE report_runs SET updated_at = COALESCE(updated_at, created_at)")
 
     def _ensure_report_template_columns(self, conn: sqlite3.Connection) -> None:
-        """Keep exactly one promoted template per technology."""
+        """Keep template metadata complete and one promoted template per technology."""
+        columns = {row['name'] for row in conn.execute("PRAGMA table_info(report_templates)").fetchall()}
+        if 'created_at' not in columns:
+            conn.execute("ALTER TABLE report_templates ADD COLUMN created_at TEXT")
+        if 'updated_at' not in columns:
+            conn.execute("ALTER TABLE report_templates ADD COLUMN updated_at TEXT")
+        now = local_now_iso()
+        conn.execute("UPDATE report_templates SET created_at = COALESCE(created_at, ?)", (now,))
+        conn.execute("UPDATE report_templates SET updated_at = COALESCE(updated_at, created_at, ?)", (now,))
         for technology in ('nsa', 'sa'):
             defaults = conn.execute(
                 "SELECT name FROM report_templates WHERE technology = ? AND is_default = 1 ORDER BY name",
@@ -430,7 +440,7 @@ class Repository:
     def list_report_templates(self, technology: str) -> list[sqlite3.Row]:
         with self.global_connection() as conn:
             return conn.execute(
-                "SELECT technology, name, is_default FROM report_templates WHERE technology = ? ORDER BY name COLLATE NOCASE",
+                "SELECT technology, name, is_default, created_at, updated_at FROM report_templates WHERE technology = ? ORDER BY name COLLATE NOCASE",
                 (technology,),
             ).fetchall()
 
@@ -438,34 +448,49 @@ class Repository:
         with self.global_connection() as conn:
             if is_default:
                 conn.execute("UPDATE report_templates SET is_default = 0 WHERE technology = ?", (technology,))
+            now = local_now_iso()
             conn.execute(
-                "INSERT INTO report_templates (technology, name, is_default) VALUES (?, ?, ?)",
-                (technology, name, int(is_default)),
+                "INSERT INTO report_templates (technology, name, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (technology, name, int(is_default), now, now),
             )
 
     def set_default_report_template(self, technology: str, name: str) -> None:
         with self.global_connection() as conn:
-            if not conn.execute(
-                "SELECT 1 FROM report_templates WHERE technology = ? AND name = ?", (technology, name)
-            ).fetchone():
+            template = conn.execute(
+                "SELECT is_default FROM report_templates WHERE technology = ? AND name = ?", (technology, name)
+            ).fetchone()
+            if not template:
                 raise ValueError('Slides Template was not found.')
-            conn.execute("UPDATE report_templates SET is_default = 0 WHERE technology = ?", (technology,))
+            defaults = conn.execute(
+                "SELECT name FROM report_templates WHERE technology = ? AND is_default = 1", (technology,)
+            ).fetchall()
+            if bool(template['is_default']) and len(defaults) == 1:
+                return
+            now = local_now_iso()
+            conn.execute("UPDATE report_templates SET is_default = 0, updated_at = ? WHERE technology = ?", (now, technology))
             conn.execute(
-                "UPDATE report_templates SET is_default = 1 WHERE technology = ? AND name = ?", (technology, name)
+                "UPDATE report_templates SET is_default = 1, updated_at = ? WHERE technology = ? AND name = ?", (now, technology, name)
             )
 
     def rename_report_template(self, technology: str, name: str, new_name: str) -> None:
         with self.global_connection() as conn:
             conn.execute(
-                "UPDATE report_templates SET name = ? WHERE technology = ? AND name = ?",
-                (new_name, technology, name),
+                "UPDATE report_templates SET name = ?, updated_at = ? WHERE technology = ? AND name = ?",
+                (new_name, local_now_iso(), technology, name),
             )
 
     def move_report_template(self, technology: str, name: str, target_technology: str) -> None:
         with self.global_connection() as conn:
             conn.execute(
-                "UPDATE report_templates SET technology = ? WHERE technology = ? AND name = ?",
-                (target_technology, technology, name),
+                "UPDATE report_templates SET technology = ?, updated_at = ? WHERE technology = ? AND name = ?",
+                (target_technology, local_now_iso(), technology, name),
+            )
+
+    def touch_report_template(self, technology: str, name: str) -> None:
+        with self.global_connection() as conn:
+            conn.execute(
+                "UPDATE report_templates SET updated_at = ? WHERE technology = ? AND name = ?",
+                (local_now_iso(), technology, name),
             )
 
     def delete_report_template(self, technology: str, name: str) -> None:

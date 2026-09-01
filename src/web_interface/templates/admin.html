@@ -157,7 +157,7 @@
     <h3 class="templates-library-heading">Slides Templates Library</h3>
     <div class="table-wrap catalogue-workspace-table-wrap">
       <table class="catalogue-workspace-table">
-        <thead><tr><th>Template name</th><th>Type</th><th>Default</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Template name</th><th>Type</th><th>Created</th><th>Last Updated</th><th>Default</th><th>Actions</th></tr></thead>
         <tbody>
           {% for catalogue in workspace_catalogues %}
           <tr>
@@ -180,12 +180,15 @@
               </form>
               {% endif %}
             </td>
+            <td class="catalogue-timestamp">{{ catalogue.created_at }}</td>
+            <td class="catalogue-timestamp">{{ catalogue.updated_at }}</td>
             <td class="catalogue-default-cell"><span class="catalogue-default-mark {% if catalogue.active %}is-default{% else %}is-not-default{% endif %}" aria-label="{% if catalogue.active %}Default template{% else %}Not the default template{% endif %}" title="{% if catalogue.active %}Default template{% else %}Not the default template{% endif %}">{% if catalogue.active %}✓{% else %}○{% endif %}</span></td>
             <td>
               <div class="catalogue-workspace-actions">
                 {% if catalogue.active %}<button type="button" class="catalogue-set-default-button" disabled>Set Default</button>{% else %}<form action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/activate" method="post"><button type="submit" class="catalogue-set-default-button">Set Default</button></form>{% endif %}
-                {% if not catalogue.active %}<form action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/delete" method="post" data-confirm="Delete template {{ catalogue.name }}? This cannot be undone."><button type="submit" class="danger-button">Delete</button></form>{% else %}<button type="button" class="danger-button" disabled title="The default template cannot be deleted">Delete</button>{% endif %}
+                <a class="catalogue-edit-button" href="/admin?catalogue_technology={{ catalogue.technology }}&amp;catalogue_id={{ catalogue.identifier }}#catalogue-editor">Edit</a>
                 <form action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/duplicate" method="post"><button type="submit" class="catalogue-duplicate-button">Duplicate</button></form>
+                {% if not catalogue.active %}<form action="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/delete" method="post" data-confirm="Delete template {{ catalogue.name }}? This cannot be undone."><button type="submit" class="danger-button">Delete</button></form>{% else %}<button type="button" class="danger-button" disabled title="The default template cannot be deleted">Delete</button>{% endif %}
                 <a class="catalogue-export-button" href="/admin/report-catalogues/{{ catalogue.technology }}/{{ catalogue.identifier }}/export">Export</a>
               </div>
             </td>

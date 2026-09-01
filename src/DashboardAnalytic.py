@@ -274,6 +274,8 @@ def report_catalogue_options(technology: str) -> list[dict[str, Any]]:
             'path': path,
             'source': 'Default source' if is_default else 'Named workspace template',
             'active': is_default,
+            'created_at': row['created_at'],
+            'updated_at': row['updated_at'],
         })
     return options
 
@@ -2059,7 +2061,12 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
                 'catalogues': catalogues,
             }
     workspace_catalogues = [
-        {**catalogue, 'technology': technology}
+        {
+            **catalogue,
+            'technology': technology,
+            'created_at': format_local_timestamp(catalogue.get('created_at')),
+            'updated_at': format_local_timestamp(catalogue.get('updated_at')),
+        }
         for technology, payload in report_catalogs.items()
         for catalogue in payload['catalogues']
     ]
@@ -4320,6 +4327,7 @@ def save_report_catalogue(
                 library_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(default_path, library_path)
             synchronize_reporting_catalogue_document()
+        repository.touch_report_template(technology, catalogue_id)
     except ValueError as exc:
         return render_admin_template(request, user, error=str(exc), status_code=400)
     repository.add_log(user.username, 'save_report_template', json.dumps({

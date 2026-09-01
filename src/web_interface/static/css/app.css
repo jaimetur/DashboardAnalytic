@@ -277,8 +277,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-import-row input, .catalogue-import-row select { min-width: 0; }
 .templates-library-heading { margin: 1.1rem 0 0; color: #5b1c22; font-size: 1.02rem; }
 .catalogue-workspace-table-wrap { margin-top: 0.9rem; }
-.catalogue-workspace-table { min-width: 720px; }
+.catalogue-workspace-table { min-width: 900px; }
 .catalogue-workspace-table th, .catalogue-workspace-table td { vertical-align: middle; }
+.catalogue-timestamp { width: 9.6rem; white-space: nowrap; color: #455964; font-size: 0.78rem; }
 .catalogue-default-cell { width: 5.5rem; text-align: center; }
 .catalogue-default-mark { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 999px; font-size: 1rem; font-weight: 800; line-height: 1; }
 .catalogue-default-mark.is-default { color: #08736d; background: rgba(8, 115, 109, 0.14); border: 1px solid rgba(8, 115, 109, 0.34); }
@@ -286,7 +287,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-rename-form, .catalogue-type-form, .catalogue-workspace-actions { display: flex; align-items: center; gap: 0.45rem; }
 .catalogue-rename-form { min-width: 280px; margin: 0; }
 .catalogue-rename-form input { min-width: 0; }
-.catalogue-rename-form button, .catalogue-workspace-actions button, .catalogue-workspace-actions .catalogue-export-button { min-height: 2rem; padding: 0.4rem 0.65rem; border-radius: 999px; font-size: 0.78rem; }
+.catalogue-rename-form button, .catalogue-workspace-actions button, .catalogue-workspace-actions .catalogue-export-button, .catalogue-workspace-actions .catalogue-edit-button { min-height: 2rem; padding: 0.4rem 0.65rem; border-radius: 999px; font-size: 0.78rem; }
 .catalogue-workspace-actions { flex-wrap: wrap; justify-content: flex-start; }
 .catalogue-workspace-actions form { margin: 0; }
 .admin-stack .catalogue-workspace-actions .catalogue-duplicate-button { background: linear-gradient(145deg, #10314a, #1f5d9c); border-color: rgba(16, 49, 74, 0.72); color: #fff; }
@@ -296,6 +297,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .admin-stack .catalogue-workspace-actions .catalogue-export-button { background: linear-gradient(145deg, #10314a, #08736d); border-color: rgba(7, 93, 89, 0.72); color: #fff; }
 .admin-stack .catalogue-workspace-actions .catalogue-set-default-button { background: linear-gradient(145deg, #f1c74d, #e5a92d); border-color: rgba(172, 119, 18, 0.72); color: #5d3b05; }
 .admin-stack .catalogue-workspace-actions .catalogue-set-default-button:hover:not(:disabled) { background: linear-gradient(145deg, #e8b935, #d79518); color: #4d3003; }
+.admin-stack .catalogue-workspace-actions .catalogue-edit-button { display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(145deg, #68bce4, #a9e0f4); border: 1px solid rgba(43, 133, 178, 0.65); color: #123e58; font-weight: 800; text-decoration: none; }
+.admin-stack .catalogue-workspace-actions .catalogue-edit-button:hover { background: linear-gradient(145deg, #4caedb, #87d1ed); color: #0b3048; }
 .slides-templates-editor-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, 0.34fr); gap: 1rem; align-items: start; }
 .slides-templates-editor-table-wrap { min-width: 0; }
 .slides-templates-editor-table-wrap > .table-wrap { max-height: 620px; overflow: auto; overscroll-behavior: contain; }
