@@ -13,16 +13,25 @@
     {% if error %}<span hidden data-admin-error>{{ error }}</span>{% endif %}
   </article>
 
-  <article class="panel admin-create-user-panel">
-    <div class="section-head tight-head">
+  <details class="panel collapsible-panel admin-create-user-panel" open data-panel-state-key="admin:create-user">
+    <summary class="collapsible-summary">
       <div>
         <p class="eyebrow">Identity</p>
         <h2>Create user</h2>
       </div>
-    </div>
-    <form class="form-stack narrow-form" action="/admin/users" method="post">
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <div class="collapsible-panel-body">
+    <form class="form-stack narrow-form" action="/admin/users" method="post" autocomplete="off">
       <label>Username<input type="text" name="username" required></label>
-      <label>Password<input type="password" name="password" required></label>
+      <label>Password
+        <div class="user-password-editor">
+          <input class="password-masked" type="text" name="password" autocomplete="off" spellcheck="false" required data-create-user-password data-lpignore="true" data-1p-ignore data-bwignore="true" data-protonpass-ignore="true">
+          <button type="button" class="user-password-toggle" data-create-user-password-toggle aria-label="Show newly entered password" title="Show newly entered password" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.2 12s3.5-6 9.8-6 9.8 6 9.8 6-3.5 6-9.8 6-9.8-6-9.8-6Z"></path><circle cx="12" cy="12" r="2.8"></circle></svg>
+          </button>
+        </div>
+      </label>
       {% if user.role == 'super-admin' %}<label>Role
         <select name="role">
           <option value="user">user</option>
@@ -48,7 +57,8 @@
       </div>{% endif %}
       <button type="submit">Create account</button>
     </form>
-  </article>
+    </div>
+  </details>
 
   <details class="panel collapsible-panel" open data-panel-state-key="admin:identity">
     <summary class="collapsible-summary">
@@ -73,7 +83,7 @@
             <td><input class="table-input" type="text" name="username" value="{{ row['username'] }}" form="user-update-{{ row['id'] }}" autocomplete="off" readonly data-user-autofill-guard required {% if user.role != 'super-admin' and row['role'] == 'super-admin' %}disabled{% endif %}></td>
             <td>
               <div class="user-password-editor">
-                <input class="table-input" type="password" name="password" value="" placeholder="••••••••" autocomplete="new-password" readonly form="user-update-{{ row['id'] }}" data-user-password data-user-autofill-guard {% if user.role != 'super-admin' and row['role'] == 'super-admin' %}disabled{% endif %}>
+                <input class="table-input password-masked" type="text" name="password" value="" placeholder="••••••••" autocomplete="off" spellcheck="false" readonly form="user-update-{{ row['id'] }}" data-user-password data-user-autofill-guard data-lpignore="true" data-1p-ignore data-bwignore="true" data-protonpass-ignore="true" {% if user.role != 'super-admin' and row['role'] == 'super-admin' %}disabled{% endif %}>
                 <button type="button" class="user-password-toggle" data-user-password-toggle aria-label="Show newly entered password" title="Show newly entered password" hidden>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.2 12s3.5-6 9.8-6 9.8 6 9.8 6-3.5 6-9.8 6-9.8-6-9.8-6Z"></path><circle cx="12" cy="12" r="2.8"></circle></svg>
                 </button>
@@ -121,13 +131,15 @@
     </div>
   </details>
 
-  <article class="panel report-catalogue-panel">
-    <div class="section-head tight-head">
+  <details class="panel collapsible-panel report-catalogue-panel" open data-panel-state-key="admin:slides-templates-management">
+    <summary class="collapsible-summary">
       <div>
         <p class="eyebrow">PowerPoint reporting</p>
         <h2>Slides Templates Management</h2>
       </div>
-    </div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <div class="collapsible-panel-body">
     <h3 class="templates-library-heading">Import Slides Template</h3>
     <p class="lede">Import a Slides Template CSV, select whether it is for NSA or SA, and manage the stored workspace templates below.</p>
     {% if catalogue_error %}<span hidden data-catalogue-import-error>{{ catalogue_error }}</span>{% endif %}
@@ -183,16 +195,18 @@
       </table>
     </div>
     <p class="form-note">Required columns: Slide, Slide tittle, Slide Subtittle, Layout, Chart Tittle, CDR source, KPI, Chart type, Filters, Rows Aggregation, Column Aggregation, Legend and Legend Position. Legend Position accepts Top, Bottom, Left or Right. Each slide number creates a new slide from its named layout. Use Title Slide or Transition Slide for structural rows without KPI/chart fields. Rows Aggregation defines chart categories/table rows; Column Aggregation defines comparison series/table columns. Chart layouts need one image placeholder per CDR row and keep analyst comments blank.</p>
-  </article>
+    </div>
+  </details>
 
-  <article class="panel slides-templates-editor-panel" id="catalogue-editor">
-    <div class="section-head tight-head">
+  <details class="panel collapsible-panel slides-templates-editor-panel" id="catalogue-editor" open data-panel-state-key="admin:slides-templates-editor">
+    <summary class="collapsible-summary">
       <div>
         <p class="eyebrow">PowerPoint reporting</p>
         <h2>Slides Templates Editor</h2>
       </div>
-      {% if catalogue_editor %}<span class="pill">{{ catalogue_editor.technology | upper }} · {{ catalogue_editor.catalogue.name }}</span>{% endif %}
-    </div>
+      <div class="summary-inline-actions">{% if catalogue_editor %}<span class="pill">{{ catalogue_editor.technology | upper }} · {{ catalogue_editor.catalogue.name }}</span>{% endif %}<span class="collapse-chip">Collapse</span></div>
+    </summary>
+    <div class="collapsible-panel-body">
     <section class="catalogue-editor-catalogue-picker" aria-label="Workspace templates">
       <p class="catalogue-library-title">Workspace templates</p>
       <form class="catalogue-editor-picker-form" action="/admin" method="get">
@@ -271,7 +285,8 @@
     {% else %}
     <p class="lede">Choose <strong>Edit</strong> next to any NSA or SA workspace template above to open it here. The editor saves directly to that template, so exporting and re-importing is not required.</p>
     {% endif %}
-  </article>
+    </div>
+  </details>
 
   <details class="panel collapsible-panel import-export-panel" open data-panel-state-key="admin:import-export">
     <summary class="collapsible-summary">
@@ -826,6 +841,29 @@
   const forms = document.querySelectorAll('form[data-user-auto-save]');
   const isEditable = (element) => !element.disabled && ['INPUT', 'SELECT'].includes(element.tagName);
 
+  const protectAdminField = (field) => {
+    if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) return;
+    if (field.type === 'hidden' || field.type === 'file' || field.type === 'checkbox' || field.type === 'radio') return;
+    field.autocomplete = 'off';
+    if (!field.disabled && !field.dataset.adminAutofillProtected) {
+      field.dataset.adminAutofillProtected = 'true';
+      field.value = field.defaultValue;
+      field.readOnly = true;
+      field.addEventListener('focus', () => { field.readOnly = false; });
+    }
+  };
+  const protectAdminFields = (root = document) => {
+    if (!(root instanceof Document || root instanceof Element)) return;
+    if (root.matches?.('form')) root.autocomplete = 'off';
+    root.querySelectorAll('form').forEach((form) => { form.autocomplete = 'off'; });
+    if (root.matches?.('input, textarea')) protectAdminField(root);
+    root.querySelectorAll('input, textarea').forEach(protectAdminField);
+  };
+  protectAdminFields();
+  new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => mutation.addedNodes.forEach((node) => protectAdminFields(node)));
+  }).observe(document.body, {childList: true, subtree: true});
+
   const restoreUsersFromServerMarkup = () => {
     // Safari and Chromium may restore old form values from their navigation
     // cache after the server has rendered a newer user list.  The default
@@ -859,6 +897,29 @@
   document.querySelectorAll('[data-user-autofill-guard]').forEach((control) => {
     control.addEventListener('focus', () => control.removeAttribute('readonly'));
   });
+
+  const createPassword = document.querySelector('[data-create-user-password]');
+  const createPasswordToggle = document.querySelector('[data-create-user-password-toggle]');
+  if (createPassword instanceof HTMLInputElement && createPasswordToggle instanceof HTMLButtonElement) {
+    const updateCreatePasswordToggle = () => {
+      const editing = document.activeElement === createPassword || document.activeElement === createPasswordToggle;
+      createPasswordToggle.hidden = !editing || createPassword.value.length === 0;
+    };
+    createPassword.addEventListener('focus', updateCreatePasswordToggle);
+    createPassword.addEventListener('input', updateCreatePasswordToggle);
+    createPassword.addEventListener('blur', () => {
+      window.setTimeout(() => {
+        if (document.activeElement !== createPasswordToggle) createPasswordToggle.hidden = true;
+      }, 0);
+    });
+    createPasswordToggle.addEventListener('pointerdown', (event) => event.preventDefault());
+    createPasswordToggle.addEventListener('click', () => {
+      const reveal = createPassword.classList.contains('password-masked');
+      createPassword.classList.toggle('password-masked', !reveal);
+      createPasswordToggle.title = reveal ? 'Hide password' : 'Show password';
+      createPasswordToggle.setAttribute('aria-label', createPasswordToggle.title);
+    });
+  }
 
   const applyUser = (form, user) => {
     if (!user) return;
@@ -957,8 +1018,8 @@
       });
       passwordToggle.addEventListener('pointerdown', (event) => event.preventDefault());
       passwordToggle.addEventListener('click', () => {
-        const reveal = password.type === 'password';
-        password.type = reveal ? 'text' : 'password';
+        const reveal = password.classList.contains('password-masked');
+        password.classList.toggle('password-masked', !reveal);
         passwordToggle.title = reveal ? 'Hide password' : 'Show password';
         passwordToggle.setAttribute('aria-label', passwordToggle.title);
       });
@@ -989,7 +1050,7 @@
         const passwordToggle = row?.querySelector('[data-user-password-toggle]');
         if (password instanceof HTMLInputElement) {
           password.value = '';
-          password.type = 'password';
+          password.classList.add('password-masked');
         }
         if (passwordToggle instanceof HTMLButtonElement) passwordToggle.hidden = true;
         hideLoadingOverlay();
