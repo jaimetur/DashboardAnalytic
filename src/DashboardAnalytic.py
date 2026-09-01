@@ -650,6 +650,9 @@ def derive_available_aggregations(filter_options: dict[str, list[str]]) -> list[
 
 def serialize_dataset_row(row) -> dict[str, Any]:
     item = dict(row)
+    for timestamp_key in ('uploaded_at', 'updated_at', 'processed_at', 'created_at'):
+        if item.get(timestamp_key):
+            item[f'{timestamp_key}_local'] = format_local_timestamp(item[timestamp_key])
     item['available_metrics'] = parse_json_field(item.get('available_metrics_json'), [])
     item['available_aggregations'] = parse_json_field(item.get('available_aggregations_json'), [])
     item['filter_options'] = parse_json_field(item.get('filter_options_json'), {})
@@ -720,7 +723,21 @@ def derive_runtime_metric_availability(dataset: dict[str, Any]) -> dict[str, boo
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now().astimezone().isoformat(timespec='microseconds')
+
+
+def format_local_timestamp(value: Any) -> str:
+    """Render an ISO timestamp in the server's local timezone."""
+    raw = str(value or '').strip()
+    if not raw:
+        return ''
+    try:
+        parsed = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone().strftime('%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return raw
 
 
 class ProcessingStopped(Exception):
@@ -1921,16 +1938,24 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             for workspace in workspace_registry.list()
         ],
     ]
+    admin_users = [
+        {**dict(row), 'created_at': format_local_timestamp(row['created_at'])}
+        for row in (repository.list_users() if active_workspace else [])
+    ]
+    admin_logs = [
+        {**dict(row), 'created_at': format_local_timestamp(row['created_at'])}
+        for row in (repository.list_logs() if active_workspace else [])
+    ]
     return render_template(
         request,
         'admin.html',
         {
             'user': user,
-            'users': repository.list_users() if active_workspace else [],
+            'users': admin_users,
             'datasets': admin_datasets,
             'vodafone_mapping_datasets': [dataset for dataset in ready_admin_datasets if dataset.get('dataset_kind') == 'mapping_vodafone'],
             'three_mapping_datasets': [dataset for dataset in ready_admin_datasets if dataset.get('dataset_kind') == 'mapping_three'],
-            'logs': repository.list_logs() if active_workspace else [],
+            'logs': admin_logs,
             'report_catalogs': report_catalogs,
             'workspace_catalogues': workspace_catalogues,
             'database_table_groups': database_table_groups,
@@ -2300,6 +2325,7 @@ def workspace(
     has_processing = any(dataset['status'] in {'queued', 'processing'} for dataset in datasets)
     workspace_logs = repository.list_workspace_logs(selected_dataset['id'] if selected_dataset else None)
     for log in workspace_logs:
+        log['created_at'] = format_local_timestamp(log.get('created_at'))
         log['summary'] = describe_workspace_log_entry(log)
         log['log_type'] = classify_workspace_log_entry(log)
 
@@ -2933,7 +2959,7 @@ async def upload_dataset(
                 'datasets': datasets,
                 'ready_datasets': [dataset for dataset in datasets if dataset['is_ready']],
                 'selected_dataset': None,
-                'workspace_logs': repository.list_workspace_logs(),
+                'workspace_logs': [{**log, 'created_at': format_local_timestamp(log.get('created_at'))} for log in repository.list_workspace_logs()],
                 'input_kind_options': sorted({(dataset.get('dataset_kind') or 'generic') for dataset in datasets}),
                 'input_kind': None,
                 'has_processing': any(dataset['status'] in {'queued', 'processing'} for dataset in datasets),
@@ -2956,7 +2982,7 @@ async def upload_dataset(
                 'datasets': datasets,
                 'ready_datasets': [dataset for dataset in datasets if dataset['is_ready']],
                 'selected_dataset': None,
-                'workspace_logs': repository.list_workspace_logs(),
+                'workspace_logs': [{**log, 'created_at': format_local_timestamp(log.get('created_at'))} for log in repository.list_workspace_logs()],
                 'input_kind_options': sorted({(dataset.get('dataset_kind') or 'generic') for dataset in datasets}),
                 'input_kind': None,
                 'has_processing': any(dataset['status'] in {'queued', 'processing'} for dataset in datasets),

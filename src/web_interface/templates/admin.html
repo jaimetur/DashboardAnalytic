@@ -359,8 +359,8 @@
             </td>
             <td>{{ row.stored_path }}</td>
             <td>{{ row.uploaded_by }}</td>
-            <td class="admin-dataset-timestamp">{{ (row.uploaded_at or '').replace('T', ' ').replace(' ', '\n') }}</td>
-            <td class="admin-dataset-timestamp">{{ (row.updated_at or row.uploaded_at or '').replace('T', ' ').replace(' ', '\n') }}</td>
+            <td class="admin-dataset-timestamp">{{ (row.uploaded_at_local or '').replace('T', ' ').replace(' ', '\n') }}</td>
+            <td class="admin-dataset-timestamp">{{ (row.updated_at_local or row.uploaded_at_local or '').replace('T', ' ').replace(' ', '\n') }}</td>
             <td>
               <div class="table-actions admin-dataset-actions">
                 {% if row.status == 'ready' %}

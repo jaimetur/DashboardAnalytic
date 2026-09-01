@@ -102,7 +102,7 @@ class WorkspaceRegistry:
     def _now() -> str:
         # Opening several workspaces in quick succession must retain a stable
         # chronology for the Login default, not collapse to the same second.
-        return datetime.now(timezone.utc).isoformat(timespec='microseconds')
+        return datetime.now().astimezone().isoformat(timespec='microseconds')
 
     @staticmethod
     def _validate_name(name: str) -> str:

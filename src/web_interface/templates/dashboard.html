@@ -42,7 +42,7 @@
           <article><span>Columns</span><strong>{{ selected_dataset.column_count or 0 }}</strong></article>
           <article><span>Number of processed sheets</span><strong>{{ (selected_dataset.filter_options.get('source_sheet', []) | length) if selected_dataset.filter_options else 0 }}</strong></article>
         </div>
-        <p class="form-note">Uploaded by {{ selected_dataset.uploaded_by }} on {{ selected_dataset.uploaded_at }}</p>
+        <p class="form-note">Uploaded by {{ selected_dataset.uploaded_by }} on {{ selected_dataset.uploaded_at_local or selected_dataset.uploaded_at }}</p>
         <div class="dataset-export-actions inline-actions">
           <a class="ghost-link action-link-preview" href="/workspace/preview/{{ selected_dataset.id }}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview Dataset</a>
           {% if analysis_loaded and analysis %}

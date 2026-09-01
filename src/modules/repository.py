@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime
 from contextlib import contextmanager
 from dataclasses import dataclass
 import json
@@ -13,6 +14,11 @@ from src.modules.auth import hash_password
 
 
 DATABASE_BLANK_FILTER = '__database_blank__'
+
+
+def local_now_iso() -> str:
+    """Return an offset-aware timestamp in the server's local timezone."""
+    return datetime.now().astimezone().isoformat(timespec='microseconds')
 
 
 SCHEMA = """
@@ -137,19 +143,20 @@ class Repository:
             self._migrate_legacy_vendor_mapping_profiles(conn)
             conn.execute(
                 """
-                INSERT OR IGNORE INTO dataset_profiles (dataset_id, status, progress)
-                SELECT id, 'queued', 0 FROM datasets
-                """
+                INSERT OR IGNORE INTO dataset_profiles (dataset_id, status, progress, updated_at)
+                SELECT id, 'queued', 0, ? FROM datasets
+                """,
+                (local_now_iso(),),
             )
             existing = conn.execute("SELECT username FROM users WHERE username = ?", (admin_username,)).fetchone()
             if not existing:
                 conn.execute(
-                    "INSERT INTO users (username, password_hash, role, active) VALUES (?, ?, 'admin', 1)",
-                    (admin_username, hash_password(admin_password)),
+                    "INSERT INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, 'admin', 1, ?)",
+                    (admin_username, hash_password(admin_password), local_now_iso()),
                 )
                 conn.execute(
-                    "INSERT INTO users (username, password_hash, role, active) VALUES (?, ?, 'user', 1)",
-                    ('demo', hash_password('demo123')),
+                    "INSERT INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, 'user', 1, ?)",
+                    ('demo', hash_password('demo123'), local_now_iso()),
                 )
 
     def _ensure_dataset_profile_columns(self, conn: sqlite3.Connection) -> None:
@@ -547,8 +554,8 @@ class Repository:
     def create_user(self, username: str, password: str, role: str) -> None:
         with self.connection() as conn:
             conn.execute(
-                "INSERT INTO users (username, password_hash, role, active) VALUES (?, ?, ?, 1)",
-                (username, hash_password(password), role),
+                "INSERT INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, ?, 1, ?)",
+                (username, hash_password(password), role, local_now_iso()),
             )
 
     def update_user(self, user_id: int, username: str, role: str, active: bool, password: str | None = None) -> None:
@@ -624,19 +631,19 @@ class Repository:
                 )
                 conn.execute(
                     """
-                    INSERT OR IGNORE INTO dataset_profiles (dataset_id, status, progress) VALUES (?, 'queued', 0)
+                    INSERT OR IGNORE INTO dataset_profiles (dataset_id, status, progress, updated_at) VALUES (?, 'queued', 0, ?)
                     """,
-                    (dataset_id,),
+                    (dataset_id, local_now_iso()),
                 )
                 return dataset_id, False
             cursor = conn.execute(
-                "INSERT INTO datasets (file_name, stored_path, uploaded_by) VALUES (?, ?, ?)",
-                (file_name, stored_path, uploaded_by),
+                "INSERT INTO datasets (file_name, stored_path, uploaded_by, uploaded_at) VALUES (?, ?, ?, ?)",
+                (file_name, stored_path, uploaded_by, local_now_iso()),
             )
             dataset_id = int(cursor.lastrowid)
             conn.execute(
-                "INSERT INTO dataset_profiles (dataset_id, status, progress) VALUES (?, 'queued', 0)",
-                (dataset_id,),
+                "INSERT INTO dataset_profiles (dataset_id, status, progress, updated_at) VALUES (?, 'queued', 0, ?)",
+                (dataset_id, local_now_iso()),
             )
             return dataset_id, True
 
@@ -1116,9 +1123,11 @@ class Repository:
             return
         assignments = ', '.join(f"{column} = ?" for column in fields)
         values = list(fields.values())
+        assignments += ', updated_at = ?'
+        values.append(local_now_iso())
         with self.connection() as conn:
             conn.execute(
-                f"UPDATE dataset_profiles SET {assignments}, updated_at = CURRENT_TIMESTAMP WHERE dataset_id = ?",
+                f"UPDATE dataset_profiles SET {assignments} WHERE dataset_id = ?",
                 (*values, dataset_id),
             )
 
@@ -1169,8 +1178,8 @@ class Repository:
     def add_log(self, username: str, action: str, details: str) -> None:
         with self.connection() as conn:
             conn.execute(
-                "INSERT INTO audit_logs (username, action, details) VALUES (?, ?, ?)",
-                (username, action, details),
+                "INSERT INTO audit_logs (username, action, details, created_at) VALUES (?, ?, ?, ?)",
+                (username, action, details, local_now_iso()),
             )
 
     def add_report_run(self, *, report_type: str, technology: str, scope: str, data_dataset_id: int,
@@ -1209,14 +1218,14 @@ class Repository:
                 """
                 INSERT INTO report_runs (
                     report_type, technology, scope, data_dataset_id, voice_dataset_id, speech_dataset_id,
-                    template_name, output_file, created_by, dataset_ids_json, dataset_names_json,
+                    template_name, output_file, created_by, created_at, dataset_ids_json, dataset_names_json,
                     slide_count, status, progress, output_path, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, CURRENT_TIMESTAMP)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?)
                 """,
                 (
                     report_type, technology, scope, data_dataset_id, voice_dataset_id, speech_dataset_id,
-                    template_name, output_file, created_by, json.dumps(dataset_ids), json.dumps(dataset_names),
-                    slide_count, str(output_path),
+                    template_name, output_file, created_by, local_now_iso(), json.dumps(dataset_ids), json.dumps(dataset_names),
+                    slide_count, str(output_path), local_now_iso(),
                 ),
             )
             return int(cursor.lastrowid)
@@ -1225,8 +1234,8 @@ class Repository:
         self, report_id: int, *, status: str | None = None, progress: int | None = None,
         last_error: str | None = None, finished: bool = False,
     ) -> None:
-        assignments = ['updated_at = CURRENT_TIMESTAMP']
-        values: list[Any] = []
+        assignments = ['updated_at = ?']
+        values: list[Any] = [local_now_iso()]
         if status is not None:
             assignments.append('status = ?')
             values.append(status)
@@ -1237,7 +1246,8 @@ class Repository:
             assignments.append('last_error = ?')
             values.append(last_error)
         if finished:
-            assignments.append("finished_at = CURRENT_TIMESTAMP")
+            assignments.append('finished_at = ?')
+            values.append(local_now_iso())
         values.append(report_id)
         with self.connection() as conn:
             conn.execute(f"UPDATE report_runs SET {', '.join(assignments)} WHERE id = ?", values)
