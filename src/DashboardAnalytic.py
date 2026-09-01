@@ -1409,7 +1409,13 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'active_workspace': active_workspace,
         **context,
     }
-    return templates.TemplateResponse(request, template_name, payload, status_code=status_code)
+    response = templates.TemplateResponse(request, template_name, payload, status_code=status_code)
+    # These pages render mutable workspace/user state.  In particular, an
+    # imported configuration must not leave a browser showing a previously
+    # cached Admin page while Database Management already reads the new DB.
+    response.headers['Cache-Control'] = 'no-store, max-age=0, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    return response
 
 
 def resolve_doc_path(doc_name: str) -> Path:
