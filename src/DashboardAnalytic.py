@@ -2562,16 +2562,21 @@ def duplicate_workspace(workspace_id: str = Form(...), user: SessionUser = Depen
 
 
 @app.post('/workspace/delete')
-def delete_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
+def delete_workspace(
+    workspace_id: str = Form(...),
+    delete_workspace_files: bool = Form(False),
+    user: SessionUser = Depends(current_user),
+) -> Response:
     require_workspace_admin(user)
     if active_workspace and active_workspace.id == workspace_id:
         return RedirectResponse('/workspace?workspace_warning=Close+the+workspace+before+removing+it.', status_code=status.HTTP_303_SEE_OTHER)
     try:
-        replacement = workspace_registry.delete(workspace_id)
+        workspace_registry.delete(workspace_id, delete_files=delete_workspace_files)
         repository.remove_workspace_access(workspace_id)
     except ValueError as exc:
         return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
-    return RedirectResponse('/workspace?workspace_notice=Workspace+deleted.', status_code=status.HTTP_303_SEE_OTHER)
+    notice = 'Workspace and all of its files deleted.' if delete_workspace_files else 'Workspace deleted. Its input and output files were preserved.'
+    return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": notice})}', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post('/workspace/access')

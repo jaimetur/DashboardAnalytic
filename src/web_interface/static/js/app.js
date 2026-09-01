@@ -972,6 +972,9 @@ const loadingCopy = document.getElementById('loading-copy');
 const confirmOverlay = document.getElementById('confirm-overlay');
 const confirmTitle = document.getElementById('confirm-title');
 const confirmCopy = document.getElementById('confirm-copy');
+const confirmOption = document.getElementById('confirm-option');
+const confirmOptionInput = document.getElementById('confirm-option-input');
+const confirmOptionLabel = document.getElementById('confirm-option-label');
 const confirmAccept = document.getElementById('confirm-accept');
 const confirmCancel = document.getElementById('confirm-cancel');
 const catalogueInsertOverlay = document.getElementById('catalogue-insert-overlay');
@@ -2002,13 +2005,20 @@ document.querySelectorAll('form[data-loading-label]').forEach((form) => {
 
 function showConfirmDialog(message, options = {}) {
   if (!confirmOverlay || !confirmTitle || !confirmCopy || !confirmAccept || !confirmCancel) {
-    return Promise.resolve(window.confirm(message || 'Are you sure?'));
+    const accepted = window.confirm(message || 'Are you sure?');
+    return Promise.resolve(options.optionLabel ? {accepted, optionChecked: false} : accepted);
   }
 
   confirmTitle.textContent = options.title || 'Confirm action';
   confirmCopy.textContent = message || options.copy || 'Are you sure you want to continue?';
   confirmAccept.textContent = options.confirmLabel || 'Confirm';
   confirmCancel.hidden = options.hideCancel === true;
+  const hasOption = Boolean(options.optionLabel && confirmOption && confirmOptionInput && confirmOptionLabel);
+  if (hasOption) {
+    confirmOptionLabel.textContent = options.optionLabel;
+    confirmOptionInput.checked = false;
+    confirmOption.hidden = false;
+  }
   confirmOverlay.hidden = false;
   document.body.classList.add('loading-active');
 
@@ -2021,7 +2031,10 @@ function showConfirmDialog(message, options = {}) {
       confirmOverlay.removeEventListener('click', handleBackdrop);
       window.removeEventListener('keydown', handleKeydown);
       confirmCancel.hidden = false;
-      resolve(accepted);
+      const optionChecked = hasOption && Boolean(confirmOptionInput?.checked);
+      if (confirmOption) confirmOption.hidden = true;
+      if (confirmOptionInput) confirmOptionInput.checked = false;
+      resolve(hasOption ? {accepted, optionChecked} : accepted);
     };
 
     const handleAccept = () => close(true);

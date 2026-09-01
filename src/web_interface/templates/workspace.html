@@ -72,7 +72,7 @@
               </details>
               <button type="submit" class="workspace-action-access">Save</button>
             </form>{% endif %}
-            <form method="post" action="/workspace/delete" data-confirm="Remove workspace '{{ item.name }}' and all its datasets? This cannot be undone." data-confirm-title="Remove workspace" data-confirm-label="Remove workspace">
+            <form method="post" action="/workspace/delete" data-workspace-delete-form data-workspace-name="{{ item.name }}">
               <input type="hidden" name="workspace_id" value="{{ item.id }}">
               <button type="submit" class="workspace-action-remove" {% if active_workspace and item.id == active_workspace.id %}disabled{% endif %}>Remove</button>
             </form>
@@ -593,6 +593,33 @@
   });
   dialog.addEventListener('click', (event) => {
     if (event.target === dialog) dialog.close();
+  });
+})();
+</script>
+<script>
+(() => {
+  document.querySelectorAll('[data-workspace-delete-form]').forEach((form) => {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const workspaceName = form.dataset.workspaceName || 'this workspace';
+      const result = await showConfirmDialog(
+        `Remove workspace '${workspaceName}'? Its registration and database will be removed; input and output files will be retained unless you choose to delete everything.`,
+        {
+          title: 'Remove workspace',
+          confirmLabel: 'Remove workspace',
+          optionLabel: 'Also permanently delete all workspace files, including input, output, reports and the workspace database.',
+        },
+      );
+      if (!result?.accepted) return;
+      if (result.optionChecked) {
+        const purge = document.createElement('input');
+        purge.type = 'hidden';
+        purge.name = 'delete_workspace_files';
+        purge.value = 'true';
+        form.append(purge);
+      }
+      form.submit();
+    });
   });
 })();
 </script>

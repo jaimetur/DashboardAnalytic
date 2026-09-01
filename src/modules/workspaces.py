@@ -360,17 +360,39 @@ class WorkspaceRegistry:
                 raise ValueError('Only the open workspace can be closed.')
             conn.execute("UPDATE workspace_state SET value = NULL WHERE key = 'active_workspace_id'")
 
-    def remove(self, workspace_id: str) -> Workspace:
+    def _managed_workspace_root(self, workspace: Workspace) -> Path:
+        """Return the registered workspace directory only when it is safe to remove."""
+        managed_root = (self.legacy_data_dir / 'workspaces').resolve()
+        workspace_root = workspace.database_path.parent.resolve()
+        if workspace_root.parent != managed_root:
+            raise ValueError('Workspace files are outside the managed workspaces directory and cannot be removed automatically.')
+        return workspace_root
+
+    def remove(self, workspace_id: str, *, delete_files: bool = True) -> Workspace:
         workspace = self.get(workspace_id)
         if not workspace:
             raise ValueError('Workspace not found.')
+        workspace_root = self._managed_workspace_root(workspace) if delete_files else None
         with self._connection() as conn:
             conn.execute('DELETE FROM workspaces WHERE id = ?', (workspace_id,))
-        # Both targets are deterministic paths registered by create(), never
-        # a path supplied by the request.
-        shutil.rmtree(workspace.database_path.parent, ignore_errors=True)
+        if workspace_root:
+            # The path is derived from the registered workspace and verified
+            # as an immediate child of data/workspaces, never from a request.
+            shutil.rmtree(workspace_root, ignore_errors=True)
         return workspace
 
-    def delete(self, workspace_id: str) -> Workspace:
-        self.remove(workspace_id)
-        return self.most_recent()
+    def delete(self, workspace_id: str, *, delete_files: bool = False) -> Workspace:
+        """Remove a workspace registration and database, optionally purging all files."""
+        workspace = self.get(workspace_id)
+        if not workspace:
+            raise ValueError('Workspace not found.')
+        workspace_root = self._managed_workspace_root(workspace)
+        self.remove(workspace_id, delete_files=False)
+        if delete_files:
+            shutil.rmtree(workspace_root, ignore_errors=True)
+        else:
+            # Keep the analyst's source files and generated output, but avoid
+            # leaving an unregistered workspace database behind.
+            for database_file in (workspace.database_path, *(Path(f'{workspace.database_path}{suffix}') for suffix in ('-wal', '-shm'))):
+                database_file.unlink(missing_ok=True)
+        return workspace

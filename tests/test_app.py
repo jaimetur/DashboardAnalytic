@@ -630,6 +630,36 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
     assert app_module.workspace_registry.get(workspace_id) is None
 
 
+def test_workspace_remove_preserves_files_unless_explicitly_requested(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    first = app_module.workspace_registry.create('Preserve files')
+    first_root = first.database_path.parent
+    (first_root / 'input').mkdir()
+    (first_root / 'input' / 'source.csv').write_text('value\n1\n', encoding='utf-8')
+
+    removed = client.post('/workspace/delete', data={'workspace_id': first.id}, follow_redirects=False)
+    assert removed.status_code == 303
+    assert app_module.workspace_registry.get(first.id) is None
+    assert (first_root / 'input' / 'source.csv').exists()
+    assert not first.database_path.exists()
+
+    second = app_module.workspace_registry.create('Delete files')
+    second_root = second.database_path.parent
+    (second_root / 'output').mkdir()
+    (second_root / 'output' / 'report.pptx').write_bytes(b'report')
+
+    removed_with_files = client.post(
+        '/workspace/delete',
+        data={'workspace_id': second.id, 'delete_workspace_files': 'true'},
+        follow_redirects=False,
+    )
+    assert removed_with_files.status_code == 303
+    assert app_module.workspace_registry.get(second.id) is None
+    assert not second_root.exists()
+
+
 def test_queued_import_continues_after_its_workspace_is_closed(client) -> None:
     import src.DashboardAnalytic as app_module
 
