@@ -6,7 +6,13 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 STORAGE_PATHS_FILE = PROJECT_ROOT / 'storage-paths.conf'
-STORAGE_ROOT_VARIABLES = frozenset({'APP_CONFIG_DIR', 'APP_DATA_DIR', 'APP_ASSETS_DIR'})
+# APP_* names are the documented settings.  The unprefixed spellings remain
+# accepted when reading older/local files so those files do not prevent a
+# deployment from starting; application settings themselves only read APP_*.
+STORAGE_ROOT_VARIABLES = frozenset({
+    'APP_CONFIG_DIR', 'APP_DATA_DIR', 'APP_ASSETS_DIR',
+    'CONFIG_DIR', 'DATA_DIR', 'ASSETS_DIR',
+})
 
 
 def load_storage_paths(path: Path = STORAGE_PATHS_FILE, environ: dict[str, str] | None = None) -> None:
