@@ -59,7 +59,7 @@
 
   <article class="panel reporting-panel reporting-jobs-panel" data-report-jobs-panel>
     <div class="section-head tight-head">
-      <div><p class="eyebrow">PowerPoint reporting</p><h2>Generated Report Jobs</h2></div>
+      <div><p class="eyebrow">PowerPoint reporting</p><h2>Generated Reports Jobs</h2></div>
       <span class="pill" data-report-jobs-count>{{ report_jobs | length }} jobs</span>
     </div>
     <p class="lede">Report generation continues on the server after leaving Reporting or signing out. Download is enabled when a job is ready.</p>
@@ -69,7 +69,7 @@
         <tbody data-report-jobs-body>
           {% for job in report_jobs %}
           <tr>
-            <td>{{ job.id }}</td><td>{{ job.date }}</td><td>{{ job.report_name }}</td><td>{{ job.datasets }}</td><td>{{ job.slides }}</td>
+            <td>{{ job.id }}</td><td>{{ job.date }}</td><td>{{ job.report_name }}</td><td>{{ job.datasets }}</td><td>{{ job.slides if job.slides is not none else '—' }}</td>
             <td title="{{ job.error }}">{{ job.status | title }}</td>
             <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%</span></div></td>
             <td><div class="report-job-actions">
@@ -138,7 +138,7 @@
       if (!jobsBody) return;
       jobsBody.replaceChildren(...jobs.map((job) => {
         const row = document.createElement('tr');
-        row.append(cell(job.id), cell(job.date), cell(job.report_name), cell(job.datasets), cell(job.slides), cell(statusLabel(job), job.error || ''));
+        row.append(cell(job.id), cell(job.date), cell(job.report_name), cell(job.datasets), cell(job.slides ?? '—'), cell(statusLabel(job), job.error || ''));
         const progressCell = document.createElement('td');
         const progress = document.createElement('div');
         progress.className = 'report-job-progress';

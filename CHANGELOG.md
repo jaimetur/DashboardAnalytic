@@ -41,6 +41,8 @@
 - Let the Slides Templates Editor choose between adding a chart to the current slide or inserting a new, sequentially renumbered slide from the final row of a slide block.
 - Harmonised grouped slide-cell typography with single-chart slides and clarified the add-row dialog actions.
 - Moved NetCheck PowerPoint generation into persistent background jobs and added Reporting job history with progress plus Download, Open and Delete actions.
+- Renamed the history panel to **Generated Reports Jobs**, showing all persisted jobs for the active workspace, including compatible historical entries.
+- Store new PowerPoint reports under each workspace's `output/reports` directory while continuing to discover older files from `exports`.
 - Made Admin ZIP exports disk-backed background jobs with direct, resumable browser downloads, selective compression for already-compressed files and 24-hour cleanup of temporary packages; this supports very large workspaces without loading the archive into browser or server memory.
 - Show an immediate upload-progress dialog when importing a ZIP, before a large package reaches the server for overwrite inspection.
 

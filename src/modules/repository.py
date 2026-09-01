@@ -1180,8 +1180,10 @@ class Repository:
                  None, vodafone_mapping_dataset_id, three_mapping_dataset_id, template_name, output_file, created_by),
             )
 
-    def list_report_runs(self, limit: int = 50) -> list[sqlite3.Row]:
+    def list_report_runs(self, limit: int | None = 50) -> list[sqlite3.Row]:
         with self.connection() as conn:
+            if limit is None:
+                return list(conn.execute("SELECT * FROM report_runs ORDER BY id DESC").fetchall())
             return list(conn.execute(
                 "SELECT * FROM report_runs ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall())

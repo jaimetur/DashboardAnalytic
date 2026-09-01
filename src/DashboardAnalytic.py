@@ -402,10 +402,11 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
     """Make one isolated workspace the target for all dataset operations."""
     global active_workspace
     workspace = workspace_registry.mark_opened(workspace_id)
-    for path in (workspace.database_path.parent, workspace.input_dir, workspace.export_dir):
+    for path in (workspace.database_path.parent, workspace.input_dir, workspace.output_dir, workspace.export_dir):
         path.mkdir(parents=True, exist_ok=True)
     object.__setattr__(settings, 'database_path', workspace.database_path)
     object.__setattr__(settings, 'input_dir', workspace.input_dir)
+    object.__setattr__(settings, 'output_dir', workspace.output_dir)
     object.__setattr__(settings, 'export_dir', workspace.export_dir)
     repository.db_path = workspace.database_path
     ANALYSIS_CACHE.clear()
@@ -2645,6 +2646,27 @@ def _report_dataset_names(selected: dict[str, list[dict[str, Any]]]) -> dict[str
     return {kind: [str(dataset['file_name']) for dataset in datasets] for kind, datasets in selected.items()}
 
 
+def _report_job_output_path(row: Any) -> Path | None:
+    """Resolve current and legacy report locations for persisted report jobs."""
+    stored = str(row['output_path'] or '').strip()
+    candidates: list[Path] = []
+    if stored:
+        candidates.append(Path(stored))
+    file_name = Path(str(row['output_file'] or '')).name
+    if file_name:
+        # New reports live under the active workspace's output tree.  Keep the
+        # former exports location as a compatibility fallback for old jobs.
+        candidates.extend((
+            Path(settings.output_dir) / 'reports' / file_name,
+            Path(settings.export_dir) / file_name,
+            Path(settings.output_dir) / file_name,
+        ))
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def serialize_report_job(row: Any) -> dict[str, Any]:
     """Expose a report job without relying on the mutable active workspace."""
     try:
@@ -2657,14 +2679,14 @@ def serialize_report_job(row: Any) -> dict[str, Any]:
     ]
     report_id = int(row['id'])
     status_value = str(row['status'] or 'ready')
-    output_path = Path(str(row['output_path'] or ''))
-    output_available = status_value == 'ready' and output_path.is_file()
+    output_available = status_value == 'ready' and _report_job_output_path(row) is not None
+    slide_count = int(row['slide_count'] or 0)
     return {
         'id': report_id,
         'date': str(row['created_at']),
         'report_name': str(row['output_file']),
         'datasets': ' · '.join(labels) or 'Historical report',
-        'slides': int(row['slide_count'] or 0),
+        'slides': slide_count or None,
         'status': status_value,
         'progress': int(row['progress'] or 0),
         'error': str(row['last_error'] or ''),
@@ -2727,7 +2749,7 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
                 technology: report_catalogue_options(technology)
                 for technology in TEMPLATE_NAMES
             },
-            'report_jobs': [serialize_report_job(row) for row in repository.list_report_runs()],
+            'report_jobs': [serialize_report_job(row) for row in repository.list_report_runs(limit=None)],
         },
     )
 
@@ -2776,7 +2798,7 @@ def generate_netcheck_cdr_report(
         raise HTTPException(status_code=400, detail=f"Unable to load the selected {technology.upper()} report template: {exc}") from exc
     generated_at = datetime.now().strftime('%Y%m%d-%H%M')
     file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{generated_at}_{uuid4().hex[:8]}.pptx"
-    destination = safe_join(Path(settings.export_dir), file_name)
+    destination = safe_join(Path(settings.output_dir) / 'reports', file_name)
     dataset_ids = {kind: [int(dataset['id']) for dataset in datasets] for kind, datasets in selected.items()}
     report_id = repository.create_report_job(
         report_type='netcheck_cdr', technology=technology, scope=report_scope,
@@ -2796,7 +2818,7 @@ def generate_netcheck_cdr_report(
 
 @app.get('/api/reporting/jobs')
 def reporting_jobs(user: SessionUser = Depends(current_user)) -> JSONResponse:
-    return JSONResponse({'jobs': [serialize_report_job(row) for row in repository.list_report_runs()]})
+    return JSONResponse({'jobs': [serialize_report_job(row) for row in repository.list_report_runs(limit=None)]})
 
 
 def _report_job_file(report_id: int) -> tuple[dict[str, Any], Path]:
@@ -2806,8 +2828,8 @@ def _report_job_file(report_id: int) -> tuple[dict[str, Any], Path]:
     payload = serialize_report_job(report)
     if payload['status'] != 'ready':
         raise HTTPException(status_code=409, detail='The report is still being generated.')
-    path = Path(str(report['output_path'] or ''))
-    if not path.is_file():
+    path = _report_job_output_path(report)
+    if path is None:
         raise HTTPException(status_code=404, detail='The generated report file is no longer available.')
     return payload, path
 
@@ -2829,8 +2851,8 @@ def delete_report_job(report_id: int, user: SessionUser = Depends(current_user))
     report = repository.delete_report_run(report_id)
     if not report:
         raise HTTPException(status_code=404, detail='Report job not found.')
-    path = Path(str(report['output_path'] or ''))
-    if path.is_file():
+    path = _report_job_output_path(report)
+    if path is not None:
         path.unlink()
     return JSONResponse({'deleted': report_id})
 
