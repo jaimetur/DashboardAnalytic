@@ -54,15 +54,13 @@ application_config_dir = settings.database_path.parent
 
 
 def legacy_workspace_registry_path() -> Path:
-    """Locate either historical registry filename while migrating to data/workspaces."""
-    current_legacy_path = application_config_dir / 'workspace-registry.db'
-    return current_legacy_path if current_legacy_path.exists() else application_config_dir / 'workspaces.db'
+    """Return the workspace registry location."""
+    return application_config_dir / 'workspace-registry.db'
 
 
 repository = Repository(settings.database_path)
 workspace_registry = WorkspaceRegistry(
     settings.input_dir.parent / 'workspaces' / 'workspace-registry.db',
-    settings.database_path,
     settings.input_dir.parent,
     settings.slides_templates_dir,
     legacy_workspace_registry_path(),
@@ -402,6 +400,9 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
     """Make one isolated workspace the target for all dataset operations."""
     global active_workspace
     workspace = workspace_registry.mark_opened(workspace_id)
+    # Authentication and shared Slides Template metadata belong to the
+    # application configuration database, not to the selected workspace.
+    repository.set_global_database(settings.database_path.parent / 'application.db')
     for path in (workspace.database_path.parent, workspace.input_dir, workspace.output_dir, workspace.export_dir):
         path.mkdir(parents=True, exist_ok=True)
     object.__setattr__(settings, 'database_path', workspace.database_path)
@@ -464,11 +465,14 @@ async def lifespan(_: FastAPI):
     global workspace_registry, application_config_dir
     application_config_dir = settings.database_path.parent
     workspace_registry = WorkspaceRegistry(
-        settings.input_dir.parent / 'workspaces' / 'workspace-registry.db', settings.database_path,
+        settings.input_dir.parent / 'workspaces' / 'workspace-registry.db',
         settings.input_dir.parent, settings.slides_templates_dir,
         legacy_workspace_registry_path(),
     )
     workspace_registry.initialize()
+    repository.set_global_database(settings.database_path.parent / 'application.db')
+    for workspace in workspace_registry.list():
+        repository.migrate_workspace_metadata(workspace.database_path)
     export_package_dir().mkdir(parents=True, exist_ok=True)
     _cleanup_expired_export_packages()
     migrate_uk_slides_templates_to_global_config()
@@ -1903,7 +1907,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         for dataset in admin_datasets
     }
     database_table_groups: dict[str, list[dict[str, str]]] = {
-        'Workspace records': [], 'Individual dataset rows': [], 'Combined CDR rows': [], 'Other tables': [],
+        'Config Tables': [], 'Workspace Tables': [], 'Individual dataset rows': [], 'Combined CDR rows': [], 'Other tables': [],
     }
     friendly_tables = {
         'audit_logs': 'Audit log',
@@ -1925,8 +1929,10 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
                 'name': table_name,
                 'label': f"Combined CDR-{reporting_match.group(1).title()}",
             })
+        elif table_name in {'users', 'report_templates'}:
+            database_table_groups['Config Tables'].append({'name': table_name, 'label': friendly_tables[table_name]})
         elif table_name in friendly_tables:
-            database_table_groups['Workspace records'].append({'name': table_name, 'label': friendly_tables[table_name]})
+            database_table_groups['Workspace Tables'].append({'name': table_name, 'label': friendly_tables[table_name]})
         else:
             database_table_groups['Other tables'].append({'name': table_name, 'label': table_name})
     export_options = [

@@ -73,7 +73,7 @@ class Settings:
     data_dir: Path = project_path("APP_DATA_DIR", "data")
     assets_dir: Path = project_path("APP_ASSETS_DIR", "assets")
 
-    database_path: Path = config_dir / "app.db"
+    database_path: Path = config_dir / "application.db"
     slides_templates_dir: Path = config_dir / "slides-templates"
     ppt_templates_dir: Path = assets_dir / "ppt-templates"
     input_dir: Path = data_dir / "input"

@@ -26,13 +26,11 @@ class WorkspaceRegistry:
     def __init__(
         self,
         registry_path: Path,
-        legacy_database_path: Path,
         legacy_data_dir: Path,
         legacy_slides_templates_dir: Path,
         legacy_registry_path: Path | None = None,
     ) -> None:
         self.registry_path = registry_path
-        self.legacy_database_path = legacy_database_path
         self.legacy_data_dir = legacy_data_dir
         self.legacy_slides_templates_dir = legacy_slides_templates_dir
         self.legacy_registry_path = legacy_registry_path
@@ -83,7 +81,6 @@ class WorkspaceRegistry:
             # Slides Templates are application configuration shared by every
             # workspace, never workspace data.
             conn.execute('UPDATE workspaces SET slides_templates_dir = ?', (str(self.legacy_slides_templates_dir),))
-        self._migrate_default_database()
         self._migrate_workspace_directories()
         self._migrate_workspace_exports()
 
@@ -158,32 +155,6 @@ class WorkspaceRegistry:
             return new_root / path.relative_to(old_root)
         except ValueError:
             return path
-
-    def _migrate_default_database(self) -> None:
-        """Relocate the legacy config DB without changing its existing data."""
-        workspace = self.get('default')
-        if not workspace:
-            return
-        target = self._workspace_root(workspace.name) / f'{workspace.name}.db'
-        source = workspace.database_path
-        # Older registry versions referenced config/app.db; a fresh registry
-        # already points at target, so use that legacy source when needed.
-        if not source.exists() and self.legacy_database_path.exists():
-            source = self.legacy_database_path
-        if source != target and source.exists():
-            # A copied/moved deployment can legitimately retain the historic
-            # config DB while the renamed workspace database already exists in
-            # the new data root. The workspace DB is the migrated destination;
-            # do not try to overwrite it or fail application startup.
-            if not target.exists():
-                self._move_database_bundle(source, target)
-                if source.parent.parent == self.legacy_data_dir / 'workspaces':
-                    try:
-                        source.parent.rmdir()
-                    except OSError:
-                        pass
-        with self._connection() as conn:
-            conn.execute('UPDATE workspaces SET database_path = ? WHERE id = ?', (str(target), 'default'))
 
     def _migrate_workspace_directories(self) -> None:
         """Move earlier ID-based folders to their human-readable names."""

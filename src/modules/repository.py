@@ -22,15 +22,6 @@ def local_now_iso() -> str:
 
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    role TEXT NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE TABLE IF NOT EXISTS datasets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     file_name TEXT NOT NULL,
@@ -96,6 +87,18 @@ CREATE TABLE IF NOT EXISTS report_runs (
     finished_at TEXT
 );
 
+"""
+
+GLOBAL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS report_templates (
     technology TEXT NOT NULL,
     name TEXT NOT NULL,
@@ -115,9 +118,11 @@ class UserRecord:
 
 
 class Repository:
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, global_db_path: Path | None = None) -> None:
         self.db_path = db_path
+        self.global_db_path = global_db_path or db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.global_db_path.parent.mkdir(parents=True, exist_ok=True)
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
@@ -133,12 +138,47 @@ class Repository:
         finally:
             conn.close()
 
+    @contextmanager
+    def global_connection(self) -> Iterator[sqlite3.Connection]:
+        conn = sqlite3.connect(self.global_db_path, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
+
+    def set_global_database(self, path: Path) -> None:
+        self.global_db_path = path
+        self.global_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def migrate_workspace_metadata(self, database_path: Path) -> None:
+        """Move pre-global users/template metadata out of one workspace DB."""
+        if not database_path.exists() or database_path == self.global_db_path:
+            return
+        with sqlite3.connect(database_path) as source, self.global_connection() as target:
+            source.row_factory = sqlite3.Row
+            tables = {row['name'] for row in source.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            target.executescript(GLOBAL_SCHEMA)
+            if 'users' in tables:
+                for row in source.execute("SELECT username, password_hash, role, active, created_at FROM users").fetchall():
+                    target.execute("INSERT OR IGNORE INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, ?, ?, ?)", tuple(row))
+                source.execute('DROP TABLE users')
+            if 'report_templates' in tables:
+                for row in source.execute("SELECT technology, name, is_default FROM report_templates").fetchall():
+                    target.execute("INSERT OR IGNORE INTO report_templates (technology, name, is_default) VALUES (?, ?, ?)", tuple(row))
+                source.execute('DROP TABLE report_templates')
+            source.commit()
+
     def initialize(self, admin_username: str, admin_password: str) -> None:
         with self.connection() as conn:
             conn.executescript(SCHEMA)
             self._ensure_dataset_profile_columns(conn)
             self._ensure_report_run_columns(conn)
-            self._ensure_report_template_columns(conn)
             self._cleanup_duplicate_datasets(conn)
             self._migrate_legacy_vendor_mapping_profiles(conn)
             conn.execute(
@@ -148,12 +188,20 @@ class Repository:
                 """,
                 (local_now_iso(),),
             )
+        self.migrate_workspace_metadata(self.db_path)
+        with self.global_connection() as conn:
+            conn.executescript(GLOBAL_SCHEMA)
+            self._ensure_report_template_columns(conn)
+            # One-time migration for databases created before users/templates
+            # were moved out of individual workspaces. New workspace databases
+            # never create these tables.
             existing = conn.execute("SELECT username FROM users WHERE username = ?", (admin_username,)).fetchone()
             if not existing:
                 conn.execute(
                     "INSERT INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, 'admin', 1, ?)",
                     (admin_username, hash_password(admin_password), local_now_iso()),
                 )
+            if not conn.execute("SELECT 1 FROM users WHERE username = 'demo'").fetchone():
                 conn.execute(
                     "INSERT INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, 'user', 1, ?)",
                     ('demo', hash_password('demo123'), local_now_iso()),
@@ -244,14 +292,14 @@ class Repository:
                 )
 
     def list_report_templates(self, technology: str) -> list[sqlite3.Row]:
-        with self.connection() as conn:
+        with self.global_connection() as conn:
             return conn.execute(
                 "SELECT technology, name, is_default FROM report_templates WHERE technology = ? ORDER BY name COLLATE NOCASE",
                 (technology,),
             ).fetchall()
 
     def add_report_template(self, technology: str, name: str, *, is_default: bool = False) -> None:
-        with self.connection() as conn:
+        with self.global_connection() as conn:
             if is_default:
                 conn.execute("UPDATE report_templates SET is_default = 0 WHERE technology = ?", (technology,))
             conn.execute(
@@ -260,7 +308,7 @@ class Repository:
             )
 
     def set_default_report_template(self, technology: str, name: str) -> None:
-        with self.connection() as conn:
+        with self.global_connection() as conn:
             if not conn.execute(
                 "SELECT 1 FROM report_templates WHERE technology = ? AND name = ?", (technology, name)
             ).fetchone():
@@ -271,21 +319,21 @@ class Repository:
             )
 
     def rename_report_template(self, technology: str, name: str, new_name: str) -> None:
-        with self.connection() as conn:
+        with self.global_connection() as conn:
             conn.execute(
                 "UPDATE report_templates SET name = ? WHERE technology = ? AND name = ?",
                 (new_name, technology, name),
             )
 
     def move_report_template(self, technology: str, name: str, target_technology: str) -> None:
-        with self.connection() as conn:
+        with self.global_connection() as conn:
             conn.execute(
                 "UPDATE report_templates SET technology = ? WHERE technology = ? AND name = ?",
                 (target_technology, technology, name),
             )
 
     def delete_report_template(self, technology: str, name: str) -> None:
-        with self.connection() as conn:
+        with self.global_connection() as conn:
             conn.execute("DELETE FROM report_templates WHERE technology = ? AND name = ?", (technology, name))
 
     def dataset_rows_table_name(self, dataset_id: int) -> str:
@@ -293,6 +341,10 @@ class Repository:
 
     def _quote_identifier(self, identifier: str) -> str:
         return '"' + str(identifier).replace('"', '""') + '"'
+
+    def _table_connection(self, table_name: str):
+        """Select the owning database for workspace and global tables."""
+        return self.global_connection if table_name in {'users', 'report_templates'} else self.connection
 
     def list_database_tables(self) -> list[str]:
         """Return the editable user tables in the currently configured workspace database."""
@@ -305,7 +357,15 @@ class Repository:
                 ORDER BY name COLLATE NOCASE
                 """
             ).fetchall()
-        return [str(row['name']) for row in rows]
+        names = [str(row['name']) for row in rows]
+        # Users and Slides Template metadata are global configuration tables;
+        # expose their names in the admin editor without duplicating them in
+        # the workspace database.
+        with self.global_connection() as global_conn:
+            for name in ('users', 'report_templates'):
+                if global_conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?", (name,)).fetchone() and name not in names:
+                    names.append(name)
+        return sorted(names, key=str.casefold)
 
     def remove_orphaned_dataset_row_tables(self) -> list[str]:
         """Remove legacy materialised tables whose dataset record no longer exists."""
@@ -389,7 +449,7 @@ class Repository:
         page_size = max(1, min(int(limit), 250))
         page_offset = max(0, int(offset))
         quoted_table = self._quote_identifier(table_name)
-        with self.connection() as conn:
+        with self._table_connection(table_name)() as conn:
             column_rows = self._database_table_metadata(conn, table_name)
             where_clause, parameters = self._database_filter_clause(column_rows, filters)
             columns = [
@@ -435,7 +495,7 @@ class Repository:
             raise ValueError('The selected table does not exist in the active workspace database.')
         quoted_table = self._quote_identifier(table_name)
         result_limit = max(1, min(int(limit), 500))
-        with self.connection() as conn:
+        with self._table_connection(table_name)() as conn:
             metadata = self._database_table_metadata(conn, table_name)
             if column_name not in {str(row['name']) for row in metadata}:
                 raise ValueError('The selected filter column does not exist in the active workspace database.')
@@ -461,7 +521,7 @@ class Repository:
         if not isinstance(updates, dict) or not updates:
             raise ValueError('Enter at least one changed value before saving.')
         quoted_table = self._quote_identifier(table_name)
-        with self.connection() as conn:
+        with self._table_connection(table_name)() as conn:
             metadata = conn.execute(f"PRAGMA table_info({quoted_table})").fetchall()
             columns = {str(row['name']): row for row in metadata}
             unknown_columns = set(updates) - set(columns)
@@ -484,7 +544,7 @@ class Repository:
         if table_name not in self.list_database_tables():
             raise ValueError('The selected table does not exist in the active workspace database.')
         quoted_table = self._quote_identifier(table_name)
-        with self.connection() as conn:
+        with self._table_connection(table_name)() as conn:
             result = conn.execute(f"DELETE FROM {quoted_table} WHERE rowid = ?", (int(rowid),))
             if result.rowcount != 1:
                 raise ValueError('The row no longer exists. Refresh the table and try again.')
@@ -535,7 +595,7 @@ class Repository:
                 conn.execute(f"DELETE FROM datasets WHERE id IN ({placeholders})", stale_ids)
 
     def get_user(self, username: str) -> UserRecord | None:
-        with self.connection() as conn:
+        with self.global_connection() as conn:
             row = conn.execute(
                 "SELECT username, password_hash, role, active FROM users WHERE username = ?",
                 (username,),
@@ -545,21 +605,21 @@ class Repository:
         return UserRecord(row['username'], row['password_hash'], row['role'], bool(row['active']))
 
     def get_user_by_id(self, user_id: int) -> sqlite3.Row | None:
-        with self.connection() as conn:
+        with self.global_connection() as conn:
             return conn.execute(
                 "SELECT id, username, role, active, created_at FROM users WHERE id = ?",
                 (user_id,),
             ).fetchone()
 
     def create_user(self, username: str, password: str, role: str) -> None:
-        with self.connection() as conn:
+        with self.global_connection() as conn:
             conn.execute(
                 "INSERT INTO users (username, password_hash, role, active, created_at) VALUES (?, ?, ?, 1, ?)",
                 (username, hash_password(password), role, local_now_iso()),
             )
 
     def update_user(self, user_id: int, username: str, role: str, active: bool, password: str | None = None) -> None:
-        with self.connection() as conn:
+        with self.global_connection() as conn:
             existing = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
             if not existing:
                 raise ValueError("User not found")
@@ -575,7 +635,7 @@ class Repository:
                 )
 
     def update_password(self, username: str, password: str) -> None:
-        with self.connection() as conn:
+        with self.global_connection() as conn:
             result = conn.execute(
                 "UPDATE users SET password_hash = ? WHERE username = ?",
                 (hash_password(password), username),
@@ -584,17 +644,17 @@ class Repository:
                 raise ValueError('User not found')
 
     def delete_user(self, user_id: int) -> None:
-        with self.connection() as conn:
+        with self.global_connection() as conn:
             cursor = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
             if cursor.rowcount == 0:
                 raise ValueError("User not found")
 
     def list_users(self) -> list[sqlite3.Row]:
-        with self.connection() as conn:
+        with self.global_connection() as conn:
             return list(conn.execute("SELECT id, username, role, active, created_at FROM users ORDER BY id ASC").fetchall())
 
     def count_active_admin_users(self) -> int:
-        with self.connection() as conn:
+        with self.global_connection() as conn:
             row = conn.execute(
                 "SELECT COUNT(*) AS total FROM users WHERE role = 'admin' AND active = 1",
             ).fetchone()
@@ -605,7 +665,7 @@ class Repository:
         if not normalized:
             return []
         placeholders = ','.join('?' for _ in normalized)
-        with self.connection() as conn:
+        with self.global_connection() as conn:
             rows = conn.execute(
                 f"SELECT username FROM users WHERE active = 1 AND username IN ({placeholders})",
                 normalized,

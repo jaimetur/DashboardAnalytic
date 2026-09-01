@@ -57,6 +57,9 @@
 - Configured Docker timezone handling through `TZ` (default `Europe/Madrid`) so NAS timestamps match the intended local time.
 - Stopped creating per-workspace `exports/` directories; report and dashboard exports now use `output/reports/`, with automatic migration of existing files.
 - Renamed report-template audit-log actions and fields from `catalogue` to `template`, including display of historical entries.
+- Moved global authentication users and shared Slides Template metadata into `config/application.db`; configuration exports now include them, while workspace databases contain only workspace data.
+- Classified `users` and the Slides Template registry as **Config Tables** in Database Management, and renamed **Workspace records** to **Workspace Tables**.
+- Removed the obsolete `config/app.db` path and legacy migration branch. `config/application.db` is now the sole global configuration database.
 
 #### 📚 Documentation:
 - Reworked the Help, README and configuration documentation for the current workspace, template, reporting and transfer workflows.
