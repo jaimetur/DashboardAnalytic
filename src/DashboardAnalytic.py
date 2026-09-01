@@ -2716,6 +2716,10 @@ def serialize_report_job(row: Any) -> dict[str, Any]:
         f"{kind.title()}: {', '.join(str(name) for name in names)}"
         for kind, names in dataset_names.items() if names
     ]
+    dataset_groups = [
+        {'kind': kind.title(), 'names': [str(name) for name in names]}
+        for kind, names in dataset_names.items() if names
+    ]
     report_id = int(row['id'])
     status_value = str(row['status'] or 'ready')
     output_available = status_value == 'ready' and _report_job_output_path(row) is not None
@@ -2725,6 +2729,7 @@ def serialize_report_job(row: Any) -> dict[str, Any]:
         'date': _local_report_date(row['created_at']),
         'report_name': str(row['output_file']),
         'datasets': ' · '.join(labels) or 'Historical report',
+        'dataset_groups': dataset_groups,
         'template': str(row['template_name'] or '—'),
         'slides': slide_count or None,
         'type': str(row['technology'] or '').upper() or '—',

@@ -318,6 +318,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-jobs-table td:nth-child(2), .report-jobs-table td:nth-child(5), .report-jobs-table td:nth-child(6) { white-space: nowrap; }
 .report-jobs-table td:nth-child(3) { min-width: 245px; }
 .report-jobs-table td:nth-child(4) { min-width: 310px; }
+.report-job-datasets { display: flex; flex-direction: column; align-items: flex-start; gap: 0.12rem; white-space: normal !important; }
+.report-job-dataset-kind { color: #5d3b86; font-weight: 800; margin-top: 0.18rem; }
 .report-job-progress { display: flex; align-items: center; gap: 0.45rem; min-width: 122px; font-variant-numeric: tabular-nums; }
 .report-job-progress progress { width: 82px; accent-color: #4b208a; }
 .report-job-actions { display: flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
