@@ -9,6 +9,7 @@ COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src ./src
+COPY assets ./assets
 COPY help ./help
 COPY README.md ./README.md
 COPY CHANGELOG.md ./CHANGELOG.md

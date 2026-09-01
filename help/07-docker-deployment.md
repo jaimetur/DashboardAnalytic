@@ -1,6 +1,6 @@
 # Docker deployment
 
-Docker Compose is the supported way to run Dashboard Analytic as a service. The compose files use `docker/.env` for runtime configuration.
+Docker Compose is the supported way to run Dashboard Analytic as a service. The compose files use `docker/.env` for runtime configuration. The Docker image includes the bundled PowerPoint master at `assets/ppt-templates/Template_CDR_analysis.pptx`.
 
 ## Development
 

@@ -228,7 +228,7 @@ docker compose --env-file docker/.env -f docker/docker-compose-dev.yml up --buil
 
 ### Production compose
 
-The production compose file is designed to pull a published Docker image instead of building locally:
+The production compose file is designed to pull a published Docker image instead of building locally. Published images include the bundled `assets/ppt-templates/Template_CDR_analysis.pptx` master required for PowerPoint reports:
 
 ```bash
 docker compose --env-file docker/.env -f docker/docker-compose.yml up -d

@@ -47,6 +47,7 @@
 - Show an immediate upload-progress dialog when importing a ZIP, before a large package reaches the server for overwrite inspection.
 - Standardized configurable storage roots as `APP_CONFIG_DIR`, `APP_DATA_DIR` and `APP_ASSETS_DIR`; all database, template and workspace paths now derive from these three roots.
 - Added self-service password changes from the header User badge with current-password verification, matching confirmation and a success dialog.
+- Fixed Docker image builds so the bundled `assets/ppt-templates/Template_CDR_analysis.pptx` master is included in production and development containers.
 
 #### 🐛 Bug fixes:
 - Fixed Slides Templates Editor row normalisation so grouping, sorting and visual merging retain every chart-definition field instead of clearing them in the browser.
