@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import base64
 import io
 import os
 import re
@@ -3246,6 +3245,7 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
                 for technology in TEMPLATE_NAMES
             },
             'report_jobs': [serialize_report_job(row) for row in repository.list_report_runs(limit=None)],
+            'report_charts': load_persisted_report_charts(),
         },
     )
 
@@ -3360,27 +3360,96 @@ def generate_netcheck_cdr_charts(
             frames = {kind: ensure_report_vendor_group(frame) for kind, frame in frames.items()}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    charts = []
+    rendered_charts: list[tuple[dict[str, Any], bytes]] = []
     for entry in catalog_entries:
         if not entry.source_kind:
             continue
         image = render_catalog_chart_preview(frames[entry.source_kind], entry, multivendor=multivendor)
-        charts.append({
+        rendered_charts.append(({
             'slide': entry.slide,
             'title': entry.chart_title or entry.slide_title or f'Slide {entry.slide}',
             'source': entry.cdr_source,
             'chart_type': entry.chart_type,
-            'image': base64.b64encode(image).decode('ascii'),
-        })
-    if not charts:
+        }, image))
+    if not rendered_charts:
         raise HTTPException(status_code=400, detail='The selected Slides Template does not contain automated CDR charts.')
+    charts = persist_report_charts(selected_catalogue['name'], rendered_charts)
     repository.add_log(user.username, 'preview_netcheck_cdr_report_charts', json.dumps({
         'technology': technology,
         'scope': report_scope,
         'template': selected_catalogue['name'],
-        'charts': len(charts),
+        'charts': len(rendered_charts),
     }))
     return JSONResponse({'template': selected_catalogue['name'], 'charts': charts})
+
+
+def report_charts_directory() -> Path:
+    """Return the active workspace directory for the latest generated chart set."""
+    return Path(settings.output_dir) / 'report-charts'
+
+
+def _report_chart_payload(manifest: dict[str, Any]) -> dict[str, Any] | None:
+    directory = report_charts_directory()
+    charts: list[dict[str, Any]] = []
+    for item in manifest.get('charts', []):
+        if not isinstance(item, dict):
+            continue
+        file_name = str(item.get('file') or '')
+        if not re.fullmatch(r'chart-\d+\.png', file_name) or not (directory / file_name).is_file():
+            return None
+        charts.append({
+            'slide': item.get('slide'),
+            'title': str(item.get('title') or ''),
+            'source': str(item.get('source') or ''),
+            'chart_type': str(item.get('chart_type') or ''),
+            'image_url': f'/reporting/charts/{file_name}?v={manifest.get("generated_at", "")}',
+        })
+    if not charts:
+        return None
+    return {'template': str(manifest.get('template') or ''), 'charts': charts}
+
+
+def load_persisted_report_charts() -> dict[str, Any] | None:
+    """Load the most recent complete chart set for the active workspace."""
+    manifest_path = report_charts_directory() / 'manifest.json'
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return _report_chart_payload(manifest) if isinstance(manifest, dict) else None
+
+
+def persist_report_charts(template_name: str, rendered_charts: list[tuple[dict[str, Any], bytes]]) -> list[dict[str, Any]]:
+    """Atomically replace the workspace's previous Report Charts with a new set."""
+    destination = report_charts_directory()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix='.report-charts-', dir=destination.parent))
+    try:
+        manifest_charts: list[dict[str, Any]] = []
+        for index, (chart, image) in enumerate(rendered_charts, start=1):
+            file_name = f'chart-{index:03d}.png'
+            (staging / file_name).write_bytes(image)
+            manifest_charts.append({**chart, 'file': file_name})
+        manifest = {'template': template_name, 'generated_at': datetime.now().astimezone().isoformat(timespec='seconds'), 'charts': manifest_charts}
+        (staging / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
+        if destination.exists():
+            shutil.rmtree(destination)
+        staging.replace(destination)
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    payload = _report_chart_payload(manifest)
+    return payload['charts'] if payload else []
+
+
+@app.get('/reporting/charts/{chart_file}')
+def report_chart_image(chart_file: str, user: SessionUser = Depends(current_user)) -> FileResponse:
+    if not re.fullmatch(r'chart-\d+\.png', chart_file):
+        raise HTTPException(status_code=404, detail='Chart not found.')
+    chart_path = safe_join(report_charts_directory(), chart_file)
+    if not chart_path.is_file():
+        raise HTTPException(status_code=404, detail='Chart not found.')
+    return FileResponse(chart_path, media_type='image/png')
 
 
 @app.get('/api/reporting/jobs')

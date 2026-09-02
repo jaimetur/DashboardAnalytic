@@ -94,7 +94,7 @@
         <tbody data-report-jobs-body>
           {% for job in report_jobs %}
           <tr>
-            <td>{{ job.id }}</td><td>{{ job.generated_by }}</td><td>{{ job.date }}</td><td>{{ job.report_name }}</td><td>{{ job.type }}</td><td>{{ job.multivendor }}</td><td>{{ job.template }}</td><td>{{ job.slides if job.slides is not none else '—' }}</td><td class="report-job-datasets">{% if job.dataset_groups %}{% for group in job.dataset_groups %}<span class="report-job-dataset-kind">{{ group.kind }}:</span>{% for name in group.names %}<span>{{ name }}</span>{% endfor %}{% endfor %}{% else %}Historical report{% endif %}</td>
+            <td>{{ job.id }}</td><td>{{ job.generated_by }}</td><td>{{ job.date }}</td><td title="{{ job.report_name }}">{{ job.report_name }}</td><td>{{ job.type }}</td><td>{{ job.multivendor }}</td><td>{{ job.template }}</td><td>{{ job.slides if job.slides is not none else '—' }}</td><td class="report-job-datasets">{% if job.dataset_groups %}{% for group in job.dataset_groups %}<span class="report-job-dataset-kind">{{ group.kind }}:</span>{% for name in group.names %}<span>{{ name }}</span>{% endfor %}{% endfor %}{% else %}Historical report{% endif %}</td>
             <td title="{{ job.error }}"><span class="queue-status-pill queue-status-{{ job.status | lower | replace('_', '-') }}">{{ job.status | title }}</span></td>
             <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%</span></div></td>
             <td><div class="report-job-actions">
@@ -111,6 +111,26 @@
     </div>
   </details>
 </section>
+
+<div class="confirm-overlay report-chart-viewer-overlay" data-report-chart-viewer hidden>
+  <div class="confirm-panel report-chart-viewer-dialog" role="dialog" aria-modal="true" aria-labelledby="report-chart-viewer-title">
+    <div class="report-chart-viewer-header">
+      <div>
+        <p class="eyebrow" data-report-chart-viewer-count>Chart</p>
+        <h3 id="report-chart-viewer-title" data-report-chart-viewer-title>Report chart</h3>
+        <p data-report-chart-viewer-meta></p>
+      </div>
+      <button type="button" class="report-chart-viewer-close" data-report-chart-viewer-close aria-label="Close chart preview" title="Close">×</button>
+    </div>
+    <div class="report-chart-viewer-image"><img data-report-chart-viewer-image alt="Selected report chart"></div>
+    <div class="report-chart-viewer-actions" aria-label="Chart navigation">
+      <button type="button" data-report-chart-navigate="first" title="First chart" aria-label="First chart">⏮</button>
+      <button type="button" data-report-chart-navigate="previous" title="Previous chart" aria-label="Previous chart">←</button>
+      <button type="button" data-report-chart-navigate="next" title="Next chart" aria-label="Next chart">→</button>
+      <button type="button" data-report-chart-navigate="last" title="Last chart" aria-label="Last chart">⏭</button>
+    </div>
+  </div>
+</div>
 {% endblock %}
 {% block extra_scripts %}
 <script>
@@ -160,6 +180,13 @@
     const reportChartsBody = document.querySelector('[data-report-charts-body]');
     const reportChartsCount = document.querySelector('[data-report-charts-count]');
     const reportChartsCopy = document.querySelector('[data-report-charts-copy]');
+    const reportChartViewer = document.querySelector('[data-report-chart-viewer]');
+    const reportChartViewerTitle = document.querySelector('[data-report-chart-viewer-title]');
+    const reportChartViewerCount = document.querySelector('[data-report-chart-viewer-count]');
+    const reportChartViewerMeta = document.querySelector('[data-report-chart-viewer-meta]');
+    const reportChartViewerImage = document.querySelector('[data-report-chart-viewer-image]');
+    let reportCharts = [];
+    let reportChartIndex = 0;
     const jobsBody = document.querySelector('[data-report-jobs-body]');
     const jobsCount = document.querySelector('[data-report-jobs-count]');
     const jobsEmpty = document.querySelector('[data-report-jobs-empty]');
@@ -207,7 +234,7 @@
       if (!jobsBody) return;
       jobsBody.replaceChildren(...jobs.map((job) => {
         const row = document.createElement('tr');
-        row.append(cell(job.id), cell(job.generated_by || '—'), cell(job.date), cell(job.report_name), cell(job.type || '—'), cell(job.multivendor || 'No'), cell(job.template || '—'), cell(job.slides ?? '—'), datasetCell(job), statusBadgeCell(job));
+        row.append(cell(job.id), cell(job.generated_by || '—'), cell(job.date), cell(job.report_name, job.report_name), cell(job.type || '—'), cell(job.multivendor || 'No'), cell(job.template || '—'), cell(job.slides ?? '—'), datasetCell(job), statusBadgeCell(job));
         const progressCell = document.createElement('td');
         const progress = document.createElement('div');
         progress.className = 'report-job-progress';
@@ -302,9 +329,14 @@
     const renderReportCharts = (payload) => {
       const charts = Array.isArray(payload.charts) ? payload.charts : [];
       if (!reportChartsBody) return;
+      reportCharts = charts;
       reportChartsBody.replaceChildren(...charts.map((chart) => {
         const card = document.createElement('article');
         card.className = 'report-chart-card';
+        card.tabIndex = 0;
+        card.setAttribute('role', 'button');
+        card.dataset.reportChartIndex = String(charts.indexOf(chart));
+        card.title = 'Open enlarged chart preview';
         const head = document.createElement('div');
         head.className = 'report-chart-card-head';
         const text = document.createElement('div');
@@ -315,7 +347,7 @@
         text.append(title, metadata);
         head.append(text);
         const image = document.createElement('img');
-        image.src = `data:image/png;base64,${chart.image}`;
+        image.src = chart.image_url;
         image.alt = `Preview of ${chart.title}`;
         card.append(head, image);
         return card;
@@ -325,6 +357,51 @@
       if (reportChartsPanel) reportChartsPanel.dataset.reportChartsReady = 'true';
       updateReportingModule();
     };
+    const openReportChartViewer = (index) => {
+      if (!reportCharts.length || !reportChartViewer) return;
+      reportChartIndex = Math.max(0, Math.min(index, reportCharts.length - 1));
+      const chart = reportCharts[reportChartIndex];
+      if (reportChartViewerTitle) reportChartViewerTitle.textContent = `Slide ${chart.slide} · ${chart.title}`;
+      if (reportChartViewerCount) reportChartViewerCount.textContent = `Chart ${reportChartIndex + 1} of ${reportCharts.length}`;
+      if (reportChartViewerMeta) reportChartViewerMeta.textContent = `${chart.source} · ${chart.chart_type}`;
+      if (reportChartViewerImage) {
+        reportChartViewerImage.src = chart.image_url;
+        reportChartViewerImage.alt = `Preview of ${chart.title}`;
+      }
+      reportChartViewer.querySelectorAll('[data-report-chart-navigate]').forEach((button) => {
+        const direction = button.dataset.reportChartNavigate;
+        button.disabled = (direction === 'first' || direction === 'previous') ? reportChartIndex === 0 : reportChartIndex === reportCharts.length - 1;
+      });
+      reportChartViewer.hidden = false;
+    };
+    const closeReportChartViewer = () => { if (reportChartViewer) reportChartViewer.hidden = true; };
+    reportChartsBody?.addEventListener('click', (event) => {
+      const card = event.target.closest('[data-report-chart-index]');
+      if (card) openReportChartViewer(Number(card.dataset.reportChartIndex));
+    });
+    reportChartsBody?.addEventListener('keydown', (event) => {
+      if (!['Enter', ' '].includes(event.key)) return;
+      const card = event.target.closest('[data-report-chart-index]');
+      if (!card) return;
+      event.preventDefault();
+      openReportChartViewer(Number(card.dataset.reportChartIndex));
+    });
+    reportChartViewer?.addEventListener('click', (event) => {
+      if (event.target === reportChartViewer || event.target.closest('[data-report-chart-viewer-close]')) {
+        closeReportChartViewer();
+        return;
+      }
+      const navigation = event.target.closest('[data-report-chart-navigate]')?.dataset.reportChartNavigate;
+      if (!navigation) return;
+      const target = {first: 0, previous: reportChartIndex - 1, next: reportChartIndex + 1, last: reportCharts.length - 1}[navigation];
+      openReportChartViewer(target);
+    });
+    document.addEventListener('keydown', (event) => {
+      if (reportChartViewer?.hidden) return;
+      if (event.key === 'Escape') closeReportChartViewer();
+      if (event.key === 'ArrowLeft') openReportChartViewer(reportChartIndex - 1);
+      if (event.key === 'ArrowRight') openReportChartViewer(reportChartIndex + 1);
+    });
     reportChartsButton?.addEventListener('click', async () => {
       if (!reportForm?.reportValidity()) return;
       showLoadingOverlay('Generating report charts', 'Please wait while the selected template charts are rendered from the selected CDRs.');
@@ -339,6 +416,8 @@
         showInfoDialog(error.message || 'Unable to generate report charts.', {title: 'Report chart generation failed', tone: 'error'});
       }
     });
+    const persistedReportCharts = {{ report_charts | tojson }};
+    if (persistedReportCharts) renderReportCharts(persistedReportCharts);
     jobsBody?.addEventListener('click', async (event) => {
       const retry = event.target.closest('[data-report-job-retry]');
       if (retry) {

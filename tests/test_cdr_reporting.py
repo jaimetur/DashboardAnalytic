@@ -719,7 +719,12 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     payload = response.json()
     assert payload['template'] == 'NSA Slide Template'
     assert payload['charts']
-    assert payload['charts'][0]['image'] == 'UE5H'
+    image_url = payload['charts'][0]['image_url']
+    assert image_url.startswith('/reporting/charts/chart-')
+    assert client.get(image_url).content == b'PNG'
+    page = client.get('/reporting')
+    assert image_url in page.text
+    assert 'data-report-chart-viewer' in page.text
     assert rendered and all(multivendor is False for _, multivendor in rendered)
 
 
