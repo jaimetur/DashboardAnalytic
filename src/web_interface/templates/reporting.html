@@ -52,7 +52,7 @@
         </select>
       </label>
       <label>Report scope
-        <select name="report_scope" data-report-scope><option value="single">Single-vendor</option><option value="multivendor" disabled>Multivendor</option></select>
+        <select name="report_scope" data-report-scope><option value="single">Operator Comparison</option><option value="multivendor" disabled>Multivendor Comparison</option></select>
       </label>
       <div class="form-actions reporting-submit-action"><button type="submit">Generate PowerPoint Report</button><button type="button" class="report-charts-button" data-report-charts-button>Generate Report Charts</button></div>
       </form>
@@ -130,8 +130,12 @@
       </div>
       <button type="button" class="report-chart-viewer-close" data-report-chart-viewer-close aria-label="Close chart preview" title="Close">×</button>
     </div>
-    <div class="report-chart-viewer-image"><img data-report-chart-viewer-image alt="Selected report chart"></div>
+    <div class="report-chart-viewer-image" data-report-chart-viewer-image>
+      <canvas data-report-chart-viewer-canvas aria-label="Selected report chart. Drag to select an area to zoom."></canvas>
+      <div class="report-chart-zoom-selection" data-report-chart-zoom-selection hidden></div>
+    </div>
     <div class="report-chart-viewer-actions" aria-label="Chart navigation">
+      <button type="button" data-report-chart-zoom-reset title="Reset zoom" aria-label="Reset zoom">⟳</button>
       <button type="button" data-report-chart-navigate="first" title="First chart" aria-label="First chart">⏮</button>
       <button type="button" data-report-chart-navigate="previous" title="Previous chart" aria-label="Previous chart">←</button>
       <button type="button" data-report-chart-navigate="next" title="Next chart" aria-label="Next chart">→</button>
@@ -198,9 +202,16 @@
     const reportChartViewerCount = document.querySelector('[data-report-chart-viewer-count]');
     const reportChartViewerMeta = document.querySelector('[data-report-chart-viewer-meta]');
     const reportChartViewerImage = document.querySelector('[data-report-chart-viewer-image]');
+    const reportChartViewerCanvas = document.querySelector('[data-report-chart-viewer-canvas]');
+    const reportChartZoomSelection = document.querySelector('[data-report-chart-zoom-selection]');
     let reportCharts = [];
     let reportChartIndex = 0;
+    let reportChartImage = null;
+    let reportChartViewport = null;
+    let reportChartDrawRect = null;
+    let reportChartZoomStart = null;
     let reportChartSets = {{ report_chart_sets | tojson }};
+    const reportScopeLabel = (scope) => ({single: 'Operator Comparison', multivendor: 'Multivendor Comparison'}[scope] || scope || '');
     const jobsBody = document.querySelector('[data-report-jobs-body]');
     const jobsCount = document.querySelector('[data-report-jobs-count]');
     const jobsEmpty = document.querySelector('[data-report-jobs-empty]');
@@ -389,7 +400,7 @@
         reportChartsTemplate.hidden = !payload.template;
       }
       if (reportChartsScope) {
-        reportChartsScope.textContent = payload.scope ? `Scope: ${payload.scope}` : '';
+        reportChartsScope.textContent = payload.scope ? `Scope: ${reportScopeLabel(payload.scope)}` : '';
         reportChartsScope.hidden = !payload.scope;
       }
       if (reportChartsCopy) reportChartsCopy.textContent = `Rendered from ${payload.template || 'the selected Slides Template'} using the selected CDRs, technology and scope. Click any chart to enlarge it.`;
@@ -446,6 +457,104 @@
         showInfoDialog(error.message || 'Unable to delete the selected chart set.', {title: 'Delete Charts Set', tone: 'error'});
       }
     });
+    const drawReportChartViewer = () => {
+      if (!reportChartViewerCanvas || !reportChartViewerImage || !reportChartImage || !reportChartViewport) return;
+      const width = reportChartViewerImage.clientWidth;
+      const height = reportChartViewerImage.clientHeight;
+      if (!width || !height) return;
+      const scale = window.devicePixelRatio || 1;
+      reportChartViewerCanvas.width = Math.round(width * scale);
+      reportChartViewerCanvas.height = Math.round(height * scale);
+      reportChartViewerCanvas.style.width = `${width}px`;
+      reportChartViewerCanvas.style.height = `${height}px`;
+      const context = reportChartViewerCanvas.getContext('2d');
+      if (!context) return;
+      context.setTransform(scale, 0, 0, scale, 0, 0);
+      context.clearRect(0, 0, width, height);
+      const aspect = reportChartViewport.width / reportChartViewport.height;
+      const drawWidth = Math.min(width, height * aspect);
+      const drawHeight = drawWidth / aspect;
+      const x = (width - drawWidth) / 2;
+      const y = (height - drawHeight) / 2;
+      context.drawImage(
+        reportChartImage,
+        reportChartViewport.x, reportChartViewport.y, reportChartViewport.width, reportChartViewport.height,
+        x, y, drawWidth, drawHeight,
+      );
+      reportChartDrawRect = {x, y, width: drawWidth, height: drawHeight};
+    };
+    const loadReportChartViewerImage = (url, title) => {
+      const image = new Image();
+      image.onload = () => {
+        if (reportChartImage !== image) return;
+        reportChartViewport = {x: 0, y: 0, width: image.naturalWidth, height: image.naturalHeight};
+        if (reportChartViewerCanvas) reportChartViewerCanvas.setAttribute('aria-label', `Preview of ${title}. Drag to select an area to zoom.`);
+        window.requestAnimationFrame(drawReportChartViewer);
+      };
+      reportChartImage = image;
+      reportChartViewport = null;
+      image.src = url;
+    };
+    const resetReportChartZoom = () => {
+      if (!reportChartImage) return;
+      reportChartViewport = {x: 0, y: 0, width: reportChartImage.naturalWidth, height: reportChartImage.naturalHeight};
+      drawReportChartViewer();
+    };
+    const pointInReportChart = (event) => {
+      const rect = reportChartViewerCanvas?.getBoundingClientRect();
+      if (!rect) return null;
+      return {x: event.clientX - rect.left, y: event.clientY - rect.top};
+    };
+    const showReportChartSelection = (start, end) => {
+      if (!reportChartZoomSelection || !reportChartDrawRect) return;
+      const left = Math.max(reportChartDrawRect.x, Math.min(start.x, end.x));
+      const right = Math.min(reportChartDrawRect.x + reportChartDrawRect.width, Math.max(start.x, end.x));
+      const top = Math.max(reportChartDrawRect.y, Math.min(start.y, end.y));
+      const bottom = Math.min(reportChartDrawRect.y + reportChartDrawRect.height, Math.max(start.y, end.y));
+      reportChartZoomSelection.style.left = `${left}px`;
+      reportChartZoomSelection.style.top = `${top}px`;
+      reportChartZoomSelection.style.width = `${Math.max(0, right - left)}px`;
+      reportChartZoomSelection.style.height = `${Math.max(0, bottom - top)}px`;
+      reportChartZoomSelection.hidden = false;
+    };
+    reportChartViewerCanvas?.addEventListener('pointerdown', (event) => {
+      if (!reportChartDrawRect || !reportChartViewport) return;
+      const point = pointInReportChart(event);
+      if (!point || point.x < reportChartDrawRect.x || point.x > reportChartDrawRect.x + reportChartDrawRect.width || point.y < reportChartDrawRect.y || point.y > reportChartDrawRect.y + reportChartDrawRect.height) return;
+      reportChartZoomStart = point;
+      reportChartViewerCanvas.setPointerCapture(event.pointerId);
+      showReportChartSelection(point, point);
+    });
+    reportChartViewerCanvas?.addEventListener('pointermove', (event) => {
+      if (!reportChartZoomStart) return;
+      const point = pointInReportChart(event);
+      if (point) showReportChartSelection(reportChartZoomStart, point);
+    });
+    reportChartViewerCanvas?.addEventListener('pointerup', (event) => {
+      if (!reportChartZoomStart || !reportChartDrawRect || !reportChartViewport) return;
+      const start = reportChartZoomStart;
+      const end = pointInReportChart(event) || start;
+      reportChartZoomStart = null;
+      reportChartZoomSelection && (reportChartZoomSelection.hidden = true);
+      const left = Math.max(reportChartDrawRect.x, Math.min(start.x, end.x));
+      const right = Math.min(reportChartDrawRect.x + reportChartDrawRect.width, Math.max(start.x, end.x));
+      const top = Math.max(reportChartDrawRect.y, Math.min(start.y, end.y));
+      const bottom = Math.min(reportChartDrawRect.y + reportChartDrawRect.height, Math.max(start.y, end.y));
+      if (right - left < 12 || bottom - top < 12) return;
+      const current = reportChartViewport;
+      reportChartViewport = {
+        x: current.x + ((left - reportChartDrawRect.x) / reportChartDrawRect.width) * current.width,
+        y: current.y + ((top - reportChartDrawRect.y) / reportChartDrawRect.height) * current.height,
+        width: ((right - left) / reportChartDrawRect.width) * current.width,
+        height: ((bottom - top) / reportChartDrawRect.height) * current.height,
+      };
+      drawReportChartViewer();
+    });
+    reportChartViewerCanvas?.addEventListener('pointercancel', () => {
+      reportChartZoomStart = null;
+      if (reportChartZoomSelection) reportChartZoomSelection.hidden = true;
+    });
+    window.addEventListener('resize', drawReportChartViewer);
     const openReportChartViewer = (index) => {
       if (!reportCharts.length || !reportChartViewer) return;
       reportChartIndex = Math.max(0, Math.min(index, reportCharts.length - 1));
@@ -453,10 +562,7 @@
       if (reportChartViewerTitle) reportChartViewerTitle.textContent = `Slide ${chart.slide} · ${chart.title}`;
       if (reportChartViewerCount) reportChartViewerCount.textContent = `Chart ${reportChartIndex + 1} of ${reportCharts.length}`;
       if (reportChartViewerMeta) reportChartViewerMeta.textContent = `${chart.source} · ${chart.chart_type}`;
-      if (reportChartViewerImage) {
-        reportChartViewerImage.src = chart.image_url;
-        reportChartViewerImage.alt = `Preview of ${chart.title}`;
-      }
+      loadReportChartViewerImage(chart.image_url, chart.title);
       reportChartViewer.querySelectorAll('[data-report-chart-navigate]').forEach((button) => {
         const direction = button.dataset.reportChartNavigate;
         button.disabled = (direction === 'first' || direction === 'previous') ? reportChartIndex === 0 : reportChartIndex === reportCharts.length - 1;
@@ -478,6 +584,10 @@
     reportChartViewer?.addEventListener('click', (event) => {
       if (event.target === reportChartViewer || event.target.closest('[data-report-chart-viewer-close]')) {
         closeReportChartViewer();
+        return;
+      }
+      if (event.target.closest('[data-report-chart-zoom-reset]')) {
+        resetReportChartZoom();
         return;
       }
       const navigation = event.target.closest('[data-report-chart-navigate]')?.dataset.reportChartNavigate;

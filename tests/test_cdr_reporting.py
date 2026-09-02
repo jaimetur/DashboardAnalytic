@@ -617,7 +617,7 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert 'Generate PowerPoint Report' in page.text
     assert 'name="vodafone_mapping_dataset_id"' not in page.text
     assert 'name="three_mapping_dataset_id"' not in page.text
-    assert '<option value="multivendor" disabled>Multivendor</option>' in page.text
+    assert '<option value="multivendor" disabled>Multivendor Comparison</option>' in page.text
     assert 'name="slides_templates"' in page.text
     assert 'value="nsa:NSA Slide Template"' in page.text
     assert 'data-report-job-form' in page.text
@@ -739,6 +739,8 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     page = client.get('/reporting')
     assert image_url in page.text
     assert 'data-report-chart-viewer' in page.text
+    assert 'data-report-chart-viewer-canvas' in page.text
+    assert 'data-report-chart-zoom-reset' in page.text
     assert rendered and all(multivendor is False for _, multivendor in rendered)
 
 

@@ -497,8 +497,10 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-chart-viewer-header p { margin: 0; color: var(--muted); }
 .report-chart-viewer-close { min-width: 2.3rem; min-height: 2.3rem; padding: 0; border-radius: 999px; background: #eee5fb; border-color: #cdb7ed; color: #5c358d; font-size: 1.55rem; line-height: 1; box-shadow: none; }
 .report-chart-viewer-close:hover:not(:disabled) { background: #dfd0f6; color: #43266e; box-shadow: none; }
-.report-chart-viewer-image { min-height: 0; display: grid; place-items: center; overflow: auto; padding: 0.6rem; border: 1px solid rgba(75, 32, 138, 0.18); border-radius: 10px; background: #fff; }
-.report-chart-viewer-image img { display: block; width: auto; max-width: 100%; height: auto; max-height: 100%; object-fit: contain; }
+.report-chart-viewer-image { position: relative; min-height: 0; overflow: hidden; padding: 0; border: 1px solid rgba(75, 32, 138, 0.18); border-radius: 10px; background: #fff; }
+.report-chart-viewer-image canvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+.report-chart-zoom-selection { position: absolute; border: 2px solid rgba(75, 32, 138, 0.92); background: rgba(157, 121, 208, 0.18); pointer-events: none; }
+.report-chart-zoom-selection[hidden] { display: none !important; }
 .report-chart-viewer-actions { display: flex; justify-content: center; gap: 0.65rem; }
 .report-chart-viewer-actions button { min-width: 2.7rem; padding: 0.45rem 0.7rem; font-size: 1.1rem; }
 .analytics-dashboard-stack button { background: linear-gradient(135deg, #0c4c8c, #287bc2); border: 1px solid rgba(12, 76, 140, 0.52); box-shadow: 0 10px 22px rgba(12, 76, 140, 0.20); }
