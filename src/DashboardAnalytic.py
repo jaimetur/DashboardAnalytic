@@ -406,7 +406,7 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
     rows = [
         {
             'Slide': entry.slide,
-            'Slide tittle': entry.slide_title,
+            'Slide Tittle': entry.slide_title,
             'Slide Subtittle': entry.slide_subtitle,
             'Layout': entry.layout,
             'Chart Tittle': entry.chart_title,

@@ -412,6 +412,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const optionsLabel = editor.querySelector('[data-catalogue-editor-options-label]');
   const options = editor.querySelector('[data-catalogue-editor-options]');
   const apply = editor.querySelector('[data-catalogue-editor-apply]');
+  const helper = editor.querySelector('.catalogue-editor-helper');
+  const helperClose = editor.querySelector('[data-catalogue-editor-helper-close]');
   const filterBuilder = editor.querySelector('[data-catalogue-filter-builder]');
   const filterConditions = editor.querySelector('[data-catalogue-filter-conditions]');
   const addFilter = editor.querySelector('[data-catalogue-filter-add]');
@@ -424,7 +426,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const chartPreviewImage = editor.querySelector('[data-catalogue-chart-preview-image]');
   const chartPreviewImageContent = editor.querySelector('[data-catalogue-chart-preview-image-content]');
   let chartPreviewImageUrl = '';
-  if (!table || !saveForm || !contentField || !heading || !copy || !optionsLabel || !options || !apply) return;
+  if (!table || !saveForm || !contentField || !heading || !copy || !optionsLabel || !options || !apply || !helper) return;
+
+  // The editor panel uses backdrop effects, which establish a containing block
+  // for fixed descendants. Move the floating helper to the document root so
+  // its viewport coordinates line up exactly with the active table cell.
+  document.body.append(helper);
 
   let suggestions = {};
   try { suggestions = JSON.parse(editor.dataset.editorSuggestions || '{}'); } catch (_error) { suggestions = {}; }
@@ -433,6 +440,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     .map((cell) => cell.textContent.trim())
     .filter((header) => header && header !== 'Row actions');
   const fieldColumns = new Set(['Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend']);
+  const assistedFields = new Set(['Layout', 'CDR source', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position']);
   const groupingColumns = new Set(['Rows Aggregation', 'Column Aggregation']);
   const optionList = (field, cell) => {
     if (field === 'Layout') return suggestions.layouts || [];
@@ -543,11 +551,40 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     (conditions.length ? conditions : [{}]).forEach(addFilterCondition);
     filterBuilder.hidden = false;
   };
+  const hideCellAssistance = () => { helper.hidden = true; };
+  const positionCellAssistance = (cell) => {
+    helper.hidden = false;
+    window.requestAnimationFrame(() => {
+      const cellBounds = cell.getBoundingClientRect();
+      const gap = 6;
+      const helperBounds = helper.getBoundingClientRect();
+      const helperWidth = helperBounds.width;
+      const helperHeight = helperBounds.height;
+      const cellCenterX = cellBounds.left + (cellBounds.width / 2);
+      const isLeftHalf = cellCenterX < window.innerWidth / 2;
+      const isTopHalf = cellBounds.top + (cellBounds.height / 2) < window.innerHeight / 2;
+      // Anchor diagonally from the active cell. This keeps the source visible
+      // while making the assistance panel unambiguously belong to that cell.
+      let left = isLeftHalf ? cellBounds.right + gap : cellBounds.left - helperWidth - gap;
+      let top = isTopHalf ? cellBounds.bottom + gap : cellBounds.top - helperHeight - gap;
+
+      // Preserve the diagonal anchor whenever possible; only constrain it at
+      // a viewport edge so the panel never becomes inaccessible.
+      left = Math.min(Math.max(gap, left), window.innerWidth - helperWidth - gap);
+      top = Math.min(Math.max(gap, top), window.innerHeight - helperHeight - gap);
+      helper.style.left = `${left}px`;
+      helper.style.top = `${top}px`;
+    });
+  };
   const selectCell = (cell) => {
     if (activeCell) activeCell.classList.remove('is-selected');
     activeCell = cell;
     activeCell.classList.add('is-selected');
     const field = cell.dataset.catalogueField || '';
+    if (!assistedFields.has(field)) {
+      hideCellAssistance();
+      return;
+    }
     heading.textContent = field || 'Selected cell';
     copy.textContent = helperCopy(field);
     const values = optionList(field, cell);
@@ -583,6 +620,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     // whenever this cell switches Available values back to multi-select.
     setupCustomMultiSelects();
     setupSearchableSingleSelects();
+    positionCellAssistance(cell);
   };
   const selectedCellFromEvent = (event) => event.target.closest?.('[data-catalogue-field]');
 
@@ -598,7 +636,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       if (remove) remove.disabled = rows.length <= 1;
     });
   };
-  const sharedSlideFields = ['Slide', 'Slide tittle', 'Slide Subtittle', 'Layout'];
+  const sharedSlideFields = ['Slide', 'Slide Tittle', 'Slide Subtittle', 'Layout'];
   const sharedValueKey = (field) => `catalogueShared${field.replace(/[^a-z0-9]+/gi, '')}`;
   const rowValue = (row, field) => (
     row.querySelector(`[data-catalogue-field="${field}"]`)?.textContent.trim()
@@ -617,7 +655,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   };
   const createCatalogueRow = (sourceRow, blankChartFields = false) => {
     const source = sourceRow instanceof HTMLTableRowElement ? rowValues(sourceRow) : (sourceRow || {});
-    const retained = ['Slide', 'Slide tittle', 'Slide Subtittle', 'Layout'];
+    const retained = ['Slide', 'Slide Tittle', 'Slide Subtittle', 'Layout'];
     const row = document.createElement('tr');
     const actions = document.createElement('td');
     actions.className = 'catalogue-row-actions';
@@ -772,7 +810,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       if (chartPreviewImageContent) chartPreviewImageContent.src = chartPreviewImageUrl;
       if (chartPreviewImage) chartPreviewImage.hidden = false;
       if (chartPreviewTableWrap) chartPreviewTableWrap.hidden = true;
-      if (chartPreviewTitle) chartPreviewTitle.textContent = `Generated chart preview · ${rowValue(row, 'Chart Tittle') || rowValue(row, 'Slide tittle') || 'Selected chart'}`;
+      if (chartPreviewTitle) chartPreviewTitle.textContent = `Generated chart preview · ${rowValue(row, 'Chart Tittle') || rowValue(row, 'Slide Tittle') || 'Selected chart'}`;
       if (chartPreviewSummary) chartPreviewSummary.textContent = 'This is the chart image produced by the current unsaved template definition.';
       if (chartPreview) chartPreview.hidden = false;
     } catch (error) {
@@ -883,8 +921,17 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const cell = selectedCellFromEvent(event);
     if (cell) selectCell(cell);
   });
+  document.addEventListener('pointerdown', (event) => {
+    if (!event.target.closest?.('[data-catalogue-field]') && !helper.contains(event.target)) hideCellAssistance();
+  });
+  table.closest('.table-wrap')?.addEventListener('scroll', hideCellAssistance, {passive: true});
+  helperClose?.addEventListener('click', hideCellAssistance);
   table.addEventListener('focusout', (event) => {
     if (event.target.closest?.('[data-catalogue-field="CDR source"]')) normaliseCatalogueRows();
+    window.requestAnimationFrame(() => {
+      const focused = document.activeElement;
+      if (!focused?.closest?.('[data-catalogue-field]') && !helper.contains(focused)) hideCellAssistance();
+    });
   });
   addFilter?.addEventListener('click', () => addFilterCondition());
   apply.addEventListener('click', () => {
@@ -987,7 +1034,7 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
   const file = form.querySelector('[data-catalogue-import-file]');
   const convert = form.querySelector('[data-catalogue-convert]');
   const currentHeaders = [
-    'Slide', 'Slide tittle', 'Slide Subtittle', 'Layout', 'Chart Tittle', 'CDR source',
+    'Slide', 'Slide Tittle', 'Slide Subtittle', 'Layout', 'Chart Tittle', 'CDR source',
     'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position',
   ];
   const normalizedHeader = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');

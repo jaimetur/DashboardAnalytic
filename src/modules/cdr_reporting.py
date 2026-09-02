@@ -28,7 +28,7 @@ TEMPLATE_NAMES = {
 CDR_REPORT_VERSION = "2026-08-31-v11"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
-CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position")
+CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position")
 # Import the two immediately preceding schemas too, so existing templates remain
 # usable after the aggregation columns were renamed and the legend was repositioned.
 PREVIOUS_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Legend", "Filters", "Grouping_Rows", "Grouping_Columns", "Legend Position")
@@ -52,8 +52,8 @@ def _catalogue_header_key(value: str) -> str:
 
 CATALOG_HEADER_ALIASES = {
     "slide": "Slide",
-    "slidetittle": "Slide tittle",
-    "slidetitle": "Slide tittle",
+    "slidetittle": "Slide Tittle",
+    "slidetitle": "Slide Tittle",
     "slidesubtittle": "Slide Subtittle",
     "slidesubtitle": "Slide Subtittle",
     "layout": "Layout",
@@ -76,6 +76,14 @@ CATALOG_HEADER_ALIASES = {
     "groupingcolumn": "Column Aggregation",
     "grouping": "Grouping",
 }
+
+
+def _canonical_catalog_headers(headers: Iterable[str]) -> tuple[str, ...]:
+    """Normalize accepted historic header spellings before schema validation."""
+    return tuple(
+        CATALOG_HEADER_ALIASES.get(_catalogue_header_key(header), str(header))
+        for header in headers
+    )
 
 
 def _default_catalogue_layout(technology: str, chart_count: int) -> str:
@@ -199,10 +207,18 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
         text = content
     reader = csv.DictReader(io.StringIO(text))
     fieldnames = tuple(reader.fieldnames or ())
-    if fieldnames not in {CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_ROWS_COLUMNS_HEADERS, LEGACY_CATALOG_HEADERS}:
+    accepted_schemas = {
+        _canonical_catalog_headers(schema)
+        for schema in (CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_ROWS_COLUMNS_HEADERS, LEGACY_CATALOG_HEADERS)
+    }
+    if _canonical_catalog_headers(fieldnames) not in accepted_schemas:
         raise ValueError("The report template must use exactly these columns: " + ", ".join(CATALOG_HEADERS))
     entries: list[CatalogEntry] = []
     for line_number, row in enumerate(reader, start=2):
+        row = {
+            CATALOG_HEADER_ALIASES.get(_catalogue_header_key(key), key): value
+            for key, value in row.items()
+        }
         try:
             slide = int((row.get("Slide") or "").strip())
         except ValueError as exc:
@@ -213,7 +229,7 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
         legacy_dimensions = parse_catalog_grouping(legacy_grouping).dimensions
         entry = CatalogEntry(
             slide=slide,
-            slide_title=(row.get("Slide tittle") or "").strip().replace("\\n", "\n"),
+            slide_title=(row.get("Slide Tittle") or "").strip().replace("\\n", "\n"),
             slide_subtitle=(row.get("Slide Subtittle") or "").strip().replace("\\n", "\n"),
             layout=(row.get("Layout") or "").strip(),
             chart_title=(row.get("Chart Tittle") or "").strip().replace("\\n", "\n"),
@@ -228,7 +244,7 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
         )
         if entry.structural_type:
             if not entry.slide_title:
-                raise ValueError(f"Catalog row {line_number} requires Slide tittle for a structural slide.")
+                raise ValueError(f"Catalog row {line_number} requires Slide Tittle for a structural slide.")
             if not entry.layout:
                 raise ValueError(f"Catalog row {line_number} requires Layout for a structural slide.")
             structural_chart_fields = (
@@ -241,7 +257,7 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
                     "legend, filter or grouping values."
                 )
         if entry.source_kind and not entry.slide_title:
-            raise ValueError(f"Catalog row {line_number} requires Slide tittle for a CDR source.")
+            raise ValueError(f"Catalog row {line_number} requires Slide Tittle for a CDR source.")
         if entry.source_kind and not entry.layout:
             raise ValueError(f"Catalog row {line_number} requires Layout for a CDR source.")
         if entry.cdr_source and entry.cdr_source.casefold() not in CATALOG_SOURCE_KINDS:
@@ -380,7 +396,7 @@ def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
     for entry in entries:
         writer.writerow({
             "Slide": entry.slide,
-            "Slide tittle": entry.slide_title.replace("\n", "\\n"),
+            "Slide Tittle": entry.slide_title.replace("\n", "\\n"),
             "Slide Subtittle": entry.slide_subtitle.replace("\n", "\\n"),
             "Layout": entry.layout,
             "Chart Tittle": entry.chart_title.replace("\n", "\\n"),

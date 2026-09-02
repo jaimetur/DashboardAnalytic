@@ -200,7 +200,7 @@
     <form class="catalogue-new-template-form" action="/admin/slides-templates/new" method="post">
       <button type="submit" class="catalogue-new-template-button">New Template</button>
     </form>
-    <p class="form-note">Required columns: Slide, Slide tittle, Slide Subtittle, Layout, Chart Tittle, CDR source, KPI, Chart type, Filters, Rows Aggregation, Column Aggregation, Legend and Legend Position. Legend Position accepts Top, Bottom, Left or Right. Each slide number creates a new slide from its named layout. Use Title Slide or Transition Slide for structural rows without KPI/chart fields. Rows Aggregation defines chart categories/table rows; Column Aggregation defines comparison series/table columns. Chart layouts need one image placeholder per CDR row and keep analyst comments blank.</p>
+    <p class="form-note">Required columns: Slide, Slide Tittle, Slide Subtittle, Layout, Chart Tittle, CDR source, KPI, Chart type, Filters, Rows Aggregation, Column Aggregation, Legend and Legend Position. Legend Position accepts Top, Bottom, Left or Right. Each slide number creates a new slide from its named layout. Use Title Slide or Transition Slide for structural rows without KPI/chart fields. Rows Aggregation defines chart categories/table rows; Column Aggregation defines comparison series/table columns. Chart layouts need one image placeholder per CDR row and keep analyst comments blank.</p>
     </div>
   </details>
 
@@ -262,7 +262,8 @@
           <span class="catalogue-editor-scroll-hint">Scroll vertically with the mouse wheel · Scroll horizontally with Shift + wheel</span>
         </div>
       </form>
-      <aside class="catalogue-editor-helper" aria-live="polite">
+      <aside class="catalogue-editor-helper" aria-live="polite" hidden>
+        <button type="button" class="catalogue-editor-helper-close" data-catalogue-editor-helper-close aria-label="Close Cell Assistance" title="Close Cell Assistance">×</button>
         <p class="eyebrow">Cell assistance</p>
         <h3 data-catalogue-editor-heading>Select a cell</h3>
         <p data-catalogue-editor-copy>Select a table cell to see compatible layouts, chart types or processed CDR columns.</p>
