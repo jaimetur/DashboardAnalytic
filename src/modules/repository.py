@@ -1278,6 +1278,79 @@ class Repository:
         """Backward-compatible alias for callers before dimension backfill v5."""
         return self.refresh_dataset_row_normalized_dimensions(dataset_id)
 
+    def materialize_cdr_derived_dimensions(self, dataset_id: int) -> bool:
+        """Backfill stable report dimensions without re-reading the source file."""
+        table_name = self.dataset_rows_table_name(dataset_id)
+        existing_columns = set(self.list_dataset_row_columns(dataset_id))
+        if not existing_columns:
+            return False
+
+        session_column = self._resolve_dataset_row_column_name(existing_columns, 'Session_Type')
+        call_mode_column = next((
+            self._resolve_dataset_row_column_name(existing_columns, candidate)
+            for candidate in ('L1_Call_Mode_A', 'L1_Call_Mode_B', 'Call_Mode')
+            if self._resolve_dataset_row_column_name(existing_columns, candidate)
+        ), None)
+        type_column = next((
+            self._resolve_dataset_row_column_name(existing_columns, candidate)
+            for candidate in ('Type_of_Test', 'Test_Type')
+            if self._resolve_dataset_row_column_name(existing_columns, candidate)
+        ), None)
+        name_column = self._resolve_dataset_row_column_name(existing_columns, 'Test_Name')
+        required = {
+            'Call Family': bool(session_column),
+            'Test Family': bool(type_column or name_column),
+        }
+        missing = [name for name, needed in required.items() if needed and name not in existing_columns]
+        if not missing:
+            return False
+
+        quoted_table = self._quote_identifier(table_name)
+        with self.connection() as conn:
+            for column in missing:
+                conn.execute(f"ALTER TABLE {quoted_table} ADD COLUMN {self._quote_identifier(column)} TEXT")
+
+            if 'Call Family' in missing and session_column:
+                session = f"LOWER(COALESCE(CAST({self._quote_identifier(session_column)} AS TEXT), ''))"
+                mode = (
+                    f"LOWER(COALESCE(CAST({self._quote_identifier(call_mode_column)} AS TEXT), ''))"
+                    if call_mode_column else "''"
+                )
+                conn.execute(
+                    f"""
+                    UPDATE {quoted_table}
+                    SET {self._quote_identifier('Call Family')} = CASE
+                        WHEN {session} LIKE '%multirab%' THEN 'MultiRAB'
+                        WHEN {session} LIKE '%whatsapp%' THEN 'WhatsApp'
+                        WHEN {session} LIKE '%volte%' OR {mode} LIKE '%volte%' THEN 'VoLTE'
+                        WHEN {session} LIKE '%vonr%' OR {mode} LIKE '%vonr%' THEN 'VoNR'
+                        ELSE 'CALL'
+                    END
+                    """
+                )
+            if 'Test Family' in missing:
+                test_type = (
+                    f"COALESCE(CAST({self._quote_identifier(type_column)} AS TEXT), '')"
+                    if type_column else "''"
+                )
+                test_name = (
+                    f"LOWER(COALESCE(CAST({self._quote_identifier(name_column)} AS TEXT), ''))"
+                    if name_column else "''"
+                )
+                conn.execute(
+                    f"""
+                    UPDATE {quoted_table}
+                    SET {self._quote_identifier('Test Family')} = CASE
+                        WHEN {test_name} LIKE '%youtube%' THEN 'YouTube'
+                        WHEN {test_name} LIKE '%fdfs%' THEN 'FDFS'
+                        WHEN {test_name} LIKE '%fdtt%' THEN 'FDTT'
+                        ELSE {test_type}
+                    END
+                    """
+                )
+            self._create_dataset_row_indexes(conn, table_name, self._table_columns(conn, table_name))
+        return True
+
     def load_dataset_rows(self, dataset_id: int, columns: list[str], filters: dict[str, Any]) -> pd.DataFrame:
         table_name = self.dataset_rows_table_name(dataset_id)
         existing_columns = set(self.list_dataset_row_columns(dataset_id))

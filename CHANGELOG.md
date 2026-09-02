@@ -32,7 +32,7 @@
 - Improved Dashboard and preview performance, adaptive filters, vendor persistence and large-dataset handling.
 - Added safe dataset renaming with synchronised source paths and references.
 - Added orphaned combined-CDR row cleanup after dataset deletion and from Database Management.
-- Added Excel-like preview filtering and pre-filters for Operator, Vendor, RAT, Session Type and Call Status.
+- Added Excel-like preview filtering and global CDR pre-filters for Operator, Vendor, RAT, Session Type, Call Status, Call Family and Test Family.
 - Added colour cues for Source Sheet, Vendor and GCID fields in dataset previews.
 - Added Slides Templates Editor cell assistance, contextual help, searchable selectors and row insertion.
 - Added reusable blank PowerPoint layouts and CSV-defined slide/chart templates.
@@ -46,6 +46,7 @@
 - Added Created and Last Updated timestamps plus direct Edit actions to the Slides Templates Library, and standardised its HTTP routes on `report-templates`.
 - Kept the current module open when switching the active workspace from the header.
 - Serialised dataset processing per workspace so retries wait as queued work while another dataset is processing.
+- Materialised `Call Family` and `Test Family` as inspectable CDR dimensions, with light-grey Preview styling for derived fields.
 
 #### 🐛 Bug fixes:
 - Preserved all chart-definition values during template migration, normalisation, sorting and visual merging; fixed defaults, renames, deletion protection, editor selection and report placeholder generation.
@@ -65,6 +66,7 @@
 - Fixed the Users table showing browser-restored form values instead of current database records after configuration imports or navigation restores.
 - Fixed blank Slides Templates so they open as an editable empty canvas, and fixed the editor selector to always show the template actually opened.
 - Fixed queued dataset and report jobs left by an application restart so they become retryable failures instead of remaining stalled.
+- Fixed large workspaces delaying application startup while derived CDR fields were being backfilled; older datasets now update on first Preview or Reporting use.
 
 #### 📚 Documentation:
 - Reworked the Help, README and configuration documentation for the current workspace, template, reporting and transfer workflows.

@@ -994,9 +994,9 @@ def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> Non
         files={'dataset_files': (
             'cdr_data.csv',
             BytesIO(
-                b'operator,vendor,RAT_A,Session_Type,Call_Status,score\n'
-                b'Vodafone UK,Ericsson,ENDC,VoLTE,Completed,91\n'
-                b'3,Nokia,NR,WhatsApp,Dropped,90\n'
+                b'operator,vendor,RAT_A,Session_Type,Call_Status,Type_of_Test,Test_Name,score\n'
+                b'Vodafone UK,Ericsson,ENDC,VoLTE,Completed,Streaming,YouTube playback,91\n'
+                b'3,Nokia,NR,WhatsApp,Dropped,Interactivity,Chat,90\n'
             ),
             'text/csv',
         )},
@@ -1009,6 +1009,10 @@ def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> Non
     assert '<option value="3" selected>' in default_preview.text
     assert '<option value="Ericsson" selected>' in default_preview.text
     assert '<option value="Nokia" selected>' in default_preview.text
+    assert 'class="derived-cdr-column">Call Family<' in default_preview.text
+    assert 'class="derived-cdr-column">Test Family<' in default_preview.text
+    assert '>VoLTE<' in default_preview.text
+    assert '>YouTube<' in default_preview.text
 
     preview = client.get(
         '/workspace/preview/1?cdr_operator=3&cdr_vendor=Nokia&cdr_rat=NR'
@@ -1020,6 +1024,8 @@ def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> Non
     assert 'name="cdr_rat"' in preview.text
     assert 'name="cdr_session_type"' in preview.text
     assert 'name="cdr_call_status"' in preview.text
+    assert 'name="cdr_call_family"' in preview.text
+    assert 'name="cdr_test_family"' in preview.text
     assert 'class="vendor-column">vendor<' in preview.text
     preview_rows = preview.text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
     assert '>Nokia<' in preview_rows
@@ -1029,6 +1035,11 @@ def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> Non
     multi_rows = multi_preview.text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
     assert '>Nokia<' in multi_rows
     assert '>Ericsson<' in multi_rows
+
+    derived_preview = client.get('/workspace/preview/1?cdr_call_family=VoLTE&cdr_test_family=YouTube')
+    derived_rows = derived_preview.text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
+    assert '>Ericsson<' in derived_rows
+    assert '>Nokia<' not in derived_rows
     assert 'name="cdr_operator" multiple' in multi_preview.text
 
 

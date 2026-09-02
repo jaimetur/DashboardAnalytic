@@ -832,6 +832,9 @@ def _catalog_column(
     if normalized in {"vendor", "reportvendor"}:
         return _group_column(frame, multivendor) if multivendor else _column(frame, ("Vendor", "vendor"))
     if normalized == "callfamily":
+        materialized = _column(frame, ("Call Family", "Call_Family", "call_family"))
+        if materialized:
+            return materialized
         session_column = _column(frame, ("Session_Type", "session_type"))
         if not session_column:
             return _column(frame, ("Call_Family", "call_family"))
@@ -849,6 +852,9 @@ def _catalog_column(
         frame["__catalog_call_family"] = family
         return "__catalog_call_family"
     if normalized == "testfamily":
+        materialized = _column(frame, ("Test Family", "Test_Family", "test_family"))
+        if materialized:
+            return materialized
         type_column = _column(frame, ("Type_of_Test", "Test_Type", "test_type"))
         name_column = _column(frame, ("Test_Name", "test_name"))
         if not type_column and not name_column:

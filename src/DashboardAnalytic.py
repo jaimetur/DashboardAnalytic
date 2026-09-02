@@ -114,7 +114,8 @@ LEGACY_VENDOR_MAPPING_FAILURE_MARKERS = (
     'assign vendors',
     'duplicate column name: vendor_2',
 )
-DATASET_NORMALIZATION_VERSION = 5
+DATASET_NORMALIZATION_VERSION = 6
+DERIVED_CDR_PREVIEW_COLUMNS = frozenset({'Call Family', 'Test Family'})
 MAPPING_PREVIEW_NORMALIZED_COLUMNS = frozenset({
     'dataset_kind', 'source_file', 'source_sheet', 'campaign', 'market', 'period', 'campaign_year', 'campaign_quarter',
     'operator', 'session_type', 'test_name', 'direction', 'region', 'city', 'vendor', 'status',
@@ -150,6 +151,45 @@ def format_preview_gcid(value: object) -> object:
     except (TypeError, ValueError):
         return str(value)
     return str(int(numeric_value)) if numeric_value.is_integer() else str(value)
+
+
+def materialize_cdr_derived_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    """Add stable, report-facing CDR dimensions as inspectable columns."""
+    result = frame.copy()
+    columns = {str(column).casefold(): str(column) for column in result.columns}
+
+    def column(*names: str) -> str | None:
+        return next((columns.get(name.casefold()) for name in names if columns.get(name.casefold())), None)
+
+    session_column = column('Session_Type', 'session_type')
+    call_mode_column = column('L1_Call_Mode_A', 'L1_Call_Mode_B', 'Call_Mode', 'call_mode')
+    if session_column:
+        session = result[session_column].fillna('').astype(str)
+        family = pd.Series('CALL', index=result.index, dtype='string')
+        family.loc[session.str.contains('multirab', case=False, na=False)] = 'MultiRAB'
+        family.loc[session.str.contains('whatsapp', case=False, na=False)] = 'WhatsApp'
+        family.loc[session.str.contains('volte', case=False, na=False)] = 'VoLTE'
+        family.loc[session.str.contains('vonr', case=False, na=False)] = 'VoNR'
+        if call_mode_column:
+            modes = result[call_mode_column].fillna('').astype(str)
+            family.loc[(family == 'CALL') & modes.str.contains('volte', case=False, na=False)] = 'VoLTE'
+            family.loc[(family == 'CALL') & modes.str.contains('vonr', case=False, na=False)] = 'VoNR'
+        result['Call Family'] = family
+
+    type_column = column('Type_of_Test', 'Test_Type', 'test_type')
+    name_column = column('Test_Name', 'test_name')
+    if type_column or name_column:
+        test_family = (
+            result[type_column].fillna('').astype(str)
+            if type_column else pd.Series('', index=result.index, dtype='string')
+        )
+        if name_column:
+            test_names = result[name_column].fillna('').astype(str)
+            test_family.loc[test_names.str.contains('youtube', case=False, na=False)] = 'YouTube'
+            test_family.loc[test_names.str.contains('fdfs', case=False, na=False)] = 'FDFS'
+            test_family.loc[test_names.str.contains('fdtt', case=False, na=False)] = 'FDTT'
+        result['Test Family'] = test_family
+    return result
 HELP_HOME_DOCUMENT = '00-help.md'
 HELP_NAVIGATION_DOCUMENTS = (
     HELP_HOME_DOCUMENT,
@@ -1116,6 +1156,8 @@ def rebuild_dataset_artifacts(
             # Mapping is optional during import. A mapping issue must not make
             # an otherwise valid CDR unusable in Workspace or Dashboard.
             auto_vendor_mapping_error = str(exc)
+    if dataset_kind in CDR_DATASET_KINDS:
+        df = materialize_cdr_derived_columns(df)
     store_cached_dataset_frame(dataset_path, df)
     task_repository.replace_dataset_rows(dataset_id, df)
     if dataset_kind in CDR_DATASET_KINDS:
@@ -1197,6 +1239,8 @@ def ensure_mapping_gcid(dataset: dict[str, Any]) -> dict[str, Any]:
 def persist_mapped_cdr_frame(dataset: dict[str, Any], frame: pd.DataFrame) -> None:
     """Replace a materialized CDR after vendor mapping and refresh its profile."""
     dataset_id = int(dataset['id'])
+    if str(dataset.get('dataset_kind') or '').casefold() in CDR_DATASET_KINDS:
+        frame = materialize_cdr_derived_columns(frame)
     repository.replace_dataset_rows(dataset_id, frame)
     dataset_kind = str(dataset.get('dataset_kind') or '').casefold()
     if dataset_kind in CDR_DATASET_KINDS:
@@ -2769,6 +2813,8 @@ def preview_dataset(
     cdr_rat: list[str] = Query(default=[]),
     cdr_session_type: list[str] = Query(default=[]),
     cdr_call_status: list[str] = Query(default=[]),
+    cdr_call_family: list[str] = Query(default=[]),
+    cdr_test_family: list[str] = Query(default=[]),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
     dataset_row = repository.get_dataset(dataset_id)
@@ -2779,6 +2825,15 @@ def preview_dataset(
         raise HTTPException(status_code=400, detail='Only processed datasets can be previewed.')
     dataset = ensure_mapping_gcid(dataset)
     dataset = ensure_canonical_mapped_vendor_column(dataset) or dataset
+    if dataset['dataset_kind'] in CDR_DATASET_KINDS:
+        # Backfill older CDRs only when they are actually inspected.  Running
+        # a full-table migration for every historical dataset during startup
+        # can delay the entire server by several minutes on large workspaces.
+        if repository.materialize_cdr_derived_dimensions(dataset_id):
+            repository.update_dataset_profile(dataset_id, normalization_version=DATASET_NORMALIZATION_VERSION)
+            refreshed = repository.get_dataset(dataset_id)
+            if refreshed:
+                dataset = serialize_dataset_row(refreshed)
 
     available_columns = repository.list_dataset_row_columns(dataset_id)
     vendor_preview_column = next(
@@ -2814,6 +2869,8 @@ def preview_dataset(
             ('cdr_rat', 'RAT', cdr_rat, ('RAT_A', 'RAT', 'Sample_RAT_A')),
             ('cdr_session_type', 'Session Type', cdr_session_type, ('Session_Type', 'session_type', 'Type_of_Test')),
             ('cdr_call_status', 'Call Status', cdr_call_status, ('Call_Status', 'call_status', 'status')),
+            ('cdr_call_family', 'Call Family', cdr_call_family, ('Call Family',)),
+            ('cdr_test_family', 'Test Family', cdr_test_family, ('Test Family',)),
         ]
         for parameter, label, requested_values, candidates in cdr_filter_definitions:
             column = next(
@@ -2875,6 +2932,10 @@ def preview_dataset(
             column for column in available_columns
             if column not in preview_columns and column != 'report_vendor'
         )
+    derived_preview_columns = {
+        column for column in preview_columns
+        if str(column).casefold() in {name.casefold() for name in DERIVED_CDR_PREVIEW_COLUMNS}
+    }
     preview_frame = repository.load_dataset_rows(dataset_id, preview_columns, preview_filters).head(row_limit)
     if 'GCID' in preview_frame.columns:
         preview_frame = preview_frame.copy()
@@ -2893,6 +2954,7 @@ def preview_dataset(
             'preview_sheet_options': preview_sheet_options,
             'preview_source_sheet': preview_source_sheet,
             'vendor_preview_columns': vendor_preview_columns,
+            'derived_preview_columns': derived_preview_columns,
             'vendor_filter_options': vendor_filter_options,
             'selected_mapping_vendor': selected_mapping_vendor,
             'selected_gcid': selected_gcid,
@@ -3014,6 +3076,7 @@ def _combined_reporting_frame(
     dataset_ids = [int(dataset['id']) for dataset in datasets]
     columns = reporting_query_columns(dataset_kind, catalog_entries, multivendor)
     for dataset_id in dataset_ids:
+        task_repository.materialize_cdr_derived_dimensions(dataset_id)
         task_repository.copy_dataset_rows_to_reporting(dataset_id, dataset_kind, columns)
     combined = task_repository.load_reporting_rows(dataset_kind, dataset_ids, columns)
     if combined.empty:

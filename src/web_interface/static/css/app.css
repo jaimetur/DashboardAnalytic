@@ -617,8 +617,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .preview-row-limit-form { display: flex; align-items: end; gap: 0.8rem; flex-wrap: wrap; margin: 1rem 0 1.8rem; }
 .preview-row-limit-form label { min-width: 180px; color: rgba(255,255,255,0.88); font-weight: 700; }
 .preview-row-limit-form input, .preview-row-limit-form select { border-color: rgba(255,255,255,0.45); background: rgba(255,255,255,0.94); color: #10314a; }
-.preview-row-limit-form button { background: linear-gradient(135deg, #e7fff7, #bcebdc); border: 1px solid rgba(255,255,255,0.55); color: #075d59; box-shadow: 0 8px 18px rgba(3, 43, 54, 0.18); }
-.preview-row-limit-form button:hover:not(:disabled) { background: linear-gradient(135deg, #d2f8ea, #9fdcc8); }
+.preview-refresh-action { flex-basis: 100%; display: flex; justify-content: flex-start; padding-top: 0.15rem; }
+.preview-refresh-button { background: linear-gradient(135deg, #7650c8, #aa7df3); border: 1px solid rgba(255,255,255,0.55); color: #fff; box-shadow: 0 8px 18px rgba(3, 43, 54, 0.18); }
+.preview-refresh-button:hover:not(:disabled) { background: linear-gradient(135deg, #623cab, #9568df); }
 .preview-actions { margin-top: 1rem; }
 .preview-actions .ghost-link:not(.action-link-primary) { background: rgba(255,255,255,0.13); border-color: rgba(255,255,255,0.34); color: #fff; }
 .preview-table-filters { display: flex; align-items: end; gap: 0.8rem 1rem; flex-wrap: wrap; margin: 0 0 1rem; padding: 0.85rem 1rem; border: 1px solid rgba(16, 49, 74, 0.14); border-radius: 14px; background: linear-gradient(135deg, rgba(234, 246, 250, 0.82), rgba(255, 255, 255, 0.88)); }
@@ -651,6 +652,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .preview-column-filter-apply { border: 1px solid rgba(7, 93, 89, 0.4); background: linear-gradient(135deg, #0b7a75, #149d94); color: #fff; box-shadow: 0 7px 16px rgba(11, 122, 117, 0.2); }
 .dataset-preview-table .gcid-column { background: #fff6bf; color: #554000; font-weight: 700; }
 .dataset-preview-table .vendor-column { background: #dff1ff; color: #12476b; font-weight: 700; }
+.dataset-preview-table .derived-cdr-column { background: #eef1f3; color: #4f5c64; }
 .dataset-preview-table-wrap::-webkit-scrollbar { display: block; width: 14px; height: 14px; }
 .dataset-preview-table-wrap::-webkit-scrollbar-track { background: rgba(16, 49, 74, 0.14); border-radius: 999px; }
 .dataset-preview-table-wrap::-webkit-scrollbar-thumb { background: rgba(16, 49, 74, 0.48); border: 2px solid rgba(255,255,255,0.72); border-radius: 999px; }
