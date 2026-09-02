@@ -1135,11 +1135,13 @@ def preview_catalog_chart_data(frame: pd.DataFrame, entry: CatalogEntry, *, limi
     }
 
 
-def render_catalog_chart_preview(frame: pd.DataFrame, entry: CatalogEntry) -> bytes:
-    """Render the same PNG chart used by a report for editor preview."""
+def render_catalog_chart_preview(frame: pd.DataFrame, entry: CatalogEntry, *, multivendor: bool = False) -> bytes:
+    """Render the same PNG chart used by a report for editor/report previews."""
     if not entry.source_kind:
         raise ValueError('Only chart rows with a CDR source can be previewed.')
-    return _chart_for_catalog_entry(entry, {entry.source_kind: frame}, False).getvalue()
+    render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
+    normalised_frame = normalise_report_operator_aliases(frame)
+    return _chart_for_catalog_entry(render_entry, {render_entry.source_kind: normalised_frame}, multivendor).getvalue()
 
 
 def _matches(frame: pd.DataFrame, column: str | None, tokens: tuple[str, ...] | None) -> pd.Series:

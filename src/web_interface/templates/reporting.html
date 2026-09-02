@@ -8,15 +8,22 @@
         <h2>Choose a reporting module</h2>
       </div>
     </div>
-    <p class="lede">Produce a consistent, template-based NetCheck CDR PowerPoint from one or more processed Data, Voice and Speech workbooks. CDRs of the same type are combined so campaigns can be benchmarked together. Select NSA or SA; Multivendor is available only when every selected CDR has already been mapped in Workspace.</p>
+    <p class="lede">Choose the reporting workflow to display. NetCheck CDR Reports combine processed Data, Voice and Speech workbooks so campaigns can be benchmarked together; Smart Orchestrator Logs Reports is reserved for its dedicated workflow.</p>
+    <label class="reporting-module-selector">Reporting module
+      <select data-reporting-module aria-label="Reporting module">
+        <option value="cdr" selected>NetCheck CDR Reports</option>
+        <option value="logs">Smart Orchestrator Logs Reports</option>
+      </select>
+    </label>
   </article>
 
-  <article class="panel reporting-panel">
-    <div class="section-head tight-head">
+  <details class="panel collapsible-panel reporting-panel" open data-panel-state-key="reporting:netcheck-cdr" data-reporting-module-panel="cdr">
+    <summary class="collapsible-summary">
       <div><p class="eyebrow">NetCheck CDR Reports</p><h2>NetCheck CDR Reports</h2></div>
-      <span class="pill live-pill">Available</span>
-    </div>
-    <form action="/reporting/netcheck-cdr" method="post" class="form-grid" data-report-job-form>
+      <div class="summary-inline-actions"><span class="pill live-pill">Available</span><span class="collapse-chip">Collapse</span></div>
+    </summary>
+    <div class="collapsible-panel-body">
+      <form action="/reporting/netcheck-cdr" method="post" class="form-grid" data-report-job-form>
       <label>CDR Data <span class="form-label-hint">Select one or more</span>
         <select name="data_dataset_id" required multiple size="4" aria-describedby="cdr-selection-help">
           {% for dataset in data_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
@@ -47,23 +54,41 @@
       <label>Report scope
         <select name="report_scope" data-report-scope><option value="single">Single-vendor</option><option value="multivendor" disabled>Multivendor</option></select>
       </label>
-      <div class="form-actions reporting-submit-action"><button type="submit">Generate PowerPoint Report</button></div>
-    </form>
-    <p id="cdr-selection-help" class="form-note">Use Ctrl/Cmd-click to select several CDRs of the same type. Their processed rows are concatenated using the union of their columns, preserving Campaign values for cross-campaign comparisons. Choose Slides Templates matching the selected technology; they apply only to this report and do not change the workspace default. Map Vendors from Workspace before choosing Multivendor. The common Template_CDR_analysis.pptx supplies masters and layouts for every report: the selected template creates each slide from scratch, fills its chart placeholders from the selected CDRs and keeps commentary areas blank for the analyst.</p>
-  </article>
-
-  <article class="panel reporting-panel">
-    <div class="section-head tight-head"><div><p class="eyebrow">Smart Orchestrator Logs Reports</p><h2>Log reporting</h2></div><span class="pill">Coming soon</span></div>
-    <p class="lede">This entry point reserves the reporting workflow for processed Smart Orchestrator Log sources. It is visible now to make the product structure explicit; automated log reporting will be added in a future release.</p>
-  </article>
-
-  <article class="panel reporting-panel reporting-jobs-panel" data-report-jobs-panel>
-    <div class="section-head tight-head">
-      <div><p class="eyebrow">PowerPoint reporting</p><h2>Generated Reports Jobs</h2></div>
-      <span class="pill" data-report-jobs-count>{{ report_jobs | length }} jobs</span>
+      <div class="form-actions reporting-submit-action"><button type="submit">Generate PowerPoint Report</button><button type="button" class="report-charts-button" data-report-charts-button>Generate Report Charts</button></div>
+      </form>
+      <p id="cdr-selection-help" class="form-note">Use Ctrl/Cmd-click to select several CDRs of the same type. Their processed rows are concatenated using the union of their columns, preserving Campaign values for cross-campaign comparisons. Choose Slides Templates matching the selected technology; they apply only to this report and do not change the workspace default. Map Vendors from Workspace before choosing Multivendor. The common Template_CDR_analysis.pptx supplies masters and layouts for every report: the selected template creates each slide from scratch, fills its chart placeholders from the selected CDRs and keeps commentary areas blank for the analyst.</p>
     </div>
-    <p class="lede">Report generation continues on the server after leaving Reporting or signing out. Download is enabled when a job is ready.</p>
-    <div class="table-wrap">
+  </details>
+
+  <details class="panel collapsible-panel reporting-panel report-charts-panel" open data-panel-state-key="reporting:report-charts" data-reporting-module-panel="cdr" data-report-charts-panel hidden>
+    <summary class="collapsible-summary">
+      <div><p class="eyebrow">Selected report definition</p><h2>Report Charts</h2></div>
+      <div class="summary-inline-actions"><span class="pill" data-report-charts-count>0 charts</span><span class="collapse-chip">Collapse</span></div>
+    </summary>
+    <div class="collapsible-panel-body">
+      <p class="lede" data-report-charts-copy>Each chart uses the selected CDRs, technology, scope and Slides Template.</p>
+      <div class="report-charts-grid" data-report-charts-body></div>
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel reporting-panel" open data-panel-state-key="reporting:smart-orchestrator-logs" data-reporting-module-panel="logs" hidden>
+    <summary class="collapsible-summary">
+      <div><p class="eyebrow">Smart Orchestrator Logs Reports</p><h2>Log Report</h2></div>
+      <div class="summary-inline-actions"><span class="pill">Coming soon</span><span class="collapse-chip">Collapse</span></div>
+    </summary>
+    <div class="collapsible-panel-body">
+      <p class="lede">This entry point reserves the reporting workflow for processed Smart Orchestrator Log sources. It is visible now to make the product structure explicit; automated log reporting will be added in a future release.</p>
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel reporting-panel reporting-jobs-panel" open data-panel-state-key="reporting:generated-report-jobs" data-reporting-module-panel="cdr" data-report-jobs-panel>
+    <summary class="collapsible-summary">
+      <div><p class="eyebrow">PowerPoint reporting</p><h2>Generated Reports Jobs</h2></div>
+      <div class="summary-inline-actions"><span class="pill" data-report-jobs-count>{{ report_jobs | length }} jobs</span><span class="collapse-chip">Collapse</span></div>
+    </summary>
+    <div class="collapsible-panel-body">
+      <p class="lede">Report generation continues on the server after leaving Reporting or signing out. Download is enabled when a job is ready.</p>
+      <div class="table-wrap">
       <table class="report-jobs-table">
         <thead><tr><th>ID</th><th>Generated by</th><th>Date</th><th>Report Name</th><th>Type</th><th>Multivendor</th><th>Template</th><th>Slides</th><th>Datasets</th><th>Status</th><th>Progress</th><th>Actions</th></tr></thead>
         <tbody data-report-jobs-body>
@@ -81,9 +106,10 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
+      <p class="form-note" data-report-jobs-empty {% if report_jobs %}hidden{% endif %}>No report jobs have been created in this workspace.</p>
     </div>
-    <p class="form-note" data-report-jobs-empty {% if report_jobs %}hidden{% endif %}>No report jobs have been created in this workspace.</p>
-  </article>
+  </details>
 </section>
 {% endblock %}
 {% block extra_scripts %}
@@ -115,7 +141,25 @@
     updateScope();
     updateCatalogues();
 
+    const reportingModule = document.querySelector('[data-reporting-module]');
+    const reportingModulePanels = document.querySelectorAll('[data-reporting-module-panel]');
+    const updateReportingModule = () => {
+      const module = reportingModule?.value || 'cdr';
+      reportingModulePanels.forEach((panel) => {
+        const isChartPanel = panel.hasAttribute('data-report-charts-panel');
+        const chartsReady = panel.dataset.reportChartsReady === 'true';
+        panel.hidden = panel.dataset.reportingModulePanel !== module || (isChartPanel && !chartsReady);
+      });
+    };
+    reportingModule?.addEventListener('change', updateReportingModule);
+    updateReportingModule();
+
     const reportForm = document.querySelector('[data-report-job-form]');
+    const reportChartsButton = document.querySelector('[data-report-charts-button]');
+    const reportChartsPanel = document.querySelector('[data-report-charts-panel]');
+    const reportChartsBody = document.querySelector('[data-report-charts-body]');
+    const reportChartsCount = document.querySelector('[data-report-charts-count]');
+    const reportChartsCopy = document.querySelector('[data-report-charts-copy]');
     const jobsBody = document.querySelector('[data-report-jobs-body]');
     const jobsCount = document.querySelector('[data-report-jobs-count]');
     const jobsEmpty = document.querySelector('[data-report-jobs-empty]');
@@ -253,6 +297,46 @@
       } catch (error) {
         hideLoadingOverlay();
         showInfoDialog(error.message || 'Unable to queue the report.', {title: 'Report job failed', tone: 'error'});
+      }
+    });
+    const renderReportCharts = (payload) => {
+      const charts = Array.isArray(payload.charts) ? payload.charts : [];
+      if (!reportChartsBody) return;
+      reportChartsBody.replaceChildren(...charts.map((chart) => {
+        const card = document.createElement('article');
+        card.className = 'report-chart-card';
+        const head = document.createElement('div');
+        head.className = 'report-chart-card-head';
+        const text = document.createElement('div');
+        const title = document.createElement('h3');
+        title.textContent = `Slide ${chart.slide} · ${chart.title}`;
+        const metadata = document.createElement('p');
+        metadata.textContent = `${chart.source} · ${chart.chart_type}`;
+        text.append(title, metadata);
+        head.append(text);
+        const image = document.createElement('img');
+        image.src = `data:image/png;base64,${chart.image}`;
+        image.alt = `Preview of ${chart.title}`;
+        card.append(head, image);
+        return card;
+      }));
+      if (reportChartsCount) reportChartsCount.textContent = `${charts.length} ${charts.length === 1 ? 'chart' : 'charts'}`;
+      if (reportChartsCopy) reportChartsCopy.textContent = `Rendered from ${payload.template || 'the selected Slides Template'} using the selected CDRs, technology and scope.`;
+      if (reportChartsPanel) reportChartsPanel.dataset.reportChartsReady = 'true';
+      updateReportingModule();
+    };
+    reportChartsButton?.addEventListener('click', async () => {
+      if (!reportForm?.reportValidity()) return;
+      showLoadingOverlay('Generating report charts', 'Please wait while the selected template charts are rendered from the selected CDRs.');
+      try {
+        const response = await fetch('/reporting/netcheck-cdr/charts', {method: 'POST', body: new FormData(reportForm), credentials: 'same-origin'});
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || 'Unable to generate report charts.');
+        renderReportCharts(payload);
+        hideLoadingOverlay();
+      } catch (error) {
+        hideLoadingOverlay();
+        showInfoDialog(error.message || 'Unable to generate report charts.', {title: 'Report chart generation failed', tone: 'error'});
       }
     });
     jobsBody?.addEventListener('click', async (event) => {

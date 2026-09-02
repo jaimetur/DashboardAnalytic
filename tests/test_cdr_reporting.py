@@ -611,6 +611,9 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert page.status_code == 200
     assert 'NetCheck CDR Reports' in page.text
     assert 'Smart Orchestrator Logs Reports' in page.text
+    assert 'data-reporting-module' in page.text
+    assert 'data-reporting-module-panel="cdr"' in page.text
+    assert 'data-reporting-module-panel="logs"' in page.text
     assert 'Generate PowerPoint Report' in page.text
     assert 'name="vodafone_mapping_dataset_id"' not in page.text
     assert 'name="three_mapping_dataset_id"' not in page.text
@@ -682,6 +685,42 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
     deleted = client.post(job['delete_url'])
     assert deleted.status_code == 200
     assert client.get(job['download_url']).status_code == 404
+
+
+def test_reporting_generates_template_chart_previews(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    uploads = [
+        ('NetCheck_CDR_Data.csv', 'data', b'RAT,Operator,Mean_Data_Rate\nENDC,Vodafone UK,42\n'),
+        ('NetCheck_CDR_Voice.csv', 'voice', b'RAT_A,Operator,Call_Status\nENDC,Vodafone UK,Completed\n'),
+        ('NetCheck_CDR_Speech.csv', 'speech', b'Sample_RAT_A,Operator,LQ\nENDC,Vodafone UK,3.8\n'),
+    ]
+    for filename, kind, content in uploads:
+        response = client.post(
+            '/dashboard/upload', data={'dataset_kinds': kind},
+            files={'dataset_files': (filename, BytesIO(content), 'text/csv')},
+        )
+        assert response.status_code == 200
+
+    rendered: list[tuple[str, bool]] = []
+
+    def render_preview(frame, entry, *, multivendor=False):
+        rendered.append((entry.cdr_source, multivendor))
+        return b'PNG'
+
+    monkeypatch.setattr(app_module, 'render_catalog_chart_preview', render_preview)
+    response = client.post('/reporting/netcheck-cdr/charts', data={
+        'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
+        'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',
+    })
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['template'] == 'NSA Slide Template'
+    assert payload['charts']
+    assert payload['charts'][0]['image'] == 'UE5H'
+    assert rendered and all(multivendor is False for _, multivendor in rendered)
 
 
 def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, monkeypatch) -> None:

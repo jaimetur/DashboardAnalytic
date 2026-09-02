@@ -22,6 +22,7 @@
 - Added persistent Generated Reports Jobs with progress, metadata, Download and Delete actions.
 - Added blank Slides Template creation from the library, ready for direct renaming and editing.
 - Added a dedicated App Logs tab that combines operational and audit activity, exposes up to 1,000 events and provides persistent user, date, type and action filters.
+- Added Report Charts to render every automated chart in the selected report template without creating a PowerPoint file.
 
 #### 🚀 Enhancements:
 - Added root-level `storage-paths.conf` with `APP_CONFIG_DIR`, `APP_DATA_DIR` and `APP_ASSETS_DIR` overrides.
@@ -51,6 +52,8 @@
 - Added per-chart Slides Templates Editor previews using the current unsaved filters, aggregations and resolved derived dimensions.
 - Added per-chart generated-image previews in the Slides Templates Editor, using the same renderer as PowerPoint report generation.
 - Added a dedicated Application Logs tab to view Application Activity with all the events.
+- Made Reporting panels collapsible and added a module selector that switches between NetCheck CDR Reports and Smart Orchestrator Logs Reports.
+- Added Generate Report Charts to E2E Reporting module to visualize all Charts included in the pre-selected report.
 
 #### 🐛 Bug fixes:
 - Preserved all chart-definition values during template migration, normalisation, sorting and visual merging; fixed defaults, renames, deletion protection, editor selection and report placeholder generation.

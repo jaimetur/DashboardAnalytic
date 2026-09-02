@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import base64
 import io
 import os
 import re
@@ -3310,6 +3311,76 @@ def generate_netcheck_cdr_report(
         name=f'report-{report_id}', daemon=True,
     ).start()
     return JSONResponse({'job_id': report_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
+
+
+@app.post('/reporting/netcheck-cdr/charts')
+def generate_netcheck_cdr_charts(
+    data_dataset_id: list[int] = Form(...),
+    voice_dataset_id: list[int] = Form(...),
+    speech_dataset_id: list[int] = Form(...),
+    technology: str = Form(...),
+    report_scope: str = Form('single'),
+    slides_templates: str = Form(''),
+    user: SessionUser = Depends(current_user),
+) -> JSONResponse:
+    """Render every automated chart in the selected Slides Template without a PPT job."""
+    technology = technology.strip().lower()
+    if technology not in TEMPLATE_NAMES:
+        raise HTTPException(status_code=400, detail='Choose NSA or SA for the CDR report.')
+    if report_scope not in {'single', 'multivendor'}:
+        raise HTTPException(status_code=400, detail='Choose a valid report scope.')
+    multivendor = report_scope == 'multivendor'
+    selected = {
+        'data': _reporting_datasets(data_dataset_id, 'data'),
+        'voice': _reporting_datasets(voice_dataset_id, 'voice'),
+        'speech': _reporting_datasets(speech_dataset_id, 'speech'),
+    }
+    if multivendor and not all(
+        dataset.get('vendor_mapping_applied')
+        for datasets in selected.values()
+        for dataset in datasets
+    ):
+        raise HTTPException(status_code=400, detail='Multivendor reporting requires every selected Data, Voice and Speech CDR to have a Workspace Vendor mapping.')
+    available_catalogues = {item['identifier']: item for item in report_catalogue_options(technology)}
+    selected_catalogue = next((item for item in available_catalogues.values() if item['active']), None)
+    if slides_templates:
+        catalogue_technology, separator, catalogue_identifier = slides_templates.partition(':')
+        if separator != ':' or catalogue_technology != technology or catalogue_identifier not in available_catalogues:
+            raise HTTPException(status_code=400, detail='Choose a Slides Template compatible with the selected technology.')
+        selected_catalogue = available_catalogues[catalogue_identifier]
+    if selected_catalogue is None:
+        raise HTTPException(status_code=400, detail=f'No {technology.upper()} Slides Template is available.')
+    try:
+        catalog_entries = load_catalog_csv(selected_catalogue['path'], technology)
+        frames = {
+            kind: _combined_reporting_frame(datasets, technology, catalog_entries, multivendor)
+            for kind, datasets in selected.items()
+        }
+        if multivendor:
+            frames = {kind: ensure_report_vendor_group(frame) for kind, frame in frames.items()}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    charts = []
+    for entry in catalog_entries:
+        if not entry.source_kind:
+            continue
+        image = render_catalog_chart_preview(frames[entry.source_kind], entry, multivendor=multivendor)
+        charts.append({
+            'slide': entry.slide,
+            'title': entry.chart_title or entry.slide_title or f'Slide {entry.slide}',
+            'source': entry.cdr_source,
+            'chart_type': entry.chart_type,
+            'image': base64.b64encode(image).decode('ascii'),
+        })
+    if not charts:
+        raise HTTPException(status_code=400, detail='The selected Slides Template does not contain automated CDR charts.')
+    repository.add_log(user.username, 'preview_netcheck_cdr_report_charts', json.dumps({
+        'technology': technology,
+        'scope': report_scope,
+        'template': selected_catalogue['name'],
+        'charts': len(charts),
+    }))
+    return JSONResponse({'template': selected_catalogue['name'], 'charts': charts})
 
 
 @app.get('/api/reporting/jobs')

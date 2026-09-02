@@ -8,7 +8,7 @@ The application follows one operational workflow: upload and process files in Wo
 | --- | --- |
 | **Workspace** | Manage isolated workspaces, then upload, classify and process their datasets. It is the source-of-truth entry point for analysis and reporting. |
 | **E2E Dashboard** | Explore one processed dataset with adaptive filters, KPI summaries, scorecards, CDF/comparison charts and dashboard exports. |
-| **E2E PowerPoint Reporting** | Generate standardised NSA or SA NetCheck CDR PowerPoint reports from three processed CDR domains. It also shows the future Smart Orchestrator Logs Reports module. |
+| **E2E PowerPoint Reporting** | Generate standardised NSA or SA NetCheck CDR PowerPoint reports, or preview every automated report chart, from three processed CDR domains. It also shows the future Smart Orchestrator Logs Reports module. |
 | **App Logs** | Review the active workspace's combined operational and audit history, with persistent filters for user, date, type and action. |
 | **Administration** | Manage users, shared templates, portable imports/exports and the active workspace database; restricted to authorised administrators. |
 | **Help** | Opens this documentation in the current application tab with its own navigation panel. |

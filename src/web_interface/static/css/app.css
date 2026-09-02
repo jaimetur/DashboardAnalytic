@@ -470,6 +470,20 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .reporting-stack .multiselect-option span { color: #43206e; }
 .reporting-panel .pill { background: linear-gradient(135deg, #eee1ff, #dfcbfb); border-color: rgba(75, 32, 138, 0.26); color: #55328c; }
 .reporting-submit-action { margin-top: 0.65rem; }
+.reporting-submit-action { display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: center; }
+.reporting-stack .report-charts-button { background: linear-gradient(135deg, #6b4ca3, #a17bd0); border-color: rgba(91, 57, 145, 0.58); color: #fff; }
+.reporting-stack .report-charts-button:hover:not(:disabled) { background: linear-gradient(135deg, #533681, #8861bd); }
+.reporting-module-selector { display: grid; gap: 0.38rem; width: min(100%, 25rem); margin-top: 1rem; color: rgba(255, 255, 255, 0.94) !important; }
+.module-hero-reporting .reporting-module-selector select { min-height: 2.5rem; border-color: rgba(255, 255, 255, 0.5); background: rgba(255, 255, 255, 0.96); color: #43206e; box-shadow: none; }
+.module-hero-reporting .reporting-module-selector select:focus { border-color: #fff; outline-color: rgba(255, 255, 255, 0.42); }
+.reporting-stack .collapsible-summary .summary-inline-actions { display: flex; align-items: center; gap: 0.65rem; margin-left: auto; }
+.report-charts-panel[hidden] { display: none; }
+.report-charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1rem; margin-top: 1rem; }
+.report-chart-card { min-width: 0; padding: 0.9rem; border: 1px solid rgba(75, 32, 138, 0.22); border-radius: 14px; background: linear-gradient(145deg, #fffaff, #f2eaff); box-shadow: 0 10px 22px rgba(75, 32, 138, 0.08); }
+.report-chart-card-head { display: flex; align-items: start; justify-content: space-between; gap: 0.65rem; margin-bottom: 0.65rem; }
+.report-chart-card h3 { margin: 0; color: #43206e; font-size: 0.98rem; }
+.report-chart-card p { margin: 0.2rem 0 0; color: #6b5790; font-size: 0.78rem; }
+.report-chart-card img { display: block; width: 100%; height: auto; border: 1px solid rgba(75, 32, 138, 0.16); border-radius: 8px; background: #fff; }
 .analytics-dashboard-stack button { background: linear-gradient(135deg, #0c4c8c, #287bc2); border: 1px solid rgba(12, 76, 140, 0.52); box-shadow: 0 10px 22px rgba(12, 76, 140, 0.20); }
 .analytics-dashboard-stack button:hover:not(:disabled) { background: linear-gradient(135deg, #08396a, #1b65a6); }
 .analytics-dashboard-stack label { color: #1f5d9c; font-weight: 700; }
