@@ -119,21 +119,18 @@ jobs:
         run: |
           docker push "${{ steps.image.outputs.image_name }}:${{ steps.image.outputs.version_tag }}"
 
-      - name: Push latest and main tags
+      - name: Push latest tag
+        shell: bash
+        run: |
+          docker tag "${{ steps.image.outputs.image_name }}:${{ steps.image.outputs.version_tag }}" "${{ steps.image.outputs.image_name }}:latest"
+          docker push "${{ steps.image.outputs.image_name }}:latest"
+
+      - name: Push main tag
         if: ${{ github.ref == 'refs/heads/main' }}
         shell: bash
         run: |
           docker tag "${{ steps.image.outputs.image_name }}:${{ steps.image.outputs.version_tag }}" "${{ steps.image.outputs.image_name }}:main"
           docker push "${{ steps.image.outputs.image_name }}:main"
-          docker tag "${{ steps.image.outputs.image_name }}:${{ steps.image.outputs.version_tag }}" "${{ steps.image.outputs.image_name }}:latest"
-          docker push "${{ steps.image.outputs.image_name }}:latest"
-
-      - name: Push latest tag for versioned release
-        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        shell: bash
-        run: |
-          docker tag "${{ steps.image.outputs.image_name }}:${{ steps.image.outputs.version_tag }}" "${{ steps.image.outputs.image_name }}:latest"
-          docker push "${{ steps.image.outputs.image_name }}:latest"
 
       - name: Prepare Docker package
         run: |

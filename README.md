@@ -254,8 +254,9 @@ The repository includes GitHub Actions workflows for:
 
 Docker image publication behavior:
 
-- `push` to `main` publishes a fresh image
-- `push` of a git tag like `v0.1.0` publishes a Docker tag like `0.1.0`
+- Every successful Docker build publishes both its version tag and a refreshed `latest` tag, including manually dispatched builds from a release branch.
+- `push` to `main` additionally refreshes the `main` tag.
+- push of a git tag like `v0.1.0` publishes a Docker tag like `0.1.0`
 - push to Docker Hub only happens if the repository secrets are configured
 
 Required GitHub repository secrets:
