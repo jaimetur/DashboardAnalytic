@@ -8,6 +8,7 @@
 #### 🌟 New Features:
 
 #### 🚀 Enhancements:
+- Moved Report Charts rendering to an independent persistent background queue with progress, retry and a separate Generated Charts Jobs panel below Generated Reports Jobs.
 
 #### 🐛 Bug fixes:
 - Fixed Report Charts failures to return actionable JSON errors and record Error events in App Logs instead of exposing a browser JSON parsing error.

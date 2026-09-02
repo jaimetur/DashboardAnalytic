@@ -26,6 +26,17 @@ def wait_for_report_job(client, job_id: int) -> dict:
     raise AssertionError(f'Report job {job_id} did not finish in time.')
 
 
+def wait_for_report_chart_job(client, job_id: int) -> dict:
+    for _ in range(100):
+        response = client.get('/api/reporting/chart-jobs')
+        assert response.status_code == 200
+        job = next(item for item in response.json()['jobs'] if item['id'] == job_id)
+        if job['status'] not in {'queued', 'processing'}:
+            return job
+        time.sleep(0.02)
+    raise AssertionError(f'Report Charts job {job_id} did not finish in time.')
+
+
 def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> None:
     lookup = {'first': 'Ericsson'}
 
@@ -752,8 +763,10 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
         'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',
     })
 
-    assert response.status_code == 200
-    payload = response.json()
+    assert response.status_code == 202
+    job = wait_for_report_chart_job(client, response.json()['job_id'])
+    assert job['status'] == 'ready'
+    payload = client.get(job['open_url']).json()
     assert payload['template'] == 'NSA Slide Template'
     assert payload['scope'] == 'single'
     assert payload['dataset_counts'] == {'data': 1, 'voice': 1, 'speech': 1}
@@ -766,8 +779,10 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
         'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
         'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',
     })
-    assert second.status_code == 200
-    second_payload = second.json()
+    assert second.status_code == 202
+    second_job = wait_for_report_chart_job(client, second.json()['job_id'])
+    assert second_job['status'] == 'ready'
+    second_payload = client.get(second_job['open_url']).json()
     assert second_payload['generation'] != payload['generation']
     assert client.get(f"/api/reporting/chart-sets/{payload['generation']}").status_code == 200
     deleted = client.post(f"/reporting/chart-sets/{second_payload['generation']}/delete")
@@ -811,11 +826,13 @@ def test_report_chart_generation_failures_return_json_and_are_logged(client, mon
         'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',
     })
 
-    assert response.status_code == 500
-    assert response.json()['detail'] == 'Unable to generate report charts: Synthetic renderer failure'
-    log = next(row for row in app_module.repository.list_logs() if row['action'] == 'preview_netcheck_cdr_report_charts_failed')
+    assert response.status_code == 202
+    job = wait_for_report_chart_job(client, response.json()['job_id'])
+    assert job['status'] == 'failed'
+    assert job['error'] == 'Synthetic renderer failure'
+    log = next(row for row in app_module.repository.list_logs() if row['action'] == 'generate_report_chart_set_failed')
     assert 'Synthetic renderer failure' in log['details']
-    app_log = next(row for row in app_module.build_app_logs() if row['action'] == 'preview_netcheck_cdr_report_charts_failed')
+    app_log = next(row for row in app_module.build_app_logs() if row['action'] == 'generate_report_chart_set_failed')
     assert app_log['log_type'] == 'Error'
 
 

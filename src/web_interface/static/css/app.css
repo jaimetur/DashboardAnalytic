@@ -375,10 +375,16 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-chart-preview-image[hidden] { display: none !important; }
 .catalogue-chart-preview-image img { display: block; width: min(100%, 1200px); height: auto; object-fit: contain; }
 .report-jobs-table { min-width: 1120px; }
+.report-chart-jobs-table { min-width: 980px; }
+.reporting-chart-jobs-panel { margin-top: 2.2rem; }
 .report-jobs-table th, .report-jobs-table td { vertical-align: middle; }
+.report-chart-jobs-table th, .report-chart-jobs-table td { vertical-align: middle; }
 .report-jobs-table tbody tr:nth-child(odd) { background: rgba(229, 220, 247, 0.46); }
+.report-chart-jobs-table tbody tr:nth-child(odd) { background: rgba(229, 220, 247, 0.46); }
 .report-jobs-table tbody tr:nth-child(even) { background: rgba(247, 239, 246, 0.72); }
+.report-chart-jobs-table tbody tr:nth-child(even) { background: rgba(247, 239, 246, 0.72); }
 .report-jobs-table tbody tr:hover { background: rgba(211, 198, 237, 0.62); }
+.report-chart-jobs-table tbody tr:hover { background: rgba(211, 198, 237, 0.62); }
 .report-jobs-table th:nth-child(2), .report-jobs-table td:nth-child(2) { min-width: 145px; }
 .report-jobs-table th:nth-child(3), .report-jobs-table td:nth-child(3) { width: 132px; min-width: 132px; max-width: 132px; white-space: normal; overflow-wrap: normal; }
 .report-jobs-table th:nth-child(4), .report-jobs-table td:nth-child(4) { width: 180px; min-width: 170px; max-width: 185px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }

@@ -89,6 +89,24 @@ CREATE TABLE IF NOT EXISTS report_runs (
     finished_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS report_chart_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    technology TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    dataset_ids_json TEXT NOT NULL DEFAULT '{}',
+    dataset_names_json TEXT NOT NULL DEFAULT '{}',
+    template_name TEXT NOT NULL,
+    chart_count INTEGER NOT NULL DEFAULT 0,
+    generation TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status TEXT NOT NULL DEFAULT 'queued',
+    progress INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TEXT
+);
+
 """
 
 GLOBAL_SCHEMA = """
@@ -216,6 +234,7 @@ class Repository:
             conn.executescript(SCHEMA)
             self._ensure_dataset_profile_columns(conn)
             self._ensure_report_run_columns(conn)
+            self._ensure_report_chart_job_columns(conn)
             self._cleanup_duplicate_datasets(conn)
             self._migrate_legacy_vendor_mapping_profiles(conn)
             conn.execute(
@@ -416,6 +435,28 @@ class Repository:
             if column not in existing_columns:
                 conn.execute(f"ALTER TABLE report_runs ADD COLUMN {column} {definition}")
         conn.execute("UPDATE report_runs SET updated_at = COALESCE(updated_at, created_at)")
+
+    def _ensure_report_chart_job_columns(self, conn: sqlite3.Connection) -> None:
+        """Keep independently persisted Report Charts jobs complete."""
+        columns = {row['name'] for row in conn.execute("PRAGMA table_info(report_chart_jobs)").fetchall()}
+        migrations = {
+            'dataset_ids_json': "TEXT NOT NULL DEFAULT '{}'",
+            'dataset_names_json': "TEXT NOT NULL DEFAULT '{}'",
+            'template_name': "TEXT NOT NULL DEFAULT ''",
+            'chart_count': 'INTEGER NOT NULL DEFAULT 0',
+            'generation': 'TEXT',
+            'created_by': "TEXT NOT NULL DEFAULT ''",
+            'created_at': 'TEXT',
+            'status': "TEXT NOT NULL DEFAULT 'queued'",
+            'progress': 'INTEGER NOT NULL DEFAULT 0',
+            'last_error': 'TEXT',
+            'updated_at': 'TEXT',
+            'finished_at': 'TEXT',
+        }
+        for column, definition in migrations.items():
+            if column not in columns:
+                conn.execute(f"ALTER TABLE report_chart_jobs ADD COLUMN {column} {definition}")
+        conn.execute("UPDATE report_chart_jobs SET updated_at = COALESCE(updated_at, created_at)")
 
     def _ensure_report_template_columns(self, conn: sqlite3.Connection) -> None:
         """Keep template metadata complete and one promoted template per technology."""
@@ -1671,6 +1712,89 @@ class Repository:
             if report:
                 conn.execute("DELETE FROM report_runs WHERE id = ?", (report_id,))
             return report
+
+    def create_report_chart_job(
+        self, *, technology: str, scope: str, dataset_ids: dict[str, list[int]],
+        dataset_names: dict[str, list[str]], template_name: str, created_by: str,
+    ) -> int:
+        with self.connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO report_chart_jobs (
+                    technology, scope, dataset_ids_json, dataset_names_json, template_name,
+                    created_by, created_at, status, progress, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)
+                """,
+                (
+                    technology, scope, json.dumps(dataset_ids), json.dumps(dataset_names), template_name,
+                    created_by, local_now_iso(), local_now_iso(),
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def update_report_chart_job(
+        self, job_id: int, *, status: str | None = None, progress: int | None = None,
+        last_error: str | None = None, chart_count: int | None = None,
+        generation: str | None = None, finished: bool = False,
+    ) -> None:
+        assignments = ['updated_at = ?']
+        values: list[Any] = [local_now_iso()]
+        if status is not None:
+            assignments.append('status = ?')
+            values.append(status)
+        if progress is not None:
+            assignments.append('progress = ?')
+            values.append(max(0, min(100, int(progress))))
+        if last_error is not None:
+            assignments.append('last_error = ?')
+            values.append(last_error)
+        if chart_count is not None:
+            assignments.append('chart_count = ?')
+            values.append(max(0, int(chart_count)))
+        if generation is not None:
+            assignments.append('generation = ?')
+            values.append(generation)
+        if finished:
+            assignments.append('finished_at = ?')
+            values.append(local_now_iso())
+        values.append(job_id)
+        with self.connection() as conn:
+            conn.execute(f"UPDATE report_chart_jobs SET {', '.join(assignments)} WHERE id = ?", values)
+
+    def list_report_chart_jobs(self, limit: int | None = 50) -> list[sqlite3.Row]:
+        with self.connection() as conn:
+            if limit is None:
+                return list(conn.execute("SELECT * FROM report_chart_jobs ORDER BY id DESC").fetchall())
+            return list(conn.execute("SELECT * FROM report_chart_jobs ORDER BY id DESC LIMIT ?", (limit,)).fetchall())
+
+    def get_report_chart_job(self, job_id: int) -> sqlite3.Row | None:
+        with self.connection() as conn:
+            return conn.execute("SELECT * FROM report_chart_jobs WHERE id = ?", (job_id,)).fetchone()
+
+    def delete_report_chart_job(self, job_id: int) -> sqlite3.Row | None:
+        with self.connection() as conn:
+            job = conn.execute("SELECT * FROM report_chart_jobs WHERE id = ?", (job_id,)).fetchone()
+            if job:
+                conn.execute("DELETE FROM report_chart_jobs WHERE id = ?", (job_id,))
+            return job
+
+    def fail_interrupted_report_chart_jobs(self) -> list[int]:
+        """Make in-process Report Charts work retryable after an app restart."""
+        message = 'Interrupted because the application restarted. Retry the job to run it again.'
+        now = local_now_iso()
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT id FROM report_chart_jobs WHERE status IN ('queued', 'processing')"
+            ).fetchall()
+            job_ids = [int(row['id']) for row in rows]
+            if job_ids:
+                placeholders = ','.join('?' for _ in job_ids)
+                conn.execute(
+                    f"UPDATE report_chart_jobs SET status = 'failed', progress = 100, last_error = ?, updated_at = ?, finished_at = ? "
+                    f"WHERE id IN ({placeholders})",
+                    (message, now, now, *job_ids),
+                )
+        return job_ids
 
     def list_logs(self, limit: int | None = 1000) -> list[sqlite3.Row]:
         with self.connection() as conn:
