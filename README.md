@@ -153,12 +153,13 @@ The `admin` panel provides:
 - user creation
 - user listing
 - dataset listing
-- audit log inspection
 - named NSA/SA template management, import conversion, default selection, duplication, deletion and export
 
 `admin` users can manage `admin` and `user` accounts, but only `super-admin` users can create, promote or modify `super-admin` accounts and assign workspace access. Removing a user or workspace also removes every corresponding access relationship.
 - an in-browser template editor with contextual assistance for layouts, chart types, fields, legends, grouping and filter conditions
 - Database Management for the active workspace, with paginated table browsing, server-side multi-value filtering, row editing and row deletion
+
+Use the **App Logs** tab to review the active workspace's combined operational and audit history. Its User, Date, Type and Action filters are preserved after a page reload until cleared.
 
 ## Embedded documentation
 

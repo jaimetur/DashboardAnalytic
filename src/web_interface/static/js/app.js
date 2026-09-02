@@ -2588,6 +2588,68 @@ if (logTypeFilter) {
   syncLogRows();
 }
 
+const appLogsPanel = document.querySelector('[data-app-logs-panel]');
+if (appLogsPanel) {
+  const appLogFiltersStorageKey = 'dashboard-analytic:/app-logs:filters';
+  const userFilter = appLogsPanel.querySelector('[data-app-log-user-filter]');
+  const dateFilter = appLogsPanel.querySelector('[data-app-log-date-filter]');
+  const typeFilter = appLogsPanel.querySelector('[data-app-log-type-filter]');
+  const actionFilter = appLogsPanel.querySelector('[data-app-log-action-filter]');
+  const clearFilters = appLogsPanel.querySelector('[data-app-log-clear-filters]');
+  const noResults = appLogsPanel.querySelector('[data-app-log-no-results]');
+  const rows = Array.from(appLogsPanel.querySelectorAll('[data-app-log-row]'));
+  const restoreSelectValue = (control, value) => {
+    if (!control || !value) return;
+    if (Array.from(control.options).some((option) => option.value === value)) control.value = value;
+  };
+  try {
+    const savedFilters = JSON.parse(window.localStorage.getItem(appLogFiltersStorageKey) || '{}');
+    restoreSelectValue(userFilter, savedFilters.user);
+    if (dateFilter && /^\d{4}-\d{2}-\d{2}$/.test(savedFilters.date || '')) dateFilter.value = savedFilters.date;
+    restoreSelectValue(typeFilter, savedFilters.type);
+    restoreSelectValue(actionFilter, savedFilters.action);
+  } catch (_error) {
+    // The log view remains fully usable when browser storage is unavailable.
+  }
+  const persistAppLogFilters = () => {
+    try {
+      window.localStorage.setItem(appLogFiltersStorageKey, JSON.stringify({
+        user: userFilter?.value || 'all', date: dateFilter?.value || '',
+        type: typeFilter?.value || 'all', action: actionFilter?.value || 'all',
+      }));
+    } catch (_error) {
+      // Persistence is a convenience and must not block filtering.
+    }
+  };
+  const syncAppLogRows = () => {
+    let visibleCount = 0;
+    rows.forEach((row) => {
+      const matches = (
+        (!userFilter || userFilter.value === 'all' || row.dataset.appLogUser === userFilter.value)
+        && (!dateFilter || !dateFilter.value || row.dataset.appLogDate === dateFilter.value)
+        && (!typeFilter || typeFilter.value === 'all' || row.dataset.appLogType === typeFilter.value)
+        && (!actionFilter || actionFilter.value === 'all' || row.dataset.appLogAction === actionFilter.value)
+      );
+      row.hidden = !matches;
+      if (matches) visibleCount += 1;
+    });
+    if (noResults) noResults.hidden = visibleCount > 0 || rows.length === 0;
+  };
+  [userFilter, dateFilter, typeFilter, actionFilter].filter(Boolean).forEach((filter) => filter.addEventListener('change', () => {
+    persistAppLogFilters();
+    syncAppLogRows();
+  }));
+  clearFilters?.addEventListener('click', () => {
+    if (userFilter) userFilter.value = 'all';
+    if (dateFilter) dateFilter.value = '';
+    if (typeFilter) typeFilter.value = 'all';
+    if (actionFilter) actionFilter.value = 'all';
+    try { window.localStorage.removeItem(appLogFiltersStorageKey); } catch (_error) { /* Ignore unavailable browser storage. */ }
+    syncAppLogRows();
+  });
+  syncAppLogRows();
+}
+
 document.querySelectorAll('[data-chart-aggregation-select]').forEach((select) => {
   select.addEventListener('change', () => {
     const metric = String(select.dataset.metric || '').trim();

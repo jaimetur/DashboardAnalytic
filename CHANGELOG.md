@@ -21,6 +21,7 @@
 - Added processed-dataset preview and direct Preview/Show Dashboard actions in Workspace and Admin.
 - Added persistent Generated Reports Jobs with progress, metadata, Download and Delete actions.
 - Added blank Slides Template creation from the library, ready for direct renaming and editing.
+- Added a dedicated App Logs tab that combines operational and audit activity, exposes up to 1,000 events and provides persistent user, date, type and action filters.
 
 #### 🚀 Enhancements:
 - Added root-level `storage-paths.conf` with `APP_CONFIG_DIR`, `APP_DATA_DIR` and `APP_ASSETS_DIR` overrides.
@@ -49,6 +50,7 @@
 - Materialised `Call Family` and `Test Family` as inspectable CDR dimensions, with light-grey Preview styling for derived fields.
 - Added per-chart Slides Templates Editor previews using the current unsaved filters, aggregations and resolved derived dimensions.
 - Added per-chart generated-image previews in the Slides Templates Editor, using the same renderer as PowerPoint report generation.
+- Added a dedicated Application Logs tab to view Application Activity with all the events.
 
 #### 🐛 Bug fixes:
 - Preserved all chart-definition values during template migration, normalisation, sorting and visual merging; fixed defaults, renames, deletion protection, editor selection and report placeholder generation.

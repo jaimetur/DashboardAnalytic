@@ -512,21 +512,6 @@
     </form>
   </dialog>
 
-  <details class="panel collapsible-panel" open data-panel-state-key="admin:audit">
-    <summary class="collapsible-summary">
-      <div>
-        <p class="eyebrow">Audit</p>
-        <h2>Access and actions log</h2>
-      </div>
-      <span class="collapse-chip">Collapse</span>
-    </summary>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>ID</th><th>User</th><th>Action</th><th>Details</th><th>Date</th></tr></thead>
-        <tbody>{% for row in logs %}<tr><td>{{ row['id'] }}</td><td>{{ row['username'] }}</td><td>{{ row['action'] }}</td><td>{{ row['details'] }}</td><td>{{ row['created_at'] }}</td></tr>{% endfor %}</tbody>
-      </table>
-    </div>
-  </details>
 </section>
 {% endblock %}
 {% block extra_scripts %}

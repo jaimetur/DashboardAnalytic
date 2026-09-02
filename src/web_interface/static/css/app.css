@@ -111,6 +111,12 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .module-tab-reporting:hover { background: linear-gradient(135deg, #e4d2fb, #d4baf4); color: #55328c; }
 .module-tab-reporting.active { background: linear-gradient(135deg, #4b208a, #bd90ff); border-color: rgba(75, 32, 138, 0.68); color: #fff; box-shadow: 0 10px 24px rgba(118, 80, 181, 0.34); }
 .module-tab-utility { background: linear-gradient(135deg, #f3f5f7, #e8edf2); border-color: rgba(126, 139, 152, 0.24); color: #44515d; }
+.module-tab-app-logs { background: linear-gradient(135deg, #fff4bd, #ffe79a); border-color: rgba(198, 153, 33, 0.32); color: #7b5710; }
+.module-tab-app-logs:hover { background: linear-gradient(135deg, #ffed9b, #ffdc72); color: #684707; }
+.module-tab-app-logs.active { background: linear-gradient(135deg, #e1a928, #f5d253); border-color: rgba(153, 105, 8, 0.64); color: #493000; box-shadow: 0 10px 24px rgba(190, 140, 17, 0.32); }
+.app-logs-hero { background: linear-gradient(135deg, #f5d253, #e1a928) !important; border-color: rgba(153, 105, 8, 0.64); color: #493000; }
+.app-logs-hero .eyebrow, .app-logs-hero h2, .app-logs-hero .lede { color: #493000; }
+.app-logs-hero .live-pill { background: rgba(73, 48, 0, 0.14); border-color: rgba(73, 48, 0, 0.35); color: #493000; font-weight: 800; }
 .module-tab-admin { background: linear-gradient(135deg, #ffe0df, #ffc9c6); border-color: rgba(200, 74, 74, 0.34); color: #a04343; }
 .module-tab-admin:hover { background: linear-gradient(135deg, #ffd1cf, #ffb5b1); color: #882e2e; }
 .module-tab-admin.active { background: linear-gradient(135deg, #861919, #ff8070); border-color: rgba(134, 25, 25, 0.68); color: #fff; box-shadow: 0 10px 24px rgba(184, 77, 58, 0.34); }
@@ -721,6 +727,12 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .table-input, .table-select { min-width: 140px; padding: 0.7rem 0.85rem; }
 .table-help { margin-top: 0.35rem; color: var(--muted); font-size: 0.78rem; }
 .logs-filter-control { min-width: 190px; }
+.app-logs-filters { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)) auto; gap: 0.8rem; align-items: end; margin: 0.9rem 0 1.1rem; }
+.app-logs-filters label { display: grid; gap: 0.35rem; color: var(--muted); font-size: 0.78rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.app-logs-filters input, .app-logs-filters select { min-width: 0; width: 100%; }
+.app-logs-clear-button { min-height: 2.7rem; padding: 0.55rem 0.85rem; background: linear-gradient(145deg, #fff0aa, #f3cc4e); border-color: rgba(174, 124, 14, 0.52); color: #684707; box-shadow: 0 8px 18px rgba(190, 140, 17, 0.16); white-space: nowrap; }
+.app-logs-clear-button:hover:not(:disabled) { background: linear-gradient(145deg, #f8df7a, #e2ad24); border-color: rgba(139, 93, 0, 0.64); color: #493000; }
+.app-logs-table code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .table-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
 .danger-button { background: linear-gradient(135deg, #c65544, #df7758); }
 .warning-button { background: linear-gradient(135deg, #d58f1f, #e9ac39); color: #fffef9; }

@@ -1627,9 +1627,14 @@ class Repository:
                 conn.execute("DELETE FROM report_runs WHERE id = ?", (report_id,))
             return report
 
-    def list_logs(self) -> list[sqlite3.Row]:
+    def list_logs(self, limit: int | None = 1000) -> list[sqlite3.Row]:
         with self.connection() as conn:
-            return list(conn.execute("SELECT id, username, action, details, created_at FROM audit_logs ORDER BY id DESC LIMIT 250").fetchall())
+            if limit is None:
+                return list(conn.execute("SELECT id, username, action, details, created_at FROM audit_logs ORDER BY id DESC").fetchall())
+            return list(conn.execute(
+                "SELECT id, username, action, details, created_at FROM audit_logs ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall())
 
     def list_workspace_logs(self, dataset_id: int | None = None, limit: int = 120) -> list[dict[str, Any]]:
         workspace_actions = {

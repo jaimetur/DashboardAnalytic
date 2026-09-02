@@ -66,6 +66,7 @@
           <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/readme' %} active{% endif %}" href="/documents/view/readme" title="Open Readme">Readme</a>
           <a class="module-tab module-tab-utility{% if request.url.path == '/documents/view/changelog' %} active{% endif %}" href="/documents/view/changelog" title="Open Changelog">Changelog</a>
           <a class="module-tab module-tab-utility{% if request.url.path.startswith('/documents/view/help') %} active{% endif %}" href="/documents/view/help" title="Open Help">Help</a>
+          <a class="module-tab module-tab-app-logs{% if request.url.path == '/app-logs' %} active{% endif %}" href="/app-logs" title="Open App Logs">App Logs</a>
           {% if user.role in ['admin', 'super-admin'] %}<a class="module-tab module-tab-admin{% if request.url.path == '/admin' %} active{% endif %}" href="/admin" title="Open Admin">Admin</a>{% endif %}
         </div>
       </nav>

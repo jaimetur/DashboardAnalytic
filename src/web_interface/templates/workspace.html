@@ -353,57 +353,6 @@
     </form>
   </dialog>
 
-  <details class="panel collapsible-panel" open data-panel-state-key="workspace:logs">
-    <summary class="collapsible-summary">
-      <div>
-        <p class="eyebrow">Workspace Logs</p>
-        <h2>Execution and Error Trail</h2>
-      </div>
-      <span class="collapse-chip">Collapse</span>
-    </summary>
-    <div class="section-head compact-toolbar">
-      <div></div>
-      <label class="logs-filter-control">Type
-        <select data-log-type-filter>
-          <option value="all">All events</option>
-          <option value="Info">Info only</option>
-          <option value="Error" selected>Error only</option>
-        </select>
-      </label>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Date</th>
-            <th>User</th>
-            <th>Type</th>
-            <th>Action</th>
-            <th>Summary</th>
-            <th>Details</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in workspace_logs %}
-          <tr data-log-row data-log-type="{{ row['log_type'] }}">
-            <td>{{ row['id'] }}</td>
-            <td>{{ row['created_at'] }}</td>
-            <td>{{ row['username'] }}</td>
-            <td><span class="log-type-badge log-type-{{ row['log_type']|lower }}">{{ row['log_type'] }}</span></td>
-            <td>{{ row['action'] }}</td>
-            <td>{{ row['summary'] }}</td>
-            <td><code>{{ row['details_text'] }}</code></td>
-          </tr>
-          {% else %}
-          <tr data-log-empty-row>
-            <td colspan="7"><article class="empty-state-inline">No workspace log entries yet.</article></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </details>
   {% endif %}
 </section>
 {% endblock %}

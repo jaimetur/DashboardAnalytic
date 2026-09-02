@@ -2194,14 +2194,6 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         {**dict(row), 'created_at': format_local_timestamp(row['created_at']), 'workspace_ids': repository.list_user_workspace_ids(int(row['id']))}
         for row in repository.list_users()
     ]
-    admin_logs = []
-    for row in (repository.list_logs() if active_workspace else []):
-        log = dict(row)
-        log['action'] = str(log.get('action') or '').replace('_report_catalogue', '_report_template')
-        log['details'] = re.sub(r'"catalogue_name"\s*:', '"template_name":', str(log.get('details') or ''))
-        log['details'] = re.sub(r'"catalogue"\s*:', '"template":', log['details'])
-        log['created_at'] = format_local_timestamp(log.get('created_at'))
-        admin_logs.append(log)
     return render_template(
         request,
         'admin.html',
@@ -2212,7 +2204,6 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             'datasets': admin_datasets,
             'vodafone_mapping_datasets': [dataset for dataset in ready_admin_datasets if dataset.get('dataset_kind') == 'mapping_vodafone'],
             'three_mapping_datasets': [dataset for dataset in ready_admin_datasets if dataset.get('dataset_kind') == 'mapping_three'],
-            'logs': admin_logs,
             'report_catalogs': report_catalogs,
             'workspace_catalogues': workspace_catalogues,
             'database_table_groups': database_table_groups,
@@ -2270,6 +2261,35 @@ def classify_workspace_log_entry(log: dict[str, Any]) -> str:
     }:
         return 'Error'
     return 'Info'
+
+
+def build_app_logs() -> list[dict[str, Any]]:
+    """Format the complete audit trail for the App Logs view."""
+    if not active_workspace:
+        return []
+    logs: list[dict[str, Any]] = []
+    for row in repository.list_logs():
+        details_text = str(row['details'] or '')
+        action = str(row['action'] or '').replace('_report_catalogue', '_report_template')
+        details_text = re.sub(r'"catalogue_name"\s*:', '"template_name":', details_text)
+        details_text = re.sub(r'"catalogue"\s*:', '"template":', details_text)
+        try:
+            details: Any = json.loads(details_text)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            details = details_text
+        log = {
+            'id': row['id'],
+            'username': str(row['username'] or ''),
+            'action': action,
+            'details': details,
+            'details_text': details_text,
+            'created_at': format_local_timestamp(row['created_at']),
+            'date': str(row['created_at'] or '')[:10],
+        }
+        log['summary'] = describe_workspace_log_entry(log)
+        log['log_type'] = classify_workspace_log_entry(log)
+        logs.append(log)
+    return logs
 
 
 def build_dashboard_payload(selected_dataset: dict[str, Any] | None, request: Request, username: str | None = None) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[str], dict[str, Any], str | None, bool]:
@@ -2591,12 +2611,6 @@ def workspace(
         # legacy failed row unusable until the next manual refresh.
         datasets, ready_datasets, input_kind_options, selected_dataset = build_dataset_view_state(dataset_id, input_kind)
     has_processing = any(dataset['status'] in {'queued', 'processing'} for dataset in datasets)
-    workspace_logs = repository.list_workspace_logs(selected_dataset['id'] if selected_dataset else None)
-    for log in workspace_logs:
-        log['created_at'] = format_local_timestamp(log.get('created_at'))
-        log['summary'] = describe_workspace_log_entry(log)
-        log['log_type'] = classify_workspace_log_entry(log)
-
     vodafone_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_vodafone']
     three_mapping_datasets = [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'mapping_three']
     add_workspace_vendor_capabilities(datasets)
@@ -2613,7 +2627,7 @@ def workspace(
             'selected_dataset': selected_dataset,
             'input_kind': input_kind,
             'input_kind_options': input_kind_options,
-            'workspace_logs': workspace_logs,
+            'workspace_logs': [],
             'error': None,
             'has_processing': has_processing,
             'vodafone_mapping_datasets': vodafone_mapping_datasets,
@@ -2960,6 +2974,21 @@ def preview_dataset(
             'selected_gcid': selected_gcid,
             'cdr_preview_filters': cdr_preview_filters,
             'visible_column_count': len(preview_columns),
+        },
+    )
+
+
+@app.get('/app-logs', response_class=HTMLResponse)
+def app_logs(request: Request, user: SessionUser = Depends(current_user)) -> HTMLResponse:
+    logs = build_app_logs()
+    return render_template(
+        request,
+        'app_logs.html',
+        {
+            'user': user,
+            'logs': logs,
+            'log_users': sorted({log['username'] for log in logs if log['username']}, key=str.casefold),
+            'log_actions': sorted({log['action'] for log in logs if log['action']}, key=str.casefold),
         },
     )
 

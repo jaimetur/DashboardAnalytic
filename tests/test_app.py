@@ -1169,7 +1169,7 @@ def test_failed_vendor_mapping_keeps_the_cdr_available(client) -> None:
     dataset = next(item for item in client.get('/api/datasets/status').json()['datasets'] if item['id'] == 1)
     assert dataset['status'] == 'ready'
     assert client.get('/workspace/preview/1').status_code == 200
-    assert 'Vendor mapping failed for CDR dataset 1' in client.get('/workspace?dataset_id=1').text
+    assert 'Vendor mapping failed for CDR dataset 1' in client.get('/app-logs').text
 
 
 def test_workspace_recovers_legacy_vendor_mapping_failures(client) -> None:
@@ -2793,7 +2793,7 @@ def test_workspace_queue_shows_dataset_size_column(client) -> None:
     assert "MB" in response.text
 
 
-def test_workspace_shows_operational_logs_panel(client) -> None:
+def test_app_logs_combines_operational_and_audit_activity(client) -> None:
     login(client)
 
     import src.DashboardAnalytic as app_module
@@ -2803,14 +2803,17 @@ def test_workspace_shows_operational_logs_panel(client) -> None:
         "process_dataset_failed",
         '{"dataset_id": 1, "file": "sample.csv", "error": "Synthetic processing failure"}',
     )
+    app_module.repository.add_log("admin", "change_password", "Password changed from the account badge.")
 
-    response = client.get("/workspace")
+    response = client.get("/app-logs")
     assert response.status_code == 200
-    assert "Workspace Logs" in response.text
-    assert "Execution and Error Trail" in response.text
+    assert "App Logs" in response.text
     assert "All events" in response.text
     assert "Info only" in response.text
     assert "Error only" in response.text
+    assert "All users" in response.text
+    assert "All actions" in response.text
     assert "Type" in response.text
     assert "Error" in response.text
     assert "Synthetic processing failure" in response.text
+    assert "change_password" in response.text
