@@ -1262,6 +1262,35 @@ def _canvas(title: str) -> tuple[Image.Image, ImageDraw.ImageDraw]:
     return image, draw
 
 
+def _text_width(draw: ImageDraw.ImageDraw, value: str, font: ImageFont.ImageFont) -> int:
+    """Return the rendered width of a label, including the actual font metrics."""
+    return int(draw.textbbox((0, 0), value, font=font)[2])
+
+
+def _draw_rotated_label(
+    image: Image.Image,
+    value: str,
+    *,
+    centre_x: float,
+    bottom_y: float,
+    fill: str,
+    font: ImageFont.ImageFont,
+) -> None:
+    """Draw a 45° label centred on ``centre_x`` with its bottom at ``bottom_y``.
+
+    Axis captions are deliberately rotated only when their measured text no
+    longer fits the space assigned to a group.  Rendering to a transparent
+    layer avoids clipping the anti-aliased glyphs on the white chart canvas.
+    """
+    probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    bbox = probe.textbbox((0, 0), value, font=font)
+    label = Image.new("RGBA", (bbox[2] - bbox[0] + 8, bbox[3] - bbox[1] + 8), (0, 0, 0, 0))
+    label_draw = ImageDraw.Draw(label)
+    label_draw.text((4 - bbox[0], 4 - bbox[1]), value, fill=fill, font=font)
+    rotated = label.rotate(45, expand=True, resample=Image.Resampling.BICUBIC)
+    image.paste(rotated, (round(centre_x - rotated.width / 2), round(bottom_y - rotated.height)), rotated)
+
+
 def _empty_chart(title: str) -> BytesIO:
     image, draw = _canvas(title)
     draw.text((50, 440), "No valid samples for this KPI and technology filter", fill="#61727D", font=_font(24))
@@ -1311,8 +1340,12 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
             draw.rectangle((x, y, x + bar_width, y + height), fill=colour)
             if value >= .08: draw.text((x + 2, y + height / 2 - 8), f"{value:.0%}", fill="white", font=_font(16, True))
             running += height
-        label = _catalogue_display_label(g, p)
-        draw.text((x - 4, chart_top + chart_height + 8), label[:24], fill="#5A6B78", font=_font(15))
+        label = _catalogue_display_label(g, p)[:24]
+        label_font = _font(15)
+        if _text_width(draw, label, label_font) > chart_width / len(combos) - 8:
+            _draw_rotated_label(image, label, centre_x=x + bar_width / 2, bottom_y=chart_top + chart_height + 75, fill="#5A6B78", font=label_font)
+        else:
+            draw.text((x - 4, chart_top + chart_height + 8), label, fill="#5A6B78", font=label_font)
     for y in range(0, 101, 20):
         value_y = chart_top + chart_height - (y / 100 * chart_height)
         draw.line((chart_left - 20, value_y, chart_left + chart_width, value_y), fill="#E4E9ED", width=1)
@@ -1338,7 +1371,9 @@ def _render_status_100_hierarchy(
         return _empty_chart(title)
 
     image, draw = _canvas(title)
-    chart_left, chart_top, chart_width, chart_height = 205, 145, 1190, 610
+    # Reserve a dedicated header band below the chart title.  Rotated vendor /
+    # operator captions can be tall, so they must never share the title area.
+    chart_left, chart_top, chart_width, chart_height = 205, 245, 1190, 510
     row_height = chart_height / len(row_keys)
     column_width = chart_width / len(column_keys)
     bar_width = max(18, min(86, column_width * 0.68))
@@ -1346,16 +1381,27 @@ def _render_status_100_hierarchy(
     # The first column level is the upper header (Operator in the template
     # contract); lower levels, such as Campaign, are shown below every column.
     outer_values = [str(key[0]) for key in column_keys]
+    outer_groups: list[tuple[int, int, str]] = []
     start = 0
     while start < len(column_keys):
         end = start + 1
         while end < len(column_keys) and outer_values[end] == outer_values[start]:
             end += 1
-        centre = chart_left + ((start + end) / 2) * column_width
-        caption = outer_values[start]
-        draw.text((centre - min(len(caption) * 4, 70), chart_top - 46), caption[:22], fill="#566A78", font=_font(16, True))
-        draw.line((chart_left + start * column_width, chart_top - 14, chart_left + end * column_width, chart_top - 14), fill="#CDD7DE", width=1)
+        outer_groups.append((start, end, outer_values[start]))
         start = end
+    header_font = _font(16, True)
+    rotate_outer_headers = any(
+        _text_width(draw, caption[:22], header_font) + 14 > (end - start) * column_width
+        for start, end, caption in outer_groups
+    )
+    for start, end, caption in outer_groups:
+        centre = chart_left + ((start + end) / 2) * column_width
+        caption = caption[:22]
+        if rotate_outer_headers:
+            _draw_rotated_label(image, caption, centre_x=centre, bottom_y=chart_top - 16, fill="#566A78", font=header_font)
+        else:
+            draw.text((centre - min(len(caption) * 4, 70), chart_top - 46), caption, fill="#566A78", font=header_font)
+        draw.line((chart_left + start * column_width, chart_top - 14, chart_left + end * column_width, chart_top - 14), fill="#CDD7DE", width=1)
 
     for row_index, row_key in enumerate(row_keys):
         pane_top = chart_top + row_index * row_height
@@ -1379,6 +1425,12 @@ def _render_status_100_hierarchy(
                 mask &= data[field].astype(str).eq(str(value))
             subset = data.loc[mask]
             if subset.empty:
+                # A grouping grid intentionally retains every column so its
+                # headers remain comparable between rows.  Mark absent source
+                # combinations explicitly instead of leaving misleading blank
+                # space (for example, a vendor with no MultiRAB samples).
+                centre_x = chart_left + (column_index + .5) * column_width
+                draw.text((centre_x - 5, pane_top + row_height / 2 - 7), "—", fill="#B5C0C8", font=_font(14))
                 continue
             x = chart_left + column_index * column_width + (column_width - bar_width) / 2
             total = len(subset)
@@ -1462,22 +1514,35 @@ def _render_failure_count_hierarchy(
     counts = failed.groupby([*row_hierarchy, *column_hierarchy, "__catalog_failure_state"], dropna=False).size()
     maximum = max(int(counts.groupby(level=list(range(len(row_hierarchy) + len(column_hierarchy)))).sum().max()), 1)
     image, draw = _canvas(title)
-    chart_left, chart_top, chart_width, chart_height = 285, 150, 1250, 620
+    # See the status renderer above: hierarchy captions use the space between
+    # the title and the plot, not the title itself.
+    chart_left, chart_top, chart_width, chart_height = 285, 245, 1250, 510
     row_height = chart_height / len(row_keys)
     column_width = chart_width / len(column_keys)
     colours = {"Failed": "#E15759", "Dropped": "#F28E2B"}
 
     outer_values = [str(key[0]) for key in column_keys]
+    outer_groups: list[tuple[int, int, str]] = []
     start = 0
     while start < len(column_keys):
         end = start + 1
         while end < len(column_keys) and outer_values[end] == outer_values[start]:
             end += 1
-        centre = chart_left + ((start + end) / 2) * column_width
-        caption = outer_values[start]
-        draw.text((centre - min(len(caption) * 4, 64), chart_top - 58), caption[:20], fill="#566A78", font=_font(15, True))
-        draw.line((chart_left + start * column_width, chart_top - 24, chart_left + end * column_width, chart_top - 24), fill="#C8D2D9", width=1)
+        outer_groups.append((start, end, outer_values[start]))
         start = end
+    header_font = _font(15, True)
+    rotate_outer_headers = any(
+        _text_width(draw, caption[:20], header_font) + 14 > (end - start) * column_width
+        for start, end, caption in outer_groups
+    )
+    for start, end, caption in outer_groups:
+        centre = chart_left + ((start + end) / 2) * column_width
+        caption = caption[:20]
+        if rotate_outer_headers:
+            _draw_rotated_label(image, caption, centre_x=centre, bottom_y=chart_top - 27, fill="#566A78", font=header_font)
+        else:
+            draw.text((centre - min(len(caption) * 4, 64), chart_top - 58), caption, fill="#566A78", font=header_font)
+        draw.line((chart_left + start * column_width, chart_top - 24, chart_left + end * column_width, chart_top - 24), fill="#C8D2D9", width=1)
 
     for column_index, column_key in enumerate(column_keys):
         lower_caption = " · ".join(str(value) for value in column_key[1:]) or str(column_key[0])
@@ -1549,6 +1614,7 @@ def _chart_axis_hierarchy(frame: pd.DataFrame, *, distribution: bool = False) ->
 
 
 def _draw_hierarchical_axis_labels(
+    image: Image.Image,
     draw: ImageDraw.ImageDraw,
     keys: list[tuple[object, ...]],
     left: float,
@@ -1570,13 +1636,21 @@ def _draw_hierarchical_axis_labels(
             centre = left + ((start + end) / 2) * item_width
             text = str(keys[start][level])[:20]
             y = top - 30 * (levels - level)
-            draw.text((centre - min(len(text) * 4.5, 86), y), text, fill="#566A78", font=_font(16, True))
+            font = _font(16, True)
+            if _text_width(draw, text, font) + 12 > (end - start) * item_width:
+                _draw_rotated_label(image, text, centre_x=centre, bottom_y=y + 24, fill="#566A78", font=font)
+            else:
+                draw.text((centre - min(len(text) * 4.5, 86), y), text, fill="#566A78", font=font)
             draw.line((left + start * item_width, y + 24, left + end * item_width, y + 24), fill="#CDD7DE", width=1)
             start = end
     for index, key in enumerate(keys):
         text = str(key[-1])[:18]
         centre = left + (index + .5) * item_width
-        draw.text((centre - min(len(text) * 4, 68), bottom + 11), text, fill="#62727E", font=_font(14))
+        font = _font(14)
+        if _text_width(draw, text, font) + 8 > item_width:
+            _draw_rotated_label(image, text, centre_x=centre, bottom_y=bottom + 78, fill="#62727E", font=font)
+        else:
+            draw.text((centre - min(len(text) * 4, 68), bottom + 11), text, fill="#62727E", font=font)
 
 
 def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | None, series: str | None, stack: str, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
@@ -1588,7 +1662,7 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
     buckets = list(data[stack].drop_duplicates())
     if not combinations or not buckets:
         return _empty_chart(title)
-    image, draw = _canvas(title); left, top, width, height = 125, 185, 1260, 550
+    image, draw = _canvas(title); left, top, width, height = 125, 260, 1260, 475
     bar_width = max(20, min(70, width // max(len(combinations) * 2, 1)))
     for index, key in enumerate(combinations):
         subset = data
@@ -1599,7 +1673,7 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
             value = len(subset[subset[stack] == bucket]) / total; segment = value * height; y = top + height - running - segment
             draw.rectangle((x, y, x + bar_width, y + segment), fill=_colour(bucket, bucket_index))
             running += segment
-    _draw_hierarchical_axis_labels(draw, combinations, left, width, top, top + height)
+    _draw_hierarchical_axis_labels(image, draw, combinations, left, width, top, top + height)
     _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, bucket), _colour(bucket, index), 2) for index, bucket in enumerate(buckets[:8])], legend_position)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
@@ -1696,7 +1770,7 @@ def _render_mean_column(title: str, frame: pd.DataFrame, group: str | None, seri
     if means.empty:
         return _empty_chart(title)
     image, draw = _canvas(title)
-    left, top, chart_width, baseline, maximum = 120, 185, 1200, 735, max(float(means.max()), 1.0)
+    left, top, chart_width, baseline, maximum = 120, 260, 1200, 735, max(float(means.max()), 1.0)
     bar_width = min(150, max(30, chart_width / max(len(means) * 1.7, 1)))
     keys = [label if isinstance(label, tuple) else (label,) for label in means.index]
     for index, (label, value) in enumerate(means.items()):
@@ -1704,7 +1778,7 @@ def _render_mean_column(title: str, frame: pd.DataFrame, group: str | None, seri
         x = left + (index + .5) * chart_width / len(means) - bar_width / 2
         draw.rectangle((x, baseline - height, x + bar_width, baseline), fill=_colour(label, index))
         draw.text((x, baseline - height - 28), f"{float(value):.2f}", fill="#34495A", font=_font(17))
-    _draw_hierarchical_axis_labels(draw, keys, left, chart_width, top, baseline)
+    _draw_hierarchical_axis_labels(image, draw, keys, left, chart_width, top, baseline)
     draw.text((left, 790), metric.replace("_", " "), fill="#62727E", font=_font(18))
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0)
     return output
@@ -2101,6 +2175,13 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
         _clear_commentary(slide)
         _remove_template_chart_placeholders(slide)
         for entry, placement in zip(chart_entries, placement_frames[:len(chart_entries)], strict=True):
-            slide.shapes.add_picture(_chart_for_catalog_entry(entry, frames, multivendor), *placement)
+            # The PowerPoint must consume the exact same renderer used by the
+            # editor and Report Charts.  Keeping this call shared prevents an
+            # unnoticed drift in normalisation, multivendor preparation or
+            # catalogue filtering between preview and export.
+            chart_bytes = render_catalog_chart_preview(
+                frames[entry.source_kind], entry, multivendor=multivendor,
+            )
+            slide.shapes.add_picture(BytesIO(chart_bytes), *placement)
     presentation.save(destination)
     return destination

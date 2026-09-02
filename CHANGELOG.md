@@ -55,6 +55,7 @@
 - Made Reporting panels collapsible and added a module selector that switches between NetCheck CDR Reports and Smart Orchestrator Logs Reports.
 - Added Generate Report Charts to E2E Reporting module to visualize all Charts included in the pre-selected report.
 - Persisted Report Charts as selectable timestamped workspace sets, with template labels, complete-set deletion and an enlarged first/previous/next/last viewer.
+- Unified PowerPoint and Report Charts rendering, clarified missing hierarchy combinations, and rotated crowded chart grouping labels by 45°.
 
 #### 🐛 Bug fixes:
 - Preserved all chart-definition values during template migration, normalisation, sorting and visual merging; fixed defaults, renames, deletion protection, editor selection and report placeholder generation.

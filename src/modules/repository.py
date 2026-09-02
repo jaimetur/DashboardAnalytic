@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import shutil
+import re
 from datetime import datetime
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -961,6 +962,16 @@ class Repository:
     def _table_columns(self, conn: sqlite3.Connection, table_name: str) -> list[str]:
         return [row['name'] for row in conn.execute(f"PRAGMA table_info({self._quote_identifier(table_name)})").fetchall()]
 
+    @staticmethod
+    def _column_identity(column: str) -> str:
+        """Match CDR headings regardless of case or harmless separators.
+
+        NetCheck exports use both forms such as ``G_Level_4`` and
+        ``G Level 4``.  Reporting templates use the readable form, while the
+        shared reporting table must retain the physical source name.
+        """
+        return re.sub(r'[^a-z0-9]+', '', str(column).casefold())
+
     REPORTING_CORE_COLUMNS = (
         'Campaign', 'Operator', 'vendor', 'report_vendor', 'RAT', 'RAT_A', 'Sample_RAT_A',
         'technology_primary', 'L1_Call_Mode_A', 'L2_Call_Mode_A', 'Session_Type',
@@ -984,15 +995,16 @@ class Repository:
         self, conn: sqlite3.Connection, table_name: str, source_columns: list[str], requested_columns: list[str]
     ) -> list[str]:
         target_columns = self._table_columns(conn, table_name)
-        target_lookup = {column.casefold(): column for column in target_columns}
-        source_lookup = {column.casefold(): column for column in source_columns}
+        target_lookup = {self._column_identity(column): column for column in target_columns}
+        source_lookup = {self._column_identity(column): column for column in source_columns}
         for requested in requested_columns:
-            source = source_lookup.get(str(requested).casefold())
-            if not source or source.casefold() in {'dataset_id', 'source_row_id'} or source.casefold() in target_lookup:
+            source = source_lookup.get(self._column_identity(requested))
+            source_key = self._column_identity(source) if source else ''
+            if not source or source_key in {'datasetid', 'sourcerowid'} or source_key in target_lookup:
                 continue
             conn.execute(f"ALTER TABLE {self._quote_identifier(table_name)} ADD COLUMN {self._quote_identifier(source)}")
             target_columns.append(source)
-            target_lookup[source.casefold()] = source
+            target_lookup[source_key] = source
         return target_columns
 
     def replace_reporting_rows(self, dataset_id: int, dataset_kind: str, df: pd.DataFrame) -> None:
@@ -1007,13 +1019,13 @@ class Repository:
             table_name, existing = self._ensure_reporting_table(conn, dataset_kind)
             quoted_table = self._quote_identifier(table_name)
             existing = self._ensure_reporting_columns(conn, table_name, safe_df.columns.tolist(), list(self.REPORTING_CORE_COLUMNS))
-            source_lookup = {str(column).casefold(): str(column) for column in safe_df.columns}
+            source_lookup = {self._column_identity(str(column)): str(column) for column in safe_df.columns}
             conn.execute(f"DELETE FROM {quoted_table} WHERE dataset_id = ?", (dataset_id,))
             payload_columns: dict[str, Any] = {'dataset_id': int(dataset_id), 'source_row_id': range(1, len(safe_df) + 1)}
             for target in existing:
                 if target in {'dataset_id', 'source_row_id'}:
                     continue
-                source = source_lookup.get(target.casefold())
+                source = source_lookup.get(self._column_identity(target))
                 payload_columns[target] = safe_df[source] if source else None
             payload = pd.DataFrame(payload_columns, index=safe_df.index)
             payload.to_sql(table_name, conn, if_exists='append', index=False)
@@ -1072,17 +1084,43 @@ class Repository:
             quoted_target = self._quote_identifier(target_table)
             source_columns = self._table_columns(conn, source_table)
             desired = list(dict.fromkeys([*self.REPORTING_CORE_COLUMNS, *(columns or [])]))
-            previous_columns = {column.casefold() for column in target_columns}
-            source_lookup = {column.casefold(): column for column in source_columns}
+            previous_columns = {self._column_identity(column) for column in target_columns}
+            source_lookup = {self._column_identity(column): column for column in source_columns}
             needs_new_columns = any(
-                str(requested).casefold() in source_lookup and str(requested).casefold() not in previous_columns
+                self._column_identity(requested) in source_lookup
+                and self._column_identity(requested) not in previous_columns
                 for requested in desired
             )
             target_columns = self._ensure_reporting_columns(conn, target_table, source_columns, desired)
             existing_rows = conn.execute(
                 f"SELECT 1 FROM {quoted_target} WHERE dataset_id = ? LIMIT 1", (dataset_id,)
             ).fetchone()
+            # CDR derived dimensions can be materialised after an earlier
+            # reporting-table copy.  Refresh only when a populated derived
+            # source value is missing from its cached counterpart; otherwise
+            # preserve the fast path for repeated large-report generation.
+            derived_columns = {'callfamily', 'testfamily'}
+            target_lookup = {self._column_identity(column): column for column in target_columns}
+            needs_derived_refresh = False
             if existing_rows and not needs_new_columns:
+                for requested in desired:
+                    identity = self._column_identity(requested)
+                    if identity not in derived_columns or identity not in source_lookup or identity not in target_lookup:
+                        continue
+                    source = source_lookup[identity]
+                    target = target_lookup[identity]
+                    stale = conn.execute(
+                        f"SELECT 1 FROM {quoted_target} AS target "
+                        f"JOIN {self._quote_identifier(source_table)} AS source ON source.rowid = target.source_row_id "
+                        f"WHERE target.dataset_id = ? "
+                        f"AND source.{self._quote_identifier(source)} IS NOT NULL "
+                        f"AND target.{self._quote_identifier(target)} IS NULL LIMIT 1",
+                        (dataset_id,),
+                    ).fetchone()
+                    if stale:
+                        needs_derived_refresh = True
+                        break
+            if existing_rows and not needs_new_columns and not needs_derived_refresh:
                 return
             conn.execute(f"DELETE FROM {quoted_target} WHERE dataset_id = ?", (dataset_id,))
             insert_columns = ['dataset_id', 'source_row_id', *(column for column in target_columns if column not in {'dataset_id', 'source_row_id'})]
@@ -1090,7 +1128,7 @@ class Repository:
             for target in insert_columns[1:]:
                 if target == 'source_row_id':
                     continue
-                source = source_lookup.get(target.casefold())
+                source = source_lookup.get(self._column_identity(target))
                 select_columns.append(self._quote_identifier(source) if source else 'NULL')
             conn.execute(
                 f"INSERT INTO {quoted_target} ({', '.join(self._quote_identifier(column) for column in insert_columns)}) "
@@ -1186,6 +1224,7 @@ class Repository:
             return requested
 
         lowered = str(requested).strip().lower()
+        requested_identity = self._column_identity(requested)
         # Pandas preserves an original source column (for example ``Operator``)
         # and stores the normalised equivalent as ``operator__2`` when their
         # names collide case-insensitively.  A request for the normalised lower
@@ -1201,6 +1240,12 @@ class Repository:
         if case_matches:
             exact_lowercase = next((column for column in case_matches if column == lowered), None)
             return exact_lowercase or sorted(case_matches)[0]
+        normalized_matches = [
+            column for column in existing_columns
+            if self._column_identity(column) == requested_identity
+        ]
+        if normalized_matches:
+            return sorted(normalized_matches)[0]
         return None
 
     def resolve_dataset_row_column_name(self, dataset_id: int, requested: str) -> str | None:

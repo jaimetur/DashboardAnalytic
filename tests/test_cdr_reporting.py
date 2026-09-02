@@ -12,6 +12,7 @@ from pptx import Presentation
 from pptx.dml.color import RGBColor
 
 from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _hierarchical_unique_keys, _layout_chart_frames, _named_slide_layout, _render_failure_count, _render_status_100, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+from src.modules.repository import Repository
 
 
 def wait_for_report_job(client, job_id: int) -> dict:
@@ -52,6 +53,24 @@ def test_report_operator_aliases_share_filters_and_grouping_across_campaigns() -
     assert filtered["Operator"].tolist() == ["Vodafone", "Vodafone", "O2", "O2", "3", "3", "EE"]
     assert set(grouped[primary]) == {"Vodafone", "O2", "3", "EE"}
     assert set(grouped[series]) == {"2025 Q4", "2026 Q2"}
+
+
+def test_reporting_cache_resolves_separator_variants_and_refreshes_derived_dimensions(tmp_path) -> None:
+    repository = Repository(tmp_path / 'workspace.db')
+    repository.replace_dataset_rows(1, pd.DataFrame({
+        'RAT_A': ['EN-DC'], 'G_Level_4': ['London'], 'Call Family': [None],
+    }))
+    repository.copy_dataset_rows_to_reporting(1, 'voice', ['RAT_A', 'G Level 4', 'Call Family'])
+
+    # Simulate a CDR that received its derived field after its first reporting
+    # copy. The cache must not retain the original null value indefinitely.
+    repository.replace_dataset_rows(1, pd.DataFrame({
+        'RAT_A': ['EN-DC'], 'G_Level_4': ['London'], 'Call Family': ['VoLTE'],
+    }))
+    repository.copy_dataset_rows_to_reporting(1, 'voice', ['RAT_A', 'G Level 4', 'Call Family'])
+
+    loaded = repository.load_reporting_rows('voice', [1], ['G Level 4', 'Call Family'])
+    assert loaded.to_dict(orient='records') == [{'G Level 4': 'London', 'Call Family': 'VoLTE'}]
 
 
 def test_session_classification_and_multivendor_enrichment() -> None:

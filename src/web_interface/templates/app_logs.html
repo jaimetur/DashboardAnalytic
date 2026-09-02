@@ -48,7 +48,7 @@
     </div>
     <div class="table-wrap">
       <table class="app-logs-table">
-        <thead><tr><th>ID</th><th>Date</th><th>User</th><th>Type</th><th>Action</th><th>Summary</th><th>Details</th></tr></thead>
+        <thead><tr><th>ID</th><th>Date</th><th>User</th><th>Type</th><th>Action</th><th>Details</th></tr></thead>
         <tbody>
           {% for row in logs %}
           <tr data-app-log-row data-app-log-user="{{ row.username }}" data-app-log-date="{{ row.date }}" data-app-log-type="{{ row.log_type }}" data-app-log-action="{{ row.action }}">
@@ -57,13 +57,12 @@
             <td>{{ row.username }}</td>
             <td><span class="log-type-badge log-type-{{ row.log_type | lower }}">{{ row.log_type }}</span></td>
             <td>{{ row.action }}</td>
-            <td>{{ row.summary }}</td>
             <td><code>{{ row.details_text }}</code></td>
           </tr>
           {% else %}
-          <tr><td colspan="7"><article class="empty-state-inline">No application log entries yet.</article></td></tr>
+          <tr><td colspan="6"><article class="empty-state-inline">No application log entries yet.</article></td></tr>
           {% endfor %}
-          <tr data-app-log-no-results hidden><td colspan="7"><article class="empty-state-inline">No entries match the current filters.</article></td></tr>
+          <tr data-app-log-no-results hidden><td colspan="6"><article class="empty-state-inline">No entries match the current filters.</article></td></tr>
         </tbody>
       </table>
     </div>
