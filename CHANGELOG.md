@@ -10,6 +10,7 @@
 #### 🚀 Enhancements:
 
 #### 🐛 Bug fixes:
+- Fixed Report Charts failures to return actionable JSON errors and record Error events in App Logs instead of exposing a browser JSON parsing error.
 
 #### 📚 Documentation:
 

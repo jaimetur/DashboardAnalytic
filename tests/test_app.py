@@ -12,7 +12,7 @@ import pandas as pd
 from fastapi import BackgroundTasks
 
 from src.modules.auth import hash_password
-from src.version import __release_date__
+from src.version import __release_date__, __version__
 
 def login(client) -> None:
     response = client.post("/login", data={"username": "admin", "password": "admin123"}, follow_redirects=False)
@@ -1851,7 +1851,7 @@ def test_top_navigation_shows_document_links(client) -> None:
     response = client.get("/workspace")
     assert response.status_code == 200
     assert "<h1>Dashboard Analytic</h1>" in response.text
-    assert f"v0.2.0 · {__release_date__}" in response.text
+    assert f"v{__version__} · {__release_date__}" in response.text
     assert 'href="/documents/view/readme"' in response.text
     assert 'href="/documents/view/changelog"' in response.text
     assert 'href="/documents/view/help"' in response.text

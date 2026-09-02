@@ -2255,7 +2255,7 @@ def describe_workspace_log_entry(log: dict[str, Any]) -> str:
 
 
 def classify_workspace_log_entry(log: dict[str, Any]) -> str:
-    if log.get('action') in {
+    if str(log.get('action') or '').endswith('_failed') or log.get('action') in {
         'process_dataset_failed', 'analyze_dataset_failed', 'analyze_dataset_warning',
         'map_dataset_vendors_failed', 'clear_dataset_vendors_failed',
     }:
@@ -3361,26 +3361,35 @@ def generate_netcheck_cdr_charts(
         if multivendor:
             frames = {kind: ensure_report_vendor_group(frame) for kind, frame in frames.items()}
     except ValueError as exc:
+        repository.add_log(user.username, 'preview_netcheck_cdr_report_charts_failed', json.dumps({
+            'technology': technology, 'scope': report_scope, 'template': selected_catalogue['name'], 'error': str(exc),
+        }))
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    rendered_charts: list[tuple[dict[str, Any], bytes]] = []
-    for entry in catalog_entries:
-        if not entry.source_kind:
-            continue
-        image = render_catalog_chart_preview(frames[entry.source_kind], entry, multivendor=multivendor)
-        rendered_charts.append(({
-            'slide': entry.slide,
-            'title': entry.chart_title or entry.slide_title or f'Slide {entry.slide}',
-            'source': entry.cdr_source,
-            'chart_type': entry.chart_type,
-        }, image))
-    if not rendered_charts:
-        raise HTTPException(status_code=400, detail='The selected Slides Template does not contain automated CDR charts.')
-    report_charts = persist_report_charts(
-        selected_catalogue['name'],
-        report_scope,
-        rendered_charts,
-        {kind: len(datasets) for kind, datasets in selected.items()},
-    )
+    try:
+        rendered_charts: list[tuple[dict[str, Any], bytes]] = []
+        for entry in catalog_entries:
+            if not entry.source_kind:
+                continue
+            image = render_catalog_chart_preview(frames[entry.source_kind], entry, multivendor=multivendor)
+            rendered_charts.append(({
+                'slide': entry.slide,
+                'title': entry.chart_title or entry.slide_title or f'Slide {entry.slide}',
+                'source': entry.cdr_source,
+                'chart_type': entry.chart_type,
+            }, image))
+        if not rendered_charts:
+            raise ValueError('The selected Slides Template does not contain automated CDR charts.')
+        report_charts = persist_report_charts(
+            selected_catalogue['name'],
+            report_scope,
+            rendered_charts,
+            {kind: len(datasets) for kind, datasets in selected.items()},
+        )
+    except Exception as exc:
+        repository.add_log(user.username, 'preview_netcheck_cdr_report_charts_failed', json.dumps({
+            'technology': technology, 'scope': report_scope, 'template': selected_catalogue['name'], 'error': str(exc),
+        }))
+        raise HTTPException(status_code=500, detail=f'Unable to generate report charts: {exc}') from exc
     repository.add_log(user.username, 'preview_netcheck_cdr_report_charts', json.dumps({
         'technology': technology,
         'scope': report_scope,

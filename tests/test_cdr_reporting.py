@@ -790,6 +790,35 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert client.get(f"/api/reporting/chart-sets/{payload['generation']}").status_code == 404
 
 
+def test_report_chart_generation_failures_return_json_and_are_logged(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    for filename, kind, content in (
+        ('NetCheck_CDR_Data.csv', 'data', b'RAT,Operator,Mean_Data_Rate\nENDC,Vodafone UK,42\n'),
+        ('NetCheck_CDR_Voice.csv', 'voice', b'RAT_A,Operator,Call_Status\nENDC,Vodafone UK,Completed\n'),
+        ('NetCheck_CDR_Speech.csv', 'speech', b'Sample_RAT_A,Operator,LQ\nENDC,Vodafone UK,3.8\n'),
+    ):
+        upload = client.post('/dashboard/upload', data={'dataset_kinds': kind}, files={'dataset_files': (filename, BytesIO(content), 'text/csv')})
+        assert upload.status_code == 200
+
+    def fail_render(*_args, **_kwargs):
+        raise RuntimeError('Synthetic renderer failure')
+
+    monkeypatch.setattr(app_module, 'render_catalog_chart_preview', fail_render)
+    response = client.post('/reporting/netcheck-cdr/charts', data={
+        'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
+        'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',
+    })
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Unable to generate report charts: Synthetic renderer failure'
+    log = next(row for row in app_module.repository.list_logs() if row['action'] == 'preview_netcheck_cdr_report_charts_failed')
+    assert 'Synthetic renderer failure' in log['details']
+    app_log = next(row for row in app_module.build_app_logs() if row['action'] == 'preview_netcheck_cdr_report_charts_failed')
+    assert app_log['log_type'] == 'Error'
+
+
 def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 

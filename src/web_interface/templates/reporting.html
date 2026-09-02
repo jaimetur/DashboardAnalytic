@@ -662,7 +662,14 @@
       showLoadingOverlay('Generating report charts', 'Please wait while the selected template charts are rendered from the selected CDRs.');
       try {
         const response = await fetch('/reporting/netcheck-cdr/charts', {method: 'POST', body: new FormData(reportForm), credentials: 'same-origin'});
-        const payload = await response.json();
+        const responseBody = await response.text();
+        let payload = {};
+        try {
+          payload = responseBody ? JSON.parse(responseBody) : {};
+        } catch (_error) {
+          const status = response.status ? ` (HTTP ${response.status})` : '';
+          throw new Error(`The chart generation service returned an invalid response${status}. Check App Logs or the server logs for details.`);
+        }
         if (!response.ok) throw new Error(payload.detail || 'Unable to generate report charts.');
         renderReportCharts(payload);
         hideLoadingOverlay();
