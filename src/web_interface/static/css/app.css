@@ -395,8 +395,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .admin-stack .catalogue-reenumerate-button:hover:not(:disabled) { background: linear-gradient(145deg, #cbc0e6, #a891d1); color: #392855; }
 .catalogue-editor-helper { position: fixed; z-index: 3000; display: grid; width: min(390px, calc(100vw - 24px)); max-height: min(580px, calc(100vh - 24px)); gap: 0.75rem; padding: 2.5rem 1rem 1rem; overflow: auto; border: 1px solid rgba(54, 72, 82, 0.24); border-radius: 16px; background: linear-gradient(145deg, #ffffff, #f1f5f6); box-shadow: 0 18px 42px rgba(25, 42, 52, 0.24); }
 .catalogue-editor-helper[hidden] { display: none !important; }
-.catalogue-editor-helper-close { position: absolute; top: 0.55rem; left: 0.55rem; display: inline-grid; width: 1.7rem; min-width: 1.7rem; height: 1.7rem; min-height: 1.7rem; padding: 0; place-items: center; border-radius: 999px; border-color: rgba(71, 101, 115, 0.30); background: #eef3f5; color: #365d70; font-size: 1.2rem; line-height: 1; box-shadow: none; }
-.catalogue-editor-helper-close:hover:not(:disabled) { border-color: rgba(54, 72, 82, 0.55); background: #dce7eb; color: #1f333d; box-shadow: none; }
+.catalogue-editor-helper-close { position: absolute; top: 0.55rem; right: 0.55rem; display: inline-grid; width: 1.7rem; min-width: 1.7rem; height: 1.7rem; min-height: 1.7rem; padding: 0; place-items: center; border-color: rgba(157, 36, 48, 0.52); background: linear-gradient(145deg, #d94b59, #ae2635); color: #ffffff; font-size: 1.2rem; line-height: 1; box-shadow: none; }
+.catalogue-editor-helper-close:hover:not(:disabled) { border-color: rgba(123, 24, 35, 0.72); background: linear-gradient(145deg, #bd3443, #851b29); color: #ffffff; box-shadow: none; }
 .catalogue-editor-helper h3, .catalogue-editor-helper p { margin: 0; }
 .catalogue-editor-helper [hidden] { display: none; }
 .catalogue-editor-helper h3 { color: #263b45; font-size: 1.05rem; }

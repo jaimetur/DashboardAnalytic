@@ -622,7 +622,30 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     setupSearchableSingleSelects();
     positionCellAssistance(cell);
   };
-  const selectedCellFromEvent = (event) => event.target.closest?.('[data-catalogue-field]');
+  const selectedCellFromEvent = (event) => {
+    const cell = event.target.closest?.('[data-catalogue-field]');
+    if (!cell) return null;
+    const viewport = table.closest('.table-wrap');
+    if (!viewport) return cell;
+    const viewportBounds = viewport.getBoundingClientRect();
+    const cellBounds = cell.getBoundingClientRect();
+    const cellIsVisible = (
+      cellBounds.right > viewportBounds.left
+      && cellBounds.left < viewportBounds.right
+      && cellBounds.bottom > viewportBounds.top
+      && cellBounds.top < viewportBounds.bottom
+    );
+    const clickIsVisible = (
+      typeof event.clientX !== 'number'
+      || (
+        event.clientX >= viewportBounds.left
+        && event.clientX <= viewportBounds.right
+        && event.clientY >= viewportBounds.top
+        && event.clientY <= viewportBounds.bottom
+      )
+    );
+    return cellIsVisible && clickIsVisible ? cell : null;
+  };
 
   const updateRowActionStates = () => {
     const rows = Array.from(table.querySelectorAll('tbody tr'));
@@ -922,7 +945,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (cell) selectCell(cell);
   });
   document.addEventListener('pointerdown', (event) => {
-    if (!event.target.closest?.('[data-catalogue-field]') && !helper.contains(event.target)) hideCellAssistance();
+    if (!selectedCellFromEvent(event) && !helper.contains(event.target)) hideCellAssistance();
   });
   table.closest('.table-wrap')?.addEventListener('scroll', hideCellAssistance, {passive: true});
   helperClose?.addEventListener('click', hideCellAssistance);
