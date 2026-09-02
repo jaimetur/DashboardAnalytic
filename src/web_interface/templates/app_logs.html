@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="dashboard-stack spacious-stack">
+  <article class="panel hero-panel app-logs-hero">
+    <div class="section-head tight-head">
+      <div>
+        <p class="eyebrow">Application activity</p>
+        <h2>App Logs</h2>
+      </div>
+      {% if active_workspace %}<span class="pill live-pill">Workspace: {{ active_workspace.name }}</span>{% endif %}
+    </div>
+    <p class="lede">Review access, configuration, dataset processing and reporting activity recorded for the active workspace.</p>
+  </article>
+
+  <article class="panel app-logs-panel" data-app-logs-panel>
+    <div class="section-head tight-head">
+      <div>
+        <p class="eyebrow">Application Events</p>
+        <h2>App Logs</h2>
+      </div>
+      <span class="pill">{{ logs | length }} entries</span>
+    </div>
+    {% if active_workspace %}
+    <div class="app-logs-filters" aria-label="App Log filters">
+      <label>User
+        <select data-app-log-user-filter>
+          <option value="all">All users</option>
+          {% for username in log_users %}<option value="{{ username }}">{{ username }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Date
+        <input type="date" data-app-log-date-filter>
+      </label>
+      <label>Type
+        <select data-app-log-type-filter>
+          <option value="all">All events</option>
+          <option value="Info">Info only</option>
+          <option value="Error">Error only</option>
+        </select>
+      </label>
+      <label>Action
+        <select data-app-log-action-filter>
+          <option value="all">All actions</option>
+          {% for action in log_actions %}<option value="{{ action }}">{{ action }}</option>{% endfor %}
+        </select>
+      </label>
+      <button type="button" class="app-logs-clear-button" data-app-log-clear-filters>Clear Filters</button>
+    </div>
+    <div class="table-wrap">
+      <table class="app-logs-table">
+        <thead><tr><th>ID</th><th>Date</th><th>User</th><th>Type</th><th>Action</th><th>Summary</th><th>Details</th></tr></thead>
+        <tbody>
+          {% for row in logs %}
+          <tr data-app-log-row data-app-log-user="{{ row.username }}" data-app-log-date="{{ row.date }}" data-app-log-type="{{ row.log_type }}" data-app-log-action="{{ row.action }}">
+            <td>{{ row.id }}</td>
+            <td>{{ row.created_at }}</td>
+            <td>{{ row.username }}</td>
+            <td><span class="log-type-badge log-type-{{ row.log_type | lower }}">{{ row.log_type }}</span></td>
+            <td>{{ row.action }}</td>
+            <td>{{ row.summary }}</td>
+            <td><code>{{ row.details_text }}</code></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7"><article class="empty-state-inline">No application log entries yet.</article></td></tr>
+          {% endfor %}
+          <tr data-app-log-no-results hidden><td colspan="7"><article class="empty-state-inline">No entries match the current filters.</article></td></tr>
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="lede">Open a workspace from Workspace Management to review its App Logs.</p>
+    {% endif %}
+  </article>
+</section>
+{% endblock %}
