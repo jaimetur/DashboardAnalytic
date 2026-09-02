@@ -415,6 +415,11 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const filterBuilder = editor.querySelector('[data-catalogue-filter-builder]');
   const filterConditions = editor.querySelector('[data-catalogue-filter-conditions]');
   const addFilter = editor.querySelector('[data-catalogue-filter-add]');
+  const chartPreview = editor.querySelector('[data-catalogue-chart-preview]');
+  const chartPreviewTitle = editor.querySelector('[data-catalogue-chart-preview-title]');
+  const chartPreviewSummary = editor.querySelector('[data-catalogue-chart-preview-summary]');
+  const chartPreviewTable = editor.querySelector('[data-catalogue-chart-preview-table]');
+  const chartPreviewClose = editor.querySelector('[data-catalogue-chart-preview-close]');
   if (!table || !saveForm || !contentField || !heading || !copy || !optionsLabel || !options || !apply) return;
 
   let suggestions = {};
@@ -618,6 +623,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       createActionButton('↓', 'down', 'Move row down'),
       createActionButton('+', 'insert', 'Insert a row below'),
       createActionButton('−', 'delete', 'Delete row', 'catalogue-row-delete'),
+      ...(String(source['CDR source'] || '').trim() ? [createActionButton('👁', 'preview', 'Preview chart data')] : []),
     );
     row.append(actions);
     catalogueHeaders.forEach((header) => {
@@ -685,6 +691,55 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (!body) return;
     renderCatalogueRows(Array.from(body.querySelectorAll('tr')).map(rowValues));
   };
+  const serialiseCatalogueContent = () => {
+    const escapeCsv = (value) => {
+      const text = String(value || '').replace(/\r?\n/g, '\\n');
+      return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    normaliseCatalogueRows();
+    const rows = Array.from(table.querySelectorAll('tbody tr')).map((row) => (
+      catalogueHeaders.map((header) => escapeCsv(rowValue(row, header))).join(',')
+    ));
+    return [catalogueHeaders.map(escapeCsv).join(','), ...rows].join('\n');
+  };
+  const renderChartPreview = (payload) => {
+    if (!chartPreview || !chartPreviewTable || !chartPreviewTitle || !chartPreviewSummary) return;
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    const columns = Array.isArray(payload.summary?.columns) ? payload.summary.columns : [];
+    chartPreviewTitle.textContent = `${payload.chart_title || 'Selected chart'} · ${payload.source || ''}`;
+    chartPreviewSummary.textContent = `${payload.summary?.matched_rows ?? 0} matching rows from ${payload.summary?.source_rows ?? 0}; showing ${payload.summary?.shown_rows ?? 0}. Filters: ${payload.filters || 'No filters'}.`;
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[character]));
+    chartPreviewTable.innerHTML = columns.length
+      ? `<thead><tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join('')}</tr></thead><tbody>${rows.length ? rows.map((item) => `<tr>${columns.map((column) => `<td>${escapeHtml(item[column])}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${columns.length}">No rows match this chart definition.</td></tr>`}</tbody>`
+      : '<tbody><tr><td>No chart fields are available to preview.</td></tr></tbody>';
+    chartPreview.hidden = false;
+  };
+  const closeChartPreview = () => { if (chartPreview) chartPreview.hidden = true; };
+  chartPreviewClose?.addEventListener('click', closeChartPreview);
+  chartPreview?.addEventListener('click', (event) => { if (event.target === chartPreview) closeChartPreview(); });
+  const previewChartData = async (row) => {
+    const endpoint = editor.dataset.chartPreviewUrl;
+    if (!endpoint) return;
+    const rowIndex = Array.from(table.querySelectorAll('tbody tr')).indexOf(row);
+    if (rowIndex < 0) return;
+    const button = row.querySelector('[data-catalogue-row-action="preview"]');
+    if (button) button.disabled = true;
+    showLoadingOverlay('Generating Chart Data Preview', 'Please wait while the Chart Data Preview is generated.');
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({catalogue_content: serialiseCatalogueContent(), row_index: rowIndex}),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Unable to preview chart data.');
+      renderChartPreview(payload);
+    } catch (error) {
+      showInfoDialog(error instanceof Error ? error.message : 'Unable to preview chart data.', {title: 'Chart Data Preview', tone: 'error'});
+    } finally {
+      hideLoadingOverlay();
+      if (button) button.disabled = false;
+    }
+  };
   table.addEventListener('click', async (event) => {
     const button = event.target.closest?.('[data-catalogue-row-action]');
     if (!button) return;
@@ -693,6 +748,10 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const body = row?.parentElement;
     if (!row || !body) return;
     const action = button.dataset.catalogueRowAction;
+    if (action === 'preview') {
+      await previewChartData(row);
+      return;
+    }
     if (action === 'insert') {
       const slide = rowValue(row, 'Slide');
       const nextRow = row.nextElementSibling;
@@ -778,6 +837,9 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const cell = selectedCellFromEvent(event);
     if (cell) selectCell(cell);
   });
+  table.addEventListener('focusout', (event) => {
+    if (event.target.closest?.('[data-catalogue-field="CDR source"]')) normaliseCatalogueRows();
+  });
   addFilter?.addEventListener('click', () => addFilterCondition());
   apply.addEventListener('click', () => {
     if (!activeCell) return;
@@ -801,15 +863,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     activeCell.focus();
   });
   saveForm.addEventListener('submit', () => {
-    const escapeCsv = (value) => {
-      const text = String(value || '').replace(/\r?\n/g, '\\n');
-      return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-    };
-    normaliseCatalogueRows();
-    const rows = Array.from(table.querySelectorAll('tbody tr')).map((row) => (
-      catalogueHeaders.map((header) => escapeCsv(rowValue(row, header))).join(',')
-    ));
-    contentField.value = [catalogueHeaders.map(escapeCsv).join(','), ...rows].join('\n');
+    contentField.value = serialiseCatalogueContent();
   });
 });
 

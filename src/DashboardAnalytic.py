@@ -33,7 +33,7 @@ from starlette.datastructures import QueryParams
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, render_cdr_report, update_catalogue_document
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, preview_catalog_chart_data, render_cdr_report, update_catalogue_document
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
@@ -4462,6 +4462,53 @@ def save_report_catalogue(
     }))
     query = urlencode({'catalogue_technology': technology, 'catalogue_id': catalogue_id})
     return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/admin/report-templates/{technology}/{catalogue_id}/chart-preview')
+async def preview_report_template_chart(
+    request: Request,
+    technology: str,
+    catalogue_id: str,
+    user: SessionUser = Depends(admin_user),
+) -> JSONResponse:
+    """Preview one unsaved editor chart against ready CDRs in this workspace."""
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace before previewing chart data.')
+    technology = technology.strip().lower()
+    if technology not in TEMPLATE_NAMES or not _named_catalogue(technology, catalogue_id):
+        raise HTTPException(status_code=404, detail='Slides Template not found.')
+    try:
+        payload = await request.json()
+        entries = parse_catalog_csv(str(payload.get('catalogue_content') or ''), technology)
+        row_index = int(payload.get('row_index'))
+        entry = entries[row_index]
+    except (ValueError, TypeError, IndexError) as exc:
+        raise HTTPException(status_code=400, detail=f'Unable to preview this chart: {exc}') from exc
+    if not entry.source_kind:
+        raise HTTPException(status_code=400, detail='Only chart rows with a CDR source can be previewed.')
+
+    frames: list[pd.DataFrame] = []
+    for dataset in repository.list_datasets():
+        if str(dataset['dataset_kind'] or '').casefold() != entry.source_kind or dataset['status'] != 'ready':
+            continue
+        dataset_id = int(dataset['id'])
+        repository.materialize_cdr_derived_dimensions(dataset_id)
+        columns = repository.list_dataset_row_columns(dataset_id)
+        if columns:
+            frames.append(repository.load_dataset_rows(dataset_id, columns, {}))
+    if not frames:
+        raise HTTPException(status_code=400, detail=f'No processed {entry.cdr_source} datasets are available in the active workspace.')
+    try:
+        preview, summary = preview_catalog_chart_data(pd.concat(frames, ignore_index=True, sort=False), entry)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse({
+        'chart_title': entry.chart_title or f'Slide {entry.slide}',
+        'source': entry.cdr_source,
+        'filters': entry.filters or 'No filters',
+        'summary': summary,
+        'rows': preview.where(pd.notna(preview), '').astype(str).to_dict(orient='records'),
+    })
 
 
 @app.get('/admin/report-templates/{technology}/export')

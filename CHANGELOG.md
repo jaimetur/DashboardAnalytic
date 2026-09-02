@@ -47,6 +47,7 @@
 - Kept the current module open when switching the active workspace from the header.
 - Serialised dataset processing per workspace so retries wait as queued work while another dataset is processing.
 - Materialised `Call Family` and `Test Family` as inspectable CDR dimensions, with light-grey Preview styling for derived fields.
+- Added per-chart Slides Templates Editor previews using the current unsaved filters, aggregations and resolved derived dimensions.
 
 #### 🐛 Bug fixes:
 - Preserved all chart-definition values during template migration, normalisation, sorting and visual merging; fixed defaults, renames, deletion protection, editor selection and report placeholder generation.

@@ -234,7 +234,7 @@
     </section>
     {% if catalogue_editor %}
     <p class="lede">Rows are ordered by Slide and alternate by slide block. When a slide contains several charts, its shared slide number, title, subtitle and layout are shown once and apply to the full slide block; saving writes those values back to every chart row in the CSV. Select a cell to edit it manually or use the contextual suggestions on the right.</p>
-    <div class="slides-templates-editor-grid" data-catalogue-editor data-editor-suggestions='{{ catalogue_editor.suggestions | tojson }}'>
+    <div class="slides-templates-editor-grid" data-catalogue-editor data-editor-suggestions='{{ catalogue_editor.suggestions | tojson }}' data-chart-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-preview">
       <form class="slides-templates-editor-table-wrap" action="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/save" method="post" data-catalogue-editor-save>
         <input type="hidden" name="catalogue_content" value="" data-catalogue-editor-content>
         <div class="table-wrap">
@@ -248,6 +248,7 @@
                   <button type="button" data-catalogue-row-action="down" title="Move row down" aria-label="Move row down">↓</button>
                   <button type="button" data-catalogue-row-action="insert" title="Insert a row below" aria-label="Insert a row below">+</button>
                   <button type="button" class="catalogue-row-delete" data-catalogue-row-action="delete" title="Delete row" aria-label="Delete row">−</button>
+                  {% if row.get('CDR source') %}<button type="button" data-catalogue-row-action="preview" title="Preview chart data" aria-label="Preview chart data">👁</button>{% endif %}
                 </td>
                 {% for header in catalogue_editor.headers %}<td contenteditable="true" spellcheck="false" data-catalogue-field="{{ header }}">{{ row.get(header, '') }}</td>{% endfor %}
               </tr>
@@ -287,6 +288,19 @@
         </section>
         <p class="table-help">You can always type any value directly into the selected cell. For Filters, complete the proposed column with an operator and value, for example <code>Operator IN (EE, 3)</code>.</p>
       </aside>
+      <div class="confirm-overlay catalogue-chart-preview-overlay" data-catalogue-chart-preview hidden>
+        <section class="confirm-panel catalogue-chart-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="catalogue-chart-preview-title">
+          <div class="catalogue-chart-preview-header">
+            <div>
+              <p class="eyebrow">Chart data preview</p>
+              <h3 id="catalogue-chart-preview-title" data-catalogue-chart-preview-title>Selected chart</h3>
+            </div>
+            <button type="button" class="catalogue-chart-preview-close" data-catalogue-chart-preview-close aria-label="Close chart data preview" title="Close">×</button>
+          </div>
+          <p data-catalogue-chart-preview-summary></p>
+          <div class="table-wrap"><table data-catalogue-chart-preview-table></table></div>
+        </section>
+      </div>
     </div>
     {% else %}
     <p class="lede">Choose <strong>Edit</strong> next to any NSA or SA workspace template above to open it here. The editor saves directly to that template, so exporting and re-importing is not required.</p>

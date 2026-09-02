@@ -1066,6 +1066,59 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
     return frame, primary, series
 
 
+def preview_catalog_chart_data(frame: pd.DataFrame, entry: CatalogEntry, *, limit: int = 200) -> tuple[pd.DataFrame, dict[str, object]]:
+    """Return the exact, post-filter rows supplied to one template chart.
+
+    This deliberately shares the reporting filter and grouping resolution so
+    the editor can expose derived dimensions (for example ``Rate Bucket``)
+    without asking users to reproduce report logic by hand.
+    """
+    if not entry.source_kind:
+        raise ValueError('Only chart rows with a CDR source can be previewed.')
+    spec = _catalog_spec(entry)
+    metric = _metric_column(frame, spec)
+    filtered = _apply_catalog_filters(frame, entry, False, metric)
+    grouped, primary, series = _apply_catalog_grouping(filtered, entry, False, metric)
+    display_columns: list[tuple[str, str]] = []
+
+    def include(source: str | None, label: str) -> None:
+        if source and source in grouped.columns:
+            display_columns.append((source, label))
+
+    # Include the physical/effective CDR fields referenced by every part of
+    # the chart definition, not only the synthetic labels used by renderers.
+    bucket_edges = _catalog_bucket_edges(entry)
+    for condition in parse_catalog_filters(entry.filters):
+        if _normalise_catalog_name(condition.column) not in {'threshold', 'buckets'}:
+            include(_catalog_column(grouped, condition.column, False, metric, bucket_edges, operator_as_vendor=False), f'Filter · {condition.column}')
+    for axis, grouping in (('Rows Aggregation', entry.grouping_rows), ('Column Aggregation', entry.grouping_columns)):
+        for dimension in parse_catalog_grouping(grouping).dimensions:
+            include(_catalog_column(grouped, dimension, False, metric, bucket_edges), f'{axis} · {dimension}')
+    include(metric, f'KPI · {metric}' if metric else 'KPI')
+    include(primary, 'Resolved Rows Aggregation')
+    include(series, 'Resolved Column Aggregation')
+    include('__catalog_stack', 'Resolved Stack Aggregation')
+
+    # Legend is a set of explicit chart captions rather than a CDR field. It
+    # is still exposed in the preview so every chart-definition input is
+    # visible in one place.
+    legend_labels = ', '.join(_legend_labels(entry.legend)) or '(automatic)'
+    if display_columns:
+        result = pd.concat(
+            [grouped[source].rename(label) for source, label in display_columns],
+            axis=1,
+        ).head(max(1, min(int(limit), 500))).copy()
+    else:
+        result = grouped.head(max(1, min(int(limit), 500))).copy()
+    result.insert(len(result.columns), 'Legend captions', legend_labels)
+    return result, {
+        'source_rows': len(frame.index),
+        'matched_rows': len(filtered.index),
+        'shown_rows': len(result.index),
+        'columns': list(result.columns),
+    }
+
+
 def _matches(frame: pd.DataFrame, column: str | None, tokens: tuple[str, ...] | None) -> pd.Series:
     if not column or not tokens:
         return pd.Series(True, index=frame.index)
