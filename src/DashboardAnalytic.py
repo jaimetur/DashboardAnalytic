@@ -3182,6 +3182,7 @@ def serialize_report_job(row: Any) -> dict[str, Any]:
         'slides': slide_count or None,
         'type': str(row['technology'] or '').upper() or '—',
         'multivendor': 'Yes' if str(row['scope'] or '').casefold() == 'multivendor' else 'No',
+        'scope': 'Multivendor Comparison' if str(row['scope'] or '').casefold() == 'multivendor' else 'Operator Comparison',
         'generated_by': str(row['created_by'] or '—'),
         'status': status_value,
         'progress': int(row['progress'] or 0),
