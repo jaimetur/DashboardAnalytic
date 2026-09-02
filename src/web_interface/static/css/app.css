@@ -305,7 +305,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .slides-templates-editor-grid { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, 0.34fr); gap: 1rem; align-items: start; }
 .slides-templates-editor-table-wrap { min-width: 0; }
 .slides-templates-editor-table-wrap > .table-wrap { max-height: 620px; overflow: auto; overscroll-behavior: contain; }
-.slides-templates-editor-table { --catalogue-actions-width: 190px; min-width: 1680px; border-collapse: separate; border-spacing: 0; border: 1px solid rgba(75, 32, 138, 0.28); }
+.slides-templates-editor-table { --catalogue-actions-width: 190px; --catalogue-slide-width: 48px; min-width: 1680px; border-collapse: separate; border-spacing: 0; border: 1px solid rgba(75, 32, 138, 0.28); }
 .slides-templates-editor-table thead th { position: sticky; top: 0; z-index: 2; background: #eee7f8; }
 .slides-templates-editor-table th, .slides-templates-editor-table td { min-width: 125px; border-right: 1px solid rgba(75, 32, 138, 0.20); border-bottom: 1px solid rgba(75, 32, 138, 0.20); vertical-align: middle; }
 .slides-templates-editor-table th:last-child, .slides-templates-editor-table td:last-child { border-right: 0; }
@@ -314,10 +314,13 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .slides-templates-editor-table .catalogue-shared-slide-cell { color: inherit; font-weight: inherit; }
 .slides-templates-editor-table .catalogue-row-actions-heading, .slides-templates-editor-table .catalogue-row-actions { position: sticky; left: 0; box-sizing: border-box; min-width: var(--catalogue-actions-width); width: var(--catalogue-actions-width); padding: 0.35rem 0.25rem; border-right: 1px solid rgba(75, 32, 138, 0.20); text-align: center; }
 .slides-templates-editor-table .catalogue-row-actions-heading { z-index: 7; background: #eee7f8; }
-.slides-templates-editor-table .catalogue-row-actions { z-index: 4; display: table-cell; vertical-align: middle; white-space: nowrap; background: #f8f4fb; }
-.slides-templates-editor-table th:nth-child(2), .slides-templates-editor-table td[data-catalogue-field="Slide"] { position: sticky; left: var(--catalogue-actions-width); box-sizing: border-box; min-width: 48px; width: 48px; box-shadow: 3px 0 5px rgba(46, 29, 72, 0.10); }
-.slides-templates-editor-table th:nth-child(2) { z-index: 6; background: #eee7f8; }
-.slides-templates-editor-table td[data-catalogue-field="Slide"] { z-index: 3; background: #f8f4fb; }
+.slides-templates-editor-table .catalogue-row-actions { z-index: 4; display: table-cell; vertical-align: middle; white-space: nowrap; text-align: left; background: #f8f4fb; }
+.slides-templates-editor-table th:nth-child(2), .slides-templates-editor-table td[data-catalogue-field="Slide"] { position: sticky; left: var(--catalogue-actions-width); box-sizing: border-box; min-width: var(--catalogue-slide-width); width: var(--catalogue-slide-width); padding-right: 0.35rem; padding-left: 0.35rem; white-space: nowrap; }
+.slides-templates-editor-table th:nth-child(2) { z-index: 8; background: #eee7f8; }
+.slides-templates-editor-table td[data-catalogue-field="Slide"] { z-index: 5; background: #f8f4fb; }
+.slides-templates-editor-table th:nth-child(3), .slides-templates-editor-table td[data-catalogue-field="Slide tittle"] { position: sticky; left: calc(var(--catalogue-actions-width) + var(--catalogue-slide-width)); box-sizing: border-box; box-shadow: 3px 0 5px rgba(46, 29, 72, 0.10); }
+.slides-templates-editor-table th:nth-child(3) { z-index: 7; background: #eee7f8; }
+.slides-templates-editor-table td[data-catalogue-field="Slide tittle"] { z-index: 4; background: #f8f4fb; }
 .slides-templates-editor-table td[data-catalogue-field="Slide"]:focus, .slides-templates-editor-table td[data-catalogue-field="Slide"].is-selected { background: #ece0ff; }
 .slides-templates-editor-table th:nth-child(3), .slides-templates-editor-table td[data-catalogue-field="Slide tittle"] { min-width: 205px; width: 205px; }
 .slides-templates-editor-table th:nth-child(4), .slides-templates-editor-table td[data-catalogue-field="Slide Subtittle"] { min-width: 185px; width: 185px; }
@@ -329,8 +332,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .slides-templates-editor-table td:focus, .slides-templates-editor-table td.is-selected { outline: 3px solid rgba(103, 61, 167, 0.28); outline-offset: -3px; background: rgba(236, 224, 255, 0.72); }
 .slides-templates-editor-table tbody tr.catalogue-slide-tone-purple td { background: #f6f1fc; }
 .slides-templates-editor-table tbody tr.catalogue-slide-tone-pink td { background: #eee7f8; }
-.slides-templates-editor-table tbody tr.catalogue-slide-tone-purple td.catalogue-row-actions, .slides-templates-editor-table tbody tr.catalogue-slide-tone-purple td[data-catalogue-field="Slide"] { background: #eee5f8; }
-.slides-templates-editor-table tbody tr.catalogue-slide-tone-pink td.catalogue-row-actions, .slides-templates-editor-table tbody tr.catalogue-slide-tone-pink td[data-catalogue-field="Slide"] { background: #e4d9f2; }
+.slides-templates-editor-table tbody tr.catalogue-slide-tone-purple td.catalogue-row-actions, .slides-templates-editor-table tbody tr.catalogue-slide-tone-purple td[data-catalogue-field="Slide"], .slides-templates-editor-table tbody tr.catalogue-slide-tone-purple td[data-catalogue-field="Slide tittle"] { background: #eee5f8; }
+.slides-templates-editor-table tbody tr.catalogue-slide-tone-pink td.catalogue-row-actions, .slides-templates-editor-table tbody tr.catalogue-slide-tone-pink td[data-catalogue-field="Slide"], .slides-templates-editor-table tbody tr.catalogue-slide-tone-pink td[data-catalogue-field="Slide tittle"] { background: #e4d9f2; }
 .slides-templates-editor-table tbody tr.catalogue-slide-tone-purple td:focus, .slides-templates-editor-table tbody tr.catalogue-slide-tone-purple td.is-selected { background: #e6d8f5; }
 .slides-templates-editor-table tbody tr.catalogue-slide-tone-pink td:focus, .slides-templates-editor-table tbody tr.catalogue-slide-tone-pink td.is-selected { background: #ded1ef; }
 .catalogue-row-actions button { min-width: 1.55rem; min-height: 1.45rem; margin: 0 0.1rem; padding: 0.12rem 0.3rem; border-radius: 999px; background: #dceaf2; border-color: #b4cfde; color: #365d70; font-size: 0.73rem; font-weight: 800; line-height: 1; box-shadow: none; }
