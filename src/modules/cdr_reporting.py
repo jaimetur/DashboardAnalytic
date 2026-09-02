@@ -1119,6 +1119,13 @@ def preview_catalog_chart_data(frame: pd.DataFrame, entry: CatalogEntry, *, limi
     }
 
 
+def render_catalog_chart_preview(frame: pd.DataFrame, entry: CatalogEntry) -> bytes:
+    """Render the same PNG chart used by a report for editor preview."""
+    if not entry.source_kind:
+        raise ValueError('Only chart rows with a CDR source can be previewed.')
+    return _chart_for_catalog_entry(entry, {entry.source_kind: frame}, False).getvalue()
+
+
 def _matches(frame: pd.DataFrame, column: str | None, tokens: tuple[str, ...] | None) -> pd.Series:
     if not column or not tokens:
         return pd.Series(True, index=frame.index)

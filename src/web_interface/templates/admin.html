@@ -234,7 +234,7 @@
     </section>
     {% if catalogue_editor %}
     <p class="lede">Rows are ordered by Slide and alternate by slide block. When a slide contains several charts, its shared slide number, title, subtitle and layout are shown once and apply to the full slide block; saving writes those values back to every chart row in the CSV. Select a cell to edit it manually or use the contextual suggestions on the right.</p>
-    <div class="slides-templates-editor-grid" data-catalogue-editor data-editor-suggestions='{{ catalogue_editor.suggestions | tojson }}' data-chart-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-preview">
+    <div class="slides-templates-editor-grid" data-catalogue-editor data-editor-suggestions='{{ catalogue_editor.suggestions | tojson }}' data-chart-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-preview" data-chart-image-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-image-preview">
       <form class="slides-templates-editor-table-wrap" action="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/save" method="post" data-catalogue-editor-save>
         <input type="hidden" name="catalogue_content" value="" data-catalogue-editor-content>
         <div class="table-wrap">
@@ -248,7 +248,7 @@
                   <button type="button" data-catalogue-row-action="down" title="Move row down" aria-label="Move row down">↓</button>
                   <button type="button" data-catalogue-row-action="insert" title="Insert a row below" aria-label="Insert a row below">+</button>
                   <button type="button" class="catalogue-row-delete" data-catalogue-row-action="delete" title="Delete row" aria-label="Delete row">−</button>
-                  {% if row.get('CDR source') %}<button type="button" data-catalogue-row-action="preview" title="Preview chart data" aria-label="Preview chart data">👁</button>{% endif %}
+                  {% if row.get('CDR source') %}<button type="button" data-catalogue-row-action="preview" title="Preview chart data" aria-label="Preview chart data">▥</button><button type="button" data-catalogue-row-action="chart-preview" title="Preview generated chart" aria-label="Preview generated chart">👁</button>{% endif %}
                 </td>
                 {% for header in catalogue_editor.headers %}<td contenteditable="true" spellcheck="false" data-catalogue-field="{{ header }}">{{ row.get(header, '') }}</td>{% endfor %}
               </tr>
@@ -299,6 +299,7 @@
           </div>
           <p data-catalogue-chart-preview-summary></p>
           <div class="table-wrap"><table data-catalogue-chart-preview-table></table></div>
+          <div class="catalogue-chart-preview-image" data-catalogue-chart-preview-image hidden><img alt="Generated chart preview" data-catalogue-chart-preview-image-content></div>
         </section>
       </div>
     </div>
