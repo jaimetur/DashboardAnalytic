@@ -22,14 +22,14 @@
     </div>
     {% if active_workspace %}
     <div class="app-logs-filters" aria-label="App Log filters">
+      <label>Date
+        <input type="date" data-app-log-date-filter>
+      </label>
       <label>User
         <select data-app-log-user-filter>
           <option value="all">All users</option>
           {% for username in log_users %}<option value="{{ username }}">{{ username }}</option>{% endfor %}
         </select>
-      </label>
-      <label>Date
-        <input type="date" data-app-log-date-filter>
       </label>
       <label>Type
         <select data-app-log-type-filter>

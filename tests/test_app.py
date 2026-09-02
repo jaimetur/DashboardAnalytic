@@ -2810,6 +2810,7 @@ def test_app_logs_combines_operational_and_audit_activity(client) -> None:
     response = client.get("/app-logs")
     assert response.status_code == 200
     assert "App Logs" in response.text
+    assert response.text.index('data-app-log-date-filter') < response.text.index('data-app-log-user-filter')
     assert "All events" in response.text
     assert "Info only" in response.text
     assert "Error only" in response.text
