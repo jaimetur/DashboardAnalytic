@@ -55,7 +55,11 @@
 - Made Reporting panels collapsible and added a module selector that switches between NetCheck CDR Reports and Smart Orchestrator Logs Reports.
 - Added Generate Report Charts to E2E Reporting module to visualize all Charts included in the pre-selected report.
 - Persisted Report Charts as selectable timestamped workspace sets, with template labels, complete-set deletion and an enlarged first/previous/next/last viewer.
+- Expanded Report Charts set controls with scope-aware selection plus selected-set and confirmed all-set deletion.
+- Added per-source CDR counts to persisted Report Charts sets, their selector labels and report metadata badges.
 - Unified PowerPoint and Report Charts rendering, clarified missing hierarchy combinations, and rotated crowded chart grouping labels by 45°.
+- Reserved adaptive chart title and row-label gutters so hierarchical captions no longer overlap plots or axes.
+- Improved dense horizontal failure charts with centred count labels and visible fallbacks for narrow stacked segments.
 
 #### 🐛 Bug fixes:
 - Preserved all chart-definition values during template migration, normalisation, sorting and visual merging; fixed defaults, renames, deletion protection, editor selection and report placeholder generation.
@@ -76,6 +80,9 @@
 - Fixed blank Slides Templates so they open as an editable empty canvas, and fixed the editor selector to always show the template actually opened.
 - Fixed queued dataset and report jobs left by an application restart so they become retryable failures instead of remaining stalled.
 - Fixed large workspaces delaying application startup while derived CDR fields were being backfilled; older datasets now update on first Preview or Reporting use.
+- Fixed report materialisation of equivalent CDR headings (for example `G_Level_4` / `G Level 4`) and refreshed stale derived dimensions so PPT and Report Charts receive the same source fields as the editor.
+- Reserved a dedicated right-side legend lane in hierarchical failure charts so legends no longer overlap rotated column headings.
+- Fixed Generated Reports Jobs width stability while reports are processing, preventing the longer status badge from pushing the table outside its panel.
 
 #### 📚 Documentation:
 - Reworked the Help, README and configuration documentation for the current workspace, template, reporting and transfer workflows.

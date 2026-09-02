@@ -1169,7 +1169,9 @@ def test_failed_vendor_mapping_keeps_the_cdr_available(client) -> None:
     dataset = next(item for item in client.get('/api/datasets/status').json()['datasets'] if item['id'] == 1)
     assert dataset['status'] == 'ready'
     assert client.get('/workspace/preview/1').status_code == 200
-    assert 'Vendor mapping failed for CDR dataset 1' in client.get('/app-logs').text
+    app_logs = client.get('/app-logs').text
+    assert 'map_dataset_vendors_failed' in app_logs
+    assert 'Cell ID field' in app_logs
 
 
 def test_workspace_recovers_legacy_vendor_mapping_failures(client) -> None:

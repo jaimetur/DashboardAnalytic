@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _hierarchical_unique_keys, _layout_chart_frames, _named_slide_layout, _render_failure_count, _render_status_100, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _hierarchical_unique_keys, _layout_chart_frames, _named_slide_layout, _render_failure_count, _render_failure_count_hierarchy, _render_status_100, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -518,6 +518,24 @@ def test_failure_count_uses_row_and_column_hierarchies_without_flattening() -> N
     assert hierarchy_renderer.call_args.args[3] == ['__catalog_column_0', '__catalog_column_1']
 
 
+def test_failure_hierarchy_reserves_a_right_legend_lane() -> None:
+    frame = pd.DataFrame({
+        '__catalog_row_0': ['VoLTE'],
+        '__catalog_column_0': ['Vodafone'],
+        '__catalog_column_1': ['2026 Q2'],
+        '__catalog_failure_state': ['Failed'],
+    })
+
+    with patch('src.modules.cdr_reporting._draw_chart_legend') as draw_legend:
+        _render_failure_count_hierarchy(
+            'Voice failures per Q/city', frame,
+            ['__catalog_row_0'], ['__catalog_column_0', '__catalog_column_1'],
+            legend_position='right',
+        )
+
+    assert draw_legend.call_args.kwargs['side_x'] == 1289
+
+
 def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> None:
     entries = load_catalog_csv(Path(__file__).parent / 'fixtures' / 'NSA Slide Template.csv', 'nsa')
     slide_ten = [entry for entry in entries if entry.slide == 10]
@@ -738,6 +756,7 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     payload = response.json()
     assert payload['template'] == 'NSA Slide Template'
     assert payload['scope'] == 'single'
+    assert payload['dataset_counts'] == {'data': 1, 'voice': 1, 'speech': 1}
     assert re.fullmatch(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', payload['generated_at'])
     assert payload['charts']
     image_url = payload['charts'][0]['image_url']
@@ -757,10 +776,18 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert client.get(image_url).content == b'PNG'
     page = client.get('/reporting')
     assert image_url in page.text
+    assert 'Operator Comparison' in page.text
+    assert '(Data:1|Voice:1|Speech:1)' in page.text
+    assert 'Delete Selected Charts Set' in page.text
+    assert 'Delete All Charts Sets' in page.text
     assert 'data-report-chart-viewer' in page.text
     assert 'data-report-chart-viewer-canvas' in page.text
     assert 'data-report-chart-zoom-reset' in page.text
     assert rendered and all(multivendor is False for _, multivendor in rendered)
+    cleared = client.post('/reporting/chart-sets/delete-all')
+    assert cleared.status_code == 200
+    assert cleared.json()['chart_sets'] == []
+    assert client.get(f"/api/reporting/chart-sets/{payload['generation']}").status_code == 404
 
 
 def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, monkeypatch) -> None:

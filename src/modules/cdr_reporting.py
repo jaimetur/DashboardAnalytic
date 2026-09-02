@@ -1196,6 +1196,7 @@ def _draw_chart_legend(
     *,
     font_size: int = 15,
     line_markers: bool = False,
+    side_x: int | None = None,
 ) -> None:
     """Draw a template legend in a row (top/bottom) or column (left/right)."""
     horizontal = position in {"top", "bottom"}
@@ -1210,7 +1211,7 @@ def _draw_chart_legend(
                 draw.rectangle((x, y, x + 18, y + 18), fill=colour)
             draw.text((x + 27, y - 1), caption[:28], fill="#34495A", font=_font(font_size))
         return
-    x, start_y = (26 if position == "left" else 1400), 126
+    x, start_y = (side_x if side_x is not None else (26 if position == "left" else 1400)), 126
     for index, (caption, colour, width) in enumerate(items):
         y = start_y + index * 28
         if line_markers:
@@ -1373,7 +1374,15 @@ def _render_status_100_hierarchy(
     image, draw = _canvas(title)
     # Reserve a dedicated header band below the chart title.  Rotated vendor /
     # operator captions can be tall, so they must never share the title area.
-    chart_left, chart_top, chart_width, chart_height = 205, 245, 1190, 510
+    row_labels = [" · ".join(str(value) for value in row_key) for row_key in row_keys]
+    row_label_font = _font(16)
+    widest_row_label = max((_text_width(draw, label, row_label_font) for label in row_labels), default=0)
+    # Leave a measured gutter for row labels, percentage ticks and a visual
+    # gap before the plot.  Fixed gutters caused long FDFS/test-family labels
+    # to cross the y axis on multi-pane charts.
+    chart_left = max(205, min(540, 24 + widest_row_label + 92))
+    chart_top, chart_right, chart_height = 245, 1395, 510
+    chart_width = chart_right - chart_left
     row_height = chart_height / len(row_keys)
     column_width = chart_width / len(column_keys)
     bar_width = max(18, min(86, column_width * 0.68))
@@ -1406,9 +1415,9 @@ def _render_status_100_hierarchy(
     for row_index, row_key in enumerate(row_keys):
         pane_top = chart_top + row_index * row_height
         pane_bottom = pane_top + row_height
-        row_label = " · ".join(str(value) for value in row_key)
+        row_label = row_labels[row_index]
         if row_label:
-            draw.text((24, pane_top + row_height / 2 - 10), row_label[:24], fill="#566A78", font=_font(16))
+            draw.text((24, pane_top + row_height / 2 - 10), row_label, fill="#566A78", font=row_label_font)
         draw.line((24, pane_bottom, chart_left + chart_width, pane_bottom), fill="#D7DEE3", width=1)
         ticks = (0, 50, 100) if row_index == len(row_keys) - 1 else (50, 100)
         for tick in ticks:
@@ -1516,7 +1525,11 @@ def _render_failure_count_hierarchy(
     image, draw = _canvas(title)
     # See the status renderer above: hierarchy captions use the space between
     # the title and the plot, not the title itself.
-    chart_left, chart_top, chart_width, chart_height = 285, 245, 1250, 510
+    chart_left, chart_top, chart_height = 285, 245, 510
+    # A right-side legend needs its own canvas lane. Without reserving it, the
+    # diagonal outer column captions extend into the legend area on dense
+    # hierarchy charts (for example Operator × Campaign failure matrices).
+    chart_width = 980 if legend_position == "right" else 1250
     row_height = chart_height / len(row_keys)
     column_width = chart_width / len(column_keys)
     colours = {"Failed": "#E15759", "Dropped": "#F28E2B"}
@@ -1581,19 +1594,44 @@ def _render_failure_count_hierarchy(
             cell_left = chart_left + column_index * column_width
             available_width = max(column_width - 10, 1)
             x = cell_left + 4
-            bar_height = max(8, min(20, row_height * 0.58))
+            # Dense failure charts can contain dozens of city rows.  Reserve
+            # enough height for a real count label rather than rendering a
+            # clipped white glyph against the bar edge.
+            bar_height = max(12, min(22, row_height * 0.84))
             y = row_top + (row_height - bar_height) / 2
+            count_font = _font(10, True)
+            outside_counts: list[str] = []
             for state in ("Failed", "Dropped"):
                 count = state_counts[state]
                 segment_width = available_width * count / maximum
                 if segment_width:
                     draw.rectangle((x, y, x + segment_width, y + bar_height), fill=colours[state])
-                    if segment_width >= 14:
-                        draw.text((x + 3, y + 2), str(count), fill="white", font=_font(10, True))
+                    label = str(count)
+                    label_width = _text_width(draw, label, count_font)
+                    if segment_width >= label_width + 10:
+                        label_box = draw.textbbox((0, 0), label, font=count_font)
+                        label_height = label_box[3] - label_box[1]
+                        draw.text(
+                            (x + (segment_width - label_width) / 2, y + (bar_height - label_height) / 2 - label_box[1]),
+                            label, fill="white", font=count_font,
+                        )
+                    else:
+                        outside_counts.append(label)
                 x += segment_width
+            if outside_counts:
+                # Keep labels visible even when an individual stacked segment
+                # is too narrow. The ordered values still follow Failed,
+                # Dropped as documented by the legend.
+                draw.text((x + 3, y + 1), " / ".join(outside_counts), fill="#34495A", font=count_font)
 
     draw.line((chart_left + chart_width, chart_top - 24, chart_left + chart_width, chart_top + chart_height + 25), fill="#D5DDE2", width=1)
-    _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colours[state], 2) for index, state in enumerate(("Failed", "Dropped"))], legend_position, font_size=13)
+    _draw_chart_legend(
+        draw,
+        [(_legend_caption(legend_labels, index, state), colours[state], 2) for index, state in enumerate(("Failed", "Dropped"))],
+        legend_position,
+        font_size=13,
+        side_x=int(chart_left + chart_width + 24) if legend_position == "right" else None,
+    )
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0)
     return output
 

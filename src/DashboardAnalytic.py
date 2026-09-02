@@ -3375,7 +3375,12 @@ def generate_netcheck_cdr_charts(
         }, image))
     if not rendered_charts:
         raise HTTPException(status_code=400, detail='The selected Slides Template does not contain automated CDR charts.')
-    report_charts = persist_report_charts(selected_catalogue['name'], report_scope, rendered_charts)
+    report_charts = persist_report_charts(
+        selected_catalogue['name'],
+        report_scope,
+        rendered_charts,
+        {kind: len(datasets) for kind, datasets in selected.items()},
+    )
     repository.add_log(user.username, 'preview_netcheck_cdr_report_charts', json.dumps({
         'technology': technology,
         'scope': report_scope,
@@ -3418,9 +3423,22 @@ def _report_chart_payload(manifest: dict[str, Any], generation: str) -> dict[str
         'generation': generation,
         'template': str(manifest.get('template') or ''),
         'scope': str(manifest.get('scope') or 'single'),
+        'dataset_counts': _report_chart_dataset_counts(manifest.get('dataset_counts')),
         'generated_at': format_local_timestamp(manifest.get('generated_at')),
         'charts': charts,
     }
+
+
+def _report_chart_dataset_counts(value: Any) -> dict[str, int]:
+    """Return safe per-source CDR counts from a Report Charts manifest."""
+    source = value if isinstance(value, dict) else {}
+    counts: dict[str, int] = {}
+    for kind in ('data', 'voice', 'speech'):
+        try:
+            counts[kind] = max(0, int(source.get(kind, 0)))
+        except (TypeError, ValueError):
+            counts[kind] = 0
+    return counts
 
 
 def _migrate_legacy_report_charts() -> None:
@@ -3461,13 +3479,13 @@ def load_persisted_report_charts(generation: str) -> dict[str, Any] | None:
     return _report_chart_payload(manifest, generation) if isinstance(manifest, dict) else None
 
 
-def list_persisted_report_chart_sets() -> list[dict[str, str]]:
+def list_persisted_report_chart_sets() -> list[dict[str, Any]]:
     """List valid saved chart sets, newest first, after migrating the old layout."""
     _migrate_legacy_report_charts()
     directory = report_charts_directory()
     if not directory.is_dir():
         return []
-    sets: list[dict[str, str]] = []
+    sets: list[dict[str, Any]] = []
     for child in directory.iterdir():
         if not child.is_dir() or not _valid_report_chart_generation(child.name):
             continue
@@ -3477,12 +3495,18 @@ def list_persisted_report_chart_sets() -> list[dict[str, str]]:
                 'generation': child.name,
                 'template': str(payload['template']),
                 'scope': str(payload['scope']),
+                'dataset_counts': payload['dataset_counts'],
                 'generated_at': str(payload['generated_at']),
             })
     return sorted(sets, key=lambda item: (item['generated_at'], item['generation']), reverse=True)
 
 
-def persist_report_charts(template_name: str, scope: str, rendered_charts: list[tuple[dict[str, Any], bytes]]) -> dict[str, Any]:
+def persist_report_charts(
+    template_name: str,
+    scope: str,
+    rendered_charts: list[tuple[dict[str, Any], bytes]],
+    dataset_counts: dict[str, int],
+) -> dict[str, Any]:
     """Persist a new timestamped Report Charts set without removing older sets."""
     destination = report_charts_directory()
     destination.mkdir(parents=True, exist_ok=True)
@@ -3503,6 +3527,7 @@ def persist_report_charts(template_name: str, scope: str, rendered_charts: list[
         manifest = {
             'template': template_name,
             'scope': scope,
+            'dataset_counts': _report_chart_dataset_counts(dataset_counts),
             'generation': target.name,
             'generated_at': datetime.now().astimezone().isoformat(timespec='seconds'),
             'charts': manifest_charts,
@@ -3534,6 +3559,18 @@ def report_chart_set(generation: str, user: SessionUser = Depends(current_user))
     if payload is None:
         raise HTTPException(status_code=404, detail='Chart set not found.')
     return JSONResponse(payload)
+
+
+@app.post('/reporting/chart-sets/delete-all')
+def delete_all_report_chart_sets(user: SessionUser = Depends(current_user)) -> JSONResponse:
+    """Remove every persisted Report Charts set for the active workspace."""
+    chart_sets = list_persisted_report_chart_sets()
+    for chart_set in chart_sets:
+        directory = safe_join(report_charts_directory(), str(chart_set['generation']))
+        if directory.is_dir():
+            shutil.rmtree(directory)
+    repository.add_log(user.username, 'delete_all_report_chart_sets', json.dumps({'count': len(chart_sets)}))
+    return JSONResponse({'chart_sets': []})
 
 
 @app.post('/reporting/chart-sets/{generation}/delete')

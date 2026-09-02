@@ -381,12 +381,14 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-jobs-table tbody tr:hover { background: rgba(211, 198, 237, 0.62); }
 .report-jobs-table th:nth-child(2), .report-jobs-table td:nth-child(2) { min-width: 145px; }
 .report-jobs-table th:nth-child(3), .report-jobs-table td:nth-child(3) { width: 132px; min-width: 132px; max-width: 132px; white-space: normal; overflow-wrap: normal; }
-.report-jobs-table th:nth-child(4), .report-jobs-table td:nth-child(4) { width: 195px; min-width: 185px; max-width: 200px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
-.report-jobs-table th:nth-child(7), .report-jobs-table td:nth-child(7) { min-width: 180px; }
+.report-jobs-table th:nth-child(4), .report-jobs-table td:nth-child(4) { width: 180px; min-width: 170px; max-width: 185px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.report-jobs-table th:nth-child(7), .report-jobs-table td:nth-child(7) { min-width: 165px; }
+.report-jobs-table th:nth-child(10), .report-jobs-table td:nth-child(10) { width: 92px; min-width: 92px; max-width: 92px; }
 .report-job-datasets { display: flex; flex-direction: column; align-items: flex-start; gap: 0.12rem; white-space: normal !important; }
 .report-job-dataset-kind { color: #5d3b86; font-weight: 800; margin-top: 0.18rem; }
 .report-job-progress { display: flex; align-items: center; gap: 0.45rem; min-width: 122px; font-variant-numeric: tabular-nums; }
 .report-job-progress progress { width: 82px; accent-color: #4b208a; }
+.report-jobs-table .queue-status-pill { box-sizing: border-box; max-width: 100%; padding: 0.34rem 0.46rem; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .report-job-actions { display: flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
 .report-job-download-button { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; padding: 0; border: 1px solid rgba(116, 87, 164, 0.62); border-radius: 999px; background: linear-gradient(145deg, #6d46a8, #9870d0); color: #fff; font-size: 1.2rem; line-height: 1; font-weight: 800; text-decoration: none; box-shadow: 0 8px 18px rgba(95, 69, 142, 0.18); }
 .report-job-download-button:hover:not(.action-link-disabled) { background: linear-gradient(145deg, #4f2d82, #7549b0); border-color: rgba(79, 45, 130, 0.78); color: #fff; box-shadow: 0 10px 22px rgba(79, 45, 130, 0.32); transform: translateY(-1px); }
@@ -477,10 +479,14 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .module-hero-reporting .reporting-module-selector select { min-height: 2.5rem; border-color: rgba(255, 255, 255, 0.5); background: rgba(255, 255, 255, 0.96); color: #43206e; box-shadow: none; }
 .module-hero-reporting .reporting-module-selector select:focus { border-color: #fff; outline-color: rgba(255, 255, 255, 0.42); }
 .reporting-stack .collapsible-summary .summary-inline-actions { display: flex; align-items: center; gap: 0.65rem; margin-left: auto; }
+.report-charts-chart-count { margin-top: 0.5rem; }
+.report-charts-chart-count .pill { background: linear-gradient(135deg, #dff3ff, #b9ddf5); border-color: rgba(42, 117, 164, 0.32); color: #1f5f8d; }
+.report-charts-panel .collapsible-summary > .summary-inline-actions { flex: 0 0 auto; width: max-content; max-width: 100%; margin-left: auto; justify-content: flex-end; gap: 0.35rem; flex-wrap: nowrap; }
+.report-charts-panel .collapsible-summary > .summary-inline-actions .pill { flex: 0 1 auto; min-width: 0; padding: 0.38rem 0.58rem; font-size: 0.82rem; line-height: 1.1; white-space: nowrap; }
 .report-charts-panel[hidden] { display: none; }
 .report-chart-set-controls { display: flex; align-items: end; gap: 0.75rem; margin-bottom: 1rem; }
-.report-chart-set-controls label { flex: 1 1 22rem; max-width: 38rem; }
-.report-chart-set-delete { flex: 0 0 auto; margin-bottom: 0.02rem; }
+.report-chart-set-controls label { flex: 1 1 30rem; max-width: 48rem; }
+.report-chart-set-delete, .report-chart-set-delete-all { flex: 0 0 auto; margin-bottom: 0.02rem; }
 .report-charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1rem; margin-top: 1rem; }
 .report-chart-card { min-width: 0; padding: 0.9rem; border: 1px solid rgba(75, 32, 138, 0.22); border-radius: 14px; background: linear-gradient(145deg, #fffaff, #f2eaff); box-shadow: 0 10px 22px rgba(75, 32, 138, 0.08); }
 .report-chart-card-head { display: flex; align-items: start; justify-content: space-between; gap: 0.65rem; margin-bottom: 0.65rem; }
