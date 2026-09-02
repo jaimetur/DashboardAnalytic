@@ -63,10 +63,18 @@
   <details class="panel collapsible-panel reporting-panel report-charts-panel" open data-panel-state-key="reporting:report-charts" data-reporting-module-panel="cdr" data-report-charts-panel hidden>
     <summary class="collapsible-summary">
       <div><p class="eyebrow">Selected report definition</p><h2>Report Charts</h2></div>
-      <div class="summary-inline-actions"><span class="pill" data-report-charts-count>0 charts</span><span class="collapse-chip">Collapse</span></div>
+      <div class="summary-inline-actions"><span class="pill" data-report-charts-generated-at hidden></span><span class="pill" data-report-charts-template hidden></span><span class="pill" data-report-charts-scope hidden></span><span class="pill" data-report-charts-count>0 charts</span><span class="collapse-chip">Collapse</span></div>
     </summary>
     <div class="collapsible-panel-body">
-      <p class="lede" data-report-charts-copy>Each chart uses the selected CDRs, technology, scope and Slides Template.</p>
+      <div class="report-chart-set-controls">
+        <label>Chart set
+          <select data-report-chart-set aria-label="Chart set">
+            {% for chart_set in report_chart_sets %}<option value="{{ chart_set.generation }}"{% if loop.first %} selected{% endif %}>{{ chart_set.generated_at }} · {{ chart_set.template }}</option>{% endfor %}
+          </select>
+        </label>
+        <button type="button" class="danger-button report-chart-set-delete" data-report-chart-set-delete>Delete Charts Set</button>
+      </div>
+      <p class="lede" data-report-charts-copy>Each chart uses the selected CDRs, technology, scope and Slides Template. Click any chart to enlarge it.</p>
       <div class="report-charts-grid" data-report-charts-body></div>
     </div>
   </details>
@@ -179,7 +187,12 @@
     const reportChartsPanel = document.querySelector('[data-report-charts-panel]');
     const reportChartsBody = document.querySelector('[data-report-charts-body]');
     const reportChartsCount = document.querySelector('[data-report-charts-count]');
+    const reportChartsGeneratedAt = document.querySelector('[data-report-charts-generated-at]');
+    const reportChartsTemplate = document.querySelector('[data-report-charts-template]');
+    const reportChartsScope = document.querySelector('[data-report-charts-scope]');
     const reportChartsCopy = document.querySelector('[data-report-charts-copy]');
+    const reportChartSetSelect = document.querySelector('[data-report-chart-set]');
+    const reportChartSetDelete = document.querySelector('[data-report-chart-set-delete]');
     const reportChartViewer = document.querySelector('[data-report-chart-viewer]');
     const reportChartViewerTitle = document.querySelector('[data-report-chart-viewer-title]');
     const reportChartViewerCount = document.querySelector('[data-report-chart-viewer-count]');
@@ -187,6 +200,7 @@
     const reportChartViewerImage = document.querySelector('[data-report-chart-viewer-image]');
     let reportCharts = [];
     let reportChartIndex = 0;
+    let reportChartSets = {{ report_chart_sets | tojson }};
     const jobsBody = document.querySelector('[data-report-jobs-body]');
     const jobsCount = document.querySelector('[data-report-jobs-count]');
     const jobsEmpty = document.querySelector('[data-report-jobs-empty]');
@@ -329,6 +343,19 @@
     const renderReportCharts = (payload) => {
       const charts = Array.isArray(payload.charts) ? payload.charts : [];
       if (!reportChartsBody) return;
+      if (payload.generation && !reportChartSets.some((chartSet) => chartSet.generation === payload.generation)) {
+        reportChartSets = [{generation: payload.generation, template: payload.template || '', scope: payload.scope || 'single', generated_at: payload.generated_at || ''}, ...reportChartSets];
+      }
+      if (reportChartSetSelect) {
+        reportChartSetSelect.replaceChildren(...reportChartSets.map((chartSet) => {
+          const option = document.createElement('option');
+          option.value = chartSet.generation;
+          option.textContent = `${chartSet.generated_at} · ${chartSet.template}`;
+          return option;
+        }));
+        reportChartSetSelect.value = payload.generation || reportChartSets[0]?.generation || '';
+      }
+      if (reportChartSetDelete) reportChartSetDelete.hidden = !reportChartSets.length;
       reportCharts = charts;
       reportChartsBody.replaceChildren(...charts.map((chart) => {
         const card = document.createElement('article');
@@ -353,10 +380,72 @@
         return card;
       }));
       if (reportChartsCount) reportChartsCount.textContent = `${charts.length} ${charts.length === 1 ? 'chart' : 'charts'}`;
-      if (reportChartsCopy) reportChartsCopy.textContent = `Rendered from ${payload.template || 'the selected Slides Template'} using the selected CDRs, technology and scope.`;
+      if (reportChartsGeneratedAt) {
+        reportChartsGeneratedAt.textContent = payload.generated_at ? `Generated at: ${payload.generated_at}` : '';
+        reportChartsGeneratedAt.hidden = !payload.generated_at;
+      }
+      if (reportChartsTemplate) {
+        reportChartsTemplate.textContent = payload.template ? `Template: ${payload.template}` : '';
+        reportChartsTemplate.hidden = !payload.template;
+      }
+      if (reportChartsScope) {
+        reportChartsScope.textContent = payload.scope ? `Scope: ${payload.scope}` : '';
+        reportChartsScope.hidden = !payload.scope;
+      }
+      if (reportChartsCopy) reportChartsCopy.textContent = `Rendered from ${payload.template || 'the selected Slides Template'} using the selected CDRs, technology and scope. Click any chart to enlarge it.`;
       if (reportChartsPanel) reportChartsPanel.dataset.reportChartsReady = 'true';
       updateReportingModule();
     };
+    reportChartSetSelect?.addEventListener('change', async () => {
+      const generation = reportChartSetSelect.value;
+      if (!generation) return;
+      showLoadingOverlay('Loading chart set', 'Please wait while the selected Report Charts set is loaded.');
+      try {
+        const response = await fetch(`/api/reporting/chart-sets/${encodeURIComponent(generation)}`, {credentials: 'same-origin'});
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || 'Unable to load the selected chart set.');
+        renderReportCharts(payload);
+        hideLoadingOverlay();
+      } catch (error) {
+        hideLoadingOverlay();
+        showInfoDialog(error.message || 'Unable to load the selected chart set.', {title: 'Chart set unavailable', tone: 'error'});
+      }
+    });
+    reportChartSetDelete?.addEventListener('click', async () => {
+      const generation = reportChartSetSelect?.value;
+      if (!generation) return;
+      const selected = reportChartSets.find((chartSet) => chartSet.generation === generation);
+      const accepted = await showConfirmDialog(`Delete the chart set generated at ${selected?.generated_at || generation}? All of its chart files will be removed.`, {title: 'Delete Charts Set', confirmLabel: 'Delete'});
+      if (!accepted) return;
+      showLoadingOverlay('Deleting chart set', 'Please wait while the selected chart set is removed.');
+      try {
+        const response = await fetch(`/reporting/chart-sets/${encodeURIComponent(generation)}/delete`, {method: 'POST', credentials: 'same-origin'});
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || 'Unable to delete the selected chart set.');
+        reportChartSets = Array.isArray(payload.chart_sets) ? payload.chart_sets : [];
+        closeReportChartViewer();
+        if (reportChartSets.length) {
+          const next = await fetch(`/api/reporting/chart-sets/${encodeURIComponent(reportChartSets[0].generation)}`, {credentials: 'same-origin'});
+          const nextPayload = await next.json();
+          if (!next.ok) throw new Error(nextPayload.detail || 'Unable to load the next chart set.');
+          renderReportCharts(nextPayload);
+        } else {
+          reportCharts = [];
+          reportChartsBody?.replaceChildren();
+          reportChartsPanel?.removeAttribute('data-report-charts-ready');
+          if (reportChartsGeneratedAt) reportChartsGeneratedAt.hidden = true;
+          if (reportChartsTemplate) reportChartsTemplate.hidden = true;
+          if (reportChartsScope) reportChartsScope.hidden = true;
+          reportChartSetSelect?.replaceChildren();
+          if (reportChartSetDelete) reportChartSetDelete.hidden = true;
+          updateReportingModule();
+        }
+        hideLoadingOverlay();
+      } catch (error) {
+        hideLoadingOverlay();
+        showInfoDialog(error.message || 'Unable to delete the selected chart set.', {title: 'Delete Charts Set', tone: 'error'});
+      }
+    });
     const openReportChartViewer = (index) => {
       if (!reportCharts.length || !reportChartViewer) return;
       reportChartIndex = Math.max(0, Math.min(index, reportCharts.length - 1));

@@ -718,9 +718,23 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert response.status_code == 200
     payload = response.json()
     assert payload['template'] == 'NSA Slide Template'
+    assert payload['scope'] == 'single'
+    assert re.fullmatch(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', payload['generated_at'])
     assert payload['charts']
     image_url = payload['charts'][0]['image_url']
-    assert image_url.startswith('/reporting/charts/chart-')
+    assert re.match(r'/reporting/charts/\d{8}-\d{6}/chart-\d+\.png\?v=', image_url)
+    assert client.get(image_url).content == b'PNG'
+    second = client.post('/reporting/netcheck-cdr/charts', data={
+        'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
+        'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',
+    })
+    assert second.status_code == 200
+    second_payload = second.json()
+    assert second_payload['generation'] != payload['generation']
+    assert client.get(f"/api/reporting/chart-sets/{payload['generation']}").status_code == 200
+    deleted = client.post(f"/reporting/chart-sets/{second_payload['generation']}/delete")
+    assert deleted.status_code == 200
+    assert [item['generation'] for item in deleted.json()['chart_sets']] == [payload['generation']]
     assert client.get(image_url).content == b'PNG'
     page = client.get('/reporting')
     assert image_url in page.text

@@ -54,7 +54,7 @@
 - Added a dedicated Application Logs tab to view Application Activity with all the events.
 - Made Reporting panels collapsible and added a module selector that switches between NetCheck CDR Reports and Smart Orchestrator Logs Reports.
 - Added Generate Report Charts to E2E Reporting module to visualize all Charts included in the pre-selected report.
-- Persisted Report Charts per workspace until regeneration, with an enlarged chart viewer and first/previous/next/last navigation.
+- Persisted Report Charts as selectable timestamped workspace sets, with template labels, complete-set deletion and an enlarged first/previous/next/last viewer.
 
 #### 🐛 Bug fixes:
 - Preserved all chart-definition values during template migration, normalisation, sorting and visual merging; fixed defaults, renames, deletion protection, editor selection and report placeholder generation.

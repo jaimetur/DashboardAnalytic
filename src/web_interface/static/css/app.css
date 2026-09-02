@@ -478,6 +478,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .module-hero-reporting .reporting-module-selector select:focus { border-color: #fff; outline-color: rgba(255, 255, 255, 0.42); }
 .reporting-stack .collapsible-summary .summary-inline-actions { display: flex; align-items: center; gap: 0.65rem; margin-left: auto; }
 .report-charts-panel[hidden] { display: none; }
+.report-chart-set-controls { display: flex; align-items: end; gap: 0.75rem; margin-bottom: 1rem; }
+.report-chart-set-controls label { flex: 1 1 22rem; max-width: 38rem; }
+.report-chart-set-delete { flex: 0 0 auto; margin-bottom: 0.02rem; }
 .report-charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1rem; margin-top: 1rem; }
 .report-chart-card { min-width: 0; padding: 0.9rem; border: 1px solid rgba(75, 32, 138, 0.22); border-radius: 14px; background: linear-gradient(145deg, #fffaff, #f2eaff); box-shadow: 0 10px 22px rgba(75, 32, 138, 0.08); }
 .report-chart-card-head { display: flex; align-items: start; justify-content: space-between; gap: 0.65rem; margin-bottom: 0.65rem; }
@@ -486,9 +489,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-chart-card img { display: block; width: 100%; height: auto; border: 1px solid rgba(75, 32, 138, 0.16); border-radius: 8px; background: #fff; }
 .report-chart-card { cursor: zoom-in; }
 .report-chart-card:focus-visible { outline: 3px solid rgba(111, 72, 166, 0.45); outline-offset: 3px; }
-.report-chart-viewer-overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 2rem; background: rgba(31, 19, 52, 0.56); z-index: 110; }
+.report-chart-viewer-overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 0.75rem; background: rgba(31, 19, 52, 0.56); z-index: 110; }
 .report-chart-viewer-overlay[hidden] { display: none !important; }
-.report-chart-viewer-dialog { width: min(94vw, 1440px); height: min(91vh, 980px); max-width: none; max-height: none; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 1rem; padding: 1.25rem 1.4rem; }
+.report-chart-viewer-dialog { width: min(calc(100vw - 3rem), 1680px); height: min(calc(100vh - 1.5rem), 1080px); max-width: none; max-height: none; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 1rem; padding: 1.25rem 1.4rem; }
 .report-chart-viewer-header { display: flex; justify-content: space-between; align-items: start; gap: 1rem; }
 .report-chart-viewer-header h3 { margin: 0.12rem 0 0.25rem; }
 .report-chart-viewer-header p { margin: 0; color: var(--muted); }
@@ -962,6 +965,8 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .confirm-overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(9, 17, 24, 0.48); backdrop-filter: blur(12px); z-index: 10000; padding: 1rem; }
 .confirm-overlay[hidden] { display: none !important; }
 .confirm-panel { width: min(92vw, 480px); padding: 1.65rem; border-radius: 28px; background: linear-gradient(180deg, rgba(255, 251, 248, 0.98), rgba(250, 243, 240, 0.96)); box-shadow: 0 40px 90px rgba(18, 32, 43, 0.26); border: 1px solid rgba(255,255,255,0.68); text-align: left; }
+.confirm-overlay.report-chart-viewer-overlay { padding: 0.75rem; background: rgba(31, 19, 52, 0.56); }
+.confirm-panel.report-chart-viewer-dialog { width: min(calc(100vw - 3rem), 1680px) !important; height: min(calc(100vh - 1.5rem), 1080px) !important; max-width: none !important; max-height: none !important; }
 .confirm-icon { display: inline-grid; place-items: center; width: 54px; height: 54px; margin-bottom: 0.9rem; border-radius: 18px; background: linear-gradient(135deg, rgba(200, 74, 74, 0.16), rgba(224, 106, 90, 0.24)); color: #bb3c3c; font-family: "Space Grotesk", "Segoe UI", sans-serif; font-size: 1.6rem; font-weight: 700; box-shadow: inset 0 1px 0 rgba(255,255,255,0.65); }
 .info-icon { background: linear-gradient(135deg, rgba(16, 49, 74, 0.16), rgba(8, 115, 109, 0.24)); color: #08736d; }
 .info-overlay[data-tone="warning"] .info-icon { background: linear-gradient(135deg, rgba(202, 133, 18, 0.18), rgba(238, 181, 65, 0.28)); color: #9b6104; }

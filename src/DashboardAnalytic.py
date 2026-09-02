@@ -3232,6 +3232,7 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
     if not active_workspace:
         return RedirectResponse('/workspace?workspace_warning=Open+a+workspace+before+using+Reporting.', status_code=status.HTTP_303_SEE_OTHER)
     ready_datasets = [serialize_dataset_row(row) for row in repository.list_datasets() if row['status'] == 'ready']
+    report_chart_sets = list_persisted_report_chart_sets()
     return render_template(
         request,
         'reporting.html',
@@ -3245,7 +3246,8 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
                 for technology in TEMPLATE_NAMES
             },
             'report_jobs': [serialize_report_job(row) for row in repository.list_report_runs(limit=None)],
-            'report_charts': load_persisted_report_charts(),
+            'report_chart_sets': report_chart_sets,
+            'report_charts': load_persisted_report_charts(report_chart_sets[0]['generation']) if report_chart_sets else None,
         },
     )
 
@@ -3373,83 +3375,177 @@ def generate_netcheck_cdr_charts(
         }, image))
     if not rendered_charts:
         raise HTTPException(status_code=400, detail='The selected Slides Template does not contain automated CDR charts.')
-    charts = persist_report_charts(selected_catalogue['name'], rendered_charts)
+    report_charts = persist_report_charts(selected_catalogue['name'], report_scope, rendered_charts)
     repository.add_log(user.username, 'preview_netcheck_cdr_report_charts', json.dumps({
         'technology': technology,
         'scope': report_scope,
         'template': selected_catalogue['name'],
         'charts': len(rendered_charts),
     }))
-    return JSONResponse({'template': selected_catalogue['name'], 'charts': charts})
+    return JSONResponse(report_charts)
 
 
 def report_charts_directory() -> Path:
-    """Return the active workspace directory for the latest generated chart set."""
+    """Return the active workspace directory containing timestamped chart sets."""
     return Path(settings.output_dir) / 'report-charts'
 
 
-def _report_chart_payload(manifest: dict[str, Any]) -> dict[str, Any] | None:
+def _valid_report_chart_generation(value: str) -> bool:
+    return bool(re.fullmatch(r'\d{8}-\d{6}(?:-\d+)?', value))
+
+
+def _report_chart_payload(manifest: dict[str, Any], generation: str) -> dict[str, Any] | None:
     directory = report_charts_directory()
+    if not _valid_report_chart_generation(generation) or str(manifest.get('generation') or '') != generation:
+        return None
     charts: list[dict[str, Any]] = []
     for item in manifest.get('charts', []):
         if not isinstance(item, dict):
             continue
         file_name = str(item.get('file') or '')
-        if not re.fullmatch(r'chart-\d+\.png', file_name) or not (directory / file_name).is_file():
+        if not re.fullmatch(r'chart-\d+\.png', file_name) or not (directory / generation / file_name).is_file():
             return None
         charts.append({
             'slide': item.get('slide'),
             'title': str(item.get('title') or ''),
             'source': str(item.get('source') or ''),
             'chart_type': str(item.get('chart_type') or ''),
-            'image_url': f'/reporting/charts/{file_name}?v={manifest.get("generated_at", "")}',
+            'image_url': f'/reporting/charts/{generation}/{file_name}?v={manifest.get("generated_at", "")}',
         })
     if not charts:
         return None
-    return {'template': str(manifest.get('template') or ''), 'charts': charts}
+    return {
+        'generation': generation,
+        'template': str(manifest.get('template') or ''),
+        'scope': str(manifest.get('scope') or 'single'),
+        'generated_at': format_local_timestamp(manifest.get('generated_at')),
+        'charts': charts,
+    }
 
 
-def load_persisted_report_charts() -> dict[str, Any] | None:
-    """Load the most recent complete chart set for the active workspace."""
-    manifest_path = report_charts_directory() / 'manifest.json'
+def _migrate_legacy_report_charts() -> None:
+    """Move the pre-library latest-set layout into its timestamped directory once."""
+    directory = report_charts_directory()
+    manifest_path = directory / 'manifest.json'
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError):
+        return
+    generation = str(manifest.get('generation') or '')
+    if not isinstance(manifest, dict) or not _valid_report_chart_generation(generation):
+        return
+    target = directory / generation
+    suffix = 2
+    while target.exists():
+        target = directory / f'{generation}-{suffix}'
+        suffix += 1
+    target.mkdir(parents=True)
+    manifest['generation'] = target.name
+    for item in manifest.get('charts', []):
+        file_name = str(item.get('file') or '') if isinstance(item, dict) else ''
+        if re.fullmatch(r'chart-\d+\.png', file_name) and (directory / file_name).is_file():
+            (directory / file_name).replace(target / file_name)
+    manifest_path.unlink(missing_ok=True)
+    (target / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
+
+
+def load_persisted_report_charts(generation: str) -> dict[str, Any] | None:
+    """Load one complete timestamped chart set from the active workspace."""
+    if not _valid_report_chart_generation(generation):
+        return None
+    manifest_path = report_charts_directory() / generation / 'manifest.json'
     try:
         manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
     except (OSError, json.JSONDecodeError):
         return None
-    return _report_chart_payload(manifest) if isinstance(manifest, dict) else None
+    return _report_chart_payload(manifest, generation) if isinstance(manifest, dict) else None
 
 
-def persist_report_charts(template_name: str, rendered_charts: list[tuple[dict[str, Any], bytes]]) -> list[dict[str, Any]]:
-    """Atomically replace the workspace's previous Report Charts with a new set."""
+def list_persisted_report_chart_sets() -> list[dict[str, str]]:
+    """List valid saved chart sets, newest first, after migrating the old layout."""
+    _migrate_legacy_report_charts()
+    directory = report_charts_directory()
+    if not directory.is_dir():
+        return []
+    sets: list[dict[str, str]] = []
+    for child in directory.iterdir():
+        if not child.is_dir() or not _valid_report_chart_generation(child.name):
+            continue
+        payload = load_persisted_report_charts(child.name)
+        if payload:
+            sets.append({
+                'generation': child.name,
+                'template': str(payload['template']),
+                'scope': str(payload['scope']),
+                'generated_at': str(payload['generated_at']),
+            })
+    return sorted(sets, key=lambda item: (item['generated_at'], item['generation']), reverse=True)
+
+
+def persist_report_charts(template_name: str, scope: str, rendered_charts: list[tuple[dict[str, Any], bytes]]) -> dict[str, Any]:
+    """Persist a new timestamped Report Charts set without removing older sets."""
     destination = report_charts_directory()
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix='.report-charts-', dir=destination.parent))
+    destination.mkdir(parents=True, exist_ok=True)
+    _migrate_legacy_report_charts()
+    generation = datetime.now().strftime('%Y%m%d-%H%M%S')
+    suffix = 2
+    target = destination / generation
+    while target.exists():
+        target = destination / f'{generation}-{suffix}'
+        suffix += 1
+    staging = Path(tempfile.mkdtemp(prefix='.report-charts-', dir=destination))
     try:
         manifest_charts: list[dict[str, Any]] = []
         for index, (chart, image) in enumerate(rendered_charts, start=1):
             file_name = f'chart-{index:03d}.png'
             (staging / file_name).write_bytes(image)
             manifest_charts.append({**chart, 'file': file_name})
-        manifest = {'template': template_name, 'generated_at': datetime.now().astimezone().isoformat(timespec='seconds'), 'charts': manifest_charts}
+        manifest = {
+            'template': template_name,
+            'scope': scope,
+            'generation': target.name,
+            'generated_at': datetime.now().astimezone().isoformat(timespec='seconds'),
+            'charts': manifest_charts,
+        }
         (staging / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
-        if destination.exists():
-            shutil.rmtree(destination)
-        staging.replace(destination)
+        staging.replace(target)
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    payload = _report_chart_payload(manifest)
-    return payload['charts'] if payload else []
+    payload = _report_chart_payload(manifest, target.name)
+    if payload is None:
+        raise ValueError('Unable to save generated report charts.')
+    return payload
 
 
-@app.get('/reporting/charts/{chart_file}')
-def report_chart_image(chart_file: str, user: SessionUser = Depends(current_user)) -> FileResponse:
-    if not re.fullmatch(r'chart-\d+\.png', chart_file):
+@app.get('/reporting/charts/{generation}/{chart_file}')
+def report_chart_image(generation: str, chart_file: str, user: SessionUser = Depends(current_user)) -> FileResponse:
+    if not _valid_report_chart_generation(generation) or not re.fullmatch(r'chart-\d+\.png', chart_file):
         raise HTTPException(status_code=404, detail='Chart not found.')
-    chart_path = safe_join(report_charts_directory(), chart_file)
+    chart_path = safe_join(report_charts_directory() / generation, chart_file)
     if not chart_path.is_file():
         raise HTTPException(status_code=404, detail='Chart not found.')
     return FileResponse(chart_path, media_type='image/png')
+
+
+@app.get('/api/reporting/chart-sets/{generation}')
+def report_chart_set(generation: str, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    payload = load_persisted_report_charts(generation)
+    if payload is None:
+        raise HTTPException(status_code=404, detail='Chart set not found.')
+    return JSONResponse(payload)
+
+
+@app.post('/reporting/chart-sets/{generation}/delete')
+def delete_report_chart_set(generation: str, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    if not _valid_report_chart_generation(generation):
+        raise HTTPException(status_code=404, detail='Chart set not found.')
+    directory = safe_join(report_charts_directory(), generation)
+    if not directory.is_dir():
+        raise HTTPException(status_code=404, detail='Chart set not found.')
+    shutil.rmtree(directory)
+    repository.add_log(user.username, 'delete_report_chart_set', json.dumps({'generation': generation}))
+    return JSONResponse({'chart_sets': list_persisted_report_chart_sets()})
 
 
 @app.get('/api/reporting/jobs')
