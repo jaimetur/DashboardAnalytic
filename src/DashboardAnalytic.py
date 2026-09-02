@@ -29,6 +29,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.datastructures import QueryParams
+from starlette.background import BackgroundTask
 
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
@@ -3140,6 +3141,85 @@ def _report_job_output_path(row: Any) -> Path | None:
     return None
 
 
+def _report_job_directory(file_name: str, output_dir: Path | None = None) -> Path:
+    """Return the dedicated directory for one generated PowerPoint report."""
+    reports_dir = Path(output_dir or settings.output_dir) / 'reports'
+    stem = Path(file_name).stem
+    return safe_join(reports_dir, stem)
+
+
+def _delete_report_job_artifacts(row: Any) -> None:
+    """Remove a report file and its sibling rendered PNG charts."""
+    path = _report_job_output_path(row)
+    if path is None:
+        return
+    report_dir = _report_job_directory(path.name)
+    if path.parent == report_dir:
+        shutil.rmtree(report_dir, ignore_errors=True)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def _report_job_charts_directory(row: Any) -> Path | None:
+    path = _report_job_output_path(row)
+    if path is None or path.parent != _report_job_directory(path.name):
+        return None
+    directory = path.parent / 'report-charts'
+    return directory if directory.is_dir() else None
+
+
+def _report_job_charts_payload(row: Any) -> dict[str, Any] | None:
+    directory = _report_job_charts_directory(row)
+    if directory is None:
+        return None
+    try:
+        manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError):
+        return None
+    charts: list[dict[str, Any]] = []
+    for item in manifest.get('charts', []) if isinstance(manifest, dict) else []:
+        if not isinstance(item, dict):
+            continue
+        file_name = str(item.get('file') or '')
+        if not re.fullmatch(r'slide-\d+-chart-\d+\.png', file_name) or not (directory / file_name).is_file():
+            return None
+        charts.append({
+            'slide': item.get('slide'), 'title': str(item.get('title') or ''),
+            'source': str(item.get('source') or ''), 'chart_type': str(item.get('chart_type') or ''),
+            'image_url': f"/reporting/jobs/{int(row['id'])}/charts/{file_name}",
+        })
+    if not charts:
+        return None
+    try:
+        dataset_ids = json.loads(row['dataset_ids_json'] or '{}')
+    except (TypeError, json.JSONDecodeError):
+        dataset_ids = {}
+    return {
+        'report_job_id': int(row['id']),
+        'report_name': str(row['output_file'] or ''),
+        'template': str(row['template_name'] or ''), 'scope': str(row['scope'] or 'single'),
+        'generated_at': _local_report_date(row['created_at']),
+        'dataset_counts': {kind: len(dataset_ids.get(kind, [])) for kind in ('data', 'voice', 'speech')},
+        'charts': charts,
+    }
+
+
+def _chart_png_zip_response(directory: Path, filename: str) -> FileResponse:
+    """Return a temporary ZIP containing every rendered PNG in *directory*."""
+    charts = sorted(path for path in directory.glob('*.png') if path.is_file())
+    if not charts:
+        raise HTTPException(status_code=404, detail='Rendered charts are not available.')
+    with tempfile.NamedTemporaryFile(prefix='dashboard-analytic-charts-', suffix='.zip', delete=False) as handle:
+        archive_path = Path(handle.name)
+    with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+        for chart in charts:
+            archive.write(chart, chart.name)
+    return FileResponse(
+        archive_path, filename=filename, media_type='application/zip',
+        background=BackgroundTask(archive_path.unlink, missing_ok=True),
+    )
+
+
 def _local_report_date(value: Any) -> str:
     """Format persisted UTC timestamps in the server's local timezone."""
     raw = str(value or '').strip()
@@ -3189,6 +3269,8 @@ def serialize_report_job(row: Any) -> dict[str, Any]:
         'error': str(row['last_error'] or ''),
         'download_url': f'/reporting/jobs/{report_id}/download' if output_available else None,
         'open_url': f'/reporting/jobs/{report_id}/open' if output_available else None,
+        'charts_url': f'/api/reporting/jobs/{report_id}/charts' if output_available and _report_job_charts_payload(row) else None,
+        'charts_download_url': f'/reporting/jobs/{report_id}/charts/download' if output_available and _report_job_charts_payload(row) else None,
         'delete_url': f'/reporting/jobs/{report_id}/delete',
         'retry_url': f'/reporting/jobs/{report_id}/retry' if status_value == 'failed' else None,
     }
@@ -3210,6 +3292,7 @@ def serialize_report_chart_job(row: Any) -> dict[str, Any]:
     return {
         'id': job_id,
         'date': _local_report_date(row['created_at']),
+        'type': str(row['technology'] or '').upper() or '—',
         'template': str(row['template_name'] or '—'),
         'scope': 'Multivendor Comparison' if str(row['scope'] or '').casefold() == 'multivendor' else 'Operator Comparison',
         'dataset_groups': dataset_groups,
@@ -3220,6 +3303,7 @@ def serialize_report_chart_job(row: Any) -> dict[str, Any]:
         'error': str(row['last_error'] or ''),
         'generation': generation or None,
         'open_url': f'/api/reporting/chart-sets/{generation}' if status_value == 'ready' and generation else None,
+        'charts_download_url': f'/reporting/chart-sets/{generation}/download' if status_value == 'ready' and generation and load_persisted_report_charts(generation) else None,
         'delete_url': f'/reporting/chart-jobs/{job_id}/delete',
         'retry_url': f'/reporting/chart-jobs/{job_id}/retry' if status_value == 'failed' else None,
     }
@@ -3243,7 +3327,10 @@ def _run_netcheck_report_job(
             frames = {kind: ensure_report_vendor_group(frame) for kind, frame in frames.items()}
         destination.parent.mkdir(parents=True, exist_ok=True)
         task_repository.update_report_job(report_id, status='processing', progress=60)
-        render_cdr_report(destination, template, frames, technology, multivendor, catalog_entries)
+        render_cdr_report(
+            destination, template, frames, technology, multivendor, catalog_entries,
+            chart_output_dir=destination.parent / 'report-charts',
+        )
         task_repository.update_report_job(report_id, status='ready', progress=100, last_error='', finished=True)
         task_repository.add_log(username, 'export_netcheck_cdr_report', json.dumps({
             'report_id': report_id,
@@ -3254,7 +3341,10 @@ def _run_netcheck_report_job(
             'file': destination.name,
         }))
     except Exception as exc:
-        destination.unlink(missing_ok=True)
+        if destination.parent == _report_job_directory(destination.name):
+            shutil.rmtree(destination.parent, ignore_errors=True)
+        else:
+            destination.unlink(missing_ok=True)
         task_repository.update_report_job(report_id, status='failed', progress=100, last_error=str(exc), finished=True)
         task_repository.add_log(username, 'export_netcheck_cdr_report_failed', json.dumps({
             'report_id': report_id, 'error': str(exc),
@@ -3267,6 +3357,7 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
         return RedirectResponse('/workspace?workspace_warning=Open+a+workspace+before+using+Reporting.', status_code=status.HTTP_303_SEE_OTHER)
     ready_datasets = [serialize_dataset_row(row) for row in repository.list_datasets() if row['status'] == 'ready']
     report_chart_sets = list_persisted_report_chart_sets()
+    report_jobs = [serialize_report_job(row) for row in repository.list_report_runs(limit=None)]
     return render_template(
         request,
         'reporting.html',
@@ -3279,7 +3370,11 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
                 technology: report_catalogue_options(technology)
                 for technology in TEMPLATE_NAMES
             },
-            'report_jobs': [serialize_report_job(row) for row in repository.list_report_runs(limit=None)],
+            'report_jobs': report_jobs,
+            'report_chart_report_sets': sorted(
+                (job for job in report_jobs if job.get('charts_url')),
+                key=lambda job: str(job.get('date') or ''), reverse=True,
+            ),
             'report_chart_jobs': [serialize_report_chart_job(row) for row in repository.list_report_chart_jobs(limit=None)],
             'report_chart_sets': report_chart_sets,
             'report_charts': load_persisted_report_charts(report_chart_sets[0]['generation']) if report_chart_sets else None,
@@ -3330,9 +3425,10 @@ def generate_netcheck_cdr_report(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Unable to load the selected {technology.upper()} report template: {exc}") from exc
     generated_at = datetime.now().strftime('%Y%m%d-%H%M%S')
-    file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{generated_at}.pptx"
-    reports_dir = Path(settings.output_dir) / 'reports'
-    destination = safe_join(reports_dir, file_name)
+    scope_token = 'by-vendor' if multivendor else 'by-operator'
+    file_name = f"NetCheck_CDR_{technology.upper()}_{scope_token}_{generated_at}.pptx"
+    report_dir = _report_job_directory(file_name)
+    destination = safe_join(report_dir, file_name)
     dataset_ids = {kind: [int(dataset['id']) for dataset in datasets] for kind, datasets in selected.items()}
     report_id = repository.create_report_job(
         report_type='netcheck_cdr', technology=technology, scope=report_scope,
@@ -3469,7 +3565,30 @@ def _run_report_chart_job(
 
 def report_charts_directory(output_dir: Path | None = None) -> Path:
     """Return the active workspace directory containing timestamped chart sets."""
-    return Path(output_dir or settings.output_dir) / 'report-charts'
+    return Path(output_dir or settings.output_dir) / 'charts'
+
+
+def _migrate_report_charts_root(output_dir: Path | None = None) -> None:
+    """Move pre-v0.2.1 Chart Sets from output/report-charts to output/charts."""
+    root = Path(output_dir or settings.output_dir)
+    legacy = root / 'report-charts'
+    destination = report_charts_directory(output_dir)
+    if not legacy.is_dir() or legacy == destination:
+        return
+    destination.mkdir(parents=True, exist_ok=True)
+    for child in legacy.iterdir():
+        target = destination / child.name
+        if target.exists():
+            if child.is_dir():
+                suffix = 2
+                while (destination / f'{child.name}-{suffix}').exists():
+                    suffix += 1
+                target = destination / f'{child.name}-{suffix}'
+            else:
+                child.unlink(missing_ok=True)
+                continue
+        child.replace(target)
+    legacy.rmdir()
 
 
 def _valid_report_chart_generation(value: str) -> bool:
@@ -3558,6 +3677,7 @@ def load_persisted_report_charts(generation: str) -> dict[str, Any] | None:
 
 def list_persisted_report_chart_sets() -> list[dict[str, Any]]:
     """List valid saved chart sets, newest first, after migrating the old layout."""
+    _migrate_report_charts_root()
     _migrate_legacy_report_charts()
     directory = report_charts_directory()
     if not directory.is_dir():
@@ -3586,6 +3706,7 @@ def persist_report_charts(
     output_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Persist a new timestamped Report Charts set without removing older sets."""
+    _migrate_report_charts_root(output_dir)
     destination = report_charts_directory(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
     _migrate_legacy_report_charts(output_dir)
@@ -3631,6 +3752,15 @@ def report_chart_image(generation: str, chart_file: str, user: SessionUser = Dep
     return FileResponse(chart_path, media_type='image/png')
 
 
+@app.get('/reporting/chart-sets/{generation}/download')
+def download_report_chart_set(generation: str, user: SessionUser = Depends(current_user)) -> FileResponse:
+    """Download every PNG belonging to one standalone Chart Set."""
+    if not _valid_report_chart_generation(generation) or load_persisted_report_charts(generation) is None:
+        raise HTTPException(status_code=404, detail='Chart set not found.')
+    directory = safe_join(report_charts_directory(), generation)
+    return _chart_png_zip_response(directory, f'Chart_Set_{generation}.zip')
+
+
 @app.get('/api/reporting/chart-sets/{generation}')
 def report_chart_set(generation: str, user: SessionUser = Depends(current_user)) -> JSONResponse:
     payload = load_persisted_report_charts(generation)
@@ -3643,11 +3773,13 @@ def report_chart_set(generation: str, user: SessionUser = Depends(current_user))
 def delete_all_report_chart_sets(user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Remove every persisted Report Charts set for the active workspace."""
     chart_sets = list_persisted_report_chart_sets()
+    generations = [str(chart_set['generation']) for chart_set in chart_sets]
     for chart_set in chart_sets:
         directory = safe_join(report_charts_directory(), str(chart_set['generation']))
         if directory.is_dir():
             shutil.rmtree(directory)
-    repository.add_log(user.username, 'delete_all_report_chart_sets', json.dumps({'count': len(chart_sets)}))
+    removed_jobs = repository.delete_report_chart_jobs_for_generations(generations)
+    repository.add_log(user.username, 'delete_all_report_chart_sets', json.dumps({'count': len(chart_sets), 'jobs': removed_jobs}))
     return JSONResponse({'chart_sets': []})
 
 
@@ -3659,7 +3791,8 @@ def delete_report_chart_set(generation: str, user: SessionUser = Depends(current
     if not directory.is_dir():
         raise HTTPException(status_code=404, detail='Chart set not found.')
     shutil.rmtree(directory)
-    repository.add_log(user.username, 'delete_report_chart_set', json.dumps({'generation': generation}))
+    removed_jobs = repository.delete_report_chart_jobs_for_generations([generation])
+    repository.add_log(user.username, 'delete_report_chart_set', json.dumps({'generation': generation, 'jobs': removed_jobs}))
     return JSONResponse({'chart_sets': list_persisted_report_chart_sets()})
 
 
@@ -3749,15 +3882,59 @@ def open_report_job(report_id: int, user: SessionUser = Depends(current_user)) -
     return FileResponse(path, filename=payload['report_name'], media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation', content_disposition_type='inline')
 
 
+@app.get('/api/reporting/jobs/{report_id}/charts')
+def report_job_charts(report_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    report = repository.get_report_run(report_id)
+    payload = _report_job_charts_payload(report) if report else None
+    if payload is None:
+        raise HTTPException(status_code=404, detail='Rendered report charts are not available.')
+    return JSONResponse(payload)
+
+
+@app.get('/reporting/jobs/{report_id}/charts/download')
+def download_report_job_charts(report_id: int, user: SessionUser = Depends(current_user)) -> FileResponse:
+    """Download the PNG charts rendered while generating one PowerPoint report."""
+    report = repository.get_report_run(report_id)
+    directory = _report_job_charts_directory(report) if report else None
+    if directory is None or _report_job_charts_payload(report) is None:
+        raise HTTPException(status_code=404, detail='Rendered report charts are not available.')
+    report_name = Path(str(report['output_file'] or 'report')).stem
+    return _chart_png_zip_response(directory, f'{report_name}_charts.zip')
+
+
+@app.get('/reporting/jobs/{report_id}/charts/{chart_file}')
+def report_job_chart_image(report_id: int, chart_file: str, user: SessionUser = Depends(current_user)) -> FileResponse:
+    if not re.fullmatch(r'slide-\d+-chart-\d+\.png', chart_file):
+        raise HTTPException(status_code=404, detail='Chart not found.')
+    report = repository.get_report_run(report_id)
+    directory = _report_job_charts_directory(report) if report else None
+    if directory is None:
+        raise HTTPException(status_code=404, detail='Chart not found.')
+    chart_path = safe_join(directory, chart_file)
+    if not chart_path.is_file():
+        raise HTTPException(status_code=404, detail='Chart not found.')
+    return FileResponse(chart_path, media_type='image/png')
+
+
 @app.post('/reporting/jobs/{report_id}/delete')
 def delete_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     report = repository.delete_report_run(report_id)
     if not report:
         raise HTTPException(status_code=404, detail='Report job not found.')
-    path = _report_job_output_path(report)
-    if path is not None:
-        path.unlink()
+    _delete_report_job_artifacts(report)
     return JSONResponse({'deleted': report_id})
+
+
+@app.post('/reporting/jobs/delete-all')
+def delete_all_report_jobs(user: SessionUser = Depends(current_user)) -> JSONResponse:
+    """Delete every persisted PowerPoint report job and its generated file."""
+    reports = repository.list_report_runs(limit=None)
+    for report in reports:
+        deleted = repository.delete_report_run(int(report['id']))
+        if deleted:
+            _delete_report_job_artifacts(deleted)
+    repository.add_log(user.username, 'delete_all_report_jobs', json.dumps({'count': len(reports)}))
+    return JSONResponse({'deleted': len(reports)})
 
 
 @app.post('/reporting/jobs/{report_id}/retry')
@@ -3794,8 +3971,9 @@ def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) 
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f'Unable to load the selected {technology.upper()} report template: {exc}') from exc
     generated_at = datetime.now().strftime('%Y%m%d-%H%M%S')
-    file_name = f"NetCheck_CDR_{technology.upper()}_{'multivendor' if multivendor else 'single_vendor'}_{generated_at}.pptx"
-    destination = safe_join(Path(settings.output_dir) / 'reports', file_name)
+    scope_token = 'by-vendor' if multivendor else 'by-operator'
+    file_name = f"NetCheck_CDR_{technology.upper()}_{scope_token}_{generated_at}.pptx"
+    destination = safe_join(_report_job_directory(file_name), file_name)
     new_report_id = repository.create_report_job(
         report_type=str(previous['report_type'] or 'netcheck_cdr'), technology=technology, scope=str(previous['scope'] or 'single'),
         data_dataset_id=selected['data'][0]['id'], voice_dataset_id=selected['voice'][0]['id'], speech_dataset_id=selected['speech'][0]['id'],

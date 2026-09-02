@@ -1778,6 +1778,19 @@ class Repository:
                 conn.execute("DELETE FROM report_chart_jobs WHERE id = ?", (job_id,))
             return job
 
+    def delete_report_chart_jobs_for_generations(self, generations: list[str]) -> int:
+        """Remove ready Chart Set jobs whose generated files were deleted."""
+        unique_generations = [value for value in dict.fromkeys(generations) if value]
+        if not unique_generations:
+            return 0
+        placeholders = ','.join('?' for _ in unique_generations)
+        with self.connection() as conn:
+            cursor = conn.execute(
+                f"DELETE FROM report_chart_jobs WHERE generation IN ({placeholders})",
+                unique_generations,
+            )
+            return int(cursor.rowcount)
+
     def fail_interrupted_report_chart_jobs(self) -> list[int]:
         """Make in-process Report Charts work retryable after an app restart."""
         message = 'Interrupted because the application restarted. Retry the job to run it again.'

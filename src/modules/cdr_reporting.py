@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass, replace
@@ -2157,7 +2158,8 @@ def _layout_chart_frames(layout) -> list[tuple[int, int, int, int]]:
 
 
 def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.DataFrame], technology: str,
-                      multivendor: bool, catalog: list[CatalogEntry] | None = None) -> Path:
+                      multivendor: bool, catalog: list[CatalogEntry] | None = None,
+                      chart_output_dir: Path | None = None) -> Path:
     if not template.exists():
         raise FileNotFoundError(f"Reporting template not found: {template.name}")
     if not catalog:
@@ -2168,6 +2170,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
     frames = {source: normalise_report_operator_aliases(frame) for source, frame in frames.items()}
     presentation = Presentation(template)
     _remove_all_slides(presentation)
+    rendered_charts: list[dict[str, object]] = []
 
     catalogue_slides: dict[int, list[CatalogEntry]] = defaultdict(list)
     render_catalog = [prepare_multivendor_catalog_entry(entry) if multivendor else entry for entry in catalog]
@@ -2212,7 +2215,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
         _set_slide_header(slide, header.slide_title, header.slide_subtitle)
         _clear_commentary(slide)
         _remove_template_chart_placeholders(slide)
-        for entry, placement in zip(chart_entries, placement_frames[:len(chart_entries)], strict=True):
+        for chart_index, (entry, placement) in enumerate(zip(chart_entries, placement_frames[:len(chart_entries)], strict=True), start=1):
             # The PowerPoint must consume the exact same renderer used by the
             # editor and Report Charts.  Keeping this call shared prevents an
             # unnoticed drift in normalisation, multivendor preparation or
@@ -2220,6 +2223,19 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
             chart_bytes = render_catalog_chart_preview(
                 frames[entry.source_kind], entry, multivendor=multivendor,
             )
+            if chart_output_dir is not None:
+                chart_output_dir.mkdir(parents=True, exist_ok=True)
+                file_name = f'slide-{number:03d}-chart-{chart_index:02d}.png'
+                (chart_output_dir / file_name).write_bytes(chart_bytes)
+                rendered_charts.append({
+                    'slide': number,
+                    'title': entry.chart_title or entry.slide_title or f'Slide {number}',
+                    'source': entry.cdr_source,
+                    'chart_type': entry.chart_type,
+                    'file': file_name,
+                })
             slide.shapes.add_picture(BytesIO(chart_bytes), *placement)
     presentation.save(destination)
+    if chart_output_dir is not None:
+        (chart_output_dir / 'manifest.json').write_text(json.dumps({'charts': rendered_charts}), encoding='utf-8')
     return destination

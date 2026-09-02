@@ -387,8 +387,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-chart-jobs-table tbody tr:hover { background: rgba(211, 198, 237, 0.62); }
 .report-jobs-table th:nth-child(2), .report-jobs-table td:nth-child(2) { min-width: 145px; }
 .report-jobs-table th:nth-child(3), .report-jobs-table td:nth-child(3) { width: 132px; min-width: 132px; max-width: 132px; white-space: normal; overflow-wrap: normal; }
-.report-jobs-table th:nth-child(4), .report-jobs-table td:nth-child(4) { width: 180px; min-width: 170px; max-width: 185px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
-.report-jobs-table th:nth-child(7), .report-jobs-table td:nth-child(7) { min-width: 165px; }
+.report-jobs-table th:nth-child(5), .report-jobs-table td:nth-child(5) { width: 180px; min-width: 170px; max-width: 185px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.report-jobs-table th:nth-child(7), .report-jobs-table td:nth-child(7) { width: 130px; min-width: 124px; max-width: 134px; white-space: normal; }
 .report-jobs-table th:nth-child(10), .report-jobs-table td:nth-child(10) { width: 92px; min-width: 92px; max-width: 92px; }
 .report-job-datasets { display: flex; flex-direction: column; align-items: flex-start; gap: 0.12rem; white-space: normal !important; }
 .report-job-dataset-kind { color: #5d3b86; font-weight: 800; margin-top: 0.18rem; }
@@ -399,11 +399,23 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-job-download-button { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; padding: 0; border: 1px solid rgba(116, 87, 164, 0.62); border-radius: 999px; background: linear-gradient(145deg, #6d46a8, #9870d0); color: #fff; font-size: 1.2rem; line-height: 1; font-weight: 800; text-decoration: none; box-shadow: 0 8px 18px rgba(95, 69, 142, 0.18); }
 .report-job-download-button:hover:not(.action-link-disabled) { background: linear-gradient(145deg, #4f2d82, #7549b0); border-color: rgba(79, 45, 130, 0.78); color: #fff; box-shadow: 0 10px 22px rgba(79, 45, 130, 0.32); transform: translateY(-1px); }
 .report-job-download-button.action-link-disabled { background: linear-gradient(135deg, #e3e8ec, #d5dde4); border-color: rgba(126, 139, 152, 0.24); color: #7a8792; box-shadow: none; cursor: not-allowed; }
+.report-job-report-download-button { position: relative; overflow: visible; font-size: 0; }
+.report-job-report-download-button::before { content: ''; width: 1.02rem; height: 0.76rem; border: 1.5px solid currentColor; border-radius: 0.12rem; background: linear-gradient(currentColor, currentColor) 50% 31% / 55% 1px no-repeat, linear-gradient(currentColor, currentColor) 50% 57% / 55% 1px no-repeat; }
+.report-job-report-download-button::after { content: '↓'; position: absolute; right: 0.12rem; bottom: 0.08rem; display: grid; place-items: center; width: 0.78rem; height: 0.78rem; border-radius: 999px; background: #fff; color: #4f2d82; font-size: 0.72rem; font-weight: 900; line-height: 1; box-shadow: 0 1px 3px rgba(49, 26, 78, 0.28); }
+.report-job-charts-download-button { position: relative; overflow: visible; font-size: 0; }
+.report-job-charts-download-button::before { content: ''; width: 1.08rem; height: 1rem; background: linear-gradient(currentColor, currentColor) left bottom / 0.21rem 0.42rem no-repeat, linear-gradient(currentColor, currentColor) center bottom / 0.21rem 0.7rem no-repeat, linear-gradient(currentColor, currentColor) right bottom / 0.21rem 0.94rem no-repeat; border-bottom: 1.5px solid currentColor; }
+.report-job-charts-download-button::after { content: '↓'; position: absolute; right: 0.16rem; bottom: 0.08rem; display: grid; place-items: center; width: 0.78rem; height: 0.78rem; border-radius: 999px; background: #fff; color: #4f2d82; font-size: 0.72rem; font-weight: 900; line-height: 1; box-shadow: 0 1px 3px rgba(49, 26, 78, 0.28); }
 .report-job-actions .danger-button { min-height: 0; width: 2rem; height: 2rem; padding: 0; font-size: 1rem; line-height: 1; font-weight: 800; }
 .report-job-retry-button { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; min-height: 0; padding: 0; border: 1px solid rgba(11, 122, 117, 0.62); border-radius: 999px; background: linear-gradient(145deg, #08736d, #20a797); color: #fff; font-size: 1.15rem; line-height: 1; font-weight: 800; box-shadow: 0 8px 18px rgba(8,115,109,0.18); }
 .report-job-retry-button:hover { background: linear-gradient(145deg, #075d58, #168b7e); border-color: rgba(7,93,88,0.78); box-shadow: 0 10px 22px rgba(7,93,88,0.3); transform: translateY(-1px); }
+.report-job-charts-button { display: inline-grid; place-items: center; width: 2rem; height: 2rem; min-height: 0; padding: 0; border: 1px solid rgba(174, 132, 28, 0.54); border-radius: 999px; background: linear-gradient(145deg, #fff2ad, #efd66e); color: #715211; font-size: 1rem; line-height: 1; box-shadow: 0 8px 18px rgba(167, 122, 19, 0.16); }
+.report-job-charts-button:hover:not(:disabled) { background: linear-gradient(145deg, #ffea84, #dfbd45); color: #533b09; box-shadow: 0 10px 22px rgba(143, 100, 13, 0.24); transform: translateY(-1px); }
+.report-chart-job-open-button { min-height: 2rem; padding: 0.34rem 0.7rem; border: 1px solid rgba(67, 108, 166, 0.58); border-radius: 999px; background: linear-gradient(145deg, #6ea8e5, #3e78bd); color: #fff; font-size: 0.78rem; font-weight: 800; line-height: 1; box-shadow: 0 8px 18px rgba(62, 120, 189, 0.2); }
+.report-chart-job-open-button:hover:not(:disabled) { border-color: rgba(43, 82, 137, 0.75); background: linear-gradient(145deg, #528ecf, #2f639f); color: #fff; box-shadow: 0 10px 22px rgba(47, 99, 159, 0.28); transform: translateY(-1px); }
 .report-job-actions .danger-button { background: linear-gradient(145deg, #8d1d2c, #d24e5b); border-color: rgba(141, 29, 44, 0.70); color: #fff; }
 .reporting-stack .report-job-actions .danger-button:hover:not(:disabled) { background: linear-gradient(145deg, #711622, #b63a48); border-color: rgba(113, 22, 34, 0.82); color: #fff; box-shadow: 0 10px 22px rgba(113, 22, 34, 0.28); }
+.reporting-stack .report-jobs-delete-all, .reporting-stack .report-chart-jobs-delete-all { min-height: 0; padding: 0.65rem 0.95rem; font-size: inherit; line-height: normal; white-space: nowrap; }
+.report-jobs-bulk-actions { display: flex; justify-content: flex-start; margin: 0 0 0.75rem; }
 .catalogue-editor-scroll-hint { margin-left: 0.2rem; color: #536b78; font-size: 0.78rem; font-weight: 700; }
 .admin-stack .catalogue-reenumerate-button { background: linear-gradient(145deg, #d9d0ef, #bba8dc); border-color: rgba(116, 87, 164, 0.62); color: #49366c; box-shadow: 0 8px 18px rgba(95, 69, 142, 0.16); }
 .admin-stack .catalogue-reenumerate-button:hover:not(:disabled) { background: linear-gradient(145deg, #cbc0e6, #a891d1); color: #392855; }
@@ -491,7 +503,19 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-charts-panel .collapsible-summary > .summary-inline-actions .pill { flex: 0 1 auto; min-width: 0; padding: 0.38rem 0.58rem; font-size: 0.82rem; line-height: 1.1; white-space: nowrap; }
 .report-charts-panel[hidden] { display: none; }
 .report-chart-set-controls { display: flex; align-items: end; gap: 0.75rem; margin-bottom: 1rem; }
-.report-chart-set-controls label { flex: 1 1 30rem; max-width: 48rem; }
+.report-chart-set-controls label { flex: 1 1 42rem; max-width: 62rem; }
+.chart-set-native-select { display: none; }
+.chart-set-picker { position: relative; width: 100%; margin-top: 0.35rem; }
+.chart-set-picker > summary { display: flex; align-items: center; min-height: 2.55rem; padding: 0.58rem 2.5rem 0.58rem 0.8rem; border: 1px solid #b99bdc; border-radius: 9px; background: #fff; color: #35234c; cursor: pointer; list-style: none; }
+.chart-set-picker > summary::-webkit-details-marker { display: none; }
+.chart-set-picker > summary::after { content: '⌄'; position: absolute; right: 0.85rem; font-size: 1.15rem; color: #5d347e; }
+.chart-set-picker[open] > summary { border-color: #7851aa; box-shadow: 0 0 0 3px rgba(120, 81, 170, 0.16); }
+.chart-set-picker-options { position: absolute; z-index: 30; top: calc(100% + 0.3rem); left: 0; right: 0; max-height: 20rem; overflow: auto; padding: 0.35rem; border: 1px solid #b99bdc; border-radius: 10px; background: #fff; box-shadow: 0 14px 30px rgba(61, 33, 92, 0.22); }
+.chart-set-picker-option { display: block; width: 100%; padding: 0.62rem 0.75rem; border: 0; border-radius: 7px; text-align: left; font: inherit; cursor: pointer; }
+.chart-set-picker-option.chart-set-option-standalone { background: #fcf8ff; color: #714496; }
+.chart-set-picker-option.chart-set-option-report { background: #f3e8ff; color: #5b317e; }
+.chart-set-picker-option.chart-set-option-standalone:hover, .chart-set-picker-option.chart-set-option-standalone:focus-visible { background: #9b62bf; color: #fff; outline: none; box-shadow: inset 0 0 0 1px rgba(82, 43, 111, 0.38); }
+.chart-set-picker-option.chart-set-option-report:hover, .chart-set-picker-option.chart-set-option-report:focus-visible { background: #75469a; color: #fff; outline: none; box-shadow: inset 0 0 0 1px rgba(69, 37, 92, 0.4); }
 .report-chart-set-delete, .report-chart-set-delete-all { flex: 0 0 auto; margin-bottom: 0.02rem; }
 .report-charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1rem; margin-top: 1rem; }
 .report-chart-card { min-width: 0; padding: 0.9rem; border: 1px solid rgba(75, 32, 138, 0.22); border-radius: 14px; background: linear-gradient(145deg, #fffaff, #f2eaff); box-shadow: 0 10px 22px rgba(75, 32, 138, 0.08); }

@@ -8,10 +8,21 @@
 #### 🌟 New Features:
 
 #### 🚀 Enhancements:
-- Moved Report Charts rendering to an independent persistent background queue with progress, retry and a separate Generated Charts Jobs panel below Generated Reports Jobs.
+- Moved Report Charts rendering to an independent persistent background queue with progress, retry and a separate Charts Jobs panel below Reports Jobs.
+- Improved Reports Jobs and Charts Jobs with type, template, scope, dataset and chart metadata, clearer panel names, bulk deletion controls and consistent job-count sizing.
+- Made Open from Charts Jobs load and select the corresponding Charts Set, expand Report Charts and scroll directly to it.
+- Automatically opens Report Charts and scrolls to the completed Chart Set when a newly queued or retried Charts Job becomes ready.
+- Stored each generated PowerPoint report with its rendered PNG charts in a dedicated `output/reports/<report-name>/report-charts/` folder, and moved independent Chart Sets to `output/charts/`.
+- Renamed the Report Charts panel to Charts Panel and unified its selector: it now lists standalone Chart Sets and report-rendered chart sets with clear source prefixes.
+- Added Delete All Reports to Charts Panel next to its Chart Set cleanup controls.
+- Added ZIP downloads for standalone Chart Set PNGs and for the PNG charts rendered with each generated report; Charts Jobs now uses the same eye action as Reports Jobs.
+- Improved Charts Set selection with report-first chronological ordering, clear source-specific hover styling and automatic closing when clicking elsewhere.
+- Renamed newly generated report files to use the clearer `_by-operator_` and `_by-vendor_` scope tokens.
 
 #### 🐛 Bug fixes:
 - Fixed Report Charts failures to return actionable JSON errors and record Error events in App Logs instead of exposing a browser JSON parsing error.
+- Fixed deleted Chart Sets leaving stale completed jobs in Charts Jobs, including single-set and all-set deletion.
+- Fixed Delete All Reports routing and its error dialog so validation failures no longer result in an empty `[object Object]` message.
 - Fixed build_docker.yml workflow to always update tag:latest.
 
 #### 📚 Documentation:
