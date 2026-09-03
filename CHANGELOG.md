@@ -6,7 +6,6 @@
 ## Release: v0.2.1
 ### Release Date: 2026-09-03
 #### 🌟 New Features:
-- Added the Chart Builder workspace tab for creating temporary charts from one or more selected processed CDR Sources, using the shared Interactive Preview controls.
 - Added a persistent Charts Jobs queue alongside Reports Jobs, with progress, retry, a dedicated Jobs panel, bulk actions and job counts.
 - Added ZIP downloads for standalone and report-rendered Chart Sets.
 - Added a Multivendor multi-campaign review before report or Chart Set generation, requiring Data, Voice and Speech CDR selection and preselecting the latest campaign for each type.
@@ -14,6 +13,7 @@
 - Added a shared Interactive Chart Preview for E2E Reporting and Slides Templates Editor: Chart Type, CDR Source, KPI, Filters, Rows, Columns, Legend and Legend Position can be changed to regenerate a temporary chart without altering the persisted chart or template.
 - Added a full-size filtered-dataset overlay above the chart preview, with Excel-style column filters and first/previous/next/last pagination.
 - Added editable generated-chart previews to Slides Templates Editor rows: Update Template applies the current Interactive Preview values to that in-memory row for the normal save workflow.
+- Added the Chart Builder workspace tab for creating temporary charts from one or more selected processed CDR Sources, using the shared Interactive Preview controls.
 
 #### 🚀 Enhancements:
 - Added the Open/eye actions for Charts Jobs and automatic opening/scrolling to the corresponding Chart Set when a new or retried Charts Job completes.
