@@ -2088,12 +2088,16 @@ def _cdf_terminal_x_maximum(
     candidates = sorted({value for values in series_values for value in values if low <= value <= fallback})
     for value in candidates:
         levels = sorted(sum(point <= value for point in values) / len(values) for values in series_values)
-        complete_curves = sum(level >= 0.98 for level in levels)
-        visually_distinct = all(right - left >= minimum_separation for left, right in zip(levels, levels[1:], strict=False))
+        completed_levels = [level for level in levels if level > 0.98]
         # Never crop meaningful CDF data. A tail is eligible only once at
-        # least three curves have reached 98%, and only when they have then
-        # converged too closely to distinguish on the rendered canvas.
-        if complete_curves >= 3 and not visually_distinct:
+        # least three curves have *exceeded* 98%, and those completed curves
+        # have themselves converged too closely to distinguish. A coincident
+        # pair alone must never truncate other still-separated CDF curves.
+        completed_curves_converged = (
+            len(completed_levels) >= 3
+            and max(completed_levels) - min(completed_levels) < minimum_separation
+        )
+        if completed_curves_converged:
             return value
     return fallback
 

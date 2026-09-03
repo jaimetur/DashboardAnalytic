@@ -424,6 +424,11 @@ def test_cdf_trims_only_a_converged_tail_after_three_curves_reach_98_percent() -
     ) == 3.0
     # Fewer than three completed curves never make a tail eligible.
     assert _cdf_terminal_x_maximum([[1.0, 2.0, 3.0, 10.0], [1.0, 2.0, 3.0, 10.0]], 1.0, 10.0) == 10.0
+    # Exactly 98% does not satisfy the strictly-above-98% threshold.
+    assert _cdf_terminal_x_maximum(
+        [[1.0] * 99 + [10.0], [2.0] * 99 + [10.0], [3.0] * 98 + [10.0, 11.0]],
+        1.0, 10.0,
+    ) == 10.0
 
 
 def test_operator_vendor_column_groups_keep_campaign_bars_in_their_operator_palette() -> None:

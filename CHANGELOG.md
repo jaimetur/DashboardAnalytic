@@ -36,9 +36,9 @@
 - Expanded multivendor chart palettes so each vendor receives a distinct shade within its operator family, while campaigns for that vendor retain the same hue.
 - Made single-campaign CDF Lines use the same emphasised stroke width as the latest campaign in a multi-campaign comparison.
 - Standardised vendor colour families across every chart type: Ericsson green, Huawei red, Samsung yellow and NSN blue, with distinct shades when the same vendor appears for multiple operators.
-- Trimmed CDF Line x-axes only after at least three curves reach 98% and then converge beyond visual distinction, avoiding premature loss of meaningful CDF data.
 - Added an overwrite confirmation when importing a Slides Template whose name already exists; overwriting the default also refreshes its active CSV.
 - Made Template to edit open the chosen Slides Template immediately, prompting to save or discard any pending edits before switching tables.
+- Trimmed CDF Line x-axes only after at least three curves strictly exceed 98% and converge with one another, avoiding premature loss of meaningful CDF data.
 
 #### 🐛 Bug fixes:
 - Unified completed Chart Set timestamps across the Charts Jobs date, `Generated at` badge, selector label and timestamped output folder.
