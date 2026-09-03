@@ -354,8 +354,11 @@
           selections.forEach(({select}) => {
             const values = chosen.get(select.name) || new Set();
             Array.from(select.options).forEach((option) => { option.selected = values.has(option.value); });
+            // The reporting source controls are custom multi-selects. Notify
+            // their checkbox menus after this programmatic update so opening
+            // a selector always reflects the CDRs that will be submitted.
+            select.dispatchEvent(new Event('change', {bubbles: true}));
           });
-          updateScope();
           close(true);
         };
         const cancelSelection = () => close(false);

@@ -3289,9 +3289,13 @@ def serialize_report_chart_job(row: Any) -> dict[str, Any]:
     job_id = int(row['id'])
     status_value = str(row['status'] or 'queued')
     generation = str(row['generation'] or '')
+    # A ready Chart Set has one canonical generation timestamp: the value in
+    # its manifest.  Reuse it in Charts Jobs rather than showing the earlier
+    # queue-creation time alongside the completed set.
+    chart_set = load_persisted_report_charts(generation) if status_value == 'ready' and generation else None
     return {
         'id': job_id,
-        'date': _local_report_date(row['created_at']),
+        'date': str(chart_set['generated_at']) if chart_set else _local_report_date(row['created_at']),
         'type': str(row['technology'] or '').upper() or '—',
         'template': str(row['template_name'] or '—'),
         'scope': 'Multivendor Comparison' if str(row['scope'] or '').casefold() == 'multivendor' else 'Operator Comparison',
@@ -3303,7 +3307,7 @@ def serialize_report_chart_job(row: Any) -> dict[str, Any]:
         'error': str(row['last_error'] or ''),
         'generation': generation or None,
         'open_url': f'/api/reporting/chart-sets/{generation}' if status_value == 'ready' and generation else None,
-        'charts_download_url': f'/reporting/chart-sets/{generation}/download' if status_value == 'ready' and generation and load_persisted_report_charts(generation) else None,
+        'charts_download_url': f'/reporting/chart-sets/{generation}/download' if chart_set else None,
         'delete_url': f'/reporting/chart-jobs/{job_id}/delete',
         'retry_url': f'/reporting/chart-jobs/{job_id}/retry' if status_value == 'failed' else None,
     }
@@ -3710,7 +3714,8 @@ def persist_report_charts(
     destination = report_charts_directory(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
     _migrate_legacy_report_charts(output_dir)
-    generation = datetime.now().strftime('%Y%m%d-%H%M%S')
+    generated_at = datetime.now().astimezone()
+    generation = generated_at.strftime('%Y%m%d-%H%M%S')
     suffix = 2
     target = destination / generation
     while target.exists():
@@ -3728,7 +3733,7 @@ def persist_report_charts(
             'scope': scope,
             'dataset_counts': _report_chart_dataset_counts(dataset_counts),
             'generation': target.name,
-            'generated_at': datetime.now().astimezone().isoformat(timespec='seconds'),
+            'generated_at': generated_at.isoformat(timespec='seconds'),
             'charts': manifest_charts,
         }
         (staging / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False), encoding='utf-8')

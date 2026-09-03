@@ -34,10 +34,13 @@
 - Added consistent dashed separators to hierarchical vertical-bar charts, only at changes in the top-level column aggregation, and strengthened CDF campaign detection from the physical Campaign field for reliable historical/latest line widths and operator/vendor palette assignment.
 - Completed hierarchical failure-count comparison grids so empty Operator/Vendor × Campaign combinations remain visible, with dashed separators only between distinct top-level column-aggregation values.
 - Expanded multivendor chart palettes so each vendor receives a distinct shade within its operator family, while campaigns for that vendor retain the same hue.
-- Increased contrast between vendors in each operator colour family. Non-line charts now keep each Vendor colour consistent across operators, while CDF lines retain operator-family shades per vendor for legibility.
 - Made single-campaign CDF Lines use the same emphasised stroke width as the latest campaign in a multi-campaign comparison.
+- Standardised vendor colour families across every chart type: Ericsson green, Huawei red, Samsung yellow and NSN blue, with distinct shades when the same vendor appears for multiple operators.
+- Trimmed CDF Line x-axes to the final value supported by at least two visually distinct curves, avoiding single-series tails and indistinguishable converged lines.
 
 #### 🐛 Bug fixes:
+- Unified completed Chart Set timestamps across the Charts Jobs date, `Generated at` badge, selector label and timestamped output folder.
+- Fixed the Reporting CDR multi-select menus retaining stale checkmarks after confirming the Multivendor campaign review; their displayed choices now match the submitted CDRs.
 - Fixed Report Charts failures to return actionable JSON errors and record Error events in App Logs instead of exposing a browser JSON parsing error.
 - Fixed deleted Chart Sets leaving stale completed jobs in Charts Jobs, including single-set and all-set deletion.
 - Fixed Delete All Reports routing and its error dialog so validation failures no longer result in an empty `[object Object]` message.

@@ -484,8 +484,16 @@ OPERATOR_COLOUR_VARIANTS = {
     "#76B7B2": ("#76B7B2", "#176B70", "#3CC4BD", "#368A8F"),
 }
 
-ERICSSON_VENDOR_COLOR = "#0082F0"
 NEUTRAL_SERIES_COLORS = ("#6F42C1", "#2E8B57", "#A0612A", "#C23B8B", "#607D8B", "#B8860B")
+
+VENDOR_COLOUR_VARIANTS = {
+    # A vendor remains recognisable in every chart. Different operators using
+    # the same vendor receive contrasting shades from that vendor's family.
+    "ericsson": ("#2E8B57", "#0D5A34", "#65B984", "#176B42"),
+    "huawei": ("#E15759", "#A61E2B", "#F58B8E", "#C43D4D"),
+    "samsung": ("#D9A514", "#9A7000", "#F2CC5C", "#C28D00"),
+    "nsn": ("#4E79A7", "#123B68", "#63A4E8", "#365A9B"),
+}
 
 
 @dataclass(frozen=True)
@@ -1261,6 +1269,11 @@ def _vendor_label(value: object) -> str:
     return non_operators[-1] if non_operators else (parts[-1] if parts else str(value).strip())
 
 
+def _vendor_colour_family(vendor: str) -> str | None:
+    normalized = vendor.casefold()
+    return next((family for family in VENDOR_COLOUR_VARIANTS if family in normalized), None)
+
+
 def _series_colours(
     keys: list[tuple[object, ...]],
     axis_columns: list[str],
@@ -1270,9 +1283,9 @@ def _series_colours(
 ) -> dict[tuple[object, ...], str]:
     """Choose colours from declared dimensions rather than label coincidences.
 
-    For bars, points and stacks, Vendor is the stable visual identity: the
-    same vendor receives the same colour across operators. CDF lines instead
-    retain operator families and use vendor shades to keep dense curves clear.
+    Vendor is the stable visual identity for bars, points, stacks and lines.
+    Recognised vendors use their own colour family regardless of operator;
+    repeated vendors across operators receive distinct shades in that family.
     """
     if not keys:
         return {}
@@ -1293,20 +1306,30 @@ def _series_colours(
     }
     operator_values = {colour for key in keys if (colour := _operator_colour(operator_for_key[key]))}
 
-    if vendor_levels and not line_chart:
+    if vendor_levels:
         vendor_level = vendor_levels[0]
         vendor_keys = [_vendor_label(key[vendor_level]) if len(key) > vendor_level else "" for key in keys]
-        vendor_colours: dict[str, str] = {}
+        vendor_colours: dict[tuple[str, str], str] = {}
+        family_offsets: dict[str, int] = {}
         neutral_index = 0
-        for vendor in vendor_keys:
-            if vendor in vendor_colours:
+        for key, vendor in zip(keys, vendor_keys, strict=True):
+            operator = operator_for_key[key].casefold()
+            identity = (vendor.casefold(), operator)
+            if identity in vendor_colours:
                 continue
-            if "ericsson" in vendor.casefold():
-                vendor_colours[vendor] = ERICSSON_VENDOR_COLOR
+            family = _vendor_colour_family(vendor)
+            if family:
+                variants = VENDOR_COLOUR_VARIANTS[family]
+                offset = family_offsets.get(family, 0)
+                vendor_colours[identity] = variants[offset % len(variants)]
+                family_offsets[family] = offset + 1
             else:
-                vendor_colours[vendor] = _colour(vendor, neutral_index)
+                vendor_colours[identity] = _colour(vendor, neutral_index)
                 neutral_index += 1
-        return {key: vendor_colours[vendor] for key, vendor in zip(keys, vendor_keys, strict=True)}
+        return {
+            key: vendor_colours[(vendor.casefold(), operator_for_key[key].casefold())]
+            for key, vendor in zip(keys, vendor_keys, strict=True)
+        }
 
     if operator_level is not None and (len(operator_values) > 1 or line_chart):
         vendor_level = vendor_levels[0] if vendor_levels else operator_level
@@ -1316,22 +1339,6 @@ def _series_colours(
         ]
         palette = _hierarchy_group_colours([(value,) for value in palette_keys])
         return {key: palette[palette_key] for key, palette_key in zip(keys, palette_keys, strict=True)}
-
-    if vendor_levels:
-        vendor_level = vendor_levels[0]
-        vendor_keys = [_vendor_label(key[vendor_level]) if len(key) > vendor_level else "" for key in keys]
-        vendor_colours: dict[str, str] = {}
-        neutral_index = 0
-        sole_operator_colour = next(iter(operator_values), None)
-        for vendor in vendor_keys:
-            if vendor in vendor_colours:
-                continue
-            if "ericsson" in vendor.casefold():
-                vendor_colours[vendor] = sole_operator_colour or ERICSSON_VENDOR_COLOR
-            else:
-                vendor_colours[vendor] = _colour(vendor, neutral_index)
-                neutral_index += 1
-        return {key: vendor_colours[vendor] for key, vendor in zip(keys, vendor_keys, strict=True)}
 
     return {key: _colour("", index) for index, key in enumerate(keys)}
 
@@ -2069,6 +2076,32 @@ def _combine_charts(title: str, charts: list[BytesIO]) -> BytesIO:
     return output
 
 
+def _cdf_shared_x_maximum(series_values: list[list[float]], fallback: float) -> float:
+    """Keep a CDF axis within the range supported by at least two curves."""
+    maxima = sorted((max(values) for values in series_values if values), reverse=True)
+    return maxima[1] if len(maxima) >= 2 and maxima[1] < fallback else fallback
+
+
+def _cdf_visually_distinct_x_maximum(
+    series_values: list[list[float]],
+    low: float,
+    fallback: float,
+    minimum_separation: float = 0.015,
+) -> float:
+    """Return the last x where every CDF curve remains visibly separated."""
+    if len(series_values) < 2:
+        return fallback
+    candidates = sorted({value for values in series_values for value in values if low <= value <= fallback})
+    visible: list[float] = []
+    for value in candidates:
+        levels = sorted(sum(point <= value for point in values) / len(values) for values in series_values)
+        if all(right - left >= minimum_separation for left, right in zip(levels, levels[1:], strict=False)):
+            visible.append(value)
+    # Identical or very close curves should retain their complete shared range:
+    # there is no meaningful visual boundary at which to cut them.
+    return visible[-1] if visible else fallback
+
+
 def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period: str | None, metric: str | None, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
     if frame.empty or not group or not metric: return _empty_chart(title)
     campaign_column = _period_column(frame)
@@ -2088,9 +2121,25 @@ def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period:
         data["__cdf_campaign"] = data[campaign_column].fillna("(blank)").astype(str).map(_campaign_display_value)
     data[metric] = pd.to_numeric(data[metric], errors="coerce"); data = data.dropna()
     if data.empty: return _empty_chart(title)
-    image, draw = _canvas(title); left, top, width, height = 100, 135, 1320, 590
-    low, high = float(data[metric].min()), float(data[metric].max()); high = high if high > low else low + 1
     combinations = _hierarchical_unique_keys(data, grouping_columns)
+    series_data: list[tuple[tuple[str, ...], pd.DataFrame, list[float]]] = []
+    for combination in combinations:
+        mask = pd.Series(True, index=data.index)
+        for column, value in zip(grouping_columns, combination, strict=True):
+            mask &= data[column].astype(str).eq(str(value))
+        subset = data.loc[mask]
+        values = subset[metric].sort_values().tolist()
+        if values:
+            series_data.append((combination, subset, values))
+    if not series_data:
+        return _empty_chart(title)
+    low = float(data[metric].min())
+    observed_high = float(data[metric].max())
+    series_values = [values for _, _, values in series_data]
+    shared_high = _cdf_shared_x_maximum(series_values, observed_high)
+    high = _cdf_visually_distinct_x_maximum(series_values, low, shared_high)
+    high = high if high > low else low + 1
+    image, draw = _canvas(title); left, top, width, height = 100, 135, 1320, 590
     # Colour policy is driven by the template's declared dimensions: operator
     # families are used only for genuine multi-operator comparisons.
     comparison_colours = _series_colours(combinations, grouping_columns, data, line_chart=True)
@@ -2105,16 +2154,13 @@ def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period:
         if len(campaigns) > 1:
             latest_campaign = campaigns[-1]
     legend_items: list[tuple[str, str, int]] = []
-    for index, combination in enumerate(combinations):
-        mask = pd.Series(True, index=data.index)
-        for column, value in zip(grouping_columns, combination, strict=True):
-            mask &= data[column].astype(str).eq(str(value))
-        subset = data.loc[mask]
-        values = subset[metric].sort_values().tolist()
-        if not values: continue
+    for index, (combination, subset, values) in enumerate(series_data):
+        visible_values = [value for value in values if value <= high]
+        if not visible_values:
+            continue
         label_parts = [str(value) for value in combination if str(value) != "(all)"]
         label = " · ".join(label_parts) or "(all)"
-        points = [(left + (value - low) / (high - low) * width, top + height - ((n + 1) / len(values)) * height) for n, value in enumerate(values)]
+        points = [(left + (value - low) / (high - low) * width, top + height - ((n + 1) / len(values)) * height) for n, value in enumerate(visible_values)]
         line_campaigns = subset["__cdf_campaign"].astype(str).unique() if latest_campaign else ()
         # A single-campaign chart has no historical curve to de-emphasise, so
         # use the same readable weight as the newest curve in a comparison.

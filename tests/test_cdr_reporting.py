@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import time
+from datetime import datetime
 import pandas as pd
 import pytest
 from io import BytesIO
@@ -11,7 +12,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_status_100, _series_colours, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_shared_x_maximum, _cdf_visually_distinct_x_maximum, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_status_100, _series_colours, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -416,6 +417,19 @@ def test_cdf_uses_emphasised_lines_when_only_one_campaign_is_rendered() -> None:
     assert {item[2] for item in draw_legend.call_args.args[1]} == {4}
 
 
+def test_cdf_limits_x_axis_to_the_last_range_shared_by_two_curves() -> None:
+    assert _cdf_shared_x_maximum([[1.0, 4.0], [1.5, 7.0], [2.0, 19.0]], 19.0) == 7.0
+    assert _cdf_shared_x_maximum([[1.0, 4.0]], 4.0) == 4.0
+
+
+def test_cdf_limits_x_axis_when_curve_levels_are_no_longer_visually_distinct() -> None:
+    assert _cdf_visually_distinct_x_maximum(
+        [[1.0] * 4 + [100.0] * 6, [2.0] * 3 + [100.0] * 7, [3.0] * 2 + [100.0] * 8],
+        1.0, 100.0, minimum_separation=0.08,
+    ) == 3.0
+    assert _cdf_visually_distinct_x_maximum([[1.0, 2.0], [1.0, 2.0]], 1.0, 2.0) == 2.0
+
+
 def test_operator_vendor_column_groups_keep_campaign_bars_in_their_operator_palette() -> None:
     colours = _hierarchy_group_colours([
         ('Vodafone_Ericsson', '2026 Q1'), ('Vodafone_Ericsson', '2026 Q2'),
@@ -428,7 +442,7 @@ def test_operator_vendor_column_groups_keep_campaign_bars_in_their_operator_pale
     assert colours['3_Ericsson'] == '#F28E2B'
 
 
-def test_chart_colours_use_operator_families_only_for_multi_operator_dimensions() -> None:
+def test_chart_colours_use_vendor_families_for_multi_operator_dimensions() -> None:
     keys = [('Vodafone', 'Ericsson'), ('Vodafone', 'Huawei'), ('3', 'Ericsson'), ('3', 'Huawei')]
     frame = pd.DataFrame({'__catalog_row_0': [], '__catalog_row_1': []})
     frame.attrs['catalogue_dimension_labels'] = {
@@ -437,19 +451,17 @@ def test_chart_colours_use_operator_families_only_for_multi_operator_dimensions(
 
     colours = _series_colours(keys, ['__catalog_row_0', '__catalog_row_1'], frame)
 
-    assert colours[('Vodafone', 'Ericsson')] == '#0082F0'
-    assert colours[('3', 'Ericsson')] == '#0082F0'
-    assert colours[('Vodafone', 'Huawei')] == colours[('3', 'Huawei')]
+    assert colours[('Vodafone', 'Ericsson')] == '#2E8B57'
+    assert colours[('3', 'Ericsson')] == '#0D5A34'
+    assert colours[('Vodafone', 'Huawei')] == '#E15759'
+    assert colours[('3', 'Huawei')] == '#A61E2B'
 
     line_colours = _series_colours(keys, ['__catalog_row_0', '__catalog_row_1'], frame, line_chart=True)
-    assert line_colours[('Vodafone', 'Ericsson')] == '#E15759'
-    assert line_colours[('Vodafone', 'Huawei')] == '#9B1D20'
-    assert line_colours[('3', 'Ericsson')] == '#F28E2B'
-    assert line_colours[('3', 'Huawei')] == '#A84B09'
+    assert line_colours == colours
 
 
-def test_chart_colours_use_ericsson_and_neutral_vendor_colours_for_one_operator() -> None:
-    keys = [('Vodafone', 'Ericsson'), ('Vodafone', 'Huawei'), ('Vodafone', 'Nokia')]
+def test_chart_colours_use_vendor_families_for_one_operator() -> None:
+    keys = [('Vodafone', 'Ericsson'), ('Vodafone', 'Huawei'), ('Vodafone', 'Samsung'), ('Vodafone', 'NSN')]
     frame = pd.DataFrame({'__catalog_row_0': [], '__catalog_row_1': []})
     frame.attrs['catalogue_dimension_labels'] = {
         '__catalog_row_0': ('Operator',), '__catalog_row_1': ('Vendor',),
@@ -457,8 +469,10 @@ def test_chart_colours_use_ericsson_and_neutral_vendor_colours_for_one_operator(
 
     colours = _series_colours(keys, ['__catalog_row_0', '__catalog_row_1'], frame)
 
-    assert colours[('Vodafone', 'Ericsson')] == '#0082F0'
-    assert len(set(colours.values())) == 3
+    assert colours == {
+        ('Vodafone', 'Ericsson'): '#2E8B57', ('Vodafone', 'Huawei'): '#E15759',
+        ('Vodafone', 'Samsung'): '#D9A514', ('Vodafone', 'NSN'): '#4E79A7',
+    }
 
 
 def test_chart_colours_detect_a_single_operator_from_composite_vendor_values() -> None:
@@ -468,7 +482,7 @@ def test_chart_colours_detect_a_single_operator_from_composite_vendor_values() -
 
     colours = _series_colours(keys, ['__catalog_column_0'], frame)
 
-    assert colours[('3_Ericsson',)] == '#0082F0'
+    assert colours[('3_Ericsson',)] == '#2E8B57'
     assert len(set(colours.values())) == 3
 
 
@@ -816,6 +830,7 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert 'campaignPeriod' in page.text
     assert 'uploadedRecency' in page.text
     assert 'latestCampaignOption' in page.text
+    assert "select.dispatchEvent(new Event('change', {bubbles: true}))" in page.text
     assert 'Reports Jobs' in page.text
     assert 'Charts Jobs' in page.text
 
@@ -919,6 +934,8 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert payload['scope'] == 'single'
     assert payload['dataset_counts'] == {'data': 1, 'voice': 1, 'speech': 1}
     assert re.fullmatch(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', payload['generated_at'])
+    assert job['date'] == payload['generated_at']
+    assert payload['generation'] == datetime.strptime(payload['generated_at'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d-%H%M%S')
     assert payload['charts']
     image_url = payload['charts'][0]['image_url']
     assert re.match(r'/reporting/charts/\d{8}-\d{6}/chart-\d+\.png\?v=', image_url)
