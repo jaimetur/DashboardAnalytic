@@ -503,6 +503,17 @@
       if (reportChartSetSelect?.value) reportChartSetSelect.dispatchEvent(new Event('change'));
       else clearSelectedReportCharts();
     };
+    const syncChartSetSelectorAfterBulkDeletion = (deletedSource) => {
+      const selectedValue = reportChartSetSelect?.value || '';
+      const selectedWasDeleted = selectedValue.startsWith(`${deletedSource}:`);
+      if (deletedSource === 'report') reportChartReportSets = [];
+      if (deletedSource === 'standalone') reportChartSets = [];
+      rebuildReportChartSetSelector(selectedWasDeleted ? '' : selectedValue);
+      updateChartSetActions();
+      if (!selectedWasDeleted) return;
+      if (reportChartSetSelect?.value) reportChartSetSelect.dispatchEvent(new Event('change'));
+      else clearSelectedReportCharts();
+    };
     const jobsBody = document.querySelector('[data-report-jobs-body]');
     const jobsCount = document.querySelector('[data-report-jobs-count]');
     const jobsEmpty = document.querySelector('[data-report-jobs-empty]');
@@ -870,19 +881,7 @@
         if (!response.ok) throw new Error(payload.detail || 'Unable to delete all chart sets.');
         reportChartSets = Array.isArray(payload.chart_sets) ? payload.chart_sets : [];
         closeReportChartViewer();
-        reportCharts = [];
-        reportChartsBody?.replaceChildren();
-        reportChartsPanel?.removeAttribute('data-report-charts-ready');
-        if (reportChartsGeneratedAt) reportChartsGeneratedAt.hidden = true;
-        if (reportChartsTemplate) reportChartsTemplate.hidden = true;
-        if (reportChartsScope) reportChartsScope.hidden = true;
-        if (reportChartsDataCount) reportChartsDataCount.hidden = true;
-        if (reportChartsVoiceCount) reportChartsVoiceCount.hidden = true;
-        if (reportChartsSpeechCount) reportChartsSpeechCount.hidden = true;
-        rebuildReportChartSetSelector();
-        if (reportChartSetDelete) reportChartSetDelete.hidden = true;
-        if (reportChartSetDeleteAll) reportChartSetDeleteAll.hidden = true;
-        updateReportingModule();
+        syncChartSetSelectorAfterBulkDeletion('standalone');
         pollReportChartJobs();
         hideLoadingOverlay();
       } catch (error) {
@@ -1516,6 +1515,8 @@
         const response = await fetch('/reporting/jobs/delete-all', {method: 'POST', credentials: 'same-origin'});
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : 'Unable to delete all reports. Check App Logs or the server logs for details.');
+        closeReportChartViewer();
+        syncChartSetSelectorAfterBulkDeletion('report');
         hideLoadingOverlay();
         pollReportJobs();
       } catch (error) {

@@ -723,6 +723,23 @@ def test_failure_hierarchy_uses_dashed_child_boundaries_within_one_operator() ->
     assert draw_dashed.call_count == 1
 
 
+def test_failure_hierarchy_uses_dashed_child_boundaries_within_one_row_group() -> None:
+    frame = pd.DataFrame({
+        '__catalog_row_0': ['VoLTE', 'VoLTE', 'MultiRAB'],
+        '__catalog_row_1': ['Belfast', 'Bristol', 'Belfast'],
+        '__catalog_column_0': ['VF', 'VF', 'VF'],
+        '__catalog_failure_state': ['Failed', 'Dropped', 'Failed'],
+    })
+
+    with patch('src.modules.cdr_reporting._draw_dashed_horizontal_line') as draw_dashed:
+        _render_failure_count_hierarchy(
+            'Voice failures per city', frame,
+            ['__catalog_row_0', '__catalog_row_1'], ['__catalog_column_0'],
+        )
+
+    assert draw_dashed.call_count == 2
+
+
 def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> None:
     entries = load_catalog_csv(Path(__file__).parent / 'fixtures' / 'NSA Slide Template.csv', 'nsa')
     slide_ten = [entry for entry in entries if entry.slide == 10]

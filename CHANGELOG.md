@@ -44,6 +44,7 @@
 - Enabled GitHub Actions layer caching for multi-platform Docker builds to speed up subsequent image publications when dependencies and build inputs are unchanged.
 - Made workspace replacement imports automatically close only the colliding active workspace, validate the incoming workspace in staging, preserve its identity and access grants, and delete all previous workspace files only after a successful replacement.
 - Standardised resolved chart labels as `YYYY-Qx` for campaigns and `VF`, `O2`, `3` and `EE` for known UK operator aliases, including Telefónica and Everything Everywhere variants.
+- Added dashed horizontal child-row separators to hierarchical failure charts and deduplicated equivalent display/physical field names in Interactive Preview selectors so dimensions such as `G Level 4` cannot be selected twice.
 
 #### 🐛 Bug fixes:
 - Fixed Reporting CDR multi-select checkmarks after Multivendor review so they match the submitted CDRs.
@@ -66,6 +67,7 @@
 - Fixed View filtered dataset and temporary chart regeneration to serialize multi-selected Dataset IDs correctly, while accepting legacy aggregation-style separators defensively.
 - Fixed shared reporting-table reuse to detect and rebuild any chart-requested column that contains source data but is empty in one dataset's cached rows, preventing fields such as `G Level 4` disappearing from historical campaigns.
 - Fixed newly added Filter Builder conditions so their Column and Operator controls immediately use the same searchable single-select dropdowns as existing conditions in every Interactive Preview.
+- Fixed Delete All Charts Sets and Delete All Reports to refresh the Chart Set selector immediately, removing deleted entries and loading the next valid selection without a page reload.
 
 #### 📚 Documentation:
 - Rewrote the PowerPoint Reporting help as static guidance for building Slides Templates, including field-by-field instructions and practical recipes for every chart type, filters, aggregations, legends, structural slides, operators and output jobs.

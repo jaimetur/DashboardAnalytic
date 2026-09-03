@@ -409,7 +409,17 @@ def catalogue_editor_columns() -> dict[str, list[str]]:
         if source not in columns or dataset['status'] != 'ready':
             continue
         columns[source].update(str(column) for column in repository.list_dataset_row_columns(dataset['id']))
-    return {source: sorted(values | derived, key=str.casefold) for source, values in columns.items()}
+    result: dict[str, list[str]] = {}
+    for source, values in columns.items():
+        # A source can expose the same field with presentation and physical
+        # spellings (for example ``G Level 4`` and ``G_Level_4``). Present it
+        # only once, preferring the readable spelling, so a multi-select can
+        # never build a duplicate Cartesian grouping dimension.
+        unique: dict[str, str] = {}
+        for value in sorted(values | derived, key=lambda item: ("_" in item, item.casefold())):
+            unique.setdefault(re.sub(r'[^a-z0-9]+', '', value.casefold()), value)
+        result[source] = sorted(unique.values(), key=str.casefold)
+    return result
 
 
 def catalogue_editor_filter_values(columns: dict[str, list[str]]) -> dict[str, dict[str, list[str]]]:

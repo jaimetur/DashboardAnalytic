@@ -1560,6 +1560,23 @@ def _draw_dashed_vertical_line(
         y += dash + gap
 
 
+def _draw_dashed_horizontal_line(
+    draw: ImageDraw.ImageDraw,
+    y: float,
+    left: float,
+    right: float,
+    *,
+    fill: str = "#AEBBC4",
+    dash: int = 8,
+    gap: int = 6,
+) -> None:
+    """Draw a light horizontal separator between child row values."""
+    x = left
+    while x < right:
+        draw.line((x, y, min(x + dash, right), y), fill=fill, width=1)
+        x += dash + gap
+
+
 def _draw_top_column_group_separators(
     draw: ImageDraw.ImageDraw,
     keys: list[tuple[object, ...]],
@@ -1921,7 +1938,14 @@ def _render_failure_count_hierarchy(
     for row_index, row_key in enumerate(row_keys):
         row_top = chart_top + row_index * row_height
         row_bottom = row_top + row_height
-        draw.line((20, row_bottom, chart_left + chart_width, row_bottom), fill="#DCE3E7", width=1)
+        next_row_key = row_keys[row_index + 1] if row_index + 1 < len(row_keys) else None
+        if next_row_key is not None and len(row_hierarchy) > 1 and row_key[0] == next_row_key[0]:
+            # Child values of the same first row dimension (for example the
+            # cities inside one Call Family) use the same dashed hierarchy
+            # convention as Campaign columns inside one Operator.
+            _draw_dashed_horizontal_line(draw, row_bottom, 20, chart_left + chart_width)
+        else:
+            draw.line((20, row_bottom, chart_left + chart_width, row_bottom), fill="#DCE3E7", width=1)
         for column_index, column_key in enumerate(column_keys):
             key_prefix = (*row_key, *column_key)
             state_counts = {
