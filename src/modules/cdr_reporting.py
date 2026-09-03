@@ -2076,30 +2076,26 @@ def _combine_charts(title: str, charts: list[BytesIO]) -> BytesIO:
     return output
 
 
-def _cdf_shared_x_maximum(series_values: list[list[float]], fallback: float) -> float:
-    """Keep a CDF axis within the range supported by at least two curves."""
-    maxima = sorted((max(values) for values in series_values if values), reverse=True)
-    return maxima[1] if len(maxima) >= 2 and maxima[1] < fallback else fallback
-
-
-def _cdf_visually_distinct_x_maximum(
+def _cdf_terminal_x_maximum(
     series_values: list[list[float]],
     low: float,
     fallback: float,
     minimum_separation: float = 0.015,
 ) -> float:
-    """Return the last x where every CDF curve remains visibly separated."""
+    """Trim only a converged CDF tail that is already effectively complete."""
     if len(series_values) < 2:
         return fallback
     candidates = sorted({value for values in series_values for value in values if low <= value <= fallback})
-    visible: list[float] = []
     for value in candidates:
         levels = sorted(sum(point <= value for point in values) / len(values) for values in series_values)
-        if all(right - left >= minimum_separation for left, right in zip(levels, levels[1:], strict=False)):
-            visible.append(value)
-    # Identical or very close curves should retain their complete shared range:
-    # there is no meaningful visual boundary at which to cut them.
-    return visible[-1] if visible else fallback
+        complete_curves = sum(level >= 0.98 for level in levels)
+        visually_distinct = all(right - left >= minimum_separation for left, right in zip(levels, levels[1:], strict=False))
+        # Never crop meaningful CDF data. A tail is eligible only once at
+        # least three curves have reached 98%, and only when they have then
+        # converged too closely to distinguish on the rendered canvas.
+        if complete_curves >= 3 and not visually_distinct:
+            return value
+    return fallback
 
 
 def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period: str | None, metric: str | None, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
@@ -2136,8 +2132,7 @@ def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period:
     low = float(data[metric].min())
     observed_high = float(data[metric].max())
     series_values = [values for _, _, values in series_data]
-    shared_high = _cdf_shared_x_maximum(series_values, observed_high)
-    high = _cdf_visually_distinct_x_maximum(series_values, low, shared_high)
+    high = _cdf_terminal_x_maximum(series_values, low, observed_high)
     high = high if high > low else low + 1
     image, draw = _canvas(title); left, top, width, height = 100, 135, 1320, 590
     # Colour policy is driven by the template's declared dimensions: operator

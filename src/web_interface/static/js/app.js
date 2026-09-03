@@ -787,6 +787,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     ));
     return [catalogueHeaders.map(escapeCsv).join(','), ...rows].join('\n');
   };
+  let savedCatalogueContent = '';
+  const hasUnsavedCatalogueChanges = () => serialiseCatalogueContent() !== savedCatalogueContent;
   const renderChartPreview = (payload) => {
     if (!chartPreview || !chartPreviewTable || !chartPreviewTitle || !chartPreviewSummary) return;
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
@@ -1003,8 +1005,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     }
     activeCell.focus();
   });
-  saveForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
+  const saveCatalogueTemplate = async () => {
     contentField.value = serialiseCatalogueContent();
     const saveButton = saveForm.querySelector('button[type="submit"]');
     hideCellAssistance();
@@ -1019,21 +1020,34 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || 'Unable to save the Slides Template.');
+      savedCatalogueContent = contentField.value;
       hideLoadingOverlay();
       showInfoDialog(`Slides Template '${payload.template || 'selected template'}' has been saved.`, {
         title: 'Slides Template saved',
       });
+      return true;
     } catch (error) {
       hideLoadingOverlay();
       showInfoDialog(error instanceof Error ? error.message : 'Unable to save the Slides Template.', {
         title: 'Slides Template save failed',
         tone: 'error',
       });
+      return false;
     } finally {
       hideLoadingOverlay();
       if (saveButton) saveButton.disabled = false;
     }
+  };
+  // Expose the editor's current state to the template picker without storing
+  // unsaved table data in the browser. The CSV rendered by the server remains
+  // the single source of truth after a selection change.
+  editor.hasUnsavedCatalogueChanges = hasUnsavedCatalogueChanges;
+  editor.saveCatalogueTemplate = saveCatalogueTemplate;
+  saveForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await saveCatalogueTemplate();
   });
+  savedCatalogueContent = serialiseCatalogueContent();
 });
 
 document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
@@ -1097,6 +1111,35 @@ document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
 });
 
 document.querySelectorAll('.catalogue-editor-picker-form').forEach((form) => {
+  // The server-selected template is authoritative. Browsers can restore a
+  // stale select value after navigation, making the picker claim that a
+  // different template is open from the one rendered in the editor table.
+  form.querySelectorAll('select[data-no-persist]').forEach((select) => {
+    Array.from(select.options).forEach((option) => { option.selected = option.defaultSelected; });
+  });
+  const picker = form.querySelector('select[name="catalogue_selection"]');
+  let selectedTemplate = picker?.value || '';
+  picker?.addEventListener('change', async () => {
+    const nextTemplate = picker.value;
+    if (!nextTemplate || nextTemplate === selectedTemplate) return;
+    const editor = document.querySelector('[data-catalogue-editor]');
+    if (editor?.hasUnsavedCatalogueChanges?.()) {
+      const saveChanges = await showConfirmDialog(
+        'This template has unsaved changes. Save them before opening the selected template?',
+        {title: 'Unsaved Slides Template changes', confirmLabel: 'Save changes', cancelLabel: 'Discard changes'},
+      );
+      if (saveChanges) {
+        const saved = await editor.saveCatalogueTemplate?.();
+        if (!saved) {
+          picker.value = selectedTemplate;
+          return;
+        }
+      }
+    }
+    selectedTemplate = nextTemplate;
+    preserveAdminScrollPosition();
+    form.submit();
+  });
   form.addEventListener('submit', () => preserveAdminScrollPosition());
 });
 
@@ -1109,6 +1152,9 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
   const name = form.querySelector('[data-catalogue-import-name]');
   const file = form.querySelector('[data-catalogue-import-file]');
   const convert = form.querySelector('[data-catalogue-convert]');
+  const overwrite = form.querySelector('[data-catalogue-overwrite]');
+  let templateLibrary = {};
+  try { templateLibrary = JSON.parse(form.dataset.catalogueTemplateLibrary || '{}'); } catch (_error) { templateLibrary = {}; }
   const currentHeaders = [
     'Slide', 'Slide Tittle', 'Slide Subtittle', 'Layout', 'Chart Tittle', 'CDR source',
     'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position',
@@ -1152,7 +1198,20 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
       );
       if (!accepted) return;
     }
+    const templateType = form.querySelector('[name="template_type"]')?.value?.trim().toLocaleLowerCase() || 'nsa';
+    const requestedName = (name?.value?.trim() || selected.name.replace(/\.csv$/i, '').replace(/[_-]+/g, ' ').trim());
+    const existing = (templateLibrary?.[templateType] || []).find((templateName) => (
+      String(templateName || '').trim().toLocaleLowerCase() === requestedName.toLocaleLowerCase()
+    ));
+    if (existing) {
+      const accepted = await showConfirmDialog(
+        `A ${templateType.toUpperCase()} template named '${existing}' already exists. Do you want to overwrite it?`,
+        {title: 'Overwrite Slides Template?', confirmLabel: 'Overwrite template'},
+      );
+      if (!accepted) return;
+    }
     if (convert) convert.value = shouldConvert ? '1' : '0';
+    if (overwrite) overwrite.value = existing ? '1' : '0';
     form.dataset.catalogueSubmitting = '1';
     showLoadingOverlay('Importing Slides Templates', 'Validating and storing the selected template in the workspace.');
     preserveAdminScrollPosition();
@@ -2250,6 +2309,7 @@ function showConfirmDialog(message, options = {}) {
   confirmTitle.textContent = options.title || 'Confirm action';
   confirmCopy.textContent = message || options.copy || 'Are you sure you want to continue?';
   confirmAccept.textContent = options.confirmLabel || 'Confirm';
+  confirmCancel.textContent = options.cancelLabel || 'Cancel';
   confirmCancel.hidden = options.hideCancel === true;
   const hasOption = Boolean(options.optionLabel && confirmOption && confirmOptionInput && confirmOptionLabel);
   if (hasOption) {
@@ -2269,6 +2329,7 @@ function showConfirmDialog(message, options = {}) {
       confirmOverlay.removeEventListener('click', handleBackdrop);
       window.removeEventListener('keydown', handleKeydown);
       confirmCancel.hidden = false;
+      confirmCancel.textContent = 'Cancel';
       const optionChecked = hasOption && Boolean(confirmOptionInput?.checked);
       if (confirmOption) confirmOption.hidden = true;
       if (confirmOptionInput) confirmOptionInput.checked = false;

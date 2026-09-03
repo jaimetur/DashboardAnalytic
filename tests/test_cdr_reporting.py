@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_shared_x_maximum, _cdf_visually_distinct_x_maximum, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_status_100, _series_colours, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_terminal_x_maximum, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_status_100, _series_colours, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -417,17 +417,13 @@ def test_cdf_uses_emphasised_lines_when_only_one_campaign_is_rendered() -> None:
     assert {item[2] for item in draw_legend.call_args.args[1]} == {4}
 
 
-def test_cdf_limits_x_axis_to_the_last_range_shared_by_two_curves() -> None:
-    assert _cdf_shared_x_maximum([[1.0, 4.0], [1.5, 7.0], [2.0, 19.0]], 19.0) == 7.0
-    assert _cdf_shared_x_maximum([[1.0, 4.0]], 4.0) == 4.0
-
-
-def test_cdf_limits_x_axis_when_curve_levels_are_no_longer_visually_distinct() -> None:
-    assert _cdf_visually_distinct_x_maximum(
-        [[1.0] * 4 + [100.0] * 6, [2.0] * 3 + [100.0] * 7, [3.0] * 2 + [100.0] * 8],
-        1.0, 100.0, minimum_separation=0.08,
+def test_cdf_trims_only_a_converged_tail_after_three_curves_reach_98_percent() -> None:
+    assert _cdf_terminal_x_maximum(
+        [[1.0] * 99 + [10.0], [2.0] * 99 + [10.0], [3.0] * 99 + [10.0], [4.0] * 70 + [30.0] * 30],
+        1.0, 30.0, minimum_separation=0.08,
     ) == 3.0
-    assert _cdf_visually_distinct_x_maximum([[1.0, 2.0], [1.0, 2.0]], 1.0, 2.0) == 2.0
+    # Fewer than three completed curves never make a tail eligible.
+    assert _cdf_terminal_x_maximum([[1.0, 2.0, 3.0, 10.0], [1.0, 2.0, 3.0, 10.0]], 1.0, 10.0) == 10.0
 
 
 def test_operator_vendor_column_groups_keep_campaign_bars_in_their_operator_palette() -> None:

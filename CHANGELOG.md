@@ -36,7 +36,9 @@
 - Expanded multivendor chart palettes so each vendor receives a distinct shade within its operator family, while campaigns for that vendor retain the same hue.
 - Made single-campaign CDF Lines use the same emphasised stroke width as the latest campaign in a multi-campaign comparison.
 - Standardised vendor colour families across every chart type: Ericsson green, Huawei red, Samsung yellow and NSN blue, with distinct shades when the same vendor appears for multiple operators.
-- Trimmed CDF Line x-axes to the final value supported by at least two visually distinct curves, avoiding single-series tails and indistinguishable converged lines.
+- Trimmed CDF Line x-axes only after at least three curves reach 98% and then converge beyond visual distinction, avoiding premature loss of meaningful CDF data.
+- Added an overwrite confirmation when importing a Slides Template whose name already exists; overwriting the default also refreshes its active CSV.
+- Made Template to edit open the chosen Slides Template immediately, prompting to save or discard any pending edits before switching tables.
 
 #### 🐛 Bug fixes:
 - Unified completed Chart Set timestamps across the Charts Jobs date, `Generated at` badge, selector label and timestamped output folder.
@@ -45,6 +47,8 @@
 - Fixed deleted Chart Sets leaving stale completed jobs in Charts Jobs, including single-set and all-set deletion.
 - Fixed Delete All Reports routing and its error dialog so validation failures no longer result in an empty `[object Object]` message.
 - Fixed build_docker.yml workflow to always update tag:latest.
+- Fixed Slides Template CSV exports adding technical technology/template suffixes; downloads now use the template's exact visible name.
+- Fixed Slides Templates Editor selection and registry stability: browser-restored picker values can no longer claim a different open template, and unregistered library CSVs no longer appear as phantom templates.
 
 #### 📚 Documentation:
 

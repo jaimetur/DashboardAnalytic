@@ -248,6 +248,11 @@ def template_filename(name: str) -> str:
     return f'{template_name}.csv'
 
 
+def template_download_filename(name: str) -> str:
+    """Return the CSV filename shown to the user when exporting a template."""
+    return template_filename(name).replace('"', '')
+
+
 def named_catalogue_path(technology: str, identifier: str, template_name: str | None = None) -> Path:
     """Return the canonical library location, named exactly after the template."""
     filename = template_filename(template_name) if template_name else f'{identifier}.csv'
@@ -255,7 +260,7 @@ def named_catalogue_path(technology: str, identifier: str, template_name: str | 
 
 
 def synchronize_template_file_names(technology: str) -> None:
-    """Synchronize the per-workspace index with the shared config CSVs."""
+    """Reconcile registered templates without treating arbitrary CSVs as templates."""
     library_dir = settings.slides_templates_dir / 'library' / technology
     library_dir.mkdir(parents=True, exist_ok=True)
     default_dir = settings.slides_templates_dir / 'default' / technology
@@ -263,14 +268,27 @@ def synchronize_template_file_names(technology: str) -> None:
     existing = {str(row['name']): bool(row['is_default']) for row in repository.list_report_templates(technology)}
     default_files = sorted(default_dir.glob('*.csv'))
     physical_names = {catalogue_registry_key(path.stem) for path in [*library_dir.glob('*.csv'), *default_files]}
-    for name in set(existing) - physical_names:
+    missing_names = set(existing) - physical_names
+    unregistered_names = physical_names - set(existing)
+    # Preserve the one unambiguous manual CSV rename supported by the library,
+    # but never promote arbitrary CSVs into the registry on a later page
+    # render. This prevents phantom templates from stale/incidental files.
+    if len(missing_names) == len(unregistered_names) == 1:
+        previous_name = next(iter(missing_names))
+        replacement_name = next(iter(unregistered_names))
+        repository.rename_report_template(technology, previous_name, replacement_name)
+        existing[replacement_name] = existing.pop(previous_name)
+        missing_names.clear()
+    for name in missing_names:
         repository.delete_report_template(technology, name)
         existing.pop(name, None)
-    for path in [*sorted(library_dir.glob('*.csv')), *default_files]:
-        name = catalogue_registry_key(path.stem)
-        if name not in existing:
-            repository.add_report_template(technology, name, is_default=False)
-            existing[name] = False
+    # The application-managed default is the only safe bootstrap source when
+    # an otherwise empty configuration database is restored.
+    if len(default_files) == 1:
+        default_name = catalogue_registry_key(default_files[0].stem)
+        if default_name not in existing:
+            repository.add_report_template(technology, default_name, is_default=False)
+            existing[default_name] = False
     if len(default_files) == 1:
         default_name = catalogue_registry_key(default_files[0].stem)
         repository.set_default_report_template(technology, default_name)
@@ -2143,6 +2161,10 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         for technology, payload in report_catalogs.items()
         for catalogue in payload['catalogues']
     ]
+    template_names_by_technology = {
+        technology: [str(catalogue['name']) for catalogue in payload['catalogues']]
+        for technology, payload in report_catalogs.items()
+    }
     admin_datasets = [serialize_dataset_row(dataset) for dataset in repository.list_datasets()] if active_workspace else []
     add_workspace_vendor_capabilities(admin_datasets)
     ready_admin_datasets = [dataset for dataset in admin_datasets if dataset['is_ready']]
@@ -2206,6 +2228,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             'vodafone_mapping_datasets': [dataset for dataset in ready_admin_datasets if dataset.get('dataset_kind') == 'mapping_vodafone'],
             'three_mapping_datasets': [dataset for dataset in ready_admin_datasets if dataset.get('dataset_kind') == 'mapping_three'],
             'report_catalogs': report_catalogs,
+            'template_names_by_technology': template_names_by_technology,
             'workspace_catalogues': workspace_catalogues,
             'database_table_groups': database_table_groups,
             'database_notice': request.query_params.get('database_notice') or None,
@@ -4765,6 +4788,7 @@ def _import_report_catalogue(
     catalogue_file: UploadFile | None,
     catalogue_name: str,
     convert_catalogue: bool,
+    overwrite_existing: bool,
     user: SessionUser,
 ) -> HTMLResponse:
     technology = technology.strip().lower()
@@ -4782,13 +4806,31 @@ def _import_report_catalogue(
         if convert_catalogue:
             content = convert_catalog_csv(content, technology)
         entries = parse_catalog_csv(content, technology)
-        if identifier in {str(row['name']) for row in repository.list_report_templates(technology)}:
-            raise ValueError(f"A {technology.upper()} template named '{identifier}' already exists.")
-        destination = named_catalogue_path(technology, identifier, catalogue_name)
+        existing_template = next(
+            (str(row['name']) for row in repository.list_report_templates(technology)
+             if str(row['name']).casefold() == identifier.casefold()),
+            None,
+        )
+        if existing_template and not overwrite_existing:
+            raise ValueError(
+                f"A {technology.upper()} template named '{existing_template}' already exists. "
+                'Confirm overwrite to replace it.'
+            )
+        # A case-insensitive name match is still the same template. Retain its
+        # existing display spelling and registry key rather than creating a
+        # second entry on case-insensitive filesystems.
+        identifier = existing_template or identifier
+        catalogue_name = identifier
+        destination = named_catalogue_path(technology, identifier, identifier)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(content)
-        repository.add_report_template(technology, identifier)
-        promote_report_template_to_default(technology, identifier)
+        if existing_template:
+            repository.touch_report_template(technology, identifier)
+            if next(row for row in repository.list_report_templates(technology) if str(row['name']) == identifier)['is_default']:
+                promote_report_template_to_default(technology, identifier)
+        else:
+            repository.add_report_template(technology, identifier)
+            promote_report_template_to_default(technology, identifier)
         synchronize_reporting_catalogue_document()
     except Exception as exc:
         repository.add_log(user.username, 'import_report_template_failed', json.dumps({
@@ -4804,7 +4846,8 @@ def _import_report_catalogue(
         'file': catalogue_file.filename,
         'chart_rows': sum(1 for entry in entries if entry.source_kind),
     }))
-    query = urlencode({'catalogue_notice': f"Imported {catalogue_name} ({technology.upper()})."})
+    action = 'Overwrote' if existing_template else 'Imported'
+    query = urlencode({'catalogue_notice': f"{action} {catalogue_name} ({technology.upper()})."})
     return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -4815,10 +4858,11 @@ def import_report_catalogue(
     catalogue_file: UploadFile | None = File(default=None),
     catalogue_name: str = Form(''),
     convert_catalogue: bool = Form(False),
+    overwrite_existing: bool = Form(False),
     user: SessionUser = Depends(admin_user),
 ) -> HTMLResponse:
     """Compatibility endpoint for existing NSA/SA-specific imports."""
-    return _import_report_catalogue(request, technology, catalogue_file, catalogue_name, convert_catalogue, user)
+    return _import_report_catalogue(request, technology, catalogue_file, catalogue_name, convert_catalogue, overwrite_existing, user)
 
 
 @app.post('/admin/slides-templates/import', response_class=HTMLResponse)
@@ -4828,10 +4872,11 @@ def import_slides_template(
     catalogue_file: UploadFile | None = File(default=None),
     catalogue_name: str = Form(''),
     convert_catalogue: bool = Form(False),
+    overwrite_existing: bool = Form(False),
     user: SessionUser = Depends(admin_user),
 ) -> HTMLResponse:
     """Import one Slides Template after the user has selected its NSA/SA type."""
-    return _import_report_catalogue(request, template_type, catalogue_file, catalogue_name, convert_catalogue, user)
+    return _import_report_catalogue(request, template_type, catalogue_file, catalogue_name, convert_catalogue, overwrite_existing, user)
 
 
 @app.post('/admin/report-templates/{technology}/{catalogue_id}/activate', response_class=HTMLResponse)
@@ -5186,10 +5231,12 @@ def export_report_catalogue(technology: str, user: SessionUser = Depends(admin_u
     if technology not in TEMPLATE_NAMES:
         raise HTTPException(status_code=404, detail='Report technology not found')
     entries = reporting_catalog_entries(technology)
+    active = next((item for item in report_catalogue_options(technology) if item['active']), None)
+    filename = template_download_filename(active['name']) if active else f'{technology.upper()} Slide Template.csv'
     return Response(
         content=catalogue_csv(entries),
         media_type='text/csv; charset=utf-8',
-        headers={'Content-Disposition': f'attachment; filename="{technology}-slides-template.csv"'},
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
     )
 
 
@@ -5210,7 +5257,7 @@ def export_selected_report_catalogue(
     return Response(
         content=catalogue_csv(load_catalog_csv(catalogue['path'], technology)),
         media_type='text/csv; charset=utf-8',
-        headers={'Content-Disposition': f'attachment; filename="{technology}-{catalogue["identifier"]}-slides-template.csv"'},
+        headers={'Content-Disposition': f'attachment; filename="{template_download_filename(catalogue["name"])}"'},
     )
 
 
@@ -5223,7 +5270,7 @@ def export_named_report_catalogue(technology: str, catalogue_id: str, user: Sess
     if not catalogue:
         raise HTTPException(status_code=404, detail='Slides Template not found')
     entries = load_catalog_csv(catalogue['path'], technology)
-    filename = f"{technology}-{catalogue['identifier']}-slides-template.csv"
+    filename = template_download_filename(catalogue['name'])
     return Response(
         content=catalogue_csv(entries),
         media_type='text/csv; charset=utf-8',

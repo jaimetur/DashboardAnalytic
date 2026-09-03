@@ -144,14 +144,15 @@
     <p class="lede">Import a Slides Template CSV, select whether it is for NSA or SA, and manage the stored workspace templates below.</p>
     {% if catalogue_error %}<span hidden data-catalogue-import-error>{{ catalogue_error }}</span>{% endif %}
     {% if catalogue_notice %}<span hidden data-catalogue-import-notice>{{ catalogue_notice }}</span>{% endif %}
-    <form class="catalogue-import-row" action="/admin/slides-templates/import" method="post" enctype="multipart/form-data" data-catalogue-import-form novalidate>
+    <form class="catalogue-import-row" action="/admin/slides-templates/import" method="post" enctype="multipart/form-data" autocomplete="off" data-catalogue-import-form data-catalogue-template-library='{{ template_names_by_technology | tojson }}' novalidate>
       <select name="template_type" aria-label="Slides Template type" title="Slides Template type">
         <option value="nsa" selected>NSA</option>
         <option value="sa">SA</option>
       </select>
-      <input type="text" name="catalogue_name" aria-label="Template name" placeholder="Template name (optional)" maxlength="80" data-catalogue-import-name>
+      <input type="text" name="catalogue_name" aria-label="Template name" placeholder="Template name (optional)" maxlength="80" autocomplete="off" data-no-persist data-catalogue-import-name>
       <input type="file" name="catalogue_file" aria-label="Slides Template CSV" accept=".csv,text/csv" data-catalogue-import-file>
       <input type="hidden" name="convert_catalogue" value="0" data-catalogue-convert>
+      <input type="hidden" name="overwrite_existing" value="0" data-catalogue-overwrite>
       <button type="submit">Import</button>
     </form>
     <h3 class="templates-library-heading">Slides Templates Library</h3>
@@ -162,8 +163,8 @@
           {% for catalogue in workspace_catalogues %}
           <tr>
             <td>
-              <form class="catalogue-rename-form" action="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/rename" method="post">
-                <input type="text" name="catalogue_name" value="{{ catalogue.name }}" aria-label="Name for {{ catalogue.name }}" maxlength="80" required data-catalogue-auto-rename>
+              <form class="catalogue-rename-form" action="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/rename" method="post" autocomplete="off">
+                <input type="text" name="catalogue_name" value="{{ catalogue.name }}" aria-label="Name for {{ catalogue.name }}" maxlength="80" required autocomplete="off" data-no-persist data-catalogue-auto-rename>
               </form>
             </td>
             <td>
@@ -215,7 +216,7 @@
     <div class="collapsible-panel-body">
     <section class="catalogue-editor-catalogue-picker" aria-label="Workspace templates">
       <p class="catalogue-library-title">Workspace templates</p>
-      <form class="catalogue-editor-picker-form" action="/admin" method="get">
+      <form class="catalogue-editor-picker-form" action="/admin" method="get" autocomplete="off">
         <label>Template to edit
           <select name="catalogue_selection" aria-label="Template to edit" required data-no-persist>
             <option value="" {% if not catalogue_editor %}selected{% endif %}>Choose a template to edit</option>
@@ -228,7 +229,6 @@
             {% endfor %}
           </select>
         </label>
-        <button type="submit">Edit</button>
         <button type="submit" formaction="/admin/report-templates/export-selected" class="catalogue-export-button">Export</button>
       </form>
     </section>
@@ -305,7 +305,7 @@
       </div>
     </div>
     {% else %}
-    <p class="lede">Choose <strong>Edit</strong> next to any NSA or SA workspace template above to open it here. The editor saves directly to that template, so exporting and re-importing is not required.</p>
+    <p class="lede">Choose an NSA or SA workspace template above to open it here. The editor saves directly to that template, so exporting and re-importing is not required.</p>
     {% endif %}
     </div>
   </details>

@@ -1938,6 +1938,38 @@ def test_admin_imports_report_catalogue_and_synchronizes_help(client, tmp_path, 
     assert 'id="info-overlay"' in confirmation.text
 
 
+def test_importing_an_existing_template_requires_explicit_overwrite(client) -> None:
+    from src.modules.cdr_reporting import CATALOG_HEADERS
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    original = (','.join(CATALOG_HEADERS) + '\n' + ','.join(['1', 'Original', '', 'Title and 1 column + Comments', '', '', '', 'Title Slide', '', '', '', '', '']) + '\n').encode('utf-8')
+    replacement = (','.join(CATALOG_HEADERS) + '\n' + ','.join(['1', 'Replacement', '', 'Title and 1 column + Comments', '', '', '', 'Title Slide', '', '', '', '', '']) + '\n').encode('utf-8')
+    created = client.post(
+        '/admin/slides-templates/import', data={'template_type': 'nsa', 'catalogue_name': 'Shared Template'},
+        files={'catalogue_file': ('Shared Template.csv', BytesIO(original), 'text/csv')}, follow_redirects=False,
+    )
+    assert created.status_code == 303
+
+    blocked = client.post(
+        '/admin/slides-templates/import', data={'template_type': 'nsa', 'catalogue_name': 'shared template'},
+        files={'catalogue_file': ('shared template.csv', BytesIO(replacement), 'text/csv')}, follow_redirects=False,
+    )
+    assert blocked.status_code == 303
+    assert 'Confirm+overwrite' in blocked.headers['location']
+    assert 'Original' in app_module.named_catalogue_path('nsa', 'Shared Template').read_text(encoding='utf-8')
+
+    overwritten = client.post(
+        '/admin/slides-templates/import',
+        data={'template_type': 'nsa', 'catalogue_name': 'shared template', 'overwrite_existing': 'true'},
+        files={'catalogue_file': ('shared template.csv', BytesIO(replacement), 'text/csv')}, follow_redirects=False,
+    )
+    assert overwritten.status_code == 303
+    assert 'Overwrote+Shared+Template' in overwritten.headers['location']
+    assert 'Replacement' in app_module.named_catalogue_path('nsa', 'Shared Template').read_text(encoding='utf-8')
+    assert 'Replacement' in app_module.reporting_catalog_path('nsa').read_text(encoding='utf-8')
+
+
 def test_admin_import_converts_a_legacy_catalogue_when_requested(client, tmp_path, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -1988,6 +2020,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'Updated Q4' in admin.text
     assert 'name="catalogue_selection"' in admin.text
     assert 'Choose a template to edit' in admin.text
+    assert '<button type="submit">Edit</button>' not in admin.text
     assert 'data-catalogue-editor-table' not in admin.text
     assert '<th>Default</th>' in admin.text
     assert 'catalogue-default-mark is-default' in admin.text
@@ -2057,6 +2090,11 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     exported = client.get('/admin/report-templates/nsa/Updated%20Q4/export')
     assert exported.status_code == 200
     assert b'Second' in exported.content
+    assert 'filename="Updated Q4.csv"' in exported.headers['content-disposition']
+
+    selected_export = client.get('/admin/report-templates/export-selected?catalogue_selection=nsa:Updated%20Q4')
+    assert selected_export.status_code == 200
+    assert 'filename="Updated Q4.csv"' in selected_export.headers['content-disposition']
 
 def test_admin_catalogue_rename_supports_background_json_save(client) -> None:
     import src.DashboardAnalytic as app_module
@@ -2180,6 +2218,16 @@ def test_template_registry_reconciles_an_unambiguous_manual_csv_rename(client) -
     reconciled = next(item for item in options if item['identifier'] == 'Historic baseline')
     assert reconciled['name'] == 'Historic baseline'
     assert reconciled['path'] == renamed
+
+
+def test_template_registry_ignores_unregistered_library_csvs(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    rogue = app_module.settings.slides_templates_dir / 'library' / 'nsa' / 'nsa NSA Slide Template slides template.csv'
+    rogue.parent.mkdir(parents=True, exist_ok=True)
+    rogue.write_bytes(app_module.catalogue_csv([]))
+
+    assert all(item['identifier'] != rogue.stem for item in app_module.report_catalogue_options('nsa'))
 
 
 def test_admin_importer_selects_template_type_and_moves_a_named_template(client) -> None:
