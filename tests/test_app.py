@@ -308,6 +308,8 @@ def test_admin_export_job_creates_a_disk_backed_download(client) -> None:
         time.sleep(0.01)
     assert payload['status'] == 'ready'
     assert payload['size'] > 0
+    assert payload['progress'] == 100
+    assert payload['bytes_total'] > 0
     download = client.get(payload['download_url'])
     assert download.status_code == 200
     with zipfile.ZipFile(BytesIO(download.content)) as archive:

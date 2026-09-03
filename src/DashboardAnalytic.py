@@ -1789,11 +1789,13 @@ def _archive_compression(path: Path) -> int:
     return zipfile.ZIP_STORED if path.suffix.casefold() in UNCOMPRESSED_ARCHIVE_SUFFIXES else zipfile.ZIP_DEFLATED
 
 
-def _archive_file(archive: zipfile.ZipFile, source: Path, archive_name: str) -> None:
+def _archive_file(archive: zipfile.ZipFile, source: Path, archive_name: str, progress_callback: Callable[[int], None] | None = None) -> None:
     archive.write(source, archive_name, compress_type=_archive_compression(source))
+    if progress_callback:
+        progress_callback(source.stat().st_size)
 
 
-def _archive_database(archive: zipfile.ZipFile, database_path: Path, archive_name: str, scratch_dir: Path | None = None) -> None:
+def _archive_database(archive: zipfile.ZipFile, database_path: Path, archive_name: str, scratch_dir: Path | None = None, progress_callback: Callable[[int], None] | None = None) -> None:
     """Add a consistent SQLite snapshot, compacting databases with substantial free space."""
     if not database_path.exists():
         return
@@ -1810,10 +1812,10 @@ def _archive_database(archive: zipfile.ZipFile, database_path: Path, archive_nam
             else:
                 with sqlite3.connect(snapshot) as target:
                     source.backup(target)
-        _archive_file(archive, snapshot, archive_name)
+        _archive_file(archive, snapshot, archive_name, progress_callback)
 
 
-def _archive_tree(archive: zipfile.ZipFile, source: Path, archive_prefix: str, *, exclude_slides_templates: bool = False) -> None:
+def _archive_tree(archive: zipfile.ZipFile, source: Path, archive_prefix: str, *, exclude_slides_templates: bool = False, progress_callback: Callable[[int], None] | None = None) -> None:
     if not source.exists():
         return
     for path in source.rglob('*'):
@@ -1822,17 +1824,17 @@ def _archive_tree(archive: zipfile.ZipFile, source: Path, archive_prefix: str, *
         relative_path = path.relative_to(source)
         if exclude_slides_templates and relative_path.parts and relative_path.parts[0] == 'slides-templates':
             continue
-        _archive_file(archive, path, f'{archive_prefix}/{relative_path.as_posix()}')
+        _archive_file(archive, path, f'{archive_prefix}/{relative_path.as_posix()}', progress_callback)
 
 
 def _workspace_archive_metadata(workspace: Workspace) -> dict[str, str]:
     return {'name': workspace.name, 'source_input_dir': str(workspace.input_dir)}
 
 
-def _archive_workspace(archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str, scratch_dir: Path | None = None) -> None:
-    _archive_database(archive, workspace.database_path, f'{archive_prefix}/database.sqlite', scratch_dir)
-    _archive_tree(archive, workspace.input_dir, f'{archive_prefix}/input')
-    _archive_tree(archive, workspace.export_dir, f'{archive_prefix}/exports')
+def _archive_workspace(archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str, scratch_dir: Path | None = None, progress_callback: Callable[[int], None] | None = None) -> None:
+    _archive_database(archive, workspace.database_path, f'{archive_prefix}/database.sqlite', scratch_dir, progress_callback)
+    _archive_tree(archive, workspace.input_dir, f'{archive_prefix}/input', progress_callback=progress_callback)
+    _archive_tree(archive, workspace.export_dir, f'{archive_prefix}/exports', progress_callback=progress_callback)
 
 
 def export_archive_filename(target: str) -> str:
@@ -1868,7 +1870,7 @@ def _selected_export_workspaces(workspace_ids: Iterable[str] | None) -> list[Wor
     return [available[workspace_id] for workspace_id in selected_ids]
 
 
-def build_export_archive_file(target: str, destination: Path, workspace_ids: Iterable[str] | None = None) -> str:
+def build_export_archive_file(target: str, destination: Path, workspace_ids: Iterable[str] | None = None, progress_callback: Callable[[int], None] | None = None) -> str:
     """Create a portable archive on disk, keeping large exports out of RAM."""
     filename = export_archive_filename(target)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1885,7 +1887,7 @@ def build_export_archive_file(target: str, destination: Path, workspace_ids: Ite
         application_database = application_config_dir / 'application.db'
         if not application_database.is_file():
             raise FileNotFoundError('The application configuration database was not found.')
-        _archive_database(archive, application_database, 'config/application.db', destination.parent)
+        _archive_database(archive, application_database, 'config/application.db', destination.parent, progress_callback)
         for path in config_root.iterdir():
             if (
                 path == application_database
@@ -1895,9 +1897,9 @@ def build_export_archive_file(target: str, destination: Path, workspace_ids: Ite
                 or path.name.endswith(('-wal', '-shm'))
             ):
                 continue
-            _archive_file(archive, path, f'config/{path.name}')
+            _archive_file(archive, path, f'config/{path.name}', progress_callback)
         if include_templates:
-            _archive_tree(archive, settings.slides_templates_dir, 'config/slides-templates')
+            _archive_tree(archive, settings.slides_templates_dir, 'config/slides-templates', progress_callback=progress_callback)
 
     # Level 1 retains most of SQLite's compression benefit while avoiding the
     # disproportionate CPU cost of the default level on multi-GB databases.
@@ -1920,7 +1922,7 @@ def build_export_archive_file(target: str, destination: Path, workspace_ids: Ite
                 'includes_slides_templates': True,
             }
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
-            _archive_tree(archive, settings.slides_templates_dir, 'slides-templates')
+            _archive_tree(archive, settings.slides_templates_dir, 'slides-templates', progress_callback=progress_callback)
         elif target.startswith('workspace:'):
             workspace = workspace_registry.get(target.removeprefix('workspace:'))
             if not workspace:
@@ -1932,7 +1934,7 @@ def build_export_archive_file(target: str, destination: Path, workspace_ids: Ite
                 'workspace': _workspace_archive_metadata(workspace),
             }
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
-            _archive_workspace(archive, workspace, 'workspace', destination.parent)
+            _archive_workspace(archive, workspace, 'workspace', destination.parent, progress_callback)
         elif target == 'full-environment':
             workspaces = _selected_export_workspaces(workspace_ids)
             manifest = {
@@ -1948,7 +1950,7 @@ def build_export_archive_file(target: str, destination: Path, workspace_ids: Ite
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             archive_configuration(archive, include_templates=True)
             for entry, workspace in zip(manifest['workspaces'], workspaces, strict=True):
-                _archive_workspace(archive, workspace, str(entry['archive_path']), destination.parent)
+                _archive_workspace(archive, workspace, str(entry['archive_path']), destination.parent, progress_callback)
         else:
             raise ValueError('Select a valid export option.')
     return filename
@@ -1960,6 +1962,50 @@ def build_export_archive(target: str) -> tuple[bytes, str]:
         destination = Path(temporary_dir) / 'package.zip'
         filename = build_export_archive_file(target, destination)
         return destination.read_bytes(), filename
+
+
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size if path.is_file() else 0
+    except OSError:
+        return 0
+
+
+def _tree_size(source: Path, *, exclude_slides_templates: bool = False) -> int:
+    if not source.exists():
+        return 0
+    total = 0
+    for path in source.rglob('*'):
+        if not path.is_file() or path.name.endswith(('-wal', '-shm')):
+            continue
+        relative_path = path.relative_to(source)
+        if exclude_slides_templates and relative_path.parts and relative_path.parts[0] == 'slides-templates':
+            continue
+        total += _file_size(path)
+    return total
+
+
+def estimate_export_bytes(target: str, workspace_ids: Iterable[str] | None = None) -> int:
+    """Estimate input bytes so the UI can show meaningful export progress."""
+    total = _file_size(application_config_dir / 'application.db')
+    if target in {'config', 'config-with-templates', 'full-environment'}:
+        for path in application_config_dir.iterdir():
+            if path.is_file() and path.name not in {'application.db', workspace_registry.registry_path.name} and not path.name.endswith(('-wal', '-shm')):
+                total += _file_size(path)
+        if target in {'config-with-templates', 'full-environment'}:
+            total += _tree_size(settings.slides_templates_dir)
+    elif target == 'slides-templates':
+        total = _tree_size(settings.slides_templates_dir)
+    elif target.startswith('workspace:'):
+        workspace = workspace_registry.get(target.removeprefix('workspace:'))
+        if workspace:
+            total = _file_size(workspace.database_path) + _tree_size(workspace.input_dir) + _tree_size(workspace.export_dir)
+    if target == 'full-environment':
+        total += sum(
+            _file_size(workspace.database_path) + _tree_size(workspace.input_dir) + _tree_size(workspace.export_dir)
+            for workspace in _selected_export_workspaces(workspace_ids)
+        )
+    return max(total, 1)
 
 
 def _cleanup_expired_export_packages() -> None:
@@ -2025,11 +2071,22 @@ def _run_export_job(job_id: str, target: str, workspace_ids: list[str] | None) -
         job['status'] = 'processing'
     destination = Path(str(job['path']))
     partial_path = destination.with_suffix('.part')
+    bytes_total = estimate_export_bytes(target, workspace_ids)
+    bytes_done = 0
+    with EXPORT_JOBS_LOCK:
+        job.update({'bytes_total': bytes_total, 'bytes_done': 0, 'progress': 0})
+
+    def progress_callback(amount: int) -> None:
+        nonlocal bytes_done
+        bytes_done += max(0, amount)
+        with EXPORT_JOBS_LOCK:
+            job.update({'bytes_done': bytes_done, 'progress': min(99, round(bytes_done * 100 / bytes_total, 1))})
+
     try:
-        filename = build_export_archive_file(target, partial_path, workspace_ids)
+        filename = build_export_archive_file(target, partial_path, workspace_ids, progress_callback)
         partial_path.replace(destination)
         with EXPORT_JOBS_LOCK:
-            job.update({'status': 'ready', 'filename': filename, 'size': destination.stat().st_size, 'finished_at': datetime.now(timezone.utc).timestamp()})
+            job.update({'status': 'ready', 'filename': filename, 'size': destination.stat().st_size, 'bytes_done': bytes_total, 'progress': 100, 'finished_at': datetime.now(timezone.utc).timestamp()})
     except Exception as exc:
         partial_path.unlink(missing_ok=True)
         destination.unlink(missing_ok=True)

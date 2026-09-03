@@ -1491,6 +1491,7 @@ document.querySelectorAll('.collapsible-panel').forEach((panel) => {
 const loadingOverlay = document.getElementById('loading-overlay');
 const loadingTitle = document.getElementById('loading-title');
 const loadingCopy = document.getElementById('loading-copy');
+const loadingProgressBar = document.querySelector('.loading-progress-bar');
 const confirmOverlay = document.getElementById('confirm-overlay');
 const confirmTitle = document.getElementById('confirm-title');
 const confirmCopy = document.getElementById('confirm-copy');
@@ -2392,8 +2393,24 @@ function showLoadingOverlay(label, copy) {
   if (!loadingOverlay) return;
   loadingTitle.textContent = label || 'Processing request';
   loadingCopy.textContent = copy || 'Please wait while the workspace processes the selected dataset or updates the dashboard.';
+  if (loadingProgressBar instanceof HTMLElement) {
+    loadingProgressBar.style.width = '45%';
+    loadingProgressBar.style.animation = '';
+  }
   loadingOverlay.hidden = false;
   document.body.classList.add('loading-active');
+}
+
+function setLoadingProgress(progress) {
+  if (!(loadingProgressBar instanceof HTMLElement)) return;
+  const numericProgress = Number(progress);
+  if (!Number.isFinite(numericProgress) || numericProgress <= 0) {
+    loadingProgressBar.style.width = '45%';
+    loadingProgressBar.style.animation = '';
+    return;
+  }
+  loadingProgressBar.style.width = `${Math.min(100, Math.max(0, numericProgress))}%`;
+  loadingProgressBar.style.animation = 'none';
 }
 
 hideLoadingOverlay();
@@ -2808,6 +2825,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
           return;
         }
         if (transfer.status === 'failed') throw new Error(transfer.error || 'The destination server could not complete the transfer.');
+        setLoadingProgress(transfer.status === 'transferring' ? transfer.progress : 0);
         const copies = {
           queued: 'Preparing the connection to the destination server.',
           connecting: 'Connecting to the destination server and creating the transfer request.',
@@ -2865,7 +2883,10 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
           return;
         }
         if (status.status === 'failed') throw new Error(status.error || 'The export package could not be created.');
-        if (loadingCopy) loadingCopy.textContent = 'Preparing the export package on the server. Large workspaces can take several minutes; you may keep this page open.';
+        setLoadingProgress(status.progress);
+        if (loadingCopy) loadingCopy.textContent = status.progress > 0
+          ? `Preparing the export package on the server — approximately ${status.progress}% of source data archived.`
+          : 'Preparing the export package on the server. Large workspaces can take several minutes; you may keep this page open.';
         window.setTimeout(() => { pollExport().catch(handleExportError); }, 1200);
       };
       const handleExportError = (error) => {
