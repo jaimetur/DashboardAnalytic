@@ -129,9 +129,10 @@ jobs:
           file: docker/dockerfile
           platforms: linux/amd64,linux/arm64
           pull: true
-          no-cache: true
           push: true
           tags: ${{ steps.image.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Prepare Docker package
         run: |

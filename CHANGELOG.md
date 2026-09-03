@@ -41,6 +41,7 @@
 - Accelerated workspace imports by atomically renaming staged SQLite databases when possible, falling back safely across filesystems, and replacing the full `quick_check` scan with lightweight SQLite validation.
 - Increased archive extraction I/O blocks to reduce overhead while restoring large workspace databases and files.
 - Published Docker tags as multi-platform manifests for native `linux/amd64` and `linux/arm64` execution, allowing Docker to select the correct image automatically and avoiding x86 emulation on ARM hosts.
+- Enabled GitHub Actions layer caching for multi-platform Docker builds to speed up subsequent image publications when dependencies and build inputs are unchanged.
 
 #### 🐛 Bug fixes:
 - Fixed Reporting CDR multi-select checkmarks after Multivendor review so they match the submitted CDRs.
