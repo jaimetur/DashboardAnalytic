@@ -18,7 +18,7 @@
 
 #### 🚀 Enhancements:
 - Added the Open/eye actions for Charts Jobs and automatic opening/scrolling to the corresponding Chart Set when a new or retried Charts Job completes.
-- Stored report-rendered PNGs in `output/reports/<report-name>/report-charts/` and standalone Chart Sets in `output/charts/`; newly generated report filenames now use `_by-operator_` or `_by-vendor_` scope tokens.
+- Stored report-rendered PNGs in `output/reports/<report-name>/report-charts/` and standalone Chart Sets in `output/charts/`; newly generated report filenames now use `_operator-comparison_` or `_vendor-comparison_` scope tokens.
 - Renamed Report Charts to Charts Panel and unified its selector with standalone and report-rendered sets, source prefixes and Delete All Reports alongside Chart Set cleanup actions.
 - Improved Charts Panel selection with report-first default ordering, source-specific styling, compact labels, a preserved prefix gap, graceful closing, and automatic refresh/fallback selection after deletion or relaunch.
 - Standardised completed standalone Chart Set timestamps across the Charts Jobs date, Charts Panel `Generated at` badge and output folder; incomplete sets remain hidden from the selector, including after reload.
@@ -43,6 +43,7 @@
 - Published Docker tags as multi-platform manifests for native `linux/amd64` and `linux/arm64` execution, allowing Docker to select the correct image automatically and avoiding x86 emulation on ARM hosts.
 - Enabled GitHub Actions layer caching for multi-platform Docker builds to speed up subsequent image publications when dependencies and build inputs are unchanged.
 - Made workspace replacement imports automatically close only the colliding active workspace, validate the incoming workspace in staging, preserve its identity and access grants, and delete all previous workspace files only after a successful replacement.
+- Standardised resolved chart labels as `YYYY-Qx` for campaigns and `VF`, `O2`, `3` and `EE` for known UK operator aliases, including Telefónica and Everything Everywhere variants.
 
 #### 🐛 Bug fixes:
 - Fixed Reporting CDR multi-select checkmarks after Multivendor review so they match the submitted CDRs.
@@ -60,6 +61,11 @@
 - Made large ZIP imports stream directly to their retained disk file and added byte-accurate browser upload progress, avoiding the previous multipart staging copy.
 - Fixed bulk deletion so Delete All Charts Sets also clears the complete Charts Jobs table and all standalone Chart Set directories, while Delete All Reports removes orphaned and incomplete folders from `output/reports`.
 - Fixed Full Environment imports to translate source workspace IDs to their retained or newly created destination IDs, preserving every imported user permission even when the replaced workspace was open or had a different local ID.
+- Moved View filtered dataset out of the E2E Reporting Interactive Preview body and into the chart navigation row, centred beneath the preview controls it applies to.
+- Renamed CDR Source to CDR Type in the E2E chart viewer and added a type-filtered Datasets multi-select, prefilled from the report or Chart Set Job and applied to temporary chart and filtered-dataset regeneration.
+- Fixed View filtered dataset and temporary chart regeneration to serialize multi-selected Dataset IDs correctly, while accepting legacy aggregation-style separators defensively.
+- Fixed shared reporting-table reuse to detect and rebuild any chart-requested column that contains source data but is empty in one dataset's cached rows, preventing fields such as `G Level 4` disappearing from historical campaigns.
+- Fixed newly added Filter Builder conditions so their Column and Operator controls immediately use the same searchable single-select dropdowns as existing conditions in every Interactive Preview.
 
 #### 📚 Documentation:
 - Rewrote the PowerPoint Reporting help as static guidance for building Slides Templates, including field-by-field instructions and practical recipes for every chart type, filters, aggregations, legends, structural slides, operators and output jobs.

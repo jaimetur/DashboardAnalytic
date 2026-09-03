@@ -50,9 +50,9 @@ def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> Non
 
 def test_report_operator_aliases_share_filters_and_grouping_across_campaigns() -> None:
     frame = pd.DataFrame({
-        "Operator": ["Vodafone", "Vodafone UK", "o2 - de", "O2(UK)", "Three", "three(uk)", "EE UK"],
-        "Campaign": ["UK_Q4_2025", "UK_Q2_2026", "UK_Q4_2025", "UK_Q2_2026", "UK_Q4_2025", "UK_Q2_2026", "UK_Q2_2026"],
-        "Call_Status": ["Completed"] * 7,
+        "Operator": ["Vodafone", "Vodafone UK", "o2 - de", "O2(UK)", "Telefónica", "Three", "Three UK", "3 UK", "EE UK", "Everything Everywhere"],
+        "Campaign": ["UK_Q4_2025", "UK_Q2_2026", "UK_Q4_2025", "UK_Q2_2026", "UK_Q2_2026", "UK_Q4_2025", "UK_Q2_2026", "UK_Q4_2025", "UK_Q2_2026", "UK_Q4_2025"],
+        "Call_Status": ["Completed"] * 10,
     })
     entry = CatalogEntry(
         1, "", "", "", "", "CDR-Voice", "Call_Status", "100% Stacked Vertical Bars", "",
@@ -63,9 +63,15 @@ def test_report_operator_aliases_share_filters_and_grouping_across_campaigns() -
     filtered = _apply_catalog_filters(normalised, entry, False, "Call_Status")
     grouped, primary, series = _apply_catalog_grouping(filtered, entry, False, "Call_Status")
 
-    assert filtered["Operator"].tolist() == ["Vodafone", "Vodafone", "O2", "O2", "3", "3", "EE"]
-    assert set(grouped[primary]) == {"Vodafone", "O2", "3", "EE"}
-    assert set(grouped[series]) == {"2025 Q4", "2026 Q2"}
+    assert filtered["Operator"].tolist() == ["VF", "VF", "O2", "O2", "O2", "3", "3", "3", "EE", "EE"]
+    assert set(grouped[primary]) == {"VF", "O2", "3", "EE"}
+    assert set(grouped[series]) == {"2025-Q4", "2026-Q2"}
+
+
+def test_h3g_is_not_normalised_as_operator_three() -> None:
+    frame = pd.DataFrame({"Operator": ["H3G", "H3G UK", "Three UK"]})
+
+    assert normalise_report_operator_aliases(frame)["Operator"].tolist() == ["H3G", "H3G UK", "3"]
 
 
 def test_reporting_cache_resolves_separator_variants_and_refreshes_derived_dimensions(tmp_path) -> None:
@@ -84,6 +90,19 @@ def test_reporting_cache_resolves_separator_variants_and_refreshes_derived_dimen
 
     loaded = repository.load_reporting_rows('voice', [1], ['G Level 4', 'Call Family'])
     assert loaded.to_dict(orient='records') == [{'G Level 4': 'London', 'Call Family': 'VoLTE'}]
+
+
+def test_reporting_cache_repairs_an_empty_requested_source_column(tmp_path) -> None:
+    repository = Repository(tmp_path / 'workspace.db')
+    repository.replace_dataset_rows(1, pd.DataFrame({'RAT': ['EN-DC'], 'G_Level_4': ['London']}))
+    repository.copy_dataset_rows_to_reporting(1, 'data', ['RAT', 'G Level 4'])
+    with repository.connection() as connection:
+        connection.execute('UPDATE reporting_rows_data SET G_Level_4 = NULL WHERE dataset_id = 1')
+
+    repository.copy_dataset_rows_to_reporting(1, 'data', ['RAT', 'G Level 4'])
+
+    loaded = repository.load_reporting_rows('data', [1], ['G Level 4'])
+    assert loaded.to_dict(orient='records') == [{'G Level 4': 'London'}]
 
 
 def test_session_classification_and_multivendor_enrichment() -> None:
@@ -352,7 +371,7 @@ def test_multivendor_rendering_rewrites_operator_display_and_grouping_but_not_fi
     filtered = _apply_catalog_filters(frame, rendered, True, 'LQ')
     grouped, primary, series = _apply_catalog_grouping(filtered, rendered, True, 'LQ')
     assert grouped[primary].tolist() == ['Vodafone_Ericsson']
-    assert grouped[series].tolist() == ['Vodafone_Ericsson · 2026 Q2']
+    assert grouped[series].tolist() == ['Vodafone_Ericsson · 2026-Q2']
 
 
 def test_rows_only_grouping_uses_one_all_series_without_repeating_the_category() -> None:
@@ -382,8 +401,8 @@ def test_campaign_grouping_displays_only_year_and_quarter() -> None:
     grouped, _primary, series = _apply_catalog_grouping(frame, entry, False, 'LQ')
 
     assert grouped['Campaign'].tolist() == ['UK_Q2_SA_2026', 'UK_Q4_2025', '2024 Q3 NSA']
-    assert grouped['__catalog_column_0'].tolist() == ['2026 Q2', '2025 Q4', '2024 Q3']
-    assert grouped[series].tolist() == ['2026 Q2', '2025 Q4', '2024 Q3']
+    assert grouped['__catalog_column_0'].tolist() == ['2026-Q2', '2025-Q4', '2024-Q3']
+    assert grouped[series].tolist() == ['2026-Q2', '2025-Q4', '2024-Q3']
 
 
 def test_cdf_renders_a_curve_for_each_complete_rows_and_columns_combination() -> None:
@@ -1012,7 +1031,7 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
     job = wait_for_report_job(client, report.json()['job_id'])
     assert job['status'] == 'ready'
     assert job['slides'] == 17
-    assert re.search(r'NetCheck_CDR_NSA_by-operator_\d{8}-\d{6}\.pptx', job['report_name'])
+    assert re.search(r'NetCheck_CDR_NSA_operator-comparison_\d{8}-\d{6}\.pptx', job['report_name'])
     download = client.get(job['download_url'])
     assert download.status_code == 200
     assert download.headers['content-type'].startswith('application/vnd.openxmlformats-officedocument.presentationml.presentation')
@@ -1074,6 +1093,23 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert job['date'] == payload['generated_at']
     assert payload['generation'] == datetime.strptime(payload['generated_at'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d-%H%M%S')
     assert payload['charts']
+    preview_context = client.get('/api/reporting/chart-preview/context', params={
+        'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
+    })
+    assert preview_context.status_code == 200
+    context_payload = preview_context.json()
+    assert context_payload['dataset_ids_by_source'] == {'cdr-data': ['1'], 'cdr-voice': ['2'], 'cdr-speech': ['3']}
+    source_key = context_payload['cdr_source'].lower()
+    expected_id = {'cdr-data': '1', 'cdr-voice': '2', 'cdr-speech': '3'}[source_key]
+    assert context_payload['dataset_ids'] == [expected_id]
+    assert context_payload['datasets_by_source']['cdr-data'] == [{'value': '1', 'label': 'NetCheck_CDR_Data.csv'}]
+    assert context_payload['datasets_by_source']['cdr-voice'] == [{'value': '2', 'label': 'NetCheck_CDR_Voice.csv'}]
+    wrong_id = next(value for value in ('1', '2', '3') if value != expected_id)
+    invalid_dataset_type = client.post('/api/reporting/chart-preview', json={
+        'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
+        'definition': {'cdr_source': context_payload['cdr_source'], 'dataset_ids': [wrong_id]},
+    })
+    assert invalid_dataset_type.status_code == 400
     image_url = payload['charts'][0]['image_url']
     assert re.match(r'/reporting/charts/\d{8}-\d{6}/chart-\d+\.png\?v=', image_url)
     assert client.get(image_url).content == b'PNG'
@@ -1116,6 +1152,17 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert app_module.repository.list_report_chart_jobs(limit=None) == []
     assert list(app_module.report_charts_directory().iterdir()) == []
     assert client.get(f"/api/reporting/chart-sets/{payload['generation']}").status_code == 404
+
+
+def test_temporary_preview_accepts_dataset_ids_with_legacy_multiplication_separator(monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    monkeypatch.setattr(app_module.repository, 'list_datasets', lambda: [
+        {'id': 2, 'status': 'ready', 'dataset_kind': 'voice'},
+        {'id': 5, 'status': 'ready', 'dataset_kind': 'voice'},
+    ])
+
+    assert app_module._temporary_preview_dataset_ids({'dataset_ids': '2 × 5'}, {}, 'voice') == [2, 5]
 
 
 def test_report_chart_generation_failures_return_json_and_are_logged(client, monkeypatch) -> None:

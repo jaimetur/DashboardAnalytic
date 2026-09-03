@@ -7,6 +7,7 @@ import gc
 import io
 import json
 import re
+import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from io import BytesIO
@@ -494,7 +495,7 @@ def _normalise_operator(value: object) -> str:
     """Return the operator form used by the Vendor-mapping business formula."""
     text = str(value or "").strip()
     key = re.sub(r"[^a-z0-9]+", "", text.casefold())
-    if key in {"3", "3uk", "three", "threeuk", "h3g", "h3guk"}:
+    if key in {"3", "3uk", "three", "threeuk"}:
         return "3"
     if key in {"vodafone", "vodafoneuk", "vf", "vfuk"}:
         return "Vodafone UK"
@@ -504,9 +505,13 @@ def _normalise_operator(value: object) -> str:
 def _normalise_report_operator(value: object) -> str:
     """Return the canonical report label for known historical UK aliases."""
     text = _normalise_operator(value)
-    key = re.sub(r"[^a-z0-9]+", "", text.casefold())
+    key = re.sub(
+        r"[^a-z0-9]+",
+        "",
+        unicodedata.normalize("NFKD", text.casefold()).encode("ascii", "ignore").decode("ascii"),
+    )
     if key in {"vodafone", "vodafoneuk", "vf", "vfuk"}:
-        return "Vodafone"
+        return "VF"
     if key.startswith("o2") or key in {"telefonica", "telefonicao2"}:
         return "O2"
     if key in {"ee", "eeuk", "everythingeverywhere"}:
@@ -952,7 +957,7 @@ def _campaign_display_value(value: object) -> str:
     year_match = re.search(r"(?:19|20)\d{2}", text)
     quarter_match = re.search(r"(?:^|[^A-Z0-9])Q\s*([1-4])(?:[^0-9]|$)", text, flags=re.I)
     if year_match and quarter_match:
-        return f"{year_match.group(0)} Q{quarter_match.group(1)}"
+        return f"{year_match.group(0)}-Q{quarter_match.group(1)}"
     return text
 
 

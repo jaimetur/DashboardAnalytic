@@ -2211,7 +2211,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     ['chart_type', 'Chart Type'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['filters', 'Filters'],
     ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
   ];
-  const multiFields = new Set(['grouping_rows', 'grouping_columns', 'legend']);
+  const multiFields = new Set(['dataset_ids', 'grouping_rows', 'grouping_columns', 'legend']);
   const sourceKey = (source) => {
     const normalized = String(source || '').trim().toLowerCase();
     return ({data: 'cdr-data', voice: 'cdr-voice', speech: 'cdr-speech'})[normalized] || (normalized.startsWith('cdr-') ? normalized : `cdr-${normalized}`);
@@ -2233,7 +2233,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
   };
   const currentDefinition = () => Object.fromEntries(Array.from(fieldsElement.querySelectorAll('[name]')).map((control) => {
     if (!control.multiple) return [control.name, control.value];
-    return [control.name, orderedSelectedValues(control).join(control.name === 'legend' ? ', ' : ' × ')];
+    return [control.name, orderedSelectedValues(control).join(control.name === 'legend' || control.name === 'dataset_ids' ? ', ' : ' × ')];
   }));
   let activeMenu = null;
   let activeMenuTrigger = null;
@@ -2248,11 +2248,12 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     if (activeMenu && activeMenuHome) activeMenuHome.insertBefore(activeMenu, activeMenuNextSibling);
     activeMenu = null; activeMenuTrigger = null; activeMenuHome = null; activeMenuNextSibling = null;
   };
-  const setupSelects = () => {
+  const setupSelects = (root = fieldsElement) => {
     // Filter-condition selects are dynamic and do not have a name. Include
     // them explicitly so Column and Operator receive the same searchable,
     // single-value dropdown used by KPI and CDR Source in every preview host.
-    fieldsElement.querySelectorAll('select[name], select[data-report-chart-filter-select], .report-chart-filter-condition select').forEach((select) => {
+    root.querySelectorAll('select[name], select[data-report-chart-filter-select], .report-chart-filter-condition select').forEach((select) => {
+      if (select.classList.contains('report-chart-preview-select-native')) return;
       const shell = document.createElement('div'); shell.className = 'report-chart-preview-select';
       const trigger = document.createElement('button'); trigger.type = 'button'; trigger.className = 'report-chart-preview-select-trigger'; trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-expanded', 'false');
       const triggerText = document.createElement('span'); triggerText.className = 'report-chart-preview-select-value'; trigger.append(triggerText);
@@ -2263,7 +2264,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
         const selected = Array.from(select.selectedOptions).map((option) => option.textContent?.trim()).filter(Boolean);
         const configured = select.dataset.previewDisplay || '';
         triggerText.textContent = select.multiple
-          ? (selected.length ? `${selected.length} selected` : (configured ? `${configured.split(select.name === 'legend' ? ',' : /\s*(?:×|x)\s*/i).filter(Boolean).length} selected` : 'Select fields…'))
+          ? (selected.length ? `${selected.length} selected` : (configured ? `${configured.split(select.name === 'legend' || select.name === 'dataset_ids' ? ',' : /\s*(?:×|x)\s*/i).filter(Boolean).length} selected` : 'Select fields…'))
           : (selected[0] || configured || 'Select a value…');
       };
       const renderOptions = () => {
@@ -2335,7 +2336,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
         const operator = document.createElement('select'); operator.dataset.reportChartFilterSelect = ''; operator.setAttribute('aria-label', 'Filter operator'); ['=', '!=', 'CONTAINS', 'NOT CONTAINS', 'IN', 'NOT IN', '>=', '<=', '>', '<'].forEach((value) => operator.add(new Option(value, value, false, value === condition.operator)));
         const value = document.createElement('input'); value.type = 'text'; value.dataset.reportChartFilterValue = ''; value.placeholder = 'Value'; value.value = condition.value || '';
         const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '−'; remove.title = 'Remove condition'; remove.addEventListener('click', () => { row.remove(); sync(); });
-        [column, operator, value].forEach((input) => { input.addEventListener('input', sync); input.addEventListener('change', sync); }); row.append(column, operator, value, remove); conditions.append(row);
+        [column, operator, value].forEach((input) => { input.addEventListener('input', sync); input.addEventListener('change', sync); }); row.append(column, operator, value, remove); conditions.append(row); setupSelects(row);
       };
       const parsed = String(definition.filters || '').split(';').map((item) => item.trim()).filter(Boolean).map((item) => { const match = item.match(/^(.+?)\s+(NOT\s+CONTAINS|NOT\s+IN|CONTAINS|IN|>=|<=|!=|=|>|<)\s+(.+)$/i); return match ? {column: match[1].trim(), operator: match[2].toUpperCase(), value: match[3].trim()} : {}; });
       (parsed.length ? parsed : [{}]).forEach(addCondition);
@@ -2345,6 +2346,11 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     const control = document.createElement('select');
     if (key === 'chart_type') (options.chartTypes || []).forEach((value) => control.add(new Option(value, value, false, normalisePreviewValue(value) === normalisePreviewValue(definition[key]))));
     else if (key === 'cdr_source') (options.cdrSources || ['CDR-Data', 'CDR-Voice', 'CDR-Speech']).forEach((value) => control.add(new Option(value, value, false, sourceKey(value) === sourceKey(definition[key]))));
+    else if (key === 'dataset_ids') {
+      control.multiple = true;
+      const selected = new Set(Array.isArray(definition[key]) ? definition[key].map(String) : String(definition[key] || '').split(',').map((value) => value.trim()).filter(Boolean));
+      (options.datasetsBySource?.[sourceKey(definition.cdr_source)] || []).forEach((dataset) => control.add(new Option(dataset.label, String(dataset.value), false, selected.has(String(dataset.value)))));
+    }
     else if (key === 'legend_position') (options.legendPositions || ['Top', 'Bottom', 'Left', 'Right']).forEach((value) => control.add(new Option(value, value, false, normalisePreviewValue(value) === normalisePreviewValue(definition[key]))));
     else {
       const available = columnsFor(definition.cdr_source);
@@ -2356,7 +2362,9 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     // browser can otherwise retain the blank placeholder selected even when
     // the option was initially marked selected by the constructor.
     if (control.multiple) {
-      const requested = valuesFor(definition[key], key);
+      const requested = key === 'dataset_ids'
+        ? new Set(Array.isArray(definition[key]) ? definition[key].map(String) : String(definition[key] || '').split(',').map((value) => value.trim()).filter(Boolean))
+        : valuesFor(definition[key], key);
       Array.from(control.options).forEach((option) => {
         option.selected = Array.from(requested).some((value) => normalisePreviewValue(value) === normalisePreviewValue(option.value));
       });
@@ -2367,7 +2375,12 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       ));
       if (matching) control.value = matching.value;
     }
-    if (control.multiple) control.dataset.previewSelectionOrder = JSON.stringify(Array.from(valuesFor(definition[key], key)).map((value) => matchingPreviewValue(value, Array.from(control.options).map((option) => option.value))));
+    if (control.multiple) {
+      const requestedOrder = key === 'dataset_ids'
+        ? (Array.isArray(definition[key]) ? definition[key].map(String) : String(definition[key] || '').split(',').map((value) => value.trim()).filter(Boolean))
+        : Array.from(valuesFor(definition[key], key));
+      control.dataset.previewSelectionOrder = JSON.stringify(requestedOrder.map((value) => matchingPreviewValue(value, Array.from(control.options).map((option) => option.value))));
+    }
     control.name = key; control.dataset.previewDisplay = String(definition[key] || ''); control.setAttribute('aria-label', label); field.append(control);
     if (key === 'grouping_rows' || key === 'grouping_columns') {
       const parsed = document.createElement('input'); parsed.type = 'text'; parsed.className = 'report-chart-preview-parsed'; parsed.readOnly = true; parsed.placeholder = `Parsed ${label}`; parsed.setAttribute('aria-label', `Parsed ${label}`);

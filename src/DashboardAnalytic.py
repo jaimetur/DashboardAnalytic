@@ -3981,13 +3981,40 @@ def _temporary_chart_preview_context(source: str, identifier: str, chart_index: 
     return entries[chart_index], selected_ids, technology, scope == 'multivendor'
 
 
+def _temporary_preview_dataset_ids(editable: dict[str, Any], selected_ids: dict[str, list[int]], source_kind: str) -> list[int]:
+    """Resolve an optional dataset selection and constrain it to its CDR type."""
+    raw_values = editable.get('dataset_ids')
+    if raw_values is None:
+        return selected_ids.get(source_kind, [])
+    values = raw_values if isinstance(raw_values, list) else re.split(r'\s*(?:,|×|\bx\b)\s*', str(raw_values), flags=re.IGNORECASE)
+    try:
+        requested = list(dict.fromkeys(int(value) for value in values if str(value).strip()))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='Choose valid processed CDR datasets.') from exc
+    available = {
+        int(row['id']) for row in repository.list_datasets()
+        if row['status'] == 'ready' and str(row['dataset_kind'] or '').casefold() == source_kind
+    }
+    if not requested or any(dataset_id not in available for dataset_id in requested):
+        raise HTTPException(status_code=400, detail=f'Choose one or more processed {source_kind.title()} CDR datasets.')
+    return requested
+
+
 @app.get('/api/reporting/chart-preview/context')
 def temporary_chart_preview_context(source: str, identifier: str, chart_index: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Return an immutable chart definition for the interactive viewer sandbox."""
-    entry, _selected_ids, _technology, _multivendor = _temporary_chart_preview_context(source, identifier, chart_index)
+    entry, selected_ids, _technology, _multivendor = _temporary_chart_preview_context(source, identifier, chart_index)
     columns = catalogue_editor_columns()
+    datasets_by_source: dict[str, list[dict[str, Any]]] = {'cdr-data': [], 'cdr-voice': [], 'cdr-speech': []}
+    for row in repository.list_datasets():
+        kind = str(row['dataset_kind'] or '').casefold()
+        if row['status'] == 'ready' and kind in {'data', 'voice', 'speech'}:
+            datasets_by_source[f'cdr-{kind}'].append({'value': str(row['id']), 'label': str(row['file_name'])})
     return JSONResponse({
         'slide': entry.slide, 'chart_title': entry.chart_title, 'cdr_source': entry.cdr_source,
+        'dataset_ids': [str(value) for value in selected_ids.get(entry.source_kind or '', [])],
+        'dataset_ids_by_source': {f'cdr-{kind}': [str(value) for value in values] for kind, values in selected_ids.items()},
+        'datasets_by_source': datasets_by_source,
         'kpi': entry.kpi, 'chart_type': entry.chart_type, 'filters': entry.filters,
         'grouping_rows': entry.grouping_rows, 'grouping_columns': entry.grouping_columns,
         'legend': entry.legend, 'legend_position': entry.legend_position,
@@ -4012,7 +4039,8 @@ async def temporary_chart_preview(request: Request, user: SessionUser = Depends(
         raise HTTPException(status_code=400, detail=f'Invalid chart preview request: {exc}') from exc
     if not entry.source_kind:
         raise HTTPException(status_code=400, detail='Choose a valid CDR Source.')
-    selected = _reporting_datasets(selected_ids[entry.source_kind], entry.source_kind)
+    preview_dataset_ids = _temporary_preview_dataset_ids(editable, selected_ids, entry.source_kind)
+    selected = _reporting_datasets(preview_dataset_ids, entry.source_kind)
     frame = _combined_reporting_frame(selected, technology, [entry], multivendor)
     if multivendor:
         frame = ensure_report_vendor_group(frame)
@@ -4049,15 +4077,16 @@ async def temporary_chart_preview_data(request: Request, user: SessionUser = Dep
     if not entry.source_kind:
         raise HTTPException(status_code=400, detail='Choose a valid CDR Source.')
     try:
+        preview_dataset_ids = _temporary_preview_dataset_ids(editable, selected_ids, entry.source_kind)
         cache_material = json.dumps({
             'scope': 'report-chart-viewer', 'workspace': str(active_workspace.database_path) if active_workspace else '',
             'source': source, 'identifier': identifier, 'chart_index': chart_index,
-            'selected_ids': selected_ids, 'definition': editable,
+            'selected_ids': preview_dataset_ids, 'definition': editable,
         }, sort_keys=True, default=str)
         cache_key = hashlib.sha256(cache_material.encode('utf-8')).hexdigest()
         cached = CHART_PREVIEW_DATA_CACHE.get(cache_key)
         if cached is None:
-            selected = _reporting_datasets(selected_ids[entry.source_kind], entry.source_kind)
+            selected = _reporting_datasets(preview_dataset_ids, entry.source_kind)
             frame = _combined_reporting_frame(selected, technology, [entry], multivendor)
             if multivendor:
                 frame = ensure_report_vendor_group(frame)
@@ -4418,7 +4447,7 @@ def generate_netcheck_cdr_report(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Unable to load the selected {technology.upper()} report template: {exc}") from exc
     generated_at = datetime.now().strftime('%Y%m%d-%H%M%S')
-    scope_token = 'by-vendor' if multivendor else 'by-operator'
+    scope_token = 'vendor-comparison' if multivendor else 'operator-comparison'
     file_name = f"NetCheck_CDR_{technology.upper()}_{scope_token}_{generated_at}.pptx"
     report_dir = _report_job_directory(file_name)
     destination = safe_join(report_dir, file_name)

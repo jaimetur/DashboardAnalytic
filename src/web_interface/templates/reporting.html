@@ -191,17 +191,21 @@
       <p class="eyebrow">Interactive preview</p>
       <p class="form-note">Changes regenerate only this temporary preview. The template and stored chart are not modified.</p>
       <div class="report-chart-viewer-fields" data-report-chart-viewer-fields></div>
-      <button type="button" class="report-chart-viewer-data-button" data-report-chart-viewer-data>
+    </section>
+    <div class="report-chart-viewer-actions" aria-label="Chart navigation and filtered data actions">
+      <div class="report-chart-viewer-navigation" aria-label="Chart navigation">
+        <button type="button" data-report-chart-zoom-reset title="Reset zoom" aria-label="Reset zoom">⟳</button>
+        <button type="button" data-report-chart-navigate="first" title="First chart" aria-label="First chart">⏮</button>
+        <button type="button" data-report-chart-navigate="previous" title="Previous chart" aria-label="Previous chart">←</button>
+        <button type="button" data-report-chart-navigate="next" title="Next chart" aria-label="Next chart">→</button>
+        <button type="button" data-report-chart-navigate="last" title="Last chart" aria-label="Last chart">⏭</button>
+      </div>
+      <div class="report-chart-viewer-filtered-data-action">
+        <button type="button" class="report-chart-viewer-data-button" data-report-chart-viewer-data hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 4h16v16H4zM4 9h16M4 14h16M10 4v16"/></svg>
         <span>View filtered dataset</span>
-      </button>
-    </section>
-    <div class="report-chart-viewer-actions" aria-label="Chart navigation">
-      <button type="button" data-report-chart-zoom-reset title="Reset zoom" aria-label="Reset zoom">⟳</button>
-      <button type="button" data-report-chart-navigate="first" title="First chart" aria-label="First chart">⏮</button>
-      <button type="button" data-report-chart-navigate="previous" title="Previous chart" aria-label="Previous chart">←</button>
-      <button type="button" data-report-chart-navigate="next" title="Next chart" aria-label="Next chart">→</button>
-      <button type="button" data-report-chart-navigate="last" title="Last chart" aria-label="Last chart">⏭</button>
+        </button>
+      </div>
     </div>
     <div class="report-chart-viewer-data-overlay" data-report-chart-viewer-data-overlay hidden>
       <section class="report-chart-viewer-data-dialog" role="dialog" aria-modal="true" aria-labelledby="report-chart-viewer-data-title">
@@ -940,7 +944,7 @@
     const previewMultiFields = new Set(['grouping_rows', 'grouping_columns', 'legend']);
     const viewerPreviewDefinition = () => Object.fromEntries(Array.from(reportChartViewerFields?.querySelectorAll('[name]') || []).map((input) => {
       const values = input.multiple ? Array.from(input.selectedOptions).map((option) => option.value).filter(Boolean) : null;
-      const separator = input.name === 'legend' ? ', ' : ' × ';
+      const separator = input.name === 'legend' || input.name === 'dataset_ids' ? ', ' : ' × ';
       return [input.name, values ? values.join(separator) : input.value];
     }));
     let reportChartViewerSelectMenu = null;
@@ -952,8 +956,9 @@
       reportChartViewerSelectMenu?.setAttribute('hidden', '');
       reportChartViewerSelectMenu = null;
     };
-    const setupReportChartViewerSelects = () => {
-      reportChartViewerFields?.querySelectorAll('select[name], select[data-report-chart-filter-select]').forEach((select) => {
+    const setupReportChartViewerSelects = (root = reportChartViewerFields) => {
+      root?.querySelectorAll('select[name], select[data-report-chart-filter-select]').forEach((select) => {
+        if (select.classList.contains('report-chart-preview-select-native')) return;
         const shell = document.createElement('div'); shell.className = 'report-chart-preview-select';
         const trigger = document.createElement('input'); trigger.type = 'text'; trigger.readOnly = true; trigger.className = 'report-chart-preview-select-trigger'; trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-expanded', 'false');
         const menu = document.createElement('div'); menu.className = 'report-chart-preview-select-menu'; menu.hidden = true;
@@ -1040,7 +1045,7 @@
             const value = document.createElement('input'); value.type = 'text'; value.dataset.reportChartFilterValue = ''; value.placeholder = 'Value'; value.value = condition.value || '';
             const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '−'; remove.title = 'Remove condition'; remove.addEventListener('click', () => { row.remove(); sync(); });
             [column, operator, value].forEach((input) => { input.addEventListener('input', sync); input.addEventListener('change', sync); });
-            row.append(column, operator, value, remove); conditions.append(row);
+            row.append(column, operator, value, remove); conditions.append(row); setupReportChartViewerSelects(row);
           };
           const parse = String(definition.filters || '').split(';').map((item) => item.trim()).filter(Boolean).map((item) => {
             const match = item.match(/^(.+?)\s+(NOT\s+CONTAINS|NOT\s+IN|CONTAINS|IN|>=|<=|!=|=|>|<)\s+(.+)$/i);
@@ -1078,6 +1083,7 @@
         field.append(control); return field;
       }));
       reportChartViewerSandbox.hidden = false;
+      if (reportChartViewerData) reportChartViewerData.hidden = false;
       setupReportChartViewerSelects();
       const sourceControl = reportChartViewerFields.querySelector('[name="cdr_source"]');
       sourceControl?.addEventListener('change', () => {
@@ -1125,22 +1131,32 @@
       };
       createInteractiveChartPreviewControls(reportChartViewerFields, definition, {
         columnsBySource: definition.columns_by_source,
+        datasetsBySource: definition.datasets_by_source,
+        fields: [
+          ['chart_type', 'Chart Type'], ['chart_title', 'Chart Tittle'], ['cdr_source', 'CDR Type'], ['dataset_ids', 'Datasets'],
+          ['kpi', 'KPI'], ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'],
+          ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+        ],
+        textFields: {chart_title: true},
         // Keep popovers within the active Chart Preview overlay so they are
         // neither hidden behind it nor detached from its stacking context.
         menuContainer: reportChartViewer,
         chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars'],
         onChange: regenerate,
         onSourceChange: (next) => {
-          renderSharedChartViewerSandbox({...definition, ...next}, chart);
+          const sourceKey = previewSourceKey(next.cdr_source);
+          renderSharedChartViewerSandbox({...definition, ...next, dataset_ids: definition.dataset_ids_by_source?.[sourceKey] || []}, chart);
           regenerate();
         },
       });
       reportChartViewerSandbox.hidden = false;
+      if (reportChartViewerData) reportChartViewerData.hidden = false;
     };
     const loadChartViewerSandbox = async (chart) => {
       const [source, identifier] = String(reportChartSetSelect?.value || '').split(':', 2);
       if (!source || !identifier || !reportChartViewerSandbox) return;
       reportChartViewerSandbox.hidden = true;
+      if (reportChartViewerData) reportChartViewerData.hidden = true;
       try {
         const params = new URLSearchParams({source, identifier, chart_index: String(reportChartIndex)});
         const response = await fetch(`/api/reporting/chart-preview/context?${params}`, {credentials: 'same-origin'});

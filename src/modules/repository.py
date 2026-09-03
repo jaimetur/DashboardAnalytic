@@ -1181,32 +1181,35 @@ class Repository:
             existing_rows = conn.execute(
                 f"SELECT 1 FROM {quoted_target} WHERE dataset_id = ? LIMIT 1", (dataset_id,)
             ).fetchone()
-            # CDR derived dimensions can be materialised after an earlier
-            # reporting-table copy.  Refresh only when a populated derived
-            # source value is missing from its cached counterpart; otherwise
-            # preserve the fast path for repeated large-report generation.
-            derived_columns = {'callfamily', 'testfamily'}
+            # A column can already exist in the shared table because another
+            # dataset introduced it, while this dataset's older cached rows
+            # still contain only NULL for that column. Validate every field
+            # requested by the chart, not just derived dimensions. The two
+            # LIMIT 1 probes retain the fast path as soon as cached data exists.
             target_lookup = {self._column_identity(column): column for column in target_columns}
-            needs_derived_refresh = False
+            needs_content_refresh = False
             if existing_rows and not needs_new_columns:
                 for requested in desired:
                     identity = self._column_identity(requested)
-                    if identity not in derived_columns or identity not in source_lookup or identity not in target_lookup:
+                    if identity not in source_lookup or identity not in target_lookup:
                         continue
                     source = source_lookup[identity]
                     target = target_lookup[identity]
-                    stale = conn.execute(
-                        f"SELECT 1 FROM {quoted_target} AS target "
-                        f"JOIN {self._quote_identifier(source_table)} AS source ON source.rowid = target.source_row_id "
-                        f"WHERE target.dataset_id = ? "
-                        f"AND source.{self._quote_identifier(source)} IS NOT NULL "
-                        f"AND target.{self._quote_identifier(target)} IS NULL LIMIT 1",
+                    cached_value = conn.execute(
+                        f"SELECT 1 FROM {quoted_target} WHERE dataset_id = ? "
+                        f"AND {self._quote_identifier(target)} IS NOT NULL LIMIT 1",
                         (dataset_id,),
                     ).fetchone()
-                    if stale:
-                        needs_derived_refresh = True
+                    if cached_value:
+                        continue
+                    source_value = conn.execute(
+                        f"SELECT 1 FROM {self._quote_identifier(source_table)} "
+                        f"WHERE {self._quote_identifier(source)} IS NOT NULL LIMIT 1"
+                    ).fetchone()
+                    if source_value:
+                        needs_content_refresh = True
                         break
-            if existing_rows and not needs_new_columns and not needs_derived_refresh:
+            if existing_rows and not needs_new_columns and not needs_content_refresh:
                 return
             conn.execute(f"DELETE FROM {quoted_target} WHERE dataset_id = ?", (dataset_id,))
             insert_columns = ['dataset_id', 'source_row_id', *(column for column in target_columns if column not in {'dataset_id', 'source_row_id'})]
