@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import gc
 import io
 import json
 import re
@@ -2586,15 +2587,20 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
     # avoids retaining Data, Voice and Speech frames simultaneously for large
     # reports on resource-constrained servers.
     cached_frames = {source: normalise_report_operator_aliases(frame) for source, frame in (frames or {}).items()}
-    remaining_by_source = defaultdict(int)
-    for entry in catalog:
-        if entry.source_kind:
-            remaining_by_source[entry.source_kind] += 1
+    active_source: str | None = None
     def frame_for(source: str) -> pd.DataFrame:
+        nonlocal active_source
+        # Keep at most one lazy-loaded CDR frame resident.  The catalogue
+        # order still determines slide/chart order, while switching sources
+        # releases the previous large DataFrame before loading the next one.
+        if frame_loader is not None and source != active_source:
+            cached_frames.clear()
+            gc.collect()
         if source not in cached_frames:
             if frame_loader is None:
                 raise ValueError(f'No CDR frame is available for {source}.')
             cached_frames[source] = normalise_report_operator_aliases(frame_loader(source))
+        active_source = source
         return cached_frames[source]
     presentation = Presentation(template)
     _remove_all_slides(presentation)
@@ -2650,11 +2656,16 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
             # catalogue filtering between preview and export.
             source_frame = frame_for(entry.source_kind)
             chart_bytes = render_catalog_chart_preview(source_frame, entry, multivendor=multivendor)
-            # Retry one isolated placeholder after releasing transient image
-            # buffers. This helps a constrained worker recover without
-            # rerunning the whole report, while preserving genuine no-data
-            # placeholders if they remain empty.
-            if is_empty_catalog_chart(chart_bytes, entry):
+            # Rebuild the source frame before retrying an unexpected empty
+            # chart. Retrying the same already-loaded frame cannot recover a
+            # worker that was under memory pressure while materialising it.
+            for _attempt in range(2):
+                if not is_empty_catalog_chart(chart_bytes, entry) or frame_loader is None:
+                    break
+                del chart_bytes
+                cached_frames.pop(entry.source_kind, None)
+                gc.collect()
+                source_frame = frame_for(entry.source_kind)
                 chart_bytes = render_catalog_chart_preview(source_frame, entry, multivendor=multivendor)
             if on_chart_rendered:
                 on_chart_rendered(entry, len(source_frame.index), is_empty_catalog_chart(chart_bytes, entry))
@@ -2670,11 +2681,8 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
                     'file': file_name,
                 })
             slide.shapes.add_picture(BytesIO(chart_bytes), *placement)
-            remaining_by_source[entry.source_kind] -= 1
-            if frame_loader is not None and remaining_by_source[entry.source_kind] == 0:
-                # The final chart for this CDR type has been embedded; release
-                # its potentially large DataFrame before moving to the next.
-                cached_frames.pop(entry.source_kind, None)
+    cached_frames.clear()
+    gc.collect()
     presentation.save(destination)
     if chart_output_dir is not None:
         (chart_output_dir / 'manifest.json').write_text(json.dumps({'charts': rendered_charts}), encoding='utf-8')

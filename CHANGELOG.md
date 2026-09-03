@@ -35,6 +35,8 @@
 - Fixed long Cell Assistance lists to open as compact, scrollable menus within the visible editor area.
 - Fixed completed Charts Jobs relaunch/row reuse and Reports Jobs table width; standardised relaunch controls in English and strengthened Report Charts selector rows.
 - Fixed incomplete or empty Report Charts and PowerPoint charts on resource-constrained servers by serialising rendering per workspace, streaming CDR types and PNGs to reduce peak memory, and retrying/logging isolated empty chart placeholders.
+- Preserved the Slides Template chart order while streaming standalone Chart Set rendering by CDR source, and rebuild source frames before retrying empty charts to avoid repeating a memory-pressured render.
+- Restored Delete Selected in Charts Panel for both standalone Chart Sets and report-rendered Chart Sets; deleting a report selection now removes its complete rendered-chart folder while preserving its PowerPoint report.
 
 #### 📚 Documentation:
 - Rewrote the PowerPoint Reporting help as static guidance for building Slides Templates, including field-by-field instructions and practical recipes for every chart type, filters, aggregations, legends, structural slides, operators and output jobs.

@@ -441,9 +441,9 @@
       }
     };
     const updateChartSetActions = (selectedValue = reportChartSetSelect?.value || '') => {
-      const hasStandaloneSets = reportChartSets.length > 0;
-      if (reportChartSetDelete) reportChartSetDelete.hidden = !hasStandaloneSets || !String(selectedValue).startsWith('standalone:');
-      if (reportChartSetDeleteAll) reportChartSetDeleteAll.hidden = !hasStandaloneSets;
+      const hasChartSets = reportChartSets.length > 0 || reportChartReportSets.length > 0;
+      if (reportChartSetDelete) reportChartSetDelete.hidden = !hasChartSets || !selectedValue;
+      if (reportChartSetDeleteAll) reportChartSetDeleteAll.hidden = !reportChartSets.length;
     };
     const clearSelectedReportCharts = () => {
       reportCharts = [];
@@ -792,38 +792,29 @@
       }, 700);
     });
     reportChartSetDelete?.addEventListener('click', async () => {
-      const [source, generation] = String(reportChartSetSelect?.value || '').split(':', 2);
-      if (source !== 'standalone' || !generation) return;
-      const selected = reportChartSets.find((chartSet) => chartSet.generation === generation);
-      const accepted = await showConfirmDialog(`Delete the chart set generated at ${selected?.generated_at || generation}? All of its chart files will be removed.`, {title: 'Delete Selected Charts Set', confirmLabel: 'Delete'});
+      const [source, identifier] = String(reportChartSetSelect?.value || '').split(':', 2);
+      if (!identifier || !['report', 'standalone'].includes(source)) return;
+      const isReportCharts = source === 'report';
+      const selected = isReportCharts
+        ? reportChartReportSets.find((report) => String(report.id) === identifier)
+        : reportChartSets.find((chartSet) => chartSet.generation === identifier);
+      const prompt = isReportCharts
+        ? `Delete the rendered chart folder for '${selected?.report_name || identifier}'? Its chart files will be permanently removed; the PowerPoint report will be kept.`
+        : `Delete the chart set generated at ${selected?.generated_at || identifier}? All of its chart files will be removed.`;
+      const accepted = await showConfirmDialog(prompt, {title: 'Delete Selected Charts Set', confirmLabel: 'Delete'});
       if (!accepted) return;
       showLoadingOverlay('Deleting chart set', 'Please wait while the selected chart set is removed.');
       try {
-        const response = await fetch(`/reporting/chart-sets/${encodeURIComponent(generation)}/delete`, {method: 'POST', credentials: 'same-origin'});
-        const payload = await response.json();
+        const endpoint = isReportCharts
+          ? `/reporting/jobs/${encodeURIComponent(identifier)}/charts/delete`
+          : `/reporting/chart-sets/${encodeURIComponent(identifier)}/delete`;
+        const response = await fetch(endpoint, {method: 'POST', credentials: 'same-origin'});
+        const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.detail || 'Unable to delete the selected chart set.');
-        reportChartSets = Array.isArray(payload.chart_sets) ? payload.chart_sets : [];
         closeReportChartViewer();
-        if (reportChartSets.length) {
-          const next = await fetch(`/api/reporting/chart-sets/${encodeURIComponent(reportChartSets[0].generation)}`, {credentials: 'same-origin'});
-          const nextPayload = await next.json();
-          if (!next.ok) throw new Error(nextPayload.detail || 'Unable to load the next chart set.');
-          renderReportCharts(nextPayload);
-        } else {
-          reportCharts = [];
-          reportChartsBody?.replaceChildren();
-          reportChartsPanel?.removeAttribute('data-report-charts-ready');
-          if (reportChartsGeneratedAt) reportChartsGeneratedAt.hidden = true;
-          if (reportChartsTemplate) reportChartsTemplate.hidden = true;
-          if (reportChartsScope) reportChartsScope.hidden = true;
-          if (reportChartsDataCount) reportChartsDataCount.hidden = true;
-          if (reportChartsVoiceCount) reportChartsVoiceCount.hidden = true;
-          if (reportChartsSpeechCount) reportChartsSpeechCount.hidden = true;
-          rebuildReportChartSetSelector();
-          if (reportChartSetDelete) reportChartSetDelete.hidden = true;
-          if (reportChartSetDeleteAll) reportChartSetDeleteAll.hidden = true;
-          updateReportingModule();
-        }
+        if (!isReportCharts) reportChartSets = Array.isArray(payload.chart_sets) ? payload.chart_sets : [];
+        syncChartSetSelectorAfterJobDeletion(`${source}:${identifier}`);
+        if (isReportCharts) pollReportJobs();
         pollReportChartJobs();
         hideLoadingOverlay();
       } catch (error) {

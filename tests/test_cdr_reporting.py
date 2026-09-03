@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import time
 from datetime import datetime
@@ -898,6 +899,25 @@ def test_chart_set_selector_excludes_published_but_processing_job(client) -> Non
 
     app_module.repository.update_report_chart_job(job_id, status='ready', progress=100, finished=True)
     assert selector_value in client.get('/reporting').text
+
+
+def test_persisted_chart_set_keeps_template_order_when_rendered_by_cdr_source(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    chart_set = app_module.persist_report_charts(
+        'NSA Slide Template', 'single',
+        [
+            ({'order': 2, 'slide': 3, 'title': 'Speech chart', 'source': 'speech', 'chart_type': 'Bar'}, b'SPEECH'),
+            ({'order': 0, 'slide': 1, 'title': 'Data chart', 'source': 'data', 'chart_type': 'Bar'}, b'DATA'),
+            ({'order': 1, 'slide': 2, 'title': 'Voice chart', 'source': 'voice', 'chart_type': 'Bar'}, b'VOICE'),
+        ],
+        {'data': 1, 'voice': 1, 'speech': 1},
+    )
+
+    manifest = json.loads((app_module.report_charts_directory() / chart_set['generation'] / 'manifest.json').read_text(encoding='utf-8'))
+    assert [chart['title'] for chart in manifest['charts']] == ['Data chart', 'Voice chart', 'Speech chart']
+    assert [chart['file'] for chart in manifest['charts']] == ['chart-001.png', 'chart-002.png', 'chart-003.png']
 
 
 def test_retrying_a_failed_chart_job_reuses_its_row(client) -> None:

@@ -3650,7 +3650,10 @@ def _run_report_chart_job(
                 empty_charts: list[dict[str, Any]] = []
                 chart_metrics: list[dict[str, Any]] = []
                 for kind in ('data', 'voice', 'speech'):
-                    entries = [entry for entry in chart_entries if entry.source_kind == kind]
+                    entries = [
+                        (order, entry) for order, entry in enumerate(chart_entries)
+                        if entry.source_kind == kind
+                    ]
                     if not entries:
                         continue
                     _ensure_report_job_active(task_repository, job_id, chart_job=True)
@@ -3658,23 +3661,31 @@ def _run_report_chart_job(
                     if multivendor:
                         frame = ensure_report_vendor_group(frame)
                     task_repository.update_report_chart_job(job_id, status='processing', progress=12 + int(rendered * 45 / len(chart_entries)))
-                    for entry in entries:
+                    for order, entry in entries:
                         _ensure_report_job_active(task_repository, job_id, chart_job=True)
                         image = render_catalog_chart_preview(frame, entry, multivendor=multivendor)
-                        if is_empty_catalog_chart(image, entry):
-                            # Release short-lived image/PIL allocations before
-                            # retrying only this chart on constrained workers.
+                        for _attempt in range(2):
+                            if not is_empty_catalog_chart(image, entry):
+                                break
+                            # Rebuild this CDR frame before retrying.  A retry
+                            # against the same pressured DataFrame could only
+                            # reproduce the same empty placeholder.
                             del image
+                            del frame
                             gc.collect()
+                            frame = _combined_reporting_frame(selected[kind], technology, catalog_entries, multivendor, task_repository)
+                            if multivendor:
+                                frame = ensure_report_vendor_group(frame)
                             image = render_catalog_chart_preview(frame, entry, multivendor=multivendor)
-                            if is_empty_catalog_chart(image, entry):
-                                empty_charts.append({'slide': entry.slide, 'source': entry.cdr_source, 'source_rows': len(frame.index)})
+                        if is_empty_catalog_chart(image, entry):
+                            empty_charts.append({'slide': entry.slide, 'source': entry.cdr_source, 'source_rows': len(frame.index)})
                         chart_metrics.append({
                             'slide': entry.slide, 'source': entry.cdr_source, 'source_rows': len(frame.index),
                             'empty_placeholder': is_empty_catalog_chart(image, entry), 'rss_mb': _reporting_memory_mb(),
                         })
                         rendered += 1
                         yield ({
+                            'order': order,
                             'slide': entry.slide,
                             'title': entry.chart_title or entry.slide_title or f'Slide {entry.slide}',
                             'source': entry.cdr_source,
@@ -3874,18 +3885,29 @@ def persist_report_charts(
         while target.exists():
             target = destination / f'{generation}-{suffix}'
             suffix += 1
-        manifest_charts: list[dict[str, Any]] = []
-        for index, (chart, image) in enumerate(rendered_charts, start=1):
-            file_name = f'chart-{index:03d}.png'
+        manifest_charts: list[tuple[int, dict[str, Any]]] = []
+        used_indexes: set[int] = set()
+        for fallback_index, (chart, image) in enumerate(rendered_charts, start=1):
+            try:
+                chart_index = int(chart.get('order', fallback_index - 1)) + 1
+            except (TypeError, ValueError):
+                chart_index = fallback_index
+            if chart_index < 1 or chart_index in used_indexes:
+                chart_index = fallback_index
+                while chart_index in used_indexes:
+                    chart_index += 1
+            used_indexes.add(chart_index)
+            file_name = f'chart-{chart_index:03d}.png'
             (staging / file_name).write_bytes(image)
-            manifest_charts.append({**chart, 'file': file_name})
+            manifest_charts.append((chart_index, {key: value for key, value in chart.items() if key != 'order'} | {'file': file_name}))
+        manifest_charts.sort(key=lambda item: item[0])
         manifest = {
             'template': template_name,
             'scope': scope,
             'dataset_counts': _report_chart_dataset_counts(dataset_counts),
             'generation': target.name,
             'generated_at': generated_at.isoformat(timespec='seconds'),
-            'charts': manifest_charts,
+            'charts': [chart for _, chart in manifest_charts],
         }
         (staging / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
         if before_publish:
@@ -4085,6 +4107,18 @@ def report_job_chart_image(report_id: int, chart_file: str, user: SessionUser = 
     if not chart_path.is_file():
         raise HTTPException(status_code=404, detail='Chart not found.')
     return FileResponse(chart_path, media_type='image/png')
+
+
+@app.post('/reporting/jobs/{report_id}/charts/delete')
+def delete_report_job_charts(report_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    """Delete only the rendered-chart folder belonging to one report."""
+    report = repository.get_report_run(report_id)
+    directory = _report_job_charts_directory(report) if report else None
+    if directory is None:
+        raise HTTPException(status_code=404, detail='Rendered report charts are not available.')
+    shutil.rmtree(directory)
+    repository.add_log(user.username, 'delete_report_job_charts', json.dumps({'report_id': report_id}))
+    return JSONResponse({'deleted': report_id})
 
 
 @app.post('/reporting/jobs/{report_id}/delete')
