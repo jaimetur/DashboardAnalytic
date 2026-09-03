@@ -313,6 +313,48 @@ def test_admin_export_job_creates_a_disk_backed_download(client) -> None:
         assert json.loads(archive.read('manifest.json'))['kind'] == 'config'
 
 
+def test_full_environment_export_job_uses_selected_workspaces(client) -> None:
+    login_super(client)
+    started = client.post(
+        '/admin/import-export/export/jobs',
+        data={'export_target': 'full-environment', 'workspace_ids': ['default']},
+    )
+    assert started.status_code == 200
+    payload = {}
+    for _ in range(100):
+        payload = client.get(started.json()['status_url']).json()
+        if payload['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.01)
+    assert payload['status'] == 'ready'
+    with zipfile.ZipFile(BytesIO(client.get(payload['download_url']).content)) as archive:
+        manifest = json.loads(archive.read('manifest.json'))
+    assert [workspace['name'] for workspace in manifest['workspaces']] == ['Default Workspace']
+
+
+def test_admin_import_job_reuses_the_inspected_disk_upload(client) -> None:
+    login_super(client)
+    exported = client.get('/admin/import-export/export?export_target=config')
+    inspected = client.post(
+        '/admin/import-export/inspect',
+        files={'package': ('configuration.zip', BytesIO(exported.content), 'application/zip')},
+    )
+    upload_id = inspected.headers['x-import-upload-id']
+    started = client.post(
+        '/admin/import-export/import/jobs',
+        data={'upload_id': upload_id, 'confirmed_import': 'true'},
+    )
+    assert started.status_code == 200
+    payload = {}
+    for _ in range(100):
+        payload = client.get(started.json()['status_url']).json()
+        if payload['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.01)
+    assert payload['status'] == 'ready'
+    assert 'Configuration imported successfully' in payload['notice']
+
+
 def test_admin_import_export_is_limited_to_slides_templates(client) -> None:
     login(client)
 

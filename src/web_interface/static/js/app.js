@@ -2221,9 +2221,18 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
   const matchingPreviewValue = (requested, available) => (
     available.find((value) => normalisePreviewValue(value) === normalisePreviewValue(requested)) || requested
   );
+  const orderedSelectedValues = (select) => {
+    const selected = new Set(Array.from(select.selectedOptions).map((option) => option.value));
+    let order = [];
+    try { order = JSON.parse(select.dataset.previewSelectionOrder || '[]'); } catch (_error) { order = []; }
+    order = order.filter((value) => selected.has(value));
+    Array.from(selected).forEach((value) => { if (!order.includes(value)) order.push(value); });
+    select.dataset.previewSelectionOrder = JSON.stringify(order);
+    return order;
+  };
   const currentDefinition = () => Object.fromEntries(Array.from(fieldsElement.querySelectorAll('[name]')).map((control) => {
     if (!control.multiple) return [control.name, control.value];
-    return [control.name, Array.from(control.selectedOptions).map((option) => option.value).filter(Boolean).join(control.name === 'legend' ? ', ' : ' × ')];
+    return [control.name, orderedSelectedValues(control).join(control.name === 'legend' ? ', ' : ' × ')];
   }));
   let activeMenu = null;
   let activeMenuTrigger = null;
@@ -2239,7 +2248,10 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     activeMenu = null; activeMenuTrigger = null; activeMenuHome = null; activeMenuNextSibling = null;
   };
   const setupSelects = () => {
-    fieldsElement.querySelectorAll('select[name], select[data-report-chart-filter-select]').forEach((select) => {
+    // Filter-condition selects are dynamic and do not have a name. Include
+    // them explicitly so Column and Operator receive the same searchable,
+    // single-value dropdown used by KPI and CDR Source in every preview host.
+    fieldsElement.querySelectorAll('select[name], select[data-report-chart-filter-select], .report-chart-filter-condition select').forEach((select) => {
       const shell = document.createElement('div'); shell.className = 'report-chart-preview-select';
       const trigger = document.createElement('button'); trigger.type = 'button'; trigger.className = 'report-chart-preview-select-trigger'; trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-expanded', 'false');
       const triggerText = document.createElement('span'); triggerText.className = 'report-chart-preview-select-value'; trigger.append(triggerText);
@@ -2260,7 +2272,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
             const item = document.createElement('label'); item.className = 'report-chart-preview-select-option is-multiple';
             const input = document.createElement('input'); input.type = 'checkbox'; input.checked = option.selected;
             const text = document.createElement('span'); text.textContent = option.textContent;
-            input.addEventListener('change', () => { option.selected = input.checked; select.dispatchEvent(new Event('change', {bubbles: true})); select.dispatchEvent(new Event('input', {bubbles: true})); syncTrigger(); });
+            input.addEventListener('change', () => { option.selected = input.checked; let order = orderedSelectedValues(select); order = input.checked ? [...order.filter((value) => value !== option.value), option.value] : order.filter((value) => value !== option.value); select.dataset.previewSelectionOrder = JSON.stringify(order); select.dispatchEvent(new Event('change', {bubbles: true})); select.dispatchEvent(new Event('input', {bubbles: true})); syncTrigger(); });
             item.append(input, text); return item;
           }
           const item = document.createElement('button'); item.type = 'button'; item.className = 'report-chart-preview-select-option'; item.textContent = option.textContent; item.setAttribute('aria-selected', String(option.selected));
@@ -2272,7 +2284,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       if (select.multiple) {
         const actions = document.createElement('div'); actions.className = 'report-chart-preview-select-actions';
         const toggleAll = document.createElement('button'); toggleAll.type = 'button'; toggleAll.textContent = 'Select all / none';
-        toggleAll.addEventListener('click', () => { const selectable = Array.from(select.options).filter((option) => !option.disabled); const selectAll = selectable.some((option) => !option.selected); selectable.forEach((option) => { option.selected = selectAll; }); select.dispatchEvent(new Event('change', {bubbles: true})); select.dispatchEvent(new Event('input', {bubbles: true})); syncTrigger(); renderOptions(); });
+        toggleAll.addEventListener('click', () => { const selectable = Array.from(select.options).filter((option) => !option.disabled); const selectAll = selectable.some((option) => !option.selected); selectable.forEach((option) => { option.selected = selectAll; }); select.dataset.previewSelectionOrder = JSON.stringify(selectAll ? selectable.map((option) => option.value) : []); select.dispatchEvent(new Event('change', {bubbles: true})); select.dispatchEvent(new Event('input', {bubbles: true})); syncTrigger(); renderOptions(); });
         actions.append(toggleAll); menu.append(search, actions, menuOptions);
       } else menu.append(search, menuOptions);
       search.addEventListener('input', renderOptions);
@@ -2311,7 +2323,8 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       const hidden = document.createElement('input'); hidden.type = 'hidden'; hidden.name = 'filters';
       const builder = document.createElement('div'); builder.className = 'report-chart-filter-builder';
       const conditions = document.createElement('div'); conditions.className = 'report-chart-filter-conditions';
-      const sync = () => { hidden.value = Array.from(conditions.children).map((row) => { const [column, operator] = row.querySelectorAll('select'); const value = row.querySelector('[data-report-chart-filter-value]'); const rawValue = value?.value.trim(); const parserValue = ['IN', 'NOT IN'].includes(operator?.value) && rawValue && !/^\(.*\)$/.test(rawValue) ? `(${rawValue})` : rawValue; return column?.value && operator?.value && parserValue ? `${column.value} ${operator.value} ${parserValue}` : ''; }).filter(Boolean).join('; '); hidden.dispatchEvent(new Event('input')); };
+      const parsedField = document.createElement('input'); parsedField.type = 'text'; parsedField.className = 'report-chart-preview-parsed'; parsedField.readOnly = true; parsedField.placeholder = 'Parsed filter'; parsedField.setAttribute('aria-label', 'Parsed filter');
+      const sync = () => { hidden.value = Array.from(conditions.children).map((row) => { const [column, operator] = row.querySelectorAll('select'); const value = row.querySelector('[data-report-chart-filter-value]'); const rawValue = value?.value.trim(); const parserValue = ['IN', 'NOT IN'].includes(operator?.value) && rawValue && !/^\(.*\)$/.test(rawValue) ? `(${rawValue})` : rawValue; return column?.value && operator?.value && parserValue ? `${column.value} ${operator.value} ${parserValue}` : ''; }).filter(Boolean).join('; '); parsedField.value = hidden.value; hidden.dispatchEvent(new Event('input')); };
       const addCondition = (condition = {}) => {
         const row = document.createElement('div'); row.className = 'report-chart-filter-condition';
         const column = document.createElement('select'); column.add(new Option('Column…', '')); column.dataset.reportChartFilterSelect = ''; column.setAttribute('aria-label', 'Filter column');
@@ -2326,7 +2339,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       const parsed = String(definition.filters || '').split(';').map((item) => item.trim()).filter(Boolean).map((item) => { const match = item.match(/^(.+?)\s+(NOT\s+CONTAINS|NOT\s+IN|CONTAINS|IN|>=|<=|!=|=|>|<)\s+(.+)$/i); return match ? {column: match[1].trim(), operator: match[2].toUpperCase(), value: match[3].trim()} : {}; });
       (parsed.length ? parsed : [{}]).forEach(addCondition);
       const add = document.createElement('button'); add.type = 'button'; add.className = 'report-chart-filter-add'; add.textContent = '+ Add condition'; add.addEventListener('click', () => addCondition());
-      builder.append(conditions, add); field.append(hidden, builder); sync(); return field;
+      builder.append(conditions, add); field.append(hidden, builder, parsedField); sync(); return field;
     }
     const control = document.createElement('select');
     if (key === 'chart_type') (options.chartTypes || []).forEach((value) => control.add(new Option(value, value, false, normalisePreviewValue(value) === normalisePreviewValue(definition[key]))));
@@ -2353,7 +2366,14 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       ));
       if (matching) control.value = matching.value;
     }
-    control.name = key; control.dataset.previewDisplay = String(definition[key] || ''); control.setAttribute('aria-label', label); field.append(control); return field;
+    if (control.multiple) control.dataset.previewSelectionOrder = JSON.stringify(Array.from(valuesFor(definition[key], key)).map((value) => matchingPreviewValue(value, Array.from(control.options).map((option) => option.value))));
+    control.name = key; control.dataset.previewDisplay = String(definition[key] || ''); control.setAttribute('aria-label', label); field.append(control);
+    if (key === 'grouping_rows' || key === 'grouping_columns') {
+      const parsed = document.createElement('input'); parsed.type = 'text'; parsed.className = 'report-chart-preview-parsed'; parsed.readOnly = true; parsed.placeholder = `Parsed ${label}`; parsed.setAttribute('aria-label', `Parsed ${label}`);
+      const syncParsed = () => { parsed.value = orderedSelectedValues(control).join(' × '); };
+      control.addEventListener('input', syncParsed); control.addEventListener('change', syncParsed); syncParsed(); field.append(parsed);
+    }
+    return field;
   }));
   setupSelects();
   fieldsElement.querySelector('[name="cdr_source"]')?.addEventListener('change', () => options.onSourceChange?.(currentDefinition()));
@@ -2572,16 +2592,53 @@ document.querySelectorAll('[data-import-export-form]').forEach((form) => {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || 'The selected file is not a valid export package.');
+      const uploadId = response.headers.get('X-Import-Upload-Id');
+      if (!uploadId) throw new Error('The uploaded package could not be retained for import.');
       const warning = importWarningDetails(payload);
       hideLoadingOverlay();
       const accepted = await showConfirmDialog(warning.message, {
         title: warning.title,
         confirmLabel: 'Import and overwrite',
       });
-      if (!accepted) return;
+      if (!accepted) {
+        await fetch(`/admin/import-export/import/uploads/${encodeURIComponent(uploadId)}`, {
+          method: 'DELETE',
+          credentials: 'same-origin',
+        }).catch(() => {});
+        return;
+      }
       confirmed.value = '1';
       showLoadingOverlay('Importing package', 'Please wait while Dashboard Analytic imports the selected package.');
-      HTMLFormElement.prototype.submit.call(form);
+      const importData = new FormData();
+      importData.set('upload_id', uploadId);
+      importData.set('confirmed_import', 'true');
+      const importResponse = await fetch('/admin/import-export/import/jobs', {
+        method: 'POST',
+        body: importData,
+        credentials: 'same-origin',
+        headers: {Accept: 'application/json'},
+      });
+      const importPayload = await importResponse.json().catch(() => ({}));
+      if (!importResponse.ok || !importPayload.status_url) {
+        throw new Error(importPayload.detail || 'The import could not be started.');
+      }
+      const pollImport = async () => {
+        const statusResponse = await fetch(importPayload.status_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}});
+        const status = await statusResponse.json().catch(() => ({}));
+        if (!statusResponse.ok) throw new Error(status.detail || 'The import status could not be read.');
+        if (status.status === 'ready') {
+          window.location.assign(`/admin?${new URLSearchParams({import_export_notice: status.notice || 'Package imported successfully.'})}`);
+          return;
+        }
+        if (status.status === 'failed') throw new Error(status.error || 'The package could not be imported.');
+        if (loadingCopy) loadingCopy.textContent = 'Importing directly from the uploaded package on disk. Large workspaces can take several minutes; no second upload is required.';
+        window.setTimeout(() => { pollImport().catch(handleImportError); }, 1200);
+      };
+      const handleImportError = (error) => {
+        hideLoadingOverlay();
+        showInfoDialog(error instanceof Error ? error.message : 'The package could not be imported.', {title: 'Import Package Error'});
+      };
+      pollImport().catch(handleImportError);
     } catch (error) {
       hideLoadingOverlay();
       showInfoDialog(error instanceof Error ? error.message : 'The selected file could not be inspected.', {
@@ -2591,16 +2648,84 @@ document.querySelectorAll('[data-import-export-form]').forEach((form) => {
   });
 });
 
+function selectFullEnvironmentWorkspaces() {
+  const overlay = document.querySelector('[data-full-environment-workspace-overlay]');
+  if (!(overlay instanceof HTMLElement)) return Promise.resolve([]);
+  const checkboxes = [...overlay.querySelectorAll('.full-environment-workspace-choice input[type="checkbox"]')];
+  const accept = overlay.querySelector('[data-full-environment-accept]');
+  const cancel = overlay.querySelector('[data-full-environment-cancel]');
+  const selectAll = overlay.querySelector('[data-full-environment-select-all]');
+  const selectNone = overlay.querySelector('[data-full-environment-select-none]');
+  const error = overlay.querySelector('[data-full-environment-workspace-error]');
+  overlay.hidden = false;
+  document.body.classList.add('loading-active');
+  if (error instanceof HTMLElement) error.hidden = true;
+  return new Promise((resolve) => {
+    const close = (selection) => {
+      overlay.hidden = true;
+      document.body.classList.remove('loading-active');
+      accept?.removeEventListener('click', submit);
+      cancel?.removeEventListener('click', dismiss);
+      selectAll?.removeEventListener('click', checkAll);
+      selectNone?.removeEventListener('click', clearAll);
+      overlay.removeEventListener('click', backdrop);
+      window.removeEventListener('keydown', keyboard);
+      resolve(selection);
+    };
+    const submit = () => {
+      const selected = checkboxes.filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value);
+      if (selected.length === 0) {
+        if (error instanceof HTMLElement) error.hidden = false;
+        return;
+      }
+      close(selected);
+    };
+    const dismiss = () => close(null);
+    const checkAll = () => { checkboxes.forEach((checkbox) => { checkbox.checked = true; }); if (error instanceof HTMLElement) error.hidden = true; };
+    const clearAll = () => { checkboxes.forEach((checkbox) => { checkbox.checked = false; }); };
+    const backdrop = (event) => { if (event.target === overlay) dismiss(); };
+    const keyboard = (event) => { if (event.key === 'Escape') dismiss(); };
+    accept?.addEventListener('click', submit);
+    cancel?.addEventListener('click', dismiss);
+    selectAll?.addEventListener('click', checkAll);
+    selectNone?.addEventListener('click', clearAll);
+    overlay.addEventListener('click', backdrop);
+    window.addEventListener('keydown', keyboard);
+    if (accept instanceof HTMLElement) accept.focus();
+  });
+}
+
 document.querySelectorAll('[data-export-package-form]').forEach((form) => {
+  const exportTarget = form.querySelector('select[name="export_target"]');
+  let selectedFullWorkspaceIds = null;
+  exportTarget?.addEventListener('change', async () => {
+    if (!(exportTarget instanceof HTMLSelectElement) || exportTarget.value !== 'full-environment') {
+      selectedFullWorkspaceIds = null;
+      return;
+    }
+    const selection = await selectFullEnvironmentWorkspaces();
+    if (selection === null) {
+      exportTarget.value = 'config';
+      selectedFullWorkspaceIds = null;
+      return;
+    }
+    selectedFullWorkspaceIds = selection;
+  });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     event.stopImmediatePropagation();
     if (!(form instanceof HTMLFormElement)) return;
+    const formData = new FormData(form);
+    if (formData.get('export_target') === 'full-environment') {
+      const workspaceIds = selectedFullWorkspaceIds || await selectFullEnvironmentWorkspaces();
+      if (workspaceIds === null) return;
+      workspaceIds.forEach((workspaceId) => formData.append('workspace_ids', workspaceId));
+    }
     showLoadingOverlay(form.dataset.loadingLabel, form.dataset.loadingCopy);
     try {
       const response = await fetch(form.action, {
         method: 'POST',
-        body: new FormData(form),
+        body: formData,
         credentials: 'same-origin',
         headers: {Accept: 'application/json'},
       });

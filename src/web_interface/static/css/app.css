@@ -215,6 +215,24 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .admin-stack .import-export-action:hover:not(:disabled) { background: linear-gradient(135deg, #104966, #1c7190); }
 .import-export-notice { color: #075d59; background: rgba(11, 122, 117, 0.10); border-color: rgba(11, 122, 117, 0.26); }
 .import-export-error { color: #7d2731; background: rgba(201, 76, 75, 0.12); border-color: rgba(139, 29, 36, 0.26); }
+.full-environment-workspace-dialog { width: min(92vw, 560px); }
+.full-environment-workspace-overlay { background: transparent !important; backdrop-filter: none !important; z-index: 10002; }
+.admin-stack .full-environment-workspace-dialog button { background: linear-gradient(135deg, #9e2933, #c94c4b); border-color: rgba(139, 29, 36, 0.62); color: #fff; box-shadow: 0 8px 18px rgba(139, 29, 36, 0.18); }
+.admin-stack .full-environment-workspace-dialog button:hover:not(:disabled) { background: linear-gradient(135deg, #84202a, #ad3538); }
+.admin-stack .full-environment-workspace-dialog .full-environment-workspace-toolbar .ghost-link { background: #f4d5d3; border-color: rgba(158, 41, 51, 0.30); color: #7d2731; box-shadow: none; }
+.admin-stack .full-environment-workspace-dialog .full-environment-workspace-toolbar .ghost-link:hover:not(:disabled) { background: #edbebc; color: #691c25; }
+.admin-stack .full-environment-workspace-dialog .full-environment-workspace-toolbar .ghost-link + .ghost-link { background: #f8e5e3; border-color: rgba(158, 41, 51, 0.22); color: #93414a; }
+.admin-stack .full-environment-workspace-dialog .full-environment-workspace-toolbar .ghost-link + .ghost-link:hover:not(:disabled) { background: #f1d1ce; color: #7d2731; }
+.admin-stack .full-environment-workspace-dialog .confirm-cancel { background: #edf1f3; border-color: rgba(68, 81, 93, 0.24); color: #36505f; box-shadow: none; }
+.admin-stack .full-environment-workspace-dialog .confirm-cancel:hover:not(:disabled) { background: #dce5e9; color: #263f4c; }
+.full-environment-workspace-toolbar { display: flex; gap: 0.55rem; margin-top: 1rem; }
+.full-environment-workspace-toolbar .ghost-link { padding: 0.45rem 0.7rem; font-size: 0.78rem; }
+.full-environment-workspace-list { display: grid; gap: 0.45rem; max-height: min(42vh, 360px); margin-top: 0.7rem; padding: 0.7rem; overflow-y: auto; border: 1px solid rgba(21, 93, 131, 0.18); border-radius: 14px; background: rgba(255, 255, 255, 0.62); }
+.full-environment-workspace-choice { display: flex; align-items: center; gap: 0.65rem; padding: 0.58rem 0.65rem; border-radius: 10px; color: #243f52; font-weight: 650; cursor: pointer; }
+.admin-stack .full-environment-workspace-choice { color: #243f52 !important; }
+.full-environment-workspace-choice:hover { background: rgba(36, 140, 175, 0.10); }
+.full-environment-workspace-choice input { width: 1.05rem; height: 1.05rem; margin: 0; accent-color: #155d83; }
+.full-environment-workspace-error { margin-top: 0.7rem !important; color: #a3313d !important; font-weight: 700; }
 .database-management-panel { border-color: rgba(139, 29, 36, 0.22); background: linear-gradient(135deg, rgba(255, 247, 246, 0.94), rgba(255, 255, 255, 0.96)); }
 .admin-stack [data-panel-state-key="admin:identity"], .admin-stack .report-catalogue-panel,
 .admin-stack .slides-templates-editor-panel, .admin-stack [data-panel-state-key="admin:datasets"] {
@@ -593,6 +611,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-chart-preview-select-menu { position: fixed; z-index: 200; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 0.4rem; width: min(23rem, calc(100vw - 1rem)); max-height: min(19rem, calc(100vh - 1rem)); padding: 0.55rem; border: 1px solid #cdb7ed; border-radius: 9px; background: #fff; box-shadow: 0 14px 32px rgba(54, 30, 86, 0.27); }
 .report-chart-preview-select-menu[hidden] { display: none !important; }
 .report-chart-preview-select-menu input[type="search"] { min-height: 2rem; padding: 0.35rem 0.5rem; border: 1px solid #cdb7ed; border-radius: 6px; background: #fff; color: #35234c; font-size: 0.76rem; }
+.report-chart-viewer-fields .report-chart-preview-parsed { width: 100%; min-height: 1.8rem; padding: 0.28rem 0.45rem; border: 1px solid #ded0ef; border-radius: 6px; background: #fff; color: #513587; font: inherit; font-size: 0.7rem; }
 .report-chart-preview-select-options { display: grid; align-content: start; min-height: 0; overflow: auto; border-top: 1px solid #eee7f7; }
 .reporting-stack .report-chart-preview-select-option, .report-chart-viewer-fields .report-chart-preview-select-option.is-multiple, .catalogue-chart-preview-sandbox .report-chart-preview-select-option { display: flex; align-items: center; justify-content: flex-start; gap: 0.5rem; width: 100%; min-height: 1.9rem; padding: 0.28rem 0.45rem; border: 0; border-radius: 0; background: #fff; color: #43266e; font-size: 0.76rem; font-weight: 500; text-align: left; cursor: pointer; box-shadow: none; }
 .reporting-stack .report-chart-preview-select-option:hover, .reporting-stack .report-chart-preview-select-option[aria-selected="true"], .catalogue-chart-preview-sandbox .report-chart-preview-select-option:hover, .catalogue-chart-preview-sandbox .report-chart-preview-select-option[aria-selected="true"] { background: #f2eaff; color: #35165d; box-shadow: none; }

@@ -362,6 +362,34 @@
     </div>
   </details>
 
+  {% if user.role == 'super-admin' %}
+  <div class="confirm-overlay full-environment-workspace-overlay" data-full-environment-workspace-overlay hidden>
+    <div class="confirm-panel full-environment-workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="full-environment-workspace-title">
+      <div class="confirm-icon info-icon" aria-hidden="true">⇩</div>
+      <p class="eyebrow">Full Environment export</p>
+      <h3 id="full-environment-workspace-title">Select workspaces</h3>
+      <p>Configuration and shared Slides Templates are always included. Choose the workspaces to add to this package.</p>
+      <div class="full-environment-workspace-toolbar">
+        <button type="button" class="ghost-link" data-full-environment-select-all>Select all</button>
+        <button type="button" class="ghost-link" data-full-environment-select-none>Select none</button>
+      </div>
+      <div class="full-environment-workspace-list">
+        {% for workspace in workspaces %}
+        <label class="full-environment-workspace-choice">
+          <input type="checkbox" value="{{ workspace.id }}" checked>
+          <span>{{ workspace.name }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      <p class="full-environment-workspace-error" data-full-environment-workspace-error hidden>Select at least one workspace.</p>
+      <div class="confirm-actions">
+        <button type="button" class="ghost-link confirm-cancel" data-full-environment-cancel>Cancel</button>
+        <button type="button" data-full-environment-accept>Export selected</button>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <details class="panel collapsible-panel database-management-panel" open data-panel-state-key="admin:database-management">
     <summary class="collapsible-summary">
       <div>

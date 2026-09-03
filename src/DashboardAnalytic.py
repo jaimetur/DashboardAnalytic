@@ -63,6 +63,9 @@ REPORT_CHART_JOB_LOCKS_LOCK = Lock()
 TEMPLATE_SAVE_LOCK = Lock()
 EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 EXPORT_JOBS_LOCK = Lock()
+IMPORT_UPLOADS: dict[str, dict[str, Any]] = {}
+IMPORT_JOBS: dict[str, dict[str, Any]] = {}
+IMPORT_JOBS_LOCK = Lock()
 EXPORT_PACKAGE_TTL = timedelta(hours=24)
 DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
 application_config_dir = settings.database_path.parent
@@ -1787,13 +1790,22 @@ def _archive_file(archive: zipfile.ZipFile, source: Path, archive_name: str) -> 
 
 
 def _archive_database(archive: zipfile.ZipFile, database_path: Path, archive_name: str, scratch_dir: Path | None = None) -> None:
-    """Add a consistent SQLite snapshot, including databases currently in WAL mode."""
+    """Add a consistent SQLite snapshot, compacting databases with substantial free space."""
     if not database_path.exists():
         return
     with tempfile.TemporaryDirectory(prefix='dashboard-analytic-export-', dir=scratch_dir) as temporary_dir:
         snapshot = Path(temporary_dir) / 'snapshot.db'
-        with sqlite3.connect(database_path) as source, sqlite3.connect(snapshot) as target:
-            source.backup(target)
+        with sqlite3.connect(database_path) as source:
+            page_count = int(source.execute('PRAGMA page_count').fetchone()[0])
+            free_pages = int(source.execute('PRAGMA freelist_count').fetchone()[0])
+            # VACUUM INTO creates a consistent, compact copy.  It is much faster
+            # overall for workspace databases whose deleted rows otherwise add
+            # several unused GB to both the snapshot and ZIP operation.
+            if page_count and free_pages / page_count >= 0.10:
+                source.execute('VACUUM INTO ?', (str(snapshot),))
+            else:
+                with sqlite3.connect(snapshot) as target:
+                    source.backup(target)
         _archive_file(archive, snapshot, archive_name)
 
 
@@ -1839,7 +1851,20 @@ def export_archive_filename(target: str) -> str:
     raise ValueError('Select a valid export option.')
 
 
-def build_export_archive_file(target: str, destination: Path) -> str:
+def _selected_export_workspaces(workspace_ids: Iterable[str] | None) -> list[Workspace]:
+    available = {workspace.id: workspace for workspace in workspace_registry.list()}
+    if workspace_ids is None:
+        return list(available.values())
+    selected_ids = list(dict.fromkeys(str(workspace_id) for workspace_id in workspace_ids))
+    missing = [workspace_id for workspace_id in selected_ids if workspace_id not in available]
+    if missing:
+        raise ValueError('One or more selected workspaces no longer exist.')
+    if not selected_ids:
+        raise ValueError('Select at least one workspace for the Full Environment export.')
+    return [available[workspace_id] for workspace_id in selected_ids]
+
+
+def build_export_archive_file(target: str, destination: Path, workspace_ids: Iterable[str] | None = None) -> str:
     """Create a portable archive on disk, keeping large exports out of RAM."""
     filename = export_archive_filename(target)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1870,7 +1895,9 @@ def build_export_archive_file(target: str, destination: Path) -> str:
         if include_templates:
             _archive_tree(archive, settings.slides_templates_dir, 'config/slides-templates')
 
-    with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+    # Level 1 retains most of SQLite's compression benefit while avoiding the
+    # disproportionate CPU cost of the default level on multi-GB databases.
+    with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=1, allowZip64=True) as archive:
         if target in {'config', 'config-with-templates'}:
             include_templates = target == 'config-with-templates'
             manifest = {
@@ -1903,7 +1930,7 @@ def build_export_archive_file(target: str, destination: Path) -> str:
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             _archive_workspace(archive, workspace, 'workspace', destination.parent)
         elif target == 'full-environment':
-            workspaces = workspace_registry.list()
+            workspaces = _selected_export_workspaces(workspace_ids)
             manifest = {
                 'format': ARCHIVE_FORMAT,
                 'version': ARCHIVE_VERSION,
@@ -1944,6 +1971,22 @@ def _cleanup_expired_export_packages() -> None:
         stale_jobs = [job_id for job_id, job in EXPORT_JOBS.items() if job.get('status') in {'ready', 'failed'} and float(job.get('finished_at', 0)) < cutoff]
         for job_id in stale_jobs:
             EXPORT_JOBS.pop(job_id, None)
+    with IMPORT_JOBS_LOCK:
+        for job in IMPORT_JOBS.values():
+            if job.get('status') in {'queued', 'processing'}:
+                active_paths.add(Path(str(job['path'])))
+        stale_upload_ids = [
+            upload_id for upload_id, upload in IMPORT_UPLOADS.items()
+            if float(upload.get('created_at', 0)) < cutoff and not upload.get('claimed')
+        ]
+        for upload_id in stale_upload_ids:
+            IMPORT_UPLOADS.pop(upload_id, None)
+        stale_import_jobs = [
+            job_id for job_id, job in IMPORT_JOBS.items()
+            if job.get('status') in {'ready', 'failed'} and float(job.get('finished_at', 0)) < cutoff
+        ]
+        for job_id in stale_import_jobs:
+            IMPORT_JOBS.pop(job_id, None)
     for path in package_dir.iterdir():
         if path in active_paths or path.stat().st_mtime >= cutoff:
             continue
@@ -1951,7 +1994,7 @@ def _cleanup_expired_export_packages() -> None:
             path.unlink(missing_ok=True)
 
 
-def _run_export_job(job_id: str, target: str) -> None:
+def _run_export_job(job_id: str, target: str, workspace_ids: list[str] | None) -> None:
     with EXPORT_JOBS_LOCK:
         job = EXPORT_JOBS.get(job_id)
         if not job:
@@ -1960,7 +2003,7 @@ def _run_export_job(job_id: str, target: str) -> None:
     destination = Path(str(job['path']))
     partial_path = destination.with_suffix('.part')
     try:
-        filename = build_export_archive_file(target, partial_path)
+        filename = build_export_archive_file(target, partial_path, workspace_ids)
         partial_path.replace(destination)
         with EXPORT_JOBS_LOCK:
             job.update({'status': 'ready', 'filename': filename, 'size': destination.stat().st_size, 'finished_at': datetime.now(timezone.utc).timestamp()})
@@ -1971,7 +2014,7 @@ def _run_export_job(job_id: str, target: str) -> None:
             job.update({'status': 'failed', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
 
 
-def start_export_job(target: str) -> dict[str, Any]:
+def start_export_job(target: str, workspace_ids: Iterable[str] | None = None) -> dict[str, Any]:
     """Start a disk-backed ZIP build that continues independently of the page."""
     filename = export_archive_filename(target)
     _cleanup_expired_export_packages()
@@ -1979,6 +2022,9 @@ def start_export_job(target: str) -> dict[str, Any]:
     package_dir.mkdir(parents=True, exist_ok=True)
     job_id = uuid4().hex
     destination = package_dir / f'{job_id}.zip'
+    selected_workspace_ids = list(workspace_ids) if workspace_ids is not None else None
+    if target == 'full-environment':
+        _selected_export_workspaces(selected_workspace_ids)
     job = {
         'id': job_id,
         'target': target,
@@ -1986,10 +2032,11 @@ def start_export_job(target: str) -> dict[str, Any]:
         'filename': filename,
         'path': str(destination),
         'created_at': datetime.now(timezone.utc).timestamp(),
+        'workspace_ids': selected_workspace_ids,
     }
     with EXPORT_JOBS_LOCK:
         EXPORT_JOBS[job_id] = job
-    Thread(target=_run_export_job, args=(job_id, target), name=f'export-{job_id[:8]}', daemon=True).start()
+    Thread(target=_run_export_job, args=(job_id, target, selected_workspace_ids), name=f'export-{job_id[:8]}', daemon=True).start()
     return job
 
 
@@ -2006,6 +2053,23 @@ def export_job_payload(job_id: str) -> dict[str, Any] | None:
 
 def _safe_extract_archive(archive: zipfile.ZipFile, destination: Path) -> None:
     for member in archive.infolist():
+        candidate = PurePosixPath(member.filename)
+        if member.is_dir():
+            continue
+        if candidate.is_absolute() or '..' in candidate.parts or not candidate.parts:
+            raise ValueError('The import archive contains an invalid file path.')
+        target = destination.joinpath(*candidate.parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with archive.open(member) as source, target.open('wb') as output:
+            shutil.copyfileobj(source, output)
+
+
+def _safe_extract_archive_prefix(archive: zipfile.ZipFile, destination: Path, prefix: str) -> None:
+    normalized_prefix = f'{prefix.rstrip("/")}/'
+    members = [member for member in archive.infolist() if member.filename.startswith(normalized_prefix)]
+    if not members:
+        raise ValueError(f'The import archive does not contain the expected {prefix} payload.')
+    for member in members:
         candidate = PurePosixPath(member.filename)
         if member.is_dir():
             continue
@@ -2107,9 +2171,10 @@ def import_config_archive(staging_root: Path, manifest: dict[str, Any]) -> None:
     repository.initialize()
 
 
-def read_import_manifest(contents: bytes) -> dict[str, Any]:
+def read_import_manifest(source: bytes | Path) -> dict[str, Any]:
     try:
-        with zipfile.ZipFile(io.BytesIO(contents)) as archive:
+        archive_source = io.BytesIO(source) if isinstance(source, bytes) else source
+        with zipfile.ZipFile(archive_source) as archive:
             manifest = json.loads(archive.read('manifest.json').decode('utf-8'))
     except (KeyError, UnicodeDecodeError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
         raise ValueError('The selected file is not a valid Dashboard Analytic export package.') from exc
@@ -2125,6 +2190,97 @@ def import_workspace_collisions(manifest: dict[str, Any]) -> list[str]:
         entries = [entries]
     existing_names = {workspace.name.casefold(): workspace.name for workspace in workspace_registry.list()}
     return [existing_names[str(entry.get('name')).casefold()] for entry in entries if isinstance(entry, dict) and str(entry.get('name') or '').casefold() in existing_names]
+
+
+def _apply_import_archive(package_path: Path, manifest: dict[str, Any]) -> str:
+    """Apply a disk-backed package and return its user-facing completion message."""
+    with zipfile.ZipFile(package_path) as archive, tempfile.TemporaryDirectory(prefix='dashboard-analytic-import-') as temporary_dir:
+        staging_root = Path(temporary_dir)
+        kind = manifest.get('kind')
+        if kind == 'workspace':
+            _safe_extract_archive_prefix(archive, staging_root, 'workspace')
+            workspace_info = manifest.get('workspace')
+            workspace = import_workspace_archive(
+                staging_root / 'workspace',
+                workspace_info if isinstance(workspace_info, dict) else None,
+                replace_existing=True,
+            )
+            return f'Workspace "{workspace.name}" imported successfully.'
+        if kind == 'config':
+            _safe_extract_archive_prefix(archive, staging_root, 'config')
+            import_config_archive(staging_root, manifest)
+            return 'Configuration imported successfully. Local workspaces were preserved.'
+        if kind == 'slides-templates':
+            _safe_extract_archive_prefix(archive, staging_root, 'slides-templates')
+            import_slides_templates_archive(staging_root)
+            return 'Slides Templates imported successfully.'
+        if kind == 'full-environment':
+            _safe_extract_archive_prefix(archive, staging_root, 'config')
+            import_config_archive(staging_root, manifest)
+            entries = manifest.get('workspaces')
+            if not isinstance(entries, list):
+                raise ValueError('The full-environment package has no workspace list.')
+            imported_workspaces: list[Workspace] = []
+            for entry in entries:
+                if not isinstance(entry, dict) or not re.fullmatch(r'workspaces/\d+', str(entry.get('archive_path') or '')):
+                    raise ValueError('The full-environment package contains an invalid workspace entry.')
+                _safe_extract_archive_prefix(archive, staging_root, str(entry['archive_path']))
+                imported_workspaces.append(import_workspace_archive(staging_root / str(entry['archive_path']), entry, replace_existing=True))
+                shutil.rmtree(staging_root / str(entry['archive_path']), ignore_errors=True)
+            return f'Full environment imported successfully ({len(imported_workspaces)} workspaces added).'
+        raise ValueError('The export package type is not supported.')
+
+
+def _run_import_job(job_id: str) -> None:
+    with IMPORT_JOBS_LOCK:
+        job = IMPORT_JOBS.get(job_id)
+        if not job:
+            return
+        job['status'] = 'processing'
+        package_path = Path(str(job['path']))
+        manifest = dict(job['manifest'])
+    try:
+        notice = _apply_import_archive(package_path, manifest)
+        with IMPORT_JOBS_LOCK:
+            job.update({'status': 'ready', 'notice': notice, 'finished_at': datetime.now(timezone.utc).timestamp()})
+    except Exception as exc:
+        with IMPORT_JOBS_LOCK:
+            job.update({'status': 'failed', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
+    finally:
+        package_path.unlink(missing_ok=True)
+        with IMPORT_JOBS_LOCK:
+            IMPORT_UPLOADS.pop(str(job.get('upload_id')), None)
+
+
+def start_import_job(upload_id: str, user: SessionUser) -> dict[str, Any]:
+    with IMPORT_JOBS_LOCK:
+        upload = IMPORT_UPLOADS.get(upload_id)
+        if not upload or upload.get('owner') != user.username:
+            raise ValueError('The uploaded package is no longer available. Select it again.')
+        if upload.get('claimed'):
+            raise ValueError('This uploaded package is already being imported.')
+        upload['claimed'] = True
+        job_id = uuid4().hex
+        job = {
+            'id': job_id,
+            'upload_id': upload_id,
+            'owner': user.username,
+            'path': upload['path'],
+            'manifest': upload['manifest'],
+            'status': 'queued',
+            'created_at': datetime.now(timezone.utc).timestamp(),
+        }
+        IMPORT_JOBS[job_id] = job
+    Thread(target=_run_import_job, args=(job_id,), name=f'import-{job_id[:8]}', daemon=True).start()
+    return job
+
+
+def import_job_payload(job_id: str, user: SessionUser) -> dict[str, Any] | None:
+    with IMPORT_JOBS_LOCK:
+        job = IMPORT_JOBS.get(job_id)
+        if not job or job.get('owner') != user.username:
+            return None
+        return {key: value for key, value in job.items() if key not in {'path', 'manifest', 'owner', 'upload_id'}}
 
 
 def require_import_export_permission(user: SessionUser, target: str) -> None:
@@ -2227,7 +2383,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         {'value': 'config', 'label': 'Config'},
         {'value': 'slides-templates', 'label': 'Slides Templates'},
         {'value': 'config-with-templates', 'label': 'Config + Slides Templates'},
-        {'value': 'full-environment', 'label': 'Full Environment (Config + Slides Templates + All Workspaces)'},
+        {'value': 'full-environment', 'label': 'Full Environment (Config + Slides Templates + Selected Workspaces)'},
         *[
             {'value': f'workspace:{workspace.id}', 'label': f'Workspace: {workspace.name}'}
             for workspace in workspace_registry.list()
@@ -4876,11 +5032,12 @@ def export_admin_package(
 @app.post('/admin/import-export/export/jobs')
 def create_admin_export_job(
     export_target: str = Form(...),
+    workspace_ids: list[str] | None = Form(None),
     user: SessionUser = Depends(admin_user),
 ) -> JSONResponse:
     require_import_export_permission(user, export_target)
     try:
-        job = start_export_job(export_target)
+        job = start_export_job(export_target, workspace_ids if export_target == 'full-environment' else None)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return JSONResponse({
@@ -4917,21 +5074,88 @@ async def inspect_admin_import_package(
     package: UploadFile = File(...),
     user: SessionUser = Depends(admin_user),
 ) -> JSONResponse:
+    _cleanup_expired_export_packages()
+    upload_id = uuid4().hex
+    package_dir = export_package_dir()
+    package_dir.mkdir(parents=True, exist_ok=True)
+    package_path = package_dir / f'import-{upload_id}.upload'
     try:
-        manifest = read_import_manifest(await package.read())
+        await save_upload_file(package, package_path)
+        manifest = read_import_manifest(package_path)
         kind = str(manifest.get('kind') or '')
         if kind not in {'config', 'workspace', 'full-environment', 'slides-templates'}:
             raise ValueError('The export package type is not supported.')
         require_import_export_permission(user, kind)
+        with IMPORT_JOBS_LOCK:
+            IMPORT_UPLOADS[upload_id] = {
+                'path': str(package_path),
+                'manifest': manifest,
+                'owner': user.username,
+                'created_at': datetime.now(timezone.utc).timestamp(),
+                'claimed': False,
+            }
         return JSONResponse({
             'kind': kind,
             'includes_slides_templates': bool(manifest.get('includes_slides_templates')),
             'workspace_collisions': import_workspace_collisions(manifest),
-        })
+        }, headers={'X-Import-Upload-Id': upload_id})
     except ValueError as exc:
+        package_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        package_path.unlink(missing_ok=True)
+        raise
+    except OSError as exc:
+        package_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f'The import package could not be stored: {exc}') from exc
     finally:
         await package.close()
+
+
+@app.delete('/admin/import-export/import/uploads/{upload_id}')
+def discard_admin_import_upload(upload_id: str, user: SessionUser = Depends(admin_user)) -> Response:
+    with IMPORT_JOBS_LOCK:
+        upload = IMPORT_UPLOADS.get(upload_id)
+        if not upload or upload.get('owner') != user.username:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        if upload.get('claimed'):
+            raise HTTPException(status_code=409, detail='The package import has already started.')
+        IMPORT_UPLOADS.pop(upload_id, None)
+        package_path = Path(str(upload['path']))
+    package_path.unlink(missing_ok=True)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.post('/admin/import-export/import/jobs')
+def create_admin_import_job(
+    upload_id: str = Form(...),
+    confirmed_import: bool = Form(False),
+    user: SessionUser = Depends(admin_user),
+) -> JSONResponse:
+    if not confirmed_import:
+        raise HTTPException(status_code=400, detail='Confirm the import warning before applying this package.')
+    with IMPORT_JOBS_LOCK:
+        upload = IMPORT_UPLOADS.get(upload_id)
+        if not upload or upload.get('owner') != user.username:
+            raise HTTPException(status_code=404, detail='The uploaded package is no longer available. Select it again.')
+        kind = str(upload['manifest'].get('kind') or '')
+    require_import_export_permission(user, kind)
+    try:
+        job = start_import_job(upload_id, user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse({
+        'job_id': job['id'],
+        'status': job['status'],
+        'status_url': f"/admin/import-export/import/jobs/{job['id']}",
+    })
+
+
+@app.get('/admin/import-export/import/jobs/{job_id}')
+def get_admin_import_job(job_id: str, user: SessionUser = Depends(admin_user)) -> JSONResponse:
+    if not (payload := import_job_payload(job_id, user)):
+        raise HTTPException(status_code=404, detail='The import job no longer exists.')
+    return JSONResponse(payload)
 
 
 @app.post('/admin/import-export/import')
@@ -4940,39 +5164,16 @@ async def import_admin_package(
     confirmed_import: bool = Form(False),
     user: SessionUser = Depends(admin_user),
 ) -> Response:
+    package_dir = export_package_dir()
+    package_dir.mkdir(parents=True, exist_ok=True)
+    package_path = package_dir / f'legacy-import-{uuid4().hex}.upload'
     try:
-        contents = await package.read()
-        with zipfile.ZipFile(io.BytesIO(contents)) as archive, tempfile.TemporaryDirectory(prefix='dashboard-analytic-import-') as temporary_dir:
-            manifest = read_import_manifest(contents)
-            if not confirmed_import:
-                raise ValueError('Confirm the import warning before applying this package.')
-            staging_root = Path(temporary_dir)
-            _safe_extract_archive(archive, staging_root)
-            kind = manifest.get('kind')
-            require_import_export_permission(user, str(kind))
-            if kind == 'workspace':
-                workspace_info = manifest.get('workspace')
-                workspace = import_workspace_archive(staging_root / 'workspace', workspace_info if isinstance(workspace_info, dict) else None, replace_existing=True)
-                notice = f'Workspace "{workspace.name}" imported successfully.'
-            elif kind == 'config':
-                import_config_archive(staging_root, manifest)
-                notice = 'Configuration imported successfully. Local workspaces were preserved.'
-            elif kind == 'slides-templates':
-                import_slides_templates_archive(staging_root)
-                notice = 'Slides Templates imported successfully.'
-            elif kind == 'full-environment':
-                import_config_archive(staging_root, manifest)
-                entries = manifest.get('workspaces')
-                if not isinstance(entries, list):
-                    raise ValueError('The full-environment package has no workspace list.')
-                imported_workspaces: list[Workspace] = []
-                for entry in entries:
-                    if not isinstance(entry, dict) or not re.fullmatch(r'workspaces/\d+', str(entry.get('archive_path') or '')):
-                        raise ValueError('The full-environment package contains an invalid workspace entry.')
-                    imported_workspaces.append(import_workspace_archive(staging_root / str(entry['archive_path']), entry, replace_existing=True))
-                notice = f'Full environment imported successfully ({len(imported_workspaces)} workspaces added).'
-            else:
-                raise ValueError('The export package type is not supported.')
+        await save_upload_file(package, package_path)
+        manifest = read_import_manifest(package_path)
+        if not confirmed_import:
+            raise ValueError('Confirm the import warning before applying this package.')
+        require_import_export_permission(user, str(manifest.get('kind')))
+        notice = _apply_import_archive(package_path, manifest)
     except (ValueError, OSError, sqlite3.Error, zipfile.BadZipFile) as exc:
         return RedirectResponse(
             f'/admin?{urlencode({"import_export_error": str(exc)})}',
@@ -4980,6 +5181,7 @@ async def import_admin_package(
         )
     finally:
         await package.close()
+        package_path.unlink(missing_ok=True)
     return RedirectResponse(
         f'/admin?{urlencode({"import_export_notice": notice})}',
         status_code=status.HTTP_303_SEE_OTHER,

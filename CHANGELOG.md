@@ -29,6 +29,8 @@
 - Improved Cell Assistance controls with Escape dismissal, readable long lists and compact searchable layouts; valid Chart Type, Legend Position, CDR Source and Layout values now preselect from the active cell, while applied Chart Types use title case.
 - Restored Filter Builder clauses in Cell Assistance and added comma-separated multi-value support for `CONTAINS` and `NOT CONTAINS` conditions.
 - Refined the Interactive Preview into a side-by-side chart/editor layout on wide screens, with a source-aware Filter Builder and compact, searchable white-and-purple dropdowns; multi-value Rows, Columns and Legend controls support search, checkboxes and Select all / none.
+- Accelerated large configuration transfers with compact SQLite snapshots, faster ZIP compression and sequential workspace extraction; imports now upload once, run from disk in the background and avoid loading multi-GB packages into application memory.
+- Added workspace selection to Full Environment exports so configuration and shared Slides Templates can be packaged with only the required workspaces.
 
 #### 🐛 Bug fixes:
 - Fixed Reporting CDR multi-select checkmarks after Multivendor review so they match the submitted CDRs.
