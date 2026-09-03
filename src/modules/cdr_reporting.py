@@ -1106,7 +1106,14 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
     return frame, primary, series
 
 
-def preview_catalog_chart_data(frame: pd.DataFrame, entry: CatalogEntry, *, limit: int = 200) -> tuple[pd.DataFrame, dict[str, object]]:
+def preview_catalog_chart_data(
+    frame: pd.DataFrame,
+    entry: CatalogEntry,
+    *,
+    limit: int = 200,
+    offset: int = 0,
+    column_filters: dict[str, tuple[str, ...]] | None = None,
+) -> tuple[pd.DataFrame, dict[str, object]]:
     """Return the exact, post-filter rows supplied to one template chart.
 
     This deliberately shares the reporting filter and grouping resolution so
@@ -1144,18 +1151,39 @@ def preview_catalog_chart_data(frame: pd.DataFrame, entry: CatalogEntry, *, limi
     # visible in one place.
     legend_labels = ', '.join(_legend_labels(entry.legend)) or '(automatic)'
     if display_columns:
-        result = pd.concat(
+        full_result = pd.concat(
             [grouped[source].rename(label) for source, label in display_columns],
             axis=1,
-        ).head(max(1, min(int(limit), 500))).copy()
+        ).copy()
     else:
-        result = grouped.head(max(1, min(int(limit), 500))).copy()
-    result.insert(len(result.columns), 'Legend captions', legend_labels)
+        full_result = grouped.copy()
+    full_result.insert(len(full_result.columns), 'Legend captions', legend_labels)
+    filter_values = {
+        str(column): sorted(
+            {'' if pd.isna(value) else str(value) for value in full_result[column].tolist()},
+            key=str.casefold,
+        )
+        for column in full_result.columns
+    }
+    for column, values in (column_filters or {}).items():
+        if column not in full_result.columns or not values:
+            continue
+        accepted = {str(value) for value in values}
+        full_result = full_result[full_result[column].map(lambda value: '' if pd.isna(value) else str(value)).isin(accepted)]
+    # Callers that render a table still request small pages.  The template-editor
+    # preview also uses this helper to build one temporary, server-side result so
+    # later page changes do not need to recalculate the chart filters.
+    page_size = max(1, min(int(limit), 100_000))
+    page_offset = max(0, int(offset))
+    result = full_result.iloc[page_offset:page_offset + page_size].copy()
     return result, {
         'source_rows': len(frame.index),
         'matched_rows': len(filtered.index),
         'shown_rows': len(result.index),
+        'visible_rows': len(full_result.index),
+        'page_offset': page_offset,
         'columns': list(result.columns),
+        'filter_values': filter_values,
     }
 
 

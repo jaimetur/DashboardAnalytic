@@ -25,6 +25,10 @@
 - Added safe red circular Stop actions for processing Reports Jobs and Charts Jobs, including cooperative cancellation and partial-output cleanup; queued and stopped Charts Jobs can also be deleted.
 - Enabled stopped Reports Jobs and Charts Jobs retries, and changed failed Charts Jobs retries to reuse their existing row instead of creating a duplicate job.
 - Added confirmed completed-job relaunch for Reports Jobs and Charts Jobs: prior output is deleted, the same row is reused and the job is queued again.
+- Added a shared Interactive Chart Preview for E2E Reporting and Slides Templates Editor: Chart Type, CDR Source, KPI, Filters, Rows, Columns, Legend and Legend Position can be changed to regenerate a temporary chart without altering the persisted chart or template.
+- Refined the Interactive Preview into a side-by-side chart/editor layout on wide screens, with a source-aware Filter Builder and compact, searchable white-and-purple dropdowns; multi-value Rows, Columns and Legend controls support search, checkboxes and Select all / none.
+- Added a full-size filtered-dataset overlay above the chart preview, with Excel-style searchable column filters over every chart-filtered value and fixed first/previous/next/last pagination controls.
+- Added editable generated-chart previews to Slides Templates Editor rows: Update Template applies the current Interactive Preview values to that in-memory row for the normal save workflow.
 
 #### 🐛 Bug fixes:
 - Fixed Reporting CDR multi-select checkmarks after Multivendor review so they match the submitted CDRs.

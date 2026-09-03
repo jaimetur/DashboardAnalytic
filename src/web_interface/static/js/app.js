@@ -418,6 +418,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const filterConditions = editor.querySelector('[data-catalogue-filter-conditions]');
   const addFilter = editor.querySelector('[data-catalogue-filter-add]');
   const chartPreview = editor.querySelector('[data-catalogue-chart-preview]');
+  const chartPreviewDialog = chartPreview?.querySelector('.catalogue-chart-preview-dialog');
   const chartPreviewTitle = editor.querySelector('[data-catalogue-chart-preview-title]');
   const chartPreviewSummary = editor.querySelector('[data-catalogue-chart-preview-summary]');
   const chartPreviewTable = editor.querySelector('[data-catalogue-chart-preview-table]');
@@ -425,7 +426,19 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const chartPreviewTableWrap = chartPreviewTable?.closest('.table-wrap');
   const chartPreviewImage = editor.querySelector('[data-catalogue-chart-preview-image]');
   const chartPreviewImageContent = editor.querySelector('[data-catalogue-chart-preview-image-content]');
+  const chartPreviewSandbox = editor.querySelector('[data-catalogue-chart-preview-sandbox]');
+  const chartPreviewFields = editor.querySelector('[data-catalogue-chart-preview-fields]');
+  const chartPreviewData = editor.querySelector('[data-catalogue-chart-preview-data]');
+  const chartPreviewDataOverlay = editor.querySelector('[data-catalogue-chart-preview-data-overlay]');
+  const chartPreviewDataPanel = editor.querySelector('[data-catalogue-chart-preview-data-panel]');
+  const chartPreviewUpdate = editor.querySelector('[data-catalogue-chart-preview-update]');
   let chartPreviewImageUrl = '';
+  let chartPreviewRow = null;
+  let chartPreviewTimer = null;
+  let chartPreviewDatasetPage = 0;
+  const chartPreviewDatasetPageSize = 100;
+  const chartPreviewDatasetFilters = new Map();
+  let chartPreviewDatasetFilterMenu = null;
   if (!table || !saveForm || !contentField || !heading || !copy || !optionsLabel || !options || !apply || !helper) return;
 
   // The editor panel uses backdrop effects, which establish a containing block
@@ -861,6 +874,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (chartPreviewImageUrl) { URL.revokeObjectURL(chartPreviewImageUrl); chartPreviewImageUrl = ''; }
     if (chartPreviewImageContent) chartPreviewImageContent.removeAttribute('src');
     if (chartPreviewImage) chartPreviewImage.hidden = true;
+    if (chartPreviewSandbox) chartPreviewSandbox.hidden = true;
     const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[character]));
     chartPreviewTable.innerHTML = columns.length
       ? `<thead><tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join('')}</tr></thead><tbody>${rows.length ? rows.map((item) => `<tr>${columns.map((column) => `<td>${escapeHtml(item[column])}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${columns.length}">No rows match this chart definition.</td></tr>`}</tbody>`
@@ -870,7 +884,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const closeChartPreview = () => { if (chartPreview) chartPreview.hidden = true; };
   chartPreviewClose?.addEventListener('click', closeChartPreview);
   chartPreview?.addEventListener('click', (event) => { if (event.target === chartPreview) closeChartPreview(); });
-  const previewChartData = async (row) => {
+  const previewChartData = async (row, definition = {}) => {
     const endpoint = editor.dataset.chartPreviewUrl;
     if (!endpoint) return;
     const rowIndex = Array.from(table.querySelectorAll('tbody tr')).indexOf(row);
@@ -881,7 +895,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     try {
       const response = await fetch(endpoint, {
         method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({catalogue_content: serialiseCatalogueContent(), row_index: rowIndex}),
+        body: JSON.stringify({catalogue_content: serialiseCatalogueContent(), row_index: rowIndex, definition}),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || 'Unable to preview chart data.');
@@ -893,19 +907,58 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       if (button) button.disabled = false;
     }
   };
-  const previewGeneratedChart = async (row) => {
+  const previewDefinition = () => Object.fromEntries(Array.from(chartPreviewFields?.querySelectorAll('[name]') || []).map((control) => {
+    if (!control.multiple) return [control.name, control.value];
+    const separator = control.name === 'legend' ? ', ' : ' × ';
+    return [control.name, Array.from(control.selectedOptions).map((option) => option.value).filter(Boolean).join(separator)];
+  }));
+  const previewDefinitionFromRow = (row) => ({
+    chart_type: rowValue(row, 'Chart type'), chart_title: rowValue(row, 'Chart Tittle'), cdr_source: rowValue(row, 'CDR source'),
+    kpi: rowValue(row, 'KPI'), filters: rowValue(row, 'Filters'), grouping_rows: rowValue(row, 'Rows Aggregation'),
+    grouping_columns: rowValue(row, 'Column Aggregation'), legend: rowValue(row, 'Legend'), legend_position: rowValue(row, 'Legend Position'),
+  });
+  const renderChartPreviewSandbox = (row, definition = null) => {
+    if (!chartPreviewSandbox || !chartPreviewFields) return;
+    const current = definition || previewDefinitionFromRow(row);
+    const regenerate = () => {
+      if (chartPreviewTimer) window.clearTimeout(chartPreviewTimer);
+      chartPreviewTimer = window.setTimeout(() => previewGeneratedChart(row, previewDefinition(), false), 350);
+    };
+    createInteractiveChartPreviewControls(chartPreviewFields, current, {
+      columnsBySource: suggestions.columns,
+      fields: [
+        ['chart_type', 'Chart Type'], ['chart_title', 'Chart Tittle'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['filters', 'Filters'],
+        ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+      ],
+      textFields: {chart_title: true},
+      // Keep these option sets identical to the persisted Chart Viewer.
+      chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars'],
+      cdrSources: ['CDR-Data', 'CDR-Voice', 'CDR-Speech'],
+      legendPositions: ['Top', 'Bottom', 'Left', 'Right'],
+      onChange: regenerate,
+      onSourceChange: (next) => {
+        renderChartPreviewSandbox(row, next);
+        regenerate();
+      },
+    });
+    chartPreviewSandbox.hidden = false;
+  };
+  const previewGeneratedChart = async (row, definition = {}, showOverlay = true) => {
     const endpoint = editor.dataset.chartImagePreviewUrl;
     if (!endpoint) return;
     const rowIndex = Array.from(table.querySelectorAll('tbody tr')).indexOf(row);
     if (rowIndex < 0) return;
+    // serialiseCatalogueContent normalises/rebuilds editor rows. Resolve the
+    // authoritative replacement row immediately afterwards, then initialise
+    // the preview from those values rather than the stale click target.
+    const catalogueContent = serialiseCatalogueContent();
+    const resolvedRow = Array.from(table.querySelectorAll('tbody tr'))[rowIndex] || row;
+    const rowDefinition = {...previewDefinitionFromRow(resolvedRow), ...definition};
     const button = row.querySelector('[data-catalogue-row-action="chart-preview"]');
     if (button) button.disabled = true;
-    showLoadingOverlay('Generating Chart Preview', 'Please wait while the chart preview is generated.');
+    if (showOverlay) showLoadingOverlay('Generating Chart Preview', 'Please wait while the chart preview is generated.');
     try {
-      const response = await fetch(endpoint, {
-        method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({catalogue_content: serialiseCatalogueContent(), row_index: rowIndex}),
-      });
+      const response = await fetch(endpoint, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({catalogue_content: catalogueContent, row_index: rowIndex, definition: rowDefinition})});
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.detail || 'Unable to preview the generated chart.');
@@ -916,16 +969,111 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       if (chartPreviewImageContent) chartPreviewImageContent.src = chartPreviewImageUrl;
       if (chartPreviewImage) chartPreviewImage.hidden = false;
       if (chartPreviewTableWrap) chartPreviewTableWrap.hidden = true;
-      if (chartPreviewTitle) chartPreviewTitle.textContent = `Generated chart preview · ${rowValue(row, 'Chart Tittle') || rowValue(row, 'Slide Tittle') || 'Selected chart'}`;
+      if (chartPreviewTitle) chartPreviewTitle.textContent = `Generated chart preview · ${rowDefinition.chart_title || rowValue(row, 'Slide Tittle') || 'Selected chart'}`;
       if (chartPreviewSummary) chartPreviewSummary.textContent = 'This is the chart image produced by the current unsaved template definition.';
+      if (showOverlay) {
+        chartPreviewDialog?.classList.remove('is-dataset-only');
+        chartPreviewRow = resolvedRow;
+        renderChartPreviewSandbox(chartPreviewRow, rowDefinition);
+      }
       if (chartPreview) chartPreview.hidden = false;
     } catch (error) {
       showInfoDialog(error instanceof Error ? error.message : 'Unable to preview the generated chart.', {title: 'Generated Chart Preview', tone: 'error'});
     } finally {
-      hideLoadingOverlay();
+      if (showOverlay) hideLoadingOverlay();
       if (button) button.disabled = false;
     }
   };
+  chartPreviewUpdate?.addEventListener('click', () => {
+    if (!chartPreviewRow) return;
+    const mapping = {chart_title: 'Chart Tittle', chart_type: 'Chart type', cdr_source: 'CDR source', kpi: 'KPI', filters: 'Filters', grouping_rows: 'Rows Aggregation', grouping_columns: 'Column Aggregation', legend: 'Legend', legend_position: 'Legend Position'};
+    Object.entries(previewDefinition()).forEach(([key, value]) => { const cell = Array.from(chartPreviewRow.querySelectorAll('[data-catalogue-field]')).find((item) => item.dataset.catalogueField === mapping[key]); if (cell) cell.textContent = value; });
+    showInfoDialog('The current preview values have been applied to this template row. Save the template to persist them.', {title: 'Template updated'});
+  });
+  chartPreviewData?.addEventListener('click', async () => {
+    if (!chartPreviewRow) return;
+    const endpoint = editor.dataset.chartPreviewUrl;
+    const rowIndex = Array.from(table.querySelectorAll('tbody tr')).indexOf(chartPreviewRow);
+    if (!endpoint || rowIndex < 0 || !chartPreviewDataPanel) return;
+    chartPreviewData.disabled = true;
+    chartPreviewDatasetPage = 0;
+    chartPreviewDatasetFilters.clear();
+    showLoadingOverlay('Loading Filtered Dataset', 'Please wait while the filtered dataset is prepared.');
+    try {
+      const activeDefinition = chartPreviewSandbox && !chartPreviewSandbox.hidden ? previewDefinition() : {};
+      const requestBody = (page) => ({catalogue_content: serialiseCatalogueContent(), row_index: rowIndex, definition: activeDefinition, page, page_size: chartPreviewDatasetPageSize, column_filters: Object.fromEntries(Array.from(chartPreviewDatasetFilters.entries()).map(([column, values]) => [column, Array.from(values)]))});
+      const response = await fetch(endpoint, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(requestBody(0))});
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Unable to load filtered dataset.');
+      const renderPage = async (page) => {
+        const request = await fetch(endpoint, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(requestBody(page))});
+        const next = await request.json().catch(() => ({}));
+        if (!request.ok) throw new Error(next.detail || 'Unable to load filtered dataset.');
+        chartPreviewDatasetPage = page;
+        renderDataset(next);
+      };
+      const renderDataset = (dataset) => {
+        const columns = dataset.columns || dataset.summary?.columns || [];
+        const rows = dataset.rows || [];
+        const visibleRows = Number(dataset.summary?.visible_rows ?? rows.length);
+        const sourceRows = Number(dataset.summary?.source_rows ?? 0);
+        const matchedRows = Number(dataset.summary?.matched_rows ?? visibleRows);
+        const pageCount = Math.max(1, Math.ceil(visibleRows / chartPreviewDatasetPageSize));
+        const tableNode = document.createElement('table');
+        const header = document.createElement('tr');
+        columns.forEach((column) => {
+          const cell = document.createElement('th'); const button = document.createElement('button'); button.type = 'button'; button.className = 'report-chart-viewer-column-filter';
+          button.textContent = `${column} ▾`; button.classList.toggle('is-filtered', chartPreviewDatasetFilters.has(column));
+          button.addEventListener('click', () => {
+            chartPreviewDatasetFilterMenu?.remove();
+            const values = (dataset.filter_values?.[column] || []).map(String); const selected = new Set(chartPreviewDatasetFilters.get(column) || values);
+            const menu = document.createElement('section'); menu.className = 'report-chart-preview-select-menu report-chart-viewer-column-filter-menu';
+            const search = document.createElement('input'); search.type = 'search'; search.placeholder = `Search ${column}`;
+            const options = document.createElement('div'); options.className = 'report-chart-preview-select-options';
+            const draw = () => { const query = search.value.toLocaleLowerCase(); options.replaceChildren(...values.filter((value) => !query || value.toLocaleLowerCase().includes(query)).map((value) => { const item = document.createElement('label'); item.className = 'report-chart-preview-select-option is-multiple'; const check = document.createElement('input'); check.type = 'checkbox'; check.checked = selected.has(value); const text = document.createElement('span'); text.textContent = value || '(Blanks)'; check.addEventListener('change', () => { if (check.checked) selected.add(value); else selected.delete(value); if (selected.size === values.length) chartPreviewDatasetFilters.delete(column); else chartPreviewDatasetFilters.set(column, selected); menu.remove(); renderPage(0).catch((error) => showInfoDialog(error.message, {title: 'Filtered dataset', tone: 'error'})); }); item.append(check, text); return item; })); };
+            search.addEventListener('input', draw); menu.append(search, options); document.body.append(menu); chartPreviewDatasetFilterMenu = menu; const bounds = button.getBoundingClientRect(); menu.style.left = `${Math.max(8, Math.min(bounds.left, window.innerWidth - 380))}px`; menu.style.top = `${Math.min(bounds.bottom + 4, window.innerHeight - 310)}px`; draw(); search.focus();
+          });
+          cell.append(button); header.append(cell);
+        });
+        const thead = document.createElement('thead'); thead.append(header); tableNode.append(thead);
+        const body = document.createElement('tbody');
+        rows.forEach((row) => { const line = document.createElement('tr'); columns.forEach((column) => { const cell = document.createElement('td'); cell.textContent = row[column] ?? ''; line.append(cell); }); body.append(line); });
+        tableNode.append(body);
+        const pager = document.createElement('nav'); pager.className = 'report-chart-viewer-data-pager';
+        const add = (label, target, title) => { const control = document.createElement('button'); control.type = 'button'; control.textContent = label; control.title = title; control.disabled = target === chartPreviewDatasetPage; control.addEventListener('click', () => renderPage(target).catch((error) => showInfoDialog(error.message, {title: 'Filtered dataset', tone: 'error'}))); pager.append(control); };
+        add('⏮', 0, 'First page'); add('←', Math.max(0, chartPreviewDatasetPage - 1), 'Previous page');
+        const label = document.createElement('span'); label.textContent = `Page ${chartPreviewDatasetPage + 1} / ${pageCount}`; pager.append(label);
+        add('→', Math.min(pageCount - 1, chartPreviewDatasetPage + 1), 'Next page'); add('⏭', pageCount - 1, 'Last page');
+        const summary = document.createElement('p'); summary.className = 'form-note';
+        summary.textContent = `${sourceRows} total dataset rows · ${matchedRows} chart-filtered rows · ${visibleRows} visible after column filters · ${rows.length} rows shown on this page`;
+        // Only the table body scrolls.  Keep the result context and page
+        // controls in sight while inspecting a long page of rows.
+        const scrollArea = document.createElement('div'); scrollArea.className = 'report-chart-viewer-data-scroll';
+        scrollArea.append(tableNode);
+        chartPreviewDataPanel.replaceChildren(summary, pager, scrollArea);
+      };
+      renderDataset(payload);
+      if (chartPreviewSandbox) chartPreviewSandbox.hidden = true;
+      if (chartPreview) chartPreview.hidden = false;
+      if (chartPreviewDataOverlay) chartPreviewDataOverlay.hidden = false;
+    } catch (error) { showInfoDialog(error instanceof Error ? error.message : 'Unable to load filtered dataset.', {title: 'Filtered dataset', tone: 'error'}); }
+    finally { hideLoadingOverlay(); chartPreviewData.disabled = false; }
+  });
+  chartPreviewDataOverlay?.addEventListener('click', (event) => {
+    if (event.target === chartPreviewDataOverlay || event.target.closest('[data-catalogue-chart-preview-data-close]')) {
+      chartPreviewDataOverlay.hidden = true;
+      chartPreviewDatasetFilterMenu?.remove(); chartPreviewDatasetFilterMenu = null;
+      if (chartPreviewDialog?.classList.contains('is-dataset-only')) {
+        chartPreviewDialog.classList.remove('is-dataset-only');
+        if (chartPreview) chartPreview.hidden = true;
+      } else if (chartPreviewSandbox) chartPreviewSandbox.hidden = false;
+    }
+  });
+  document.addEventListener('click', (event) => {
+    if (chartPreviewDatasetFilterMenu && !chartPreviewDatasetFilterMenu.contains(event.target) && !event.target.closest('.report-chart-viewer-column-filter')) {
+      chartPreviewDatasetFilterMenu.remove(); chartPreviewDatasetFilterMenu = null;
+    }
+  });
   table.addEventListener('click', async (event) => {
     const button = event.target.closest?.('[data-catalogue-row-action]');
     if (!button) return;
@@ -935,7 +1083,15 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (!row || !body) return;
     const action = button.dataset.catalogueRowAction;
     if (action === 'preview') {
-      await previewChartData(row);
+      chartPreviewRow = row;
+      chartPreviewDialog?.classList.add('is-dataset-only');
+      if (chartPreviewTitle) chartPreviewTitle.textContent = `Filtered dataset · ${rowValue(row, 'Chart Tittle') || rowValue(row, 'Slide Tittle') || 'Selected chart'}`;
+      if (chartPreviewSummary) chartPreviewSummary.textContent = 'The complete chart-filtered dataset is available in paginated pages.';
+      if (chartPreviewImage) chartPreviewImage.hidden = true;
+      if (chartPreviewSandbox) chartPreviewSandbox.hidden = true;
+      if (chartPreviewTableWrap) chartPreviewTableWrap.hidden = true;
+      showLoadingOverlay('Loading Chart Data Preview', 'Please wait while the selected chart dataset is loaded.');
+      chartPreviewData?.click();
       return;
     }
     if (action === 'chart-preview') {
@@ -2043,6 +2199,167 @@ function setupCustomMultiSelects() {
     shell.appendChild(menu);
     syncCheckboxes();
   });
+}
+
+// The Chart Viewer and the Slides Template editor deliberately share this
+// control surface. Keeping the filter builder and the searchable popovers in
+// one component prevents the two previews from drifting apart.
+function createInteractiveChartPreviewControls(fieldsElement, definition, options = {}) {
+  if (!fieldsElement) return {definition: () => ({})};
+  const fields = options.fields || [
+    ['chart_type', 'Chart Type'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['filters', 'Filters'],
+    ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+  ];
+  const multiFields = new Set(['grouping_rows', 'grouping_columns', 'legend']);
+  const sourceKey = (source) => {
+    const normalized = String(source || '').trim().toLowerCase();
+    return ({data: 'cdr-data', voice: 'cdr-voice', speech: 'cdr-speech'})[normalized] || (normalized.startsWith('cdr-') ? normalized : `cdr-${normalized}`);
+  };
+  const columnsFor = (source) => Array.from(new Set((options.columnsBySource || {})[sourceKey(source)] || [])).sort((left, right) => left.localeCompare(right));
+  const valuesFor = (value, key) => new Set(String(value || '').split(key === 'legend' ? ',' : /\s*(?:×|x)\s*/i).map((item) => item.trim()).filter(Boolean));
+  const normalisePreviewValue = (value) => String(value || '').trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, '');
+  const matchingPreviewValue = (requested, available) => (
+    available.find((value) => normalisePreviewValue(value) === normalisePreviewValue(requested)) || requested
+  );
+  const currentDefinition = () => Object.fromEntries(Array.from(fieldsElement.querySelectorAll('[name]')).map((control) => {
+    if (!control.multiple) return [control.name, control.value];
+    return [control.name, Array.from(control.selectedOptions).map((option) => option.value).filter(Boolean).join(control.name === 'legend' ? ', ' : ' × ')];
+  }));
+  let activeMenu = null;
+  let activeMenuTrigger = null;
+  let activeMenuHome = null;
+  let activeMenuNextSibling = null;
+  let closeTimer = null;
+  const closeMenu = () => {
+    if (closeTimer) window.clearTimeout(closeTimer);
+    closeTimer = null;
+    activeMenuTrigger?.setAttribute('aria-expanded', 'false');
+    activeMenu?.setAttribute('hidden', '');
+    if (activeMenu && activeMenuHome) activeMenuHome.insertBefore(activeMenu, activeMenuNextSibling);
+    activeMenu = null; activeMenuTrigger = null; activeMenuHome = null; activeMenuNextSibling = null;
+  };
+  const setupSelects = () => {
+    fieldsElement.querySelectorAll('select[name], select[data-report-chart-filter-select]').forEach((select) => {
+      const shell = document.createElement('div'); shell.className = 'report-chart-preview-select';
+      const trigger = document.createElement('button'); trigger.type = 'button'; trigger.className = 'report-chart-preview-select-trigger'; trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-expanded', 'false');
+      const triggerText = document.createElement('span'); triggerText.className = 'report-chart-preview-select-value'; trigger.append(triggerText);
+      const menu = document.createElement('div'); menu.className = 'report-chart-preview-select-menu'; menu.hidden = true;
+      const search = document.createElement('input'); search.type = 'search'; search.placeholder = 'Search values…'; search.setAttribute('aria-label', `Search ${select.getAttribute('aria-label') || 'values'}`);
+      const menuOptions = document.createElement('div'); menuOptions.className = 'report-chart-preview-select-options';
+      const syncTrigger = () => {
+        const selected = Array.from(select.selectedOptions).map((option) => option.textContent?.trim()).filter(Boolean);
+        const configured = select.dataset.previewDisplay || '';
+        triggerText.textContent = select.multiple
+          ? (selected.length ? `${selected.length} selected` : (configured ? `${configured.split(select.name === 'legend' ? ',' : /\s*(?:×|x)\s*/i).filter(Boolean).length} selected` : 'Select fields…'))
+          : (selected[0] || configured || 'Select a value…');
+      };
+      const renderOptions = () => {
+        const query = search.value.trim().toLocaleLowerCase();
+        menuOptions.replaceChildren(...Array.from(select.options).filter((option) => !option.disabled && (!query || option.textContent.toLocaleLowerCase().includes(query))).map((option) => {
+          if (select.multiple) {
+            const item = document.createElement('label'); item.className = 'report-chart-preview-select-option is-multiple';
+            const input = document.createElement('input'); input.type = 'checkbox'; input.checked = option.selected;
+            const text = document.createElement('span'); text.textContent = option.textContent;
+            input.addEventListener('change', () => { option.selected = input.checked; select.dispatchEvent(new Event('change', {bubbles: true})); select.dispatchEvent(new Event('input', {bubbles: true})); syncTrigger(); });
+            item.append(input, text); return item;
+          }
+          const item = document.createElement('button'); item.type = 'button'; item.className = 'report-chart-preview-select-option'; item.textContent = option.textContent; item.setAttribute('aria-selected', String(option.selected));
+          item.addEventListener('click', () => { select.value = option.value; select.dispatchEvent(new Event('change', {bubbles: true})); select.dispatchEvent(new Event('input', {bubbles: true})); syncTrigger(); closeMenu(); });
+          return item;
+        }));
+        if (!menuOptions.childElementCount) { const empty = document.createElement('p'); empty.className = 'report-chart-preview-select-empty'; empty.textContent = 'No matching values'; menuOptions.append(empty); }
+      };
+      if (select.multiple) {
+        const actions = document.createElement('div'); actions.className = 'report-chart-preview-select-actions';
+        const toggleAll = document.createElement('button'); toggleAll.type = 'button'; toggleAll.textContent = 'Select all / none';
+        toggleAll.addEventListener('click', () => { const selectable = Array.from(select.options).filter((option) => !option.disabled); const selectAll = selectable.some((option) => !option.selected); selectable.forEach((option) => { option.selected = selectAll; }); select.dispatchEvent(new Event('change', {bubbles: true})); select.dispatchEvent(new Event('input', {bubbles: true})); syncTrigger(); renderOptions(); });
+        actions.append(toggleAll); menu.append(search, actions, menuOptions);
+      } else menu.append(search, menuOptions);
+      search.addEventListener('input', renderOptions);
+      const toggleMenu = () => {
+        if (activeMenu === menu) { closeMenu(); return; }
+        closeMenu(); renderOptions();
+        // Some hosts use a backdrop that creates a new fixed-positioning
+        // context. Each caller can therefore choose the visible dialog layer
+        // that owns its popup; the template editor deliberately uses body.
+        activeMenuHome = menu.parentNode;
+        activeMenuNextSibling = menu.nextSibling;
+        (options.menuContainer || document.body).append(menu);
+        menu.hidden = false; activeMenu = menu; activeMenuTrigger = trigger; trigger.setAttribute('aria-expanded', 'true');
+        const bounds = trigger.getBoundingClientRect(); menu.style.left = `${Math.max(8, Math.min(bounds.left, window.innerWidth - 380))}px`; menu.style.top = `${Math.min(bounds.bottom + 4, window.innerHeight - 310)}px`; search.focus();
+      };
+      trigger.addEventListener('click', toggleMenu);
+      trigger.addEventListener('keydown', (event) => { if (['Enter', ' ', 'ArrowDown'].includes(event.key)) { event.preventDefault(); toggleMenu(); } });
+      shell.addEventListener('mouseenter', () => { if (closeTimer) window.clearTimeout(closeTimer); });
+      shell.addEventListener('mouseleave', () => { if (closeTimer) window.clearTimeout(closeTimer); closeTimer = window.setTimeout(() => { if (activeMenu === menu) closeMenu(); }, 550); });
+      menu.addEventListener('mouseenter', () => { if (closeTimer) window.clearTimeout(closeTimer); });
+      menu.addEventListener('mouseleave', () => { if (closeTimer) window.clearTimeout(closeTimer); closeTimer = window.setTimeout(() => { if (activeMenu === menu) closeMenu(); }, 550); });
+      select.classList.add('report-chart-preview-select-native'); select.after(shell); shell.append(trigger, menu); syncTrigger();
+    });
+  };
+  document.addEventListener('click', (event) => {
+    if (activeMenu && !activeMenu.contains(event.target) && !activeMenuTrigger?.closest('.report-chart-preview-select')?.contains(event.target)) closeMenu();
+  });
+  fieldsElement.replaceChildren(...fields.map(([key, label]) => {
+    const field = document.createElement('label'); field.dataset.previewField = key; field.textContent = label;
+    if (options.textFields?.[key]) {
+      const control = document.createElement('input');
+      control.type = 'text'; control.name = key; control.value = definition[key] || ''; control.setAttribute('aria-label', label);
+      field.append(control); return field;
+    }
+    if (key === 'filters') {
+      const hidden = document.createElement('input'); hidden.type = 'hidden'; hidden.name = 'filters';
+      const builder = document.createElement('div'); builder.className = 'report-chart-filter-builder';
+      const conditions = document.createElement('div'); conditions.className = 'report-chart-filter-conditions';
+      const sync = () => { hidden.value = Array.from(conditions.children).map((row) => { const [column, operator] = row.querySelectorAll('select'); const value = row.querySelector('[data-report-chart-filter-value]'); return column?.value && operator?.value && value?.value ? `${column.value} ${operator.value} ${value.value}` : ''; }).filter(Boolean).join('; '); hidden.dispatchEvent(new Event('input')); };
+      const addCondition = (condition = {}) => {
+        const row = document.createElement('div'); row.className = 'report-chart-filter-condition';
+        const column = document.createElement('select'); column.add(new Option('Column…', '')); column.dataset.reportChartFilterSelect = ''; column.setAttribute('aria-label', 'Filter column');
+        const filterColumns = Array.from(new Set([condition.column || '', ...columnsFor(definition.cdr_source)].filter(Boolean)));
+        const selectedColumn = matchingPreviewValue(condition.column, filterColumns);
+        filterColumns.forEach((value) => column.add(new Option(value, value, false, value === selectedColumn)));
+        const operator = document.createElement('select'); operator.dataset.reportChartFilterSelect = ''; operator.setAttribute('aria-label', 'Filter operator'); ['=', '!=', 'CONTAINS', 'NOT CONTAINS', 'IN', 'NOT IN', '>=', '<=', '>', '<'].forEach((value) => operator.add(new Option(value, value, false, value === condition.operator)));
+        const value = document.createElement('input'); value.type = 'text'; value.dataset.reportChartFilterValue = ''; value.placeholder = 'Value'; value.value = condition.value || '';
+        const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '−'; remove.title = 'Remove condition'; remove.addEventListener('click', () => { row.remove(); sync(); });
+        [column, operator, value].forEach((input) => { input.addEventListener('input', sync); input.addEventListener('change', sync); }); row.append(column, operator, value, remove); conditions.append(row);
+      };
+      const parsed = String(definition.filters || '').split(';').map((item) => item.trim()).filter(Boolean).map((item) => { const match = item.match(/^(.+?)\s+(NOT\s+CONTAINS|NOT\s+IN|CONTAINS|IN|>=|<=|!=|=|>|<)\s+(.+)$/i); return match ? {column: match[1].trim(), operator: match[2].toUpperCase(), value: match[3].trim()} : {}; });
+      (parsed.length ? parsed : [{}]).forEach(addCondition);
+      const add = document.createElement('button'); add.type = 'button'; add.className = 'report-chart-filter-add'; add.textContent = '+ Add condition'; add.addEventListener('click', () => addCondition());
+      builder.append(conditions, add); field.append(hidden, builder); sync(); return field;
+    }
+    const control = document.createElement('select');
+    if (key === 'chart_type') (options.chartTypes || []).forEach((value) => control.add(new Option(value, value, false, normalisePreviewValue(value) === normalisePreviewValue(definition[key]))));
+    else if (key === 'cdr_source') (options.cdrSources || ['CDR-Data', 'CDR-Voice', 'CDR-Speech']).forEach((value) => control.add(new Option(value, value, false, sourceKey(value) === sourceKey(definition[key]))));
+    else if (key === 'legend_position') (options.legendPositions || ['Top', 'Bottom', 'Left', 'Right']).forEach((value) => control.add(new Option(value, value, false, normalisePreviewValue(value) === normalisePreviewValue(definition[key]))));
+    else {
+      const available = columnsFor(definition.cdr_source);
+      const selected = new Set(Array.from(valuesFor(definition[key], key)).map((value) => matchingPreviewValue(value, available)));
+      if (multiFields.has(key)) control.multiple = true; else control.add(new Option('Choose a field…', ''));
+      Array.from(new Set([...selected, ...available])).filter(Boolean).forEach((value) => control.add(new Option(value, value, false, selected.has(value))));
+    }
+    // Explicit assignment is needed after dynamic menu reconstruction: a
+    // browser can otherwise retain the blank placeholder selected even when
+    // the option was initially marked selected by the constructor.
+    if (control.multiple) {
+      const requested = valuesFor(definition[key], key);
+      Array.from(control.options).forEach((option) => {
+        option.selected = Array.from(requested).some((value) => normalisePreviewValue(value) === normalisePreviewValue(option.value));
+      });
+    } else {
+      const requested = key === 'cdr_source' ? sourceKey(definition[key]) : normalisePreviewValue(definition[key]);
+      const matching = Array.from(control.options).find((option) => (
+        key === 'cdr_source' ? sourceKey(option.value) === requested : normalisePreviewValue(option.value) === requested
+      ));
+      if (matching) control.value = matching.value;
+    }
+    control.name = key; control.dataset.previewDisplay = String(definition[key] || ''); control.setAttribute('aria-label', label); field.append(control); return field;
+  }));
+  setupSelects();
+  fieldsElement.querySelector('[name="cdr_source"]')?.addEventListener('change', () => options.onSourceChange?.(currentDefinition()));
+  fieldsElement.querySelectorAll('[name]').forEach((control) => control.addEventListener('input', () => options.onChange?.(currentDefinition())));
+  fieldsElement.querySelectorAll('select[name]').forEach((control) => control.addEventListener('change', () => options.onChange?.(currentDefinition())));
+  return {definition: currentDefinition, close: closeMenu};
 }
 
 function hideLoadingOverlay() {

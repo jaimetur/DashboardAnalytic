@@ -300,7 +300,24 @@
           </div>
           <p data-catalogue-chart-preview-summary></p>
           <div class="table-wrap"><table data-catalogue-chart-preview-table></table></div>
-          <div class="catalogue-chart-preview-image" data-catalogue-chart-preview-image hidden><img alt="Generated chart preview" data-catalogue-chart-preview-image-content></div>
+          <div class="catalogue-chart-preview-image" data-catalogue-chart-preview-image hidden>
+            <img alt="Generated chart preview" data-catalogue-chart-preview-image-content>
+          </div>
+          <section class="catalogue-chart-preview-sandbox" data-catalogue-chart-preview-sandbox hidden>
+            <p class="eyebrow">Interactive preview</p>
+            <p class="form-note">Changes regenerate only this temporary preview. Use Update Template to apply them to this row.</p>
+            <div class="report-chart-viewer-fields" data-catalogue-chart-preview-fields></div>
+          </section>
+          <div class="catalogue-chart-preview-actions">
+            <button type="button" class="report-chart-viewer-data-button" data-catalogue-chart-preview-data><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 4h16v16H4zM4 9h16M4 14h16M10 4v16"/></svg><span>View filtered dataset</span></button>
+            <button type="button" data-catalogue-chart-preview-update>Update Template</button>
+          </div>
+          <div class="report-chart-viewer-data-overlay catalogue-chart-preview-data-overlay" data-catalogue-chart-preview-data-overlay hidden>
+            <section class="report-chart-viewer-data-dialog" role="dialog" aria-modal="true" aria-labelledby="catalogue-chart-preview-data-title">
+              <header class="report-chart-viewer-data-header"><div><p class="eyebrow">Chart data</p><h3 id="catalogue-chart-preview-data-title">Filtered dataset</h3></div><button type="button" class="report-chart-viewer-close" data-catalogue-chart-preview-data-close aria-label="Close filtered dataset" title="Close">×</button></header>
+              <div class="report-chart-viewer-data" data-catalogue-chart-preview-data-panel></div>
+            </section>
+          </div>
         </section>
       </div>
     </div>

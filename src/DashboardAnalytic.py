@@ -18,7 +18,7 @@ import warnings
 import tempfile
 import zipfile
 from contextlib import asynccontextmanager
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from threading import Lock, Thread
@@ -53,6 +53,7 @@ SESSION_COOKIE = 'bench_automations_session'
 SESSIONS: dict[str, SessionUser] = {}
 ANALYSIS_CACHE: dict[str, dict[str, Any]] = {}
 DATAFRAME_CACHE: dict[str, pd.DataFrame] = {}
+CHART_PREVIEW_DATA_CACHE: dict[str, tuple[pd.DataFrame, dict[str, Any]]] = {}
 STOP_REQUESTS: set[int] = set()
 STOP_REQUESTS_LOCK = Lock()
 DATASET_PROCESSING_LOCKS: dict[str, Lock] = {}
@@ -3248,6 +3249,143 @@ def _report_job_charts_payload(row: Any) -> dict[str, Any] | None:
     }
 
 
+def _temporary_chart_preview_context(source: str, identifier: str, chart_index: int) -> tuple[Any, dict[str, list[int]], str, bool]:
+    """Resolve one persisted chart back to its immutable template definition."""
+    if source == 'report':
+        row = repository.get_report_run(int(identifier))
+        scope = str(row['scope'] or 'single') if row else 'single'
+    elif source == 'standalone':
+        row = next((item for item in repository.list_report_chart_jobs(limit=None) if str(item['generation'] or '') == identifier), None)
+        scope = str(row['scope'] or 'single') if row else 'single'
+    else:
+        row = None
+        scope = 'single'
+    if not row:
+        raise HTTPException(status_code=404, detail='The selected Chart Set is no longer available.')
+    try:
+        dataset_ids = json.loads(row['dataset_ids_json'] or '{}')
+        selected_ids = {kind: [int(value) for value in dataset_ids.get(kind, [])] for kind in ('data', 'voice', 'speech')}
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail='The selected Chart Set has invalid CDR references.') from exc
+    technology = str(row['technology'] or '').strip().lower()
+    template_name = str(row['template_name'] or '')
+    template = next((item for item in report_catalogue_options(technology) if item['name'] == template_name), None)
+    if technology not in TEMPLATE_NAMES or not template:
+        raise HTTPException(status_code=404, detail='The Slides Template used by this Chart Set is no longer available.')
+    entries = [entry for entry in load_catalog_csv(template['path'], technology) if entry.source_kind]
+    if chart_index < 0 or chart_index >= len(entries):
+        raise HTTPException(status_code=404, detail='The selected chart definition is no longer available.')
+    return entries[chart_index], selected_ids, technology, scope == 'multivendor'
+
+
+@app.get('/api/reporting/chart-preview/context')
+def temporary_chart_preview_context(source: str, identifier: str, chart_index: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    """Return an immutable chart definition for the interactive viewer sandbox."""
+    entry, _selected_ids, _technology, _multivendor = _temporary_chart_preview_context(source, identifier, chart_index)
+    columns = catalogue_editor_columns()
+    return JSONResponse({
+        'slide': entry.slide, 'chart_title': entry.chart_title, 'cdr_source': entry.cdr_source,
+        'kpi': entry.kpi, 'chart_type': entry.chart_type, 'filters': entry.filters,
+        'grouping_rows': entry.grouping_rows, 'grouping_columns': entry.grouping_columns,
+        'legend': entry.legend, 'legend_position': entry.legend_position,
+        'columns_by_source': columns,
+    })
+
+
+@app.post('/api/reporting/chart-preview')
+async def temporary_chart_preview(request: Request, user: SessionUser = Depends(current_user)) -> Response:
+    """Render a transient chart from viewer edits without altering stored output."""
+    try:
+        payload = await request.json()
+        source = str(payload.get('source') or '')
+        identifier = str(payload.get('identifier') or '')
+        chart_index = int(payload.get('chart_index'))
+        entry, selected_ids, technology, multivendor = _temporary_chart_preview_context(source, identifier, chart_index)
+        editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
+        allowed = {'chart_title', 'cdr_source', 'kpi', 'chart_type', 'filters', 'grouping_rows', 'grouping_columns', 'legend', 'legend_position'}
+        changes = {key: str(value or '') for key, value in editable.items() if key in allowed}
+        entry = replace(entry, **changes)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f'Invalid chart preview request: {exc}') from exc
+    if not entry.source_kind:
+        raise HTTPException(status_code=400, detail='Choose a valid CDR Source.')
+    selected = _reporting_datasets(selected_ids[entry.source_kind], entry.source_kind)
+    frame = _combined_reporting_frame(selected, technology, [entry], multivendor)
+    if multivendor:
+        frame = ensure_report_vendor_group(frame)
+    try:
+        image = render_catalog_chart_preview(frame, entry, multivendor=multivendor)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(content=image, media_type='image/png', headers={'Cache-Control': 'no-store'})
+
+
+@app.post('/api/reporting/chart-preview/data')
+async def temporary_chart_preview_data(request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    """Return the bounded filtered chart dataset for the viewer sandbox."""
+    try:
+        payload = await request.json()
+        source = str(payload.get('source') or '')
+        identifier = str(payload.get('identifier') or '')
+        chart_index = int(payload.get('chart_index'))
+        entry, selected_ids, technology, multivendor = _temporary_chart_preview_context(
+            source, identifier, chart_index,
+        )
+        editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
+        allowed = {'chart_title', 'cdr_source', 'kpi', 'chart_type', 'filters', 'grouping_rows', 'grouping_columns', 'legend', 'legend_position'}
+        entry = replace(entry, **{key: str(value or '') for key, value in editable.items() if key in allowed})
+        page = max(0, int(payload.get('page', 0)))
+        page_size = max(1, min(250, int(payload.get('page_size', 100))))
+        raw_column_filters = payload.get('column_filters') if isinstance(payload.get('column_filters'), dict) else {}
+        column_filters = {
+            str(column): tuple(str(value) for value in values if value is not None)
+            for column, values in raw_column_filters.items() if isinstance(values, list)
+        }
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f'Invalid chart data request: {exc}') from exc
+    if not entry.source_kind:
+        raise HTTPException(status_code=400, detail='Choose a valid CDR Source.')
+    try:
+        cache_material = json.dumps({
+            'scope': 'report-chart-viewer', 'workspace': str(active_workspace.database_path) if active_workspace else '',
+            'source': source, 'identifier': identifier, 'chart_index': chart_index,
+            'selected_ids': selected_ids, 'definition': editable,
+        }, sort_keys=True, default=str)
+        cache_key = hashlib.sha256(cache_material.encode('utf-8')).hexdigest()
+        cached = CHART_PREVIEW_DATA_CACHE.get(cache_key)
+        if cached is None:
+            selected = _reporting_datasets(selected_ids[entry.source_kind], entry.source_kind)
+            frame = _combined_reporting_frame(selected, technology, [entry], multivendor)
+            if multivendor:
+                frame = ensure_report_vendor_group(frame)
+            full_preview, base_summary = preview_catalog_chart_data(frame, entry, limit=100_000)
+            cached = (full_preview, base_summary)
+            CHART_PREVIEW_DATA_CACHE[cache_key] = cached
+            while len(CHART_PREVIEW_DATA_CACHE) > 12:
+                CHART_PREVIEW_DATA_CACHE.pop(next(iter(CHART_PREVIEW_DATA_CACHE)))
+        full_preview, base_summary = cached
+        filtered_preview = full_preview
+        for column, values in column_filters.items():
+            if column in filtered_preview.columns and values:
+                accepted = set(values)
+                filtered_preview = filtered_preview[filtered_preview[column].map(lambda value: '' if pd.isna(value) else str(value)).isin(accepted)]
+        offset = page * page_size
+        preview = filtered_preview.iloc[offset:offset + page_size].copy()
+        summary = {
+            **base_summary,
+            'shown_rows': len(preview.index), 'visible_rows': len(filtered_preview.index), 'page_offset': offset,
+            'columns': list(preview.columns),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse({
+        'columns': [str(column) for column in preview.columns],
+        'rows': preview.where(pd.notna(preview), '').astype(str).to_dict(orient='records'),
+        'summary': {key: value for key, value in summary.items() if key != 'filter_values'},
+        'filter_values': summary.get('filter_values', {}),
+    })
+
+
 def _chart_png_zip_response(directory: Path, filename: str) -> FileResponse:
     """Return a temporary ZIP containing every rendered PNG in *directory*."""
     charts = sorted(path for path in directory.glob('*.png') if path.is_file())
@@ -5372,24 +5510,64 @@ async def preview_report_template_chart(
         entries = parse_catalog_csv(str(payload.get('catalogue_content') or ''), technology)
         row_index = int(payload.get('row_index'))
         entry = entries[row_index]
+        editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
+        allowed = {'chart_title', 'cdr_source', 'kpi', 'chart_type', 'filters', 'grouping_rows', 'grouping_columns', 'legend', 'legend_position'}
+        entry = replace(entry, **{key: str(value or '') for key, value in editable.items() if key in allowed})
     except (ValueError, TypeError, IndexError) as exc:
         raise HTTPException(status_code=400, detail=f'Unable to preview this chart: {exc}') from exc
     if not entry.source_kind:
         raise HTTPException(status_code=400, detail='Only chart rows with a CDR source can be previewed.')
 
-    frames: list[pd.DataFrame] = []
-    for dataset in repository.list_datasets():
-        if str(dataset['dataset_kind'] or '').casefold() != entry.source_kind or dataset['status'] != 'ready':
-            continue
-        dataset_id = int(dataset['id'])
-        repository.materialize_cdr_derived_dimensions(dataset_id)
-        columns = repository.list_dataset_row_columns(dataset_id)
-        if columns:
-            frames.append(repository.load_dataset_rows(dataset_id, columns, {}))
-    if not frames:
-        raise HTTPException(status_code=400, detail=f'No processed {entry.cdr_source} datasets are available in the active workspace.')
     try:
-        preview, summary = preview_catalog_chart_data(pd.concat(frames, ignore_index=True, sort=False), entry)
+        page = max(0, int(payload.get('page') or 0))
+        page_size = max(1, min(int(payload.get('page_size') or 100), 250))
+        raw_column_filters = payload.get('column_filters') if isinstance(payload.get('column_filters'), dict) else {}
+        column_filters = {
+            str(column): tuple(str(value) for value in values)
+            for column, values in raw_column_filters.items() if isinstance(values, list)
+        }
+        cache_material = json.dumps({
+            'workspace': str(active_workspace.database_path), 'catalogue': str(payload.get('catalogue_content') or ''),
+            'row': row_index, 'definition': editable,
+        }, sort_keys=True, default=str)
+        cache_key = hashlib.sha256(cache_material.encode('utf-8')).hexdigest()
+        cached = CHART_PREVIEW_DATA_CACHE.get(cache_key)
+        if cached is None:
+            # The chart definition and source data do not change while the user
+            # moves between pages.  Materialising the CDRs is the expensive part,
+            # so do it only for the first page and page the temporary result below.
+            frames: list[pd.DataFrame] = []
+            for dataset in repository.list_datasets():
+                if str(dataset['dataset_kind'] or '').casefold() != entry.source_kind or dataset['status'] != 'ready':
+                    continue
+                dataset_id = int(dataset['id'])
+                repository.materialize_cdr_derived_dimensions(dataset_id)
+                columns = repository.list_dataset_row_columns(dataset_id)
+                if columns:
+                    frames.append(repository.load_dataset_rows(dataset_id, columns, {}))
+            if not frames:
+                raise HTTPException(status_code=400, detail=f'No processed {entry.cdr_source} datasets are available in the active workspace.')
+            full_preview, base_summary = preview_catalog_chart_data(
+                pd.concat(frames, ignore_index=True, sort=False), entry, limit=100_000,
+            )
+            cached = (full_preview, base_summary)
+            CHART_PREVIEW_DATA_CACHE[cache_key] = cached
+            # Keep temporary preview state bounded; the newest entry is always retained.
+            while len(CHART_PREVIEW_DATA_CACHE) > 12:
+                CHART_PREVIEW_DATA_CACHE.pop(next(iter(CHART_PREVIEW_DATA_CACHE)))
+        full_preview, base_summary = cached
+        filtered_preview = full_preview
+        for column, values in column_filters.items():
+            if column in filtered_preview.columns and values:
+                accepted = set(values)
+                filtered_preview = filtered_preview[filtered_preview[column].map(lambda value: '' if pd.isna(value) else str(value)).isin(accepted)]
+        offset = page * page_size
+        preview = filtered_preview.iloc[offset:offset + page_size].copy()
+        summary = {
+            **base_summary,
+            'shown_rows': len(preview.index), 'visible_rows': len(filtered_preview.index), 'page_offset': offset,
+            'columns': list(preview.columns),
+        }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse({
@@ -5397,6 +5575,8 @@ async def preview_report_template_chart(
         'source': entry.cdr_source,
         'filters': entry.filters or 'No filters',
         'summary': summary,
+        'columns': summary.get('columns', []),
+        'filter_values': summary.get('filter_values', {}),
         'rows': preview.where(pd.notna(preview), '').astype(str).to_dict(orient='records'),
     })
 
@@ -5418,6 +5598,9 @@ async def preview_report_template_chart_image(
         payload = await request.json()
         entries = parse_catalog_csv(str(payload.get('catalogue_content') or ''), technology)
         entry = entries[int(payload.get('row_index'))]
+        editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
+        allowed = {'chart_title', 'cdr_source', 'kpi', 'chart_type', 'filters', 'grouping_rows', 'grouping_columns', 'legend', 'legend_position'}
+        entry = replace(entry, **{key: str(value or '') for key, value in editable.items() if key in allowed})
     except (ValueError, TypeError, IndexError) as exc:
         raise HTTPException(status_code=400, detail=f'Unable to preview this chart: {exc}') from exc
     if not entry.source_kind:
