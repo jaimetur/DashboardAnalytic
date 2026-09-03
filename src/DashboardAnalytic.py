@@ -2268,6 +2268,57 @@ def _unique_import_workspace_name(name: str) -> str:
     return candidate
 
 
+def _replace_workspace_from_staging(existing: Workspace, staging: Workspace) -> Workspace:
+    """Commit a validated workspace import while retaining its local identity."""
+    existing_root = existing.database_path.parent
+    staging_root = staging.database_path.parent
+    backup_root = existing_root.with_name(f'.{existing_root.name}-import-backup-{uuid4().hex}')
+    staged_database_name = staging.database_path.name
+    was_active = bool(active_workspace and active_workspace.id == existing.id)
+
+    if was_active:
+        close_active_workspace()
+
+    try:
+        # Keep the old workspace recoverable until the replacement is fully in
+        # place.  Renaming within the managed volume is effectively instant,
+        # even for very large workspace directories.
+        if existing_root.exists():
+            existing_root.rename(backup_root)
+        staging_root.rename(existing_root)
+
+        imported_database = existing_root / staged_database_name
+        WorkspaceRegistry._move_database_bundle(imported_database, existing.database_path)
+        if existing.database_path.exists():
+            with sqlite3.connect(existing.database_path) as connection:
+                has_datasets = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'datasets'"
+                ).fetchone()
+                if has_datasets:
+                    connection.execute(
+                        'UPDATE datasets SET stored_path = REPLACE(stored_path, ?, ?)',
+                        (str(staging.input_dir), str(existing.input_dir)),
+                    )
+
+        # The original registry row and workspace id are deliberately kept so
+        # user access grants and references continue to work unchanged.
+        workspace_registry.remove(staging.id, delete_files=False)
+    except Exception:
+        replacement_root = existing_root
+        if replacement_root.exists():
+            shutil.rmtree(replacement_root, ignore_errors=True)
+        if backup_root.exists():
+            backup_root.rename(existing_root)
+        if was_active:
+            activate_workspace(existing.id)
+        raise
+    else:
+        # Delete every file from the previous workspace only after the staged
+        # database and directories have been installed successfully.
+        shutil.rmtree(backup_root, ignore_errors=True)
+        return workspace_registry.get(existing.id) or existing
+
+
 def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | None, *, replace_existing: bool = False) -> Workspace:
     database_snapshot = payload / 'database.sqlite'
     if not database_snapshot.exists():
@@ -2275,12 +2326,12 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
     source_name = workspace_info.get('name') if workspace_info else None
     requested_name = str(source_name or 'Imported Workspace')
     existing_workspace = next((workspace for workspace in workspace_registry.list() if workspace.name.casefold() == requested_name.casefold()), None)
-    if existing_workspace and replace_existing:
-        if active_workspace and active_workspace.id == existing_workspace.id:
-            raise ValueError(f'Close workspace "{existing_workspace.name}" before replacing it through import.')
-        workspace_registry.remove(existing_workspace.id)
-        repository.remove_workspace_access(existing_workspace.id)
-    workspace = workspace_registry.create(requested_name if replace_existing or not existing_workspace else _unique_import_workspace_name(requested_name))
+    replacing_workspace = existing_workspace if existing_workspace and replace_existing else None
+    if replacing_workspace:
+        staging_name = _unique_import_workspace_name(f'{requested_name[:70]} - Importing {uuid4().hex[:8]}')
+        workspace = workspace_registry.create(staging_name)
+    else:
+        workspace = workspace_registry.create(requested_name if not existing_workspace else _unique_import_workspace_name(requested_name))
     try:
         for source, destination in (
             (payload / 'input', workspace.input_dir),
@@ -2308,6 +2359,14 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
         workspace_registry.remove(workspace.id)
         repository.remove_workspace_access(workspace.id)
         raise
+    if replacing_workspace:
+        try:
+            return _replace_workspace_from_staging(replacing_workspace, workspace)
+        except Exception:
+            if workspace_registry.get(workspace.id):
+                workspace_registry.remove(workspace.id)
+                repository.remove_workspace_access(workspace.id)
+            raise
     return workspace
 
 

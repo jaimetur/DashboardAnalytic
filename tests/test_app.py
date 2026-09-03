@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import time
 from io import BytesIO
 from pathlib import Path
@@ -980,6 +981,42 @@ def test_queued_import_continues_after_its_workspace_is_closed(client) -> None:
     completed = app_module.Repository(workspace_database).get_dataset(dataset_id)
     assert completed is not None
     assert completed['status'] == 'ready'
+
+
+def test_workspace_import_replaces_an_open_workspace_and_removes_old_files(client, tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login_super(client)
+    original = app_module.active_workspace
+    assert original is not None
+    old_output = original.output_dir / 'obsolete-report.txt'
+    old_output.parent.mkdir(parents=True, exist_ok=True)
+    old_output.write_text('old workspace output', encoding='utf-8')
+
+    payload = tmp_path / 'workspace-import'
+    (payload / 'input').mkdir(parents=True)
+    (payload / 'input' / 'new-data.csv').write_text('value\n1\n', encoding='utf-8')
+    source_input = '/exported/workspace/input'
+    with sqlite3.connect(payload / 'database.sqlite') as connection:
+        connection.execute('CREATE TABLE datasets (stored_path TEXT)')
+        connection.execute('INSERT INTO datasets (stored_path) VALUES (?)', (f'{source_input}/new-data.csv',))
+
+    imported = app_module.import_workspace_archive(
+        payload,
+        {'name': original.name, 'source_input_dir': source_input},
+        replace_existing=True,
+    )
+
+    assert imported.id == original.id
+    assert imported.name == original.name
+    assert app_module.active_workspace is None
+    assert not old_output.exists()
+    assert (imported.input_dir / 'new-data.csv').read_text(encoding='utf-8') == 'value\n1\n'
+    with sqlite3.connect(imported.database_path) as connection:
+        stored_path = connection.execute('SELECT stored_path FROM datasets').fetchone()[0]
+    assert stored_path == str(imported.input_dir / 'new-data.csv')
+    assert app_module.repository.user_has_workspace_access('admin', imported.id)
+    assert all(' - Importing ' not in workspace.name for workspace in app_module.workspace_registry.list())
 
 
 def test_admin_panel_is_available_for_admin(client) -> None:
