@@ -1665,7 +1665,20 @@ class Repository:
             values.append(local_now_iso())
         values.append(report_id)
         with self.connection() as conn:
-            conn.execute(f"UPDATE report_runs SET {', '.join(assignments)} WHERE id = ?", values)
+            # A user can stop a worker between any two progress updates.  Do
+            # not let a late update from that worker revive the stopped job.
+            conn.execute(f"UPDATE report_runs SET {', '.join(assignments)} WHERE id = ? AND status <> 'stopped'", values)
+
+    def stop_report_job(self, report_id: int) -> bool:
+        """Stop a queued or running report job without deleting its audit row."""
+        now = local_now_iso()
+        with self.connection() as conn:
+            cursor = conn.execute(
+                "UPDATE report_runs SET status = 'stopped', last_error = '', updated_at = ?, finished_at = ? "
+                "WHERE id = ? AND status IN ('queued', 'processing')",
+                (now, now, report_id),
+            )
+            return cursor.rowcount == 1
 
     def fail_interrupted_background_jobs(self) -> tuple[list[int], list[int]]:
         """Fail jobs left running when the application process stopped.
@@ -1759,7 +1772,30 @@ class Repository:
             values.append(local_now_iso())
         values.append(job_id)
         with self.connection() as conn:
-            conn.execute(f"UPDATE report_chart_jobs SET {', '.join(assignments)} WHERE id = ?", values)
+            # See update_report_job: stopped work must remain stopped even if
+            # its in-process thread reaches a later progress checkpoint.
+            conn.execute(f"UPDATE report_chart_jobs SET {', '.join(assignments)} WHERE id = ? AND status <> 'stopped'", values)
+
+    def stop_report_chart_job(self, job_id: int) -> bool:
+        """Stop a queued or running Chart Set job."""
+        now = local_now_iso()
+        with self.connection() as conn:
+            cursor = conn.execute(
+                "UPDATE report_chart_jobs SET status = 'stopped', last_error = '', updated_at = ?, finished_at = ? "
+                "WHERE id = ? AND status IN ('queued', 'processing')",
+                (now, now, job_id),
+            )
+            return cursor.rowcount == 1
+
+    def retry_report_chart_job(self, job_id: int) -> bool:
+        """Reset one failed Chart Set job so its row can be reused."""
+        with self.connection() as conn:
+            cursor = conn.execute(
+                "UPDATE report_chart_jobs SET status = 'queued', progress = 0, last_error = '', chart_count = 0, "
+                "generation = NULL, finished_at = NULL, updated_at = ? WHERE id = ? AND status IN ('failed', 'stopped')",
+                (local_now_iso(), job_id),
+            )
+            return cursor.rowcount == 1
 
     def list_report_chart_jobs(self, limit: int | None = 50) -> list[sqlite3.Row]:
         with self.connection() as conn:

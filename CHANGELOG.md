@@ -41,6 +41,13 @@
 - Trimmed CDF Line x-axes only after at least three curves strictly exceed 98% and converge with one another, avoiding premature loss of meaningful CDF data.
 - Made Slides Template saves atomic and short-lived: CSV replacement completes before metadata/audit work is deferred, reducing failures during server load.
 - Stopped template edits from regenerating the PowerPoint help document, removing an unnecessary synchronous filesystem write from every save.
+- Added square Stop actions for processing Reports Jobs and Charts Jobs, with safe cooperative cancellation and cleanup of partial output.
+- Enabled deletion of queued and stopped Charts Jobs.
+- Unified standalone Chart Set timestamps on the completion time: Charts Jobs, the Charts Panel `Generated at` badge and the output-folder timestamp now share one value.
+- Kept Chart Sets out of the Charts Panel selector until their background job has fully completed, including after a page reload.
+- Enabled Retry actions for stopped Reports Jobs and Charts Jobs, matching failed-job recovery.
+- Restyled Stop actions as red circular controls with a prominent white square, consistently in Reports Jobs and Charts Jobs.
+- Changed failed Charts Jobs retries to reuse the existing row instead of creating a duplicate failed/queued pair.
 
 #### 🐛 Bug fixes:
 - Unified completed Chart Set timestamps across the Charts Jobs date, `Generated at` badge, selector label and timestamped output folder.

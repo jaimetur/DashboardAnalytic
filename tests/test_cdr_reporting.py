@@ -834,6 +834,88 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert "select.dispatchEvent(new Event('change', {bubbles: true}))" in page.text
     assert 'Reports Jobs' in page.text
     assert 'Charts Jobs' in page.text
+    assert 'data-report-job-stop' in page.text
+    assert 'data-report-chart-job-stop' in page.text
+
+
+def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    report_id = app_module.repository.create_report_job(
+        report_type='netcheck_cdr', technology='nsa', scope='single',
+        data_dataset_id=1, voice_dataset_id=2, speech_dataset_id=3,
+        dataset_ids={'data': [1], 'voice': [2], 'speech': [3]},
+        dataset_names={'data': ['Data'], 'voice': ['Voice'], 'speech': ['Speech']},
+        slide_count=1, template_name='NSA Slide Template', output_file='stop-test.pptx',
+        output_path=app_module.settings.output_dir / 'reports' / 'stop-test.pptx', created_by='admin',
+    )
+    app_module.repository.update_report_job(report_id, status='processing', progress=40)
+    stopped_report = client.post(f'/reporting/jobs/{report_id}/stop')
+    assert stopped_report.status_code == 200
+    report = next(item for item in client.get('/api/reporting/jobs').json()['jobs'] if item['id'] == report_id)
+    assert report['status'] == 'stopped'
+    assert report['stop_url'] is None
+    assert report['retry_url'] == f'/reporting/jobs/{report_id}/retry'
+    assert client.post(report['delete_url']).status_code == 200
+
+    chart_id = app_module.repository.create_report_chart_job(
+        technology='nsa', scope='single', dataset_ids={'data': [1], 'voice': [2], 'speech': [3]},
+        dataset_names={'data': ['Data'], 'voice': ['Voice'], 'speech': ['Speech']},
+        template_name='NSA Slide Template', created_by='admin',
+    )
+    app_module.repository.update_report_chart_job(chart_id, status='processing', progress=40)
+    stopped_chart = client.post(f'/reporting/chart-jobs/{chart_id}/stop')
+    assert stopped_chart.status_code == 200
+    chart = next(item for item in client.get('/api/reporting/chart-jobs').json()['jobs'] if item['id'] == chart_id)
+    assert chart['status'] == 'stopped'
+    assert chart['stop_url'] is None
+    assert chart['retry_url'] == f'/reporting/chart-jobs/{chart_id}/retry'
+    assert client.post(chart['delete_url']).status_code == 200
+
+
+def test_chart_set_selector_excludes_published_but_processing_job(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    chart_set = app_module.persist_report_charts(
+        'NSA Slide Template', 'single',
+        [({'slide': 1, 'title': 'Completed chart', 'source': 'data', 'chart_type': 'Bar'}, b'PNG')],
+        {'data': 1, 'voice': 1, 'speech': 1},
+    )
+    assert (app_module.report_charts_directory() / chart_set['generation']).is_dir()
+    assert chart_set['generation'].startswith(
+        datetime.strptime(chart_set['generated_at'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d-%H%M%S')
+    )
+    job_id = app_module.repository.create_report_chart_job(
+        technology='nsa', scope='single', dataset_ids={'data': [1], 'voice': [2], 'speech': [3]},
+        dataset_names={'data': ['Data'], 'voice': ['Voice'], 'speech': ['Speech']},
+        template_name='NSA Slide Template', created_by='admin',
+    )
+    app_module.repository.update_report_chart_job(job_id, status='processing', generation=chart_set['generation'])
+    selector_value = f'value="standalone:{chart_set["generation"]}"'
+    assert selector_value not in client.get('/reporting').text
+
+    app_module.repository.update_report_chart_job(job_id, status='ready', progress=100, finished=True)
+    assert selector_value in client.get('/reporting').text
+
+
+def test_retrying_a_failed_chart_job_reuses_its_row(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    job_id = app_module.repository.create_report_chart_job(
+        technology='nsa', scope='single', dataset_ids={'data': [], 'voice': [], 'speech': []},
+        dataset_names={}, template_name='NSA Slide Template', created_by='admin',
+    )
+    app_module.repository.update_report_chart_job(job_id, status='failed', progress=100, last_error='Synthetic failure', finished=True)
+    before_ids = [row['id'] for row in app_module.repository.list_report_chart_jobs(limit=None)]
+
+    response = client.post(f'/reporting/chart-jobs/{job_id}/retry')
+
+    assert response.status_code == 202
+    assert response.json()['job_id'] == job_id
+    assert [row['id'] for row in app_module.repository.list_report_chart_jobs(limit=None)] == before_ids
 
 
 def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client) -> None:
