@@ -8,19 +8,33 @@
 #### 🌟 New Features:
 
 #### 🚀 Enhancements:
-- Added a persistent background Charts Jobs queue alongside Reports Jobs, with progress, metadata, bulk actions, Open/eye actions, ZIP downloads and dedicated output locations for report charts (`output/reports/<report-name>/report-charts/`) and standalone Chart Sets (`output/charts/`); report filenames now use `_by-operator_` or `_by-vendor_` scope tokens.
-- Unified Reports Jobs and Charts Jobs lifecycle controls: red circular Stop actions with safe cancellation and partial-output cleanup, deletion of eligible jobs, and row-reusing Retry/Relaunch actions. Relaunching a completed job confirms deletion of its prior report/chart output before queueing it again.
-- Redesigned the Charts Panel and Chart Set selector: unified standalone and report-rendered sets with source prefixes, report-first default ordering, source-specific styling, compact labels, an explicit prefix gap, graceful closing, automatic selection/opening of newly completed sets, and immediate refresh/fallback selection after deletion or relaunch.
+- Added a persistent background Charts Jobs queue alongside Reports Jobs, with progress, retry and its own Jobs panel; both job tables now show clearer type, template, scope, dataset and chart metadata, bulk actions and job counts.
+- Added the Open/eye actions for Charts Jobs and automatic opening/scrolling to the corresponding Chart Set when a new or retried Charts Job completes.
+- Stored report-rendered PNGs in `output/reports/<report-name>/report-charts/` and standalone Chart Sets in `output/charts/`, with ZIP downloads for both; newly generated report filenames now use `_by-operator_` or `_by-vendor_` scope tokens.
+- Renamed Report Charts to Charts Panel and unified its selector with standalone and report-rendered sets, source prefixes and Delete All Reports alongside Chart Set cleanup actions.
+- Improved Charts Panel selection with report-first default ordering, source-specific styling, compact labels, a preserved prefix gap, graceful closing, and automatic refresh/fallback selection after deletion or relaunch.
 - Standardised completed standalone Chart Set timestamps across the Charts Jobs date, Charts Panel `Generated at` badge and output folder; incomplete sets remain hidden from the selector, including after reload.
 - Added a Multivendor multi-campaign review before report or Chart Set generation, requiring one or more Data, Voice and Speech CDRs and preselecting the latest campaign for each type.
-- Improved chart rendering and presentation: complete zero-value aggregation combinations, hierarchical separators and captions, vertical KPI labels, stable operator/vendor palettes (including multivendor shades), robust campaign detection, complete CDF combinations and latest-campaign emphasis, compact canvas-aware legends, and conservative CDF x-axis trimming.
-- Made Slides Templates editing and imports more reliable: asynchronous, atomic saves that preserve editor state without regenerating help; immediate template switching with save/discard prompts; overwrite confirmation and default refresh; exact visible export names; and preserved hyphens when deriving or auto-filling names from CSV files.
-- Expanded and refined Slides Templates Cell Assistance: Escape dismissal, readable long option lists, compact searchable controls, restored valid values from the selected cell for Chart Type, Legend Position, CDR Source and Layout, title-cased Chart Type output, and a Filter Builder with restored clauses plus comma-separated `CONTAINS`/`NOT CONTAINS` values.
+- Improved Count Stacked Horizontal Bars and hierarchical failure grids so complete Rows/Columns Aggregation combinations remain visible, including zero-count values, with dashed separators only between the relevant top-level groups.
+- Improved hierarchical chart presentation with a single caption orientation, vertical KPI y-axis labels, stable operator/vendor palettes and distinct multivendor shades; strengthened Campaign detection for consistent historical/latest line widths and colours.
+- Refined CDF Lines to render every complete aggregation combination, use appropriate latest/single-campaign emphasis, avoid overlapping markers/labels, compact dense legends for the available canvas, and trim x-axes only after a conservative convergence threshold.
+- Made Slides Templates saves asynchronous and atomic while preserving editor state; deferred metadata/audit work and removed unnecessary PowerPoint-help regeneration from every save.
+- Improved Slides Templates selection and import workflows with immediate template switching plus save/discard prompts, overwrite confirmation/default refresh, exact export names, and preserved hyphens when deriving or auto-filling names from CSV files.
+- Improved Cell Assistance controls with Escape dismissal, readable long lists and compact searchable layouts; valid Chart Type, Legend Position, CDR Source and Layout values now preselect from the active cell, while applied Chart Types use title case.
+- Restored Filter Builder clauses in Cell Assistance and added comma-separated multi-value support for `CONTAINS` and `NOT CONTAINS` conditions.
+- Added safe red circular Stop actions for processing Reports Jobs and Charts Jobs, including cooperative cancellation and partial-output cleanup; queued and stopped Charts Jobs can also be deleted.
+- Enabled stopped Reports Jobs and Charts Jobs retries, and changed failed Charts Jobs retries to reuse their existing row instead of creating a duplicate job.
+- Added confirmed completed-job relaunch for Reports Jobs and Charts Jobs: prior output is deleted, the same row is reused and the job is queued again.
 - Serialized Report and Charts rendering per workspace, streamed CDR types and PNGs to lower peak memory usage, and retried/logged isolated empty chart placeholders.
 
 #### 🐛 Bug fixes:
-- Fixed Reporting CDR multi-select checkmarks after Multivendor review, actionable Report Charts errors/App Logs, Chart Set and report deletion routing/dialogues, and the Docker `latest` tag workflow.
-- Fixed Slides Templates Editor picker/registry state, compact long Cell Assistance lists, completed Charts Jobs relaunch and row reuse, and Reports Jobs table width; standardised relaunch controls in English and strengthened Report Charts selector rows.
+- Fixed Reporting CDR multi-select checkmarks after Multivendor review so they match the submitted CDRs.
+- Fixed Report Charts failures to return actionable JSON errors and record Error events in App Logs.
+- Fixed Chart Set and report deletion routing/dialogues, including stale completed jobs after single-set or all-set Chart Set deletion.
+- Fixed the Docker workflow so `tag:latest` is always updated.
+- Fixed Slides Templates Editor picker/registry state and prevented unregistered library CSVs appearing as phantom templates.
+- Fixed long Cell Assistance lists to open as compact, scrollable menus within the visible editor area.
+- Fixed completed Charts Jobs relaunch/row reuse and Reports Jobs table width; standardised relaunch controls in English and strengthened Report Charts selector rows.
 
 #### 📚 Documentation:
 - Rewrote the PowerPoint Reporting help as static guidance for building Slides Templates, including field-by-field instructions and practical recipes for every chart type, filters, aggregations, legends, structural slides, operators and output jobs.
