@@ -3,6 +3,18 @@
 
 ---
 
+## Release: v0.2.2
+### Release Date: 2026-09-04
+#### 🌟 New Features:
+
+#### 🚀 Enhancements:
+
+#### 🐛 Bug fixes:
+
+#### 📚 Documentation:
+
+---
+
 ## Release: v0.2.1
 ### Release Date: 2026-09-03
 #### 🌟 New Features:
