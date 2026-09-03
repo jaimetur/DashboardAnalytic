@@ -269,6 +269,24 @@ class Repository:
                 conn.execute(
                     "INSERT INTO application_state (key, value) VALUES ('bootstrap_users_created', '1')"
                 )
+            # The three shipped accounts are intended to be usable immediately
+            # in the bootstrap workspace.  Add the membership idempotently on
+            # every startup so older installations are repaired without
+            # recreating deleted users or changing any other access grants.
+            for username in ('super', 'admin', 'demo'):
+                row = conn.execute(
+                    'SELECT id, workspace_ids_json FROM users WHERE username COLLATE NOCASE = ?',
+                    (username,),
+                ).fetchone()
+                if not row:
+                    continue
+                workspace_ids = self._workspace_ids_from_json(row['workspace_ids_json'])
+                if 'default' not in workspace_ids:
+                    workspace_ids.append('default')
+                    conn.execute(
+                        'UPDATE users SET workspace_ids_json = ? WHERE id = ?',
+                        (self._workspace_ids_json(workspace_ids), int(row['id'])),
+                    )
 
     @staticmethod
     def _workspace_ids_from_json(value: object) -> list[str]:
@@ -331,12 +349,18 @@ class Repository:
         with self.global_connection() as conn:
             conn.executescript(GLOBAL_SCHEMA)
             self._ensure_user_workspace_columns(conn)
+            user = conn.execute('SELECT username FROM users WHERE id = ?', (user_id,)).fetchone()
+            if user and str(user['username']).casefold() in {'super', 'admin', 'demo'} and 'default' not in unique_ids:
+                unique_ids.append('default')
+                unique_ids.sort()
             conn.execute('UPDATE users SET workspace_ids_json = ? WHERE id = ?', (json.dumps(unique_ids), user_id))
 
     def set_workspace_user_access(self, workspace_id: str, usernames: list[str]) -> None:
         """Replace one workspace's membership using current, case-insensitive usernames."""
         normalized_workspace_id = str(workspace_id).strip()
         selected_usernames = {str(username).strip().casefold() for username in usernames if str(username).strip()}
+        if normalized_workspace_id == 'default':
+            selected_usernames.update({'super', 'admin', 'demo'})
         with self.global_connection() as conn:
             conn.executescript(GLOBAL_SCHEMA)
             self._ensure_user_workspace_columns(conn)

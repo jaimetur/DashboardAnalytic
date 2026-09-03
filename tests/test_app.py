@@ -131,28 +131,18 @@ def test_login_username_is_case_insensitive_and_rejects_case_duplicates(client) 
     assert 'already exists' in duplicate.text
 
 
-def test_login_warns_when_valid_user_cannot_access_selected_workspace(client) -> None:
+def test_bootstrap_demo_can_access_default_workspace(client) -> None:
     response = client.post(
         '/login',
         data={'username': 'demo', 'password': 'demo123', 'workspace_id': 'default'},
+        follow_redirects=False,
     )
-    assert response.status_code == 403
-    assert 'You do not have access to that workspace.' in response.text
-    assert 'class="alert alert-warning" role="alert"' in response.text
+    assert response.status_code == 303
 
 
-def test_only_super_admin_has_implicit_workspace_access(client) -> None:
+def test_bootstrap_users_have_default_workspace_access(client) -> None:
     import src.DashboardAnalytic as app_module
 
-    denied_admin = client.post(
-        '/login',
-        data={'username': 'admin', 'password': 'admin123', 'workspace_id': 'default'},
-    )
-    assert denied_admin.status_code == 403
-    assert 'You do not have access to that workspace.' in denied_admin.text
-
-    admin = next(row for row in app_module.repository.list_users() if row['username'] == 'admin')
-    app_module.repository.set_user_workspace_access(int(admin['id']), ['default'])
     granted_admin = client.post(
         '/login',
         data={'username': 'admin', 'password': 'admin123', 'workspace_id': 'default'},
@@ -160,7 +150,16 @@ def test_only_super_admin_has_implicit_workspace_access(client) -> None:
     )
     assert granted_admin.status_code == 303
 
-    app_module.repository.set_user_workspace_access(int(admin['id']), [])
+    granted_demo = client.post(
+        '/login',
+        data={'username': 'demo', 'password': 'demo123', 'workspace_id': 'default'},
+        follow_redirects=False,
+    )
+    assert granted_demo.status_code == 303
+    assert app_module.repository.user_has_workspace_access('super', 'default')
+    assert app_module.repository.user_has_workspace_access('admin', 'default')
+    assert app_module.repository.user_has_workspace_access('demo', 'default')
+
     super_admin = client.post(
         '/login',
         data={'username': 'super', 'password': 'super123', 'workspace_id': 'default'},
@@ -701,7 +700,7 @@ def test_workspace_management_save_updates_name_and_user_access(client) -> None:
         'workspace': {'id': germany.id, 'name': 'Germany Q3'},
     }
     assert app_module.workspace_registry.get(germany.id).name == 'Germany Q3'
-    assert app_module.repository.list_user_workspace_ids(int(demo['id'])) == [germany.id]
+    assert app_module.repository.list_user_workspace_ids(int(demo['id'])) == ['default', germany.id]
     workspace_page = client.get('/workspace')
     assert '<th>Workspace</th>' in workspace_page.text
     assert '<th>Size</th>' in workspace_page.text
@@ -718,7 +717,7 @@ def test_workspace_management_save_updates_name_and_user_access(client) -> None:
         headers={'X-Requested-With': 'XMLHttpRequest'},
     )
     assert unchanged_name.status_code == 200
-    assert app_module.repository.list_user_workspace_ids(int(demo['id'])) == []
+    assert app_module.repository.list_user_workspace_ids(int(demo['id'])) == ['default']
 
 
 def test_workspace_management_isolates_dataset_databases_and_remembers_last_opened_workspace(client) -> None:
