@@ -1,0 +1,76 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="dashboard-stack spacious-stack reporting-stack">
+  <article class="panel hero-panel chart-builder-hero" style="background:linear-gradient(135deg,#b85b20,#e99b45)!important;color:#fff">
+    <p class="eyebrow">Ad-hoc analysis</p><h2>Chart Builder</h2>
+    <p class="lede">Select one or more processed CDR Sources, then build and refine a temporary chart.</p>
+  </article>
+  <article class="panel">
+    <label class="chart-builder-sources">CDR Type
+      <select data-chart-builder-type><option value="data">Data</option><option value="voice">Voice</option><option value="speech">Speech</option></select>
+    </label>
+    <label class="chart-builder-sources">CDR Source <span class="form-label-hint">Select one or more processed CDRs</span>
+      <select data-chart-builder-sources multiple size="6">{% for dataset in datasets %}<option value="{{ dataset.id }}" data-kind="{{ dataset.kind }}" data-columns='{{ dataset.columns | tojson }}'>{{ dataset.name }}</option>{% endfor %}</select>
+    </label>
+    <div class="chart-builder-layout">
+      <div class="chart-builder-canvas" data-chart-builder-canvas><p>Select CDR Sources and configure the Interactive Preview.</p></div>
+      <section class="report-chart-viewer-sandbox" data-chart-builder-sandbox>
+        <p class="eyebrow">Interactive preview</p><p class="form-note">Changes regenerate only this temporary preview.</p>
+        <div class="report-chart-viewer-fields" data-chart-builder-fields></div>
+      </section>
+    </div>
+  </article>
+</section>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+(() => {
+  const type = document.querySelector('[data-chart-builder-type]');
+  const sources = document.querySelector('[data-chart-builder-sources]');
+  const fields = document.querySelector('[data-chart-builder-fields]');
+  const canvas = document.querySelector('[data-chart-builder-canvas]');
+  if (!type || !sources || !fields || !canvas) return;
+  let timer = null;
+  let previewRequest = 0;
+  const sourceOptions = Array.from(sources.options).map((option) => ({
+    value: option.value, label: option.textContent, kind: option.dataset.kind, columns: option.dataset.columns,
+  }));
+  const selected = () => Array.from(sources.selectedOptions).filter((option) => option.dataset.kind === type.value).map((option) => Number(option.value));
+  const columns = () => Array.from(new Set(Array.from(sources.selectedOptions).flatMap((option) => JSON.parse(option.dataset.columns || '[]')))).sort((a,b) => a.localeCompare(b));
+  const definition = () => ({...Object.fromEntries(Array.from(fields.querySelectorAll('[name]')).map((control) => [control.name, control.multiple ? Array.from(control.selectedOptions).map((option) => option.value).join(control.name === 'legend' ? ', ' : ' × ') : control.value])), cdr_source: `CDR-${type.value[0].toUpperCase()}${type.value.slice(1)}`});
+  const filterSources = () => {
+    // Rebuild instead of merely hiding native options: the reusable
+    // multi-select mirrors its option list into checkbox controls.
+    sources.replaceChildren(...sourceOptions.filter((option) => option.kind === type.value).map((option) => {
+      const item = new Option(option.label, option.value);
+      item.dataset.kind = option.kind; item.dataset.columns = option.columns;
+      return item;
+    }));
+    sources.dispatchEvent(new Event('multiselect:options-updated'));
+  };
+  const render = () => {
+    const values = columns();
+    createInteractiveChartPreviewControls(fields, {chart_title: 'Ad-hoc chart', chart_type: '100% Stacked Vertical Bars', cdr_source: 'CDR-Data', kpi: '', filters: '', grouping_rows: '', grouping_columns: '', legend: '', legend_position: 'Top'}, {
+      columnsBySource: {'cdr-data': values}, textFields: {chart_title: true},
+      fields: [['chart_title','Chart Title'],['chart_type','Chart Type'],['kpi','KPI'],['filters','Filters'],['grouping_rows','Rows'],['grouping_columns','Columns'],['legend','Legend'],['legend_position','Legend Position']],
+      chartTypes: ['100% Stacked Vertical Bars','Count Stacked Horizontal Bars','CDF Line','Scatter','Table','Distribution Stacked Vertical Bars','Threshold Stacked Vertical Bars','Average Vertical Bars','Median Vertical Bars'],
+      onChange: queue,
+    });
+  };
+  const preview = async () => {
+    if (!selected().length || !definition().kpi) return;
+    const requestId = ++previewRequest;
+    try { const response = await fetch('/api/chart-builder/preview', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({dataset_ids:selected(), definition:definition()})}); const body = await response.blob(); if (!response.ok) throw new Error(await body.text()); if (requestId !== previewRequest) return; const image = document.createElement('img'); image.src = URL.createObjectURL(body); image.alt = 'Temporary chart preview'; canvas.replaceChildren(image); } catch (error) { if (requestId === previewRequest) canvas.replaceChildren(Object.assign(document.createElement('p'), {textContent:'Choose a valid KPI and aggregation to generate the chart.'})); }
+  };
+  function queue() { window.clearTimeout(timer); timer = window.setTimeout(preview, 350); }
+  type.addEventListener('change', () => { filterSources(); render(); canvas.replaceChildren(Object.assign(document.createElement('p'), {textContent:'Select one or more processed CDR Sources.'})); });
+  sources.addEventListener('change', () => { render(); queue(); });
+  // The shared controls include native selects hidden behind searchable menus.
+  // Delegate both events so every visible editor change reaches this preview.
+  fields.addEventListener('input', queue);
+  fields.addEventListener('change', queue);
+  filterSources();
+  render();
+})();
+</script>
+{% endblock %}

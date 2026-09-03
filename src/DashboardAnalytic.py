@@ -40,7 +40,7 @@ from starlette.background import BackgroundTask
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
@@ -3611,25 +3611,65 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
         _report_job_charts_payload(report_rows_by_id[int(report_chart_report_sets[0]['id'])])
         if report_chart_report_sets else None
     )
-    return render_template(
-        request,
-        'reporting.html',
-        {
-            'user': user,
-            'data_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'data'],
-            'voice_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'voice'],
-            'speech_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'speech'],
-            'report_catalogues': {
-                technology: report_catalogue_options(technology)
-                for technology in TEMPLATE_NAMES
-            },
-            'report_jobs': report_jobs,
-            'report_chart_report_sets': report_chart_report_sets,
-            'report_chart_jobs': [serialize_report_chart_job(row) for row in chart_job_rows],
-            'report_chart_sets': report_chart_sets,
-            'report_charts': default_report_charts or (load_persisted_report_charts(report_chart_sets[0]['generation']) if report_chart_sets else None),
-        },
+    return render_template(request, 'reporting.html', {
+        'user': user,
+        'data_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'data'],
+        'voice_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'voice'],
+        'speech_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'speech'],
+        'report_catalogues': {technology: report_catalogue_options(technology) for technology in TEMPLATE_NAMES},
+        'report_jobs': report_jobs, 'report_chart_report_sets': report_chart_report_sets,
+        'report_chart_jobs': [serialize_report_chart_job(row) for row in chart_job_rows],
+        'report_chart_sets': report_chart_sets,
+        'report_charts': default_report_charts or (load_persisted_report_charts(report_chart_sets[0]['generation']) if report_chart_sets else None),
+    })
+
+
+def _chart_builder_context(payload: dict[str, Any]) -> tuple[pd.DataFrame, CatalogEntry]:
+    """Build an ad-hoc chart from explicitly selected ready CDRs."""
+    selected_ids = {int(value) for value in payload.get('dataset_ids', [])}
+    if not selected_ids:
+        raise HTTPException(status_code=400, detail='Select at least one processed CDR Source.')
+    frames: list[pd.DataFrame] = []
+    for dataset in repository.list_datasets():
+        if int(dataset['id']) not in selected_ids or dataset['status'] != 'ready':
+            continue
+        columns = repository.list_dataset_row_columns(int(dataset['id']))
+        if columns:
+            frames.append(repository.load_dataset_rows(int(dataset['id']), columns, {}))
+    if not frames:
+        raise HTTPException(status_code=400, detail='The selected CDR Sources are not ready.')
+    definition = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
+    entry = CatalogEntry(
+        slide=1, slide_title='Chart Builder', slide_subtitle='', layout='',
+        chart_title=str(definition.get('chart_title') or 'Ad-hoc chart'), cdr_source=str(definition.get('cdr_source') or 'CDR-Data'),
+        kpi=str(definition.get('kpi') or ''), chart_type=str(definition.get('chart_type') or '100% Stacked Vertical Bars'),
+        legend=str(definition.get('legend') or ''), filters=str(definition.get('filters') or ''),
+        grouping_rows=str(definition.get('grouping_rows') or ''), grouping_columns=str(definition.get('grouping_columns') or ''),
+        legend_position=str(definition.get('legend_position') or 'Top'),
     )
+    return pd.concat(frames, ignore_index=True, sort=False), entry
+
+
+@app.get('/chart-builder', response_class=HTMLResponse)
+def chart_builder(request: Request, user: SessionUser = Depends(current_user)) -> HTMLResponse:
+    if not active_workspace:
+        return RedirectResponse('/workspace?workspace_warning=Open+a+workspace+before+using+Chart+Builder.', status_code=status.HTTP_303_SEE_OTHER)
+    datasets = []
+    for row in repository.list_datasets():
+        if row['status'] != 'ready':
+            continue
+        datasets.append({'id': int(row['id']), 'name': str(row['file_name']), 'kind': str(row['dataset_kind']), 'columns': repository.list_dataset_row_columns(int(row['id']))})
+    return render_template(request, 'chart_builder.html', {'user': user, 'datasets': datasets})
+
+
+@app.post('/api/chart-builder/preview')
+async def chart_builder_preview(request: Request, user: SessionUser = Depends(current_user)) -> Response:
+    payload = await request.json()
+    frame, entry = _chart_builder_context(payload)
+    try:
+        return Response(content=render_catalog_chart_preview(frame, entry), media_type='image/png', headers={'Cache-Control': 'no-store'})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post('/reporting/netcheck-cdr')

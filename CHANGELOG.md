@@ -6,15 +6,21 @@
 ## Release: v0.2.1
 ### Release Date: 2026-09-03
 #### 🌟 New Features:
+- Added the Chart Builder workspace tab for creating temporary charts from one or more selected processed CDR Sources, using the shared Interactive Preview controls.
+- Added a persistent Charts Jobs queue alongside Reports Jobs, with progress, retry, a dedicated Jobs panel, bulk actions and job counts.
+- Added ZIP downloads for standalone and report-rendered Chart Sets.
+- Added a Multivendor multi-campaign review before report or Chart Set generation, requiring Data, Voice and Speech CDR selection and preselecting the latest campaign for each type.
+- Added Stop, retry and confirmed relaunch actions for Reports Jobs and Charts Jobs, including cooperative cancellation and partial-output cleanup.
+- Added a shared Interactive Chart Preview for E2E Reporting and Slides Templates Editor: Chart Type, CDR Source, KPI, Filters, Rows, Columns, Legend and Legend Position can be changed to regenerate a temporary chart without altering the persisted chart or template.
+- Added a full-size filtered-dataset overlay above the chart preview, with Excel-style column filters and first/previous/next/last pagination.
+- Added editable generated-chart previews to Slides Templates Editor rows: Update Template applies the current Interactive Preview values to that in-memory row for the normal save workflow.
 
 #### 🚀 Enhancements:
-- Added a persistent background Charts Jobs queue alongside Reports Jobs, with progress, retry and its own Jobs panel; both job tables now show clearer type, template, scope, dataset and chart metadata, bulk actions and job counts.
 - Added the Open/eye actions for Charts Jobs and automatic opening/scrolling to the corresponding Chart Set when a new or retried Charts Job completes.
-- Stored report-rendered PNGs in `output/reports/<report-name>/report-charts/` and standalone Chart Sets in `output/charts/`, with ZIP downloads for both; newly generated report filenames now use `_by-operator_` or `_by-vendor_` scope tokens.
+- Stored report-rendered PNGs in `output/reports/<report-name>/report-charts/` and standalone Chart Sets in `output/charts/`; newly generated report filenames now use `_by-operator_` or `_by-vendor_` scope tokens.
 - Renamed Report Charts to Charts Panel and unified its selector with standalone and report-rendered sets, source prefixes and Delete All Reports alongside Chart Set cleanup actions.
 - Improved Charts Panel selection with report-first default ordering, source-specific styling, compact labels, a preserved prefix gap, graceful closing, and automatic refresh/fallback selection after deletion or relaunch.
 - Standardised completed standalone Chart Set timestamps across the Charts Jobs date, Charts Panel `Generated at` badge and output folder; incomplete sets remain hidden from the selector, including after reload.
-- Added a Multivendor multi-campaign review before report or Chart Set generation, requiring one or more Data, Voice and Speech CDRs and preselecting the latest campaign for each type.
 - Improved Count Stacked Horizontal Bars and hierarchical failure grids so complete Rows/Columns Aggregation combinations remain visible, including zero-count values, with dashed separators only between the relevant top-level groups.
 - Improved hierarchical chart presentation with a single caption orientation, vertical KPI y-axis labels, stable operator/vendor palettes and distinct multivendor shades; strengthened Campaign detection for consistent historical/latest line widths and colours.
 - Refined CDF Lines to render every complete aggregation combination, use appropriate latest/single-campaign emphasis, avoid overlapping markers/labels, compact dense legends for the available canvas, and trim x-axes only after a conservative convergence threshold.
@@ -22,13 +28,7 @@
 - Improved Slides Templates selection and import workflows with immediate template switching plus save/discard prompts, overwrite confirmation/default refresh, exact export names, and preserved hyphens when deriving or auto-filling names from CSV files.
 - Improved Cell Assistance controls with Escape dismissal, readable long lists and compact searchable layouts; valid Chart Type, Legend Position, CDR Source and Layout values now preselect from the active cell, while applied Chart Types use title case.
 - Restored Filter Builder clauses in Cell Assistance and added comma-separated multi-value support for `CONTAINS` and `NOT CONTAINS` conditions.
-- Added safe red circular Stop actions for processing Reports Jobs and Charts Jobs, including cooperative cancellation and partial-output cleanup; queued and stopped Charts Jobs can also be deleted.
-- Enabled stopped Reports Jobs and Charts Jobs retries, and changed failed Charts Jobs retries to reuse their existing row instead of creating a duplicate job.
-- Added confirmed completed-job relaunch for Reports Jobs and Charts Jobs: prior output is deleted, the same row is reused and the job is queued again.
-- Added a shared Interactive Chart Preview for E2E Reporting and Slides Templates Editor: Chart Type, CDR Source, KPI, Filters, Rows, Columns, Legend and Legend Position can be changed to regenerate a temporary chart without altering the persisted chart or template.
 - Refined the Interactive Preview into a side-by-side chart/editor layout on wide screens, with a source-aware Filter Builder and compact, searchable white-and-purple dropdowns; multi-value Rows, Columns and Legend controls support search, checkboxes and Select all / none.
-- Added a full-size filtered-dataset overlay above the chart preview, with Excel-style searchable column filters over every chart-filtered value and fixed first/previous/next/last pagination controls.
-- Added editable generated-chart previews to Slides Templates Editor rows: Update Template applies the current Interactive Preview values to that in-memory row for the normal save workflow.
 
 #### 🐛 Bug fixes:
 - Fixed Reporting CDR multi-select checkmarks after Multivendor review so they match the submitted CDRs.

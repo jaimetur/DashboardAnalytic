@@ -2311,7 +2311,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       const hidden = document.createElement('input'); hidden.type = 'hidden'; hidden.name = 'filters';
       const builder = document.createElement('div'); builder.className = 'report-chart-filter-builder';
       const conditions = document.createElement('div'); conditions.className = 'report-chart-filter-conditions';
-      const sync = () => { hidden.value = Array.from(conditions.children).map((row) => { const [column, operator] = row.querySelectorAll('select'); const value = row.querySelector('[data-report-chart-filter-value]'); return column?.value && operator?.value && value?.value ? `${column.value} ${operator.value} ${value.value}` : ''; }).filter(Boolean).join('; '); hidden.dispatchEvent(new Event('input')); };
+      const sync = () => { hidden.value = Array.from(conditions.children).map((row) => { const [column, operator] = row.querySelectorAll('select'); const value = row.querySelector('[data-report-chart-filter-value]'); const rawValue = value?.value.trim(); const parserValue = ['IN', 'NOT IN'].includes(operator?.value) && rawValue && !/^\(.*\)$/.test(rawValue) ? `(${rawValue})` : rawValue; return column?.value && operator?.value && parserValue ? `${column.value} ${operator.value} ${parserValue}` : ''; }).filter(Boolean).join('; '); hidden.dispatchEvent(new Event('input')); };
       const addCondition = (condition = {}) => {
         const row = document.createElement('div'); row.className = 'report-chart-filter-condition';
         const column = document.createElement('select'); column.add(new Option('Column…', '')); column.dataset.reportChartFilterSelect = ''; column.setAttribute('aria-label', 'Filter column');

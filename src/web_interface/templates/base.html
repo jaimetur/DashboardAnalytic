@@ -57,9 +57,11 @@
           {% if active_workspace %}
           <a class="module-tab module-tab-dashboard{% if request.url.path == '/dashboard' %} active{% endif %}" href="/dashboard" title="Open E2E Dashboard"><span class="module-tab-label-desktop">E2E Dashboard</span><span class="module-tab-label-mobile">Dashboard</span></a>
           <a class="module-tab module-tab-reporting{% if request.url.path == '/reporting' %} active{% endif %}" href="/reporting" title="Open E2E Reporting"><span class="module-tab-label-desktop">E2E Reporting</span><span class="module-tab-label-mobile">Reporting</span></a>
+          <a class="module-tab module-tab-chart-builder{% if request.url.path == '/chart-builder' %} active{% endif %}" href="/chart-builder" title="Build an ad-hoc chart"><span class="module-tab-label-desktop">Chart Builder</span><span class="module-tab-label-mobile">Builder</span></a>
           {% else %}
           <span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use E2E Dashboard"><span class="module-tab-label-desktop">E2E Dashboard</span><span class="module-tab-label-mobile">Dashboard</span></span>
           <span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use E2E Reporting"><span class="module-tab-label-desktop">E2E Reporting</span><span class="module-tab-label-mobile">Reporting</span></span>
+          <span class="module-tab module-tab-disabled" aria-disabled="true" title="Open a workspace to use Chart Builder"><span class="module-tab-label-desktop">Chart Builder</span><span class="module-tab-label-mobile">Builder</span></span>
           {% endif %}
         </div>
         <div class="module-tabs-secondary" aria-label="Documentation and administration">
