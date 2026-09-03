@@ -8,7 +8,7 @@ The Workspace accepts CSV, XLSX, XLS and XLSM files. Uploaded data, metadata and
 2. Open the workspace and upload the source file.
 3. Confirm the detected type and source name; for a batch, review every proposed type independently.
 4. Wait until its status is **Processed**.
-5. Open E2E Dashboard or E2E PowerPoint Reporting and select the processed dataset.
+5. Open E2E Dashboard or E2E Reporting and select the processed dataset.
 
 If a status shows an error, correct the source and upload it again. Do not create a report from a failed or incomplete ingestion.
 

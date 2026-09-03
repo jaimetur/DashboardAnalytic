@@ -2,7 +2,7 @@
 
 ## Current scope
 
-Dashboard Analytic currently provides isolated named Workspaces, the E2E Dashboard for interactive KPI inspection and E2E PowerPoint Reporting for NetCheck CDR PowerPoint generation. Administrators can also manage templates and inspect/edit the active workspace database.
+Dashboard Analytic currently provides isolated named Workspaces, the E2E Dashboard for interactive KPI inspection and E2E Reporting for NetCheck CDR PowerPoint generation. Administrators can also manage templates and inspect/edit the active workspace database.
 
 NetCheck reporting supports Data, Voice and Speech CDR inputs, NSA/SA selection, single-vendor reports and multivendor reports from Vendor values mapped in Workspace using VFUK/3UK datasets. The output uses selected named Slides Templates and the project PowerPoint template, while leaving analyst comment areas available for manual conclusions.
 

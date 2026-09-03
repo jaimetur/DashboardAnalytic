@@ -1,6 +1,6 @@
 # Web interface
 
-The application follows one operational workflow: upload and process files in Workspace, explore them in the E2E Dashboard, or generate a presentation in E2E PowerPoint Reporting.
+The application follows one operational workflow: upload and process files in Workspace, explore them in the E2E Dashboard, or generate a presentation in E2E Reporting.
 
 ## Main areas
 
@@ -8,7 +8,7 @@ The application follows one operational workflow: upload and process files in Wo
 | --- | --- |
 | **Workspace** | Manage isolated workspaces, then upload, classify and process their datasets. It is the source-of-truth entry point for analysis and reporting. |
 | **E2E Dashboard** | Explore one processed dataset with adaptive filters, KPI summaries, scorecards, CDF/comparison charts and dashboard exports. |
-| **E2E PowerPoint Reporting** | Generate standardised NSA or SA NetCheck CDR PowerPoint reports, or preview every automated report chart, from three processed CDR domains. It also shows the future Smart Orchestrator Logs Reports module. |
+| **E2E Reporting** | Generate standardised NSA or SA NetCheck CDR PowerPoint reports, or preview every automated report chart, from three processed CDR domains. It also shows the future Smart Orchestrator Logs Reports module. |
 | **App Logs** | Review the active workspace's combined operational and audit history, with persistent filters for user, date, type and action. |
 | **Administration** | Manage users, shared templates, portable imports/exports and the active workspace database; restricted to authorised administrators. |
 | **Help** | Opens this documentation in the current application tab with its own navigation panel. |
@@ -27,7 +27,7 @@ Once a dataset is processed, **Preview** opens a read-only sample in a new tab. 
 
 Select a processed CDR dataset, then use the available controls to narrow the view by the dimensions present in that data. The dashboard exposes KPI-like numeric metrics only; coordinate fields, identifiers and technical metadata are excluded. Adaptive filters support compact multi-selection, date ranges and available CDR values. **Preview Dataset** opens the same persisted-data preview as Workspace. KPI tables and charts always reflect the active filters. Confirm the dataset, filters and aggregation before using a Word or PowerPoint export action.
 
-## E2E PowerPoint Reporting
+## E2E Reporting
 
 Open **NetCheck CDR Reports** to create a PowerPoint report. The form requires three processed workspace datasets: one **Data**, one **Voice** and one **Speech** CDR. Select NSA or SA, then select the report scope.
 

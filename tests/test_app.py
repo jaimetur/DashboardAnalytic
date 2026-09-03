@@ -2282,13 +2282,13 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     assert help_documents[1]["label"] == "Configuration File"
     assert any(item["relative_path"] == "02-web-interface.md" for item in help_documents)
     assert any(
-        item["relative_path"] == "04-e2e-dashboard-analysis.md"
+        item["relative_path"] == "04-e2e-dashboard.md"
         and item["label"] == "E2E Dashboard"
         for item in help_documents
     )
     assert any(
-        item["relative_path"] == "05-e2e-ppt-reporting.md"
-        and item["label"] == "E2E PowerPoint Reporting"
+        item["relative_path"] == "05-e2e-reporting.md"
+        and item["label"] == "E2E Reporting"
         for item in help_documents
     )
     excluded_help_documents = {

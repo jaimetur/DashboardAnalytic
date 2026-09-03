@@ -1,4 +1,4 @@
-# 5. E2E PowerPoint Reporting
+# 5. E2E Reporting
 
 Use **E2E Reporting → NetCheck CDR Reports** to create a PowerPoint report or a persistent set of PNG charts from processed CDR-Data, CDR-Voice and CDR-Speech datasets.
 

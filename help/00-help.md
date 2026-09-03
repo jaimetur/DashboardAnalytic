@@ -9,15 +9,15 @@ Dashboard Analytic separates work into named, isolated workspaces and three conn
 - **Workspace** starts with Workspace Management. Create, open, close, rename, duplicate or remove a workspace, then upload NetCheck CDR Data, Voice and Speech workbooks, Smart Orchestrator Logs and operator-specific Multivendor Mappings. Every workspace has independent files and database contents; Slides Templates are shared configuration.
 - **App Logs** provides the active workspace's combined operational and audit history, with filters for user, date, type and action.
 - **E2E Dashboard** is the interactive analysis surface for one processed dataset. It provides adaptive filters, KPI summaries, percentile scorecards, CDF/comparison charts and exports of the active dashboard scope.
-- **E2E PowerPoint Reporting** produces the standard NSA or SA NetCheck CDR PowerPoint from the three processed CDR domains and selected shared Slides Templates. A multivendor run uses Vendor values that were mapped and stored on the CDR beforehand.
+- **E2E Reporting** produces the standard NSA or SA NetCheck CDR PowerPoint from the three processed CDR domains and selected shared Slides Templates. A multivendor run uses Vendor values that were mapped and stored on the CDR beforehand.
 
 ## Recommended reading order
 
 - **01.** [Configuration](01-configuration-file.md) — set up application access and persistent storage.
 - **02.** [Web interface](02-web-interface.md) — understand the Workspace, Dashboard, Reporting, Help and Administration areas.
 - **03.** [Data ingestion](03-data-ingestion.md) — upload and process source datasets.
-- **04.** [E2E Dashboard](04-e2e-dashboard-analysis.md) — explore interactive KPI analysis.
-- **05.** [E2E PowerPoint Reporting](05-e2e-ppt-reporting.md) — generate NetCheck CDR & Smart Orchestrator Logs reports.
+- **04.** [E2E Dashboard](04-e2e-dashboard.md) — explore interactive KPI analysis.
+- **05.** [E2E Reporting](05-e2e-reporting.md) — generate NetCheck CDR & Smart Orchestrator Logs reports.
 - **06.** [Administration](06-admin-panel.md) — manage accounts and review operational activity.
 - **07.** [Docker deployment](07-docker-deployment.md) — run the application as a docker container service.
 - **08.** [Project structure](08-project-structure.md) — find the project structure.

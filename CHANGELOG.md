@@ -62,6 +62,7 @@
 
 #### 📚 Documentation:
 - Rewrote the PowerPoint Reporting help as static guidance for building Slides Templates, including field-by-field instructions and practical recipes for every chart type, filters, aggregations, legends, structural slides, operators and output jobs.
+- Renamed module `E2E PowerPoint Reporting` to `E2E Reporting` and module `E2E Dashboard Analysis` to `E2E Dashboard`.
 
 ---
 

@@ -200,16 +200,16 @@ HELP_NAVIGATION_DOCUMENTS = (
     '01-configuration-file.md',
     '02-web-interface.md',
     '03-data-ingestion.md',
-    '04-e2e-dashboard-analysis.md',
-    '05-e2e-ppt-reporting.md',
+    '04-e2e-dashboard.md',
+    '05-e2e-reporting.md',
     '06-admin-panel.md',
     '07-docker-deployment.md',
     '08-project-structure.md',
     '09-roadmap.md',
 )
 HELP_DOCUMENT_LABELS = {
-    '04-e2e-dashboard-analysis.md': 'E2E Dashboard',
-    '05-e2e-ppt-reporting.md': 'E2E PowerPoint Reporting',
+    '04-e2e-dashboard.md': 'E2E Dashboard',
+    '05-e2e-reporting.md': 'E2E Reporting',
 }
 
 

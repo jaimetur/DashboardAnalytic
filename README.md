@@ -23,9 +23,9 @@ Dashboard Analytic is a multi-user application for ingesting CDR-style datasets,
 - Lets administrators inspect, edit, filter and delete rows in the active workspace database
 - Exposes embedded Readme, Changelog and Help viewers rendered from Markdown
 
-## E2E PowerPoint Reporting
+## E2E Reporting
 
-The top navigation separates the existing **E2E Dashboard** from **E2E PowerPoint Reporting**.
+The top navigation separates the existing **E2E Dashboard** from **E2E Reporting**.
 
 ### Modules
 
@@ -39,7 +39,7 @@ Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone
 
 1. Upload the three NetCheck workbooks (Data, Voice and Speech) in **Workspace** and wait until each one is marked `Processed`.
 2. If a multivendor report is required, upload the **VFUK** and/or **3UK** mapping workbooks first. When importing each CDR, select the required mapping(s) from its optional VFUK/3UK selectors, or use **Map Vendors** later from the queue. That dialog preselects the newest ready mapping of each type and can queue several unmapped CDRs together without blocking the workspace. Each CDR stores the calculated Vendor values.
-3. Open **E2E PowerPoint Reporting → NetCheck CDR Reports**.
+3. Open **E2E Reporting → NetCheck CDR Reports**.
 4. Select one or more processed CDRs for each required input type. CDRs of the same type are read from the shared reporting table, retaining campaign values for comparisons.
 5. Choose `NSA` or `SA`. NSA sessions are selected when the available RAT field contains `ENDC`; SA sessions are selected when it contains `NR`.
 6. Choose compatible Slides Templates and `Single-vendor` or `Multivendor`. Multivendor is enabled only when all three selected Data, Voice and Speech CDRs have a saved vendor mapping.
@@ -70,7 +70,7 @@ For Vodafone UK and Three, the report takes the first and last Global CI from th
 6. Select a processed CDR in `Select Dataset`
 7. Use `Adaptive Filters` and press `Update Dashboard` to compute the full analysis
 8. Review KPI cards, scorecards, charts, and aggregated tables
-9. Export the current dashboard analysis to Word or PowerPoint if needed, or open **E2E PowerPoint Reporting** to create a template-backed CDR report
+9. Export the current dashboard analysis to Word or PowerPoint if needed, or open **E2E Reporting** to create a template-backed CDR report
 
 An import captures its workspace database when it is queued. It therefore continues in the server after closing that workspace or signing out; reopening the workspace later shows its final status.
 
