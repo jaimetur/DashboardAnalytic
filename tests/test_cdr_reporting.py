@@ -1101,9 +1101,20 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert 'data-report-chart-viewer-canvas' in page.text
     assert 'data-report-chart-zoom-reset' in page.text
     assert rendered and all(multivendor is False for _, multivendor in rendered)
+    orphaned_job = app_module.repository.create_report_chart_job(
+        technology='nsa', scope='single', dataset_ids={}, dataset_names={},
+        template_name='Interrupted Chart Set', created_by='admin',
+    )
+    orphaned_directory = app_module.report_charts_directory() / '.incomplete-chart-set'
+    orphaned_directory.mkdir(parents=True)
+    (orphaned_directory / 'partial.png').write_bytes(b'partial')
     cleared = client.post('/reporting/chart-sets/delete-all')
     assert cleared.status_code == 200
     assert cleared.json()['chart_sets'] == []
+    assert cleared.json()['deleted_jobs'] == 2
+    assert app_module.repository.get_report_chart_job(orphaned_job) is None
+    assert app_module.repository.list_report_chart_jobs(limit=None) == []
+    assert list(app_module.report_charts_directory().iterdir()) == []
     assert client.get(f"/api/reporting/chart-sets/{payload['generation']}").status_code == 404
 
 

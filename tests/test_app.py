@@ -222,6 +222,8 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
         full_manifest = json.loads(archive.read('manifest.json'))
         assert full_manifest['kind'] == 'full-environment'
         assert len(full_manifest['workspaces']) == 1
+        assert full_manifest['workspaces'][0]['id'] == 'default'
+        assert {'super', 'admin', 'demo'} <= set(full_manifest['workspaces'][0]['access_usernames'])
         assert 'config/workspace-registry.db' not in archive.namelist()
     full_import_response = client.post(
         '/admin/import-export/import',
@@ -231,6 +233,38 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     )
     assert full_import_response.status_code == 303
     assert len(app_module.workspace_registry.list()) == 1
+
+
+def test_full_environment_import_remaps_permissions_to_replaced_workspace_id(client, tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login_super(client)
+    source_workspace = app_module.workspace_registry.create('Imported Team')
+    app_module.repository.set_workspace_user_access(source_workspace.id, ['admin', 'demo'])
+    app_module.activate_workspace(source_workspace.id)
+    exported = client.get('/admin/import-export/export?export_target=full-environment')
+    assert exported.status_code == 200
+    package_path = tmp_path / 'full-environment.zip'
+    package_path.write_bytes(exported.content)
+    manifest = app_module.read_import_manifest(package_path)
+
+    app_module.close_active_workspace()
+    app_module.workspace_registry.remove(source_workspace.id)
+    app_module.repository.remove_workspace_access(source_workspace.id)
+    occupying_workspace = app_module.workspace_registry.create('Local Only')
+    replacement = app_module.workspace_registry.create('Imported Team')
+    assert occupying_workspace.id == source_workspace.id
+    assert replacement.id != source_workspace.id
+    app_module.activate_workspace(replacement.id)
+
+    app_module._apply_import_archive(package_path, manifest)
+
+    replaced = next(workspace for workspace in app_module.workspace_registry.list() if workspace.name == 'Imported Team')
+    assert replaced.id == replacement.id
+    assert app_module.active_workspace is None
+    assert app_module.repository.user_has_workspace_access('admin', replaced.id)
+    assert app_module.repository.user_has_workspace_access('demo', replaced.id)
+    assert not app_module.repository.user_has_workspace_access('admin', source_workspace.id)
 
 
 def test_config_import_replaces_global_users_and_preserves_user_ids(client) -> None:
@@ -1017,6 +1051,22 @@ def test_workspace_import_replaces_an_open_workspace_and_removes_old_files(clien
     assert stored_path == str(imported.input_dir / 'new-data.csv')
     assert app_module.repository.user_has_workspace_access('admin', imported.id)
     assert all(' - Importing ' not in workspace.name for workspace in app_module.workspace_registry.list())
+
+
+def test_delete_all_reports_removes_orphaned_output_directories(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    reports_root = Path(app_module.settings.output_dir) / 'reports'
+    orphaned = reports_root / 'report-without-job' / 'report-charts'
+    orphaned.mkdir(parents=True, exist_ok=True)
+    (orphaned / 'chart-1.png').write_bytes(b'old chart')
+
+    response = client.post('/reporting/jobs/delete-all')
+
+    assert response.status_code == 200
+    assert reports_root.is_dir()
+    assert list(reports_root.iterdir()) == []
 
 
 def test_admin_panel_is_available_for_admin(client) -> None:

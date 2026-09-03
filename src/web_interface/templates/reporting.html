@@ -856,11 +856,10 @@
         showInfoDialog(error.message || 'Unable to delete the selected chart set.', {title: 'Delete Selected Charts Set', tone: 'error'});
       }
     });
-    reportChartSetDeleteAll?.addEventListener('click', async () => {
-      if (!reportChartSets.length) return;
-      const accepted = await showConfirmDialog(`Delete all ${reportChartSets.length} generated chart sets? All of their chart files will be removed.`, {title: 'Delete All Charts Sets', confirmLabel: 'Delete all'});
+    const deleteAllChartSets = async () => {
+      const accepted = await showConfirmDialog('Delete all generated Chart Sets and every row in Charts Jobs? All associated chart files will also be removed.', {title: 'Delete All Charts Sets', confirmLabel: 'Delete all'});
       if (!accepted) return;
-      showLoadingOverlay('Deleting all chart sets', 'Please wait while every generated chart set is removed.');
+      showLoadingOverlay('Deleting all chart sets', 'Please wait while every Chart Set, chart file and Charts Job is removed.');
       try {
         const response = await fetch('/reporting/chart-sets/delete-all', {method: 'POST', credentials: 'same-origin'});
         const payload = await response.json();
@@ -886,8 +885,9 @@
         hideLoadingOverlay();
         showInfoDialog(error.message || 'Unable to delete all chart sets.', {title: 'Delete All Charts Sets', tone: 'error'});
       }
-    });
-    reportChartSetsDeleteAllFromJobs?.addEventListener('click', () => reportChartSetDeleteAll?.click());
+    };
+    reportChartSetDeleteAll?.addEventListener('click', deleteAllChartSets);
+    reportChartSetsDeleteAllFromJobs?.addEventListener('click', deleteAllChartSets);
     const drawReportChartViewer = () => {
       if (!reportChartViewerCanvas || !reportChartViewerImage || !reportChartImage || !reportChartViewport) return;
       const width = reportChartViewerImage.clientWidth;

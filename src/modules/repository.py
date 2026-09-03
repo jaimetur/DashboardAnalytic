@@ -922,6 +922,27 @@ class Repository:
                     (self._workspace_ids_json(workspace_ids), int(row['id'])),
                 )
 
+    def remap_workspace_access(self, workspace_id_map: dict[str, str]) -> None:
+        """Translate imported workspace grants from source ids to local ids."""
+        normalized = {
+            str(source).strip(): str(destination).strip()
+            for source, destination in workspace_id_map.items()
+            if str(source).strip() and str(destination).strip()
+        }
+        if not normalized:
+            return
+        with self.global_connection() as conn:
+            self._ensure_user_workspace_columns(conn)
+            for row in conn.execute('SELECT id, workspace_ids_json FROM users').fetchall():
+                workspace_ids = [
+                    normalized.get(workspace_id, workspace_id)
+                    for workspace_id in self._workspace_ids_from_json(row['workspace_ids_json'])
+                ]
+                conn.execute(
+                    'UPDATE users SET workspace_ids_json = ? WHERE id = ?',
+                    (self._workspace_ids_json(workspace_ids), int(row['id'])),
+                )
+
     def list_active_users_by_usernames(self, usernames: list[str]) -> list[str]:
         normalized = [username.strip() for username in usernames if username and username.strip()]
         if not normalized:

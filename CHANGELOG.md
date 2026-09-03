@@ -58,6 +58,8 @@
 - Ensured the default `super`, `admin` and `demo` accounts always retain access to the `Default` workspace, including after startup migrations or access edits.
 - Made incoming server-transfer approval available across every super-admin page and idempotent, preventing duplicate polling from reporting an already accepted offer as missing.
 - Made large ZIP imports stream directly to their retained disk file and added byte-accurate browser upload progress, avoiding the previous multipart staging copy.
+- Fixed bulk deletion so Delete All Charts Sets also clears the complete Charts Jobs table and all standalone Chart Set directories, while Delete All Reports removes orphaned and incomplete folders from `output/reports`.
+- Fixed Full Environment imports to translate source workspace IDs to their retained or newly created destination IDs, preserving every imported user permission even when the replaced workspace was open or had a different local ID.
 
 #### 📚 Documentation:
 - Rewrote the PowerPoint Reporting help as static guidance for building Slides Templates, including field-by-field instructions and practical recipes for every chart type, filters, aggregations, legends, structural slides, operators and output jobs.

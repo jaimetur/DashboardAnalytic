@@ -1831,8 +1831,20 @@ def _archive_tree(archive: zipfile.ZipFile, source: Path, archive_prefix: str, *
         _archive_file(archive, path, f'{archive_prefix}/{relative_path.as_posix()}', progress_callback)
 
 
-def _workspace_archive_metadata(workspace: Workspace) -> dict[str, str]:
-    return {'name': workspace.name, 'source_input_dir': str(workspace.input_dir)}
+def _workspace_archive_metadata(workspace: Workspace) -> dict[str, Any]:
+    # The source id is required to translate user access grants when a Full
+    # Environment is restored onto a server where the same workspace name is
+    # already registered under a different local id.
+    access_usernames = [
+        str(user['username']) for user in repository.list_users()
+        if workspace.id in repository.list_user_workspace_ids(int(user['id']))
+    ]
+    return {
+        'id': workspace.id,
+        'name': workspace.name,
+        'source_input_dir': str(workspace.input_dir),
+        'access_usernames': access_usernames,
+    }
 
 
 def _archive_workspace(archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str, scratch_dir: Path | None = None, progress_callback: Callable[[int], None] | None = None) -> None:
@@ -2493,14 +2505,26 @@ def _apply_import_archive(
             if not isinstance(entries, list):
                 raise ValueError('The full-environment package has no workspace list.')
             imported_workspaces: list[Workspace] = []
+            workspace_id_map: dict[str, str] = {}
             for entry in entries:
                 if not isinstance(entry, dict) or not re.fullmatch(r'workspaces/\d+', str(entry.get('archive_path') or '')):
                     raise ValueError('The full-environment package contains an invalid workspace entry.')
                 _safe_extract_archive_prefix(archive, staging_root, str(entry['archive_path']), extracted)
                 if progress_callback:
                     progress_callback(f'importing workspace {len(imported_workspaces) + 1} of {len(entries)}', 90.0 + (len(imported_workspaces) * 9.0 / max(len(entries), 1)))
-                imported_workspaces.append(import_workspace_archive(staging_root / str(entry['archive_path']), entry, replace_existing=True))
+                imported_workspace = import_workspace_archive(staging_root / str(entry['archive_path']), entry, replace_existing=True)
+                imported_workspaces.append(imported_workspace)
+                source_workspace_id = str(entry.get('id') or '').strip()
+                if source_workspace_id:
+                    workspace_id_map[source_workspace_id] = imported_workspace.id
+                access_usernames = entry.get('access_usernames')
+                if isinstance(access_usernames, list):
+                    repository.set_workspace_user_access(
+                        imported_workspace.id,
+                        [str(username) for username in access_usernames],
+                    )
                 shutil.rmtree(staging_root / str(entry['archive_path']), ignore_errors=True)
+            repository.remap_workspace_access(workspace_id_map)
             if progress_callback:
                 progress_callback('finalising', 100.0)
             return f'Full environment imported successfully ({len(imported_workspaces)} workspaces added).'
@@ -3870,13 +3894,17 @@ def _report_job_directory(file_name: str, output_dir: Path | None = None) -> Pat
 
 def _delete_report_job_artifacts(row: Any) -> None:
     """Remove a report file and its sibling rendered PNG charts."""
+    file_name = Path(str(row['output_file'] or '')).name
+    if file_name:
+        # The job directory may still contain rendered charts or partial
+        # output even when the PowerPoint itself is already missing.
+        report_dir = _report_job_directory(file_name)
+        if report_dir.is_dir():
+            shutil.rmtree(report_dir)
     path = _report_job_output_path(row)
     if path is None:
         return
-    report_dir = _report_job_directory(path.name)
-    if path.parent == report_dir:
-        shutil.rmtree(report_dir, ignore_errors=True)
-    else:
+    if path.parent != _report_job_directory(path.name):
         path.unlink(missing_ok=True)
 
 
@@ -4804,16 +4832,17 @@ def report_chart_set(generation: str, user: SessionUser = Depends(current_user))
 
 @app.post('/reporting/chart-sets/delete-all')
 def delete_all_report_chart_sets(user: SessionUser = Depends(current_user)) -> JSONResponse:
-    """Remove every persisted Report Charts set for the active workspace."""
+    """Remove every standalone Chart Set and every Charts Job row."""
     chart_sets = list_persisted_report_chart_sets()
-    generations = [str(chart_set['generation']) for chart_set in chart_sets]
-    for chart_set in chart_sets:
-        directory = safe_join(report_charts_directory(), str(chart_set['generation']))
-        if directory.is_dir():
-            shutil.rmtree(directory)
-    removed_jobs = repository.delete_report_chart_jobs_for_generations(generations)
+    charts_root = report_charts_directory()
+    if charts_root.is_dir():
+        # Clear valid, incomplete and legacy/unregistered set directories.
+        shutil.rmtree(charts_root)
+    charts_root.mkdir(parents=True, exist_ok=True)
+    jobs = repository.list_report_chart_jobs(limit=None)
+    removed_jobs = sum(repository.delete_report_chart_job(int(job['id'])) is not None for job in jobs)
     repository.add_log(user.username, 'delete_all_report_chart_sets', json.dumps({'count': len(chart_sets), 'jobs': removed_jobs}))
-    return JSONResponse({'chart_sets': []})
+    return JSONResponse({'chart_sets': [], 'deleted_jobs': removed_jobs})
 
 
 @app.post('/reporting/chart-sets/{generation}/delete')
@@ -4999,6 +5028,12 @@ def delete_all_report_jobs(user: SessionUser = Depends(current_user)) -> JSONRes
         deleted = repository.delete_report_run(int(report['id']))
         if deleted:
             _delete_report_job_artifacts(deleted)
+    # Also remove incomplete and orphaned report directories which no longer
+    # have a usable database row or PowerPoint file.
+    reports_root = Path(settings.output_dir) / 'reports'
+    if reports_root.is_dir():
+        shutil.rmtree(reports_root)
+    reports_root.mkdir(parents=True, exist_ok=True)
     repository.add_log(user.username, 'delete_all_report_jobs', json.dumps({'count': len(reports)}))
     return JSONResponse({'deleted': len(reports)})
 
