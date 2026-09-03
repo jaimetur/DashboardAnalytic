@@ -644,6 +644,7 @@ async def lifespan(_: FastAPI):
                 json.dumps({'datasets': interrupted_datasets, 'reports': interrupted_reports, 'chart_jobs': interrupted_chart_jobs}),
             )
     export_package_dir().mkdir(parents=True, exist_ok=True)
+    _recover_unimported_transfer_packages()
     _cleanup_expired_export_packages()
     migrate_uk_slides_templates_to_global_config()
     if (workspace_id := workspace_registry.active_id()):
@@ -2042,7 +2043,7 @@ def _cleanup_expired_export_packages() -> None:
             if job.get('status') not in {'ready', 'failed'}:
                 active_paths.add(Path(str(job['path'])))
         for offer in TRANSFER_OFFERS.values():
-            if offer.get('status') in {'receiving', 'received', 'importing'} and offer.get('path'):
+            if offer.get('status') in {'receiving', 'received', 'importing', 'recovered'} and offer.get('path'):
                 active_paths.add(Path(str(offer['path'])))
             if offer.get('status') == 'pending' and float(offer.get('created_at', 0)) < cutoff:
                 offer.update({'status': 'expired', 'error': 'The transfer offer expired before it was accepted.', 'finished_at': datetime.now(timezone.utc).timestamp()})
@@ -2061,6 +2062,86 @@ def _cleanup_expired_export_packages() -> None:
             continue
         if path.is_file():
             path.unlink(missing_ok=True)
+
+
+def _recovered_transfer_details(manifest: dict[str, Any]) -> tuple[str, list[str]]:
+    kind = str(manifest.get('kind') or '')
+    if kind == 'config':
+        return ('Config + Slides Templates' if manifest.get('includes_slides_templates') else 'Config', [])
+    if kind == 'slides-templates':
+        return ('Slides Templates', [])
+    if kind == 'workspace':
+        workspace = manifest.get('workspace')
+        name = str(workspace.get('name') or '') if isinstance(workspace, dict) else ''
+        return ('Workspace', [name] if name else [])
+    if kind == 'full-environment':
+        entries = manifest.get('workspaces')
+        workspaces = [str(entry.get('name') or '') for entry in entries if isinstance(entry, dict) and entry.get('name')] if isinstance(entries, list) else []
+        return ('Full Environment', workspaces)
+    return (kind.title() or 'Transfer package', [])
+
+
+def _recover_unimported_transfer_packages() -> None:
+    """Restore valid incoming transfer archives left by an interrupted server.
+
+    A partial streamed upload is not a valid ZIP and is safe to remove. A
+    complete archive is retained in memory as a deliberate recovery choice for
+    a super-admin instead of silently importing it after a restart.
+    """
+    package_dir = export_package_dir()
+    if not package_dir.exists():
+        return
+    with TRANSFER_LOCK:
+        known_paths = {Path(str(offer.get('path'))) for offer in TRANSFER_OFFERS.values() if offer.get('path')}
+        active_outgoing_paths = {Path(str(job.get('path'))) for job in TRANSFER_JOBS.values() if job.get('path') and job.get('status') not in {'ready', 'failed'}}
+    # Outgoing transfer archives are disposable intermediates. There is no
+    # remote receipt state to resume after a restart, so remove every orphan.
+    for package_path in package_dir.glob('transfer-*.zip'):
+        if package_path not in active_outgoing_paths:
+            package_path.unlink(missing_ok=True)
+    for package_path in package_dir.glob('incoming-transfer-*.upload'):
+        if package_path in known_paths:
+            continue
+        try:
+            manifest = read_import_manifest(package_path)
+            kind = str(manifest.get('kind') or '')
+            if kind not in {'config', 'workspace', 'full-environment', 'slides-templates'}:
+                raise ValueError('Unsupported transfer package.')
+        except (OSError, ValueError, zipfile.BadZipFile):
+            package_path.unlink(missing_ok=True)
+            continue
+        created_at = package_path.stat().st_mtime
+        offer_id = uuid4().hex
+        content, workspaces = _recovered_transfer_details(manifest)
+        with TRANSFER_LOCK:
+            TRANSFER_OFFERS[offer_id] = {
+                'id': offer_id,
+                'source': 'Recovered local transfer package',
+                'kind': kind,
+                'content': content,
+                'workspaces': workspaces,
+                'status': 'recovered',
+                'phase': 'ready to import',
+                'progress': 100.0,
+                'size': package_path.stat().st_size,
+                'path': str(package_path),
+                'manifest': manifest,
+                'created_at': created_at,
+                'recovered': True,
+            }
+
+
+def recovered_transfer_packages() -> list[dict[str, Any]]:
+    _recover_unimported_transfer_packages()
+    with TRANSFER_LOCK:
+        return sorted([
+            {
+                key: offer.get(key)
+                for key in ('id', 'source', 'content', 'kind', 'workspaces', 'size')
+            } | {'created_at': format_local_timestamp(offer.get('created_at'))}
+            for offer in TRANSFER_OFFERS.values()
+            if offer.get('status') == 'recovered'
+        ], key=lambda offer: offer['created_at'] or '', reverse=True)
 
 
 def _run_export_job(job_id: str, target: str, workspace_ids: list[str] | None) -> None:
@@ -2144,7 +2225,12 @@ def _safe_extract_archive(archive: zipfile.ZipFile, destination: Path) -> None:
             shutil.copyfileobj(source, output)
 
 
-def _safe_extract_archive_prefix(archive: zipfile.ZipFile, destination: Path, prefix: str) -> None:
+def _safe_extract_archive_prefix(
+    archive: zipfile.ZipFile,
+    destination: Path,
+    prefix: str,
+    progress_callback: Callable[[int], None] | None = None,
+) -> None:
     normalized_prefix = f'{prefix.rstrip("/")}/'
     members = [member for member in archive.infolist() if member.filename.startswith(normalized_prefix)]
     if not members:
@@ -2159,6 +2245,8 @@ def _safe_extract_archive_prefix(archive: zipfile.ZipFile, destination: Path, pr
         target.parent.mkdir(parents=True, exist_ok=True)
         with archive.open(member) as source, target.open('wb') as output:
             shutil.copyfileobj(source, output)
+        if progress_callback:
+            progress_callback(member.file_size)
 
 
 def _unique_import_workspace_name(name: str) -> str:
@@ -2272,30 +2360,59 @@ def import_workspace_collisions(manifest: dict[str, Any]) -> list[str]:
     return [existing_names[str(entry.get('name')).casefold()] for entry in entries if isinstance(entry, dict) and str(entry.get('name') or '').casefold() in existing_names]
 
 
-def _apply_import_archive(package_path: Path, manifest: dict[str, Any]) -> str:
+def _apply_import_archive(
+    package_path: Path,
+    manifest: dict[str, Any],
+    progress_callback: Callable[[str, float], None] | None = None,
+) -> str:
     """Apply a disk-backed package and return its user-facing completion message."""
     with zipfile.ZipFile(package_path) as archive, tempfile.TemporaryDirectory(prefix='dashboard-analytic-import-') as temporary_dir:
         staging_root = Path(temporary_dir)
         kind = manifest.get('kind')
+        total_extract_bytes = max(sum(member.file_size for member in archive.infolist() if not member.is_dir()), 1)
+        extracted_bytes = 0
+
+        def extracted(size: int) -> None:
+            nonlocal extracted_bytes
+            extracted_bytes += size
+            if progress_callback:
+                progress_callback('extracting', min(85.0, extracted_bytes * 85.0 / total_extract_bytes))
+
+        if progress_callback:
+            progress_callback('validating', 0.0)
         if kind == 'workspace':
-            _safe_extract_archive_prefix(archive, staging_root, 'workspace')
+            _safe_extract_archive_prefix(archive, staging_root, 'workspace', extracted)
             workspace_info = manifest.get('workspace')
+            if progress_callback:
+                progress_callback('importing workspace', 90.0)
             workspace = import_workspace_archive(
                 staging_root / 'workspace',
                 workspace_info if isinstance(workspace_info, dict) else None,
                 replace_existing=True,
             )
+            if progress_callback:
+                progress_callback('finalising', 100.0)
             return f'Workspace "{workspace.name}" imported successfully.'
         if kind == 'config':
-            _safe_extract_archive_prefix(archive, staging_root, 'config')
+            _safe_extract_archive_prefix(archive, staging_root, 'config', extracted)
+            if progress_callback:
+                progress_callback('importing configuration', 90.0)
             import_config_archive(staging_root, manifest)
+            if progress_callback:
+                progress_callback('finalising', 100.0)
             return 'Configuration imported successfully. Local workspaces were preserved.'
         if kind == 'slides-templates':
-            _safe_extract_archive_prefix(archive, staging_root, 'slides-templates')
+            _safe_extract_archive_prefix(archive, staging_root, 'slides-templates', extracted)
+            if progress_callback:
+                progress_callback('importing Slides Templates', 90.0)
             import_slides_templates_archive(staging_root)
+            if progress_callback:
+                progress_callback('finalising', 100.0)
             return 'Slides Templates imported successfully.'
         if kind == 'full-environment':
-            _safe_extract_archive_prefix(archive, staging_root, 'config')
+            _safe_extract_archive_prefix(archive, staging_root, 'config', extracted)
+            if progress_callback:
+                progress_callback('importing configuration', 87.0)
             import_config_archive(staging_root, manifest)
             entries = manifest.get('workspaces')
             if not isinstance(entries, list):
@@ -2304,9 +2421,13 @@ def _apply_import_archive(package_path: Path, manifest: dict[str, Any]) -> str:
             for entry in entries:
                 if not isinstance(entry, dict) or not re.fullmatch(r'workspaces/\d+', str(entry.get('archive_path') or '')):
                     raise ValueError('The full-environment package contains an invalid workspace entry.')
-                _safe_extract_archive_prefix(archive, staging_root, str(entry['archive_path']))
+                _safe_extract_archive_prefix(archive, staging_root, str(entry['archive_path']), extracted)
+                if progress_callback:
+                    progress_callback(f'importing workspace {len(imported_workspaces) + 1} of {len(entries)}', 90.0 + (len(imported_workspaces) * 9.0 / max(len(entries), 1)))
                 imported_workspaces.append(import_workspace_archive(staging_root / str(entry['archive_path']), entry, replace_existing=True))
                 shutil.rmtree(staging_root / str(entry['archive_path']), ignore_errors=True)
+            if progress_callback:
+                progress_callback('finalising', 100.0)
             return f'Full environment imported successfully ({len(imported_workspaces)} workspaces added).'
         raise ValueError('The export package type is not supported.')
 
@@ -2429,11 +2550,17 @@ def _run_received_transfer(offer_id: str) -> None:
             return
         package_path = Path(str(offer['path']))
         manifest = dict(offer['manifest'])
-        offer['status'] = 'importing'
-    try:
-        notice = _apply_import_archive(package_path, manifest)
+        offer.update({'status': 'importing', 'phase': 'validating', 'progress': 0.0})
+
+    def update_progress(phase: str, progress: float) -> None:
         with TRANSFER_LOCK:
-            offer.update({'status': 'ready', 'notice': notice, 'finished_at': datetime.now(timezone.utc).timestamp()})
+            current_offer = TRANSFER_OFFERS.get(offer_id)
+            if current_offer:
+                current_offer.update({'phase': phase, 'progress': round(min(100.0, max(0.0, progress)), 1)})
+    try:
+        notice = _apply_import_archive(package_path, manifest, update_progress)
+        with TRANSFER_LOCK:
+            offer.update({'status': 'ready', 'phase': 'complete', 'progress': 100.0, 'notice': notice, 'finished_at': datetime.now(timezone.utc).timestamp()})
     except Exception as exc:
         with TRANSFER_LOCK:
             offer.update({'status': 'failed', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
@@ -2490,11 +2617,18 @@ def _run_transfer_job(job_id: str) -> None:
                 raise TimeoutError('The destination server did not accept the transfer within one hour.')
 
             with TRANSFER_LOCK:
-                job['status'] = 'exporting'
-            filename = build_export_archive_file(target, package_path, workspace_ids)
+                job.update({'status': 'exporting', 'export_total': estimate_export_bytes(target, workspace_ids), 'exported_bytes': 0, 'progress': 0.0})
+
+            def update_export_progress(written: int) -> None:
+                with TRANSFER_LOCK:
+                    job['exported_bytes'] = int(job.get('exported_bytes') or 0) + written
+                    total = max(int(job.get('export_total') or 1), 1)
+                    job['progress'] = round(min(100.0, job['exported_bytes'] * 100.0 / total), 1)
+
+            filename = build_export_archive_file(target, package_path, workspace_ids, update_export_progress)
             package_size = package_path.stat().st_size
             with TRANSFER_LOCK:
-                job.update({'status': 'transferring', 'filename': filename, 'size': package_size, 'bytes_sent': 0})
+                job.update({'status': 'transferring', 'filename': filename, 'size': package_size, 'bytes_sent': 0, 'progress': 0.0})
 
             def package_chunks() -> Iterable[bytes]:
                 sent = 0
@@ -2503,6 +2637,7 @@ def _run_transfer_job(job_id: str) -> None:
                         sent += len(chunk)
                         with TRANSFER_LOCK:
                             job['bytes_sent'] = sent
+                            job['progress'] = round(sent * 100.0 / max(package_size, 1), 1)
                         yield chunk
 
             response = client.put(
@@ -2515,6 +2650,7 @@ def _run_transfer_job(job_id: str) -> None:
             with TRANSFER_LOCK:
                 job['status'] = 'remote_importing'
                 job['bytes_sent'] = package_size
+                job['progress'] = 0.0
 
             import_deadline = monotonic() + 86400
             while monotonic() < import_deadline:
@@ -2525,9 +2661,11 @@ def _run_transfer_job(job_id: str) -> None:
                 response.raise_for_status()
                 remote_payload = response.json()
                 remote_status = str(remote_payload.get('status') or '')
+                with TRANSFER_LOCK:
+                    job.update({'remote_phase': remote_payload.get('phase') or '', 'progress': float(remote_payload.get('progress') or 0)})
                 if remote_status == 'ready':
                     with TRANSFER_LOCK:
-                        job.update({'status': 'ready', 'notice': remote_payload.get('notice') or 'Transfer imported successfully.', 'finished_at': datetime.now(timezone.utc).timestamp()})
+                        job.update({'status': 'ready', 'progress': 100.0, 'notice': remote_payload.get('notice') or 'Transfer imported successfully.', 'finished_at': datetime.now(timezone.utc).timestamp()})
                     return
                 if remote_status in {'rejected', 'failed', 'expired'}:
                     raise ValueError(remote_payload.get('error') or 'The destination server could not import the package.')
@@ -2573,9 +2711,7 @@ def transfer_job_payload(job_id: str, user: SessionUser) -> dict[str, Any] | Non
         if not job or job.get('owner') != user.username:
             return None
         payload = {key: value for key, value in job.items() if key not in {'owner', 'path'}}
-    size = int(payload.get('size') or 0)
-    sent = int(payload.get('bytes_sent') or 0)
-    payload['progress'] = round(sent * 100 / size, 1) if size else 0
+    payload['progress'] = round(float(payload.get('progress') or 0), 1)
     return payload
 
 
@@ -2710,6 +2846,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             'catalogue_notice': request.query_params.get('catalogue_notice') or None,
             'catalogue_error': request.query_params.get('catalogue_error') or None,
             'export_options': export_options,
+            'recovered_transfer_packages': recovered_transfer_packages() if user.role == 'super-admin' else [],
             'import_export_notice': request.query_params.get('import_export_notice') or None,
             'import_export_error': request.query_params.get('import_export_error') or None,
             'error': error,
@@ -5338,6 +5475,8 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
         'workspaces': [str(value)[:160] for value in payload.get('workspaces', []) if value] if isinstance(payload.get('workspaces'), list) else [],
         'secret_hash': hashlib.sha256(secret.encode('utf-8')).hexdigest(),
         'status': 'pending',
+        'phase': 'awaiting approval',
+        'progress': 0.0,
         'created_at': datetime.now(timezone.utc).timestamp(),
     }
     with TRANSFER_LOCK:
@@ -5358,7 +5497,7 @@ def get_transfer_offer_status(offer_id: str, request: Request) -> JSONResponse:
         offer = TRANSFER_OFFERS.get(offer_id)
         if not offer or not _transfer_offer_secret_matches(offer, secret):
             raise HTTPException(status_code=404, detail='The transfer offer does not exist.')
-        payload = {key: offer.get(key) for key in ('status', 'notice', 'error') if offer.get(key) is not None}
+        payload = {key: offer.get(key) for key in ('status', 'phase', 'progress', 'notice', 'error') if offer.get(key) is not None}
     return JSONResponse(payload)
 
 
@@ -5371,7 +5510,8 @@ async def receive_transfer_package(offer_id: str, request: Request) -> JSONRespo
             raise HTTPException(status_code=404, detail='The transfer offer does not exist.')
         if offer.get('status') != 'accepted':
             raise HTTPException(status_code=409, detail='The transfer has not been accepted by the destination server.')
-        offer['status'] = 'receiving'
+        expected_size = max(int(request.headers.get('Content-Length') or 0), 0)
+        offer.update({'status': 'receiving', 'phase': 'receiving package', 'size': expected_size, 'bytes_received': 0, 'progress': 0.0})
     package_dir = export_package_dir()
     package_dir.mkdir(parents=True, exist_ok=True)
     package_path = package_dir / f'incoming-transfer-{offer_id}.upload'
@@ -5379,11 +5519,16 @@ async def receive_transfer_package(offer_id: str, request: Request) -> JSONRespo
         with package_path.open('wb') as output:
             async for chunk in request.stream():
                 output.write(chunk)
+                with TRANSFER_LOCK:
+                    offer['bytes_received'] = int(offer.get('bytes_received') or 0) + len(chunk)
+                    size = int(offer.get('size') or 0)
+                    if size:
+                        offer['progress'] = round(min(100.0, offer['bytes_received'] * 100.0 / size), 1)
         manifest = read_import_manifest(package_path)
         if str(manifest.get('kind') or '') != str(offer['kind']):
             raise ValueError('The received package type does not match the accepted transfer offer.')
         with TRANSFER_LOCK:
-            offer.update({'path': str(package_path), 'manifest': manifest, 'status': 'received'})
+            offer.update({'path': str(package_path), 'manifest': manifest, 'status': 'received', 'phase': 'package received', 'progress': 100.0})
         Thread(target=_run_received_transfer, args=(offer_id,), name=f'incoming-transfer-{offer_id[:8]}', daemon=True).start()
         return JSONResponse({'offer_id': offer_id, 'status': 'received'})
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
@@ -5409,6 +5554,56 @@ def list_pending_transfer_offers(user: SessionUser = Depends(super_admin_user)) 
     return JSONResponse({'offers': sorted(offers, key=lambda offer: float(offer.get('created_at') or 0))})
 
 
+@app.get('/admin/import-export/transfers/offers/{offer_id}')
+def get_admin_transfer_offer(offer_id: str, user: SessionUser = Depends(super_admin_user)) -> JSONResponse:
+    """Expose safe progress fields to the destination super-admin UI."""
+    with TRANSFER_LOCK:
+        offer = TRANSFER_OFFERS.get(offer_id)
+        if not offer:
+            raise HTTPException(status_code=404, detail='The transfer offer no longer exists.')
+        return JSONResponse({
+            key: offer.get(key)
+            for key in ('id', 'source', 'content', 'status', 'phase', 'progress', 'size', 'bytes_received', 'notice', 'error')
+            if offer.get(key) is not None
+        })
+
+
+@app.get('/admin/import-export/transfers/recoveries')
+def list_recovered_transfer_packages(user: SessionUser = Depends(super_admin_user)) -> JSONResponse:
+    return JSONResponse({'offers': recovered_transfer_packages()})
+
+
+@app.post('/admin/import-export/transfers/recoveries/{offer_id}/import')
+def import_recovered_transfer_package(offer_id: str, user: SessionUser = Depends(super_admin_user)) -> JSONResponse:
+    with TRANSFER_LOCK:
+        offer = TRANSFER_OFFERS.get(offer_id)
+        if not offer or offer.get('status') != 'recovered':
+            raise HTTPException(status_code=404, detail='The recovered transfer package is no longer available.')
+        package_path = Path(str(offer.get('path') or ''))
+        if not package_path.is_file():
+            TRANSFER_OFFERS.pop(offer_id, None)
+            raise HTTPException(status_code=404, detail='The recovered transfer package is no longer available.')
+        offer.update({'status': 'received', 'phase': 'starting recovered import', 'progress': 100.0, 'accepted_by': user.username})
+    Thread(target=_run_received_transfer, args=(offer_id,), name=f'recovered-transfer-{offer_id[:8]}', daemon=True).start()
+    return JSONResponse({'offer_id': offer_id, 'status': 'received'})
+
+
+@app.post('/admin/import-export/transfers/recoveries/{offer_id}/delete')
+def delete_recovered_transfer_package(offer_id: str, user: SessionUser = Depends(super_admin_user)) -> JSONResponse:
+    with TRANSFER_LOCK:
+        offer = TRANSFER_OFFERS.get(offer_id)
+        if not offer or offer.get('status') != 'recovered':
+            raise HTTPException(status_code=404, detail='The recovered transfer package is no longer available.')
+        package_path = Path(str(offer.get('path') or ''))
+        TRANSFER_OFFERS.pop(offer_id, None)
+    package_path.unlink(missing_ok=True)
+    try:
+        repository.add_log(user.username, 'delete_recovered_transfer_package', f'Deleted recovered {offer["content"]} transfer package.')
+    except sqlite3.Error:
+        pass
+    return JSONResponse({'deleted': offer_id})
+
+
 @app.post('/admin/import-export/transfers/offers/{offer_id}/accept')
 def accept_transfer_offer(offer_id: str, user: SessionUser = Depends(super_admin_user)) -> JSONResponse:
     accepted_now = False
@@ -5417,7 +5612,7 @@ def accept_transfer_offer(offer_id: str, user: SessionUser = Depends(super_admin
         if not offer:
             raise HTTPException(status_code=404, detail='The pending transfer offer no longer exists.')
         if offer.get('status') == 'pending':
-            offer.update({'status': 'accepted', 'accepted_by': user.username, 'accepted_at': datetime.now(timezone.utc).timestamp()})
+            offer.update({'status': 'accepted', 'phase': 'waiting for source package', 'accepted_by': user.username, 'accepted_at': datetime.now(timezone.utc).timestamp()})
             accepted_now = True
         elif offer.get('status') not in {'accepted', 'receiving', 'received', 'importing', 'ready'}:
             raise HTTPException(status_code=409, detail='This transfer offer can no longer be accepted.')

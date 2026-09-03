@@ -1169,6 +1169,13 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .loading-spinner { width: 42px; height: 42px; border-radius: 50%; border: 4px solid rgba(11, 122, 117, 0.18); border-top-color: var(--brand); animation: spin 0.95s linear infinite; }
 .loading-progress-shell { margin-top: 1rem; height: 10px; border-radius: 999px; overflow: hidden; background: rgba(16, 49, 74, 0.08); }
 .loading-progress-bar { width: 45%; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--brand), #149d94 52%, #53d7c8); animation: progress-slide 1.4s ease-in-out infinite; }
+.recovered-transfer-packages { display: grid; gap: 0.7rem; margin-top: 1.35rem; padding-top: 1.1rem; border-top: 1px solid rgba(93, 59, 134, 0.2); }
+.recovered-transfer-packages h3 { margin: 0.08rem 0 0.22rem; color: #4b208a; }
+.recovered-transfer-table { min-width: 640px; }
+.recovered-transfer-table th, .recovered-transfer-table td { vertical-align: middle; }
+.recovered-transfer-table td:first-child small { display: block; margin-top: 0.16rem; color: var(--muted); }
+.recovered-transfer-table th:last-child, .recovered-transfer-table td:last-child { width: 104px; }
+.recovered-transfer-table td:nth-child(2) { min-width: 150px; }
 .confirm-overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(9, 17, 24, 0.48); backdrop-filter: blur(12px); z-index: 10000; padding: 1rem; }
 .confirm-overlay[hidden] { display: none !important; }
 .confirm-panel { width: min(92vw, 480px); padding: 1.65rem; border-radius: 28px; background: linear-gradient(180deg, rgba(255, 251, 248, 0.98), rgba(250, 243, 240, 0.96)); box-shadow: 0 40px 90px rgba(18, 32, 43, 0.26); border: 1px solid rgba(255,255,255,0.68); text-align: left; }

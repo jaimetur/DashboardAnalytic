@@ -2865,14 +2865,14 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
           return;
         }
         if (transfer.status === 'failed') throw new Error(transfer.error || 'The destination server could not complete the transfer.');
-        setLoadingProgress(transfer.status === 'transferring' ? transfer.progress : 0);
+        setLoadingProgress(transfer.progress);
         const copies = {
           queued: 'Preparing the connection to the destination server.',
           connecting: 'Connecting to the destination server and creating the transfer request.',
           awaiting_acceptance: 'Waiting for a super-admin on the destination server to accept the transfer.',
-          exporting: 'The destination accepted the transfer. Creating the selected export package.',
+          exporting: `The destination accepted the transfer. Creating the selected export package${transfer.progress ? ` — ${transfer.progress}%` : ''}.`,
           transferring: `Sending the package to the destination server${transfer.progress ? ` — ${transfer.progress}%` : ''}.`,
-          remote_importing: 'Package received. The destination server is importing it automatically.',
+          remote_importing: `Package received. The destination server is ${transfer.remote_phase || 'importing it'}${transfer.progress ? ` — ${transfer.progress}%` : ''}.`,
         };
         if (loadingCopy) loadingCopy.textContent = copies[transfer.status] || 'The server transfer is in progress.';
         window.setTimeout(() => { pollTransfer().catch(handleTransferError); }, 1500);
@@ -2951,6 +2951,36 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
   if (!document.querySelector('[data-server-transfer-listener]')) return;
   let reviewingOffer = false;
   let pollingOffers = false;
+  const pollAcceptedTransfer = async (offerId) => {
+    const response = await fetch(`/admin/import-export/transfers/offers/${encodeURIComponent(offerId)}`, {
+      credentials: 'same-origin', headers: {Accept: 'application/json'}, cache: 'no-store',
+    });
+    const offer = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(offer.detail || 'The transfer status could not be read.');
+    if (offer.status === 'ready') {
+      hideLoadingOverlay();
+      showInfoDialog(offer.notice || 'The incoming transfer was imported successfully.', {title: 'Incoming Transfer Complete', tone: 'info'});
+      return;
+    }
+    if (offer.status === 'failed' || offer.status === 'rejected' || offer.status === 'expired') {
+      throw new Error(offer.error || 'The incoming transfer could not be completed.');
+    }
+    setLoadingProgress(offer.progress);
+    if (loadingCopy) {
+      const progress = offer.progress ? ` — ${offer.progress}%` : '';
+      const copies = {
+        accepted: 'Waiting for the source server to start sending the package',
+        receiving: 'Receiving the package from the source server',
+        received: 'Package received. Starting the import',
+        importing: `Importing the received package${offer.phase ? `: ${offer.phase}` : ''}`,
+      };
+      loadingCopy.textContent = `${copies[offer.status] || 'Incoming transfer in progress'}${progress}.`;
+    }
+    window.setTimeout(() => { pollAcceptedTransfer(offerId).catch((error) => {
+      hideLoadingOverlay();
+      showInfoDialog(error instanceof Error ? error.message : 'The incoming transfer could not be completed.', {title: 'Incoming Transfer Error', tone: 'error'});
+    }); }, 1200);
+  };
   const pollIncomingTransferOffers = async () => {
     if (reviewingOffer || pollingOffers) return;
     pollingOffers = true;
@@ -2982,6 +3012,12 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       if (!decision.ok) {
         const error = await decision.json().catch(() => ({}));
         showInfoDialog(error.detail || 'The transfer decision could not be saved.', {title: 'Incoming Transfer Error'});
+      } else if (accepted) {
+        showLoadingOverlay('Incoming server transfer', 'Waiting for the source server to start sending the package.');
+        pollAcceptedTransfer(offer.id).catch((error) => {
+          hideLoadingOverlay();
+          showInfoDialog(error instanceof Error ? error.message : 'The incoming transfer could not be completed.', {title: 'Incoming Transfer Error', tone: 'error'});
+        });
       }
     } catch (_error) {
       // A transient polling failure should not interrupt the Admin page.
@@ -2990,6 +3026,51 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       pollingOffers = false;
     }
   };
+  document.querySelectorAll('[data-recovered-transfer-import]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const offerId = button.dataset.recoveredTransferImport;
+      if (!offerId) return;
+      button.disabled = true;
+      showLoadingOverlay('Importing recovered transfer', 'Preparing the recovered package for import.');
+      try {
+        const response = await fetch(`/admin/import-export/transfers/recoveries/${encodeURIComponent(offerId)}/import`, {
+          method: 'POST', credentials: 'same-origin', headers: {Accept: 'application/json'},
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.detail || 'The recovered transfer could not be imported.');
+        pollAcceptedTransfer(offerId).catch((error) => {
+          hideLoadingOverlay();
+          showInfoDialog(error instanceof Error ? error.message : 'The recovered transfer could not be imported.', {title: 'Recovered Transfer Error', tone: 'error'});
+        });
+      } catch (error) {
+        hideLoadingOverlay();
+        button.disabled = false;
+        showInfoDialog(error instanceof Error ? error.message : 'The recovered transfer could not be imported.', {title: 'Recovered Transfer Error', tone: 'error'});
+      }
+    });
+  });
+  document.querySelectorAll('[data-recovered-transfer-delete]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const offerId = button.dataset.recoveredTransferDelete;
+      if (!offerId) return;
+      const confirmed = await showConfirmDialog('Delete this recovered transfer package permanently? It will no longer be available to import.', {
+        title: 'Delete recovered package', confirmLabel: 'Delete package', tone: 'danger',
+      });
+      if (!confirmed) return;
+      button.disabled = true;
+      try {
+        const response = await fetch(`/admin/import-export/transfers/recoveries/${encodeURIComponent(offerId)}/delete`, {
+          method: 'POST', credentials: 'same-origin', headers: {Accept: 'application/json'},
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.detail || 'The recovered transfer package could not be deleted.');
+        document.querySelector(`[data-recovered-transfer-row="${CSS.escape(offerId)}"]`)?.remove();
+      } catch (error) {
+        button.disabled = false;
+        showInfoDialog(error instanceof Error ? error.message : 'The recovered transfer package could not be deleted.', {title: 'Recovered Transfer Error', tone: 'error'});
+      }
+    });
+  });
   window.setInterval(pollIncomingTransferOffers, 3000);
   pollIncomingTransferOffers();
 })();

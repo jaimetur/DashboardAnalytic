@@ -174,7 +174,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     login_super(client)
     admin_response = client.get('/admin')
     assert admin_response.status_code == 200
-    assert 'Export/Import' in admin_response.text
+    assert 'Export / Import' in admin_response.text
     assert 'Transfer to other server' in admin_response.text
     assert 'Config</option>' in admin_response.text
     assert 'Config + Slides Templates' in admin_response.text
@@ -370,6 +370,42 @@ def test_admin_import_stream_upload_avoids_multipart_staging(client) -> None:
     assert inspected.json()['kind'] == 'config'
 
 
+def test_recover_complete_transfer_packages_and_remove_incomplete_ones(client, monkeypatch, tmp_path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    package, _ = app_module.build_export_archive('config')
+    complete_path = tmp_path / 'incoming-transfer-complete.upload'
+    incomplete_path = tmp_path / 'incoming-transfer-incomplete.upload'
+    outgoing_path = tmp_path / 'transfer-interrupted.zip'
+    complete_path.write_bytes(package)
+    incomplete_path.write_bytes(b'partial transfer')
+    outgoing_path.write_bytes(b'partial outgoing transfer')
+    monkeypatch.setattr(app_module, 'export_package_dir', lambda: tmp_path)
+    existing_offer_ids = set(app_module.TRANSFER_OFFERS)
+    try:
+        app_module._recover_unimported_transfer_packages()
+        assert not incomplete_path.exists()
+        assert not outgoing_path.exists()
+        recovered = [offer for offer_id, offer in app_module.TRANSFER_OFFERS.items() if offer_id not in existing_offer_ids]
+        assert len(recovered) == 1
+        assert recovered[0]['status'] == 'recovered'
+        assert recovered[0]['content'] == 'Config'
+        assert recovered[0]['workspaces'] == []
+        login_super(client)
+        listed = client.get('/admin/import-export/transfers/recoveries')
+        assert listed.status_code == 200
+        assert recovered[0]['id'] in [offer['id'] for offer in listed.json()['offers']]
+        admin_panel = client.get('/admin')
+        assert 'Recovered transfer packages' in admin_panel.text
+        assert '<th>Workspaces</th>' in admin_panel.text
+        deleted = client.post(f'/admin/import-export/transfers/recoveries/{recovered[0]["id"]}/delete')
+        assert deleted.status_code == 200
+        assert not complete_path.exists()
+    finally:
+        for offer_id in set(app_module.TRANSFER_OFFERS) - existing_offer_ids:
+            app_module.TRANSFER_OFFERS.pop(offer_id, None)
+
+
 def test_incoming_server_transfer_requires_acceptance_and_imports_after_upload(client) -> None:
     secret = 'server-transfer-test-secret-that-is-long-enough'
     headers = {'X-Dashboard-Transfer-Secret': secret}
@@ -394,6 +430,10 @@ def test_incoming_server_transfer_requires_acceptance_and_imports_after_upload(c
     assert [item['id'] for item in pending.json()['offers']] == [offer_id]
     accepted = client.post(f'/admin/import-export/transfers/offers/{offer_id}/accept')
     assert accepted.status_code == 200
+    destination_progress = client.get(f'/admin/import-export/transfers/offers/{offer_id}')
+    assert destination_progress.status_code == 200
+    assert destination_progress.json()['status'] == 'accepted'
+    assert destination_progress.json()['progress'] == 0.0
     repeated_accept = client.post(f'/admin/import-export/transfers/offers/{offer_id}/accept')
     assert repeated_accept.status_code == 200
     assert client.get('/workspace').text.count('data-server-transfer-listener') == 1
@@ -451,8 +491,10 @@ def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(clien
             state['uploaded'] = True
             return FakeResponse({'status': 'received'})
 
-    def fake_export(target, destination, workspace_ids=None):
+    def fake_export(target, destination, workspace_ids=None, progress_callback=None):
         destination.write_bytes(b'streamed-transfer-package')
+        if progress_callback:
+            progress_callback(len(b'streamed-transfer-package'))
         return 'transfer.zip'
 
     monkeypatch.setattr(app_module.httpx, 'Client', FakeClient)
@@ -467,6 +509,7 @@ def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(clien
         time.sleep(0.01)
     assert payload['status'] == 'ready'
     assert payload['destination'] == 'http://destination.example:8080'
+    assert payload['progress'] == 100.0
     assert state['bytes'] == len(b'streamed-transfer-package')
 
 

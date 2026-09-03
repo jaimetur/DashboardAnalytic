@@ -33,9 +33,9 @@ Structural fields such as **Slide**, **Slide Tittle**, **Slide Subtittle** and *
 
 `Layout` must match a named layout in the selected PPT template and provide enough chart placeholders for the number of CDR rows in that slide. The title placeholder receives `Slide Tittle` and its optional blue subtitle; the analyst-comments placeholder stays blank. During report generation the renderer removes inherited template chart examples and inserts calculated charts in the selected layout. Imports/default changes also refresh the NSA/SA Slides Templates tables in the PowerPoint Reporting help page.
 
-## Export/Import
+## Export / Import
 
-**Export/Import**, below Database Management, creates portable ZIP packages and detects their type automatically during import. Exports are prepared as background jobs in `data/transfer-packages/`; the browser starts a direct download only once the ZIP is ready, avoiding browser-memory limits for large workspaces. Temporary packages are removed after 24 hours. A super-admin can also use **Transfer to other server** to contact another Dashboard Analytic URL and port. The destination asks one of its super-admins to accept or reject the offer; after acceptance, the package is streamed to disk and imported automatically when reception finishes.
+**Export / Import**, below Database Management, creates portable ZIP packages and detects their type automatically during import. Exports are prepared as background jobs in `data/transfer-packages/`; the browser starts a direct download only once the ZIP is ready, avoiding browser-memory limits for large workspaces. Temporary packages are removed after 24 hours. A super-admin can also use **Transfer to other server** to contact another Dashboard Analytic URL and port. The destination asks one of its super-admins to accept or reject the offer; after acceptance, the package is streamed to disk and imported automatically when reception finishes.
 
 - **Only Config** exports application configuration but deliberately excludes `workspace-registry.db`, so importing it preserves the destination deployment's workspace list.
 - **Config + Slides Templates** adds the shared `config/slides-templates/` CSV library.
