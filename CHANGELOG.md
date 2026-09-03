@@ -38,6 +38,8 @@
 - Added protected incoming-transfer recovery: incomplete transfer files are removed, while complete unimported packages are listed with their creation time for a super-admin to select and import.
 - Set the default server-transfer destination port to `7278`.
 - Prefilled the server-transfer destination dialog with port `7278` while keeping it editable.
+- Accelerated workspace imports by atomically renaming staged SQLite databases when possible, falling back safely across filesystems, and replacing the full `quick_check` scan with lightweight SQLite validation.
+- Increased archive extraction I/O blocks to reduce overhead while restoring large workspace databases and files.
 
 #### 🐛 Bug fixes:
 - Fixed Reporting CDR multi-select checkmarks after Multivendor review so they match the submitted CDRs.

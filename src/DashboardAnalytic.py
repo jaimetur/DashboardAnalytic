@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import io
 import os
+import errno
 import gc
 import sys
 try:
@@ -2229,7 +2230,7 @@ def _safe_extract_archive(archive: zipfile.ZipFile, destination: Path) -> None:
         target = destination.joinpath(*candidate.parts)
         target.parent.mkdir(parents=True, exist_ok=True)
         with archive.open(member) as source, target.open('wb') as output:
-            shutil.copyfileobj(source, output)
+            shutil.copyfileobj(source, output, length=16 * 1024 * 1024)
 
 
 def _safe_extract_archive_prefix(
@@ -2251,7 +2252,7 @@ def _safe_extract_archive_prefix(
         target = destination.joinpath(*candidate.parts)
         target.parent.mkdir(parents=True, exist_ok=True)
         with archive.open(member) as source, target.open('wb') as output:
-            shutil.copyfileobj(source, output)
+            shutil.copyfileobj(source, output, length=16 * 1024 * 1024)
         if progress_callback:
             progress_callback(member.file_size)
 
@@ -2289,12 +2290,20 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
                 shutil.copytree(source, destination, dirs_exist_ok=True)
             else:
                 destination.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(database_snapshot, workspace.database_path)
+        # The database has already been fully materialised in staging. Keep
+        # the fast same-filesystem rename path so multi-GB workspaces are not
+        # written a second time; fall back to a copy for split Docker volumes.
+        try:
+            os.replace(database_snapshot, workspace.database_path)
+        except OSError as exc:
+            if getattr(exc, 'errno', None) != errno.EXDEV:
+                raise
+            shutil.copy2(database_snapshot, workspace.database_path)
         source_input_dir = workspace_info.get('source_input_dir') if workspace_info else None
         with sqlite3.connect(workspace.database_path) as connection:
+            connection.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
             if source_input_dir:
                 connection.execute('UPDATE datasets SET stored_path = REPLACE(stored_path, ?, ?)', (str(source_input_dir), str(workspace.input_dir)))
-            connection.execute('PRAGMA quick_check').fetchone()
     except Exception:
         workspace_registry.remove(workspace.id)
         repository.remove_workspace_access(workspace.id)
