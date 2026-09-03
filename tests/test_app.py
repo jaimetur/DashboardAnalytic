@@ -381,6 +381,9 @@ def test_incoming_server_transfer_requires_acceptance_and_imports_after_upload(c
     assert [item['id'] for item in pending.json()['offers']] == [offer_id]
     accepted = client.post(f'/admin/import-export/transfers/offers/{offer_id}/accept')
     assert accepted.status_code == 200
+    repeated_accept = client.post(f'/admin/import-export/transfers/offers/{offer_id}/accept')
+    assert repeated_accept.status_code == 200
+    assert client.get('/workspace').text.count('data-server-transfer-listener') == 1
 
     uploaded = client.put(
         f'/api/import-export/transfers/offers/{offer_id}/package',

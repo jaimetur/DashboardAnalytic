@@ -144,6 +144,7 @@
     </div>
   </div>
   {% endif %}
+  {% if user and user.role == 'super-admin' %}<span data-server-transfer-listener hidden></span>{% endif %}
   <script src="{{ static_path('js/app.js') }}?v={{ asset_version('js/app.js') }}"></script>
   {% block extra_scripts %}{% endblock %}
 </body>

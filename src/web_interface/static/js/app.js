@@ -2908,16 +2908,19 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
 });
 
 (() => {
-  if (!document.querySelector('[data-server-transfer-overlay]')) return;
+  if (!document.querySelector('[data-server-transfer-listener]')) return;
   let reviewingOffer = false;
+  let pollingOffers = false;
   const pollIncomingTransferOffers = async () => {
+    if (reviewingOffer || pollingOffers) return;
+    pollingOffers = true;
     try {
       const response = await fetch('/admin/import-export/transfers/offers', {
         credentials: 'same-origin',
         headers: {Accept: 'application/json'},
         cache: 'no-store',
       });
-      if (!response.ok || reviewingOffer) return;
+      if (!response.ok) return;
       const payload = await response.json().catch(() => ({}));
       const offer = Array.isArray(payload.offers) ? payload.offers[0] : null;
       if (!offer) return;
@@ -2944,6 +2947,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       // A transient polling failure should not interrupt the Admin page.
     } finally {
       reviewingOffer = false;
+      pollingOffers = false;
     }
   };
   window.setInterval(pollIncomingTransferOffers, 3000);

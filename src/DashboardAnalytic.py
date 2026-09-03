@@ -5411,15 +5411,21 @@ def list_pending_transfer_offers(user: SessionUser = Depends(super_admin_user)) 
 
 @app.post('/admin/import-export/transfers/offers/{offer_id}/accept')
 def accept_transfer_offer(offer_id: str, user: SessionUser = Depends(super_admin_user)) -> JSONResponse:
+    accepted_now = False
     with TRANSFER_LOCK:
         offer = TRANSFER_OFFERS.get(offer_id)
-        if not offer or offer.get('status') != 'pending':
+        if not offer:
             raise HTTPException(status_code=404, detail='The pending transfer offer no longer exists.')
-        offer.update({'status': 'accepted', 'accepted_by': user.username, 'accepted_at': datetime.now(timezone.utc).timestamp()})
-    try:
-        repository.add_log(user.username, 'accept_server_transfer', f'Accepted incoming {offer["content"]} transfer from {offer["source"]}.')
-    except sqlite3.Error:
-        pass
+        if offer.get('status') == 'pending':
+            offer.update({'status': 'accepted', 'accepted_by': user.username, 'accepted_at': datetime.now(timezone.utc).timestamp()})
+            accepted_now = True
+        elif offer.get('status') not in {'accepted', 'receiving', 'received', 'importing', 'ready'}:
+            raise HTTPException(status_code=409, detail='This transfer offer can no longer be accepted.')
+    if accepted_now:
+        try:
+            repository.add_log(user.username, 'accept_server_transfer', f'Accepted incoming {offer["content"]} transfer from {offer["source"]}.')
+        except sqlite3.Error:
+            pass
     return JSONResponse({'accepted': True})
 
 
