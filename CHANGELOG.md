@@ -25,7 +25,6 @@
 - Added safe red circular Stop actions for processing Reports Jobs and Charts Jobs, including cooperative cancellation and partial-output cleanup; queued and stopped Charts Jobs can also be deleted.
 - Enabled stopped Reports Jobs and Charts Jobs retries, and changed failed Charts Jobs retries to reuse their existing row instead of creating a duplicate job.
 - Added confirmed completed-job relaunch for Reports Jobs and Charts Jobs: prior output is deleted, the same row is reused and the job is queued again.
-- Serialized Report and Charts rendering per workspace, streamed CDR types and PNGs to lower peak memory usage, and retried/logged isolated empty chart placeholders.
 
 #### 🐛 Bug fixes:
 - Fixed Reporting CDR multi-select checkmarks after Multivendor review so they match the submitted CDRs.
@@ -35,6 +34,7 @@
 - Fixed Slides Templates Editor picker/registry state and prevented unregistered library CSVs appearing as phantom templates.
 - Fixed long Cell Assistance lists to open as compact, scrollable menus within the visible editor area.
 - Fixed completed Charts Jobs relaunch/row reuse and Reports Jobs table width; standardised relaunch controls in English and strengthened Report Charts selector rows.
+- Fixed incomplete or empty Report Charts and PowerPoint charts on resource-constrained servers by serialising rendering per workspace, streaming CDR types and PNGs to reduce peak memory, and retrying/logging isolated empty chart placeholders.
 
 #### 📚 Documentation:
 - Rewrote the PowerPoint Reporting help as static guidance for building Slides Templates, including field-by-field instructions and practical recipes for every chart type, filters, aggregations, legends, structural slides, operators and output jobs.
