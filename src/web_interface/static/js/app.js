@@ -2695,8 +2695,62 @@ function selectFullEnvironmentWorkspaces() {
   });
 }
 
+function selectTransferDestination() {
+  const overlay = document.querySelector('[data-server-transfer-overlay]');
+  if (!(overlay instanceof HTMLElement)) return Promise.resolve(null);
+  const url = overlay.querySelector('[data-server-transfer-url]');
+  const port = overlay.querySelector('[data-server-transfer-port]');
+  const error = overlay.querySelector('[data-server-transfer-error]');
+  const accept = overlay.querySelector('[data-server-transfer-connect]');
+  const cancel = overlay.querySelector('[data-server-transfer-cancel]');
+  overlay.hidden = false;
+  document.body.classList.add('loading-active');
+  if (error instanceof HTMLElement) error.hidden = true;
+  return new Promise((resolve) => {
+    const close = (value) => {
+      overlay.hidden = true;
+      document.body.classList.remove('loading-active');
+      accept?.removeEventListener('click', submit);
+      cancel?.removeEventListener('click', dismiss);
+      overlay.removeEventListener('click', backdrop);
+      window.removeEventListener('keydown', keyboard);
+      resolve(value);
+    };
+    const submit = () => {
+      const destinationUrl = url instanceof HTMLInputElement ? url.value.trim() : '';
+      const destinationPort = port instanceof HTMLInputElement ? port.value.trim() : '';
+      if (!destinationUrl) {
+        if (error instanceof HTMLElement) {
+          error.textContent = 'Enter the destination server URL or IP address.';
+          error.hidden = false;
+        }
+        url?.focus();
+        return;
+      }
+      if (destinationPort && (Number(destinationPort) < 1 || Number(destinationPort) > 65535)) {
+        if (error instanceof HTMLElement) {
+          error.textContent = 'The port must be between 1 and 65535.';
+          error.hidden = false;
+        }
+        port?.focus();
+        return;
+      }
+      close({destinationUrl, destinationPort});
+    };
+    const dismiss = () => close(null);
+    const backdrop = (event) => { if (event.target === overlay) dismiss(); };
+    const keyboard = (event) => { if (event.key === 'Escape') dismiss(); };
+    accept?.addEventListener('click', submit);
+    cancel?.addEventListener('click', dismiss);
+    overlay.addEventListener('click', backdrop);
+    window.addEventListener('keydown', keyboard);
+    url?.focus();
+  });
+}
+
 document.querySelectorAll('[data-export-package-form]').forEach((form) => {
   const exportTarget = form.querySelector('select[name="export_target"]');
+  const transferButton = form.querySelector('[data-server-transfer]');
   let selectedFullWorkspaceIds = null;
   exportTarget?.addEventListener('change', async () => {
     if (!(exportTarget instanceof HTMLSelectElement) || exportTarget.value !== 'full-environment') {
@@ -2710,6 +2764,65 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       return;
     }
     selectedFullWorkspaceIds = selection;
+  });
+  transferButton?.addEventListener('click', async () => {
+    if (!(form instanceof HTMLFormElement)) return;
+    const formData = new FormData(form);
+    if (formData.get('export_target') === 'full-environment') {
+      const workspaceIds = selectedFullWorkspaceIds || await selectFullEnvironmentWorkspaces();
+      if (workspaceIds === null) return;
+      selectedFullWorkspaceIds = workspaceIds;
+      workspaceIds.forEach((workspaceId) => formData.append('workspace_ids', workspaceId));
+    }
+    const destination = await selectTransferDestination();
+    if (!destination) return;
+    formData.set('destination_url', destination.destinationUrl);
+    if (destination.destinationPort) formData.set('destination_port', destination.destinationPort);
+    showLoadingOverlay('Contacting destination server', 'Checking whether the destination server accepts the selected export.');
+    const handleTransferError = (error) => {
+      hideLoadingOverlay();
+      showInfoDialog(error instanceof Error ? error.message : 'The server transfer could not be completed.', {
+        title: 'Server Transfer Error',
+        tone: 'error',
+      });
+    };
+    try {
+      const response = await fetch('/admin/import-export/transfers/jobs', {
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin',
+        headers: {Accept: 'application/json'},
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.status_url) throw new Error(payload.detail || 'The transfer could not be started.');
+      const pollTransfer = async () => {
+        const statusResponse = await fetch(payload.status_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}});
+        const transfer = await statusResponse.json().catch(() => ({}));
+        if (!statusResponse.ok) throw new Error(transfer.detail || 'The transfer status could not be read.');
+        if (transfer.status === 'ready') {
+          hideLoadingOverlay();
+          showInfoDialog(transfer.notice || 'The destination server received and imported the package successfully.', {
+            title: 'Server Transfer Complete',
+            tone: 'info',
+          });
+          return;
+        }
+        if (transfer.status === 'failed') throw new Error(transfer.error || 'The destination server could not complete the transfer.');
+        const copies = {
+          queued: 'Preparing the connection to the destination server.',
+          connecting: 'Connecting to the destination server and creating the transfer request.',
+          awaiting_acceptance: 'Waiting for a super-admin on the destination server to accept the transfer.',
+          exporting: 'The destination accepted the transfer. Creating the selected export package.',
+          transferring: `Sending the package to the destination server${transfer.progress ? ` — ${transfer.progress}%` : ''}.`,
+          remote_importing: 'Package received. The destination server is importing it automatically.',
+        };
+        if (loadingCopy) loadingCopy.textContent = copies[transfer.status] || 'The server transfer is in progress.';
+        window.setTimeout(() => { pollTransfer().catch(handleTransferError); }, 1500);
+      };
+      pollTransfer().catch(handleTransferError);
+    } catch (error) {
+      handleTransferError(error);
+    }
   });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -2772,6 +2885,49 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
     }
   });
 });
+
+(() => {
+  if (!document.querySelector('[data-server-transfer-overlay]')) return;
+  let reviewingOffer = false;
+  const pollIncomingTransferOffers = async () => {
+    try {
+      const response = await fetch('/admin/import-export/transfers/offers', {
+        credentials: 'same-origin',
+        headers: {Accept: 'application/json'},
+        cache: 'no-store',
+      });
+      if (!response.ok || reviewingOffer) return;
+      const payload = await response.json().catch(() => ({}));
+      const offer = Array.isArray(payload.offers) ? payload.offers[0] : null;
+      if (!offer) return;
+      reviewingOffer = true;
+      const workspaceCopy = Array.isArray(offer.workspaces) && offer.workspaces.length
+        ? `\nWorkspaces: ${offer.workspaces.join(', ')}`
+        : '';
+      const sourceAddress = offer.source_address ? ` (${offer.source_address})` : '';
+      const accepted = await showConfirmDialog(
+        `${offer.source}${sourceAddress} wants to transfer “${offer.content}” to this server.${workspaceCopy}\n\nAfter the complete package is received, it will be imported automatically and may overwrite matching configuration or workspaces.`,
+        {title: 'Incoming server transfer', confirmLabel: 'Accept transfer', cancelLabel: 'Reject'},
+      );
+      const action = accepted ? 'accept' : 'reject';
+      const decision = await fetch(`/admin/import-export/transfers/offers/${encodeURIComponent(offer.id)}/${action}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {Accept: 'application/json'},
+      });
+      if (!decision.ok) {
+        const error = await decision.json().catch(() => ({}));
+        showInfoDialog(error.detail || 'The transfer decision could not be saved.', {title: 'Incoming Transfer Error'});
+      }
+    } catch (_error) {
+      // A transient polling failure should not interrupt the Admin page.
+    } finally {
+      reviewingOffer = false;
+    }
+  };
+  window.setInterval(pollIncomingTransferOffers, 3000);
+  pollIncomingTransferOffers();
+})();
 
 document.querySelectorAll('form[data-loading-label]').forEach((form) => {
   form.addEventListener('submit', (event) => {

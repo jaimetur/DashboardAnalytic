@@ -211,8 +211,11 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .import-export-grid .form-stack { display: grid; grid-template-rows: auto auto 1fr auto; padding: 1rem; border: 1px solid rgba(20, 81, 112, 0.16); border-radius: 14px; background: rgba(255, 255, 255, 0.68); }
 .import-export-grid .form-note { margin: 0; padding: 0.72rem 0; align-self: start; }
 .import-export-grid h3 { margin: 0; color: #174966; }
+.import-export-actions { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; }
 .admin-stack .import-export-action { justify-self: start; background: linear-gradient(135deg, #155d83, #248caf); border-color: rgba(15, 73, 105, 0.64); }
 .admin-stack .import-export-action:hover:not(:disabled) { background: linear-gradient(135deg, #104966, #1c7190); }
+.admin-stack .server-transfer-action { background: linear-gradient(135deg, #8f2932, #c24a4d); border-color: rgba(126, 31, 39, 0.60); }
+.admin-stack .server-transfer-action:hover:not(:disabled) { background: linear-gradient(135deg, #752029, #a93a40); }
 .import-export-notice { color: #075d59; background: rgba(11, 122, 117, 0.10); border-color: rgba(11, 122, 117, 0.26); }
 .import-export-error { color: #7d2731; background: rgba(201, 76, 75, 0.12); border-color: rgba(139, 29, 36, 0.26); }
 .full-environment-workspace-dialog { width: min(92vw, 560px); }
@@ -233,6 +236,17 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .full-environment-workspace-choice:hover { background: rgba(36, 140, 175, 0.10); }
 .full-environment-workspace-choice input { width: 1.05rem; height: 1.05rem; margin: 0; accent-color: #155d83; }
 .full-environment-workspace-error { margin-top: 0.7rem !important; color: #a3313d !important; font-weight: 700; }
+.server-transfer-overlay { background: transparent !important; backdrop-filter: none !important; z-index: 10002; }
+.server-transfer-dialog { width: min(92vw, 620px); }
+.server-transfer-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, 0.28fr); gap: 0.8rem; margin-top: 1.1rem; }
+.admin-stack .server-transfer-fields label { color: #7d2731; }
+.admin-stack .server-transfer-fields input { width: 100%; box-sizing: border-box; background: #fff; }
+.server-transfer-error { margin-top: 0.75rem !important; color: #a3313d !important; font-weight: 700; }
+.admin-stack .server-transfer-dialog [data-server-transfer-connect] { background: linear-gradient(135deg, #8f2932, #c24a4d); border-color: rgba(126, 31, 39, 0.60); color: #fff; }
+.admin-stack .server-transfer-dialog [data-server-transfer-connect]:hover:not(:disabled) { background: linear-gradient(135deg, #752029, #a93a40); }
+.admin-stack .server-transfer-dialog [data-server-transfer-cancel] { background: #edf1f3; border-color: rgba(68, 81, 93, 0.24); color: #36505f; box-shadow: none; }
+.admin-stack .server-transfer-dialog [data-server-transfer-cancel]:hover:not(:disabled) { background: #dce5e9; color: #263f4c; }
+@media (max-width: 640px) { .server-transfer-fields { grid-template-columns: 1fr; } }
 .database-management-panel { border-color: rgba(139, 29, 36, 0.22); background: linear-gradient(135deg, rgba(255, 247, 246, 0.94), rgba(255, 255, 255, 0.96)); }
 .admin-stack [data-panel-state-key="admin:identity"], .admin-stack .report-catalogue-panel,
 .admin-stack .slides-templates-editor-panel, .admin-stack [data-panel-state-key="admin:datasets"] {

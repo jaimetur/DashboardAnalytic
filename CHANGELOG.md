@@ -14,6 +14,7 @@
 - Added a full-size filtered-dataset overlay above the chart preview, with Excel-style column filters and first/previous/next/last pagination.
 - Added editable generated-chart previews to Slides Templates Editor rows: Update Template applies the current Interactive Preview values to that in-memory row for the normal save workflow.
 - Added the Chart Builder workspace tab for creating temporary charts from one or more selected processed CDR Sources, using the shared Interactive Preview controls.
+- Added approved server-to-server configuration transfers: the source connects to a destination URL and port, waits for destination super-admin acceptance, streams the selected export and triggers its automatic disk-backed import on receipt.
 
 #### 🚀 Enhancements:
 - Added the Open/eye actions for Charts Jobs and automatic opening/scrolling to the corresponding Chart Set when a new or retried Charts Job completes.

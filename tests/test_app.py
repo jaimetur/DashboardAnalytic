@@ -175,7 +175,8 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     login_super(client)
     admin_response = client.get('/admin')
     assert admin_response.status_code == 200
-    assert 'Import/Export' in admin_response.text
+    assert 'Export/Import' in admin_response.text
+    assert 'Transfer to other server' in admin_response.text
     assert 'Config</option>' in admin_response.text
     assert 'Config + Slides Templates' in admin_response.text
     assert 'Workspace: Default Workspace' in admin_response.text
@@ -353,6 +354,103 @@ def test_admin_import_job_reuses_the_inspected_disk_upload(client) -> None:
         time.sleep(0.01)
     assert payload['status'] == 'ready'
     assert 'Configuration imported successfully' in payload['notice']
+
+
+def test_incoming_server_transfer_requires_acceptance_and_imports_after_upload(client) -> None:
+    secret = 'server-transfer-test-secret-that-is-long-enough'
+    headers = {'X-Dashboard-Transfer-Secret': secret}
+    offer = client.post(
+        '/api/import-export/transfers/offers',
+        headers=headers,
+        json={'source': 'Test source', 'archive_version': 1, 'kind': 'config', 'content': 'config', 'workspaces': []},
+    )
+    assert offer.status_code == 200
+    offer_id = offer.json()['offer_id']
+
+    login_super(client)
+    exported = client.get('/admin/import-export/export?export_target=config')
+    blocked_upload = client.put(
+        f'/api/import-export/transfers/offers/{offer_id}/package',
+        headers={**headers, 'Content-Type': 'application/zip'},
+        content=exported.content,
+    )
+    assert blocked_upload.status_code == 409
+
+    pending = client.get('/admin/import-export/transfers/offers')
+    assert [item['id'] for item in pending.json()['offers']] == [offer_id]
+    accepted = client.post(f'/admin/import-export/transfers/offers/{offer_id}/accept')
+    assert accepted.status_code == 200
+
+    uploaded = client.put(
+        f'/api/import-export/transfers/offers/{offer_id}/package',
+        headers={**headers, 'Content-Type': 'application/zip'},
+        content=exported.content,
+    )
+    assert uploaded.status_code == 200
+    payload = {}
+    for _ in range(100):
+        payload = client.get(f'/api/import-export/transfers/offers/{offer_id}', headers=headers).json()
+        if payload['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.01)
+    assert payload['status'] == 'ready'
+    assert 'Configuration imported successfully' in payload['notice']
+
+
+def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    state = {'uploaded': False, 'bytes': 0}
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def post(self, *args, **kwargs):
+            return FakeResponse({'offer_id': 'remote-offer'})
+
+        def get(self, *args, **kwargs):
+            return FakeResponse({'status': 'ready', 'notice': 'Imported remotely.'} if state['uploaded'] else {'status': 'accepted'})
+
+        def put(self, *args, **kwargs):
+            for chunk in kwargs['content']:
+                state['bytes'] += len(chunk)
+            state['uploaded'] = True
+            return FakeResponse({'status': 'received'})
+
+    def fake_export(target, destination, workspace_ids=None):
+        destination.write_bytes(b'streamed-transfer-package')
+        return 'transfer.zip'
+
+    monkeypatch.setattr(app_module.httpx, 'Client', FakeClient)
+    monkeypatch.setattr(app_module, 'build_export_archive_file', fake_export)
+    user = app_module.SessionUser(username='super', role='super-admin')
+    job = app_module.start_transfer_job('http://destination.example', 8080, 'config', None, user)
+    payload = {}
+    for _ in range(100):
+        payload = app_module.transfer_job_payload(job['id'], user)
+        if payload['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.01)
+    assert payload['status'] == 'ready'
+    assert payload['destination'] == 'http://destination.example:8080'
+    assert state['bytes'] == len(b'streamed-transfer-package')
 
 
 def test_admin_import_export_is_limited_to_slides_templates(client) -> None:

@@ -331,7 +331,7 @@
     <summary class="collapsible-summary">
       <div>
         <p class="eyebrow">Portability and backup</p>
-        <h2>Import/Export</h2>
+        <h2>Export/Import</h2>
       </div>
       <span class="collapse-chip">Collapse</span>
     </summary>
@@ -341,13 +341,16 @@
     <div class="import-export-grid">
       <form class="form-stack" action="/admin/import-export/export/jobs" method="post" data-export-package-form data-loading-label="Preparing export package" data-loading-copy="Please wait while Dashboard Analytic creates the selected export package. You can keep this page open while it runs.">
         <h3>Export</h3>
-        <label>Content to export
-          <select name="export_target" aria-label="Content to export">
+        <label>Content to export/transfer
+          <select name="export_target" aria-label="Content to export or transfer">
             {% for option in export_options %}<option value="{{ option.value }}" {% if option.disabled | default(false) %}disabled{% endif %}>{{ option.label }}</option>{% endfor %}
           </select>
         </label>
         <p class="form-note">{% if user.role == 'super-admin' %}Choose configuration, Slides Templates, one workspace or the complete environment.{% else %}Only shared Slides Templates can be exported by an admin account.{% endif %}</p>
-        <button type="submit" class="import-export-action">Export ZIP</button>
+        <div class="import-export-actions">
+          <button type="submit" class="import-export-action">Export ZIP</button>
+          {% if user.role == 'super-admin' %}<button type="button" class="server-transfer-action" data-server-transfer>Transfer to other server</button>{% endif %}
+        </div>
       </form>
       <form class="form-stack" action="/admin/import-export/import" method="post" enctype="multipart/form-data" data-import-export-form>
         <h3>Import</h3>
@@ -385,6 +388,28 @@
       <div class="confirm-actions">
         <button type="button" class="ghost-link confirm-cancel" data-full-environment-cancel>Cancel</button>
         <button type="button" data-full-environment-accept>Export selected</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="confirm-overlay server-transfer-overlay" data-server-transfer-overlay hidden>
+    <div class="confirm-panel server-transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="server-transfer-title">
+      <div class="confirm-icon info-icon" aria-hidden="true">⇄</div>
+      <p class="eyebrow">Server-to-server transfer</p>
+      <h3 id="server-transfer-title">Destination server</h3>
+      <p>The destination super-admin will be asked to accept this transfer before the export package is created and sent. Use HTTPS, or HTTP only on a trusted private network.</p>
+      <div class="server-transfer-fields">
+        <label>Server URL or IP
+          <input type="text" inputmode="url" placeholder="https://dashboard.example.com or 192.168.1.20" data-server-transfer-url>
+        </label>
+        <label>Port
+          <input type="number" min="1" max="65535" placeholder="Optional" data-server-transfer-port>
+        </label>
+      </div>
+      <p class="server-transfer-error" data-server-transfer-error hidden></p>
+      <div class="confirm-actions">
+        <button type="button" class="ghost-link confirm-cancel" data-server-transfer-cancel>Cancel</button>
+        <button type="button" data-server-transfer-connect>Connect and request approval</button>
       </div>
     </div>
   </div>

@@ -26,7 +26,7 @@ Inspect running services with `docker compose -f docker/docker-compose.yml ps` a
 
 ## Persistent data
 
-The workspace registry, shared Slides Templates library, workspace databases, uploaded sources and exports must persist outside the container filesystem. The compose configuration mounts both `config/` and `data/`; confirm that the host directories are writable by Docker and included in the backup policy. In particular, back up `config/slides-templates/` and the complete `data/workspaces/` tree (including `workspace-registry.db`). Admin **Import/Export** can also produce portable ZIP backups.
+The workspace registry, shared Slides Templates library, workspace databases, uploaded sources and exports must persist outside the container filesystem. The compose configuration mounts both `config/` and `data/`; confirm that the host directories are writable by Docker and included in the backup policy. In particular, back up `config/slides-templates/` and the complete `data/workspaces/` tree (including `workspace-registry.db`). Admin **Export/Import** can also produce portable ZIP backups or transfer selected content to another server after destination approval.
 
 Before the first production start, set a private `APP_SECRET_KEY`, a non-default administrator password and the required storage paths in `docker/.env`. See [Configuration](01-configuration-file.md) for the variable reference.
 
