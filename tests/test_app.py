@@ -1901,17 +1901,11 @@ def test_non_admin_navigation_hides_admin_tab(client) -> None:
     assert 'User: demo' in workspace.text
 
 
-def test_admin_imports_report_catalogue_and_synchronizes_help(client, tmp_path, monkeypatch) -> None:
+def test_admin_imports_report_catalogue(client) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
     import src.DashboardAnalytic as app_module
 
     login(client)
-    help_document = tmp_path / 'powerpoint-reporting.md'
-    help_document.write_text(
-        '# Reporting\n\n<!-- SLIDES_TEMPLATES:START -->\nold\n<!-- SLIDES_TEMPLATES:END -->\n',
-        encoding='utf-8',
-    )
-    monkeypatch.setattr(app_module, 'REPORT_CATALOGUE_DOCUMENT', help_document)
     content = (
         ','.join(CATALOG_HEADERS)
         + '\n8,Completed Call Ratio,Voice quality,Title and 1 column + Comments,Completed call ratio,CDR-Voice,Call_Status,100% Stacked Vertical Bars,Call Family = VoLTE,Operator,Campaign,Completed/Dropped/Failed,\n'
@@ -1926,7 +1920,6 @@ def test_admin_imports_report_catalogue_and_synchronizes_help(client, tmp_path, 
 
     assert response.status_code == 303
     assert app_module.reporting_catalog_path('nsa').read_bytes() == content
-    assert 'Completed Call Ratio' in help_document.read_text(encoding='utf-8')
 
     exported = client.get('/admin/report-templates/nsa/export')
     assert exported.status_code == 200
@@ -1970,13 +1963,10 @@ def test_importing_an_existing_template_requires_explicit_overwrite(client) -> N
     assert 'Replacement' in app_module.reporting_catalog_path('nsa').read_text(encoding='utf-8')
 
 
-def test_admin_import_converts_a_legacy_catalogue_when_requested(client, tmp_path, monkeypatch) -> None:
+def test_admin_import_converts_a_legacy_catalogue_when_requested(client) -> None:
     import src.DashboardAnalytic as app_module
 
     login(client)
-    help_document = tmp_path / 'powerpoint-reporting.md'
-    help_document.write_text('# Reporting\n\n<!-- SLIDES_TEMPLATES:START -->\nold\n<!-- SLIDES_TEMPLATES:END -->\n', encoding='utf-8')
-    monkeypatch.setattr(app_module, 'REPORT_CATALOGUE_DOCUMENT', help_document)
     legacy = (
         'Slide,Slide title,Slide subtitle,Layout,CDR Source,KPI,Chart Type,Filters,Grouping\n'
         '8,Legacy quality,,Title and 1 column + Comments,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator × Campaign\n'
@@ -1995,14 +1985,11 @@ def test_admin_import_converts_a_legacy_catalogue_when_requested(client, tmp_pat
     assert 'Legacy quality' in stored
 
 
-def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(client, tmp_path, monkeypatch) -> None:
+def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(client) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
     import src.DashboardAnalytic as app_module
 
     login(client)
-    help_document = tmp_path / 'powerpoint-reporting.md'
-    help_document.write_text('# Reporting\n\n<!-- SLIDES_TEMPLATES:START -->\nold\n<!-- SLIDES_TEMPLATES:END -->\n', encoding='utf-8')
-    monkeypatch.setattr(app_module, 'REPORT_CATALOGUE_DOCUMENT', help_document)
     first = (','.join(CATALOG_HEADERS) + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n').encode('utf-8')
     second = (','.join(CATALOG_HEADERS) + '\n8,Second,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n').encode('utf-8')
 
@@ -2112,14 +2099,11 @@ def test_admin_catalogue_rename_supports_background_json_save(client) -> None:
     assert next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'Renamed default')['name'] == 'Renamed default'
 
 
-def test_admin_renaming_named_catalogue_renames_its_csv_file(client, tmp_path, monkeypatch) -> None:
+def test_admin_renaming_named_catalogue_renames_its_csv_file(client) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
     import src.DashboardAnalytic as app_module
 
     login(client)
-    help_document = tmp_path / 'powerpoint-reporting.md'
-    help_document.write_text('# Reporting\n\n<!-- SLIDES_TEMPLATES:START -->\nold\n<!-- SLIDES_TEMPLATES:END -->\n', encoding='utf-8')
-    monkeypatch.setattr(app_module, 'REPORT_CATALOGUE_DOCUMENT', help_document)
     content = (
         ','.join(CATALOG_HEADERS)
         + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'

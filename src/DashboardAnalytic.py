@@ -34,7 +34,7 @@ from starlette.background import BackgroundTask
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report, update_catalogue_document
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
@@ -53,6 +53,7 @@ DATASET_PROCESSING_LOCKS: dict[str, Lock] = {}
 DATASET_PROCESSING_LOCKS_LOCK = Lock()
 REPORT_CHART_JOB_LOCKS: dict[str, Lock] = {}
 REPORT_CHART_JOB_LOCKS_LOCK = Lock()
+TEMPLATE_SAVE_LOCK = Lock()
 EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 EXPORT_JOBS_LOCK = Lock()
 EXPORT_PACKAGE_TTL = timedelta(hours=24)
@@ -210,7 +211,6 @@ HELP_DOCUMENT_LABELS = {
     '04-e2e-dashboard-analysis.md': 'E2E Dashboard',
     '05-e2e-ppt-reporting.md': 'E2E PowerPoint Reporting',
 }
-REPORT_CATALOGUE_DOCUMENT = PROJECT_ROOT / 'help' / '05-e2e-ppt-reporting.md'
 
 
 def help_document_number(relative_path: str) -> str | None:
@@ -251,6 +251,21 @@ def template_filename(name: str) -> str:
 def template_download_filename(name: str) -> str:
     """Return the CSV filename shown to the user when exporting a template."""
     return template_filename(name).replace('"', '')
+
+
+def atomic_write_template(path: Path, content: bytes) -> None:
+    """Replace a template CSV atomically, never exposing a partial file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f'.{path.name}.', suffix='.tmp', dir=path.parent)
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, 'wb') as output:
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def named_catalogue_path(technology: str, identifier: str, template_name: str | None = None) -> Path:
@@ -457,14 +472,6 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
             'columns': columns,
         },
     }
-
-
-def synchronize_reporting_catalogue_document() -> None:
-    update_catalogue_document(
-        REPORT_CATALOGUE_DOCUMENT,
-        reporting_catalog_entries('nsa'),
-        reporting_catalog_entries('sa'),
-    )
 
 
 def synchronize_reporting_row_store() -> None:
@@ -4831,7 +4838,10 @@ def _import_report_catalogue(
         else:
             repository.add_report_template(technology, identifier)
             promote_report_template_to_default(technology, identifier)
-        synchronize_reporting_catalogue_document()
+        # Keep the registry aligned with the files promoted by this import.
+        # This is intentionally limited to the template library; it no longer
+        # rebuilds the PowerPoint help document.
+        synchronize_template_file_names(technology)
     except Exception as exc:
         repository.add_log(user.username, 'import_report_template_failed', json.dumps({
             'technology': technology,
@@ -4893,7 +4903,6 @@ def activate_report_catalogue(
     if catalogue_id not in available:
         return render_admin_template(request, user, error='Slides Template not found.', status_code=404)
     promote_report_template_to_default(technology, catalogue_id)
-    synchronize_reporting_catalogue_document()
     repository.add_log(user.username, 'activate_report_template', json.dumps({
         'technology': technology,
         'template': available[catalogue_id]['name'],
@@ -4944,7 +4953,6 @@ def change_report_catalogue_type(
         destination_path.parent.mkdir(parents=True, exist_ok=True)
         source_path.rename(destination_path)
         repository.move_report_template(technology, catalogue_id, target_technology)
-        synchronize_reporting_catalogue_document()
     except ValueError as exc:
         return render_admin_template(request, user, error=str(exc), status_code=400)
     repository.add_log(user.username, 'change_report_template_type', json.dumps({
@@ -5087,9 +5095,37 @@ def delete_report_catalogue(
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 
+def finalize_template_save(
+    task_repository: Repository,
+    username: str,
+    technology: str,
+    template_name: str,
+    chart_rows: int,
+) -> None:
+    """Update metadata/audit after the template file is safely available."""
+    try:
+        task_repository.touch_report_template(technology, template_name)
+    except (sqlite3.Error, OSError) as exc:
+        warnings.warn(f'Unable to update Slides Template metadata: {exc}', RuntimeWarning)
+        try:
+            task_repository.add_log(username, 'save_report_template_metadata_failed', json.dumps({
+                'technology': technology, 'template': template_name, 'error': str(exc),
+            }))
+        except (sqlite3.Error, OSError) as log_exc:
+            warnings.warn(f'Unable to log Slides Template metadata failure: {log_exc}', RuntimeWarning)
+        return
+    try:
+        task_repository.add_log(username, 'save_report_template', json.dumps({
+            'technology': technology, 'template': template_name, 'chart_rows': chart_rows,
+        }))
+    except (sqlite3.Error, OSError) as exc:
+        warnings.warn(f'Unable to log Slides Template save: {exc}', RuntimeWarning)
+
+
 @app.post('/admin/report-templates/{technology}/{catalogue_id}/save')
 def save_report_catalogue(
     request: Request,
+    background_tasks: BackgroundTasks,
     technology: str,
     catalogue_id: str,
     catalogue_content: str = Form(...),
@@ -5099,41 +5135,41 @@ def save_report_catalogue(
     technology = technology.strip().lower()
     if technology not in TEMPLATE_NAMES:
         raise HTTPException(status_code=404, detail='Report technology not found')
-    catalogue = next((item for item in report_catalogue_options(technology) if item['identifier'] == catalogue_id), None)
-    if not catalogue:
-        if wants_json:
-            return JSONResponse({'detail': 'Slides Template not found.'}, status_code=404)
-        return render_admin_template(request, user, error='Slides Template not found.', status_code=404)
     try:
-        entries = parse_catalog_csv(catalogue_content, technology)
-        entries = [entry for _index, entry in sorted(enumerate(entries), key=lambda item: (item[1].slide, item[0]))]
-        catalogue['path'].parent.mkdir(parents=True, exist_ok=True)
-        catalogue['path'].write_bytes(catalogue_csv(entries))
-        if catalogue['active']:
-            default_path = default_report_slides_template_path(technology, catalogue['name'])
-            # The selected default is edited through its active mirror. Keep
-            # the canonical library copy byte-for-byte aligned with it.
-            if catalogue['path'] == default_path:
-                default_name = catalogue['name']
-                library_path = named_catalogue_path(technology, catalogue_registry_key(default_name), default_name)
-                library_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(default_path, library_path)
-            synchronize_reporting_catalogue_document()
-        repository.touch_report_template(technology, catalogue_id)
+        metadata = next((row for row in repository.list_report_templates(technology) if str(row['name']) == catalogue_id), None)
+        if not metadata:
+            raise FileNotFoundError('Slides Template not found.')
+        template_name = str(metadata['name'])
+        is_default = bool(metadata['is_default'])
+        destination = (
+            default_report_slides_template_path(technology, template_name)
+            if is_default else named_catalogue_path(technology, template_name, template_name)
+        )
+        entries = [entry for _index, entry in sorted(enumerate(parse_catalog_csv(catalogue_content, technology)), key=lambda item: (item[1].slide, item[0]))]
+        content = catalogue_csv(entries)
+        # The lock only covers the short atomic replacements. Expensive
+        # metadata and audit writes run after the response is sent.
+        with TEMPLATE_SAVE_LOCK:
+            if is_default:
+                atomic_write_template(named_catalogue_path(technology, template_name, template_name), content)
+            atomic_write_template(destination, content)
     except ValueError as exc:
         if wants_json:
             return JSONResponse({'detail': str(exc)}, status_code=400)
         return render_admin_template(request, user, error=str(exc), status_code=400)
-    repository.add_log(user.username, 'save_report_template', json.dumps({
-        'technology': technology,
-        'template': catalogue['name'],
-        'chart_rows': sum(1 for entry in entries if entry.source_kind),
-    }))
+    except (FileNotFoundError, OSError, sqlite3.Error) as exc:
+        detail = f'Unable to save the Slides Template: {exc}'
+        if wants_json:
+            return JSONResponse({'detail': detail}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return render_admin_template(request, user, error=detail, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
+    chart_rows = sum(1 for entry in entries if entry.source_kind)
+    task_repository = Repository(Path(repository.db_path), Path(repository.global_db_path))
+    background_tasks.add_task(finalize_template_save, task_repository, user.username, technology, template_name, chart_rows)
     if wants_json:
         return JSONResponse({
-            'template': catalogue['name'],
+            'template': template_name,
             'technology': technology,
-            'chart_rows': sum(1 for entry in entries if entry.source_kind),
+            'chart_rows': chart_rows,
         })
     query = urlencode({'catalogue_technology': technology, 'catalogue_id': catalogue_id})
     return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)

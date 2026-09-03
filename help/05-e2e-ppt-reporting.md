@@ -1,151 +1,282 @@
 # 5. E2E PowerPoint Reporting
 
-Dashboard Analytic supports a generic dashboard export and a template-backed NetCheck CDR report. The latter is available from **E2E PowerPoint Reporting → NetCheck CDR Reports**.
+Use **E2E Reporting → NetCheck CDR Reports** to create a PowerPoint report or a persistent set of PNG charts from processed CDR-Data, CDR-Voice and CDR-Speech datasets.
 
-## Before generating a NetCheck report
+## Before generating a report
 
-Upload and process the required files in Workspace first:
+Process at least one ready CDR of each type in Workspace. The reporting page can combine several datasets of the same type, retaining their `Campaign` values for multi-campaign comparisons.
 
-- one or more `CDR-Data` workbooks;
-- one or more `CDR-Voice` workbooks;
-- one or more `CDR-Speech` workbooks.
+Choose the required technology:
 
-The Reporting selectors default to the latest ready CDR of each type, but support multiple selection. Use Ctrl/Cmd-click to select additional workbooks. Selected Data, Voice and Speech CDRs are read from their respective shared reporting tables using the union of available columns, so repeated reports do not need to concatenate the original datasets again. Existing `Campaign` values are retained, enabling comparisons such as 2025 Q4, 2026 Q1 and 2026 Q2 in the same report.
-
-Before the report applies template filters and groupings, it also consolidates recognised historical UK operator aliases in its in-memory data. Thus `Vodafone` and `Vodafone UK` appear as `Vodafone`; `O2(UK)` and `o2 - de` as `O2`; `3`, `Three` and `three(uk)` as `3`; and EE variants as `EE`. A template filter such as `Operator IN (Vodafone, O2, 3, EE)` therefore matches all of those variants. This is a report-only compatibility layer and does not rename any Workspace dataset.
-
-For a Multivendor report, also process the relevant **VFUK Vodafone UK** and/or **3UK Three UK** mappings, then apply them while importing each CDR or use **Map Vendors** from the Workspace queue later. The reporting page no longer selects mapping files: it uses the Vendor values persisted on the selected CDRs. Multivendor remains disabled until all three selected CDRs have been mapped.
-
-## Report options
-
-Choose the technology according to the required session scope:
-
-| Technology | CDR session filter |
+| Technology | Included sessions |
 | --- | --- |
-| **NSA** | `RAT`, `RAT_A` or `Sample_RAT_A` contains `ENDC`. |
-| **SA** | `RAT`, `RAT_A` or `Sample_RAT_A` contains `NR`. |
+| NSA | Values containing `ENDC` in `RAT`, `RAT_A` or `Sample_RAT_A` |
+| SA | Values containing `NR` in the same fields |
 
-Then choose a report scope:
+Choose **Operator Comparison** for normal operator analysis, or **Multivendor Comparison** when every selected CDR has a persisted Vendor mapping. In a multivendor report, grouping dimensions named `Operator` are resolved as the operator-vendor comparison field; `Operator` filters still apply to the physical CDR Operator column.
 
-- **Single-vendor** generates the operator analysis without further mapping requirements.
-- **Multivendor** is available only when every selected CDR already contains a Vendor mapping. It creates vendor series where applicable, while keeping O2/EE as operator comparisons. During rendering, template grouping dimensions named `Operator` become `Vendor`; legends named `Operator` become `Campaign`; and occurrences of `Operator` in slide titles, subtitles and chart titles become `Vendor`. `Operator` filters are deliberately not changed and continue to filter the source CDR Operator field.
+The reporting page warns when multivendor and multiple campaigns are selected together. It preselects the most recent CDR of each type, but you can retain any valid selection.
 
-Choose **Slides Templates** as well. The technology's default template is preselected; another stored NSA or SA template can be chosen for that run without changing the workspace default.
+## Slides Templates
 
-## Vendor calculation
+PowerPoint reports are built from Slides Templates managed in **Admin → Slides Templates Management**. They are CSV definitions, not a fixed embedded report. Create, duplicate, import, rename, export and select NSA or SA templates there, then open one in **Slides Templates Editor**.
 
-For Vodafone and Three, the report derives vendor from the first and last value available in CDR `Cell_ID_A`, `Cell_IDs_A`, `Cell_ID`, `Global CI`, `GCID`, `GCI`, `CGI` or `ECI` and the corresponding mapping. During 3UK processing, Workspace materialises `GCID` from the same value as `Cid__ECI` (or `CId___ECI`). During VFUK processing, it materialises the 4G GCID as `eNodeB ID × 256 + Local Cell ID`; this is equivalent to `HEX2DEC(DEC2HEX(eNodeB ID, 5) & DEC2HEX(Local Cell ID, 2))` in Excel. It also materialises the existing 5G convention, `gNodeB ID × 4096 + Local Cell ID`, for inspection in the mapping preview. The report's Vodafone lookup remains based on the agreed 4G mapping formula. The agreed business formula is authoritative: matching mapped endpoints yield that vendor; Vodafone explicitly distinguishes Ericsson-related mixed cases, other mixed cases and missing endpoints; Three uses a mixed-vendor result for non-matching endpoints. O2 and EE remain represented as the operator.
+The common PowerPoint file in `assets/ppt-templates/Template_CDR_analysis.pptx` supplies slide masters and layouts. For each distinct `Slide` value, the renderer creates a slide from the declared `Layout`; chart rows sharing a slide number fill the available chart placeholders in order. Commentary placeholders are left blank for the analyst.
 
-## Generated presentation
+Templates are stored under `config/slides-templates/`. The documentation is static: saving a template never rewrites this file or publishes a current template definition into it.
 
-Every NSA, SA, single-vendor and multivendor report uses the same `assets/ppt-templates/Template_CDR_analysis.pptx` (or the file with that name below the configured `APP_ASSETS_DIR`). It is a master/layout-only template and intentionally contains no slides. For every distinct `Slide` number in the selected Slides Templates, the renderer creates one new slide from its named layout, ordered by slide number. Rows with the same number represent separate charts on that slide and fill its image placeholders from left to right and then top to bottom. Commentary placeholders remain blank for analyst input.
+## Template columns
 
-An administrator can manage several named NSA and SA Slides Templates CSVs in the shared application library under `config/slides-templates/`. The single importer selects the required `NSA` or `SA` type (NSA by default); a non-default library template can also be moved to the other type from its Type selector. A template can be set as the default, duplicated, renamed, deleted or exported, then edited directly in the browser. Its visible name is its physical CSV filename without `.csv`; duplicates use `- Copy`, then `- Copy 2`, and so on. Every CDR row represents one chart image and declares its named PowerPoint `Layout`; the renderer creates the slide, populates its title and places generated charts in the layout's matching chart placeholders. Importing or selecting a new default template refreshes the tables below.
+| Column | Purpose |
+| --- | --- |
+| `Slide` | Positive slide number. Rows are sorted by this value when saved. Rows with the same number form one slide. |
+| `Slide Tittle` | Shared slide title. The spelling `Tittle` is intentional and is part of the CSV schema. |
+| `Slide Subtittle` | Optional shared slide subtitle. |
+| `Layout` | Exact layout name from `Template_CDR_analysis.pptx`. |
+| `Chart Tittle` | Optional title drawn inside the chart. |
+| `CDR source` | `CDR-Data`, `CDR-Voice` or `CDR-Speech`. Leave empty for structural slides. |
+| `KPI` | Processed CDR field to render. |
+| `Chart type` | Automated chart type or a structural slide type. |
+| `Filters` | Semicolon-separated conditions applied before aggregation. |
+| `Rows Aggregation` | Category/table-row hierarchy. Separate dimensions with `×`. |
+| `Column Aggregation` | Comparison-series/table-column hierarchy. Separate dimensions with `×`. |
+| `Legend` | Optional comma-separated legend labels or fields. |
+| `Legend Position` | `Top`, `Bottom`, `Left` or `Right`; blank defaults to `Top`. |
 
-Use the **Reporting module** selector at the top of E2E Reporting to show either **NetCheck CDR Reports** (the default) or **Smart Orchestrator Logs Reports**. The panels within each selected workflow can be collapsed independently. Use **Generate Report Charts** beside **Generate PowerPoint Report** to render every automated chart in the selected Slides Template without creating a PPTX. The **Report Charts** panel appears below NetCheck CDR Reports and shows one chart card per template row, using the same selected CDRs, technology and single-vendor/multivendor scope as report generation. Every generation is retained as a timestamped folder under `output/report-charts/`; use the Chart set selector to load any saved set by its local generation time and template, or **Delete Charts Set** to remove the selected set and all its chart files. Select a card to open the enlarged viewer and use its first, previous, next and last controls. Generation runs as a persistent background job, so Reporting returns immediately and the work continues after navigating away or signing out. Generated filenames include the report type, scope and second-precision timestamp without a random suffix. The **Generated Reports Jobs** panel lists the complete persisted history with each job's ID, date, report name, selected datasets, template, slide count, type, multivendor state, creator, status and progress. New PPTX files are stored in the active workspace's `output/reports` directory; existing jobs created before this change are also resolved from the legacy `exports` directory. When ready, use **Download** for a direct streamed PPTX download, **Open** to open it in a new browser tab, or **Delete** to remove both the job record and generated file. If a report fails, its status exposes the error. If it contains no valid samples, re-check the selected technology, operator sheets and CDR inputs; the message indicates that the selected persisted rows did not match the relevant KPI and technology filter. For NSA, validate that the relevant RAT field actually contains an ENDC variant; for SA, validate the expected `NR` values.
+The editor groups `Slide`, `Slide Tittle`, `Slide Subtittle` and `Layout` visually for multi-chart slides, but the CSV still stores those values on every row. It also provides a Filter Builder, contextual column suggestions and chart-data/chart-image previews.
 
-## Slides Templates and chart contract
+### Structural slides
 
-The renderer follows the visual grammar of the supplied template for every automated KPI slide: 100% stacked columns for success/quality splits, stacked count bars for failures, CDF lines for continuous KPIs, vertical bars for mean or median comparisons, distribution bars for FDTT rate buckets, and band/radio-quality scatter plots on the dedicated SA Vodafone analysis. Operator colours remain consistent with the template: 3UK orange, EE blue, VFUK red and O2 purple. `Campaign` (or the processed `period` fallback) is the benchmark/category dimension; a multivendor run replaces the operator series with the calculated operator-vendor series.
+Use one row with no `CDR source` or KPI fields:
 
-The technology condition below is always applied before the slide-level filters: NSA contains an ENDC spelling in `RAT`, `RAT_A` or `Sample_RAT_A`; SA contains `NR` in the same fields.
+- `Title Slide` normally uses `Title Page` and fills the title/subtitle placeholders.
+- `Transition Slide` normally uses `Title Only` and creates a section divider.
 
-The current CSV schema is `Slide`, `Slide Tittle`, `Slide Subtittle`, `Layout`, `Chart Tittle`, `CDR source`, `KPI`, `Chart type`, `Filters`, `Rows Aggregation`, `Column Aggregation`, `Legend` and `Legend Position`. For automated rows, all chart-definition fields are executable. `Slide Subtittle` is rendered in the second line of a chart slide's title placeholder in smaller blue text; `Chart Tittle` is the chart heading; `Legend` can replace generated captions in comma-separated order. `Legend Position` accepts `Top`, `Bottom`, `Left` or `Right`; top/bottom produce a horizontal legend row, while left/right use a vertical legend column. Blank values default to `Top`.
+A structural slide cannot share its slide number with chart rows.
 
-Two structural `Chart type` values build non-KPI slides:
+Example cover row (only the relevant values are shown):
 
-- `Title Slide` creates the presentation cover, normally with the `Title Page` layout. `Slide Tittle` and `Slide Subtittle` populate the layout's title and subtitle placeholders.
-- `Transition Slide` creates a section divider, normally with `Title Only` or another suitable transition layout. It accepts a title and optional subtitle.
+```text
+Slide: 1
+Slide Tittle: NetCheck 5G Executive Report
+Slide Subtittle: 2026 Q2 · Operator Comparison
+Layout: Title Page
+Chart type: Title Slide
+```
 
-A structural slide occupies exactly one template row and cannot share its slide number with chart rows. Leave `Chart Tittle`, `CDR source`, `KPI`, `Filters`, `Rows Aggregation`, `Column Aggregation` and `Legend` empty. The former `Not Automated (preserve)` value is retained only for legacy conversion: imported legacy rows are migrated to `Title Slide` or `Transition Slide`, because an empty template has no source slide to preserve.
+Example divider row:
 
-Write filters as semicolon-separated expressions such as `Call Family IN (VoLTE, MultiRAB); Direction = DL` or `Type_of_Test = Interactivity`. Supported operators are `IN (...)`, `NOT IN (...)`, `CONTAINS`, `NOT CONTAINS`, `=`, `!=`, `<`, `<=`, `>` and `>=`. Use processed CDR column names (case-insensitive matching is supported). `Call Family` and `Test Family` are persisted derived CDR columns and appear in the dataset Preview with a light-grey background: Call Family normalises session/call-mode values, while Test Family normalises test type/name values. `Threshold = 1.6` configures `Threshold Stacked Vertical Bars`, while `Buckets = 1,5,20,100` configures `Rate Bucket` for `Distribution Stacked Vertical Bars`; `Rate Bucket`, Threshold and Buckets remain chart-specific calculated/configuration values rather than stored CDR columns.
+```text
+Slide: 6
+Slide Tittle: Voice service analysis
+Layout: Title Only
+Chart type: Transition Slide
+```
 
-Write each aggregation hierarchy with `×`. `Rows Aggregation` defines the visible category/table-row hierarchy. `Column Aggregation` defines comparison series and table columns; if it is empty, the renderer uses one `(all)` series and does not duplicate category labels. For distribution charts the final column dimension is the stack/bucket breakdown. This interpretation is consistent across CDF, scatter, mean/median bars, stacked status/failure/distribution bars and tables. `Operator` resolves to the calculated operator-vendor comparison field in multivendor reports. The valid automated chart types are `100% Stacked Vertical Bars`, `Count Stacked Horizontal Bars`, `CDF Line`, `Scatter`, `Table`, `Average Vertical Bars`, `Median Vertical Bars`, `Distribution Stacked Vertical Bars` and `Threshold Stacked Vertical Bars`; the structural types are `Title Slide` and `Transition Slide`.
+## Supported chart types
 
-The importer accepts the current schema and compatible legacy schemas. If the headers differ, it presents a conversion confirmation: compatible names are migrated, legacy `Grouping` is split into row/column grouping, new optional presentation fields remain blank, and a missing layout is assigned from the number of CDR charts on that slide. Any remaining invalid chart contract is presented in a floating import-failure dialog.
+Automated rows support:
 
-<!-- SLIDES_TEMPLATES:START -->
+- `100% Stacked Vertical Bars`
+- `Count Stacked Horizontal Bars`
+- `CDF Line`
+- `Scatter`
+- `Table`
+- `Average Vertical Bars`
+- `Median Vertical Bars`
+- `Distribution Stacked Vertical Bars`
+- `Threshold Stacked Vertical Bars`
 
-Export the active NSA or SA Slides Template from Admin before editing it. The tables below always reflect the active CSV files under `config/slides-templates/default/`.
+Choose a KPI and at least one Rows or Column Aggregation dimension for every automated row. `CDF Line` creates one curve per complete aggregation combination. Count charts retain empty combinations so comparisons remain aligned.
 
-### NSA template
+### Chart recipes
 
-| Slide | Slide Tittle | Slide Subtittle | Layout | Chart Tittle | CDR source | KPI | Chart type | Filters | Rows Aggregation | Column Aggregation | Legend | Legend Position |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 2025 Q4 Net check UK | NSA CDR analysis<br>Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title Page | — | — | — | Title Slide | — | — | — | — | Top |
-| 2 | Executive Summary | — | Title Only | — | — | — | Transition Slide | — | — | — | — | Top |
-| 3 | Completed Call Ratio | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 1 column + Comments | — | CDR-Voice | Call_Status | 100% Stacked Vertical Bars | Call Family IN (VoLTE, MultiRAB, WhatsApp); Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Call Family | Operator × Campaign | — | Right |
-| 4 | Voice failures per Q/city | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 1 column + Comments | — | CDR-Voice | Call_Status | Count Stacked Horizontal Bars | Call Family IN (VoLTE, MultiRAB, WhatsApp); Call_Status IN (Failed, Dropped); Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Call Family × G Level 4 | Operator × Campaign | — | Right |
-| 5 | Data failures | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 rows + Comments right | — | CDR-Data | Test_Result | 100% Stacked Vertical Bars | Test Family IN (httpBrowser, httpTransfer, VideoStreaming); Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Type_of_Test | Operator × Campaign | — | Right |
-| 5 | Data failures | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 rows + Comments right | — | CDR-Data | Test_Result | 100% Stacked Vertical Bars | Test_Name CONTAINS FDFS; Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Type_of_Test | Operator × Campaign | — | Right |
-| 6 | POLQA AVG MOS (Multirab&volte) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Speech | LQ | CDF Line | Call_Status = Completed; Call Family IN (VoLTE, MultiRAB); Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 6 | POLQA AVG MOS (Multirab&volte) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Speech | LQ | Average Vertical Bars | Call_Status = Completed; Call Family IN (VoLTE, MultiRAB); Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 7 | POLQA AVG MOS (WhatsApp) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 3 columns + Comments | — | CDR-Speech | LQ | CDF Line | Call_Status = Completed; Call Family = WhatsApp; Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 7 | POLQA AVG MOS (WhatsApp) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 3 columns + Comments | — | CDR-Speech | LQ | Average Vertical Bars | Call_Status = Completed; Call Family = WhatsApp; Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 8 | POLQA <1.6 | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Speech | LQ | Threshold Stacked Vertical Bars | Call_Status = Completed; Call Family = WhatsApp; Threshold = 1.6; Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 8 | POLQA <1.6 | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Speech | LQ | Threshold Stacked Vertical Bars | Call_Status = Completed; Call Family IN (Multi-RAB, VoLTE); Threshold = 1.6; Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 9 | CST | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Voice | Call_Setup_Time | CDF Line | Call Family IN (VoLTE, MultiRAB); Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 9 | CST | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Voice | Call_Setup_Time | Average Vertical Bars | Call Family IN (VoLTE, MultiRAB); Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 10 | FDTT DL (7s) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Data | Mean_Data_Rate | CDF Line | Test_Result = Completed; Test_Name CONTAINS FDTT http DL MT; Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 10 | FDTT DL (7s) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Data | Mean_Data_Rate | Distribution Stacked Vertical Bars | Test_Result = Completed; Test_Name CONTAINS FDTT http DL MT; Buckets = 1,5,20,100; Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign × Rate Bucket | — | Bottom |
-| 11 | FDTT UL (7s) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Data | Mean_Data_Rate | CDF Line | Test_Result = Completed; Test_Name CONTAINS FDTT UDP UL ST; Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 11 | FDTT UL (7s) | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Data | Mean_Data_Rate | Distribution Stacked Vertical Bars | Test_Result = Completed; Test_Name CONTAINS FDTT UDP UL ST; Buckets = 1,3,10,20; Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign × Rate Bucket | — | Bottom |
-| 12 | FDFS DL | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 3 columns + Comments | — | CDR-Data | Mean_Data_Rate | CDF Line | Test_Result = Completed; Test_Name IN (FDFS HTTP DL ST, FDFS HTTPS DL ST); Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 12 | FDFS DL | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 3 columns + Comments | — | CDR-Data | Transfer_Duration | CDF Line | Test_Result = Completed; Test_Name IN (FDFS HTTP DL ST, FDFS HTTPS DL ST); Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 12 | FDFS DL | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 3 columns + Comments | — | CDR-Data | Transfer_Duration | Average Vertical Bars | Test_Result = Completed; Test_Name IN (FDFS HTTP DL ST, FDFS HTTPS DL ST); Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 13 | FDFS UL | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 3 columns + Comments | — | CDR-Data | Mean_Data_Rate | CDF Line | Test_Result = Completed; Test_Name IN (FDFS HTTP UL ST, FDFS HTTPS UL ST); Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 13 | FDFS UL | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 3 columns + Comments | — | CDR-Data | Transfer_Duration | CDF Line | Test_Result = Completed; Test_Name IN (FDFS HTTP UL ST, FDFS HTTPS UL ST); Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 13 | FDFS UL | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 3 columns + Comments | — | CDR-Data | Transfer_Duration | Average Vertical Bars | Test_Result = Completed; Test_Name IN (FDFS HTTP UL ST, FDFS HTTPS UL ST); Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 14 | Interactivity | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns and 2 rows + Comments right | — | CDR-Data | Interactivity_RTT_Median | CDF Line | Test_Result = Completed; Type_of_Test = Interactivity; Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 14 | Interactivity | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns and 2 rows + Comments right | — | CDR-Data | Interactivity_RTT_Median | Median Vertical Bars | Test_Result = Completed; Type_of_Test = Interactivity; Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 14 | Interactivity | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns and 2 rows + Comments right | — | CDR-Data | Packet_Error_Ratio | CDF Line | Test_Result = Completed; Type_of_Test = Interactivity; Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 14 | Interactivity | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns and 2 rows + Comments right | — | CDR-Data | Packet_Error_Ratio | Average Vertical Bars | Test_Result = Completed; Type_of_Test = Interactivity; Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 15 | Browsing | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Data | http_Browser_1MB_Reached_Duration | CDF Line | Test_Result = Completed; Type_of_Test = httpBrowser; Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 15 | Browsing | Belfast, Bristol, Cardiff, Edinburgh, London, Leeds and Sheffield | Title and 2 columns + Comments | — | CDR-Data | http_Browser_1MB_Reached_Duration | Average Vertical Bars | Test_Result = Completed; Type_of_Test = httpBrowser; Operator IN (Vodafone UK, 3, EE); vendor NOT CONTAINS (Mixed, Other) | Operator | Campaign | — | Bottom |
-| 16 | Conclusions | — | Title Only | — | — | — | Transition Slide | — | — | — | — | Top |
+The examples below show the chart-specific fields. Add the shared `Slide`, titles and `Layout` fields appropriate for the target PowerPoint layout.
 
-### SA template
+#### 100% Stacked Vertical Bars
 
-| Slide | Slide Tittle | Slide Subtittle | Layout | Chart Tittle | CDR source | KPI | Chart type | Filters | Rows Aggregation | Column Aggregation | Legend | Legend Position |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | NPPI Tech Forum<br>VodafoneThree & Ericsson<br>2026-08-06 | 2026 Q2 Net check 5G SA Campaign<br>Final Scoring and Gap Analysis<br>CDR KPI Analysis | Title Page | — | — | — | Title Slide | — | — | — | — | Top |
-| 2 | Agenda | — | Title Only | — | — | — | Transition Slide | — | — | — | — | Top |
-| 3 | Voice Failures | 7 Cities | Title and 2 columns | — | CDR-Voice | Call_Status | Count Stacked Horizontal Bars | Failed/Dropped; Classic call, MultiRAB, WhatsApp | Call family | Operator × Campaign | — | Bottom |
-| 3 | Voice Failures | 7 Cities | Title and 2 columns | — | CDR-Voice | Failure_Technology | Count Stacked Horizontal Bars | Failed/Dropped; Classic call, MultiRAB, WhatsApp | Call family | Failure technology × Operator × Campaign | — | Bottom |
-| 4 | Voice Failures (Vodafone UK) | 7 Cities | Title and 3 columns | — | CDR-Voice | Call_Status | Count Stacked Horizontal Bars | Failed/Dropped; Operator Vodafone UK | Call family | City × Campaign | — | Bottom |
-| 4 | Voice Failures (Vodafone UK) | 7 Cities | Title and 3 columns | — | CDR-Voice | Failure_Technology | Count Stacked Horizontal Bars | Failed/Dropped; Operator Vodafone UK | Call family | Failure technology × Campaign | — | Bottom |
-| 4 | Voice Failures (Vodafone UK) | 7 Cities | Title and 3 columns | — | CDR-Voice | Failure_Category | Count Stacked Horizontal Bars | Failed/Dropped; Operator Vodafone UK | Call family | Failure category × Campaign | — | Bottom |
-| 5 | Completed Call Ratio | 7 cities | Title and 1 smaller column | — | CDR-Voice | Call_Status | 100% Stacked Vertical Bars | Classic call, MultiRAB, WhatsApp | Call family | Operator × Campaign | — | Right |
-| 6 | POLQA <1.6 Rate | 7 cities | Title and 1 smaller column | — | CDR-Speech | LQ | 100% Stacked Vertical Bars | LQ < 1.6 vs ≥ 1.6 | Call family | Operator × Campaign | — | Right |
-| 7 | POLQA <1.6 Rate Vodafone (Whatsapp) | 7 cities | Title and 3 columns | — | CDR-Speech | LQ | Threshold Stacked Vertical Bars | Operator Vodafone UK; WhatsApp; LQ < 1.6; NR band | NR band | — | — | Bottom |
-| 7 | POLQA <1.6 Rate Vodafone (Whatsapp) | 7 cities | Title and 3 columns | — | CDR-Speech | LQ vs Playing_RSRP_NR_Avg | Scatter | Operator Vodafone UK; WhatsApp; NR samples | Radio strength | LQ state | — | Bottom |
-| 7 | POLQA <1.6 Rate Vodafone (Whatsapp) | 7 cities | Title and 3 columns | — | CDR-Speech | LQ vs 4G_RSRP_Avg_A | Scatter | Operator Vodafone UK; WhatsApp; LTE samples | Radio strength | LQ state | — | Bottom |
-| 8 | POLQA <1.6 Rate Three UK (Whatsapp) | 7 cities | Title and 2 columns | — | CDR-Speech | LQ | 100% Stacked Vertical Bars | Operator Three UK; WhatsApp; LQ < 1.6 vs ≥ 1.6 | Campaign | — | — | Bottom |
-| 8 | POLQA <1.6 Rate Three UK (Whatsapp) | 7 cities | Title and 2 columns | — | CDR-Speech | LQ | CDF Line | Operator Three UK; WhatsApp | Campaign | — | — | Bottom |
-| 9 | POLQA Avg MOS | 7 cities | Title and 8 Content | — | CDR-Voice | POLQA_LQ_Avg | CDF Line | Classic call or MultiRAB | Operator | Campaign | — | Bottom |
-| 9 | POLQA Avg MOS | 7 cities | Title and 8 Content | — | CDR-Voice | POLQA_LQ_Avg | Average Vertical Bars | Classic call or MultiRAB | Operator | Campaign | — | Bottom |
-| 9 | POLQA Avg MOS | 7 cities | Title and 8 Content | — | CDR-Speech | LQ | CDF Line | WhatsApp | Operator | Campaign | — | Bottom |
-| 9 | POLQA Avg MOS | 7 cities | Title and 8 Content | — | CDR-Speech | LQ | Average Vertical Bars | WhatsApp | Operator | Campaign | — | Bottom |
-| 10 | POLQA Avg MOS | London | Title and 8 Content | — | CDR-Voice | POLQA_LQ_Avg | CDF Line | Classic call or MultiRAB; location London | Operator | Campaign | — | Bottom |
-| 10 | POLQA Avg MOS | London | Title and 8 Content | — | CDR-Voice | POLQA_LQ_Avg | Average Vertical Bars | Classic call or MultiRAB; location London | Operator | Campaign | — | Bottom |
-| 10 | POLQA Avg MOS | London | Title and 8 Content | — | CDR-Speech | LQ | CDF Line | WhatsApp; location London | Operator | Campaign | — | Bottom |
-| 10 | POLQA Avg MOS | London | Title and 8 Content | — | CDR-Speech | LQ | Average Vertical Bars | WhatsApp; location London | Operator | Campaign | — | Bottom |
-| 11 | Netcheck CDR Data Analysis | 2026 Q2 NSA vs SA Campaign<br>7 Cities and London | Title Only | — | — | — | Transition Slide | — | — | — | — | Top |
-| 12 | FDFS Success Ratio | — | Title and 2 columns | — | CDR-Data | Test_Result | 100% Stacked Vertical Bars | FDFS; Direction DL; 7 cities | Operator | Campaign | — | Bottom |
-| 12 | FDFS Success Ratio | — | Title and 2 columns | — | CDR-Data | Test_Result | 100% Stacked Vertical Bars | FDFS; Direction UL; London | Operator | Campaign | — | Bottom |
-| 13 | FDFS DL Throughput | 7 Cities | Title and 2 columns | — | CDR-Data | Mean_Data_Rate | CDF Line | FDFS; Direction DL | Operator | Campaign | — | Bottom |
-| 13 | FDFS DL Throughput | 7 Cities | Title and 2 columns | — | CDR-Data | Data_Test_Duration | Average Vertical Bars | FDFS; Direction DL | Operator | Campaign | — | Bottom |
-| 14 | FDFS UL Throughput | 7 Cities | Title and 2 columns | — | CDR-Data | Mean_Data_Rate | CDF Line | FDFS; Direction UL | Operator | Campaign | — | Bottom |
-| 14 | FDFS UL Throughput | 7 Cities | Title and 2 columns | — | CDR-Data | Data_Test_Duration | Average Vertical Bars | FDFS; Direction UL | Operator | Campaign | — | Bottom |
-| 15 | FDTT DL and UL Throughput | 7 Cities | Title and 2 columns | — | CDR-Data | FDTT_Sustainable_MDR | CDF Line | FDTT; Directions DL and UL | Operator | Campaign | — | Bottom |
-| 15 | FDTT DL and UL Throughput | 7 Cities | Title and 2 columns | — | CDR-Data | FDTT_Sustainable_MDR | Distribution Stacked Vertical Bars | FDTT; Directions DL and UL; template rate buckets | Operator | Campaign × Rate bucket | — | Bottom |
-| 16 | Interactivity KPIs | 7 Cities | Title and 8 Content | — | CDR-Data | Interactivity_RTT_Median | CDF Line | Interactivity tests | Operator | Campaign | — | Bottom |
-| 16 | Interactivity KPIs | 7 Cities | Title and 8 Content | — | CDR-Data | Interactivity_RTT_Median | Median Vertical Bars | Interactivity tests | Operator | Campaign | — | Bottom |
-| 16 | Interactivity KPIs | 7 Cities | Title and 8 Content | — | CDR-Data | Interactivity_Packet_Error_Ratio | CDF Line | Interactivity tests | Operator | Campaign | — | Bottom |
-| 16 | Interactivity KPIs | 7 Cities | Title and 8 Content | — | CDR-Data | Interactivity_Packet_Error_Ratio | Average Vertical Bars | Interactivity tests | Operator | Campaign | — | Bottom |
-| 17 | Browsing Time to 1MB | 7 cities | Title and 2 columns | — | CDR-Data | http_Browser_1MB_Reached_Duration | CDF Line | Browsing/HTTP tests | Operator | Campaign | — | Bottom |
-| 17 | Browsing Time to 1MB | 7 cities | Title and 2 columns | — | CDR-Data | http_Browser_1MB_Reached_Duration | Average Vertical Bars | Browsing/HTTP tests | Operator | Campaign | — | Bottom |
-| 18 | Conclusions | — | Title Only | — | — | — | Transition Slide | — | — | — | — | Top |
+Use for proportions, success ratios and categorical quality splits. The KPI is the field whose categories become the stack segments.
 
-<!-- SLIDES_TEMPLATES:END -->
+```text
+CDR source: CDR-Voice
+KPI: Call_Status
+Chart type: 100% Stacked Vertical Bars
+Filters: Call Family IN (VoLTE, MultiRAB); Operator IN (Vodafone, 3, EE)
+Rows Aggregation: Call Family
+Column Aggregation: Operator × Campaign
+Legend Position: Right
+```
+
+This produces one 100% bar per operator/campaign comparison, split by `Call_Status`.
+
+#### Count Stacked Horizontal Bars
+
+Use for counts of failures or events. Rows form the horizontal categories and the KPI normally supplies the stacked statuses or failure causes.
+
+```text
+CDR source: CDR-Data
+KPI: Test_Result
+Chart type: Count Stacked Horizontal Bars
+Filters: Test Family IN (FDFS, FDTT); Test_Result IN (Failed, Dropped)
+Rows Aggregation: Test Family × City
+Column Aggregation: Operator × Campaign
+Legend Position: Bottom
+```
+
+All combinations of the selected aggregation values are retained, including zero-count combinations, so operator/campaign comparisons remain aligned.
+
+#### CDF Line
+
+Use for continuous metrics such as throughput, duration, latency or MOS. Every complete Rows/Columns Aggregation combination creates one line.
+
+```text
+CDR source: CDR-Data
+KPI: Mean_Data_Rate
+Chart type: CDF Line
+Filters: Test_Result = Completed; Test_Name CONTAINS FDFS; Direction = DL
+Rows Aggregation: Operator
+Column Aggregation: Campaign
+Legend Position: Bottom
+```
+
+With two operators and two campaigns, the example produces four CDF lines. A single campaign is emphasised; with multiple campaigns the latest campaign is emphasised within each comparison family.
+
+#### Average Vertical Bars and Median Vertical Bars
+
+Use for one numeric summary per aggregation combination. Choose `Average Vertical Bars` for mean values or `Median Vertical Bars` where outliers should have less influence.
+
+```text
+CDR source: CDR-Speech
+KPI: LQ
+Chart type: Average Vertical Bars
+Filters: Call_Status = Completed; Call Family = WhatsApp
+Rows Aggregation: Operator
+Column Aggregation: Campaign
+Legend Position: Top
+```
+
+To show the median instead, change only `Chart type` to `Median Vertical Bars`.
+
+#### Distribution Stacked Vertical Bars
+
+Use to show how a numeric KPI is distributed across explicit ranges. Add `Buckets` in Filters and use `Rate Bucket` as the final column aggregation dimension.
+
+```text
+CDR source: CDR-Data
+KPI: Mean_Data_Rate
+Chart type: Distribution Stacked Vertical Bars
+Filters: Test_Result = Completed; Test_Name CONTAINS FDTT; Buckets = 1,5,20,100
+Rows Aggregation: Operator
+Column Aggregation: Campaign × Rate Bucket
+Legend Position: Right
+```
+
+The bucket values define the boundaries; adjust them to the KPI unit and the business thresholds being analysed.
+
+#### Threshold Stacked Vertical Bars
+
+Use for a pass/fail distribution around one threshold. Add `Threshold` in Filters.
+
+```text
+CDR source: CDR-Speech
+KPI: LQ
+Chart type: Threshold Stacked Vertical Bars
+Filters: Call_Status = Completed; Call Family = VoLTE; Threshold = 1.6
+Rows Aggregation: Operator
+Column Aggregation: Campaign
+Legend Position: Right
+```
+
+#### Scatter
+
+Use for the relationship between a KPI and a radio/quality dimension. The KPI can use the `Metric vs Dimension` form where supported by the processed CDR columns.
+
+```text
+CDR source: CDR-Speech
+KPI: LQ vs Playing_RSRP_NR_Avg
+Chart type: Scatter
+Filters: Call_Status = Completed; Call Family = WhatsApp
+Rows Aggregation: Operator
+Column Aggregation: Campaign
+Legend Position: Bottom
+```
+
+#### Table
+
+Use when exact values are more useful than a chart. Rows and columns form the table axes; KPI supplies the aggregated cell value.
+
+```text
+CDR source: CDR-Voice
+KPI: Call_Setup_Time
+Chart type: Table
+Filters: Call_Status = Completed
+Rows Aggregation: City
+Column Aggregation: Operator × Campaign
+Legend Position: Top
+```
+
+## Filters
+
+Write one or more conditions separated by `;` (logical AND). Column names are matched case-insensitively against the selected processed CDR source.
+
+```text
+Call Family IN (VoLTE, MultiRAB); Direction = DL; vendor NOT CONTAINS (Mixed, Other)
+```
+
+Supported operators are:
+
+| Operator | Example |
+| --- | --- |
+| Equals / not equal | `Call_Status = Completed`, `Operator != EE` |
+| List inclusion / exclusion | `Operator IN (Vodafone, O2, 3, EE)`, `Campaign NOT IN (2025 Q4)` |
+| Contains / not contains | `Test_Name CONTAINS FDFS`, `vendor NOT CONTAINS (Mixed, Other)` |
+| Numeric comparison | `LQ < 1.6`, `Mean_Data_Rate >= 20` |
+
+`IN`, `NOT IN`, `CONTAINS` and `NOT CONTAINS` accept comma-separated values enclosed in parentheses. The Filter Builder creates the same syntax.
+
+More filter examples:
+
+```text
+Operator = Vodafone
+Campaign IN (2026 Q1, 2026 Q2)
+vendor NOT CONTAINS (Mixed, Other)
+Test_Name CONTAINS FDFS
+LQ >= 1.6; LQ < 4.0
+```
+
+Use `;` rather than a comma to join independent conditions. A comma only separates values belonging to the same `IN`, `NOT IN`, `CONTAINS` or `NOT CONTAINS` condition.
+
+`Call Family` and `Test Family` are materialised derived fields. They appear in CDR Preview with a light-grey background so they can be distinguished from columns that came directly from the source CDR. `Threshold = 1.6` configures threshold charts; `Buckets = 1,5,20,100` configures rate buckets for distribution charts.
+
+## Aggregations and legends
+
+Use `×` to define a hierarchy, for example:
+
+```text
+Rows Aggregation: Call Family × G Level 4
+Column Aggregation: Operator × Campaign
+```
+
+Rows Aggregation supplies categories (or table rows); Column Aggregation supplies comparison series (or table columns). A blank Column Aggregation produces one `(all)` comparison. `Campaign` is commonly used to compare selected CDRs. In multivendor reports, `Operator` aggregation resolves to the mapped comparison field.
+
+Use `Legend` only when you need explicit display labels; otherwise the renderer derives captions from the aggregation values. Position the legend with `Legend Position`.
+
+For example, enter `2026 Q2, 2026 Q1` in `Legend` to supply two explicit captions for a two-series chart. Leave it blank when the aggregation values are already the desired labels. Use `Top` or `Bottom` for a horizontal legend; use `Left` or `Right` when a vertical legend leaves more room for the plot.
+
+### Multi-chart slides
+
+Rows with the same `Slide` number are separate charts on one PowerPoint slide. They must use the same `Slide Tittle`, `Slide Subtittle` and `Layout`, but may use different CDR sources, KPIs, filters and chart types. Choose a layout with enough chart placeholders for the number of rows in that slide. For example, put a CDF Line and an Average Vertical Bars row on Slide 8 to compare a throughput distribution with its headline average.
+
+## Operators, vendors and colours
+
+Recognised historical operator aliases are normalised in the report only: Vodafone variants become `Vodafone`, Three variants become `3`, O2 variants become `O2`, and EE variants become `EE`. This does not alter the stored CDR.
+
+For chart dimensions that use Vendor, vendor families use consistent colours: Ericsson green, Huawei red, Samsung yellow and NSN blue, with distinct shades where several operators share the vendor. Other vendors use clearly distinct neutral colours.
+
+## Output and jobs
+
+**Generate PowerPoint Report** queues a report job. Its PPTX is stored in `output/reports/<report-name>/`; rendered PNG charts are stored in `output/reports/<report-name>/report-charts/`.
+
+**Generate Report Charts** queues an independent Charts Job and stores its set under `output/charts/<timestamp>/`. The Charts Panel lists standalone and report-generated sets, supports enlarged previews, downloads and cleanup. Reports Jobs and Charts Jobs retain their own status, progress and actions.
+
+If a job fails, consult **App Logs** and retry it from its job panel after correcting the reported input or template issue.

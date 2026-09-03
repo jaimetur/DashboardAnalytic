@@ -39,6 +39,8 @@
 - Added an overwrite confirmation when importing a Slides Template whose name already exists; overwriting the default also refreshes its active CSV.
 - Made Template to edit open the chosen Slides Template immediately, prompting to save or discard any pending edits before switching tables.
 - Trimmed CDF Line x-axes only after at least three curves strictly exceed 98% and converge with one another, avoiding premature loss of meaningful CDF data.
+- Made Slides Template saves atomic and short-lived: CSV replacement completes before metadata/audit work is deferred, reducing failures during server load.
+- Stopped template edits from regenerating the PowerPoint help document, removing an unnecessary synchronous filesystem write from every save.
 
 #### 🐛 Bug fixes:
 - Unified completed Chart Set timestamps across the Charts Jobs date, `Generated at` badge, selector label and timestamped output folder.
@@ -51,6 +53,7 @@
 - Fixed Slides Templates Editor selection and registry stability: browser-restored picker values can no longer claim a different open template, and unregistered library CSVs no longer appear as phantom templates.
 
 #### 📚 Documentation:
+- Rewrote the PowerPoint Reporting help as static guidance for building Slides Templates, including field-by-field instructions and practical recipes for every chart type, filters, aggregations, legends, structural slides, operators and output jobs.
 
 ---
 

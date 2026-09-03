@@ -387,15 +387,6 @@ def active_catalog_path(catalog_dir: Path, fallback_catalog: Path, technology: s
     return fallback_catalog
 
 
-def catalogue_markdown(entries: list[CatalogEntry], technology: str) -> str:
-    heading = "NSA" if technology == "nsa" else "SA"
-    lines = [f"### {heading} template", "", "| " + " | ".join(CATALOG_HEADERS) + " |", "| " + " | ".join("---" for _ in CATALOG_HEADERS) + " |"]
-    for entry in entries:
-        values = (str(entry.slide), entry.slide_title, entry.slide_subtitle or "—", entry.layout or "—", entry.chart_title or "—", entry.cdr_source or "—", entry.kpi or "—", entry.chart_type or "—", entry.filters or "—", entry.grouping_rows or "—", entry.grouping_columns or "—", entry.legend or "—", entry.legend_position.title())
-        lines.append("| " + " | ".join(value.replace("|", "\\|").replace("\n", "<br>") for value in values) + " |")
-    return "\n".join(lines)
-
-
 def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
     """Serialize the active template using the current editable CSV schema."""
     output = io.StringIO(newline="")
@@ -419,15 +410,6 @@ def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
         })
     return output.getvalue().encode("utf-8")
 
-
-def update_catalogue_document(document: Path, nsa_entries: list[CatalogEntry], sa_entries: list[CatalogEntry]) -> None:
-    start = "<!-- SLIDES_TEMPLATES:START -->"
-    end = "<!-- SLIDES_TEMPLATES:END -->"
-    content = document.read_text(encoding="utf-8")
-    if start not in content or end not in content:
-        raise ValueError("The PowerPoint reporting help document is missing its Slides Templates markers.")
-    block = "\n".join((start, "", "Export the active NSA or SA Slides Template from Admin before editing it. The tables below always reflect the active CSV files under `config/slides-templates/default/`.", "", catalogue_markdown(nsa_entries, "nsa"), "", catalogue_markdown(sa_entries, "sa"), "", end))
-    document.write_text(re.sub(re.escape(start) + r".*?" + re.escape(end), block, content, flags=re.S), encoding="utf-8")
 
 # The PPT templates contain rasterised Tableau charts.  These rules are the
 # source-of-truth replacement contract captured from every automated KPI slide:
