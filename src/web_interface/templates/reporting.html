@@ -392,6 +392,19 @@
     };
     const reportChartReportSetLabel = (report) => `Report Charts: ${report.report_name}`;
     const newestFirst = (items, field) => [...items].sort((left, right) => String(right[field] || '').localeCompare(String(left[field] || '')));
+    const renderChartSetPickerText = (container, option) => {
+      const fullText = option?.textContent || 'Select a Chart Set';
+      const prefix = option?.classList.contains('chart-set-option-standalone') ? 'Standalone Charts: '
+        : option?.classList.contains('chart-set-option-report') ? 'Report Charts: ' : '';
+      container.replaceChildren();
+      if (!prefix) { container.textContent = fullText; return; }
+      const label = document.createElement('span');
+      label.className = `chart-set-picker-prefix ${option.classList.contains('chart-set-option-standalone') ? 'chart-set-picker-prefix-standalone' : 'chart-set-picker-prefix-report'}`;
+      label.textContent = prefix;
+      const detail = document.createElement('span');
+      detail.textContent = fullText.slice(prefix.length).trimStart();
+      container.append(label, detail);
+    };
     const rebuildReportChartSetSelector = (selectedValue = '') => {
       if (!reportChartSetSelect) return;
       const options = [
@@ -412,14 +425,14 @@
       ];
       reportChartSetSelect.replaceChildren(...options);
       reportChartSetSelect.value = selectedValue || options[0]?.value || '';
-      if (reportChartSetPickerLabel) reportChartSetPickerLabel.textContent = reportChartSetSelect.selectedOptions[0]?.textContent || 'Select a Chart Set';
+      if (reportChartSetPickerLabel) renderChartSetPickerText(reportChartSetPickerLabel, reportChartSetSelect.selectedOptions[0]);
       if (reportChartSetPickerOptions) {
         reportChartSetPickerOptions.replaceChildren(...options.map((option) => {
           const choice = document.createElement('button');
           choice.type = 'button';
           choice.className = `chart-set-picker-option ${option.className}`;
           choice.dataset.chartSetValue = option.value;
-          choice.textContent = option.textContent;
+          renderChartSetPickerText(choice, option);
           choice.setAttribute('role', 'option');
           choice.setAttribute('aria-selected', String(option.value === reportChartSetSelect.value));
           return choice;

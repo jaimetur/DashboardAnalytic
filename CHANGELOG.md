@@ -48,6 +48,7 @@
 - Enabled Retry actions for stopped Reports Jobs and Charts Jobs, matching failed-job recovery.
 - Restyled Stop actions as red circular controls with a prominent white square, consistently in Reports Jobs and Charts Jobs.
 - Changed failed Charts Jobs retries to reuse the existing row instead of creating a duplicate failed/queued pair.
+- Reduced the Charts Panel selector text and set it to normal weight so complete Chart Set names fit more comfortably.
 
 #### 🐛 Bug fixes:
 - Unified completed Chart Set timestamps across the Charts Jobs date, `Generated at` badge, selector label and timestamped output folder.
