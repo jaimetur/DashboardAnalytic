@@ -120,9 +120,9 @@
               {% if job.download_url %}<a class="report-job-download-button report-job-report-download-button" href="{{ job.download_url }}" download title="Download report" aria-label="Download report"></a>{% else %}<span class="report-job-download-button report-job-report-download-button action-link-disabled" title="Report download unavailable" aria-label="Report download unavailable"></span>{% endif %}
               {% if job.charts_download_url %}<a class="report-job-download-button report-job-charts-download-button" href="{{ job.charts_download_url }}" download title="Download report charts as ZIP" aria-label="Download report charts as ZIP"></a>{% endif %}
               {% if job.charts_url %}<button type="button" class="report-job-charts-button" title="Open rendered report charts" aria-label="Open rendered report charts" data-report-job-charts="{{ job.charts_url }}">👁</button>{% endif %}
-              {% if job.retry_url %}<button type="button" class="report-job-retry-button" title="Retry report" aria-label="Retry report" data-report-job-retry="{{ job.retry_url }}" data-report-job-name="{{ job.report_name }}">↻</button>{% endif %}
+              {% if job.retry_url %}<button type="button" class="report-job-retry-button" title="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry report' }}" aria-label="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry report' }}" data-report-job-retry="{{ job.retry_url }}" data-report-job-id="{{ job.id }}" data-report-job-status="{{ job.status }}" data-report-job-name="{{ job.report_name }}">↻</button>{% endif %}
               {% if job.stop_url %}<button type="button" class="report-job-stop-button" title="Stop report" aria-label="Stop report" data-report-job-stop="{{ job.stop_url }}" data-report-job-name="{{ job.report_name }}">■</button>{% endif %}
-              <button type="button" class="danger-button" title="Delete report" aria-label="Delete report" data-report-job-delete="{{ job.delete_url }}" data-report-job-name="{{ job.report_name }}">✕</button>
+              <button type="button" class="danger-button" title="Delete report" aria-label="Delete report" data-report-job-delete="{{ job.delete_url }}" data-report-job-id="{{ job.id }}" data-report-job-name="{{ job.report_name }}">✕</button>
             </div></td>
           </tr>
           {% endfor %}
@@ -149,7 +149,7 @@
           <td>{{ job.id }}</td><td>{{ job.generated_by }}</td><td>{{ job.date }}</td><td>{{ job.type }}</td><td>{{ job.template }}</td><td>{{ job.scope }}</td><td>{{ job.charts if job.charts is not none else '—' }}</td><td class="report-job-datasets">{% if job.dataset_groups %}{% for group in job.dataset_groups %}<span class="report-job-dataset-kind">{{ group.kind }}:</span>{% for name in group.names %}<span>{{ name }}</span>{% endfor %}{% endfor %}{% else %}Historical Chart Set{% endif %}</td>
           <td title="{{ job.error }}"><span class="queue-status-pill queue-status-{{ job.status | lower | replace('_', '-') }}">{{ job.status | title }}</span></td>
           <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%</span></div></td>
-          <td><div class="report-job-actions">{% if job.charts_download_url %}<a class="report-job-download-button report-job-charts-download-button" href="{{ job.charts_download_url }}" download title="Download Chart Set PNGs as ZIP" aria-label="Download Chart Set PNGs as ZIP"></a>{% endif %}{% if job.open_url %}<button type="button" class="report-job-charts-button" title="Open generated Chart Set" aria-label="Open generated Chart Set" data-report-chart-job-open="{{ job.open_url }}">👁</button>{% endif %}{% if job.retry_url %}<button type="button" class="report-job-retry-button" title="Retry Chart Set" data-report-chart-job-retry="{{ job.retry_url }}" data-report-chart-job-name="{{ job.template }}">↻</button>{% endif %}{% if job.stop_url %}<button type="button" class="report-job-stop-button" title="Stop Chart Set" aria-label="Stop Chart Set" data-report-chart-job-stop="{{ job.stop_url }}" data-report-chart-job-name="{{ job.template }}">■</button>{% endif %}<button type="button" class="danger-button" title="Delete Chart Set job" data-report-chart-job-delete="{{ job.delete_url }}" data-report-chart-job-name="{{ job.template }}">✕</button></div></td>
+          <td><div class="report-job-actions">{% if job.charts_download_url %}<a class="report-job-download-button report-job-charts-download-button" href="{{ job.charts_download_url }}" download title="Download Chart Set PNGs as ZIP" aria-label="Download Chart Set PNGs as ZIP"></a>{% endif %}{% if job.open_url %}<button type="button" class="report-job-charts-button" title="Open generated Chart Set" aria-label="Open generated Chart Set" data-report-chart-job-open="{{ job.open_url }}">👁</button>{% endif %}{% if job.retry_url %}<button type="button" class="report-job-retry-button" title="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry Chart Set' }}" aria-label="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry Chart Set' }}" data-report-chart-job-retry="{{ job.retry_url }}" data-report-chart-job-name="{{ job.template }}" data-report-chart-job-status="{{ job.status }}" data-report-chart-job-generation="{{ job.generation or '' }}">↻</button>{% endif %}{% if job.stop_url %}<button type="button" class="report-job-stop-button" title="Stop Chart Set" aria-label="Stop Chart Set" data-report-chart-job-stop="{{ job.stop_url }}" data-report-chart-job-name="{{ job.template }}">■</button>{% endif %}<button type="button" class="danger-button" title="Delete Chart Set job" data-report-chart-job-delete="{{ job.delete_url }}" data-report-chart-job-generation="{{ job.generation or '' }}" data-report-chart-job-name="{{ job.template }}">✕</button></div></td>
         </tr>
         {% endfor %}
       </tbody></table></div>
@@ -408,7 +408,7 @@
     const rebuildReportChartSetSelector = (selectedValue = '') => {
       if (!reportChartSetSelect) return;
       const options = [
-        ...newestFirst(reportChartReportSets, 'date').map((report) => {
+        ...newestFirst(reportChartReportSets, 'charts_date').map((report) => {
           const option = document.createElement('option');
           option.className = 'chart-set-option-report';
           option.value = `report:${report.id}`;
@@ -424,7 +424,8 @@
         }),
       ];
       reportChartSetSelect.replaceChildren(...options);
-      reportChartSetSelect.value = selectedValue || options[0]?.value || '';
+      reportChartSetSelect.value = options.some((option) => option.value === selectedValue)
+        ? selectedValue : options[0]?.value || '';
       if (reportChartSetPickerLabel) renderChartSetPickerText(reportChartSetPickerLabel, reportChartSetSelect.selectedOptions[0]);
       if (reportChartSetPickerOptions) {
         reportChartSetPickerOptions.replaceChildren(...options.map((option) => {
@@ -443,6 +444,26 @@
       const hasStandaloneSets = reportChartSets.length > 0;
       if (reportChartSetDelete) reportChartSetDelete.hidden = !hasStandaloneSets || !String(selectedValue).startsWith('standalone:');
       if (reportChartSetDeleteAll) reportChartSetDeleteAll.hidden = !hasStandaloneSets;
+    };
+    const clearSelectedReportCharts = () => {
+      reportCharts = [];
+      reportChartsBody?.replaceChildren();
+      if (reportChartsCount) reportChartsCount.textContent = '0 charts';
+      reportChartsPanel?.removeAttribute('data-report-charts-ready');
+      [reportChartsGeneratedAt, reportChartsTemplate, reportChartsScope, reportChartsDataCount, reportChartsVoiceCount, reportChartsSpeechCount]
+        .forEach((badge) => { if (badge) badge.hidden = true; });
+      updateReportingModule();
+    };
+    const syncChartSetSelectorAfterJobDeletion = (deletedValue) => {
+      const wasSelected = reportChartSetSelect?.value === deletedValue;
+      const [source, identifier] = deletedValue.split(':', 2);
+      if (source === 'report') reportChartReportSets = reportChartReportSets.filter((item) => String(item.id) !== identifier);
+      if (source === 'standalone') reportChartSets = reportChartSets.filter((item) => String(item.generation) !== identifier);
+      rebuildReportChartSetSelector(wasSelected ? '' : reportChartSetSelect?.value || '');
+      updateChartSetActions();
+      if (!wasSelected) return;
+      if (reportChartSetSelect?.value) reportChartSetSelect.dispatchEvent(new Event('change'));
+      else clearSelectedReportCharts();
     };
     const jobsBody = document.querySelector('[data-report-jobs-body]');
     const jobsCount = document.querySelector('[data-report-jobs-count]');
@@ -546,9 +567,12 @@
           retry.type = 'button';
           retry.className = 'report-job-retry-button';
           retry.textContent = '↻';
-          retry.title = 'Retry report';
-          retry.setAttribute('aria-label', 'Retry report');
+          const relaunchReadyJob = String(job.status || '').toLowerCase() === 'ready';
+          retry.title = relaunchReadyJob ? 'Relaunch Job' : 'Retry report';
+          retry.setAttribute('aria-label', retry.title);
           retry.dataset.reportJobRetry = job.retry_url;
+          retry.dataset.reportJobId = job.id;
+          retry.dataset.reportJobStatus = job.status || '';
           retry.dataset.reportJobName = job.report_name;
           actions.append(retry);
         }
@@ -566,6 +590,7 @@
         remove.title = 'Delete report';
         remove.setAttribute('aria-label', 'Delete report');
         remove.dataset.reportJobDelete = job.delete_url;
+        remove.dataset.reportJobId = job.id;
         remove.dataset.reportJobName = job.report_name;
         actions.append(remove);
         actionsCell.append(actions);
@@ -610,9 +635,9 @@
         const actionsCell = document.createElement('td'); const actions = document.createElement('div'); actions.className = 'report-job-actions';
         if (job.charts_download_url) { const download = reportActionLink('', job.charts_download_url, true); download.className = 'report-job-download-button report-job-charts-download-button'; download.download = ''; download.title = 'Download Chart Set PNGs as ZIP'; download.setAttribute('aria-label', 'Download Chart Set PNGs as ZIP'); actions.append(download); }
         if (job.open_url) { const open = document.createElement('button'); open.type = 'button'; open.className = 'report-job-charts-button'; open.textContent = '👁'; open.title = 'Open generated Chart Set'; open.setAttribute('aria-label', 'Open generated Chart Set'); open.dataset.reportChartJobOpen = job.open_url; actions.append(open); }
-        if (job.retry_url) { const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'report-job-retry-button'; retry.textContent = '↻'; retry.title = 'Retry Chart Set'; retry.dataset.reportChartJobRetry = job.retry_url; retry.dataset.reportChartJobName = job.template; actions.append(retry); }
+        if (job.retry_url) { const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'report-job-retry-button'; retry.textContent = '↻'; const relaunchReadyJob = String(job.status || '').toLowerCase() === 'ready'; retry.title = relaunchReadyJob ? 'Relaunch Job' : 'Retry Chart Set'; retry.setAttribute('aria-label', retry.title); retry.dataset.reportChartJobRetry = job.retry_url; retry.dataset.reportChartJobName = job.template; retry.dataset.reportChartJobStatus = job.status || ''; retry.dataset.reportChartJobGeneration = job.generation || ''; actions.append(retry); }
         if (job.stop_url) { const stop = document.createElement('button'); stop.type = 'button'; stop.className = 'report-job-stop-button'; stop.textContent = '■'; stop.title = 'Stop Chart Set'; stop.setAttribute('aria-label', 'Stop Chart Set'); stop.dataset.reportChartJobStop = job.stop_url; stop.dataset.reportChartJobName = job.template; actions.append(stop); }
-        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'danger-button'; remove.textContent = '✕'; remove.title = 'Delete Chart Set job'; remove.dataset.reportChartJobDelete = job.delete_url; remove.dataset.reportChartJobName = job.template; actions.append(remove);
+        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'danger-button'; remove.textContent = '✕'; remove.title = 'Delete Chart Set job'; remove.dataset.reportChartJobDelete = job.delete_url; remove.dataset.reportChartJobGeneration = job.generation || ''; remove.dataset.reportChartJobName = job.template; actions.append(remove);
         actionsCell.append(actions); row.append(progressCell, actionsCell); return row;
       }));
       if (chartJobsCount) chartJobsCount.textContent = `${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'}`;
@@ -1029,15 +1054,20 @@
       }
       const retry = event.target.closest('[data-report-job-retry]');
       if (retry) {
-        const accepted = await showConfirmDialog('Retry report \'' + retry.dataset.reportJobName + '\' ? A new report job will be created.', {title: 'Retry report', confirmLabel: 'Retry'});
+        const relaunchReadyJob = String(retry.dataset.reportJobStatus || '').toLowerCase() === 'ready';
+        const prompt = relaunchReadyJob
+          ? `Relaunch report '${retry.dataset.reportJobName}'? Its existing PowerPoint and generated charts will be permanently deleted before it is queued again.`
+          : `Retry report '${retry.dataset.reportJobName}'? The same job will be queued again.`;
+        const accepted = await showConfirmDialog(prompt, {title: relaunchReadyJob ? 'Relaunch Job' : 'Retry report', confirmLabel: relaunchReadyJob ? 'Relaunch' : 'Retry'});
         if (!accepted) return;
-        showLoadingOverlay('Retrying PowerPoint report', 'The report will be generated on the server. You can leave this page while it runs.');
+        showLoadingOverlay(relaunchReadyJob ? 'Relaunching PowerPoint report' : 'Retrying PowerPoint report', 'The report will be generated on the server. You can leave this page while it runs.');
         try {
           const response = await fetch(retry.dataset.reportJobRetry, {method: 'POST', credentials: 'same-origin'});
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(payload.detail || 'Unable to retry the report.');
           hideLoadingOverlay();
-          showInfoDialog('Report job #' + payload.job_id + ' has been queued.', {title: 'Report retry queued'});
+          if (relaunchReadyJob) syncChartSetSelectorAfterJobDeletion(`report:${retry.dataset.reportJobId}`);
+          showInfoDialog('Report job #' + payload.job_id + ' has been queued.', {title: relaunchReadyJob ? 'Report relaunch queued' : 'Report retry queued'});
           pollReportJobs();
         } catch (error) {
           hideLoadingOverlay();
@@ -1065,6 +1095,7 @@
         showInfoDialog(payload.detail || 'Unable to delete the report.', {title: 'Delete report', tone: 'error'});
         return;
       }
+      syncChartSetSelectorAfterJobDeletion(`report:${remove.dataset.reportJobId}`);
       pollReportJobs();
     });
     reportJobsDeleteAll?.addEventListener('click', async () => {
@@ -1103,12 +1134,17 @@
       }
       const retry = event.target.closest('[data-report-chart-job-retry]');
       if (retry) {
-        const accepted = await showConfirmDialog(`Retry Chart Set '${retry.dataset.reportChartJobName}'? The same job will be queued again.`, {title: 'Retry Chart Set', confirmLabel: 'Retry'});
+        const relaunchReadyJob = String(retry.dataset.reportChartJobStatus || '').toLowerCase() === 'ready';
+        const prompt = relaunchReadyJob
+          ? `Relaunch Chart Set '${retry.dataset.reportChartJobName}'? Its generated charts will be permanently deleted before it is queued again.`
+          : `Retry Chart Set '${retry.dataset.reportChartJobName}'? The same job will be queued again.`;
+        const accepted = await showConfirmDialog(prompt, {title: relaunchReadyJob ? 'Relaunch Job' : 'Retry Chart Set', confirmLabel: relaunchReadyJob ? 'Relaunch' : 'Retry'});
         if (!accepted) return;
         const response = await fetch(retry.dataset.reportChartJobRetry, {method: 'POST', credentials: 'same-origin'});
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) { showInfoDialog(payload.detail || 'Unable to retry Chart Set.', {title: 'Chart Set retry failed', tone: 'error'}); return; }
-        showInfoDialog(`Report Charts job #${payload.job_id} has been queued.`, {title: 'Chart Set retry queued'});
+        if (relaunchReadyJob && retry.dataset.reportChartJobGeneration) syncChartSetSelectorAfterJobDeletion(`standalone:${retry.dataset.reportChartJobGeneration}`);
+        showInfoDialog(`Report Charts job #${payload.job_id} has been queued.`, {title: relaunchReadyJob ? 'Chart Set relaunch queued' : 'Chart Set retry queued'});
         pendingAutoOpenReportChartJobs.add(payload.job_id);
         pollReportChartJobs();
         return;
@@ -1130,6 +1166,7 @@
       const response = await fetch(remove.dataset.reportChartJobDelete, {method: 'POST', credentials: 'same-origin'});
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) { showInfoDialog(payload.detail || 'Unable to delete Chart Set job.', {title: 'Delete Chart Set job', tone: 'error'}); return; }
+      if (remove.dataset.reportChartJobGeneration) syncChartSetSelectorAfterJobDeletion(`standalone:${remove.dataset.reportChartJobGeneration}`);
       pollReportChartJobs();
     });
     pollReportJobs();

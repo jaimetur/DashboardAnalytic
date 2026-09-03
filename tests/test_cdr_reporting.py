@@ -918,6 +918,30 @@ def test_retrying_a_failed_chart_job_reuses_its_row(client) -> None:
     assert [row['id'] for row in app_module.repository.list_report_chart_jobs(limit=None)] == before_ids
 
 
+def test_deleting_a_ready_chart_job_removes_its_chart_set(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    chart_set = app_module.persist_report_charts(
+        'NSA Slide Template', 'single',
+        [({'slide': 1, 'title': 'Chart', 'source': 'data', 'chart_type': 'Bar'}, b'PNG')],
+        {'data': 1, 'voice': 1, 'speech': 1},
+    )
+    job_id = app_module.repository.create_report_chart_job(
+        technology='nsa', scope='single', dataset_ids={'data': [], 'voice': [], 'speech': []},
+        dataset_names={}, template_name='NSA Slide Template', created_by='admin',
+    )
+    app_module.repository.update_report_chart_job(
+        job_id, status='ready', progress=100, generation=chart_set['generation'], finished=True,
+    )
+
+    deleted = client.post(f'/reporting/chart-jobs/{job_id}/delete')
+
+    assert deleted.status_code == 200
+    assert deleted.json()['generation'] == chart_set['generation']
+    assert not (app_module.report_charts_directory() / chart_set['generation']).exists()
+
+
 def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client) -> None:
     client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
     uploads = [
@@ -976,6 +1000,16 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
     opened = client.get(job['open_url'])
     assert opened.status_code == 200
     assert opened.headers['content-disposition'].startswith('inline;')
+    import src.DashboardAnalytic as app_module
+    stale_file = app_module._report_job_directory(job['report_name']) / 'stale-output.txt'
+    stale_file.write_text('remove me', encoding='utf-8')
+    relaunched = client.post(job['retry_url'])
+    assert relaunched.status_code == 202
+    assert relaunched.json()['job_id'] == job['id']
+    rerun = wait_for_report_job(client, job['id'])
+    assert rerun['status'] == 'ready'
+    assert not stale_file.exists()
+    assert [item['id'] for item in client.get('/api/reporting/jobs').json()['jobs']] == [job['id']]
     deleted = client.post(job['delete_url'])
     assert deleted.status_code == 200
     assert client.get(job['download_url']).status_code == 404
@@ -1104,8 +1138,9 @@ def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, monkey
 
     captured: dict[str, pd.DataFrame] = {}
 
-    def capture_report(destination, template, frames, technology, multivendor, catalog, **_kwargs):
-        captured.update(frames)
+    def capture_report(destination, template, frames, technology, multivendor, catalog, **kwargs):
+        frame_loader = kwargs.get('frame_loader')
+        captured.update(frames or {kind: frame_loader(kind) for kind in ('data', 'voice', 'speech')})
         destination.write_bytes(b'PK')
         return destination
 

@@ -716,6 +716,28 @@ def test_interrupted_background_jobs_become_retryable_failures(client) -> None:
     assert app_module.serialize_report_job(report)['retry_url'] == f'/reporting/jobs/{report_id}/retry'
 
 
+def test_ready_chart_set_job_supports_relaunch_and_row_reuse(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    job_id = app_module.repository.create_report_chart_job(
+        technology='nsa', scope='single', dataset_ids={'data': [], 'voice': [], 'speech': []},
+        dataset_names={'data': [], 'voice': [], 'speech': []}, template_name='NSA Slide Template', created_by='admin',
+    )
+    app_module.repository.update_report_chart_job(
+        job_id, status='ready', progress=100, chart_count=2, generation='2026-09-03_12-00-00', finished=True,
+    )
+
+    ready_job = app_module.repository.get_report_chart_job(job_id)
+    assert ready_job is not None
+    assert app_module.serialize_report_chart_job(ready_job)['retry_url'] == f'/reporting/chart-jobs/{job_id}/retry'
+    assert app_module.repository.retry_report_chart_job(job_id)
+
+    relaunched_job = app_module.repository.get_report_chart_job(job_id)
+    assert relaunched_job is not None
+    assert relaunched_job['status'] == 'queued'
+    assert relaunched_job['generation'] is None
+
+
 def test_workspace_management_lists_restricted_workspaces_without_enabling_actions(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -1929,6 +1951,25 @@ def test_admin_imports_report_catalogue(client) -> None:
     assert 'data-catalogue-import-notice' in confirmation.text
     assert 'catalogue-management-notice' not in confirmation.text
     assert 'id="info-overlay"' in confirmation.text
+
+
+def test_admin_import_preserves_hyphens_in_uploaded_template_name(client) -> None:
+    from src.modules.cdr_reporting import CATALOG_HEADERS
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    content = (
+        ','.join(CATALOG_HEADERS)
+        + '\n1,Imported template,,Title and 1 column + Comments,,,,Title Slide,,,,,\n'
+    ).encode('utf-8')
+    response = client.post(
+        '/admin/slides-templates/import', data={'template_type': 'nsa', 'catalogue_name': ''},
+        files={'catalogue_file': ('NSA Slide Template - Gabriele.csv', BytesIO(content), 'text/csv')},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert app_module.named_catalogue_path('nsa', 'NSA Slide Template - Gabriele').is_file()
 
 
 def test_importing_an_existing_template_requires_explicit_overwrite(client) -> None:

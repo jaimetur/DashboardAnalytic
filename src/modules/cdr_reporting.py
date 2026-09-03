@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from io import BytesIO
 from itertools import product
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
@@ -1165,6 +1165,12 @@ def render_catalog_chart_preview(frame: pd.DataFrame, entry: CatalogEntry, *, mu
     render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
     normalised_frame = normalise_report_operator_aliases(frame)
     return _chart_for_catalog_entry(render_entry, {render_entry.source_kind: normalised_frame}, multivendor).getvalue()
+
+
+def is_empty_catalog_chart(image: bytes, entry: CatalogEntry) -> bool:
+    """Identify the intentional no-samples placeholder emitted by the renderer."""
+    title = entry.chart_title or entry.slide_title
+    return image == _empty_chart(title).getvalue()
 
 
 def _matches(frame: pd.DataFrame, column: str | None, tokens: tuple[str, ...] | None) -> pd.Series:
@@ -2562,9 +2568,11 @@ def _layout_chart_frames(layout) -> list[tuple[int, int, int, int]]:
     return [frame for row in visual_rows for frame in sorted(row, key=lambda item: item[0])]
 
 
-def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.DataFrame], technology: str,
+def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.DataFrame] | None, technology: str,
                       multivendor: bool, catalog: list[CatalogEntry] | None = None,
-                      chart_output_dir: Path | None = None) -> Path:
+                      chart_output_dir: Path | None = None,
+                      frame_loader: Callable[[str], pd.DataFrame] | None = None,
+                      on_chart_rendered: Callable[[CatalogEntry, int, bool], None] | None = None) -> Path:
     if not template.exists():
         raise FileNotFoundError(f"Reporting template not found: {template.name}")
     if not catalog:
@@ -2572,7 +2580,22 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
     # A report may concatenate campaigns that were exported using different
     # operator spellings.  Apply aliases only to these in-memory report frames
     # before filtering and grouping; Workspace datasets remain source-faithful.
-    frames = {source: normalise_report_operator_aliases(frame) for source, frame in frames.items()}
+    if frames is None and frame_loader is None:
+        raise ValueError('Report rendering requires CDR frames or a frame loader.')
+    # Keep only the source currently needed when a loader is supplied.  This
+    # avoids retaining Data, Voice and Speech frames simultaneously for large
+    # reports on resource-constrained servers.
+    cached_frames = {source: normalise_report_operator_aliases(frame) for source, frame in (frames or {}).items()}
+    remaining_by_source = defaultdict(int)
+    for entry in catalog:
+        if entry.source_kind:
+            remaining_by_source[entry.source_kind] += 1
+    def frame_for(source: str) -> pd.DataFrame:
+        if source not in cached_frames:
+            if frame_loader is None:
+                raise ValueError(f'No CDR frame is available for {source}.')
+            cached_frames[source] = normalise_report_operator_aliases(frame_loader(source))
+        return cached_frames[source]
     presentation = Presentation(template)
     _remove_all_slides(presentation)
     rendered_charts: list[dict[str, object]] = []
@@ -2625,9 +2648,16 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
             # editor and Report Charts.  Keeping this call shared prevents an
             # unnoticed drift in normalisation, multivendor preparation or
             # catalogue filtering between preview and export.
-            chart_bytes = render_catalog_chart_preview(
-                frames[entry.source_kind], entry, multivendor=multivendor,
-            )
+            source_frame = frame_for(entry.source_kind)
+            chart_bytes = render_catalog_chart_preview(source_frame, entry, multivendor=multivendor)
+            # Retry one isolated placeholder after releasing transient image
+            # buffers. This helps a constrained worker recover without
+            # rerunning the whole report, while preserving genuine no-data
+            # placeholders if they remain empty.
+            if is_empty_catalog_chart(chart_bytes, entry):
+                chart_bytes = render_catalog_chart_preview(source_frame, entry, multivendor=multivendor)
+            if on_chart_rendered:
+                on_chart_rendered(entry, len(source_frame.index), is_empty_catalog_chart(chart_bytes, entry))
             if chart_output_dir is not None:
                 chart_output_dir.mkdir(parents=True, exist_ok=True)
                 file_name = f'slide-{number:03d}-chart-{chart_index:02d}.png'
@@ -2640,6 +2670,11 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
                     'file': file_name,
                 })
             slide.shapes.add_picture(BytesIO(chart_bytes), *placement)
+            remaining_by_source[entry.source_kind] -= 1
+            if frame_loader is not None and remaining_by_source[entry.source_kind] == 0:
+                # The final chart for this CDR type has been embedded; release
+                # its potentially large DataFrame before moving to the next.
+                cached_frames.pop(entry.source_kind, None)
     presentation.save(destination)
     if chart_output_dir is not None:
         (chart_output_dir / 'manifest.json').write_text(json.dumps({'charts': rendered_charts}), encoding='utf-8')

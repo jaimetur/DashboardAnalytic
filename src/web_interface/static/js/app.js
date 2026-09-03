@@ -569,6 +569,51 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const hideCellAssistance = () => {
     helper.hidden = true;
     delete helper.dataset.catalogueAssistanceField;
+    helper.classList.remove('catalogue-editor-menu-open');
+    helper.querySelectorAll('.searchable-select-menu, .multiselect-menu').forEach((menu) => {
+      menu.style.removeProperty('position');
+      menu.style.removeProperty('left');
+      menu.style.removeProperty('top');
+      menu.style.removeProperty('bottom');
+      menu.style.removeProperty('right');
+      menu.style.removeProperty('width');
+      menu.style.removeProperty('max-height');
+    });
+  };
+  const placeAssistanceMenu = (target) => {
+    const shell = target.closest?.('.searchable-select-shell, .multiselect-shell');
+    const menu = shell?.querySelector('.searchable-select-menu:not([hidden]), .multiselect-menu:not([hidden])');
+    const editorPanel = editor.closest('.slides-templates-editor-panel');
+    if (!shell || !menu || !editorPanel) return;
+    const panelBounds = editorPanel.getBoundingClientRect();
+    const shellBounds = shell.getBoundingClientRect();
+    const gap = 7;
+    // The editor panel can be taller than the viewport.  Constrain the menu
+    // to the visible part of both, otherwise a fixed menu can be placed below
+    // the screen and look as though it refused to open.
+    const visiblePanelTop = Math.max(8, panelBounds.top);
+    const visiblePanelBottom = Math.min(window.innerHeight - 8, panelBounds.bottom);
+    const below = Math.max(0, visiblePanelBottom - shellBounds.bottom - gap);
+    const above = Math.max(0, shellBounds.top - visiblePanelTop - gap);
+    const openBelow = below >= above;
+    const availableHeight = openBelow ? below : above;
+    // A compact, scrollable list remains usable even when there is little
+    // room beside the Cell Assistance dialog.
+    const maxHeight = Math.max(96, Math.min(360, availableHeight));
+    const width = Math.max(180, Math.min(shellBounds.width, panelBounds.right - shellBounds.left));
+    menu.style.position = 'fixed';
+    menu.style.left = `${Math.max(panelBounds.left, Math.min(shellBounds.left, panelBounds.right - width))}px`;
+    menu.style.right = 'auto';
+    menu.style.width = `${width}px`;
+    menu.style.maxHeight = `${maxHeight}px`;
+    if (openBelow) {
+      menu.style.top = `${shellBounds.bottom + gap}px`;
+      menu.style.bottom = 'auto';
+    } else {
+      menu.style.bottom = `${Math.max(0, window.innerHeight - shellBounds.top + gap)}px`;
+      menu.style.top = 'auto';
+    }
+    helper.classList.add('catalogue-editor-menu-open');
   };
   const positionCellAssistance = (cell) => {
     helper.hidden = false;
@@ -618,8 +663,19 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         .map((value) => value.trim())
         .filter(Boolean),
     );
+    const normaliseOptionValue = (value) => String(value || '')
+      .trim().toLocaleLowerCase().replace(/[\s_-]+/g, ' ');
+    const hasExistingValue = (value) => Array.from(existingValues).some(
+      (existing) => normaliseOptionValue(existing) === normaliseOptionValue(value),
+    );
     if (values.length) {
-      values.forEach((value) => options.add(new Option(value, value, false, existingValues.has(value))));
+      values.forEach((value) => options.add(new Option(value, value, false, hasExistingValue(value))));
+      // Explicitly assign the matching value as well as marking its option.
+      // This keeps the searchable single-select hydrated after it is rebuilt.
+      if (!allowsMultiple) {
+        const selected = Array.from(options.options).find((option) => hasExistingValue(option.value));
+        options.value = selected?.value || '';
+      }
     } else {
       options.add(new Option('No contextual values are defined for this field. Edit it manually.', '', true, false));
       options.options[0].disabled = true;
@@ -639,6 +695,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     // whenever this cell switches Available values back to multi-select.
     setupCustomMultiSelects();
     setupSearchableSingleSelects();
+    if (!allowsMultiple) {
+      window.requestAnimationFrame(() => {
+        const input = options.nextElementSibling?.querySelector('.searchable-select-input');
+        if (input) input.value = options.selectedOptions[0]?.textContent?.trim() || '';
+      });
+    }
     positionCellAssistance(cell);
   };
   const selectedCellFromEvent = (event) => {
@@ -976,6 +1038,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   });
   table.closest('.table-wrap')?.addEventListener('scroll', hideCellAssistance, {passive: true});
   helperClose?.addEventListener('click', hideCellAssistance);
+  helper.addEventListener('focusin', (event) => window.requestAnimationFrame(() => placeAssistanceMenu(event.target)));
+  helper.addEventListener('click', (event) => window.requestAnimationFrame(() => placeAssistanceMenu(event.target)));
   table.addEventListener('focusout', (event) => {
     if (event.target.closest?.('[data-catalogue-field="CDR source"]')) normaliseCatalogueRows();
     window.requestAnimationFrame(() => {
@@ -984,14 +1048,20 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     });
   });
   addFilter?.addEventListener('click', () => addFilterCondition());
+  const displayChartType = (value) => String(value || '').replace(/\b\w+/g, (word) => (
+    word.toLocaleLowerCase() === 'cdf'
+      ? 'CDF' : `${word.charAt(0).toLocaleUpperCase()}${word.slice(1).toLocaleLowerCase()}`
+  ));
   apply.addEventListener('click', () => {
     if (!activeCell) return;
     const selected = Array.from(options.selectedOptions).map((option) => option.value).filter(Boolean);
     if (!selected.length) return;
     const field = activeCell.dataset.catalogueField || '';
     const current = activeCell.textContent.trim();
-    if (field === 'Layout' || field === 'Chart type' || field === 'CDR source' || field === 'KPI' || field === 'Legend Position') {
+    if (field === 'Layout' || field === 'CDR source' || field === 'KPI' || field === 'Legend Position') {
       activeCell.textContent = selected[0];
+    } else if (field === 'Chart type') {
+      activeCell.textContent = displayChartType(selected[0]);
     } else if (field === 'Filters') {
       const clauses = selected.map((value) => `${value} = `).join('; ');
       activeCell.textContent = current ? `${current}; ${clauses}` : clauses;
@@ -1173,7 +1243,7 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
   file?.addEventListener('change', () => {
     const selected = file.files?.[0];
     if (!selected || !name || name.value.trim()) return;
-    name.value = selected.name.replace(/\.csv$/i, '').replace(/[_-]+/g, ' ').trim();
+    name.value = selected.name.replace(/\.csv$/i, '').replace(/_+/g, ' ').trim();
   });
   form.addEventListener('submit', async (event) => {
     if (form.dataset.catalogueSubmitting === '1') return;
@@ -1199,7 +1269,7 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
       if (!accepted) return;
     }
     const templateType = form.querySelector('[name="template_type"]')?.value?.trim().toLocaleLowerCase() || 'nsa';
-    const requestedName = (name?.value?.trim() || selected.name.replace(/\.csv$/i, '').replace(/[_-]+/g, ' ').trim());
+    const requestedName = (name?.value?.trim() || selected.name.replace(/\.csv$/i, '').replace(/_+/g, ' ').trim());
     const existing = (templateLibrary?.[templateType] || []).find((templateName) => (
       String(templateName || '').trim().toLocaleLowerCase() === requestedName.toLocaleLowerCase()
     ));

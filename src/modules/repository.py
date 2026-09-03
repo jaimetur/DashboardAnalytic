@@ -1680,6 +1680,16 @@ class Repository:
             )
             return cursor.rowcount == 1
 
+    def retry_report_job(self, report_id: int) -> bool:
+        """Reset a completed, failed or stopped report job for reuse."""
+        with self.connection() as conn:
+            cursor = conn.execute(
+                "UPDATE report_runs SET status = 'queued', progress = 0, last_error = '', finished_at = NULL, updated_at = ? "
+                "WHERE id = ? AND status IN ('failed', 'stopped', 'ready')",
+                (local_now_iso(), report_id),
+            )
+            return cursor.rowcount == 1
+
     def fail_interrupted_background_jobs(self) -> tuple[list[int], list[int]]:
         """Fail jobs left running when the application process stopped.
 
@@ -1788,11 +1798,11 @@ class Repository:
             return cursor.rowcount == 1
 
     def retry_report_chart_job(self, job_id: int) -> bool:
-        """Reset one failed Chart Set job so its row can be reused."""
+        """Reset one failed, stopped or completed Chart Set job for reuse."""
         with self.connection() as conn:
             cursor = conn.execute(
                 "UPDATE report_chart_jobs SET status = 'queued', progress = 0, last_error = '', chart_count = 0, "
-                "generation = NULL, finished_at = NULL, updated_at = ? WHERE id = ? AND status IN ('failed', 'stopped')",
+                "generation = NULL, finished_at = NULL, updated_at = ? WHERE id = ? AND status IN ('failed', 'stopped', 'ready')",
                 (local_now_iso(), job_id),
             )
             return cursor.rowcount == 1
