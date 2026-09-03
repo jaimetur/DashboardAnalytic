@@ -15,7 +15,6 @@
 - Added editable generated-chart previews to Slides Templates Editor rows: Update Template applies the current Interactive Preview values to that in-memory row for the normal save workflow.
 - Added the Chart Builder workspace tab for creating temporary charts from one or more selected processed CDR Sources, using the shared Interactive Preview controls.
 - Added approved server-to-server configuration transfers: the source connects to a destination URL and port, waits for destination super-admin acceptance, streams the selected export and triggers its automatic disk-backed import on receipt.
-
 #### 🚀 Enhancements:
 - Added the Open/eye actions for Charts Jobs and automatic opening/scrolling to the corresponding Chart Set when a new or retried Charts Job completes.
 - Stored report-rendered PNGs in `output/reports/<report-name>/report-charts/` and standalone Chart Sets in `output/charts/`; newly generated report filenames now use `_by-operator_` or `_by-vendor_` scope tokens.
@@ -40,6 +39,7 @@
 - Prefilled the server-transfer destination dialog with port `7278` while keeping it editable.
 - Accelerated workspace imports by atomically renaming staged SQLite databases when possible, falling back safely across filesystems, and replacing the full `quick_check` scan with lightweight SQLite validation.
 - Increased archive extraction I/O blocks to reduce overhead while restoring large workspace databases and files.
+- Published Docker tags as multi-platform manifests for native `linux/amd64` and `linux/arm64` execution, allowing Docker to select the correct image automatically and avoiding x86 emulation on ARM hosts.
 
 #### 🐛 Bug fixes:
 - Fixed Reporting CDR multi-select checkmarks after Multivendor review so they match the submitted CDRs.

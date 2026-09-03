@@ -254,6 +254,7 @@ The repository includes GitHub Actions workflows for:
 
 Docker image publication behavior:
 
+- Published tags are multi-platform manifests containing native `linux/amd64` and `linux/arm64` images. Docker automatically pulls the variant matching the host architecture; do not set `platform` in the production Compose file.
 - Every successful Docker build publishes both its version tag and a refreshed `latest` tag, including manually dispatched builds from a release branch.
 - `push` to `main` additionally refreshes the `main` tag.
 - push of a git tag like `v0.1.0` publishes a Docker tag like `0.1.0`
@@ -275,6 +276,12 @@ Recommended tags:
 - `latest`
 - `main`
 - `0.1.0`
+
+You can confirm the architectures published for a tag with:
+
+```bash
+docker buildx imagetools inspect ${DOCKERHUB_USERNAME}/dashboard-analytic:latest
+```
 
 ## Synology NAS / DockerHand deployment
 

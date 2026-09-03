@@ -19,7 +19,15 @@ Use this mode while developing or validating UI and API changes. Stop it with `C
 Start the production stack in the background:
 
 ```bash
-docker compose --env-file docker/.env -f docker/docker-compose.yml up -d --build
+docker compose --env-file docker/.env -f docker/docker-compose.yml up -d --pull always
+```
+
+Published tags contain native images for both `linux/amd64` and `linux/arm64`. Docker selects the matching image automatically when it pulls the tag, so the production Compose configuration deliberately does not set `platform`. This avoids x86 emulation on ARM hosts such as Apple Silicon while keeping the same image name and tag for Intel/AMD servers.
+
+To verify a published tag before deployment:
+
+```bash
+docker buildx imagetools inspect IMAGE_REPOSITORY:IMAGE_TAG
 ```
 
 Inspect running services with `docker compose -f docker/docker-compose.yml ps` and use the same compose file with `logs -f` when diagnosing an issue.
@@ -34,6 +42,6 @@ Before the first production start, set a private `APP_SECRET_KEY`, a non-default
 
 1. Back up the persistent database and data directories.
 2. Pull or obtain the intended application revision.
-3. Rebuild and start the production compose stack.
+3. Pull and start the production compose stack.
 4. Log in, open an existing workspace and verify that its datasets, templates and database data are available.
 5. Generate a small test export before processing production CDRs.
