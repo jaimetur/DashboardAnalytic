@@ -1595,9 +1595,12 @@ def test_reporting_preselects_latest_ready_cdr_of_each_type(client) -> None:
     voice_select = reporting.text.split('name="voice_dataset_id"', 1)[1].split('</select>', 1)[0]
     speech_select = reporting.text.split('name="speech_dataset_id"', 1)[1].split('</select>', 1)[0]
 
-    assert 'value="3" data-vendor-mapped="false" selected' in data_select
-    assert 'value="2" data-vendor-mapped="false" selected' in voice_select
-    assert 'value="4" data-vendor-mapped="false" selected' in speech_select
+    assert 'value="3" data-vendor-mapped="false" data-uploaded-at=' in data_select
+    assert 'selected>latest-data.csv' in data_select
+    assert 'value="2" data-vendor-mapped="false" data-uploaded-at=' in voice_select
+    assert 'selected>voice.csv' in voice_select
+    assert 'value="4" data-vendor-mapped="false" data-uploaded-at=' in speech_select
+    assert 'selected>speech.csv' in speech_select
     assert 'if (active) catalogue.value = active.value;' in reporting.text
 
 
@@ -2025,6 +2028,18 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     saved_editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=Baseline%20Q4')
     assert '>Edited</td>' in saved_editor.text
     assert saved_editor.text.index('>Edited</td>') < saved_editor.text.index('>Late</td>')
+
+    saved_in_background = client.post(
+        '/admin/report-templates/nsa/Baseline%20Q4/save',
+        data={'catalogue_content': edited},
+        headers={'accept': 'application/json'},
+    )
+    assert saved_in_background.status_code == 200
+    assert saved_in_background.json() == {
+        'template': 'Baseline Q4',
+        'technology': 'nsa',
+        'chart_rows': 2,
+    }
 
     activated = client.post('/admin/report-templates/nsa/Baseline%20Q4/activate', follow_redirects=False)
     assert activated.status_code == 303

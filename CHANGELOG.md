@@ -18,6 +18,24 @@
 - Added ZIP downloads for standalone Chart Set PNGs and for the PNG charts rendered with each generated report; Charts Jobs now uses the same eye action as Reports Jobs.
 - Improved Charts Set selection with report-first chronological ordering, clear source-specific hover styling and automatic closing when clicking elsewhere.
 - Renamed newly generated report files to use the clearer `_by-operator_` and `_by-vendor_` scope tokens.
+- Added a Multivendor multi-campaign review dialog before report or Chart Set generation, with one-or-more CDR validation for Data, Voice and Speech and the chronologically latest selected campaign preselected for each type.
+- Made Count Stacked Horizontal Bars retain every filtered Rows/Columns Aggregation value, drawing zero-count combinations instead of omitting them.
+- Added dashed vertical separators between child column-aggregation values, such as campaigns, within the same top-level group in Count Stacked Horizontal Bars.
+- Made Slides Templates Editor saves asynchronous with immediate progress and confirmation dialogs, preserving the open editor, table state and scroll position.
+- Added Escape-key dismissal for the floating Slides Templates Editor Cell Assistance panel.
+- Added a brief grace period before the Charts Set selector closes after the pointer leaves it.
+- Enlarged contextual Cell Assistance for Filters and Legend Position so filter values and every legend-placement option remain readable.
+- Restored existing filter clauses into the Cell Assistance Filter Builder and refined its compact light selector styling.
+- Added comma-separated multi-value support for Filter Builder `CONTAINS` and `NOT CONTAINS` conditions.
+- Improved hierarchical column charts with a single caption orientation, vertical KPI y-axis labels, and stable operator/vendor colours (Vodafone red, 3 orange, O2 blue and EE turquoise) whenever an operator/vendor is a column-aggregation dimension, including distinct shades for multivendor groups.
+- Refined CDF rendering with thin baseline lines, emphasis only for the latest campaign in multi-campaign comparisons, and non-overlapping legend markers and labels.
+- Made CDF Line generate one curve for every complete Rows/Columns Aggregation combination, regardless of which axis defines each dimension.
+- Made dense CDF legends compact and canvas-aware, and enlarged the chart viewer to keep every legend row visible.
+- Added consistent dashed separators to hierarchical vertical-bar charts, only at changes in the top-level column aggregation, and strengthened CDF campaign detection from the physical Campaign field for reliable historical/latest line widths and operator/vendor palette assignment.
+- Completed hierarchical failure-count comparison grids so empty Operator/Vendor × Campaign combinations remain visible, with dashed separators only between distinct top-level column-aggregation values.
+- Expanded multivendor chart palettes so each vendor receives a distinct shade within its operator family, while campaigns for that vendor retain the same hue.
+- Increased contrast between vendors in each operator colour family. Non-line charts now keep each Vendor colour consistent across operators, while CDF lines retain operator-family shades per vendor for legibility.
+- Made single-campaign CDF Lines use the same emphasised stroke width as the latest campaign in a multi-campaign comparison.
 
 #### 🐛 Bug fixes:
 - Fixed Report Charts failures to return actionable JSON errors and record Error events in App Logs instead of exposing a browser JSON parsing error.

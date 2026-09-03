@@ -5037,19 +5037,22 @@ def delete_report_catalogue(
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/admin/report-templates/{technology}/{catalogue_id}/save', response_class=HTMLResponse)
+@app.post('/admin/report-templates/{technology}/{catalogue_id}/save')
 def save_report_catalogue(
     request: Request,
     technology: str,
     catalogue_id: str,
     catalogue_content: str = Form(...),
     user: SessionUser = Depends(admin_user),
-) -> HTMLResponse:
+) -> Response:
+    wants_json = 'application/json' in request.headers.get('accept', '')
     technology = technology.strip().lower()
     if technology not in TEMPLATE_NAMES:
         raise HTTPException(status_code=404, detail='Report technology not found')
     catalogue = next((item for item in report_catalogue_options(technology) if item['identifier'] == catalogue_id), None)
     if not catalogue:
+        if wants_json:
+            return JSONResponse({'detail': 'Slides Template not found.'}, status_code=404)
         return render_admin_template(request, user, error='Slides Template not found.', status_code=404)
     try:
         entries = parse_catalog_csv(catalogue_content, technology)
@@ -5068,12 +5071,20 @@ def save_report_catalogue(
             synchronize_reporting_catalogue_document()
         repository.touch_report_template(technology, catalogue_id)
     except ValueError as exc:
+        if wants_json:
+            return JSONResponse({'detail': str(exc)}, status_code=400)
         return render_admin_template(request, user, error=str(exc), status_code=400)
     repository.add_log(user.username, 'save_report_template', json.dumps({
         'technology': technology,
         'template': catalogue['name'],
         'chart_rows': sum(1 for entry in entries if entry.source_kind),
     }))
+    if wants_json:
+        return JSONResponse({
+            'template': catalogue['name'],
+            'technology': technology,
+            'chart_rows': sum(1 for entry in entries if entry.source_kind),
+        })
     query = urlencode({'catalogue_technology': technology, 'catalogue_id': catalogue_id})
     return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)
 

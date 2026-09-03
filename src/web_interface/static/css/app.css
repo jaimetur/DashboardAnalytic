@@ -401,10 +401,10 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-job-download-button.action-link-disabled { background: linear-gradient(135deg, #e3e8ec, #d5dde4); border-color: rgba(126, 139, 152, 0.24); color: #7a8792; box-shadow: none; cursor: not-allowed; }
 .report-job-report-download-button { position: relative; overflow: visible; font-size: 0; }
 .report-job-report-download-button::before { content: ''; width: 1.02rem; height: 0.76rem; border: 1.5px solid currentColor; border-radius: 0.12rem; background: linear-gradient(currentColor, currentColor) 50% 31% / 55% 1px no-repeat, linear-gradient(currentColor, currentColor) 50% 57% / 55% 1px no-repeat; }
-.report-job-report-download-button::after { content: '↓'; position: absolute; right: 0.12rem; bottom: 0.08rem; display: grid; place-items: center; width: 0.78rem; height: 0.78rem; border-radius: 999px; background: #fff; color: #4f2d82; font-size: 0.72rem; font-weight: 900; line-height: 1; box-shadow: 0 1px 3px rgba(49, 26, 78, 0.28); }
+.report-job-report-download-button::after { content: '↓'; position: absolute; right: 0.12rem; bottom: 0.08rem; display: grid; place-items: center; width: 0.78rem; height: 0.78rem; border-radius: 999px; background: #d9f3df; color: #237146; font-size: 0.72rem; font-weight: 900; line-height: 1; box-shadow: 0 1px 3px rgba(30, 101, 61, 0.28); }
 .report-job-charts-download-button { position: relative; overflow: visible; font-size: 0; }
 .report-job-charts-download-button::before { content: ''; width: 1.08rem; height: 1rem; background: linear-gradient(currentColor, currentColor) left bottom / 0.21rem 0.42rem no-repeat, linear-gradient(currentColor, currentColor) center bottom / 0.21rem 0.7rem no-repeat, linear-gradient(currentColor, currentColor) right bottom / 0.21rem 0.94rem no-repeat; border-bottom: 1.5px solid currentColor; }
-.report-job-charts-download-button::after { content: '↓'; position: absolute; right: 0.16rem; bottom: 0.08rem; display: grid; place-items: center; width: 0.78rem; height: 0.78rem; border-radius: 999px; background: #fff; color: #4f2d82; font-size: 0.72rem; font-weight: 900; line-height: 1; box-shadow: 0 1px 3px rgba(49, 26, 78, 0.28); }
+.report-job-charts-download-button::after { content: '↓'; position: absolute; right: 0.16rem; bottom: 0.08rem; display: grid; place-items: center; width: 0.78rem; height: 0.78rem; border-radius: 999px; background: #d9f3df; color: #237146; font-size: 0.72rem; font-weight: 900; line-height: 1; box-shadow: 0 1px 3px rgba(30, 101, 61, 0.28); }
 .report-job-actions .danger-button { min-height: 0; width: 2rem; height: 2rem; padding: 0; font-size: 1rem; line-height: 1; font-weight: 800; }
 .report-job-retry-button { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; min-height: 0; padding: 0; border: 1px solid rgba(11, 122, 117, 0.62); border-radius: 999px; background: linear-gradient(145deg, #08736d, #20a797); color: #fff; font-size: 1.15rem; line-height: 1; font-weight: 800; box-shadow: 0 8px 18px rgba(8,115,109,0.18); }
 .report-job-retry-button:hover { background: linear-gradient(145deg, #075d58, #168b7e); border-color: rgba(7,93,88,0.78); box-shadow: 0 10px 22px rgba(7,93,88,0.3); transform: translateY(-1px); }
@@ -420,6 +420,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .admin-stack .catalogue-reenumerate-button { background: linear-gradient(145deg, #d9d0ef, #bba8dc); border-color: rgba(116, 87, 164, 0.62); color: #49366c; box-shadow: 0 8px 18px rgba(95, 69, 142, 0.16); }
 .admin-stack .catalogue-reenumerate-button:hover:not(:disabled) { background: linear-gradient(145deg, #cbc0e6, #a891d1); color: #392855; }
 .catalogue-editor-helper { position: fixed; z-index: 3000; display: grid; width: min(390px, calc(100vw - 24px)); max-height: min(580px, calc(100vh - 24px)); gap: 0.75rem; padding: 2.5rem 1rem 1rem; overflow: auto; border: 1px solid rgba(54, 72, 82, 0.24); border-radius: 16px; background: linear-gradient(145deg, #ffffff, #f1f5f6); box-shadow: 0 18px 42px rgba(25, 42, 52, 0.24); }
+.catalogue-editor-helper[data-catalogue-assistance-field="Filters"] { width: min(660px, calc(100vw - 24px)); }
+.catalogue-editor-helper[data-catalogue-assistance-field="Legend Position"] { height: min(470px, calc(100vh - 24px)); max-height: min(470px, calc(100vh - 24px)); overflow: visible; }
 .catalogue-editor-helper[hidden] { display: none !important; }
 .catalogue-editor-helper-close { position: absolute; top: 0.55rem; right: 0.55rem; display: inline-grid; width: 1.7rem; min-width: 1.7rem; height: 1.7rem; min-height: 1.7rem; padding: 0; place-items: center; border-color: rgba(157, 36, 48, 0.52); background: linear-gradient(145deg, #d94b59, #ae2635); color: #ffffff; font-size: 1.2rem; line-height: 1; box-shadow: none; }
 .catalogue-editor-helper-close:hover:not(:disabled) { border-color: rgba(123, 24, 35, 0.72); background: linear-gradient(145deg, #bd3443, #851b29); color: #ffffff; box-shadow: none; }
@@ -455,7 +457,12 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-filter-builder .eyebrow { color: #405560; }
 .catalogue-filter-conditions { display: grid; gap: 0.65rem; }
 .catalogue-filter-condition { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 1fr) auto; gap: 0.4rem; align-items: center; }
-.catalogue-filter-builder input { min-width: 0; width: 100%; border-color: rgba(54, 72, 82, 0.34); background: #fff; color: #263b45; font-size: 0.82rem; }
+.catalogue-filter-builder input { min-width: 0; width: 100%; min-height: 2.25rem; padding: 0.42rem 0.65rem; border-color: rgba(75, 104, 118, 0.35); border-radius: 10px; background: #fff; color: #314852; font-size: 0.78rem; }
+.catalogue-filter-builder .searchable-select-shell { min-width: 0; }
+.catalogue-filter-builder .searchable-select-input { min-height: 2.25rem; padding: 0.42rem 2.15rem 0.42rem 0.65rem; border-color: rgba(75, 104, 118, 0.35); border-radius: 10px; background: #fbfdfe; color: #314852; font-size: 0.78rem; }
+.catalogue-filter-builder .searchable-select-menu { max-height: 12rem; padding: 0.3rem; border-color: rgba(75, 104, 118, 0.28); border-radius: 10px; background: #ffffff; box-shadow: 0 10px 24px rgba(42, 67, 78, 0.16); }
+.catalogue-filter-builder .searchable-select-option { padding: 0.38rem 0.55rem; border: 0; border-radius: 7px; background: #ffffff; color: #405963; font-size: 0.76rem; line-height: 1.25; box-shadow: none; }
+.catalogue-filter-builder .searchable-select-option:hover, .catalogue-filter-builder .searchable-select-option[aria-selected="true"] { background: #e8f1f4; color: #294650; box-shadow: none; }
 .catalogue-filter-builder button { margin: 0; background: linear-gradient(135deg, #3f6474, #527b8c); border-color: #3f6474; box-shadow: none; }
 .catalogue-filter-builder button:hover:not(:disabled) { background: linear-gradient(135deg, #324f5c, #426b7b); box-shadow: none; }
 .catalogue-filter-builder .catalogue-filter-remove { min-width: 2rem; padding: 0.45rem 0.6rem; background: #f3e5e8; border-color: #d59ba8; color: #8c3447; font-size: 1.1rem; line-height: 1; }
@@ -525,9 +532,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-chart-card img { display: block; width: 100%; height: auto; border: 1px solid rgba(75, 32, 138, 0.16); border-radius: 8px; background: #fff; }
 .report-chart-card { cursor: zoom-in; }
 .report-chart-card:focus-visible { outline: 3px solid rgba(111, 72, 166, 0.45); outline-offset: 3px; }
-.report-chart-viewer-overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 0.75rem; background: rgba(31, 19, 52, 0.56); z-index: 110; }
+.report-chart-viewer-overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 0.35rem; background: rgba(31, 19, 52, 0.56); z-index: 110; }
 .report-chart-viewer-overlay[hidden] { display: none !important; }
-.report-chart-viewer-dialog { width: min(calc(100vw - 3rem), 1680px); height: min(calc(100vh - 1.5rem), 1080px); max-width: none; max-height: none; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 1rem; padding: 1.25rem 1.4rem; }
+.report-chart-viewer-dialog { width: min(calc(100vw - 1rem), 1680px); height: min(calc(100vh - 0.7rem), 1100px); max-width: none; max-height: none; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 1rem; padding: 1.25rem 1.4rem; }
 .report-chart-viewer-header { display: flex; justify-content: space-between; align-items: start; gap: 1rem; }
 .report-chart-viewer-header h3 { margin: 0.12rem 0 0.25rem; }
 .report-chart-viewer-header p { margin: 0; color: var(--muted); }
@@ -1003,8 +1010,8 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .confirm-overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(9, 17, 24, 0.48); backdrop-filter: blur(12px); z-index: 10000; padding: 1rem; }
 .confirm-overlay[hidden] { display: none !important; }
 .confirm-panel { width: min(92vw, 480px); padding: 1.65rem; border-radius: 28px; background: linear-gradient(180deg, rgba(255, 251, 248, 0.98), rgba(250, 243, 240, 0.96)); box-shadow: 0 40px 90px rgba(18, 32, 43, 0.26); border: 1px solid rgba(255,255,255,0.68); text-align: left; }
-.confirm-overlay.report-chart-viewer-overlay { padding: 0.75rem; background: rgba(31, 19, 52, 0.56); }
-.confirm-panel.report-chart-viewer-dialog { width: min(calc(100vw - 3rem), 1680px) !important; height: min(calc(100vh - 1.5rem), 1080px) !important; max-width: none !important; max-height: none !important; }
+.confirm-overlay.report-chart-viewer-overlay { padding: 0.35rem; background: rgba(31, 19, 52, 0.56); }
+.confirm-panel.report-chart-viewer-dialog { width: min(calc(100vw - 1rem), 1680px) !important; height: min(calc(100vh - 0.7rem), 1100px) !important; max-width: none !important; max-height: none !important; }
 .confirm-icon { display: inline-grid; place-items: center; width: 54px; height: 54px; margin-bottom: 0.9rem; border-radius: 18px; background: linear-gradient(135deg, rgba(200, 74, 74, 0.16), rgba(224, 106, 90, 0.24)); color: #bb3c3c; font-family: "Space Grotesk", "Segoe UI", sans-serif; font-size: 1.6rem; font-weight: 700; box-shadow: inset 0 1px 0 rgba(255,255,255,0.65); }
 .info-icon { background: linear-gradient(135deg, rgba(16, 49, 74, 0.16), rgba(8, 115, 109, 0.24)); color: #08736d; }
 .info-overlay[data-tone="warning"] .info-icon { background: linear-gradient(135deg, rgba(202, 133, 18, 0.18), rgba(238, 181, 65, 0.28)); color: #9b6104; }
@@ -1018,6 +1025,15 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .confirm-option { display: flex; align-items: flex-start; gap: 0.65rem; margin-top: 1rem; padding: 0.82rem 0.9rem; border: 1px solid rgba(187, 60, 60, 0.24); border-radius: 13px; background: rgba(200, 74, 74, 0.07); color: #5d3232; font-weight: 600; line-height: 1.35; cursor: pointer; }
 .confirm-option[hidden] { display: none !important; }
 .confirm-option input { flex: 0 0 auto; width: 1.05rem; height: 1.05rem; margin: 0.1rem 0 0; accent-color: #bb3c3c; }
+.report-multicampaign-dialog { width: min(92vw, 680px); }
+.report-multicampaign-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.8rem; margin-top: 1.1rem; }
+.report-multicampaign-group { min-width: 0; margin: 0; padding: 0.75rem; border: 1px solid rgba(119, 77, 181, 0.24); border-radius: 14px; background: rgba(119, 77, 181, 0.06); }
+.report-multicampaign-group legend { padding: 0 0.25rem; color: #56338a; font-weight: 750; }
+.report-multicampaign-choice { display: flex; align-items: flex-start; gap: 0.45rem; padding: 0.35rem 0; color: #34495a; font-size: 0.82rem; line-height: 1.25; cursor: pointer; }
+.report-multicampaign-choice input { flex: 0 0 auto; width: 1rem; height: 1rem; margin: 0.05rem 0 0; accent-color: #6b4ca3; }
+.report-multicampaign-choice span { overflow-wrap: anywhere; }
+.report-multicampaign-error { margin: 0.9rem 0 0; color: #b23b3b; font-weight: 700; }
+@media (max-width: 720px) { .report-multicampaign-groups { grid-template-columns: 1fr; } }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.35rem; flex-wrap: wrap; }
 .confirm-cancel { cursor: pointer; color: #44515d; box-shadow: 0 8px 20px rgba(18, 32, 43, 0.08); }
 .change-password-cancel { background: linear-gradient(135deg, #e8eef2, #d4e0e6); border-color: rgba(68, 81, 93, 0.28); color: #263946; }

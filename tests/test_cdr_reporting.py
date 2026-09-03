@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _hierarchical_unique_keys, _layout_chart_frames, _named_slide_layout, _render_failure_count, _render_failure_count_hierarchy, _render_status_100, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_status_100, _series_colours, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -384,10 +384,99 @@ def test_campaign_grouping_displays_only_year_and_quarter() -> None:
     assert grouped[series].tolist() == ['2026 Q2', '2025 Q4', '2024 Q3']
 
 
+def test_cdf_renders_a_curve_for_each_complete_rows_and_columns_combination() -> None:
+    frame = pd.DataFrame({
+        '__catalog_row_0': ['Vodafone', 'Vodafone', 'Vodafone', 'Vodafone', 'O2', 'O2', 'O2', 'O2'],
+        '__catalog_column_0': ['2025', '2025', '2026', '2026', '2025', '2025', '2026', '2026'],
+        '__catalog_primary': ['unused'] * 8,
+        '__catalog_series': ['unused'] * 8,
+        'Campaign': ['2025', '2025', '2026', '2026', '2025', '2025', '2026', '2026'],
+        'Metric': [1.0, 2.0, 1.5, 2.5, 1.2, 2.2, 1.7, 2.7],
+    })
+
+    with patch('src.modules.cdr_reporting._draw_chart_legend') as draw_legend:
+        _render_cdf_line('CDF', frame, '__catalog_primary', '__catalog_series', 'Metric')
+
+    legend_items = draw_legend.call_args.args[1]
+    assert [item[0] for item in legend_items] == [
+        'Vodafone · 2025', 'Vodafone · 2026', 'O2 · 2025', 'O2 · 2026',
+    ]
+
+
+def test_cdf_uses_emphasised_lines_when_only_one_campaign_is_rendered() -> None:
+    frame = pd.DataFrame({
+        '__catalog_row_0': ['Vodafone', 'Vodafone', 'O2', 'O2'],
+        '__catalog_primary': ['unused'] * 4, '__catalog_series': ['unused'] * 4,
+        'Campaign': ['2026 Q2'] * 4, 'Metric': [1.0, 2.0, 1.2, 2.2],
+    })
+
+    with patch('src.modules.cdr_reporting._draw_chart_legend') as draw_legend:
+        _render_cdf_line('CDF', frame, '__catalog_primary', '__catalog_series', 'Metric')
+
+    assert {item[2] for item in draw_legend.call_args.args[1]} == {4}
+
+
+def test_operator_vendor_column_groups_keep_campaign_bars_in_their_operator_palette() -> None:
+    colours = _hierarchy_group_colours([
+        ('Vodafone_Ericsson', '2026 Q1'), ('Vodafone_Ericsson', '2026 Q2'),
+        ('Vodafone_Huawei', '2026 Q1'), ('Vodafone_Huawei', '2026 Q2'),
+        ('3_Ericsson', '2026 Q1'), ('3_Ericsson', '2026 Q2'),
+    ])
+
+    assert colours['Vodafone_Ericsson'] == '#E15759'
+    assert colours['Vodafone_Huawei'] == '#9B1D20'
+    assert colours['3_Ericsson'] == '#F28E2B'
+
+
+def test_chart_colours_use_operator_families_only_for_multi_operator_dimensions() -> None:
+    keys = [('Vodafone', 'Ericsson'), ('Vodafone', 'Huawei'), ('3', 'Ericsson'), ('3', 'Huawei')]
+    frame = pd.DataFrame({'__catalog_row_0': [], '__catalog_row_1': []})
+    frame.attrs['catalogue_dimension_labels'] = {
+        '__catalog_row_0': ('Operator',), '__catalog_row_1': ('Vendor',),
+    }
+
+    colours = _series_colours(keys, ['__catalog_row_0', '__catalog_row_1'], frame)
+
+    assert colours[('Vodafone', 'Ericsson')] == '#0082F0'
+    assert colours[('3', 'Ericsson')] == '#0082F0'
+    assert colours[('Vodafone', 'Huawei')] == colours[('3', 'Huawei')]
+
+    line_colours = _series_colours(keys, ['__catalog_row_0', '__catalog_row_1'], frame, line_chart=True)
+    assert line_colours[('Vodafone', 'Ericsson')] == '#E15759'
+    assert line_colours[('Vodafone', 'Huawei')] == '#9B1D20'
+    assert line_colours[('3', 'Ericsson')] == '#F28E2B'
+    assert line_colours[('3', 'Huawei')] == '#A84B09'
+
+
+def test_chart_colours_use_ericsson_and_neutral_vendor_colours_for_one_operator() -> None:
+    keys = [('Vodafone', 'Ericsson'), ('Vodafone', 'Huawei'), ('Vodafone', 'Nokia')]
+    frame = pd.DataFrame({'__catalog_row_0': [], '__catalog_row_1': []})
+    frame.attrs['catalogue_dimension_labels'] = {
+        '__catalog_row_0': ('Operator',), '__catalog_row_1': ('Vendor',),
+    }
+
+    colours = _series_colours(keys, ['__catalog_row_0', '__catalog_row_1'], frame)
+
+    assert colours[('Vodafone', 'Ericsson')] == '#0082F0'
+    assert len(set(colours.values())) == 3
+
+
+def test_chart_colours_detect_a_single_operator_from_composite_vendor_values() -> None:
+    keys = [('3_Ericsson',), ('3_Huawei',), ('3_Nokia',)]
+    frame = pd.DataFrame({'__catalog_column_0': []})
+    frame.attrs['catalogue_dimension_labels'] = {'__catalog_column_0': ('Vendor',)}
+
+    colours = _series_colours(keys, ['__catalog_column_0'], frame)
+
+    assert colours[('3_Ericsson',)] == '#0082F0'
+    assert len(set(colours.values())) == 3
+
+
 def test_catalogue_filter_contract_supports_not_in_and_not_contains() -> None:
-    conditions = parse_catalog_filters('Session_Type NOT IN (WhatsApp, SMS); Campaign NOT CONTAINS legacy')
+    conditions = parse_catalog_filters('Session_Type NOT IN (WhatsApp, SMS); Vendor NOT CONTAINS (Mixed, Other); Campaign NOT CONTAINS legacy')
     assert [(item.column, item.operator, item.values) for item in conditions] == [
         ('Session_Type', 'NOT IN', ('WhatsApp', 'SMS')),
+        ('Vendor', 'NOT CONTAINS', ('Mixed', 'Other')),
         ('Campaign', 'NOT CONTAINS', ('legacy',)),
     ]
     entry = parse_catalog_csv(
@@ -399,6 +488,20 @@ def test_catalogue_filter_contract_supports_not_in_and_not_contains() -> None:
         'LQ': [3.2, 4.0, 3.8], 'Operator': ['EE', 'EE', 'O2'],
     })
     assert _apply_catalog_filters(frame, entry, False, 'LQ')['Operator'].tolist() == ['EE']
+
+
+def test_not_contains_filter_excludes_each_comma_separated_term() -> None:
+    entry = CatalogEntry(
+        1, 'Quality', '', 'Title and 1 column', '', 'CDR-Speech', 'LQ', 'CDF Line',
+        '', 'Vendor NOT CONTAINS (Mixed, Other)', 'Vendor', 'Campaign', 'Top',
+    )
+    frame = pd.DataFrame({
+        'Vendor': ['Vodafone_Ericsson', 'Vodafone_Mixed Vendor', '3_Other Vendor'],
+        'Campaign': ['2026 Q1'] * 3,
+        'LQ': [3.5, 3.6, 3.7],
+    })
+
+    assert _apply_catalog_filters(frame, entry, False, 'LQ')['Vendor'].tolist() == ['Vodafone_Ericsson']
 
 
 def test_catalogue_call_family_uses_documented_netcheck_session_values() -> None:
@@ -529,6 +632,27 @@ def test_failure_count_uses_row_and_column_hierarchies_without_flattening() -> N
     assert hierarchy_renderer.call_args.args[3] == ['__catalog_column_0', '__catalog_column_1']
 
 
+def test_failure_count_keeps_zero_count_hierarchy_categories_from_all_filtered_rows() -> None:
+    entry = parse_catalog_csv(
+        ','.join(CATALOG_HEADERS)
+        + '\n9,Voice failures,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,,Call Family,Operator × Campaign,Failed/Dropped,\n',
+        'nsa',
+    )[0]
+    frame = pd.DataFrame({
+        'Session_Type': ['VoLTE', 'VoLTE'], 'Operator': ['Vodafone', '3'],
+        'Campaign': ['Q2', 'Q2'], 'Call_Status': ['Completed', 'Completed'],
+    })
+    grouped, primary, series = _apply_catalog_grouping(frame, entry, False, 'Call_Status')
+
+    with patch('src.modules.cdr_reporting._render_failure_count_hierarchy') as hierarchy_renderer:
+        hierarchy_renderer.return_value = BytesIO(b'zero-count-grid')
+        chart = _render_failure_count('Voice failures', grouped, primary, series)
+
+    assert chart.getvalue() == b'zero-count-grid'
+    assert hierarchy_renderer.call_args.kwargs['comparison_frame'] is grouped
+    assert hierarchy_renderer.call_args.args[1].empty
+
+
 def test_failure_hierarchy_reserves_a_right_legend_lane() -> None:
     frame = pd.DataFrame({
         '__catalog_row_0': ['VoLTE'],
@@ -545,6 +669,23 @@ def test_failure_hierarchy_reserves_a_right_legend_lane() -> None:
         )
 
     assert draw_legend.call_args.kwargs['side_x'] == 1289
+
+
+def test_failure_hierarchy_uses_dashed_child_boundaries_within_one_operator() -> None:
+    frame = pd.DataFrame({
+        '__catalog_row_0': ['VoLTE', 'VoLTE'],
+        '__catalog_column_0': ['Vodafone', 'Vodafone'],
+        '__catalog_column_1': ['2026 Q2', '2026 Q1'],
+        '__catalog_failure_state': ['Failed', 'Dropped'],
+    })
+
+    with patch('src.modules.cdr_reporting._draw_dashed_vertical_line') as draw_dashed:
+        _render_failure_count_hierarchy(
+            'Voice failures per campaign', frame,
+            ['__catalog_row_0'], ['__catalog_column_0', '__catalog_column_1'],
+        )
+
+    assert draw_dashed.call_count == 1
 
 
 def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> None:
@@ -669,6 +810,12 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert 'name="slides_templates"' in page.text
     assert 'value="nsa:NSA Slide Template"' in page.text
     assert 'data-report-job-form' in page.text
+    assert 'data-report-multicampaign-dialog' in page.text
+    assert 'Review selected campaigns' in page.text
+    assert 'latest selected CDR for each type is preselected' in page.text
+    assert 'campaignPeriod' in page.text
+    assert 'uploadedRecency' in page.text
+    assert 'latestCampaignOption' in page.text
     assert 'Reports Jobs' in page.text
     assert 'Charts Jobs' in page.text
 

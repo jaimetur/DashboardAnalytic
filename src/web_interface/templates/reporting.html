@@ -26,17 +26,17 @@
       <form action="/reporting/netcheck-cdr" method="post" class="form-grid" data-report-job-form>
       <label>CDR Data <span class="form-label-hint">Select one or more</span>
         <select name="data_dataset_id" required multiple size="4" aria-describedby="cdr-selection-help">
-          {% for dataset in data_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
+          {% for dataset in data_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}" data-uploaded-at="{{ dataset.uploaded_at }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
       <label>CDR Voice <span class="form-label-hint">Select one or more</span>
         <select name="voice_dataset_id" required multiple size="4" aria-describedby="cdr-selection-help">
-          {% for dataset in voice_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
+          {% for dataset in voice_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}" data-uploaded-at="{{ dataset.uploaded_at }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
       <label>CDR Speech <span class="form-label-hint">Select one or more</span>
         <select name="speech_dataset_id" required multiple size="4" aria-describedby="cdr-selection-help">
-          {% for dataset in speech_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
+          {% for dataset in speech_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}" data-uploaded-at="{{ dataset.uploaded_at }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
       <label>Technology
@@ -157,6 +157,21 @@
   </details>
 </section>
 
+<div class="confirm-overlay report-multicampaign-overlay" data-report-multicampaign-dialog hidden>
+  <section class="confirm-panel report-multicampaign-dialog" role="dialog" aria-modal="true" aria-labelledby="report-multicampaign-title" aria-describedby="report-multicampaign-copy">
+    <div class="confirm-icon info-icon" aria-hidden="true">!</div>
+    <p class="eyebrow">Multivendor comparison</p>
+    <h3 id="report-multicampaign-title">Review selected campaigns</h3>
+    <p id="report-multicampaign-copy">Multivendor charts that also compare several campaigns can be difficult to read. The latest selected CDR for each type is preselected from its campaign label; if that cannot be determined, its upload date is used. Choose the campaigns to include.</p>
+    <div class="report-multicampaign-groups" data-report-multicampaign-groups></div>
+    <p class="form-note report-multicampaign-error" data-report-multicampaign-error hidden>Select at least one CDR for Data, Voice and Speech.</p>
+    <div class="confirm-actions">
+      <button type="button" class="ghost-link confirm-cancel" data-report-multicampaign-cancel>Cancel</button>
+      <button type="button" class="action-link-primary" data-report-multicampaign-continue>Continue</button>
+    </div>
+  </section>
+</div>
+
 <div class="confirm-overlay report-chart-viewer-overlay" data-report-chart-viewer hidden>
   <div class="confirm-panel report-chart-viewer-dialog" role="dialog" aria-modal="true" aria-labelledby="report-chart-viewer-title">
     <div class="report-chart-viewer-header">
@@ -225,6 +240,11 @@
 
     const reportForm = document.querySelector('[data-report-job-form]');
     const reportChartsButton = document.querySelector('[data-report-charts-button]');
+    const reportMulticampaignDialog = document.querySelector('[data-report-multicampaign-dialog]');
+    const reportMulticampaignGroups = document.querySelector('[data-report-multicampaign-groups]');
+    const reportMulticampaignError = document.querySelector('[data-report-multicampaign-error]');
+    const reportMulticampaignContinue = document.querySelector('[data-report-multicampaign-continue]');
+    const reportMulticampaignCancel = document.querySelector('[data-report-multicampaign-cancel]');
     const reportChartsPanel = document.querySelector('[data-report-charts-panel]');
     const reportChartsBody = document.querySelector('[data-report-charts-body]');
     const reportChartsCount = document.querySelector('[data-report-charts-count]');
@@ -250,6 +270,104 @@
     const reportChartViewerImage = document.querySelector('[data-report-chart-viewer-image]');
     const reportChartViewerCanvas = document.querySelector('[data-report-chart-viewer-canvas]');
     const reportChartZoomSelection = document.querySelector('[data-report-chart-zoom-selection]');
+    const selectedCdrsByType = () => Array.from(cdrSelectors).map((select) => ({
+      select,
+      label: ({data_dataset_id: 'CDR Data', voice_dataset_id: 'CDR Voice', speech_dataset_id: 'CDR Speech'})[select.name] || select.name,
+      options: Array.from(select.selectedOptions),
+    }));
+    const campaignPeriod = (option) => {
+      const label = String(option?.textContent || '');
+      const yearThenQuarter = label.match(/\b((?:19|20)\d{2})\D*Q([1-4])\b/i);
+      const quarterThenYear = label.match(/\bQ([1-4])\D*((?:19|20)\d{2})\b/i);
+      if (yearThenQuarter) return Number(yearThenQuarter[1]) * 10 + Number(yearThenQuarter[2]);
+      if (quarterThenYear) return Number(quarterThenYear[2]) * 10 + Number(quarterThenYear[1]);
+      return null;
+    };
+    const uploadedRecency = (option) => {
+      const uploadedAt = Date.parse(option?.dataset.uploadedAt || '');
+      return Number.isFinite(uploadedAt) ? uploadedAt : 0;
+    };
+    const latestCampaignOption = (options) => {
+      // Campaign labels take precedence only when every selected CDR can be
+      // ordered from its year/quarter. Otherwise, use the upload chronology
+      // consistently for the whole CDR type instead of comparing unlike keys.
+      const canOrderByCampaign = options.every((option) => campaignPeriod(option) !== null);
+      const recency = canOrderByCampaign ? campaignPeriod : uploadedRecency;
+      return options.reduce(
+        (latest, option) => !latest || recency(option) > recency(latest) ? option : latest,
+        null,
+      );
+    };
+    const hasMulticampaignMultivendorSelection = () => (
+      scope?.value === 'multivendor' && selectedCdrsByType().some(({options}) => options.length > 1)
+    );
+    const reviewMultivendorCampaigns = () => {
+      if (!hasMulticampaignMultivendorSelection()) return Promise.resolve(true);
+      if (!reportMulticampaignDialog || !reportMulticampaignGroups || !reportMulticampaignContinue || !reportMulticampaignCancel) {
+        return Promise.resolve(window.confirm('Multivendor charts with several campaigns can be difficult to read. Continue with the currently selected CDRs?'));
+      }
+      const selections = selectedCdrsByType();
+      reportMulticampaignGroups.replaceChildren(...selections.map(({select, label, options}) => {
+        const group = document.createElement('fieldset');
+        group.className = 'report-multicampaign-group';
+        const legend = document.createElement('legend');
+        legend.textContent = label;
+        group.append(legend);
+        const latestOption = latestCampaignOption(options);
+        options.forEach((option) => {
+          const choice = document.createElement('label');
+          choice.className = 'report-multicampaign-choice';
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.checked = option === latestOption;
+          input.dataset.reportDatasetSelect = select.name;
+          input.dataset.reportDatasetId = option.value;
+          const name = document.createElement('span');
+          name.textContent = option.textContent.trim();
+          choice.append(input, name);
+          group.append(choice);
+        });
+        return group;
+      }));
+      if (reportMulticampaignError) reportMulticampaignError.hidden = true;
+      reportMulticampaignDialog.hidden = false;
+      document.body.classList.add('loading-active');
+      return new Promise((resolve) => {
+        const close = (accepted) => {
+          reportMulticampaignDialog.hidden = true;
+          document.body.classList.remove('loading-active');
+          reportMulticampaignContinue.removeEventListener('click', continueSelection);
+          reportMulticampaignCancel.removeEventListener('click', cancelSelection);
+          reportMulticampaignDialog.removeEventListener('click', closeFromBackdrop);
+          window.removeEventListener('keydown', closeFromEscape);
+          resolve(accepted);
+        };
+        const continueSelection = () => {
+          const chosen = new Map(selections.map(({select}) => [select.name, new Set()]));
+          reportMulticampaignGroups.querySelectorAll('[data-report-dataset-select]:checked').forEach((input) => {
+            chosen.get(input.dataset.reportDatasetSelect)?.add(input.dataset.reportDatasetId);
+          });
+          if (Array.from(chosen.values()).some((values) => values.size === 0)) {
+            if (reportMulticampaignError) reportMulticampaignError.hidden = false;
+            return;
+          }
+          selections.forEach(({select}) => {
+            const values = chosen.get(select.name) || new Set();
+            Array.from(select.options).forEach((option) => { option.selected = values.has(option.value); });
+          });
+          updateScope();
+          close(true);
+        };
+        const cancelSelection = () => close(false);
+        const closeFromBackdrop = (event) => { if (event.target === reportMulticampaignDialog) close(false); };
+        const closeFromEscape = (event) => { if (event.key === 'Escape') close(false); };
+        reportMulticampaignContinue.addEventListener('click', continueSelection);
+        reportMulticampaignCancel.addEventListener('click', cancelSelection);
+        reportMulticampaignDialog.addEventListener('click', closeFromBackdrop);
+        window.addEventListener('keydown', closeFromEscape);
+        reportMulticampaignContinue.focus();
+      });
+    };
     let reportCharts = [];
     let reportChartIndex = 0;
     let reportChartImage = null;
@@ -502,6 +620,7 @@
     };
     reportForm?.addEventListener('submit', async (event) => {
       event.preventDefault();
+      if (!reportForm.reportValidity() || !(await reviewMultivendorCampaigns())) return;
       showLoadingOverlay('Queueing PowerPoint report', 'The report will be generated on the server. You can leave this page while it runs.');
       try {
         const response = await fetch(reportForm.action, {method: 'POST', body: new FormData(reportForm), credentials: 'same-origin'});
@@ -609,7 +728,19 @@
     document.addEventListener('pointerdown', (event) => {
       if (reportChartSetPicker?.open && !reportChartSetPicker.contains(event.target)) reportChartSetPicker.open = false;
     });
-    reportChartSetPicker?.addEventListener('pointerleave', () => { reportChartSetPicker.open = false; });
+    let chartSetPickerCloseTimer = null;
+    const cancelChartSetPickerClose = () => {
+      if (chartSetPickerCloseTimer) window.clearTimeout(chartSetPickerCloseTimer);
+      chartSetPickerCloseTimer = null;
+    };
+    reportChartSetPicker?.addEventListener('pointerenter', cancelChartSetPickerClose);
+    reportChartSetPicker?.addEventListener('pointerleave', () => {
+      cancelChartSetPickerClose();
+      chartSetPickerCloseTimer = window.setTimeout(() => {
+        reportChartSetPicker.open = false;
+        chartSetPickerCloseTimer = null;
+      }, 700);
+    });
     reportChartSetDelete?.addEventListener('click', async () => {
       const [source, generation] = String(reportChartSetSelect?.value || '').split(':', 2);
       if (source !== 'standalone' || !generation) return;
@@ -828,6 +959,7 @@
     });
     reportChartsButton?.addEventListener('click', async () => {
       if (!reportForm?.reportValidity()) return;
+      if (!(await reviewMultivendorCampaigns())) return;
       showLoadingOverlay('Queueing Report Charts', 'The Chart Set will be rendered on the server. You can leave this page while it runs.');
       try {
         const response = await fetch('/reporting/netcheck-cdr/charts', {method: 'POST', body: new FormData(reportForm), credentials: 'same-origin'});

@@ -472,7 +472,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     ['IN', 'In list (IN)'], ['NOT IN', 'Not in list (NOT IN)'], ['<', 'Less than (<)'], ['<=', 'Less than or equal (≤)'],
     ['>', 'Greater than (>)'], ['>=', 'Greater than or equal (≥)'],
   ];
-  const parseFilterConditions = (raw) => String(raw || '').split(';').map((clause) => {
+  const parseFilterConditions = (raw) => String(raw || '').replace(/\u00a0/g, ' ').split(';').map((clause) => {
     const match = clause.trim().match(/^(.+?)\s+(NOT\s+CONTAINS|NOT\s+IN|CONTAINS|IN|>=|<=|!=|=|>|<)\s+(.+)$/i);
     if (!match) return null;
     const [, field, operator, value] = match;
@@ -485,7 +485,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       const operator = row.querySelector('[data-filter-operator]')?.value.trim();
       const rawValue = row.querySelector('[data-filter-value]')?.value.trim();
       if (!field || !operator || !rawValue) return '';
-      const value = ['IN', 'NOT IN'].includes(operator) && !/^\(.+\)$/.test(rawValue) ? `(${rawValue})` : rawValue;
+      const listOperator = ['IN', 'NOT IN', 'CONTAINS', 'NOT CONTAINS'].includes(operator);
+      const value = listOperator && rawValue.includes(',') && !/^\(.+\)$/.test(rawValue) ? `(${rawValue})` : rawValue;
       return `${field} ${operator} ${value}`;
     }).filter(Boolean);
     activeCell.textContent = clauses.join('; ');
@@ -503,13 +504,17 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     field.setAttribute('aria-label', 'Filter field');
     field.append(new Option('Choose field', ''));
     fields.forEach((value) => field.add(new Option(value, value)));
-    field.value = condition.field || '';
+    const normalizedOption = (select, requested) => {
+      const normalize = (value) => String(value || '').toLocaleLowerCase().replace(/[^a-z0-9]+/g, '');
+      return Array.from(select.options).find((option) => normalize(option.value) === normalize(requested))?.value || requested || '';
+    };
+    field.value = normalizedOption(field, condition.field);
     const operator = document.createElement('select');
     operator.dataset.filterOperator = '';
     operator.dataset.searchableSelect = '';
     operator.setAttribute('aria-label', 'Filter operator');
     filterOperators.forEach(([value, label]) => operator.add(new Option(label, value)));
-    operator.value = condition.operator || '=';
+    operator.value = normalizedOption(operator, condition.operator || '=');
     const value = document.createElement('input');
     const list = document.createElement('datalist');
     const listId = `catalogue-filter-values-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -543,6 +548,16 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     row.append(field, operator, value, remove, list);
     filterConditions.append(row);
     setupSearchableSingleSelects();
+    // The visual searchable controls are sibling shells. Hydrate them from
+    // the native select after they have been mounted, so existing clauses are
+    // visible immediately rather than showing their search placeholder.
+    window.requestAnimationFrame(() => {
+      [field, operator].forEach((select) => {
+        const input = select.nextElementSibling?.querySelector('.searchable-select-input');
+        if (input) input.value = select.selectedOptions[0]?.textContent?.trim() || '';
+      });
+      value.value = condition.value || '';
+    });
   };
   const populateFilterBuilder = (cell) => {
     if (!filterBuilder || !filterConditions) return;
@@ -551,7 +566,10 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     (conditions.length ? conditions : [{}]).forEach(addFilterCondition);
     filterBuilder.hidden = false;
   };
-  const hideCellAssistance = () => { helper.hidden = true; };
+  const hideCellAssistance = () => {
+    helper.hidden = true;
+    delete helper.dataset.catalogueAssistanceField;
+  };
   const positionCellAssistance = (cell) => {
     helper.hidden = false;
     window.requestAnimationFrame(() => {
@@ -585,6 +603,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       hideCellAssistance();
       return;
     }
+    helper.dataset.catalogueAssistanceField = field;
     heading.textContent = field || 'Selected cell';
     copy.textContent = helperCopy(field);
     const values = optionList(field, cell);
@@ -947,6 +966,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   document.addEventListener('pointerdown', (event) => {
     if (!selectedCellFromEvent(event) && !helper.contains(event.target)) hideCellAssistance();
   });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || helper.hidden) return;
+    event.preventDefault();
+    hideCellAssistance();
+    activeCell?.blur();
+  });
   table.closest('.table-wrap')?.addEventListener('scroll', hideCellAssistance, {passive: true});
   helperClose?.addEventListener('click', hideCellAssistance);
   table.addEventListener('focusout', (event) => {
@@ -978,8 +1003,36 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     }
     activeCell.focus();
   });
-  saveForm.addEventListener('submit', () => {
+  saveForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
     contentField.value = serialiseCatalogueContent();
+    const saveButton = saveForm.querySelector('button[type="submit"]');
+    hideCellAssistance();
+    if (saveButton) saveButton.disabled = true;
+    showLoadingOverlay('Saving Slides Template', 'Please wait while the Slides Template is being saved.');
+    try {
+      const response = await fetch(saveForm.action, {
+        method: 'POST',
+        body: new FormData(saveForm),
+        credentials: 'same-origin',
+        headers: {Accept: 'application/json'},
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Unable to save the Slides Template.');
+      hideLoadingOverlay();
+      showInfoDialog(`Slides Template '${payload.template || 'selected template'}' has been saved.`, {
+        title: 'Slides Template saved',
+      });
+    } catch (error) {
+      hideLoadingOverlay();
+      showInfoDialog(error instanceof Error ? error.message : 'Unable to save the Slides Template.', {
+        title: 'Slides Template save failed',
+        tone: 'error',
+      });
+    } finally {
+      hideLoadingOverlay();
+      if (saveButton) saveButton.disabled = false;
+    }
   });
 });
 
