@@ -37,7 +37,7 @@ def test_login_page_loads(client) -> None:
     assert 'class="login-workspace-field">Workspace' in response.text
     assert 'data-login-password-toggle' in response.text
     assert '<span class="login-password-editor">' in response.text
-    assert 'Default Workspace' in response.text
+    assert 'Default' in response.text
 
 
 def test_new_environment_creates_the_three_bootstrap_roles(client) -> None:
@@ -179,7 +179,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert 'Transfer to other server' in admin_response.text
     assert 'Config</option>' in admin_response.text
     assert 'Config + Slides Templates' in admin_response.text
-    assert 'Workspace: Default Workspace' in admin_response.text
+    assert 'Workspace: Default' in admin_response.text
 
     config_response = client.get('/admin/import-export/export?export_target=config')
     assert config_response.status_code == 200
@@ -202,7 +202,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert inspection_response.json() == {
         'kind': 'workspace',
         'includes_slides_templates': False,
-        'workspace_collisions': ['Default Workspace'],
+        'workspace_collisions': ['Default'],
     }
     close_response = client.post('/workspace/close', data={'workspace_id': 'default'}, follow_redirects=False)
     assert close_response.status_code == 303
@@ -214,7 +214,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     )
     assert imported_response.status_code == 303
     assert 'import_export_notice=' in imported_response.headers['location']
-    assert any(workspace.name == 'Default Workspace' for workspace in app_module.workspace_registry.list())
+    assert any(workspace.name == 'Default' for workspace in app_module.workspace_registry.list())
 
     full_response = client.get('/admin/import-export/export?export_target=full-environment')
     assert full_response.status_code == 200
@@ -332,7 +332,7 @@ def test_full_environment_export_job_uses_selected_workspaces(client) -> None:
     assert payload['status'] == 'ready'
     with zipfile.ZipFile(BytesIO(client.get(payload['download_url']).content)) as archive:
         manifest = json.loads(archive.read('manifest.json'))
-    assert [workspace['name'] for workspace in manifest['workspaces']] == ['Default Workspace']
+    assert [workspace['name'] for workspace in manifest['workspaces']] == ['Default']
 
 
 def test_admin_import_job_reuses_the_inspected_disk_upload(client) -> None:
@@ -463,7 +463,7 @@ def test_admin_import_export_is_limited_to_slides_templates(client) -> None:
     assert 'data-panel-state-key="admin:import-export"' in panel.text
     assert 'Slides Templates</option>' in panel.text
     assert 'value="config" disabled>Config</option>' in panel.text
-    assert 'value="workspace:default" disabled>Workspace: Default Workspace</option>' in panel.text
+    assert 'value="workspace:default" disabled>Workspace: Default</option>' in panel.text
 
     blocked_export = client.get('/admin/import-export/export?export_target=config')
     assert blocked_export.status_code == 403
@@ -676,7 +676,7 @@ def test_reupload_preserves_original_upload_date_for_dataset_ordering(client) ->
     assert '<th>Uploaded</th>' in workspace.text
     assert '<th>Updated</th>' in workspace.text
     assert workspace.text.index('<th>Uploaded</th>') < workspace.text.index('<th>Updated</th>')
-    assert 'Default Workspace (' in workspace.text
+    assert 'Default (' in workspace.text
 
 
 def test_workspace_management_save_updates_name_and_user_access(client) -> None:
@@ -736,7 +736,7 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
     )
     default_db = app_module.repository.db_path
     assert default_db.parent == app_module.settings.input_dir.parent
-    assert default_db.name == 'Default Workspace.db'
+    assert default_db.name == 'Default.db'
 
     created = client.post('/workspace/create', data={'name': 'Campaign benchmark'}, follow_redirects=False)
     assert created.status_code == 303
@@ -751,7 +751,7 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
     assert 'Campaign benchmark' in page.text
     assert 'Manage workspaces' in page.text
     assert 'data-workspace-open disabled>Open</button>' in page.text
-    assert page.text.index('>Campaign benchmark (') < page.text.index('>Default Workspace (')
+    assert page.text.index('>Campaign benchmark (') < page.text.index('>Default (')
     workspace_id = app_module.active_workspace.id
     renamed = client.post('/workspace/rename', data={'workspace_id': workspace_id, 'name': 'Campaign benchmark Q3'})
     assert renamed.status_code == 200
@@ -767,8 +767,8 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
 
     duplicated = client.post('/workspace/duplicate', data={'workspace_id': 'default'}, follow_redirects=False)
     assert duplicated.status_code == 303
-    copied_workspace = next(item for item in app_module.workspace_registry.list() if item.name == 'Default Workspace - Copy')
-    assert copied_workspace.database_path.name == 'Default Workspace - Copy.db'
+    copied_workspace = next(item for item in app_module.workspace_registry.list() if item.name == 'Default - Copy')
+    assert copied_workspace.database_path.name == 'Default - Copy.db'
     with app_module.repository.connection() as conn:
         assert conn.execute('SELECT COUNT(*) FROM datasets').fetchone()[0] == 1
 
@@ -783,8 +783,8 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
     assert 'module-tab-disabled' in closed_workspace.text
     assert client.get('/dashboard', follow_redirects=False).status_code == 303
     login_page = client.get('/login')
-    assert login_page.text.index('>Campaign benchmark Q3</option>') < login_page.text.index('>Default Workspace</option>')
-    assert '<option value="default" selected>Default Workspace</option>' in login_page.text
+    assert login_page.text.index('>Campaign benchmark Q3</option>') < login_page.text.index('>Default</option>')
+    assert '<option value="default" selected>Default</option>' in login_page.text
 
     deleted = client.post('/workspace/delete', data={'workspace_id': workspace_id}, follow_redirects=False)
     assert deleted.status_code == 303
@@ -970,7 +970,7 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
     assert admin.status_code == 200
     assert "Database Management" in admin.text
     assert 'data-database-table-select' in admin.text
-    assert 'Workspace: Default Workspace' in admin.text
+    assert 'Workspace: Default' in admin.text
     assert 'Clean orphaned rows' in admin.text
     assert 'value="users"' in admin.text
     assert app_module.repository.dataset_rows_table_exists(987)

@@ -33,6 +33,7 @@
 - Accelerated large configuration transfers with compact SQLite snapshots, faster ZIP compression and sequential workspace extraction; imports now upload once, run from disk in the background and avoid loading multi-GB packages into application memory.
 - Added workspace selection to Full Environment exports so configuration and shared Slides Templates can be packaged with only the required workspaces.
 - Added estimated byte-based progress to ZIP exports and real byte progress while streaming server-to-server transfers.
+- Renamed the bootstrap workspace to `Default`; existing installations migrate its display name and storage paths without changing workspace data.
 
 #### 🐛 Bug fixes:
 - Fixed Reporting CDR multi-select checkmarks after Multivendor review so they match the submitted CDRs.

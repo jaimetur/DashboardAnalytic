@@ -62,14 +62,14 @@ class WorkspaceRegistry:
             conn.execute("CREATE TABLE IF NOT EXISTS workspace_state (key TEXT PRIMARY KEY, value TEXT)")
             if not conn.execute("SELECT 1 FROM workspaces LIMIT 1").fetchone():
                 now = self._now()
-                default_root = self._workspace_root('Default Workspace')
+                default_root = self._workspace_root('Default')
                 conn.execute(
                     """INSERT INTO workspaces (
                         id, name, database_path, input_dir, output_dir, export_dir,
                         slides_templates_dir, created_at, last_opened_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
-                        'default', 'Default Workspace', str(default_root / 'Default Workspace.db'),
+                        'default', 'Default', str(default_root / 'Default.db'),
                         str(default_root / 'input'), str(default_root / 'output'),
                         str(default_root / 'output' / 'reports'), str(self.legacy_slides_templates_dir), now, now,
                     ),
@@ -81,8 +81,39 @@ class WorkspaceRegistry:
             # Slides Templates are application configuration shared by every
             # workspace, never workspace data.
             conn.execute('UPDATE workspaces SET slides_templates_dir = ?', (str(self.legacy_slides_templates_dir),))
+        self._migrate_default_workspace_name()
         self._migrate_workspace_directories()
         self._migrate_workspace_exports()
+
+    def _migrate_default_workspace_name(self) -> None:
+        """Rename the bootstrap workspace while preserving existing user data."""
+        workspace = self.get('default')
+        if not workspace or workspace.name != 'Default Workspace':
+            return
+        old_root = workspace.database_path.parent
+        new_root = self._workspace_root('Default')
+        if old_root != new_root:
+            if new_root.exists():
+                raise ValueError('Cannot rename the default workspace because the "Default" workspace directory already exists.')
+            elif old_root.exists():
+                shutil.move(str(old_root), str(new_root))
+        old_database = workspace.database_path
+        moved_database = new_root / old_database.name
+        new_database = new_root / 'Default.db'
+        if moved_database.exists() and moved_database != new_database:
+            self._move_database_bundle(moved_database, new_database)
+        elif not new_database.exists() and old_database.exists() and old_database != new_database:
+            self._move_database_bundle(old_database, new_database)
+        new_input = self._relocate_path(workspace.input_dir, old_root, new_root)
+        new_output = self._relocate_path(workspace.output_dir, old_root, new_root)
+        new_export = self._relocate_path(workspace.export_dir, old_root, new_root)
+        with self._connection() as conn:
+            conn.execute(
+                '''UPDATE workspaces
+                   SET name = ?, database_path = ?, input_dir = ?, output_dir = ?, export_dir = ?
+                   WHERE id = ?''',
+                ('Default', str(new_database), str(new_input), str(new_output), str(new_export), workspace.id),
+            )
 
     def _migrate_workspace_exports(self) -> None:
         """Move report exports into output/reports and stop creating exports/."""
