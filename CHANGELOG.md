@@ -36,6 +36,8 @@
 - Renamed the bootstrap workspace to `Default`; existing installations migrate its display name and storage paths without changing workspace data.
 - Added live transfer progress across both servers: source package creation and transmission, plus destination package reception and staged import progress.
 - Added protected incoming-transfer recovery: incomplete transfer files are removed, while complete unimported packages are listed with their creation time for a super-admin to select and import.
+- Set the default server-transfer destination port to `7278`.
+- Prefilled the server-transfer destination dialog with port `7278` while keeping it editable.
 
 #### 🐛 Bug fixes:
 - Fixed Reporting CDR multi-select checkmarks after Multivendor review so they match the submitted CDRs.

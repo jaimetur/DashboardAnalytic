@@ -38,6 +38,8 @@ from fastapi.templating import Jinja2Templates
 from starlette.datastructures import QueryParams
 from starlette.background import BackgroundTask
 
+DEFAULT_TRANSFER_PORT = 7278
+
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
@@ -2504,7 +2506,7 @@ def normalize_transfer_destination(destination_url: str, destination_port: int |
         parsed_port = parsed.port
     except ValueError as exc:
         raise ValueError('Enter a valid destination server port.') from exc
-    port = destination_port or parsed_port
+    port = destination_port or parsed_port or DEFAULT_TRANSFER_PORT
     if port is not None and not 1 <= int(port) <= 65535:
         raise ValueError('The destination port must be between 1 and 65535.')
     hostname = f'[{parsed.hostname}]' if ':' in parsed.hostname else parsed.hostname
@@ -2645,12 +2647,23 @@ def _run_transfer_job(job_id: str) -> None:
                             job['progress'] = round(sent * 100.0 / max(package_size, 1), 1)
                         yield chunk
 
-            response = client.put(
-                _transfer_api_url(destination, f'/api/import-export/transfers/offers/{offer_id}/package'),
-                headers={**headers, 'Content-Type': 'application/zip', 'Content-Length': str(package_size), 'X-Export-Filename': filename},
-                content=package_chunks(),
-                timeout=httpx.Timeout(30.0, read=3600.0, write=3600.0),
-            )
+            for attempt in range(3):
+                try:
+                    response = client.put(
+                        _transfer_api_url(destination, f'/api/import-export/transfers/offers/{offer_id}/package'),
+                        headers={**headers, 'Content-Type': 'application/zip', 'Content-Length': str(package_size), 'X-Export-Filename': filename},
+                        content=package_chunks(),
+                        timeout=httpx.Timeout(30.0, read=3600.0, write=3600.0),
+                    )
+                    if getattr(response, 'status_code', 200) >= 500:
+                        response.raise_for_status()
+                    break
+                except (httpx.TransportError, httpx.TimeoutException, httpx.HTTPStatusError):
+                    if attempt == 2:
+                        raise
+                    with TRANSFER_LOCK:
+                        job.update({'status': 'transferring', 'phase': f'retrying transmission ({attempt + 2}/3)', 'bytes_sent': 0, 'progress': 0.0})
+                    sleep(2 ** attempt)
             response.raise_for_status()
             with TRANSFER_LOCK:
                 job['status'] = 'remote_importing'
@@ -5513,7 +5526,7 @@ async def receive_transfer_package(offer_id: str, request: Request) -> JSONRespo
         offer = TRANSFER_OFFERS.get(offer_id)
         if not offer or not _transfer_offer_secret_matches(offer, secret):
             raise HTTPException(status_code=404, detail='The transfer offer does not exist.')
-        if offer.get('status') != 'accepted':
+        if offer.get('status') not in {'accepted', 'receiving'}:
             raise HTTPException(status_code=409, detail='The transfer has not been accepted by the destination server.')
         expected_size = max(int(request.headers.get('Content-Length') or 0), 0)
         offer.update({'status': 'receiving', 'phase': 'receiving package', 'size': expected_size, 'bytes_received': 0, 'progress': 0.0})
@@ -5544,8 +5557,8 @@ async def receive_transfer_package(offer_id: str, request: Request) -> JSONRespo
     except Exception as exc:
         package_path.unlink(missing_ok=True)
         with TRANSFER_LOCK:
-            offer.update({'status': 'failed', 'error': 'The package transfer was interrupted.', 'finished_at': datetime.now(timezone.utc).timestamp()})
-        raise HTTPException(status_code=400, detail='The package transfer was interrupted.') from exc
+            offer.update({'status': 'accepted', 'phase': 'waiting for transmission retry', 'error': 'The package transfer was interrupted; waiting for the source to retry.', 'progress': 0.0})
+        raise HTTPException(status_code=503, detail='The package transfer was interrupted; the source may retry.') from exc
 
 
 @app.get('/admin/import-export/transfers/offers')

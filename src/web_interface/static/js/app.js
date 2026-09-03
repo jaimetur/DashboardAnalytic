@@ -2852,11 +2852,13 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.status_url) throw new Error(payload.detail || 'The transfer could not be started.');
+      try { window.localStorage.setItem('dashboard-analytic:active-transfer', JSON.stringify({job_id: payload.job_id, status_url: payload.status_url})); } catch (_error) { /* Ignore storage failures. */ }
       const pollTransfer = async () => {
         const statusResponse = await fetch(payload.status_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}});
         const transfer = await statusResponse.json().catch(() => ({}));
         if (!statusResponse.ok) throw new Error(transfer.detail || 'The transfer status could not be read.');
         if (transfer.status === 'ready') {
+          try { window.localStorage.removeItem('dashboard-analytic:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
           hideLoadingOverlay();
           showInfoDialog(transfer.notice || 'The destination server received and imported the package successfully.', {
             title: 'Server Transfer Complete',
@@ -2864,7 +2866,10 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
           });
           return;
         }
-        if (transfer.status === 'failed') throw new Error(transfer.error || 'The destination server could not complete the transfer.');
+        if (transfer.status === 'failed') {
+          try { window.localStorage.removeItem('dashboard-analytic:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
+          throw new Error(transfer.error || 'The destination server could not complete the transfer.');
+        }
         setLoadingProgress(transfer.progress);
         const copies = {
           queued: 'Preparing the connection to the destination server.',
@@ -3073,6 +3078,33 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
   });
   window.setInterval(pollIncomingTransferOffers, 3000);
   pollIncomingTransferOffers();
+})();
+
+// The transfer itself is server-side, so a page reload should restore its
+// progress dialog instead of making the user guess whether it is still running.
+(() => {
+  if (!document.querySelector('[data-server-transfer-listener]')) return;
+  let saved;
+  try { saved = JSON.parse(window.localStorage.getItem('dashboard-analytic:active-transfer') || 'null'); } catch (_error) { saved = null; }
+  if (!saved?.status_url) return;
+  const poll = async () => {
+    const response = await fetch(saved.status_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}, cache: 'no-store'});
+    const transfer = await response.json().catch(() => ({}));
+    if (!response.ok || transfer.status === 'failed') {
+      try { window.localStorage.removeItem('dashboard-analytic:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
+      if (transfer.error) showInfoDialog(transfer.error, {title: 'Server Transfer Error', tone: 'error'});
+      return;
+    }
+    if (transfer.status === 'ready') {
+      try { window.localStorage.removeItem('dashboard-analytic:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
+      showInfoDialog(transfer.notice || 'The server transfer completed successfully.', {title: 'Server Transfer Complete', tone: 'info'});
+      return;
+    }
+    showLoadingOverlay('Resuming server transfer', transfer.status === 'remote_importing' ? 'The destination server is importing the package.' : 'The server transfer is still in progress.');
+    setLoadingProgress(transfer.progress);
+    window.setTimeout(() => { poll().catch(() => {}); }, 1500);
+  };
+  poll().catch(() => {});
 })();
 
 document.querySelectorAll('form[data-loading-label]').forEach((form) => {
