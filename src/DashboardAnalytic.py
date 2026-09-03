@@ -5532,6 +5532,11 @@ async def inspect_admin_import_package(
     package: UploadFile = File(...),
     user: SessionUser = Depends(admin_user),
 ) -> JSONResponse:
+    """Compatibility endpoint for multipart clients.
+
+    The browser UI uses the direct-stream endpoint below so large imports do
+    not first become a multipart temporary file and then get copied again.
+    """
     _cleanup_expired_export_packages()
     upload_id = uuid4().hex
     package_dir = export_package_dir()
@@ -5539,24 +5544,7 @@ async def inspect_admin_import_package(
     package_path = package_dir / f'import-{upload_id}.upload'
     try:
         await save_upload_file(package, package_path)
-        manifest = read_import_manifest(package_path)
-        kind = str(manifest.get('kind') or '')
-        if kind not in {'config', 'workspace', 'full-environment', 'slides-templates'}:
-            raise ValueError('The export package type is not supported.')
-        require_import_export_permission(user, kind)
-        with IMPORT_JOBS_LOCK:
-            IMPORT_UPLOADS[upload_id] = {
-                'path': str(package_path),
-                'manifest': manifest,
-                'owner': user.username,
-                'created_at': datetime.now(timezone.utc).timestamp(),
-                'claimed': False,
-            }
-        return JSONResponse({
-            'kind': kind,
-            'includes_slides_templates': bool(manifest.get('includes_slides_templates')),
-            'workspace_collisions': import_workspace_collisions(manifest),
-        }, headers={'X-Import-Upload-Id': upload_id})
+        return _retain_import_upload(upload_id, package_path, user)
     except ValueError as exc:
         package_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -5568,6 +5556,60 @@ async def inspect_admin_import_package(
         raise HTTPException(status_code=400, detail=f'The import package could not be stored: {exc}') from exc
     finally:
         await package.close()
+
+
+def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser) -> JSONResponse:
+    """Validate and retain an already disk-backed import upload."""
+    manifest = read_import_manifest(package_path)
+    kind = str(manifest.get('kind') or '')
+    if kind not in {'config', 'workspace', 'full-environment', 'slides-templates'}:
+        raise ValueError('The export package type is not supported.')
+    require_import_export_permission(user, kind)
+    with IMPORT_JOBS_LOCK:
+        IMPORT_UPLOADS[upload_id] = {
+            'path': str(package_path),
+            'manifest': manifest,
+            'owner': user.username,
+            'created_at': datetime.now(timezone.utc).timestamp(),
+            'claimed': False,
+        }
+    return JSONResponse({
+        'kind': kind,
+        'includes_slides_templates': bool(manifest.get('includes_slides_templates')),
+        'workspace_collisions': import_workspace_collisions(manifest),
+    }, headers={'X-Import-Upload-Id': upload_id})
+
+
+@app.post('/admin/import-export/inspect/upload')
+async def inspect_admin_import_package_stream(
+    request: Request,
+    user: SessionUser = Depends(admin_user),
+) -> JSONResponse:
+    """Receive an import ZIP directly to its retained disk path.
+
+    Unlike multipart uploads this avoids a second multi-gigabyte disk copy.
+    """
+    _cleanup_expired_export_packages()
+    upload_id = uuid4().hex
+    package_dir = export_package_dir()
+    package_dir.mkdir(parents=True, exist_ok=True)
+    package_path = package_dir / f'import-{upload_id}.upload'
+    try:
+        with package_path.open('wb') as output:
+            async for chunk in request.stream():
+                output.write(chunk)
+        if not package_path.stat().st_size:
+            raise ValueError('Select an export package to import.')
+        return _retain_import_upload(upload_id, package_path, user)
+    except ValueError as exc:
+        package_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        package_path.unlink(missing_ok=True)
+        raise
+    except OSError as exc:
+        package_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f'The import package could not be stored: {exc}') from exc
 
 
 @app.delete('/admin/import-export/import/uploads/{upload_id}')

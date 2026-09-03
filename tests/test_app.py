@@ -357,6 +357,19 @@ def test_admin_import_job_reuses_the_inspected_disk_upload(client) -> None:
     assert 'Configuration imported successfully' in payload['notice']
 
 
+def test_admin_import_stream_upload_avoids_multipart_staging(client) -> None:
+    login_super(client)
+    exported = client.get('/admin/import-export/export?export_target=config')
+    inspected = client.post(
+        '/admin/import-export/inspect/upload',
+        content=exported.content,
+        headers={'Content-Type': 'application/zip'},
+    )
+    assert inspected.status_code == 200
+    assert inspected.headers['x-import-upload-id']
+    assert inspected.json()['kind'] == 'config'
+
+
 def test_incoming_server_transfer_requires_acceptance_and_imports_after_upload(client) -> None:
     secret = 'server-transfer-test-secret-that-is-long-enough'
     headers = {'X-Dashboard-Transfer-Secret': secret}

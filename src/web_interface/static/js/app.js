@@ -2587,12 +2587,58 @@ function importWarningDetails(payload) {
   };
 }
 
+function formatImportUploadBytes(bytes) {
+  const numeric = Number(bytes);
+  if (!Number.isFinite(numeric) || numeric < 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = numeric;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+}
+
+function uploadImportPackage(file) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open('POST', '/admin/import-export/inspect/upload', true);
+    request.withCredentials = true;
+    request.setRequestHeader('Accept', 'application/json');
+    request.setRequestHeader('Content-Type', file.type || 'application/zip');
+    request.upload.addEventListener('progress', (event) => {
+      if (!event.lengthComputable) return;
+      const progress = event.total ? (event.loaded / event.total) * 100 : 0;
+      setLoadingProgress(progress);
+      if (loadingCopy) {
+        loadingCopy.textContent = `Uploading ${formatImportUploadBytes(event.loaded)} of ${formatImportUploadBytes(event.total)} — ${Math.round(progress)}%.`;
+      }
+    });
+    request.addEventListener('load', () => {
+      let payload = {};
+      try { payload = JSON.parse(request.responseText || '{}'); } catch (_error) { /* Handled below. */ }
+      if (request.status < 200 || request.status >= 300) {
+        reject(new Error(payload.detail || 'The selected file is not a valid export package.'));
+        return;
+      }
+      resolve({payload, uploadId: request.getResponseHeader('X-Import-Upload-Id')});
+    });
+    request.addEventListener('error', () => reject(new Error('The import package upload was interrupted.')));
+    request.addEventListener('abort', () => reject(new Error('The import package upload was cancelled.')));
+    request.send(file);
+  });
+}
+
 document.querySelectorAll('[data-import-export-form]').forEach((form) => {
   const confirmed = form.querySelector('[data-import-export-confirmed]');
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!(form instanceof HTMLFormElement) || !(confirmed instanceof HTMLInputElement)) return;
     if (!form.reportValidity()) return;
+    const packageInput = form.querySelector('input[type="file"][name="package"]');
+    const packageFile = packageInput instanceof HTMLInputElement ? packageInput.files?.[0] : null;
+    if (!packageFile) return;
     confirmed.value = '0';
     showLoadingOverlay(
       'Uploading import package',
@@ -2601,16 +2647,10 @@ document.querySelectorAll('[data-import-export-form]').forEach((form) => {
     try {
       // Let the browser paint the progress dialog before starting a potentially large upload.
       await new Promise((resolve) => window.requestAnimationFrame(resolve));
-      const response = await fetch('/admin/import-export/inspect', {
-        method: 'POST',
-        body: new FormData(form),
-        credentials: 'same-origin',
-        headers: {Accept: 'application/json'},
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.detail || 'The selected file is not a valid export package.');
-      const uploadId = response.headers.get('X-Import-Upload-Id');
+      const {payload, uploadId} = await uploadImportPackage(packageFile);
       if (!uploadId) throw new Error('The uploaded package could not be retained for import.');
+      setLoadingProgress(100);
+      if (loadingCopy) loadingCopy.textContent = 'Upload complete. Inspecting the package…';
       const warning = importWarningDetails(payload);
       hideLoadingOverlay();
       const accepted = await showConfirmDialog(warning.message, {
