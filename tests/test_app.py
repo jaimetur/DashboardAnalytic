@@ -395,6 +395,8 @@ def test_recover_complete_transfer_packages_and_remove_incomplete_ones(client, m
         listed = client.get('/admin/import-export/transfers/recoveries')
         assert listed.status_code == 200
         assert recovered[0]['id'] in [offer['id'] for offer in listed.json()['offers']]
+        assert len(listed.json()['offers'][0]['created_at']) == 16
+        assert listed.json()['offers'][0]['created_at'][4] == '-'
         admin_panel = client.get('/admin')
         assert 'Recovered transfer packages' in admin_panel.text
         assert '<th>Workspaces</th>' in admin_panel.text

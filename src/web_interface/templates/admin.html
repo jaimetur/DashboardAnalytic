@@ -380,7 +380,7 @@
               <td>{{ package.created_at }}</td>
               <td>{{ package.size | filesizeformat }}</td>
               <td><div class="report-job-actions">
-                <button type="button" class="report-job-retry-button" data-recovered-transfer-import="{{ package.id }}" title="Import package" aria-label="Import recovered package">⇩</button>
+                <button type="button" class="recovered-transfer-import-button" data-recovered-transfer-import="{{ package.id }}" title="Import package" aria-label="Import recovered package">↑</button>
                 <button type="button" class="danger-button" data-recovered-transfer-delete="{{ package.id }}" title="Delete package" aria-label="Delete recovered package">×</button>
               </div></td>
             </tr>

@@ -2133,12 +2133,17 @@ def _recover_unimported_transfer_packages() -> None:
 
 def recovered_transfer_packages() -> list[dict[str, Any]]:
     _recover_unimported_transfer_packages()
+    def created_at(offer: dict[str, Any]) -> str:
+        try:
+            return datetime.fromtimestamp(float(offer.get('created_at') or 0), timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M')
+        except (TypeError, ValueError, OSError):
+            return ''
     with TRANSFER_LOCK:
         return sorted([
             {
                 key: offer.get(key)
                 for key in ('id', 'source', 'content', 'kind', 'workspaces', 'size')
-            } | {'created_at': format_local_timestamp(offer.get('created_at'))}
+            } | {'created_at': created_at(offer)}
             for offer in TRANSFER_OFFERS.values()
             if offer.get('status') == 'recovered'
         ], key=lambda offer: offer['created_at'] or '', reverse=True)
