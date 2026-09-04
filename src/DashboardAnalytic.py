@@ -3770,24 +3770,6 @@ def app_logs(request: Request, user: SessionUser = Depends(current_user)) -> HTM
     )
 
 
-@app.post('/api/app-logs/button-click')
-async def audit_button_click(request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
-    """Record authenticated UI controls that do not have their own endpoint."""
-    try:
-        payload = await request.json()
-    except (ValueError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=400, detail='Invalid button audit payload.') from exc
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail='Invalid button audit payload.')
-    details = {
-        'page': str(payload.get('page') or '')[:200],
-        'label': str(payload.get('label') or '')[:160],
-        'control': str(payload.get('control') or '')[:120],
-    }
-    repository.add_log(user.username, 'ui_button_click', json.dumps(details))
-    return JSONResponse({'recorded': True})
-
-
 @app.get('/dashboard', response_class=HTMLResponse)
 def dashboard(
     request: Request,
@@ -4524,6 +4506,10 @@ def generate_netcheck_cdr_report(
         args=(report_id, task_repository, selected, technology, multivendor, catalog_entries, template, destination, user.username, selected_catalogue['name']),
         name=f'report-{report_id}', daemon=True,
     ).start()
+    repository.add_log(user.username, 'generate_powerpoint_report_requested', json.dumps({
+        'report_id': report_id, 'technology': technology, 'scope': report_scope,
+        'template': selected_catalogue['name'], 'datasets': dataset_ids,
+    }))
     return JSONResponse({'job_id': report_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
 
 
@@ -4576,8 +4562,9 @@ def generate_netcheck_cdr_charts(
         args=(job_id, task_repository, dataset_ids, technology, report_scope, selected_catalogue['name'], output_dir, user.username),
         name=f'report-charts-{job_id}', daemon=True,
     ).start()
-    repository.add_log(user.username, 'queue_report_chart_job', json.dumps({
+    repository.add_log(user.username, 'generate_chart_set_requested', json.dumps({
         'job_id': job_id, 'technology': technology, 'scope': report_scope, 'template': selected_catalogue['name'],
+        'datasets': dataset_ids,
     }))
     return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
 

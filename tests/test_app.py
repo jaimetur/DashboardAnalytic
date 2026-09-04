@@ -3221,16 +3221,11 @@ def test_app_logs_normalises_user_case_and_records_login_outcomes(client) -> Non
     assert any(details['success'] is True and details['result'] == 'successful' for details in login_details)
 
 
-def test_authenticated_button_click_is_recorded_without_form_values(client) -> None:
+def test_generic_button_click_audit_endpoint_is_not_exposed(client) -> None:
     login(client)
 
     response = client.post('/api/app-logs/button-click', json={
-        'page': '/reporting', 'label': 'View filtered dataset', 'control': 'reportChartViewerData',
-        'password': 'must-not-be-recorded',
+        'page': '/reporting', 'label': 'Select All / None', 'control': 'multiselect-action',
     })
 
-    assert response.status_code == 200
-    page = client.get('/app-logs').text
-    assert 'ui_button_click' in page
-    assert 'View filtered dataset' in page
-    assert 'must-not-be-recorded' not in page
+    assert response.status_code == 404

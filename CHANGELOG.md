@@ -11,7 +11,7 @@
 - Preserved every explicitly filtered `IN` category in hierarchical chart grids even when it has zero matching samples, and strengthened/extended solid first-level row and column separators through their outer headings.
 - Increased and strengthened chart titles, axis values and bar-value labels across the shared renderers, and rebuilt legends with larger bold captions, markers, line samples and spacing for reliable preview and report scaling.
 - Fixed the Legend contract so field selections generate value-based legends in Average/Median and CDF charts, legacy slash-separated template captions remain supported, and Legend Position is applied by the shared renderer.
-- Normalised App Logs users to lowercase with case-insensitive filtering, recorded explicit successful/failed login outcomes, and added safe page/control audit events for every authenticated button activation.
+- Normalised App Logs users to lowercase with case-insensitive filtering, recorded explicit successful/failed login outcomes, and limited UI auditing to meaningful operations with descriptive actions such as report or Chart Set generation.
 - Automatically opened and scrolled to the Charts Panel when a newly queued or retried Report Job completes successfully, matching the existing Charts Job workflow.
 
 #### 🐛 Bug fixes:
