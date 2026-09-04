@@ -2393,6 +2393,8 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
 
     reporting = client.get('/reporting')
     assert 'value="nsa:Updated Q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting.text
+    assert 'data-report-charts-edit-template' in reporting.text
+    assert 'data-report-template-editor-frame' in reporting.text
 
     editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=Baseline%20Q4')
     assert editor.status_code == 200
@@ -2411,6 +2413,12 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert '<optgroup label="Layouts">' in editor.text
     assert '<optgroup label="Chart types">' in editor.text
     assert '<optgroup label="CDR fields">' in editor.text
+
+    embedded_editor = client.get('/admin?catalogue_id=Baseline%20Q4&embedded_template_editor=1')
+    assert embedded_editor.status_code == 200
+    assert 'data-embedded-template-editor' in embedded_editor.text
+    assert 'data-catalogue-editor-table' in embedded_editor.text
+    assert 'catalogue-editor-catalogue-picker" aria-label="Workspace templates" hidden' in embedded_editor.text
 
     edited = (
         ','.join(CATALOG_HEADERS)

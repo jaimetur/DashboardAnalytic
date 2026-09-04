@@ -653,10 +653,10 @@ def test_status_chart_uses_nested_columns_without_a_row_grouping() -> None:
 
 def test_status_chart_excludes_empty_and_nan_states_from_percentage_data() -> None:
     frame = pd.DataFrame({
-        'Operator': ['EE'] * 6,
-        'Campaign': ['2026-Q2'] * 6,
-        'Test_Result': ['Completed', 'Failed', None, float('nan'), '', ' NaN '],
-        '__catalog_column_0': ['EE'] * 6,
+        'Operator': ['EE'] * 8,
+        'Campaign': ['2026-Q2'] * 8,
+        'Test_Result': ['Completed', 'Failed', None, float('nan'), '', ' NaN ', 'Not executed', 'Unknown'],
+        '__catalog_column_0': ['EE'] * 8,
     })
 
     with patch('src.modules.cdr_reporting._render_status_100_hierarchy') as hierarchy_renderer:

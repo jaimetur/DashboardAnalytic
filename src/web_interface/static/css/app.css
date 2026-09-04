@@ -588,6 +588,28 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .chart-set-picker-option:hover .chart-set-picker-prefix, .chart-set-picker-option:focus-visible .chart-set-picker-prefix { color: #fff; }
 .report-chart-set-delete, .report-chart-set-delete-all { flex: 0 0 auto; margin-bottom: 0.02rem; }
 .report-charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1rem; margin-top: 1rem; }
+.report-charts-footer-actions { display: flex; justify-content: flex-end; margin-top: 1rem; }
+.report-charts-edit-template { background: linear-gradient(135deg, #6d46a8, #9369cf); color: #fff; }
+.report-template-editor-overlay { position: fixed; inset: 0; z-index: 220; display: grid; place-items: center; padding: 0.35rem; background: rgba(31, 19, 52, 0.58); }
+.report-template-editor-overlay[hidden] { display: none !important; }
+.confirm-panel.report-template-editor-dialog { width: 90vw !important; height: 90vh !important; min-height: 0; max-width: none !important; max-height: none !important; display: grid; grid-template-rows: auto minmax(0, 1fr); padding: 1rem; overflow: hidden; }
+.report-template-editor-frame { width: 100%; height: 100%; min-height: 0; border: 0; border-radius: 10px; background: #fff; }
+body[data-embedded-template-editor] > .shell > header,
+body[data-embedded-template-editor] .module-tabs,
+body[data-embedded-template-editor] .admin-stack > :not(.slides-templates-editor-panel) { display: none !important; }
+body[data-embedded-template-editor] .shell,
+body[data-embedded-template-editor] main,
+body[data-embedded-template-editor] .admin-stack { width: 100%; max-width: none; height: 100%; min-height: 0; margin: 0; padding: 0; overflow: hidden; }
+body[data-embedded-template-editor] { height: 100vh; overflow: hidden; }
+body[data-embedded-template-editor] .slides-templates-editor-panel { position: relative; display: block; height: 100%; min-height: 0; margin: 0; border-radius: 0; overflow: hidden; }
+body[data-embedded-template-editor] .slides-templates-editor-panel > summary { display: none; }
+body[data-embedded-template-editor] .catalogue-editor-catalogue-picker[hidden] { display: none !important; }
+body[data-embedded-template-editor] .slides-templates-editor-panel > .collapsible-panel-body { position: absolute; inset: 0; display: flex; flex-direction: column; height: auto; min-height: 0; overflow: hidden; }
+body[data-embedded-template-editor] .slides-templates-editor-panel > .collapsible-panel-body > .lede { flex: 0 0 auto; }
+body[data-embedded-template-editor] .slides-templates-editor-grid { display: flex; flex: 1 1 auto; flex-direction: column; align-items: stretch; height: auto; min-height: 0; overflow: hidden; }
+body[data-embedded-template-editor] .slides-templates-editor-table-wrap { display: flex; flex: 1 1 auto; flex-direction: column; height: auto; min-height: 0; overflow: hidden; }
+body[data-embedded-template-editor] .slides-templates-editor-table-wrap > .table-wrap { flex: 1 1 auto; width: 100%; height: auto; min-height: 0; max-height: none; overflow: auto; }
+body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-actions { flex: 0 0 auto; margin: 0; padding: 0.8rem 0 0; background: #fffaf8; }
 .report-chart-card { min-width: 0; padding: 0.9rem; border: 1px solid rgba(75, 32, 138, 0.22); border-radius: 14px; background: linear-gradient(145deg, #fffaff, #f2eaff); box-shadow: 0 10px 22px rgba(75, 32, 138, 0.08); }
 .report-chart-card-head { display: flex; align-items: start; justify-content: space-between; gap: 0.65rem; margin-bottom: 0.65rem; }
 .report-chart-card h3 { margin: 0; color: #43206e; font-size: 0.98rem; }

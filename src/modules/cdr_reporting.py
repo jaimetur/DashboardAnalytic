@@ -1745,7 +1745,19 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
         valid_state = raw.notna() & raw.ne("") & ~raw.isin({"nan", "<na>"})
         data = data.loc[valid_state].copy()
         raw = raw.loc[data.index]
-        data["state"] = raw.map(lambda value: "Completed" if any(item in value for item in ("complete", "success", "pass", "ok")) else "Dropped" if "drop" in value else "Failed")
+        def status_category(value: str) -> str | None:
+            if "drop" in value:
+                return "Dropped"
+            if any(item in value for item in ("fail", "error", "not complete", "not success", "not pass", "not ok", "nok")):
+                return "Failed"
+            if any(item in value for item in ("complete", "success", "pass")) or value == "ok":
+                return "Completed"
+            return None
+
+        data["state"] = raw.map(status_category)
+        # Unknown non-empty statuses are not failures. Only the three explicit
+        # chart states participate in the percentage denominator.
+        data = data.loc[data["state"].notna()].copy()
     data = data.dropna(subset=[group, period])
     row_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_row_")]
     column_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_column_")]

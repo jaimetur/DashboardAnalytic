@@ -86,6 +86,7 @@
       </div>
       <p class="lede" data-report-charts-copy>Each chart uses the selected CDRs, technology, scope and Slides Template. Click any chart to enlarge it.</p>
       <div class="report-charts-grid" data-report-charts-body></div>
+      {% if user.role in ['admin', 'super-admin'] %}<div class="report-charts-footer-actions"><button type="button" class="report-charts-edit-template" data-report-charts-edit-template hidden>Edit Slides Template</button></div>{% endif %}
     </div>
   </details>
 
@@ -221,6 +222,14 @@
     </div>
   </div>
 </div>
+{% if user.role in ['admin', 'super-admin'] %}
+<div class="confirm-overlay report-template-editor-overlay" data-report-template-editor hidden>
+  <section class="confirm-panel report-template-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="report-template-editor-title">
+    <header class="report-chart-viewer-header"><div><p class="eyebrow">PowerPoint reporting</p><h3 id="report-template-editor-title">Edit Slides Template</h3></div><button type="button" class="report-chart-viewer-close" data-report-template-editor-close aria-label="Close template editor">×</button></header>
+    <iframe class="report-template-editor-frame" data-report-template-editor-frame title="Slides Templates Editor"></iframe>
+  </section>
+</div>
+{% endif %}
 {% endblock %}
 {% block extra_scripts %}
 <script>
@@ -281,6 +290,10 @@
     const reportChartsVoiceCount = document.querySelector('[data-report-charts-voice-count]');
     const reportChartsSpeechCount = document.querySelector('[data-report-charts-speech-count]');
     const reportChartsCopy = document.querySelector('[data-report-charts-copy]');
+    const reportChartsEditTemplate = document.querySelector('[data-report-charts-edit-template]');
+    const reportTemplateEditor = document.querySelector('[data-report-template-editor]');
+    const reportTemplateEditorFrame = document.querySelector('[data-report-template-editor-frame]');
+    const reportTemplateEditorClose = document.querySelector('[data-report-template-editor-close]');
     const reportChartSetSelect = document.querySelector('[data-report-chart-set]');
     const reportChartSetPicker = document.querySelector('[data-chart-set-picker]');
     const reportChartSetPickerLabel = document.querySelector('[data-chart-set-picker-label]');
@@ -762,6 +775,7 @@
         showInfoDialog(error.message || 'Unable to queue the report.', {title: 'Report job failed', tone: 'error'});
       }
     });
+    let activeChartSetTemplate = '';
     const renderReportCharts = (payload) => {
       const charts = Array.isArray(payload.charts) ? payload.charts : [];
       if (!reportChartsBody) return;
@@ -780,6 +794,8 @@
       rebuildReportChartSetSelector(selectedChartSet);
       updateChartSetActions(selectedChartSet);
       reportCharts = charts;
+      activeChartSetTemplate = String(payload.template || '');
+      if (reportChartsEditTemplate) reportChartsEditTemplate.hidden = !activeChartSetTemplate;
       reportChartsBody.replaceChildren(...charts.map((chart) => {
         const card = document.createElement('article');
         card.className = 'report-chart-card';
@@ -823,6 +839,19 @@
       if (reportChartsPanel) reportChartsPanel.dataset.reportChartsReady = 'true';
       updateReportingModule();
     };
+    const closeTemplateEditor = () => {
+      if (reportTemplateEditor) reportTemplateEditor.hidden = true;
+      if (reportTemplateEditorFrame) reportTemplateEditorFrame.removeAttribute('src');
+    };
+    reportChartsEditTemplate?.addEventListener('click', () => {
+      if (!activeChartSetTemplate || !reportTemplateEditor || !reportTemplateEditorFrame) return;
+      reportTemplateEditorFrame.src = `/admin?catalogue_id=${encodeURIComponent(activeChartSetTemplate)}&embedded_template_editor=1`;
+      reportTemplateEditor.hidden = false;
+      reportTemplateEditorClose?.focus();
+    });
+    reportTemplateEditor?.addEventListener('click', (event) => {
+      if (event.target === reportTemplateEditor || event.target.closest('[data-report-template-editor-close]')) closeTemplateEditor();
+    });
     reportChartSetSelect?.addEventListener('change', async () => {
       const [source, identifier] = String(reportChartSetSelect.value || '').split(':', 2);
       if (!source || !identifier) return;

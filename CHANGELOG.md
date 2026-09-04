@@ -6,6 +6,7 @@
 ## Release: v0.2.2
 ### Release Date: 2026-09-04
 #### 🌟 New Features:
+- Added an Edit Slides Template action to the active Charts Panel, opening the exact generating template in a full editor modal without the template selector.
 
 #### 🚀 Enhancements:
 - Preserved every explicitly filtered `IN` category in hierarchical chart grids even when it has zero matching samples, and strengthened/extended solid first-level row and column separators through their outer headings.
@@ -29,6 +30,8 @@
 - Fixed undersized, non-bold Docker chart text by installing an Arial-compatible Linux font and sharing cross-platform font resolution across chart and export renderers.
 - Excluded null, NaN and empty status/KPI values from both the numerator and denominator of 100% stacked charts instead of misclassifying them as failures or valid quality samples.
 - Allowed admins to export or transfer shared Slides Templates and only their accessible workspaces, while keeping configuration/full-environment transfers and workspace imports restricted; made the initial destination handshake retry-safe and idempotent to avoid first-attempt connection failures.
+- Excluded unknown and non-executed status values from 100% chart denominators and restricted Failed segments to explicitly failed/error states.
+- Sized the Charts Panel template editor modal to 90% of the browser viewport and reduced its embedded view to the editor itself, with a fixed visible action bar and scrolling confined to the template table.
 
 #### 📚 Documentation:
 

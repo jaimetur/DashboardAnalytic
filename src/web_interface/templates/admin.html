@@ -214,7 +214,7 @@
       <div class="summary-inline-actions">{% if catalogue_editor %}<span class="pill">{{ catalogue_editor.technology | upper }} · {{ catalogue_editor.catalogue.name }}</span>{% endif %}<span class="collapse-chip">Collapse</span></div>
     </summary>
     <div class="collapsible-panel-body">
-    <section class="catalogue-editor-catalogue-picker" aria-label="Workspace templates">
+    <section class="catalogue-editor-catalogue-picker" aria-label="Workspace templates"{% if embedded_template_editor %} hidden{% endif %}>
       <p class="catalogue-library-title">Workspace templates</p>
       <form class="catalogue-editor-picker-form" action="/admin" method="get" autocomplete="off">
         <label>Template to edit
@@ -419,6 +419,7 @@
       </div>
     </div>
   </div>
+  {% endif %}
 
   <div class="confirm-overlay server-transfer-overlay" data-server-transfer-overlay hidden>
     <div class="confirm-panel server-transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="server-transfer-title">
@@ -441,7 +442,6 @@
       </div>
     </div>
   </div>
-  {% endif %}
 
   <details class="panel collapsible-panel database-management-panel" open data-panel-state-key="admin:database-management">
     <summary class="collapsible-summary">

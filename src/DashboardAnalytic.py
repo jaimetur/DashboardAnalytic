@@ -2896,8 +2896,14 @@ def would_remove_required_super_admin(target_user, normalized_role: str, will_be
 
 
 def render_admin_template(request: Request, user: SessionUser, error: str | None = None, status_code: int = 200) -> HTMLResponse:
+    embedded_template_editor = request.query_params.get('embedded_template_editor') == '1'
     selected_technology = request.query_params.get('catalogue_technology') or None
     selected_catalogue = request.query_params.get('catalogue_id') or None
+    if embedded_template_editor and selected_catalogue and not selected_technology:
+        selected_technology = next((
+            technology for technology in TEMPLATE_NAMES
+            if any(item['identifier'] == selected_catalogue for item in report_catalogue_options(technology))
+        ), None)
     selection = request.query_params.get('catalogue_selection') or ''
     if selection and ':' in selection:
         candidate_technology, candidate_catalogue = selection.split(':', 1)
@@ -2990,6 +2996,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         'admin.html',
         {
             'user': user,
+            'embedded_template_editor': embedded_template_editor,
             'users': admin_users,
             'workspaces': workspace_registry.list(),
             'datasets': admin_datasets,
