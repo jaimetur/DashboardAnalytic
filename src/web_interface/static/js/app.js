@@ -3862,10 +3862,13 @@ if (appLogsPanel) {
     const details = document.createElement('code'); details.textContent = String(log.details_text || ''); detailsCell.append(details); row.append(detailsCell);
     return row;
   };
-  const refreshAppLogs = async () => {
-    if (refreshInProgress || !body || document.hidden) return;
+  const refreshAppLogs = async ({manual = false} = {}) => {
+    if (refreshInProgress || !body || (!manual && document.hidden)) return;
     refreshInProgress = true;
-    if (refreshButton) refreshButton.disabled = true;
+    // Background polling must be visually silent.  Toggling disabled here
+    // made the Refresh button flash every five seconds even though the user
+    // had not pressed it.
+    if (manual && refreshButton) refreshButton.disabled = true;
     try {
       const response = await fetch('/api/app-logs', {headers: {'Accept': 'application/json'}, cache: 'no-store'});
       if (!response.ok) throw new Error('Unable to refresh App Logs.');
@@ -3882,7 +3885,7 @@ if (appLogsPanel) {
       // Keep the last successfully rendered snapshot if a polling request fails.
     } finally {
       refreshInProgress = false;
-      if (refreshButton) refreshButton.disabled = false;
+      if (manual && refreshButton) refreshButton.disabled = false;
     }
   };
   [userFilter, executorFilter, dateFilter, typeFilter, actionFilter].filter(Boolean).forEach((filter) => filter.addEventListener('change', () => {
@@ -3898,7 +3901,7 @@ if (appLogsPanel) {
     try { window.localStorage.removeItem(appLogFiltersStorageKey); } catch (_error) { /* Ignore unavailable browser storage. */ }
     syncAppLogRows();
   });
-  refreshButton?.addEventListener('click', refreshAppLogs);
+  refreshButton?.addEventListener('click', () => refreshAppLogs({manual: true}));
   window.setInterval(refreshAppLogs, 5000);
   syncAppLogRows();
 }

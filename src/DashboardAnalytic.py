@@ -598,6 +598,19 @@ def workspace_disk_usage(workspace: Workspace) -> int:
     return total
 
 
+def invalidate_workspace_size_cache(workspace_root: Path | None = None) -> None:
+    """Discard a workspace-size snapshot after changing files on its disk."""
+    root = workspace_root or (active_workspace.database_path.parent if active_workspace else None)
+    if root is None:
+        return
+    try:
+        cache_key = str(root.resolve())
+    except OSError:
+        cache_key = str(root)
+    with _workspace_size_cache_lock:
+        _workspace_size_cache.pop(cache_key, None)
+
+
 def format_workspace_size(size_bytes: int) -> str:
     if size_bytes >= 1024 ** 3:
         value = size_bytes / (1024 ** 3)
@@ -1153,6 +1166,10 @@ def process_dataset(
             task_repository.add_log(username, 'process_dataset_failed', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name, 'error': str(exc)}))
         finally:
             clear_stop_request(dataset_id)
+            # Materialising dataset rows can substantially change the
+            # workspace database even though the uploaded file itself was
+            # already counted when it was saved.
+            invalidate_workspace_size_cache(task_repository.db_path.parent)
 
 
 def enqueue_dataset_processing(
@@ -4473,6 +4490,7 @@ def _run_netcheck_report_job_locked(
         gc.collect()
         _ensure_report_job_active(task_repository, report_id)
         task_repository.update_report_job(report_id, status='ready', progress=100, last_error='', finished=True)
+        invalidate_workspace_size_cache(task_repository.db_path.parent)
         task_repository.add_log(username, 'export_netcheck_cdr_report', json.dumps({
             'report_id': report_id,
             'datasets': {kind: [dataset['id'] for dataset in datasets] for kind, datasets in selected.items()},
@@ -4487,11 +4505,13 @@ def _run_netcheck_report_job_locked(
             shutil.rmtree(destination.parent, ignore_errors=True)
         else:
             destination.unlink(missing_ok=True)
+        invalidate_workspace_size_cache(task_repository.db_path.parent)
     except Exception as exc:
         if destination.parent == _report_job_directory(destination.name):
             shutil.rmtree(destination.parent, ignore_errors=True)
         else:
             destination.unlink(missing_ok=True)
+        invalidate_workspace_size_cache(task_repository.db_path.parent)
         task_repository.update_report_job(report_id, status='failed', progress=100, last_error=str(exc), finished=True)
         task_repository.add_log(username, 'export_netcheck_cdr_report_failed', json.dumps({
             'report_id': report_id, 'error': str(exc),
@@ -4811,6 +4831,7 @@ def _run_report_chart_job(
                 job_id, status='ready', progress=100, last_error='', chart_count=len(chart_entries),
                 generation=str(report_charts['generation']), finished=True,
             )
+            invalidate_workspace_size_cache(task_repository.db_path.parent)
             task_repository.add_log(username, 'chart_set_published', json.dumps({
                 'job_id': job_id, 'executed_by': 'system', 'generation': report_charts['generation'], 'technology': technology,
                 'scope': report_scope, 'template': template_name, 'charts': len(chart_entries),
@@ -4818,11 +4839,13 @@ def _run_report_chart_job(
         except ReportJobStopped:
             if report_charts:
                 shutil.rmtree(report_charts_directory(output_dir) / str(report_charts['generation']), ignore_errors=True)
+            invalidate_workspace_size_cache(task_repository.db_path.parent)
         except Exception as exc:
             task_repository.add_log(username, 'chart_set_generation_failed', json.dumps({
                 'job_id': job_id, 'executed_by': 'system', 'error': str(exc),
             }))
             task_repository.update_report_chart_job(job_id, status='failed', progress=100, last_error=str(exc), finished=True)
+            invalidate_workspace_size_cache(task_repository.db_path.parent)
 
 
 def report_charts_directory(output_dir: Path | None = None) -> Path:
@@ -5059,6 +5082,7 @@ def delete_all_report_chart_sets(user: SessionUser = Depends(current_user)) -> J
     charts_root.mkdir(parents=True, exist_ok=True)
     jobs = repository.list_report_chart_jobs(limit=None)
     removed_jobs = sum(repository.delete_report_chart_job(int(job['id'])) is not None for job in jobs)
+    invalidate_workspace_size_cache()
     repository.add_log(user.username, 'delete_all_report_chart_sets', json.dumps({'count': len(chart_sets), 'jobs': removed_jobs}))
     return JSONResponse({'chart_sets': [], 'deleted_jobs': removed_jobs})
 
@@ -5072,6 +5096,7 @@ def delete_report_chart_set(generation: str, user: SessionUser = Depends(current
         raise HTTPException(status_code=404, detail='Chart set not found.')
     shutil.rmtree(directory)
     removed_jobs = repository.delete_report_chart_jobs_for_generations([generation])
+    invalidate_workspace_size_cache()
     repository.add_log(user.username, 'delete_report_chart_set', json.dumps({'generation': generation, 'jobs': removed_jobs}))
     return JSONResponse({'chart_sets': list_persisted_report_chart_sets()})
 
@@ -5094,6 +5119,7 @@ def delete_report_chart_job(job_id: int, user: SessionUser = Depends(current_use
         if directory.is_dir():
             shutil.rmtree(directory)
     repository.delete_report_chart_job(job_id)
+    invalidate_workspace_size_cache()
     repository.add_log(user.username, 'delete_report_chart_job', json.dumps({'job_id': job_id}))
     return JSONResponse({'deleted': job_id, 'generation': generation or None})
 
@@ -5132,6 +5158,7 @@ def retry_report_chart_job(job_id: int, user: SessionUser = Depends(current_user
         # A completed job owns this exact Chart Set. Remove it before reuse so
         # a relaunch never retains PNGs or a manifest from the prior run.
         shutil.rmtree(safe_join(report_charts_directory(), generation), ignore_errors=True)
+        invalidate_workspace_size_cache()
     if not repository.retry_report_chart_job(job_id):
         raise HTTPException(status_code=409, detail='This Chart Set job is no longer available for retry.')
     task_repository = Repository(Path(repository.db_path), repository.global_db_path)
@@ -5217,6 +5244,7 @@ def delete_report_job_charts(report_id: int, user: SessionUser = Depends(current
     if directory is None:
         raise HTTPException(status_code=404, detail='Rendered report charts are not available.')
     shutil.rmtree(directory)
+    invalidate_workspace_size_cache()
     repository.add_log(user.username, 'delete_report_job_charts', json.dumps({'report_id': report_id}))
     return JSONResponse({'deleted': report_id})
 
@@ -5227,6 +5255,7 @@ def delete_report_job(report_id: int, user: SessionUser = Depends(current_user))
     if not report:
         raise HTTPException(status_code=404, detail='Report job not found.')
     _delete_report_job_artifacts(report)
+    invalidate_workspace_size_cache()
     return JSONResponse({'deleted': report_id})
 
 
@@ -5252,6 +5281,7 @@ def delete_all_report_jobs(user: SessionUser = Depends(current_user)) -> JSONRes
     if reports_root.is_dir():
         shutil.rmtree(reports_root)
     reports_root.mkdir(parents=True, exist_ok=True)
+    invalidate_workspace_size_cache()
     repository.add_log(user.username, 'delete_all_report_jobs', json.dumps({'count': len(reports)}))
     return JSONResponse({'deleted': len(reports)})
 
@@ -5297,6 +5327,7 @@ def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) 
     # created the PPTX itself, so reruns never inherit partial charts or files.
     _delete_report_job_artifacts(previous)
     shutil.rmtree(destination.parent, ignore_errors=True)
+    invalidate_workspace_size_cache()
     if not repository.retry_report_job(report_id):
         raise HTTPException(status_code=409, detail='This report job is no longer available for relaunch.')
     task_repository = Repository(Path(repository.db_path))
@@ -5408,6 +5439,7 @@ async def upload_dataset(
         extension = Path(dataset_file.filename or '').suffix.lower()
         destination = safe_join(settings.input_dir, dataset_file.filename or f'upload{extension}')
         await save_upload_file(dataset_file, destination)
+        invalidate_workspace_size_cache()
         dataset_id, created = repository.add_dataset(dataset_file.filename or destination.name, str(destination), user.username)
         selected_kind = selected_kinds[index] if selected_kinds else None
         if selected_kind:
@@ -5643,6 +5675,7 @@ def delete_dataset(dataset_id: int, return_to: str = Form(''), user: SessionUser
     # imposing a full-table cleanup on every Admin page load.
     repository.remove_orphaned_dataset_row_tables()
     repository.remove_orphaned_reporting_rows()
+    invalidate_workspace_size_cache()
     stale_keys = [key for key in ANALYSIS_CACHE if str(dataset_path.resolve()) in key]
     for key in stale_keys:
         ANALYSIS_CACHE.pop(key, None)
