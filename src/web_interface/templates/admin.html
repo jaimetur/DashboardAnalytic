@@ -233,6 +233,9 @@
       </form>
     </section>
     {% if catalogue_editor %}
+    {% if catalogue_editor.validation_error %}
+    <div class="alert alert-warning" role="alert"><strong>This Slides Template contains an invalid filter.</strong> {{ catalogue_editor.validation_error }} Correct that filter definition before saving.</div>
+    {% endif %}
     <p class="lede">Rows are ordered by Slide and alternate by slide block. When a slide contains several charts, its shared slide number, title, subtitle and layout are shown once and apply to the full slide block; saving writes those values back to every chart row in the CSV. Select a cell to edit it manually or use the contextual suggestions on the right.</p>
     <div class="slides-templates-editor-grid" data-catalogue-editor data-editor-suggestions='{{ catalogue_editor.suggestions | tojson }}' data-chart-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-preview" data-chart-image-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-image-preview">
       <form class="slides-templates-editor-table-wrap" action="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/save" method="post" data-catalogue-editor-save>

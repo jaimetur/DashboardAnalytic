@@ -28,7 +28,6 @@
 - Replaced the chart viewer's reset-zoom symbol with a clearer magnifying-glass icon while preserving its accessible Reset zoom action.
 
 #### 🐛 Bug fixes:
-- Rejected malformed Slides Template filters when adjacent conditions are missing their semicolon separator, and stored each condition on its own line in both editor cells and quoted CSV filter fields.
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
 - Fixed NSA/SA session classification so native and MultiRAB calls use VoLTE, EPSFB or VoNR call modes before RAT fallback, while WhatsApp continues to use its explicit RAT.
 - Fixed Docker source-layer freshness by keying application layers to the exact Git commit while retaining dependency caching, and embedded the revision in every published image for verification.
@@ -37,6 +36,7 @@
 - Sized the Charts Panel template editor modal to 90% of the browser viewport and reduced its embedded view to the editor itself, with a fixed visible action bar and scrolling confined to the template table.
 - Allowed admins to export or transfer shared Slides Templates and only their accessible workspaces, while keeping configuration/full-environment transfers and workspace imports restricted; removed forbidden options from their selector so transfer requests always include a valid target, made the initial destination handshake retry-safe and idempotent, persisted incoming offers, and made destination notification polling resilient to stale Docker-rendered pages and browser tab suspension.
 - Moved status-row inclusion out of the chart renderer and into explicit template filters such as `Test_Result IN (Completed, Dropped, Failed)`, making the denominator visible and editable while status charts continue to honour the selected KPI.
+- Rejected malformed Slides Template filters when adjacent conditions are missing their semicolon separator, kept damaged templates open for correction instead of crashing Admin, and stored each condition on its own line in both editor cells and quoted CSV filter fields.
 
 #### 📚 Documentation:
 

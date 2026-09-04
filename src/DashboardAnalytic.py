@@ -460,6 +460,7 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
     catalogue = next((item for item in report_catalogue_options(technology) if item['identifier'] == catalogue_id), None)
     if not catalogue:
         return None
+    validation_error = None
     try:
         entries = load_catalog_csv(catalogue['path'], technology)
     except ValueError as exc:
@@ -467,9 +468,16 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
         # headers.  It is valid to open that blank canvas in the editor, while
         # the report-generation parser continues to reject a template that
         # has not yet been configured with any slides.
-        if str(exc) != 'The report template does not contain any rows.':
+        if str(exc) == 'The report template does not contain any rows.':
+            entries = []
+        elif 'Invalid filter' in str(exc):
+            # An invalid persisted filter must remain editable. Report
+            # generation and saving still use strict validation, but opening
+            # Admin must not become impossible because of a damaged row.
+            validation_error = str(exc)
+            entries = load_catalog_csv(catalogue['path'], technology, validate_filters=False)
+        else:
             raise
-        entries = []
     # CSVs are allowed to have been edited out of order. The editor always
     # presents coherent slide blocks while preserving the chart order inside a
     # slide when it is saved again.
@@ -500,6 +508,7 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
         'catalogue': catalogue,
         'rows': rows,
         'headers': CATALOG_HEADERS,
+        'validation_error': validation_error,
         'suggestions': {
             'layouts': catalogue_layout_names(technology),
             'chart_types': sorted(CHART_TYPES | STRUCTURAL_SLIDE_TYPES, key=str.casefold),

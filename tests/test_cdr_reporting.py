@@ -418,6 +418,16 @@ def test_catalogue_filters_accept_lines_but_reject_a_missing_condition_separator
     with pytest.raises(ValueError, match='semicolon is required'):
         parse_catalog_filters(malformed)
 
+    row = ','.join(CATALOG_HEADERS) + (
+        '\n5,Failures,,Title and 1 column + Comments,Failures,CDR-Data,Test_Result,'
+        '100% Stacked Vertical Bars,"Test_Result IN (Completed, Dropped, Failed)Operator IN (EE, 3)",'
+        'Operator,Campaign,,Top\n'
+    )
+    with pytest.raises(ValueError, match='semicolon is required'):
+        parse_catalog_csv(row, 'nsa')
+    editable = parse_catalog_csv(row, 'nsa', validate_filters=False)
+    assert editable[0].filters.endswith('Operator IN (EE, 3)')
+
 
 def test_multivendor_rendering_rewrites_operator_display_and_grouping_but_not_filters() -> None:
     entry = parse_catalog_csv(

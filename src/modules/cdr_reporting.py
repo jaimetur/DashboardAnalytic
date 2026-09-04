@@ -210,7 +210,7 @@ def parse_legend_position(value: str) -> str:
     return aliases[normalized]
 
 
-def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntry]:
+def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters: bool = True) -> list[CatalogEntry]:
     """Validate the editable report-template CSV and return its chart rows."""
     if technology not in TEMPLATE_NAMES:
         raise ValueError("Catalog technology must be NSA or SA.")
@@ -289,7 +289,8 @@ def parse_catalog_csv(content: bytes | str, technology: str) -> list[CatalogEntr
         if entry.source_kind and not (entry.grouping_rows or entry.grouping_columns):
             raise ValueError(f"Catalog row {line_number} requires Rows Aggregation or Column Aggregation for a CDR source.")
         try:
-            parse_catalog_filters(entry.filters)
+            if validate_filters:
+                parse_catalog_filters(entry.filters)
             parse_catalog_grouping(entry.grouping_rows)
             parse_catalog_grouping(entry.grouping_columns)
             parse_legend_position(entry.legend_position)
@@ -386,8 +387,8 @@ def convert_catalog_csv(content: bytes | str, technology: str) -> bytes:
     return catalogue_csv(entries)
 
 
-def load_catalog_csv(path: Path, technology: str) -> list[CatalogEntry]:
-    return parse_catalog_csv(path.read_bytes(), technology)
+def load_catalog_csv(path: Path, technology: str, *, validate_filters: bool = True) -> list[CatalogEntry]:
+    return parse_catalog_csv(path.read_bytes(), technology, validate_filters=validate_filters)
 
 
 def active_catalog_path(catalog_dir: Path, fallback_catalog: Path, technology: str) -> Path:
