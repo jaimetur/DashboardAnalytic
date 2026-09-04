@@ -1657,6 +1657,7 @@ def _apply_resolved_legend(
     _draw_chart_legend(
         ImageDraw.Draw(image), items, position,
         line_markers="cdf" in entry.chart_type.casefold(),
+        side_x=(1320 if position == "right" and "cdf" in entry.chart_type.casefold() else None),
     )
     output = BytesIO()
     image.save(output, format="PNG")
@@ -2458,7 +2459,25 @@ def _cdf_terminal_x_maximum(
     return fallback
 
 
-def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period: str | None, metric: str | None, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
+def _cdf_plot_geometry(legend_position: str) -> tuple[int, int, int, int]:
+    """Reserve a non-overlapping lane for a lateral CDF legend."""
+    if legend_position == "right":
+        return 100, 135, 1190, 590
+    if legend_position == "left":
+        return 400, 135, 1020, 590
+    return 100, 135, 1320, 590
+
+
+def _render_cdf_line(
+    title: str,
+    frame: pd.DataFrame,
+    group: str | None,
+    period: str | None,
+    metric: str | None,
+    legend_labels: tuple[str, ...] = (),
+    legend_position: str = "top",
+    layout_legend_position: str | None = None,
+) -> BytesIO:
     if frame.empty or not group or not metric: return _empty_chart(title)
     campaign_column = _period_column(frame)
     # A CDF series is defined by the complete aggregation hierarchy, not by
@@ -2494,7 +2513,9 @@ def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period:
     series_values = [values for _, _, values in series_data]
     high = _cdf_terminal_x_maximum(series_values, low, observed_high)
     high = high if high > low else low + 1
-    image, draw = _canvas(title); left, top, width, height = 100, 135, 1320, 590
+    image, draw = _canvas(title)
+    layout_position = layout_legend_position or legend_position
+    left, top, width, height = _cdf_plot_geometry(layout_position)
     # Colour policy is driven by the template's declared dimensions: operator
     # families are used only for genuine multi-operator comparisons.
     comparison_colours = _series_colours(combinations, grouping_columns, data, line_chart=True)
@@ -2523,7 +2544,7 @@ def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period:
         draw.line(points, fill=colour, width=line_width)
         legend_items.append((label, colour, line_width))
     for tick in range(0, 101, 20):
-        y = top + height - tick / 100 * height; draw.line((left, y, left + width, y), fill="#E4E9ED", width=1); draw.text((16, y - 10), f"{tick}%", fill="#4E6271", font=_font(18, True))
+        y = top + height - tick / 100 * height; draw.line((left, y, left + width, y), fill="#E4E9ED", width=1); draw.text((left - 84, y - 10), f"{tick}%", fill="#4E6271", font=_font(18, True))
     for tick in range(0, 6):
         value = low + (high - low) * tick / 5
         x = left + width * tick / 5
@@ -2731,7 +2752,10 @@ def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame
             legend_dimensions=() if not legend_labels else legend_dimensions,
             legend_position=renderer_legend_position,
         ))
-    return finish(_render_cdf_line(chart_title, frame, group, period, metric, (), renderer_legend_position))
+    return finish(_render_cdf_line(
+        chart_title, frame, group, period, metric, (), renderer_legend_position,
+        layout_legend_position=legend_position,
+    ))
 
 
 def _chart_for_spec(title: str, frames: dict[str, pd.DataFrame], spec: dict, multivendor: bool) -> BytesIO:

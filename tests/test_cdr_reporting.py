@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_mean_column, _render_status_100, _resolved_legend_items, _series_colours, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_mean_column, _render_status_100, _resolved_legend_items, _series_colours, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -367,6 +367,14 @@ def test_cdf_resolved_legend_reproduces_historical_and_latest_line_widths() -> N
     assert [(caption, width) for caption, _colour_value, width in items] == [
         ('EE · 2026-Q1', 1), ('EE · 2026-Q2', 4),
     ]
+
+
+def test_cdf_plot_reserves_space_for_side_legends() -> None:
+    left, _top, width, _height = _cdf_plot_geometry('right')
+    assert left + width < 1320
+    left, _top, width, _height = _cdf_plot_geometry('left')
+    assert left >= 400
+    assert _cdf_plot_geometry('top') == (100, 135, 1320, 590)
 
 
 def test_threshold_legend_uses_the_resolved_value_and_chart_segment_colours() -> None:
