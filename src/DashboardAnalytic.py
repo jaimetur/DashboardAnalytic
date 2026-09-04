@@ -3034,9 +3034,25 @@ def build_app_logs() -> list[dict[str, Any]]:
             details: Any = json.loads(details_text)
         except (TypeError, ValueError, json.JSONDecodeError):
             details = details_text
+        stored_username = str(row['username'] or '').strip().casefold()
+        legacy_requested_by = (
+            str(details.get('requested_by') or '').strip().casefold()
+            if isinstance(details, dict) and details.get('requested_by') else ''
+        )
+        executed_by = (
+            str(details.get('executed_by') or details.get('actioned_by') or '').strip().casefold()
+            if isinstance(details, dict) and (details.get('executed_by') or details.get('actioned_by')) else ''
+        )
+        # Briefly published Chart Set events used `system` as User and placed
+        # the originator in requested_by. Present them with the corrected
+        # semantics without rewriting immutable audit history.
+        display_username = legacy_requested_by if stored_username == 'system' and legacy_requested_by and not executed_by else stored_username
+        if stored_username == 'system' and legacy_requested_by and not executed_by:
+            executed_by = 'system'
         log = {
             'id': row['id'],
-            'username': str(row['username'] or '').strip().casefold(),
+            'username': display_username,
+            'executed_by': executed_by or '—',
             'action': action,
             'details': details,
             'details_text': details_text,
@@ -4563,15 +4579,15 @@ def generate_netcheck_cdr_charts(
     )
     task_repository = Repository(Path(repository.db_path), repository.global_db_path)
     output_dir = Path(settings.output_dir)
+    repository.add_log(user.username, 'chart_set_generation_requested', json.dumps({
+        'job_id': job_id, 'technology': technology, 'scope': report_scope, 'template': selected_catalogue['name'],
+        'datasets': dataset_ids,
+    }))
     Thread(
         target=_run_report_chart_job,
         args=(job_id, task_repository, dataset_ids, technology, report_scope, selected_catalogue['name'], output_dir, user.username),
         name=f'report-charts-{job_id}', daemon=True,
     ).start()
-    repository.add_log(user.username, 'generate_chart_set_requested', json.dumps({
-        'job_id': job_id, 'technology': technology, 'scope': report_scope, 'template': selected_catalogue['name'],
-        'datasets': dataset_ids,
-    }))
     return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
 
 
@@ -4657,11 +4673,11 @@ def _run_report_chart_job(
                     del frame
                     gc.collect()
                 if empty_charts:
-                    task_repository.add_log(username, 'generate_report_chart_set_empty_charts', json.dumps({
-                        'job_id': job_id, 'charts': empty_charts,
+                    task_repository.add_log(username, 'chart_set_rendering_warning', json.dumps({
+                        'job_id': job_id, 'executed_by': 'system', 'charts': empty_charts,
                     }))
-                task_repository.add_log(username, 'generate_report_chart_set_metrics', json.dumps({
-                    'job_id': job_id, 'charts': chart_metrics,
+                task_repository.add_log(username, 'chart_set_rendering_completed', json.dumps({
+                    'job_id': job_id, 'executed_by': 'system', 'charts': chart_metrics,
                 }))
             _ensure_report_job_active(task_repository, job_id, chart_job=True)
             report_charts = persist_report_charts(
@@ -4676,15 +4692,17 @@ def _run_report_chart_job(
                 job_id, status='ready', progress=100, last_error='', chart_count=len(chart_entries),
                 generation=str(report_charts['generation']), finished=True,
             )
-            task_repository.add_log(username, 'generate_report_chart_set', json.dumps({
-                'job_id': job_id, 'generation': report_charts['generation'], 'technology': technology,
+            task_repository.add_log(username, 'chart_set_published', json.dumps({
+                'job_id': job_id, 'executed_by': 'system', 'generation': report_charts['generation'], 'technology': technology,
                 'scope': report_scope, 'template': template_name, 'charts': len(chart_entries),
             }))
         except ReportJobStopped:
             if report_charts:
                 shutil.rmtree(report_charts_directory(output_dir) / str(report_charts['generation']), ignore_errors=True)
         except Exception as exc:
-            task_repository.add_log(username, 'generate_report_chart_set_failed', json.dumps({'job_id': job_id, 'error': str(exc)}))
+            task_repository.add_log(username, 'chart_set_generation_failed', json.dumps({
+                'job_id': job_id, 'executed_by': 'system', 'error': str(exc),
+            }))
             task_repository.update_report_chart_job(job_id, status='failed', progress=100, last_error=str(exc), finished=True)
 
 

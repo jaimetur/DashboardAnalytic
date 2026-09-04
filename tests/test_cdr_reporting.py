@@ -1287,10 +1287,13 @@ def test_report_chart_generation_failures_return_json_and_are_logged(client, mon
     job = wait_for_report_chart_job(client, response.json()['job_id'])
     assert job['status'] == 'failed'
     assert job['error'] == 'Synthetic renderer failure'
-    log = next(row for row in app_module.repository.list_logs() if row['action'] == 'generate_report_chart_set_failed')
+    log = next(row for row in app_module.repository.list_logs() if row['action'] == 'chart_set_generation_failed')
+    assert log['username'] == 'admin'
     assert 'Synthetic renderer failure' in log['details']
-    app_log = next(row for row in app_module.build_app_logs() if row['action'] == 'generate_report_chart_set_failed')
+    app_log = next(row for row in app_module.build_app_logs() if row['action'] == 'chart_set_generation_failed')
     assert app_log['log_type'] == 'Error'
+    assert app_log['username'] == 'admin'
+    assert app_log['executed_by'] == 'system'
 
 
 def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, monkeypatch) -> None:

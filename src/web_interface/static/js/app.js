@@ -3625,7 +3625,7 @@ if (appLogsPanel) {
     row.dataset.appLogDate = String(log.date || '');
     row.dataset.appLogType = String(log.log_type || 'Info');
     row.dataset.appLogAction = String(log.action || '');
-    const values = [log.id, log.created_at, log.username];
+    const values = [log.id, log.created_at, log.username, log.executed_by || '—'];
     values.forEach((value) => { const cell = document.createElement('td'); cell.textContent = String(value ?? ''); row.append(cell); });
     const typeCell = document.createElement('td');
     const badge = document.createElement('span');

@@ -16,6 +16,7 @@
 - Preselected the two most recently uploaded processed CDRs of each Data, Voice and Speech type in E2E Reporting, falling back to the sole available dataset when only one exists.
 - Reduced each CDR selector to its most recently uploaded selected dataset when switching to Vendor Comparison, without replacing an existing single selection.
 - Added manual Refresh and five-second incremental polling to App Logs while preserving the active filters.
+- Clarified Chart Set audit stages as generation requested, rendering completed and published; App Logs retains the initiating user in `User` and identifies background execution as `system` in the new `Executed by` column.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
