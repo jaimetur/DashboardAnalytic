@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_terminal_x_maximum, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_status_100, _series_colours, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_terminal_x_maximum, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_status_100, _series_colours, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -686,6 +686,26 @@ def test_failure_count_keeps_zero_count_hierarchy_categories_from_all_filtered_r
     assert chart.getvalue() == b'zero-count-grid'
     assert hierarchy_renderer.call_args.kwargs['comparison_frame'] is grouped
     assert hierarchy_renderer.call_args.args[1].empty
+
+
+def test_failure_count_keeps_explicit_in_filter_categories_with_zero_matching_rows() -> None:
+    entry = CatalogEntry(
+        4, 'Failures', '', '', '', 'CDR-Voice', 'Call_Status', 'Count Stacked Horizontal Bars', '',
+        'Call_Status IN (Failed, Dropped); G Level 4 IN (Belfast, Bristol, Cardiff)',
+        'Call Family × G Level 4', 'Operator × Campaign',
+    )
+    frame = pd.DataFrame({
+        'Call Family': ['VoLTE'], 'G_Level_4': ['Belfast'], 'Operator': ['EE'],
+        'Campaign': ['2026 Q2'], 'Call_Status': ['Failed'],
+    })
+
+    filtered = _apply_catalog_filters(frame, entry, False, 'Call_Status')
+    grouped, _primary, _series = _apply_catalog_grouping(filtered, entry, False, 'Call_Status')
+
+    assert grouped.attrs['catalogue_dimension_values']['__catalog_row_1'] == ['Belfast', 'Bristol', 'Cardiff']
+    assert _hierarchical_complete_keys(grouped, ['__catalog_row_0', '__catalog_row_1']) == [
+        ('VoLTE', 'Belfast'), ('VoLTE', 'Bristol'), ('VoLTE', 'Cardiff'),
+    ]
 
 
 def test_failure_hierarchy_reserves_a_right_legend_lane() -> None:

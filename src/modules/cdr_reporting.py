@@ -1055,14 +1055,28 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
 
     row_columns = resolve_dimensions(row_spec.dimensions, "row")
     column_columns = resolve_dimensions(column_spec.dimensions, "column")
+    explicit_dimension_values = {
+        _normalise_catalog_name(condition.column): list(condition.values)
+        for condition in parse_catalog_filters(entry.filters)
+        if condition.operator == "IN"
+    }
+    configured_dimension_values: dict[str, list[str]] = {}
     # Preserve every resolved hierarchy level for renderers that need pane-like
     # rows and nested column headers. The flattened primary/series fields remain
     # available for chart grammars that intentionally use compact labels.
     def materialise_dimension(dimension: str, column: str, target: str) -> None:
         values = frame[column].fillna("(blank)").astype(str)
-        if _normalise_catalog_name(dimension) == "campaign":
+        normalized_dimension = _normalise_catalog_name(dimension)
+        if normalized_dimension == "campaign":
             values = values.map(_campaign_display_value)
         frame[target] = values
+        requested = explicit_dimension_values.get(normalized_dimension)
+        if requested:
+            if normalized_dimension == "campaign":
+                requested = [_campaign_display_value(value) for value in requested]
+            elif normalized_dimension == "operator":
+                requested = [_normalise_report_operator(value) for value in requested]
+            configured_dimension_values[target] = list(dict.fromkeys(requested))
 
     row_display_columns: list[str] = []
     for index, (dimension, column) in enumerate(zip(row_spec.dimensions, row_columns, strict=True)):
@@ -1102,6 +1116,7 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         frame["__catalog_stack"] = frame[stack_column].fillna("(blank)").astype(str)
     else:
         materialise(column_display_columns, series)
+    frame.attrs["catalogue_dimension_values"] = configured_dimension_values
     frame.attrs["catalogue_dimension_labels"] = {
         **{column: dimension for column, dimension in zip(row_display_columns, row_spec.dimensions, strict=True)},
         **{column: dimension for column, dimension in zip(column_display_columns, column_spec.dimensions, strict=True)},
@@ -1483,7 +1498,11 @@ def _hierarchical_complete_keys(frame: pd.DataFrame, columns: list[str]) -> list
     """
     if not columns:
         return [()]
-    values_by_level = [list(frame[column].drop_duplicates()) for column in columns]
+    configured_values = frame.attrs.get("catalogue_dimension_values", {})
+    values_by_level = [
+        list(configured_values.get(column) or frame[column].drop_duplicates())
+        for column in columns
+    ]
     if any(not values for values in values_by_level):
         return []
     return [tuple(key) for key in product(*values_by_level)]
@@ -1878,6 +1897,7 @@ def _render_failure_count_hierarchy(
     # diagonal outer column captions extend into the legend area on dense
     # hierarchy charts (for example Operator × Campaign failure matrices).
     chart_width = 980 if legend_position == "right" else 1250
+    outer_separator_top = chart_top - 64
     row_height = chart_height / len(row_keys)
     column_width = chart_width / len(column_keys)
     colours = {"Failed": "#E15759", "Dropped": "#F28E2B"}
@@ -1916,7 +1936,7 @@ def _render_failure_count_hierarchy(
             _draw_dashed_vertical_line(draw, cell_left, chart_top - 24, chart_top + chart_height + 25)
         else:
             # A new first-level aggregation value begins a new solid group.
-            draw.line((cell_left, chart_top - 24, cell_left, chart_top + chart_height + 25), fill="#D5DDE2", width=1)
+            draw.line((cell_left, outer_separator_top, cell_left, chart_top + chart_height + 25), fill="#AEBBC4", width=2)
         draw.text((cell_left + 3, chart_top + chart_height + 7), "0", fill="#7A8993", font=_font(10))
         draw.text((cell_left + column_width - 22, chart_top + chart_height + 7), str(maximum), fill="#7A8993", font=_font(10))
 
@@ -1945,7 +1965,7 @@ def _render_failure_count_hierarchy(
             # convention as Campaign columns inside one Operator.
             _draw_dashed_horizontal_line(draw, row_bottom, 20, chart_left + chart_width)
         else:
-            draw.line((20, row_bottom, chart_left + chart_width, row_bottom), fill="#DCE3E7", width=1)
+            draw.line((20, row_bottom, chart_left + chart_width, row_bottom), fill="#AEBBC4", width=2)
         for column_index, column_key in enumerate(column_keys):
             key_prefix = (*row_key, *column_key)
             state_counts = {
@@ -1985,7 +2005,7 @@ def _render_failure_count_hierarchy(
                 # Dropped as documented by the legend.
                 draw.text((x + 3, y + 1), " / ".join(outside_counts), fill="#34495A", font=count_font)
 
-    draw.line((chart_left + chart_width, chart_top - 24, chart_left + chart_width, chart_top + chart_height + 25), fill="#D5DDE2", width=1)
+    draw.line((chart_left + chart_width, outer_separator_top, chart_left + chart_width, chart_top + chart_height + 25), fill="#AEBBC4", width=2)
     _draw_chart_legend(
         draw,
         [(_legend_caption(legend_labels, index, state), colours[state], 2) for index, state in enumerate(("Failed", "Dropped"))],
