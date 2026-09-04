@@ -1528,10 +1528,16 @@ def _resolved_legend_items(
     requested = _legend_dimensions(entry.legend)
     if not requested:
         return []
-    if entry.chart_type.strip().casefold() == "threshold stacked vertical bars":
+    if (
+        entry.chart_type.strip().casefold() == "threshold stacked vertical bars"
+        and any(_normalise_catalog_name(value) == "threshold" for value in requested)
+    ):
         threshold = _catalog_threshold(entry)
         threshold_caption = f"{threshold:g}"
-        return [(f"Threshold = {threshold_caption}", "", 0)]
+        return [
+            (f"< {threshold_caption}", "#E15759", 2),
+            (f"≥ {threshold_caption}", "#59A14F", 2),
+        ]
     row_dimensions = parse_catalog_grouping(entry.grouping_rows).dimensions
     column_dimensions = parse_catalog_grouping(entry.grouping_columns).dimensions
     kpi_dimensions = tuple(
@@ -1676,6 +1682,12 @@ def _draw_chart_legend(
     # report and preview viewers.
     font_size = max(font_size, 17)
     marker_size = 22
+    def legend_line_width(series_width: int) -> int:
+        # CDF charts are commonly scaled down in previews and PowerPoint. A
+        # one-pixel difference (3px vs 4px) is then almost invisible, so
+        # exaggerate only the thicker/latest-series sample in the legend.
+        return max(series_width + 2 if series_width > 1 else series_width, 3)
+
     horizontal = position in {"top", "bottom"}
     if horizontal:
         # Dense CDFs can legitimately contain one curve per full hierarchy
@@ -1694,7 +1706,7 @@ def _draw_chart_legend(
             y = start_y + (index // columns) * row_height
             text_only = not colour
             if line_markers and not text_only:
-                draw.line((x, y + 11, x + 34, y + 11), fill=colour, width=max(width, 3))
+                draw.line((x, y + 11, x + 34, y + 11), fill=colour, width=legend_line_width(width))
             elif not text_only:
                 draw.rectangle((x, y, x + marker_size, y + marker_size), fill=colour)
             draw.text((x if text_only else x + (43 if line_markers else 32), y - 1), caption[:28], fill="#263B4A", font=_font(font_size, True))
@@ -1704,7 +1716,7 @@ def _draw_chart_legend(
         y = start_y + index * (font_size + 14)
         text_only = not colour
         if line_markers and not text_only:
-            draw.line((x, y + 11, x + 34, y + 11), fill=colour, width=max(width, 3))
+            draw.line((x, y + 11, x + 34, y + 11), fill=colour, width=legend_line_width(width))
         elif not text_only:
             draw.rectangle((x, y, x + marker_size, y + marker_size), fill=colour)
         draw.text((x if text_only else x + (43 if line_markers else 32), y - 1), caption[:24], fill="#263B4A", font=_font(font_size, True))

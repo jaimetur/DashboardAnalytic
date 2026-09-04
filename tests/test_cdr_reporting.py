@@ -369,15 +369,16 @@ def test_cdf_resolved_legend_reproduces_historical_and_latest_line_widths() -> N
     ]
 
 
-def test_threshold_chart_legend_is_a_textual_threshold_description() -> None:
+def test_threshold_legend_uses_the_resolved_value_and_chart_segment_colours() -> None:
     entry = CatalogEntry(
         slide=8, slide_title='', slide_subtitle='', layout='', chart_title='POLQA <1.6',
         cdr_source='CDR-Speech', kpi='POLQA < 1.6 vs >= 1.6',
-        chart_type='Threshold Stacked Vertical Bars', legend='POLQA', filters='',
+        chart_type='Threshold Stacked Vertical Bars', legend='Threshold', filters='',
         grouping_rows='Operator', grouping_columns='Campaign', legend_position='bottom',
     )
     assert _resolved_legend_items(entry, pd.DataFrame({'POLQA': [1.2, 2.1]}), 'POLQA') == [
-        ('Threshold = 1.6', '', 0),
+        ('< 1.6', '#E15759', 2),
+        ('≥ 1.6', '#59A14F', 2),
     ]
 
 
