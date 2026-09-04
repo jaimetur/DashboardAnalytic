@@ -456,6 +456,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const assistedFields = new Set(['Layout', 'CDR source', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position']);
   const groupingColumns = new Set(['Rows Aggregation', 'Column Aggregation']);
   const validationAlert = document.querySelector('[data-catalogue-validation-alert]');
+  const validationMessage = validationAlert?.querySelector('[data-catalogue-validation-message]');
   const canonicalFilterValue = (value) => String(value || '')
     .replace(/\u00a0/g, ' ')
     .split(/\s*;\s*|\s*[\r\n]+\s*/)
@@ -463,6 +464,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     .filter(Boolean)
     .join('; ');
   const displayedFilterValue = (value) => canonicalFilterValue(value).replace(/; /g, ';\n');
+  const markCellEdited = (cell) => cell?.classList.add('is-edited');
   const renderFilterCell = (cell, value) => {
     const clauses = canonicalFilterValue(value).split('; ').filter(Boolean);
     cell.replaceChildren(...clauses.map((clause, index) => {
@@ -472,17 +474,40 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       return line;
     }));
   };
-  const filterValueIsValid = (value) => canonicalFilterValue(value).split('; ').filter(Boolean).every((clause) => {
+  const filterValidationError = (value) => {
+    const clauses = canonicalFilterValue(value).split('; ').filter(Boolean);
+    for (const clause of clauses) {
     const match = clause.match(/^(.+?)\s+(NOT\s+CONTAINS|NOT\s+IN|CONTAINS|IN|>=|<=|!=|=|>|<)\s+(.+)$/i);
-    if (!match) return false;
+      if (!match) return `Invalid filter '${clause}': expected 'Column OP value' and a semicolon between conditions.`;
     const operator = match[2].replace(/\s+/g, ' ').toUpperCase();
-    return !['IN', 'NOT IN'].includes(operator) || /^\([^()]+\)$/.test(match[3].trim());
-  });
+      if (['IN', 'NOT IN'].includes(operator) && !/^\([^()]+\)$/.test(match[3].trim())) {
+        const detail = /\)\s*\S/.test(match[3])
+          ? 'a semicolon is required after the closing parenthesis'
+          : 'IN values must use parentheses';
+        return `Invalid filter '${clause}': ${detail}.`;
+      }
+    }
+    return '';
+  };
   const refreshFilterValidationAlert = () => {
     if (!validationAlert) return;
-    const filtersAreValid = Array.from(table.querySelectorAll('[data-catalogue-field="Filters"]'))
-      .every((cell) => !rowValue(cell.closest('tr'), 'Filters') || filterValueIsValid(rowValue(cell.closest('tr'), 'Filters')));
-    if (filtersAreValid) validationAlert.hidden = true;
+    const rows = Array.from(table.querySelectorAll('tbody tr'));
+    let invalid = null;
+    for (const row of rows) {
+      const value = rowValue(row, 'Filters');
+      const error = value ? filterValidationError(value) : '';
+      if (!error) continue;
+      const slide = rowValue(row, 'Slide') || '?';
+      const chart = rows.filter((candidate) => (
+        rowValue(candidate, 'Slide') === slide
+        && rowValue(candidate, 'CDR source')
+        && rows.indexOf(candidate) <= rows.indexOf(row)
+      )).length || 1;
+      invalid = `Slide: ${slide} - Chart: ${chart} -> ${error}`;
+      break;
+    }
+    if (validationMessage) validationMessage.textContent = invalid || '';
+    validationAlert.hidden = !invalid;
   };
   const optionList = (field, cell) => {
     if (field === 'Layout') return suggestions.layouts || [];
@@ -532,6 +557,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       return `${field} ${operator} ${value}`;
     }).filter(Boolean);
     renderFilterCell(activeCell, clauses.join('; '));
+    markCellEdited(activeCell);
     refreshFilterValidationAlert();
   };
   const addFilterCondition = (condition = {}) => {
@@ -791,7 +817,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       ?? '';
     return field === 'Filters' ? canonicalFilterValue(value) : value;
   };
-  const rowValues = (row) => Object.fromEntries(catalogueHeaders.map((header) => [header, rowValue(row, header)]));
+  const rowValues = (row) => {
+    const values = Object.fromEntries(catalogueHeaders.map((header) => [header, rowValue(row, header)]));
+    values.__editedFields = Array.from(row.querySelectorAll('[data-catalogue-field].is-edited'))
+      .map((cell) => cell.dataset.catalogueField);
+    return values;
+  };
   const createActionButton = (label, action, title, className = '') => {
     const button = document.createElement('button');
     button.type = 'button';
@@ -827,6 +858,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       const value = blankChartFields && !retained.includes(header) ? '' : (source[header] || '');
       if (header === 'Filters') renderFilterCell(cell, value);
       else cell.textContent = value;
+      if (source.__editedFields?.includes(header)) cell.classList.add('is-edited');
       row.append(cell);
     });
     return row;
@@ -1023,7 +1055,13 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   chartPreviewUpdate?.addEventListener('click', () => {
     if (!chartPreviewRow) return;
     const mapping = {chart_title: 'Chart Tittle', chart_type: 'Chart type', cdr_source: 'CDR source', kpi: 'KPI', filters: 'Filters', grouping_rows: 'Rows Aggregation', grouping_columns: 'Column Aggregation', legend: 'Legend', legend_position: 'Legend Position'};
-    Object.entries(previewDefinition()).forEach(([key, value]) => { const cell = Array.from(chartPreviewRow.querySelectorAll('[data-catalogue-field]')).find((item) => item.dataset.catalogueField === mapping[key]); if (cell) cell.textContent = value; });
+    Object.entries(previewDefinition()).forEach(([key, value]) => {
+      const cell = Array.from(chartPreviewRow.querySelectorAll('[data-catalogue-field]')).find((item) => item.dataset.catalogueField === mapping[key]);
+      if (!cell) return;
+      if (mapping[key] === 'Filters') renderFilterCell(cell, value);
+      else cell.textContent = value;
+      markCellEdited(cell);
+    });
     showInfoDialog('The current preview values have been applied to this template row. Save the template to persist them.', {title: 'Template updated'});
   });
   chartPreviewData?.addEventListener('click', async () => {
@@ -1207,7 +1245,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       const reenumerated = String(reenumeratedSlides.get(slide));
       row.dataset[sharedValueKey('Slide')] = reenumerated;
       const slideCell = row.querySelector('[data-catalogue-field="Slide"]');
-      if (slideCell) slideCell.textContent = reenumerated;
+      if (slideCell) { slideCell.textContent = reenumerated; markCellEdited(slideCell); }
     });
     normaliseCatalogueRows();
   });
@@ -1220,7 +1258,9 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (cell) selectCell(cell);
   });
   table.addEventListener('input', (event) => {
-    if (event.target.closest?.('[data-catalogue-field="Filters"]')) refreshFilterValidationAlert();
+    const cell = event.target.closest?.('[data-catalogue-field]');
+    markCellEdited(cell);
+    if (cell?.dataset.catalogueField === 'Filters') refreshFilterValidationAlert();
   });
   document.addEventListener('pointerdown', (event) => {
     if (!selectedCellFromEvent(event) && !helper.contains(event.target)) hideCellAssistance();
@@ -1268,6 +1308,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       const additions = selected.filter((value) => !currentOrder.includes(value));
       activeCell.textContent = [...retained, ...additions].join(' × ');
     }
+    markCellEdited(activeCell);
+    if (field === 'Filters') refreshFilterValidationAlert();
     activeCell.focus();
   });
   const saveCatalogueTemplate = async () => {
@@ -1406,6 +1448,30 @@ document.querySelectorAll('.catalogue-editor-picker-form').forEach((form) => {
     form.submit();
   });
   form.addEventListener('submit', () => preserveAdminScrollPosition());
+});
+
+const adminTemplateEditor = document.querySelector('[data-admin-template-editor]');
+const adminTemplateEditorFrame = document.querySelector('[data-admin-template-editor-frame]');
+const adminTemplateEditorClose = document.querySelector('[data-admin-template-editor-close]');
+const adminTemplateEditorTitle = document.querySelector('[data-admin-template-editor-title]');
+const closeAdminTemplateEditor = () => {
+  if (adminTemplateEditor) adminTemplateEditor.hidden = true;
+  if (adminTemplateEditorFrame) adminTemplateEditorFrame.removeAttribute('src');
+};
+document.querySelectorAll('[data-open-template-editor]').forEach((button) => {
+  button.addEventListener('click', () => {
+    if (!adminTemplateEditor || !adminTemplateEditorFrame) return;
+    adminTemplateEditorFrame.src = button.dataset.openTemplateEditor || '';
+    if (adminTemplateEditorTitle) adminTemplateEditorTitle.textContent = `Edit Slides Template: ${button.dataset.templateName || 'Selected Template'}`;
+    adminTemplateEditor.hidden = false;
+    adminTemplateEditorClose?.focus();
+  });
+});
+adminTemplateEditor?.addEventListener('click', (event) => {
+  if (event.target === adminTemplateEditor || event.target.closest('[data-admin-template-editor-close]')) closeAdminTemplateEditor();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && adminTemplateEditor && !adminTemplateEditor.hidden) closeAdminTemplateEditor();
 });
 
 document.querySelectorAll('form[action*="/admin/report-templates/"]').forEach((form) => {

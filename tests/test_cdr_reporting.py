@@ -423,7 +423,7 @@ def test_catalogue_filters_accept_lines_but_reject_a_missing_condition_separator
         '100% Stacked Vertical Bars,"Test_Result IN (Completed, Dropped, Failed)Operator IN (EE, 3)",'
         'Operator,Campaign,,Top\n'
     )
-    with pytest.raises(ValueError, match='Slide 5 Chart 1.*semicolon is required'):
+    with pytest.raises(ValueError, match=r'Slide: 5 - Chart: 1 ->.*semicolon is required'):
         parse_catalog_csv(row, 'nsa')
     editable = parse_catalog_csv(row, 'nsa', validate_filters=False)
     assert editable[0].filters.endswith('Operator IN (EE, 3)')

@@ -261,7 +261,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
         )
         if entry.source_kind:
             chart_positions[entry.slide] += 1
-        editor_location = f"Slide {entry.slide} Chart {chart_positions[entry.slide]}" if entry.source_kind else f"Slide {entry.slide}"
+        editor_location = f"Slide: {entry.slide} - Chart: {chart_positions[entry.slide]}" if entry.source_kind else f"Slide: {entry.slide}"
         if entry.structural_type:
             if not entry.slide_title:
                 raise ValueError(f"Catalog row {line_number} requires Slide Tittle for a structural slide.")
@@ -299,7 +299,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             parse_catalog_grouping(entry.grouping_columns)
             parse_legend_position(entry.legend_position)
         except ValueError as exc:
-            raise ValueError(f"{editor_location}: {exc}") from exc
+            raise ValueError(f"{editor_location} -> {exc}") from exc
         entries.append(entry)
     if not entries:
         raise ValueError("The report template does not contain any rows.")

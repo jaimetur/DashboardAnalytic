@@ -225,7 +225,7 @@
 {% if user.role in ['admin', 'super-admin'] %}
 <div class="confirm-overlay report-template-editor-overlay" data-report-template-editor hidden>
   <section class="confirm-panel report-template-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="report-template-editor-title">
-    <header class="report-chart-viewer-header"><div><p class="eyebrow">PowerPoint reporting</p><h3 id="report-template-editor-title">Edit Slides Template</h3></div><button type="button" class="report-chart-viewer-close" data-report-template-editor-close aria-label="Close template editor">×</button></header>
+    <header class="report-chart-viewer-header"><div><p class="eyebrow">PowerPoint reporting</p><h3 id="report-template-editor-title" data-report-template-editor-title>Edit Slides Template</h3></div><button type="button" class="report-chart-viewer-close" data-report-template-editor-close aria-label="Close template editor">×</button></header>
     <iframe class="report-template-editor-frame" data-report-template-editor-frame title="Slides Templates Editor"></iframe>
   </section>
 </div>
@@ -294,6 +294,7 @@
     const reportTemplateEditor = document.querySelector('[data-report-template-editor]');
     const reportTemplateEditorFrame = document.querySelector('[data-report-template-editor-frame]');
     const reportTemplateEditorClose = document.querySelector('[data-report-template-editor-close]');
+    const reportTemplateEditorTitle = document.querySelector('[data-report-template-editor-title]');
     const reportChartSetSelect = document.querySelector('[data-report-chart-set]');
     const reportChartSetPicker = document.querySelector('[data-chart-set-picker]');
     const reportChartSetPickerLabel = document.querySelector('[data-chart-set-picker-label]');
@@ -846,6 +847,7 @@
     reportChartsEditTemplate?.addEventListener('click', () => {
       if (!activeChartSetTemplate || !reportTemplateEditor || !reportTemplateEditorFrame) return;
       reportTemplateEditorFrame.src = `/admin?catalogue_id=${encodeURIComponent(activeChartSetTemplate)}&embedded_template_editor=1`;
+      if (reportTemplateEditorTitle) reportTemplateEditorTitle.textContent = `Edit Slides Template: ${activeChartSetTemplate}`;
       reportTemplateEditor.hidden = false;
       reportTemplateEditorClose?.focus();
     });

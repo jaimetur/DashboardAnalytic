@@ -26,6 +26,7 @@
 - Set the default server-transfer destination port to `7278`, while respecting a different port explicitly included in the destination URL.
 - Prefilled the server-transfer destination dialog with port `7278`, remembered the last URL and port used, and enabled Enter-key submission from either field.
 - Replaced the chart viewer's reset-zoom symbol with a clearer magnifying-glass icon while preserving its accessible Reset zoom action.
+- Opened Slides Templates Editor in the shared 90%-viewport editor dialog from each Admin template-management Edit action, showing the selected template name in its title, highlighting session-edited cells in pastel yellow and removing the permanent editor panel from the main Admin page.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
@@ -36,7 +37,7 @@
 - Sized the Charts Panel template editor modal to 90% of the browser viewport and reduced its embedded view to the editor itself, with a fixed visible action bar and scrolling confined to the template table.
 - Allowed admins to export or transfer shared Slides Templates and only their accessible workspaces, while keeping configuration/full-environment transfers and workspace imports restricted; removed forbidden options from their selector so transfer requests always include a valid target, made the initial destination handshake retry-safe and idempotent, persisted incoming offers, and made destination notification polling resilient to stale Docker-rendered pages and browser tab suspension.
 - Moved status-row inclusion out of the chart renderer and into explicit template filters such as `Test_Result IN (Completed, Dropped, Failed)`, making the denominator visible and editable while status charts continue to honour the selected KPI.
-- Rejected malformed Slides Template filters when adjacent conditions are missing their semicolon separator, located errors by Slide and Chart, kept damaged templates open for correction with a self-clearing warning, and stored each condition on its own line with editor-only bullet markers and quoted multiline CSV fields.
+- Rejected malformed Slides Template filters when adjacent conditions are missing their semicolon separator, located errors as `Slide: n - Chart: n`, validated manual filter-cell edits live with a self-updating warning, kept damaged templates open for correction, and stored each condition on its own line with editor-only bullet markers and quoted multiline CSV fields.
 
 #### 📚 Documentation:
 

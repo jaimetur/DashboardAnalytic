@@ -187,7 +187,7 @@
             <td>
               <div class="catalogue-workspace-actions">
                 {% if catalogue.active %}<button type="button" class="catalogue-set-default-button" disabled>Set Default</button>{% else %}<form action="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/activate" method="post"><button type="submit" class="catalogue-set-default-button">Set Default</button></form>{% endif %}
-                <a class="catalogue-edit-button" href="/admin?catalogue_technology={{ catalogue.technology }}&amp;catalogue_id={{ catalogue.identifier }}#catalogue-editor">Edit</a>
+                <button type="button" class="catalogue-edit-button" data-open-template-editor="/admin?catalogue_technology={{ catalogue.technology }}&amp;catalogue_id={{ catalogue.identifier }}&amp;embedded_template_editor=1" data-template-name="{{ catalogue.name }}">Edit</button>
                 <form action="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/duplicate" method="post"><button type="submit" class="catalogue-duplicate-button">Duplicate</button></form>
                 {% if not catalogue.active %}<form action="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/delete" method="post" data-confirm="Delete template {{ catalogue.name }}? This cannot be undone."><button type="submit" class="danger-button">Delete</button></form>{% else %}<button type="button" class="danger-button" disabled title="The default template cannot be deleted">Delete</button>{% endif %}
                 <a class="catalogue-export-button" href="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/export">Export</a>
@@ -205,6 +205,7 @@
     </div>
   </details>
 
+  {% if embedded_template_editor %}
   <details class="panel collapsible-panel slides-templates-editor-panel" id="catalogue-editor" open data-panel-state-key="admin:slides-templates-editor">
     <summary class="collapsible-summary">
       <div>
@@ -233,9 +234,7 @@
       </form>
     </section>
     {% if catalogue_editor %}
-    {% if catalogue_editor.validation_error %}
-    <div class="alert alert-warning" role="alert" data-catalogue-validation-alert><strong>This Slides Template contains an invalid filter.</strong> {{ catalogue_editor.validation_error }} Correct that filter definition before saving.</div>
-    {% endif %}
+    <div class="alert alert-warning" role="alert" data-catalogue-validation-alert{% if not catalogue_editor.validation_error %} hidden{% endif %}><strong>This Slides Template contains an invalid filter.</strong> <span data-catalogue-validation-message>{{ catalogue_editor.validation_error or '' }}</span> Correct that filter definition before saving.</div>
     <p class="lede">Rows are ordered by Slide and alternate by slide block. When a slide contains several charts, its shared slide number, title, subtitle and layout are shown once and apply to the full slide block; saving writes those values back to every chart row in the CSV. Select a cell to edit it manually or use the contextual suggestions on the right.</p>
     <div class="slides-templates-editor-grid" data-catalogue-editor data-editor-suggestions='{{ catalogue_editor.suggestions | tojson }}' data-chart-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-preview" data-chart-image-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-image-preview">
       <form class="slides-templates-editor-table-wrap" action="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/save" method="post" data-catalogue-editor-save>
@@ -329,6 +328,14 @@
     {% endif %}
     </div>
   </details>
+  {% else %}
+  <div class="confirm-overlay report-template-editor-overlay" data-admin-template-editor hidden>
+    <section class="confirm-panel report-template-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-template-editor-title">
+      <header class="report-chart-viewer-header"><div><p class="eyebrow">PowerPoint reporting</p><h3 id="admin-template-editor-title" data-admin-template-editor-title>Edit Slides Template</h3></div><button type="button" class="report-chart-viewer-close" data-admin-template-editor-close aria-label="Close template editor">×</button></header>
+      <iframe class="report-template-editor-frame" data-admin-template-editor-frame title="Slides Templates Editor"></iframe>
+    </section>
+  </div>
+  {% endif %}
 
   <details class="panel collapsible-panel import-export-panel" open data-panel-state-key="admin:import-export">
     <summary class="collapsible-summary">
@@ -1173,7 +1180,7 @@
   });
 })();
 </script>
-{% if catalogue_editor %}
+{% if catalogue_editor and embedded_template_editor %}
 <script>
   // An explicit template selection must take precedence over a previously
   // collapsed editor panel saved in this browser.

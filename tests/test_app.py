@@ -2425,14 +2425,13 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     admin = client.get('/admin')
     assert 'Baseline Q4' in admin.text
     assert 'Updated Q4' in admin.text
-    assert 'name="catalogue_selection"' in admin.text
-    assert 'Choose a template to edit' in admin.text
-    assert '<button type="submit">Edit</button>' not in admin.text
+    assert 'name="catalogue_selection"' not in admin.text
+    assert 'data-admin-template-editor' in admin.text
+    assert 'data-open-template-editor="/admin?catalogue_technology=nsa&amp;catalogue_id=Baseline Q4&amp;embedded_template_editor=1"' in admin.text
     assert 'data-catalogue-editor-table' not in admin.text
     assert '<th>Default</th>' in admin.text
     assert 'catalogue-default-mark is-default' in admin.text
-    assert 'value="nsa:Baseline Q4"' in admin.text
-    assert '/admin/report-templates/export-selected' in admin.text
+    assert '/admin/report-templates/nsa/Baseline Q4/export' in admin.text
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Second'
     assert app_module.reporting_catalog_path('nsa').name == 'Updated Q4.csv'
     assert app_module.named_catalogue_path('nsa', 'Baseline Q4').exists()
@@ -2444,26 +2443,18 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
 
     editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=Baseline%20Q4')
     assert editor.status_code == 200
-    assert 'Slides Templates Editor' in editor.text
-    assert 'data-catalogue-editor-table' in editor.text
-    assert 'data-catalogue-field="Layout"' in editor.text
-    assert 'data-catalogue-editor-options' in editor.text
-    assert 'data-catalogue-row-action="insert"' in editor.text
-    assert 'data-catalogue-row-action="up"' in editor.text
-    assert 'data-catalogue-row-action="down"' in editor.text
-    assert 'data-catalogue-row-action="delete"' in editor.text
-    assert 'data-catalogue-reenumerate' in editor.text
-    assert editor.text.index('catalogue-row-actions-heading') < editor.text.index('>Slide</th>')
-    assert 'value="nsa:Baseline Q4" selected' in editor.text
-    assert 'Title and 1 column + Comments' in editor.text
-    assert '<optgroup label="Layouts">' in editor.text
-    assert '<optgroup label="Chart types">' in editor.text
-    assert '<optgroup label="CDR fields">' in editor.text
+    assert 'data-catalogue-editor-table' not in editor.text
+    assert 'data-admin-template-editor' in editor.text
 
     embedded_editor = client.get('/admin?catalogue_id=Baseline%20Q4&embedded_template_editor=1')
     assert embedded_editor.status_code == 200
     assert 'data-embedded-template-editor' in embedded_editor.text
     assert 'data-catalogue-editor-table' in embedded_editor.text
+    assert 'data-catalogue-field="Layout"' in embedded_editor.text
+    assert 'data-catalogue-editor-options' in embedded_editor.text
+    assert 'data-catalogue-row-action="insert"' in embedded_editor.text
+    assert 'data-catalogue-reenumerate' in embedded_editor.text
+    assert 'Title and 1 column + Comments' in embedded_editor.text
     assert 'catalogue-editor-catalogue-picker" aria-label="Workspace templates" hidden' in embedded_editor.text
 
     edited = (
@@ -2473,7 +2464,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     )
     saved = client.post('/admin/report-templates/nsa/Baseline%20Q4/save', data={'catalogue_content': edited}, follow_redirects=False)
     assert saved.status_code == 303
-    saved_editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=Baseline%20Q4')
+    saved_editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=Baseline%20Q4&embedded_template_editor=1')
     assert '>Edited</td>' in saved_editor.text
     assert saved_editor.text.index('>Edited</td>') < saved_editor.text.index('>Late</td>')
 
