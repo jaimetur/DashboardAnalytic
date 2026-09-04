@@ -8,12 +8,12 @@ import pandas as pd
 import pytest
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_terminal_x_maximum, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_mean_column, _render_status_100, _series_colours, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_mean_column, _render_status_100, _series_colours, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -328,6 +328,14 @@ def test_status_chart_draws_legend_at_the_catalogue_position() -> None:
         _render_status_100('Status', frame, 'Operator', 'Campaign', legend_position='left')
 
     assert draw_legend.call_args.args[2] == 'left'
+
+
+def test_chart_legend_normalises_title_case_position_from_interactive_preview() -> None:
+    draw = MagicMock()
+
+    _draw_chart_legend(draw, [('VF', '#E60000', 1)], 'Left')
+
+    assert draw.rectangle.call_args.args[0][0] == 26
 
 
 def test_catalogue_accepts_structural_slides_and_rejects_chart_configuration_on_them() -> None:

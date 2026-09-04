@@ -44,7 +44,7 @@ DEFAULT_TRANSFER_PORT = 7278
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
@@ -4031,6 +4031,18 @@ def _temporary_chart_preview_context(source: str, identifier: str, chart_index: 
     return entries[chart_index], selected_ids, technology, scope == 'multivendor'
 
 
+def _temporary_chart_definition_changes(editable: dict[str, Any]) -> dict[str, str]:
+    """Normalise editable values shared by every Interactive Preview entry point."""
+    allowed = {
+        'chart_title', 'cdr_source', 'kpi', 'chart_type', 'filters',
+        'grouping_rows', 'grouping_columns', 'legend', 'legend_position',
+    }
+    changes = {key: str(value or '') for key, value in editable.items() if key in allowed}
+    if 'legend_position' in changes:
+        changes['legend_position'] = parse_legend_position(changes['legend_position'])
+    return changes
+
+
 def _temporary_preview_dataset_ids(editable: dict[str, Any], selected_ids: dict[str, list[int]], source_kind: str) -> list[int]:
     """Resolve an optional dataset selection and constrain it to its CDR type."""
     raw_values = editable.get('dataset_ids')
@@ -4082,9 +4094,7 @@ async def temporary_chart_preview(request: Request, user: SessionUser = Depends(
         chart_index = int(payload.get('chart_index'))
         entry, selected_ids, technology, multivendor = _temporary_chart_preview_context(source, identifier, chart_index)
         editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
-        allowed = {'chart_title', 'cdr_source', 'kpi', 'chart_type', 'filters', 'grouping_rows', 'grouping_columns', 'legend', 'legend_position'}
-        changes = {key: str(value or '') for key, value in editable.items() if key in allowed}
-        entry = replace(entry, **changes)
+        entry = replace(entry, **_temporary_chart_definition_changes(editable))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f'Invalid chart preview request: {exc}') from exc
     if not entry.source_kind:
@@ -4113,8 +4123,7 @@ async def temporary_chart_preview_data(request: Request, user: SessionUser = Dep
             source, identifier, chart_index,
         )
         editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
-        allowed = {'chart_title', 'cdr_source', 'kpi', 'chart_type', 'filters', 'grouping_rows', 'grouping_columns', 'legend', 'legend_position'}
-        entry = replace(entry, **{key: str(value or '') for key, value in editable.items() if key in allowed})
+        entry = replace(entry, **_temporary_chart_definition_changes(editable))
         page = max(0, int(payload.get('page', 0)))
         page_size = max(1, min(250, int(payload.get('page_size', 100))))
         raw_column_filters = payload.get('column_filters') if isinstance(payload.get('column_filters'), dict) else {}
@@ -4427,7 +4436,7 @@ def _chart_builder_context(payload: dict[str, Any]) -> tuple[pd.DataFrame, Catal
         kpi=str(definition.get('kpi') or ''), chart_type=str(definition.get('chart_type') or '100% Stacked Vertical Bars'),
         legend=str(definition.get('legend') or ''), filters=str(definition.get('filters') or ''),
         grouping_rows=str(definition.get('grouping_rows') or ''), grouping_columns=str(definition.get('grouping_columns') or ''),
-        legend_position=str(definition.get('legend_position') or 'Top'),
+        legend_position=parse_legend_position(str(definition.get('legend_position') or 'Top')),
     )
     return pd.concat(frames, ignore_index=True, sort=False), entry
 
@@ -6648,8 +6657,7 @@ async def preview_report_template_chart(
         row_index = int(payload.get('row_index'))
         entry = entries[row_index]
         editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
-        allowed = {'chart_title', 'cdr_source', 'kpi', 'chart_type', 'filters', 'grouping_rows', 'grouping_columns', 'legend', 'legend_position'}
-        entry = replace(entry, **{key: str(value or '') for key, value in editable.items() if key in allowed})
+        entry = replace(entry, **_temporary_chart_definition_changes(editable))
     except (ValueError, TypeError, IndexError) as exc:
         raise HTTPException(status_code=400, detail=f'Unable to preview this chart: {exc}') from exc
     if not entry.source_kind:
@@ -6736,8 +6744,7 @@ async def preview_report_template_chart_image(
         entries = parse_catalog_csv(str(payload.get('catalogue_content') or ''), technology)
         entry = entries[int(payload.get('row_index'))]
         editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
-        allowed = {'chart_title', 'cdr_source', 'kpi', 'chart_type', 'filters', 'grouping_rows', 'grouping_columns', 'legend', 'legend_position'}
-        entry = replace(entry, **{key: str(value or '') for key, value in editable.items() if key in allowed})
+        entry = replace(entry, **_temporary_chart_definition_changes(editable))
     except (ValueError, TypeError, IndexError) as exc:
         raise HTTPException(status_code=400, detail=f'Unable to preview this chart: {exc}') from exc
     if not entry.source_kind:

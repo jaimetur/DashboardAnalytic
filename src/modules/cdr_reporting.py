@@ -1451,6 +1451,7 @@ def _draw_chart_legend(
     side_x: int | None = None,
 ) -> None:
     """Draw a template legend in a row (top/bottom) or column (left/right)."""
+    position = parse_legend_position(position)
     # Legends are part of the chart, not ancillary metadata. Enforce a
     # readable minimum because the 1600px PNG is normally scaled down in the
     # report and preview viewers.
@@ -2428,7 +2429,7 @@ def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame
     chart_title = entry.chart_title or entry.slide_title
     legend_dimensions = _legend_dimensions(entry.legend)
     legend_labels = _legend_labels(entry.legend)
-    legend_position = entry.legend_position
+    legend_position = parse_legend_position(entry.legend_position)
     frame, group, period = _source_for_spec(frames, spec, multivendor)
     metric = _metric_column(frame, spec)
     try:

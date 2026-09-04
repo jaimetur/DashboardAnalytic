@@ -650,6 +650,7 @@
       if (jobsEmpty) jobsEmpty.hidden = jobs.length > 0;
     };
     let pollingReportJobs = false;
+    const pendingAutoOpenReportJobs = new Set();
     const refreshReportJobs = async () => {
       if (!jobsBody) return [];
       const response = await fetch('/api/reporting/jobs', {credentials: 'same-origin'});
@@ -664,6 +665,19 @@
       pollingReportJobs = true;
       try {
         const jobs = await refreshReportJobs();
+        const readyJob = jobs.find((job) => pendingAutoOpenReportJobs.has(Number(job.id)) && job.status === 'ready' && job.charts_url);
+        if (readyJob) {
+          const chartResponse = await fetch(readyJob.charts_url, {credentials: 'same-origin'});
+          const chartPayload = await chartResponse.json();
+          if (chartResponse.ok) {
+            pendingAutoOpenReportJobs.delete(Number(readyJob.id));
+            renderReportCharts(chartPayload);
+            if (reportChartsPanel) reportChartsPanel.open = true;
+            reportChartsPanel?.scrollIntoView({behavior: 'smooth', block: 'start'});
+          }
+        }
+        jobs.filter((job) => ['failed', 'stopped'].includes(String(job.status || '').toLowerCase()))
+          .forEach((job) => pendingAutoOpenReportJobs.delete(Number(job.id)));
         if (jobs.some((job) => ['queued', 'processing'].includes(job.status))) window.setTimeout(pollReportJobs, 2000);
       } catch (_error) {
         window.setTimeout(pollReportJobs, 5000);
@@ -727,6 +741,7 @@
         if (!response.ok) throw new Error(payload.detail || 'Unable to queue the report.');
         hideLoadingOverlay();
         showInfoDialog(`Report job #${payload.job_id} has been queued. Download will become available when generation finishes.`, {title: 'Report job queued'});
+        pendingAutoOpenReportJobs.add(Number(payload.job_id));
         pollReportJobs();
       } catch (error) {
         hideLoadingOverlay();
@@ -1477,6 +1492,7 @@
           hideLoadingOverlay();
           if (relaunchReadyJob) syncChartSetSelectorAfterJobDeletion(`report:${retry.dataset.reportJobId}`);
           showInfoDialog('Report job #' + payload.job_id + ' has been queued.', {title: relaunchReadyJob ? 'Report relaunch queued' : 'Report retry queued'});
+          pendingAutoOpenReportJobs.add(Number(payload.job_id));
           pollReportJobs();
         } catch (error) {
           hideLoadingOverlay();

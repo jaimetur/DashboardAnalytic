@@ -8,8 +8,14 @@
 #### 🌟 New Features:
 
 #### 🚀 Enhancements:
+- Preserved every explicitly filtered `IN` category in hierarchical chart grids even when it has zero matching samples, and strengthened/extended solid first-level row and column separators through their outer headings.
+- Increased and strengthened chart titles, axis values and bar-value labels across the shared renderers, and rebuilt legends with larger bold captions, markers, line samples and spacing for reliable preview and report scaling.
+- Fixed the Legend contract so field selections generate value-based legends in Average/Median and CDF charts, legacy slash-separated template captions remain supported, and Legend Position is applied by the shared renderer.
+- Normalised App Logs users to lowercase with case-insensitive filtering, recorded explicit successful/failed login outcomes, and added safe page/control audit events for every authenticated button activation.
+- Automatically opened and scrolled to the Charts Panel when a newly queued or retried Report Job completes successfully, matching the existing Charts Job workflow.
 
 #### 🐛 Bug fixes:
+- Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
 
 #### 📚 Documentation:
 
@@ -57,10 +63,6 @@
 - Made workspace replacement imports automatically close only the colliding active workspace, validate the incoming workspace in staging, preserve its identity and access grants, and delete all previous workspace files only after a successful replacement.
 - Standardised resolved chart labels as `YYYY-Qx` for campaigns and `VF`, `O2`, `3` and `EE` for known UK operator aliases, including Telefónica and Everything Everywhere variants.
 - Added dashed horizontal child-row separators to hierarchical failure charts and deduplicated equivalent display/physical field names in Interactive Preview selectors so dimensions such as `G Level 4` cannot be selected twice.
-- Preserved every explicitly filtered `IN` category in hierarchical chart grids even when it has zero matching samples, and strengthened/extended solid first-level row and column separators through their outer headings.
-- Increased and strengthened chart titles, axis values and bar-value labels across the shared renderers, and rebuilt legends with larger bold captions, markers, line samples and spacing for reliable preview and report scaling.
-- Fixed the Legend contract so field selections generate value-based legends in Average/Median and CDF charts, legacy slash-separated template captions remain supported, and Legend Position is applied by the shared renderer.
-- Normalised App Logs users to lowercase with case-insensitive filtering, recorded explicit successful/failed login outcomes, and added safe page/control audit events for every authenticated button activation.
 
 #### 🐛 Bug fixes:
 - Fixed Reporting CDR multi-select checkmarks after Multivendor review so they match the submitted CDRs.
