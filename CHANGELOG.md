@@ -25,6 +25,7 @@
 - Added a Cancel operation action to outgoing server-transfer progress, cooperatively stopping connection, approval waiting, export or transmission and cleaning temporary output.
 - Set the default server-transfer destination port to `7278`, while respecting a different port explicitly included in the destination URL.
 - Prefilled the server-transfer destination dialog with port `7278`, remembered the last URL and port used, and enabled Enter-key submission from either field.
+- Replaced the chart viewer's reset-zoom symbol with a clearer magnifying-glass icon while preserving its accessible Reset zoom action.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
