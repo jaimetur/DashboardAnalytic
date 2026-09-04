@@ -453,6 +453,13 @@ def test_incoming_server_transfer_requires_acceptance_and_imports_after_upload(c
     )
     assert offer.status_code == 200
     offer_id = offer.json()['offer_id']
+    repeated_offer = client.post(
+        '/api/import-export/transfers/offers',
+        headers=headers,
+        json={'source': 'Test source', 'archive_version': 1, 'kind': 'config', 'content': 'config', 'workspaces': []},
+    )
+    assert repeated_offer.status_code == 200
+    assert repeated_offer.json()['offer_id'] == offer_id
 
     login_super(client)
     exported = client.get('/admin/import-export/export?export_target=config')
@@ -494,7 +501,7 @@ def test_incoming_server_transfer_requires_acceptance_and_imports_after_upload(c
 def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
-    state = {'uploaded': False, 'bytes': 0}
+    state = {'uploaded': False, 'bytes': 0, 'post_attempts': 0}
 
     class FakeResponse:
         def __init__(self, payload):
@@ -517,6 +524,9 @@ def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(clien
             return None
 
         def post(self, *args, **kwargs):
+            state['post_attempts'] += 1
+            if state['post_attempts'] == 1:
+                raise app_module.httpx.ConnectError('temporary first-contact failure')
             return FakeResponse({'offer_id': 'remote-offer'})
 
         def get(self, *args, **kwargs):
@@ -535,6 +545,7 @@ def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(clien
         return 'transfer.zip'
 
     monkeypatch.setattr(app_module.httpx, 'Client', FakeClient)
+    monkeypatch.setattr(app_module, 'sleep', lambda _seconds: None)
     monkeypatch.setattr(app_module, 'build_export_archive_file', fake_export)
     user = app_module.SessionUser(username='super', role='super-admin')
     job = app_module.start_transfer_job('http://destination.example', 8080, 'config', None, user)
@@ -547,18 +558,24 @@ def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(clien
     assert payload['status'] == 'ready'
     assert payload['destination'] == 'http://destination.example:8080'
     assert payload['progress'] == 100.0
+    assert state['post_attempts'] == 2
     assert state['bytes'] == len(b'streamed-transfer-package')
 
 
-def test_admin_import_export_is_limited_to_slides_templates(client) -> None:
+def test_admin_export_and_transfer_are_limited_to_templates_and_accessible_workspaces(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    restricted = app_module.workspace_registry.create('Restricted Team')
     login(client)
 
     panel = client.get('/admin')
     assert panel.status_code == 200
     assert 'data-panel-state-key="admin:import-export"' in panel.text
     assert 'Slides Templates</option>' in panel.text
+    assert 'Transfer to other server' in panel.text
     assert 'value="config" disabled>Config</option>' in panel.text
-    assert 'value="workspace:default" disabled>Workspace: Default</option>' in panel.text
+    assert 'value="workspace:default" >Workspace: Default</option>' in panel.text
+    assert f'value="workspace:{restricted.id}"' not in panel.text
 
     blocked_export = client.get('/admin/import-export/export?export_target=config')
     assert blocked_export.status_code == 403
@@ -567,6 +584,22 @@ def test_admin_import_export_is_limited_to_slides_templates(client) -> None:
     assert templates_export.status_code == 200
     with zipfile.ZipFile(BytesIO(templates_export.content)) as archive:
         assert json.loads(archive.read('manifest.json'))['kind'] == 'slides-templates'
+
+    workspace_export = client.get('/admin/import-export/export?export_target=workspace:default')
+    assert workspace_export.status_code == 200
+    assert client.get(f'/admin/import-export/export?export_target=workspace:{restricted.id}').status_code == 403
+
+    monkeypatch.setattr(app_module, 'start_transfer_job', lambda *args, **kwargs: {'id': 'admin-transfer', 'status': 'queued'})
+    transfer = client.post('/admin/import-export/transfers/jobs', data={
+        'destination_url': 'destination.example', 'destination_port': '7278',
+        'export_target': 'workspace:default',
+    })
+    assert transfer.status_code == 200
+    blocked_transfer = client.post('/admin/import-export/transfers/jobs', data={
+        'destination_url': 'destination.example', 'destination_port': '7278',
+        'export_target': 'config',
+    })
+    assert blocked_transfer.status_code == 403
 
     config_package = BytesIO()
     with zipfile.ZipFile(config_package, 'w') as archive:
@@ -579,6 +612,12 @@ def test_admin_import_export_is_limited_to_slides_templates(client) -> None:
         files={'package': ('config.zip', config_package, 'application/zip')},
     )
     assert blocked_import.status_code == 403
+
+    blocked_workspace_import = client.post(
+        '/admin/import-export/inspect',
+        files={'package': ('workspace.zip', BytesIO(workspace_export.content), 'application/zip')},
+    )
+    assert blocked_workspace_import.status_code == 403
 
 
 def test_admin_can_login_upload_and_see_automatic_dashboard(client) -> None:

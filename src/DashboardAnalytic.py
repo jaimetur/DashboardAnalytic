@@ -2691,17 +2691,32 @@ def _run_transfer_job(job_id: str) -> None:
     headers = {'X-Dashboard-Transfer-Secret': offer_secret, 'Accept': 'application/json'}
     try:
         with httpx.Client(timeout=httpx.Timeout(30.0, read=65.0), follow_redirects=False) as client:
-            response = client.post(
-                _transfer_api_url(destination, '/api/import-export/transfers/offers'),
-                headers=headers,
-                json={
-                    'source': __app_name__,
-                    'archive_version': ARCHIVE_VERSION,
-                    'kind': 'full-environment' if target == 'full-environment' else 'workspace' if target.startswith('workspace:') else 'config' if target in {'config', 'config-with-templates'} else 'slides-templates',
-                    'content': _transfer_content_label(target),
-                    'workspaces': _transfer_offer_workspace_names(target, workspace_ids),
-                },
-            )
+            offer_payload = {
+                'source': __app_name__,
+                'archive_version': ARCHIVE_VERSION,
+                'kind': 'full-environment' if target == 'full-environment' else 'workspace' if target.startswith('workspace:') else 'config' if target in {'config', 'config-with-templates'} else 'slides-templates',
+                'content': _transfer_content_label(target),
+                'workspaces': _transfer_offer_workspace_names(target, workspace_ids),
+            }
+            # Retry a transient first connection (for example while a remote
+            # container wakes up). The offer endpoint is idempotent for this
+            # transfer secret, so a lost response cannot duplicate the offer.
+            for attempt in range(3):
+                try:
+                    response = client.post(
+                        _transfer_api_url(destination, '/api/import-export/transfers/offers'),
+                        headers=headers,
+                        json=offer_payload,
+                    )
+                    if getattr(response, 'status_code', 200) >= 500:
+                        response.raise_for_status()
+                    break
+                except (httpx.TransportError, httpx.TimeoutException, httpx.HTTPStatusError):
+                    if attempt == 2:
+                        raise
+                    with TRANSFER_LOCK:
+                        job['phase'] = f'retrying destination connection ({attempt + 2}/3)'
+                    sleep(1 << attempt)
             response.raise_for_status()
             offer_id = str(response.json().get('offer_id') or '')
             if not offer_id:
@@ -2799,6 +2814,7 @@ def _run_transfer_job(job_id: str) -> None:
 
 
 def start_transfer_job(destination_url: str, destination_port: int | None, target: str, workspace_ids: Iterable[str] | None, user: SessionUser) -> dict[str, Any]:
+    require_export_permission(user, target)
     destination = normalize_transfer_destination(destination_url, destination_port)
     _cleanup_expired_export_packages()
     selected_workspace_ids = list(workspace_ids) if workspace_ids is not None else None
@@ -2836,11 +2852,27 @@ def transfer_job_payload(job_id: str, user: SessionUser) -> dict[str, Any] | Non
 
 
 def require_import_export_permission(user: SessionUser, target: str) -> None:
+    """Authorize imports; admins may only restore shared Slides Templates."""
     if user.role == 'super-admin' or target == 'slides-templates':
         return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail='Only super-admins can import or export configuration and workspaces.',
+    )
+
+
+def require_export_permission(user: SessionUser, target: str) -> None:
+    """Authorize exports and transfers without exposing other workspaces."""
+    if user.role == 'super-admin' or target == 'slides-templates':
+        return
+    if target.startswith('workspace:'):
+        workspace_id = target.removeprefix('workspace:')
+        if workspace_registry.get(workspace_id) and repository.user_has_workspace_access(user.username, workspace_id):
+            return
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='You do not have access to that workspace.')
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail='Only super-admins can export or transfer application configuration and full environments.',
     )
 
 
@@ -2938,11 +2970,17 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         {'value': 'full-environment', 'label': 'Full Environment (Config + Slides Templates + Selected Workspaces)'},
         *[
             {'value': f'workspace:{workspace.id}', 'label': f'Workspace: {workspace.name}'}
-            for workspace in workspace_registry.list()
+            for workspace in accessible_workspaces(user)
         ],
     ]
     if user.role != 'super-admin':
-        export_options = [{**option, 'disabled': option['value'] != 'slides-templates'} for option in export_options]
+        export_options = [
+            {
+                **option,
+                'disabled': option['value'] != 'slides-templates' and not option['value'].startswith('workspace:'),
+            }
+            for option in export_options
+        ]
     admin_users = [
         {**dict(row), 'created_at': format_local_timestamp(row['created_at']), 'workspace_ids': repository.list_user_workspace_ids(int(row['id']))}
         for row in repository.list_users()
@@ -5686,6 +5724,18 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     if payload.get('archive_version') != ARCHIVE_VERSION:
         raise HTTPException(status_code=409, detail='The source server uses an incompatible export package version.')
     source_address = request.client.host if request.client else 'unknown'
+    secret_hash = hashlib.sha256(secret.encode('utf-8')).hexdigest()
+    # The source retries transient first-contact failures. Return the original
+    # offer if its response was lost, instead of showing duplicate approvals.
+    with TRANSFER_LOCK:
+        existing_offer = next((
+            existing for existing in TRANSFER_OFFERS.values()
+            if existing.get('secret_hash') == secret_hash
+            and existing.get('source_address') == source_address
+            and existing.get('status') not in {'rejected', 'failed', 'expired'}
+        ), None)
+        if existing_offer:
+            return JSONResponse({'offer_id': existing_offer['id'], 'status': existing_offer['status']})
     offer_id = uuid4().hex
     offer = {
         'id': offer_id,
@@ -5694,7 +5744,7 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
         'kind': kind,
         'content': str(payload.get('content') or kind)[:160],
         'workspaces': [str(value)[:160] for value in payload.get('workspaces', []) if value] if isinstance(payload.get('workspaces'), list) else [],
-        'secret_hash': hashlib.sha256(secret.encode('utf-8')).hexdigest(),
+        'secret_hash': secret_hash,
         'status': 'pending',
         'phase': 'awaiting approval',
         'progress': 0.0,
@@ -5865,9 +5915,9 @@ def create_admin_transfer_job(
     destination_port: int | None = Form(None),
     export_target: str = Form(...),
     workspace_ids: list[str] | None = Form(None),
-    user: SessionUser = Depends(super_admin_user),
+    user: SessionUser = Depends(admin_user),
 ) -> JSONResponse:
-    require_import_export_permission(user, export_target)
+    require_export_permission(user, export_target)
     try:
         job = start_transfer_job(
             destination_url,
@@ -5882,7 +5932,7 @@ def create_admin_transfer_job(
 
 
 @app.get('/admin/import-export/transfers/jobs/{job_id}')
-def get_admin_transfer_job(job_id: str, user: SessionUser = Depends(super_admin_user)) -> JSONResponse:
+def get_admin_transfer_job(job_id: str, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     if not (payload := transfer_job_payload(job_id, user)):
         raise HTTPException(status_code=404, detail='The transfer job no longer exists.')
     return JSONResponse(payload)
@@ -5893,7 +5943,7 @@ def export_admin_package(
     export_target: str = Query(...),
     user: SessionUser = Depends(admin_user),
 ) -> FileResponse:
-    require_import_export_permission(user, export_target)
+    require_export_permission(user, export_target)
     try:
         _cleanup_expired_export_packages()
         destination = export_package_dir() / f'legacy-{uuid4().hex}.zip'
@@ -5909,7 +5959,7 @@ def create_admin_export_job(
     workspace_ids: list[str] | None = Form(None),
     user: SessionUser = Depends(admin_user),
 ) -> JSONResponse:
-    require_import_export_permission(user, export_target)
+    require_export_permission(user, export_target)
     try:
         job = start_export_job(export_target, workspace_ids if export_target == 'full-environment' else None)
     except ValueError as exc:
@@ -5925,7 +5975,7 @@ def create_admin_export_job(
 def get_admin_export_job(job_id: str, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     if not (payload := export_job_payload(job_id)):
         raise HTTPException(status_code=404, detail='The export job no longer exists. Start a new export.')
-    require_import_export_permission(user, str(payload['target']))
+    require_export_permission(user, str(payload['target']))
     return JSONResponse(payload)
 
 
@@ -5933,7 +5983,7 @@ def get_admin_export_job(job_id: str, user: SessionUser = Depends(admin_user)) -
 def download_admin_export_job(job_id: str, user: SessionUser = Depends(admin_user)) -> FileResponse:
     if not (payload := export_job_payload(job_id)):
         raise HTTPException(status_code=404, detail='The export job no longer exists. Start a new export.')
-    require_import_export_permission(user, str(payload['target']))
+    require_export_permission(user, str(payload['target']))
     if payload['status'] != 'ready':
         raise HTTPException(status_code=409, detail='The export package is still being prepared.')
     with EXPORT_JOBS_LOCK:

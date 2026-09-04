@@ -346,10 +346,10 @@
             {% for option in export_options %}<option value="{{ option.value }}" {% if option.disabled | default(false) %}disabled{% endif %}>{{ option.label }}</option>{% endfor %}
           </select>
         </label>
-        <p class="form-note">{% if user.role == 'super-admin' %}Choose configuration, Slides Templates, one workspace or the complete environment.{% else %}Only shared Slides Templates can be exported by an admin account.{% endif %}</p>
+        <p class="form-note">{% if user.role == 'super-admin' %}Choose configuration, Slides Templates, one workspace or the complete environment.{% else %}Admins can export or transfer shared Slides Templates and the workspaces they can access.{% endif %}</p>
         <div class="import-export-actions">
           <button type="submit" class="import-export-action">Export ZIP</button>
-          {% if user.role == 'super-admin' %}<button type="button" class="server-transfer-action" data-server-transfer>Transfer to other server</button>{% endif %}
+          <button type="button" class="server-transfer-action" data-server-transfer>Transfer to other server</button>
         </div>
       </form>
       <form class="form-stack" action="/admin/import-export/import" method="post" enctype="multipart/form-data" data-import-export-form>
