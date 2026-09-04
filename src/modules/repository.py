@@ -1925,6 +1925,7 @@ class Repository:
         offer_id = str(offer['id'])
         updated_at = float(offer.get('updated_at') or offer.get('created_at') or 0)
         with self.global_connection() as conn:
+            self._ensure_transfer_offers_table(conn)
             conn.execute(
                 """
                 INSERT INTO transfer_offers (id, payload_json, updated_at)
@@ -1942,6 +1943,8 @@ class Repository:
         now = float(offer.get('created_at') or datetime.now().timestamp())
         superseded: list[str] = []
         with self.global_connection() as conn:
+            self._ensure_transfer_offers_table(conn)
+            conn.commit()
             conn.execute('BEGIN IMMEDIATE')
             rows = conn.execute("SELECT id, payload_json FROM transfer_offers").fetchall()
             for row in rows:
@@ -1976,6 +1979,7 @@ class Repository:
 
     def list_transfer_offers(self) -> list[dict[str, Any]]:
         with self.global_connection() as conn:
+            self._ensure_transfer_offers_table(conn)
             rows = conn.execute(
                 "SELECT payload_json FROM transfer_offers ORDER BY updated_at"
             ).fetchall()
@@ -1991,7 +1995,20 @@ class Repository:
 
     def delete_transfer_offer(self, offer_id: str) -> None:
         with self.global_connection() as conn:
+            self._ensure_transfer_offers_table(conn)
             conn.execute("DELETE FROM transfer_offers WHERE id = ?", (str(offer_id),))
+
+    def _ensure_transfer_offers_table(self, conn: sqlite3.Connection) -> None:
+        """Repair pre-migration persistent application databases on demand."""
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS transfer_offers (
+                id TEXT PRIMARY KEY,
+                payload_json TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
 
     def list_logs(self, limit: int | None = 1000) -> list[sqlite3.Row]:
         with self.connection() as conn:

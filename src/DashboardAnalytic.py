@@ -6207,6 +6207,16 @@ def create_admin_transfer_job(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except sqlite3.Error as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f'The transfer state database could not be prepared: {exc}',
+        ) from exc
+    except OSError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f'The transfer working directory could not be prepared: {exc}',
+        ) from exc
     return JSONResponse({
         'job_id': job['id'],
         'status': job['status'],

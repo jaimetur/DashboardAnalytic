@@ -43,6 +43,7 @@
 - Classified every table owned by the active workspace under Workspace Tables in Database Management, including `report_chart_jobs` as Chart Set jobs, while retaining dedicated groups for individual dataset and combined CDR row tables.
 - Renamed the visible Database Management label for `report_runs` to Generated Reports jobs without changing the physical workspace table.
 - Made transfer-offer replacement atomic across Docker workers: SQLite now cancels prior pending offers and inserts the new request in one write transaction, removing the stale in-memory admission check that could still return `Too many pending transfer offers`.
+- Made server-transfer startup self-repair the SQLite offer table for pre-migration Docker volumes and replaced the generic startup failure with actionable database, filesystem or expired-session diagnostics.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.

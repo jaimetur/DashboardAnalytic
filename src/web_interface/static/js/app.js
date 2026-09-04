@@ -3075,6 +3075,10 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         credentials: 'same-origin',
         headers: {Accept: 'application/json'},
       });
+      const responseType = response.headers.get('content-type') || '';
+      if (response.redirected || !responseType.includes('application/json')) {
+        throw new Error('Your session expired or the server restarted. Reload the page, log in again and retry the transfer.');
+      }
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.status_url) throw new Error(payload.detail || 'The transfer could not be started.');
       transferCancelUrl = payload.cancel_url || '';
