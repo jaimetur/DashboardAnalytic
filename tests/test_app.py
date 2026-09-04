@@ -559,6 +559,30 @@ def test_equivalent_pending_transfer_offer_is_reused_with_the_new_secret(client,
         app_module.TRANSFER_OFFERS.pop(offer_id, None)
 
 
+def test_new_transfer_offer_supersedes_old_pending_requests_from_same_server(client, monkeypatch, tmp_path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    monkeypatch.setattr(app_module, 'export_package_dir', lambda: tmp_path)
+    offer_ids = []
+    try:
+        for index in range(7):
+            response = client.post(
+                '/api/import-export/transfers/offers',
+                headers={'X-Dashboard-Transfer-Secret': f'superseding-transfer-secret-{index:02d}-long-enough'},
+                json={
+                    'source': 'Persistent Docker source', 'archive_version': 1,
+                    'kind': 'slides-templates', 'content': f'Slides Templates {index}', 'workspaces': [],
+                },
+            )
+            assert response.status_code == 200
+            offer_ids.append(response.json()['offer_id'])
+        assert app_module.TRANSFER_OFFERS[offer_ids[-1]]['status'] == 'pending'
+        assert all(app_module.TRANSFER_OFFERS[offer_id]['status'] == 'cancelled' for offer_id in offer_ids[:-1])
+    finally:
+        for offer_id in offer_ids:
+            app_module.TRANSFER_OFFERS.pop(offer_id, None)
+
+
 def test_persisted_pending_transfer_offer_expires_after_approval_window(client, monkeypatch, tmp_path) -> None:
     import src.DashboardAnalytic as app_module
 

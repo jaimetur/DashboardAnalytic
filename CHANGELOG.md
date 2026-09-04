@@ -38,6 +38,7 @@
 - Rendered `Threshold` legends as two colour-matched ranges derived from the configured value (`< threshold` and `≥ threshold`), matching the red and green stacked-chart segments.
 - Increased the visual weight of latest-campaign CDF legend samples so thick and thin curve styles remain clearly distinguishable in scaled previews and reports.
 - Sized CDF side-legend lanes asymmetrically: right legends sit close to an expanded plot without wasting canvas space, while left legends receive enough room for captions and the relocated y-axis percentages without overlap.
+- Prevented persisted Docker transfer offers from exhausting the per-source pending limit: a new request now supersedes older unreviewed requests from the same server, and superseded source handshakes terminate immediately instead of waiting for approval timeout.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.

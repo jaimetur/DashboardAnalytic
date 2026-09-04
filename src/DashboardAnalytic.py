@@ -2844,7 +2844,7 @@ def _run_transfer_job(job_id: str) -> None:
                 remote_status = str(response.json().get('status') or '')
                 if remote_status == 'accepted':
                     break
-                if remote_status in {'rejected', 'failed', 'expired'}:
+                if remote_status in {'rejected', 'failed', 'expired', 'cancelled'}:
                     raise ValueError(response.json().get('error') or 'The destination server rejected the transfer.')
                 sleep(2)
             else:
@@ -2915,7 +2915,7 @@ def _run_transfer_job(job_id: str) -> None:
                     with TRANSFER_LOCK:
                         job.update({'status': 'ready', 'progress': 100.0, 'notice': remote_payload.get('notice') or 'Transfer imported successfully.', 'finished_at': datetime.now(timezone.utc).timestamp()})
                     return
-                if remote_status in {'rejected', 'failed', 'expired'}:
+                if remote_status in {'rejected', 'failed', 'expired', 'cancelled'}:
                     raise ValueError(remote_payload.get('error') or 'The destination server could not import the package.')
                 sleep(2)
             raise TimeoutError('The destination server did not finish importing the package within 24 hours.')
@@ -5956,6 +5956,25 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
             })
             _save_transfer_offer(reusable_offer)
             return JSONResponse({'offer_id': reusable_offer['id'], 'status': reusable_offer['status'], 'reused': True})
+        # A source UI can have only one active approval handshake. Persisted
+        # pending requests deliberately survive Docker restarts, but older
+        # requests for different content must not accumulate until the source
+        # admission limit is exhausted. Supersede them when that same server
+        # submits a fresh request.
+        now = datetime.now(timezone.utc).timestamp()
+        for existing in TRANSFER_OFFERS.values():
+            if (
+                existing.get('status') == 'pending'
+                and existing.get('source_address') == source_address
+                and existing.get('source') == source
+            ):
+                existing.update({
+                    'status': 'cancelled',
+                    'phase': 'superseded by newer request',
+                    'error': 'This transfer offer was replaced by a newer request from the same server.',
+                    'finished_at': now,
+                })
+                _save_transfer_offer(existing)
     offer_id = uuid4().hex
     offer = {
         'id': offer_id,
