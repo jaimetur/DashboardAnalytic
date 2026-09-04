@@ -2608,7 +2608,10 @@ def normalize_transfer_destination(destination_url: str, destination_port: int |
         parsed_port = parsed.port
     except ValueError as exc:
         raise ValueError('Enter a valid destination server port.') from exc
-    port = destination_port or parsed_port or DEFAULT_TRANSFER_PORT
+    # An explicit URL port is authoritative. The dialog's prefilled 7278 is a
+    # fallback for bare hostnames and must not silently replace :443, a Docker
+    # published host port, or any other port already entered in the URL.
+    port = parsed_port or destination_port or DEFAULT_TRANSFER_PORT
     if port is not None and not 1 <= int(port) <= 65535:
         raise ValueError('The destination port must be between 1 and 65535.')
     hostname = f'[{parsed.hostname}]' if ':' in parsed.hostname else parsed.hostname
@@ -2652,6 +2655,42 @@ def _transfer_offer_secret_matches(offer: dict[str, Any], secret: str) -> bool:
     return secrets.compare_digest(str(offer.get('secret_hash') or ''), supplied)
 
 
+def _transfer_offer_state_path(offer_id: str) -> Path:
+    return export_package_dir() / f'transfer-offer-{offer_id}.json'
+
+
+def _persist_transfer_offer(offer: dict[str, Any]) -> None:
+    """Persist handshake state so Docker restarts/workers cannot hide offers."""
+    directory = export_package_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = _transfer_offer_state_path(str(offer['id']))
+    temporary = destination.with_suffix('.json.tmp')
+    temporary.write_text(json.dumps(offer, sort_keys=True, default=str), encoding='utf-8')
+    os.replace(temporary, destination)
+
+
+def _refresh_persisted_transfer_offers() -> None:
+    directory = export_package_dir()
+    if not directory.is_dir():
+        return
+    for path in directory.glob('transfer-offer-*.json'):
+        try:
+            offer = json.loads(path.read_text(encoding='utf-8'))
+            offer_id = str(offer.get('id') or '')
+            if not offer_id:
+                continue
+            current = TRANSFER_OFFERS.get(offer_id)
+            if current is None or float(offer.get('updated_at') or offer.get('created_at') or 0) > float(current.get('updated_at') or current.get('created_at') or 0):
+                TRANSFER_OFFERS[offer_id] = offer
+        except (OSError, ValueError, TypeError):
+            continue
+
+
+def _save_transfer_offer(offer: dict[str, Any]) -> None:
+    offer['updated_at'] = datetime.now(timezone.utc).timestamp()
+    _persist_transfer_offer(offer)
+
+
 def _run_received_transfer(offer_id: str) -> None:
     with TRANSFER_LOCK:
         offer = TRANSFER_OFFERS.get(offer_id)
@@ -2660,6 +2699,7 @@ def _run_received_transfer(offer_id: str) -> None:
         package_path = Path(str(offer['path']))
         manifest = dict(offer['manifest'])
         offer.update({'status': 'importing', 'phase': 'validating', 'progress': 0.0})
+        _save_transfer_offer(offer)
 
     def update_progress(phase: str, progress: float) -> None:
         with TRANSFER_LOCK:
@@ -2670,9 +2710,11 @@ def _run_received_transfer(offer_id: str) -> None:
         notice = _apply_import_archive(package_path, manifest, update_progress)
         with TRANSFER_LOCK:
             offer.update({'status': 'ready', 'phase': 'complete', 'progress': 100.0, 'notice': notice, 'finished_at': datetime.now(timezone.utc).timestamp()})
+            _save_transfer_offer(offer)
     except Exception as exc:
         with TRANSFER_LOCK:
             offer.update({'status': 'failed', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
+            _save_transfer_offer(offer)
     finally:
         package_path.unlink(missing_ok=True)
 
@@ -2689,8 +2731,16 @@ def _run_transfer_job(job_id: str) -> None:
         package_path = Path(str(job['path']))
     offer_secret = secrets.token_urlsafe(32)
     headers = {'X-Dashboard-Transfer-Secret': offer_secret, 'Accept': 'application/json'}
+    def cancellation_requested() -> bool:
+        with TRANSFER_LOCK:
+            return bool(job.get('cancel_requested'))
+
+    def stop_if_cancelled() -> None:
+        if cancellation_requested():
+            raise InterruptedError('The server transfer was cancelled.')
+
     try:
-        with httpx.Client(timeout=httpx.Timeout(30.0, read=65.0), follow_redirects=False) as client:
+        with httpx.Client(timeout=httpx.Timeout(65.0, connect=5.0), follow_redirects=False) as client:
             offer_payload = {
                 'source': __app_name__,
                 'archive_version': ARCHIVE_VERSION,
@@ -2712,6 +2762,7 @@ def _run_transfer_job(job_id: str) -> None:
                         response.raise_for_status()
                     break
                 except (httpx.TransportError, httpx.TimeoutException, httpx.HTTPStatusError):
+                    stop_if_cancelled()
                     if attempt == 2:
                         raise
                     with TRANSFER_LOCK:
@@ -2721,11 +2772,17 @@ def _run_transfer_job(job_id: str) -> None:
             offer_id = str(response.json().get('offer_id') or '')
             if not offer_id:
                 raise ValueError('The destination server did not create a transfer offer.')
+            if cancellation_requested():
+                client.delete(_transfer_api_url(destination, f'/api/import-export/transfers/offers/{offer_id}'), headers=headers)
+                stop_if_cancelled()
             with TRANSFER_LOCK:
                 job.update({'status': 'awaiting_acceptance', 'remote_offer_id': offer_id})
 
             acceptance_deadline = monotonic() + 3600
             while monotonic() < acceptance_deadline:
+                if cancellation_requested():
+                    client.delete(_transfer_api_url(destination, f'/api/import-export/transfers/offers/{offer_id}'), headers=headers)
+                    stop_if_cancelled()
                 response = client.get(
                     _transfer_api_url(destination, f'/api/import-export/transfers/offers/{offer_id}'),
                     headers=headers,
@@ -2742,8 +2799,10 @@ def _run_transfer_job(job_id: str) -> None:
 
             with TRANSFER_LOCK:
                 job.update({'status': 'exporting', 'export_total': estimate_export_bytes(target, workspace_ids), 'exported_bytes': 0, 'progress': 0.0})
+            stop_if_cancelled()
 
             def update_export_progress(written: int) -> None:
+                stop_if_cancelled()
                 with TRANSFER_LOCK:
                     job['exported_bytes'] = int(job.get('exported_bytes') or 0) + written
                     total = max(int(job.get('export_total') or 1), 1)
@@ -2758,6 +2817,7 @@ def _run_transfer_job(job_id: str) -> None:
                 sent = 0
                 with package_path.open('rb') as package_file:
                     while chunk := package_file.read(4 * 1024 * 1024):
+                        stop_if_cancelled()
                         sent += len(chunk)
                         with TRANSFER_LOCK:
                             job['bytes_sent'] = sent
@@ -2806,6 +2866,9 @@ def _run_transfer_job(job_id: str) -> None:
                     raise ValueError(remote_payload.get('error') or 'The destination server could not import the package.')
                 sleep(2)
             raise TimeoutError('The destination server did not finish importing the package within 24 hours.')
+    except InterruptedError as exc:
+        with TRANSFER_LOCK:
+            job.update({'status': 'cancelled', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
     except Exception as exc:
         with TRANSFER_LOCK:
             job.update({'status': 'failed', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
@@ -5735,6 +5798,7 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     # The source retries transient first-contact failures. Return the original
     # offer if its response was lost, instead of showing duplicate approvals.
     with TRANSFER_LOCK:
+        _refresh_persisted_transfer_offers()
         existing_offer = next((
             existing for existing in TRANSFER_OFFERS.values()
             if existing.get('secret_hash') == secret_hash
@@ -5765,6 +5829,18 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
         if pending_from_source >= 5:
             raise HTTPException(status_code=429, detail='Too many pending transfer offers from this server.')
         TRANSFER_OFFERS[offer_id] = offer
+        _save_transfer_offer(offer)
+    try:
+        repository.add_log('system', 'incoming_server_transfer_offer_received', json.dumps({
+            'offer_id': offer_id,
+            'source': offer['source'],
+            'source_address': source_address,
+            'content': offer['content'],
+            'workspaces': offer['workspaces'],
+            'executed_by': 'system',
+        }))
+    except sqlite3.Error:
+        pass
     return JSONResponse({'offer_id': offer_id, 'status': 'pending'})
 
 
@@ -5772,6 +5848,7 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
 def get_transfer_offer_status(offer_id: str, request: Request) -> JSONResponse:
     secret = request.headers.get('X-Dashboard-Transfer-Secret', '')
     with TRANSFER_LOCK:
+        _refresh_persisted_transfer_offers()
         offer = TRANSFER_OFFERS.get(offer_id)
         if not offer or not _transfer_offer_secret_matches(offer, secret):
             raise HTTPException(status_code=404, detail='The transfer offer does not exist.')
@@ -5779,10 +5856,25 @@ def get_transfer_offer_status(offer_id: str, request: Request) -> JSONResponse:
     return JSONResponse(payload)
 
 
+@app.delete('/api/import-export/transfers/offers/{offer_id}')
+def cancel_transfer_offer(offer_id: str, request: Request) -> JSONResponse:
+    secret = request.headers.get('X-Dashboard-Transfer-Secret', '')
+    with TRANSFER_LOCK:
+        _refresh_persisted_transfer_offers()
+        offer = TRANSFER_OFFERS.get(offer_id)
+        if not offer or not _transfer_offer_secret_matches(offer, secret):
+            raise HTTPException(status_code=404, detail='The transfer offer does not exist.')
+        if offer.get('status') not in {'ready', 'failed', 'rejected', 'expired', 'cancelled'}:
+            offer.update({'status': 'cancelled', 'phase': 'cancelled by source', 'error': 'The source server cancelled the transfer.', 'finished_at': datetime.now(timezone.utc).timestamp()})
+            _save_transfer_offer(offer)
+    return JSONResponse({'cancelled': True})
+
+
 @app.put('/api/import-export/transfers/offers/{offer_id}/package')
 async def receive_transfer_package(offer_id: str, request: Request) -> JSONResponse:
     secret = request.headers.get('X-Dashboard-Transfer-Secret', '')
     with TRANSFER_LOCK:
+        _refresh_persisted_transfer_offers()
         offer = TRANSFER_OFFERS.get(offer_id)
         if not offer or not _transfer_offer_secret_matches(offer, secret):
             raise HTTPException(status_code=404, detail='The transfer offer does not exist.')
@@ -5790,6 +5882,7 @@ async def receive_transfer_package(offer_id: str, request: Request) -> JSONRespo
             raise HTTPException(status_code=409, detail='The transfer has not been accepted by the destination server.')
         expected_size = max(int(request.headers.get('Content-Length') or 0), 0)
         offer.update({'status': 'receiving', 'phase': 'receiving package', 'size': expected_size, 'bytes_received': 0, 'progress': 0.0})
+        _save_transfer_offer(offer)
     package_dir = export_package_dir()
     package_dir.mkdir(parents=True, exist_ok=True)
     package_path = package_dir / f'incoming-transfer-{offer_id}.upload'
@@ -5807,23 +5900,27 @@ async def receive_transfer_package(offer_id: str, request: Request) -> JSONRespo
             raise ValueError('The received package type does not match the accepted transfer offer.')
         with TRANSFER_LOCK:
             offer.update({'path': str(package_path), 'manifest': manifest, 'status': 'received', 'phase': 'package received', 'progress': 100.0})
+            _save_transfer_offer(offer)
         Thread(target=_run_received_transfer, args=(offer_id,), name=f'incoming-transfer-{offer_id[:8]}', daemon=True).start()
         return JSONResponse({'offer_id': offer_id, 'status': 'received'})
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
         package_path.unlink(missing_ok=True)
         with TRANSFER_LOCK:
             offer.update({'status': 'failed', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
+            _save_transfer_offer(offer)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         package_path.unlink(missing_ok=True)
         with TRANSFER_LOCK:
             offer.update({'status': 'accepted', 'phase': 'waiting for transmission retry', 'error': 'The package transfer was interrupted; waiting for the source to retry.', 'progress': 0.0})
+            _save_transfer_offer(offer)
         raise HTTPException(status_code=503, detail='The package transfer was interrupted; the source may retry.') from exc
 
 
 @app.get('/admin/import-export/transfers/offers')
 def list_pending_transfer_offers(user: SessionUser = Depends(super_admin_user)) -> JSONResponse:
     with TRANSFER_LOCK:
+        _refresh_persisted_transfer_offers()
         offers = [
             {key: offer.get(key) for key in ('id', 'source', 'source_address', 'kind', 'content', 'workspaces', 'created_at')}
             for offer in TRANSFER_OFFERS.values()
@@ -5836,6 +5933,7 @@ def list_pending_transfer_offers(user: SessionUser = Depends(super_admin_user)) 
 def get_admin_transfer_offer(offer_id: str, user: SessionUser = Depends(super_admin_user)) -> JSONResponse:
     """Expose safe progress fields to the destination super-admin UI."""
     with TRANSFER_LOCK:
+        _refresh_persisted_transfer_offers()
         offer = TRANSFER_OFFERS.get(offer_id)
         if not offer:
             raise HTTPException(status_code=404, detail='The transfer offer no longer exists.')
@@ -5886,6 +5984,7 @@ def delete_recovered_transfer_package(offer_id: str, user: SessionUser = Depends
 def accept_transfer_offer(offer_id: str, user: SessionUser = Depends(super_admin_user)) -> JSONResponse:
     accepted_now = False
     with TRANSFER_LOCK:
+        _refresh_persisted_transfer_offers()
         offer = TRANSFER_OFFERS.get(offer_id)
         if not offer:
             raise HTTPException(status_code=404, detail='The pending transfer offer no longer exists.')
@@ -5894,6 +5993,7 @@ def accept_transfer_offer(offer_id: str, user: SessionUser = Depends(super_admin
             accepted_now = True
         elif offer.get('status') not in {'accepted', 'receiving', 'received', 'importing', 'ready'}:
             raise HTTPException(status_code=409, detail='This transfer offer can no longer be accepted.')
+        _save_transfer_offer(offer)
     if accepted_now:
         try:
             repository.add_log(user.username, 'accept_server_transfer', f'Accepted incoming {offer["content"]} transfer from {offer["source"]}.')
@@ -5905,10 +6005,12 @@ def accept_transfer_offer(offer_id: str, user: SessionUser = Depends(super_admin
 @app.post('/admin/import-export/transfers/offers/{offer_id}/reject')
 def reject_transfer_offer(offer_id: str, user: SessionUser = Depends(super_admin_user)) -> JSONResponse:
     with TRANSFER_LOCK:
+        _refresh_persisted_transfer_offers()
         offer = TRANSFER_OFFERS.get(offer_id)
         if not offer or offer.get('status') != 'pending':
             raise HTTPException(status_code=404, detail='The pending transfer offer no longer exists.')
         offer.update({'status': 'rejected', 'error': 'The destination super-admin rejected the transfer.', 'finished_at': datetime.now(timezone.utc).timestamp()})
+        _save_transfer_offer(offer)
     try:
         repository.add_log(user.username, 'reject_server_transfer', f'Rejected incoming {offer["content"]} transfer from {offer["source"]}.')
     except sqlite3.Error:
@@ -5935,7 +6037,12 @@ def create_admin_transfer_job(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return JSONResponse({'job_id': job['id'], 'status': job['status'], 'status_url': f"/admin/import-export/transfers/jobs/{job['id']}"})
+    return JSONResponse({
+        'job_id': job['id'],
+        'status': job['status'],
+        'status_url': f"/admin/import-export/transfers/jobs/{job['id']}",
+        'cancel_url': f"/admin/import-export/transfers/jobs/{job['id']}/cancel",
+    })
 
 
 @app.get('/admin/import-export/transfers/jobs/{job_id}')
@@ -5943,6 +6050,18 @@ def get_admin_transfer_job(job_id: str, user: SessionUser = Depends(admin_user))
     if not (payload := transfer_job_payload(job_id, user)):
         raise HTTPException(status_code=404, detail='The transfer job no longer exists.')
     return JSONResponse(payload)
+
+
+@app.post('/admin/import-export/transfers/jobs/{job_id}/cancel')
+def cancel_admin_transfer_job(job_id: str, user: SessionUser = Depends(admin_user)) -> JSONResponse:
+    with TRANSFER_LOCK:
+        job = TRANSFER_JOBS.get(job_id)
+        if not job or job.get('owner') != user.username:
+            raise HTTPException(status_code=404, detail='The transfer job no longer exists.')
+        if job.get('status') in {'ready', 'failed', 'cancelled'}:
+            return JSONResponse({'status': job.get('status')})
+        job.update({'cancel_requested': True, 'status': 'cancelling', 'phase': 'cancellation requested'})
+    return JSONResponse({'status': 'cancelling'})
 
 
 @app.get('/admin/import-export/export')

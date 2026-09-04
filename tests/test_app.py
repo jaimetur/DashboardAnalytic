@@ -498,6 +498,30 @@ def test_incoming_server_transfer_requires_acceptance_and_imports_after_upload(c
     assert 'Configuration imported successfully' in payload['notice']
 
 
+def test_incoming_transfer_offer_survives_process_memory_loss(client, monkeypatch, tmp_path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    monkeypatch.setattr(app_module, 'export_package_dir', lambda: tmp_path)
+    secret = 'persistent-transfer-test-secret-long-enough'
+    offer = client.post(
+        '/api/import-export/transfers/offers',
+        headers={'X-Dashboard-Transfer-Secret': secret},
+        json={
+            'source': 'Docker source', 'archive_version': 1,
+            'kind': 'slides-templates', 'content': 'Slides Templates', 'workspaces': [],
+        },
+    )
+    assert offer.status_code == 200
+    offer_id = offer.json()['offer_id']
+    app_module.TRANSFER_OFFERS.pop(offer_id)
+
+    login_super(client)
+    pending = client.get('/admin/import-export/transfers/offers')
+    assert pending.status_code == 200
+    assert [item['id'] for item in pending.json()['offers']] == [offer_id]
+    app_module.TRANSFER_OFFERS.pop(offer_id, None)
+
+
 def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -560,6 +584,28 @@ def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(clien
     assert payload['progress'] == 100.0
     assert state['post_attempts'] == 2
     assert state['bytes'] == len(b'streamed-transfer-package')
+
+
+def test_transfer_owner_can_request_job_cancellation(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    job_id = 'cancel-transfer-test'
+    app_module.TRANSFER_JOBS[job_id] = {'id': job_id, 'owner': 'admin', 'status': 'connecting', 'path': '/tmp/unused-transfer.zip'}
+    try:
+        response = client.post(f'/admin/import-export/transfers/jobs/{job_id}/cancel')
+        assert response.status_code == 200
+        assert response.json()['status'] == 'cancelling'
+        assert app_module.TRANSFER_JOBS[job_id]['cancel_requested'] is True
+    finally:
+        app_module.TRANSFER_JOBS.pop(job_id, None)
+
+
+def test_transfer_url_explicit_port_overrides_prefilled_default_port() -> None:
+    import src.DashboardAnalytic as app_module
+
+    assert app_module.normalize_transfer_destination('https://destination.example:8443', 7278) == 'https://destination.example:8443'
+    assert app_module.normalize_transfer_destination('destination.example', 7278) == 'http://destination.example:7278'
 
 
 def test_admin_export_and_transfer_are_limited_to_templates_and_accessible_workspaces(client, monkeypatch) -> None:

@@ -1492,6 +1492,7 @@ const loadingOverlay = document.getElementById('loading-overlay');
 const loadingTitle = document.getElementById('loading-title');
 const loadingCopy = document.getElementById('loading-copy');
 const loadingProgressBar = document.querySelector('.loading-progress-bar');
+const loadingCancel = document.getElementById('loading-cancel');
 const confirmOverlay = document.getElementById('confirm-overlay');
 const confirmTitle = document.getElementById('confirm-title');
 const confirmCopy = document.getElementById('confirm-copy');
@@ -2399,6 +2400,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
 function hideLoadingOverlay() {
   if (!loadingOverlay) return;
   loadingOverlay.hidden = true;
+  if (loadingCancel instanceof HTMLButtonElement) { loadingCancel.hidden = true; loadingCancel.onclick = null; loadingCancel.disabled = false; }
   document.body.classList.remove('loading-active');
 }
 
@@ -2406,6 +2408,7 @@ function showLoadingOverlay(label, copy) {
   if (!loadingOverlay) return;
   loadingTitle.textContent = label || 'Processing request';
   loadingCopy.textContent = copy || 'Please wait while the workspace processes the selected dataset or updates the dashboard.';
+  if (loadingCancel instanceof HTMLButtonElement) { loadingCancel.hidden = true; loadingCancel.onclick = null; loadingCancel.disabled = false; }
   if (loadingProgressBar instanceof HTMLElement) {
     loadingProgressBar.style.width = '45%';
     loadingProgressBar.style.animation = '';
@@ -2773,6 +2776,12 @@ function selectTransferDestination() {
   const error = overlay.querySelector('[data-server-transfer-error]');
   const accept = overlay.querySelector('[data-server-transfer-connect]');
   const cancel = overlay.querySelector('[data-server-transfer-cancel]');
+  const destinationStorageKey = 'dashboard-analytic:transfer-destination';
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(destinationStorageKey) || 'null');
+    if (url instanceof HTMLInputElement && saved?.destinationUrl) url.value = saved.destinationUrl;
+    if (port instanceof HTMLInputElement && saved?.destinationPort) port.value = saved.destinationPort;
+  } catch (_error) { /* Keep the defaults when browser storage is unavailable. */ }
   overlay.hidden = false;
   document.body.classList.add('loading-active');
   if (error instanceof HTMLElement) error.hidden = true;
@@ -2784,6 +2793,8 @@ function selectTransferDestination() {
       cancel?.removeEventListener('click', dismiss);
       overlay.removeEventListener('click', backdrop);
       window.removeEventListener('keydown', keyboard);
+      url?.removeEventListener('keydown', submitWithEnter);
+      port?.removeEventListener('keydown', submitWithEnter);
       resolve(value);
     };
     const submit = () => {
@@ -2805,7 +2816,13 @@ function selectTransferDestination() {
         port?.focus();
         return;
       }
+      try { window.localStorage.setItem(destinationStorageKey, JSON.stringify({destinationUrl, destinationPort})); } catch (_error) { /* Ignore storage failures. */ }
       close({destinationUrl, destinationPort});
+    };
+    const submitWithEnter = (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      submit();
     };
     const dismiss = () => close(null);
     const backdrop = (event) => { if (event.target === overlay) dismiss(); };
@@ -2814,6 +2831,8 @@ function selectTransferDestination() {
     cancel?.addEventListener('click', dismiss);
     overlay.addEventListener('click', backdrop);
     window.addEventListener('keydown', keyboard);
+    url?.addEventListener('keydown', submitWithEnter);
+    port?.addEventListener('keydown', submitWithEnter);
     url?.focus();
   });
 }
@@ -2849,6 +2868,21 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
     formData.set('destination_url', destination.destinationUrl);
     if (destination.destinationPort) formData.set('destination_port', destination.destinationPort);
     showLoadingOverlay('Contacting destination server', 'Checking whether the destination server accepts the selected export.');
+    let transferCancelUrl = '';
+    let transferCancelled = false;
+    if (loadingCancel instanceof HTMLButtonElement) {
+      loadingCancel.hidden = false;
+      loadingCancel.onclick = async () => {
+        transferCancelled = true;
+        loadingCancel.disabled = true;
+        loadingCancel.textContent = 'Cancelling…';
+        if (transferCancelUrl) {
+          await fetch(transferCancelUrl, {method: 'POST', credentials: 'same-origin', headers: {Accept: 'application/json'}}).catch(() => {});
+        }
+        hideLoadingOverlay();
+        loadingCancel.textContent = 'Cancel operation';
+      };
+    }
     const handleTransferError = (error) => {
       hideLoadingOverlay();
       showInfoDialog(error instanceof Error ? error.message : 'The server transfer could not be completed.', {
@@ -2865,6 +2899,11 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.status_url) throw new Error(payload.detail || 'The transfer could not be started.');
+      transferCancelUrl = payload.cancel_url || '';
+      if (transferCancelled) {
+        if (transferCancelUrl) await fetch(transferCancelUrl, {method: 'POST', credentials: 'same-origin', headers: {Accept: 'application/json'}}).catch(() => {});
+        return;
+      }
       try { window.localStorage.setItem('dashboard-analytic:active-transfer', JSON.stringify({job_id: payload.job_id, status_url: payload.status_url})); } catch (_error) { /* Ignore storage failures. */ }
       const pollTransfer = async () => {
         const statusResponse = await fetch(payload.status_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}});
@@ -2882,6 +2921,11 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         if (transfer.status === 'failed') {
           try { window.localStorage.removeItem('dashboard-analytic:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
           throw new Error(transfer.error || 'The destination server could not complete the transfer.');
+        }
+        if (transfer.status === 'cancelled' || transfer.status === 'cancelling') {
+          try { window.localStorage.removeItem('dashboard-analytic:active-transfer'); } catch (_error) { /* Ignore storage failures. */ }
+          hideLoadingOverlay();
+          return;
         }
         setLoadingProgress(transfer.progress);
         const copies = {
@@ -2966,7 +3010,12 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
 });
 
 (() => {
-  if (!document.querySelector('[data-server-transfer-listener]')) return;
+  // Do not depend exclusively on a server-rendered marker: a stale outer page
+  // in front of an updated Docker backend could otherwise receive offers but
+  // never start the notification poll. Non-super-admin sessions are rejected
+  // by the endpoint and stop polling after that first authorization response.
+  if (!document.body.dataset.authenticatedUser) return;
+  let offerPollingAllowed = true;
   let reviewingOffer = false;
   let pollingOffers = false;
   const pollAcceptedTransfer = async (offerId) => {
@@ -2980,7 +3029,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       showInfoDialog(offer.notice || 'The incoming transfer was imported successfully.', {title: 'Incoming Transfer Complete', tone: 'info'});
       return;
     }
-    if (offer.status === 'failed' || offer.status === 'rejected' || offer.status === 'expired') {
+    if (offer.status === 'failed' || offer.status === 'rejected' || offer.status === 'expired' || offer.status === 'cancelled') {
       throw new Error(offer.error || 'The incoming transfer could not be completed.');
     }
     setLoadingProgress(offer.progress);
@@ -3000,7 +3049,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
     }); }, 1200);
   };
   const pollIncomingTransferOffers = async () => {
-    if (reviewingOffer || pollingOffers) return;
+    if (!offerPollingAllowed || reviewingOffer || pollingOffers) return;
     pollingOffers = true;
     try {
       const response = await fetch('/admin/import-export/transfers/offers', {
@@ -3008,6 +3057,10 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         headers: {Accept: 'application/json'},
         cache: 'no-store',
       });
+      if (response.status === 401 || response.status === 403) {
+        offerPollingAllowed = false;
+        return;
+      }
       if (!response.ok) return;
       const payload = await response.json().catch(() => ({}));
       const offer = Array.isArray(payload.offers) ? payload.offers[0] : null;
@@ -3090,6 +3143,8 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
     });
   });
   window.setInterval(pollIncomingTransferOffers, 3000);
+  window.addEventListener('focus', pollIncomingTransferOffers);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) pollIncomingTransferOffers(); });
   pollIncomingTransferOffers();
 })();
 

@@ -22,6 +22,9 @@
 - Added an `Executed by` filter after `User` in App Logs, including preserved filter state and automatic option updates during live refreshes.
 - Unified the inactive Workspace, E2E Dashboard, E2E Reporting and Chart Builder tabs with the Chart Builder palette while preserving each module's existing active colour.
 - Ordered Campaign aggregation values chronologically from the oldest to the newest across every shared chart renderer, independently of dataset ingestion order.
+- Added a Cancel operation action to outgoing server-transfer progress, cooperatively stopping connection, approval waiting, export or transmission and cleaning temporary output.
+- Set the default server-transfer destination port to `7278`, while respecting a different port explicitly included in the destination URL.
+- Prefilled the server-transfer destination dialog with port `7278`, remembered the last URL and port used, and enabled Enter-key submission from either field.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
@@ -31,7 +34,7 @@
 - Excluded null, NaN and empty status/KPI values from both the numerator and denominator of 100% stacked charts instead of misclassifying them as failures or valid quality samples.
 - Excluded unknown and non-executed status values from 100% chart denominators and restricted Failed segments to explicitly failed/error states.
 - Sized the Charts Panel template editor modal to 90% of the browser viewport and reduced its embedded view to the editor itself, with a fixed visible action bar and scrolling confined to the template table.
-- Allowed admins to export or transfer shared Slides Templates and only their accessible workspaces, while keeping configuration/full-environment transfers and workspace imports restricted; removed forbidden options from their selector so transfer requests always include a valid target, and made the initial destination handshake retry-safe and idempotent.
+- Allowed admins to export or transfer shared Slides Templates and only their accessible workspaces, while keeping configuration/full-environment transfers and workspace imports restricted; removed forbidden options from their selector so transfer requests always include a valid target, made the initial destination handshake retry-safe and idempotent, persisted incoming offers, and made destination notification polling resilient to stale Docker-rendered pages and browser tab suspension.
 
 #### 📚 Documentation:
 
@@ -70,8 +73,6 @@
 - Renamed the bootstrap workspace to `Default`; existing installations migrate its display name and storage paths without changing workspace data.
 - Added live transfer progress across both servers: source package creation and transmission, plus destination package reception and staged import progress.
 - Added protected incoming-transfer recovery: incomplete transfer files are removed, while complete unimported packages are listed with their creation time for a super-admin to select and import.
-- Set the default server-transfer destination port to `7278`.
-- Prefilled the server-transfer destination dialog with port `7278` while keeping it editable.
 - Accelerated workspace imports by atomically renaming staged SQLite databases when possible, falling back safely across filesystems, and replacing the full `quick_check` scan with lightweight SQLite validation.
 - Increased archive extraction I/O blocks to reduce overhead while restoring large workspace databases and files.
 - Published Docker tags as multi-platform manifests for native `linux/amd64` and `linux/arm64` execution, allowing Docker to select the correct image automatically and avoiding x86 emulation on ARM hosts.
