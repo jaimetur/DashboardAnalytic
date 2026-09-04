@@ -1518,7 +1518,7 @@ document.querySelectorAll('[data-open-template-editor]').forEach((button) => {
   button.addEventListener('click', () => {
     if (!adminTemplateEditor || !adminTemplateEditorFrame) return;
     adminTemplateEditorFrame.src = button.dataset.openTemplateEditor || '';
-    if (adminTemplateEditorTitle) adminTemplateEditorTitle.textContent = `Edit Slides Template: ${button.dataset.templateName || 'Selected Template'}`;
+    if (adminTemplateEditorTitle) adminTemplateEditorTitle.textContent = `Edit Slides Template: "${button.dataset.templateName || 'Selected Template'}"`;
     adminTemplateEditor.hidden = false;
     adminTemplateEditorClose?.focus();
   });

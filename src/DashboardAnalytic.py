@@ -1605,7 +1605,8 @@ def super_admin_user(user: SessionUser = Depends(current_user)) -> SessionUser:
 
 def render_template(request: Request, template_name: str, context: dict[str, Any], status_code: int = 200) -> HTMLResponse:
     template_user = context.get('user')
-    header_workspaces = workspace_registry.list() if isinstance(template_user, SessionUser) else []
+    embedded_template_editor = bool(context.get('embedded_template_editor'))
+    header_workspaces = workspace_registry.list() if isinstance(template_user, SessionUser) and not embedded_template_editor else []
     header_workspace_access = workspace_access_map(template_user, header_workspaces) if isinstance(template_user, SessionUser) else {}
     payload = {
         'request': request,
@@ -1615,7 +1616,7 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'asset_version': asset_version,
         'static_path': lambda asset_path: str(request.app.url_path_for('static', path=asset_path)),
         'active_workspace': active_workspace,
-        'active_workspace_size': format_workspace_size(workspace_disk_usage(active_workspace)) if active_workspace else None,
+        'active_workspace_size': format_workspace_size(workspace_disk_usage(active_workspace)) if active_workspace and not embedded_template_editor else None,
         'header_workspaces': header_workspaces,
         'header_workspace_access': header_workspace_access,
         'header_workspace_sizes': {item.id: format_workspace_size(workspace_disk_usage(item)) for item in header_workspaces},
@@ -5783,6 +5784,34 @@ def export_report(
 @app.get('/admin', response_class=HTMLResponse)
 def admin_panel(request: Request, user: SessionUser = Depends(admin_user)) -> HTMLResponse:
     return render_admin_template(request, user)
+
+
+@app.get('/admin/report-templates/{technology}/{catalogue_id}/editor', response_class=HTMLResponse)
+def embedded_report_template_editor(
+    request: Request,
+    technology: str,
+    catalogue_id: str,
+    user: SessionUser = Depends(admin_user),
+) -> HTMLResponse:
+    """Render only the selected Slides Template editor for modal iframes."""
+    technology = technology.strip().lower()
+    if technology == 'auto':
+        technology = next((
+            candidate for candidate in TEMPLATE_NAMES
+            if any(item['identifier'] == catalogue_id for item in report_catalogue_options(candidate))
+        ), '')
+    if technology not in TEMPLATE_NAMES:
+        raise HTTPException(status_code=404, detail='Report technology not found')
+    editor = catalogue_editor_payload(technology, catalogue_id)
+    if not editor:
+        raise HTTPException(status_code=404, detail='Slides Template not found')
+    return render_template(request, 'admin.html', {
+        'user': user,
+        'embedded_template_editor': True,
+        'catalogue_editor': editor,
+        'report_catalogs': {},
+        'error': None,
+    })
 
 
 @app.post('/api/import-export/transfers/offers')

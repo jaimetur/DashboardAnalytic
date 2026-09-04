@@ -28,6 +28,8 @@
 - Replaced the chart viewer's reset-zoom symbol with a clearer magnifying-glass icon while preserving its accessible Reset zoom action.
 - Added `vendor NOT CONTAINS (Mixed, Other)` automatically to every Vendor Comparison chart at render time, allowing the same stored Slides Template to serve Operator and Vendor comparisons without unresolved vendor groups.
 - Opened Slides Templates Editor in the shared 90%-viewport editor dialog from each Admin template-management Edit action, showing the selected template name in its title, providing both footer and corner Close actions, highlighting changed cells in pale yellow and genuinely added text in a stronger yellow without misidentifying filter lines shifted by insertions, and removing the permanent editor panel from the main Admin page.
+- Accelerated the modal Slides Templates Editor with a dedicated lightweight route that skips the full Admin payload, workspace disk scans and unrelated management panels.
+- Clarified modal editor titles with the selected template name in quotation marks and enforced the neutral grey Close button styling.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.

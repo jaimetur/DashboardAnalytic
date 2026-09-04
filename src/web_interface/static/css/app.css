@@ -414,6 +414,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-insert-slide-button { background: linear-gradient(145deg, #dcefe2, #bde0c8); border-color: rgba(72, 135, 93, 0.55); color: #286642; }
 .catalogue-insert-slide-button:hover { background: linear-gradient(145deg, #cae5d2, #aad7b8); color: #1e5636; }
 .slides-templates-editor-table-wrap .form-actions { display: flex; align-items: center; gap: 0.65rem; margin-top: 0.9rem; flex-wrap: wrap; }
+.slides-templates-editor-table-wrap .catalogue-editor-close-button { background: linear-gradient(135deg, #8b949e, #6e7781) !important; border-color: #626b75 !important; color: #fff !important; }
+.slides-templates-editor-table-wrap .catalogue-editor-close-button:hover:not(:disabled) { background: linear-gradient(135deg, #747d87, #57606a) !important; border-color: #4f5862 !important; color: #fff !important; }
 .confirm-overlay.catalogue-chart-preview-overlay { position: absolute !important; inset: 0 !important; display: block !important; padding: 1rem; overflow: hidden; z-index: 10; }
 .confirm-panel.catalogue-chart-preview-dialog { position: relative; width: 100% !important; height: 100% !important; max-width: none; max-height: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 390px); grid-template-rows: auto auto minmax(0, 1fr); gap: 0.8rem 1rem; padding: 1.35rem; }
 .catalogue-chart-preview-header, .catalogue-chart-preview-dialog > p { grid-column: 1 / -1; }

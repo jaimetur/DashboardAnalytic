@@ -777,6 +777,7 @@
       }
     });
     let activeChartSetTemplate = '';
+    let activeChartSetTechnology = '';
     const renderReportCharts = (payload) => {
       const charts = Array.isArray(payload.charts) ? payload.charts : [];
       if (!reportChartsBody) return;
@@ -796,6 +797,7 @@
       updateChartSetActions(selectedChartSet);
       reportCharts = charts;
       activeChartSetTemplate = String(payload.template || '');
+      activeChartSetTechnology = String(payload.technology || '').trim().toLocaleLowerCase();
       if (reportChartsEditTemplate) reportChartsEditTemplate.hidden = !activeChartSetTemplate;
       reportChartsBody.replaceChildren(...charts.map((chart) => {
         const card = document.createElement('article');
@@ -846,8 +848,8 @@
     };
     reportChartsEditTemplate?.addEventListener('click', () => {
       if (!activeChartSetTemplate || !reportTemplateEditor || !reportTemplateEditorFrame) return;
-      reportTemplateEditorFrame.src = `/admin?catalogue_id=${encodeURIComponent(activeChartSetTemplate)}&embedded_template_editor=1`;
-      if (reportTemplateEditorTitle) reportTemplateEditorTitle.textContent = `Edit Slides Template: ${activeChartSetTemplate}`;
+      reportTemplateEditorFrame.src = `/admin/report-templates/${encodeURIComponent(activeChartSetTechnology || 'auto')}/${encodeURIComponent(activeChartSetTemplate)}/editor`;
+      if (reportTemplateEditorTitle) reportTemplateEditorTitle.textContent = `Edit Slides Template: "${activeChartSetTemplate}"`;
       reportTemplateEditor.hidden = false;
       reportTemplateEditorClose?.focus();
     });

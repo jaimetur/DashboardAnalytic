@@ -2427,7 +2427,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'Updated Q4' in admin.text
     assert 'name="catalogue_selection"' not in admin.text
     assert 'data-admin-template-editor' in admin.text
-    assert 'data-open-template-editor="/admin?catalogue_technology=nsa&amp;catalogue_id=Baseline Q4&amp;embedded_template_editor=1"' in admin.text
+    assert 'data-open-template-editor="/admin/report-templates/nsa/Baseline%20Q4/editor"' in admin.text
     assert 'data-catalogue-editor-table' not in admin.text
     assert '<th>Default</th>' in admin.text
     assert 'catalogue-default-mark is-default' in admin.text
@@ -2446,10 +2446,12 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'data-catalogue-editor-table' not in editor.text
     assert 'data-admin-template-editor' in editor.text
 
-    embedded_editor = client.get('/admin?catalogue_id=Baseline%20Q4&embedded_template_editor=1')
+    embedded_editor = client.get('/admin/report-templates/nsa/Baseline%20Q4/editor')
     assert embedded_editor.status_code == 200
     assert 'data-embedded-template-editor' in embedded_editor.text
     assert 'data-catalogue-editor-table' in embedded_editor.text
+    assert 'Slides Templates Management' not in embedded_editor.text
+    assert 'Export / Import' not in embedded_editor.text
     assert 'data-catalogue-field="Layout"' in embedded_editor.text
     assert 'data-catalogue-editor-options' in embedded_editor.text
     assert 'data-catalogue-row-action="insert"' in embedded_editor.text
@@ -2464,7 +2466,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     )
     saved = client.post('/admin/report-templates/nsa/Baseline%20Q4/save', data={'catalogue_content': edited}, follow_redirects=False)
     assert saved.status_code == 303
-    saved_editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=Baseline%20Q4&embedded_template_editor=1')
+    saved_editor = client.get('/admin/report-templates/nsa/Baseline%20Q4/editor')
     assert '>Edited</td>' in saved_editor.text
     assert saved_editor.text.index('>Edited</td>') < saved_editor.text.index('>Late</td>')
 

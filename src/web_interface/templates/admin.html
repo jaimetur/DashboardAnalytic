@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% block content %}
 <section class="dashboard-stack spacious-stack admin-stack">
+  {% if not embedded_template_editor %}
   <article class="panel dataset-summary-panel module-hero-admin admin-overview-panel" style="background: linear-gradient(135deg, #ff8070, #861919) !important; color: #ffffff;">
     <div class="section-head tight-head">
       <div>
@@ -187,7 +188,7 @@
             <td>
               <div class="catalogue-workspace-actions">
                 {% if catalogue.active %}<button type="button" class="catalogue-set-default-button" disabled>Set Default</button>{% else %}<form action="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/activate" method="post"><button type="submit" class="catalogue-set-default-button">Set Default</button></form>{% endif %}
-                <button type="button" class="catalogue-edit-button" data-open-template-editor="/admin?catalogue_technology={{ catalogue.technology }}&amp;catalogue_id={{ catalogue.identifier }}&amp;embedded_template_editor=1" data-template-name="{{ catalogue.name }}">Edit</button>
+                <button type="button" class="catalogue-edit-button" data-open-template-editor="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier | urlencode }}/editor" data-template-name="{{ catalogue.name }}">Edit</button>
                 <form action="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/duplicate" method="post"><button type="submit" class="catalogue-duplicate-button">Duplicate</button></form>
                 {% if not catalogue.active %}<form action="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/delete" method="post" data-confirm="Delete template {{ catalogue.name }}? This cannot be undone."><button type="submit" class="danger-button">Delete</button></form>{% else %}<button type="button" class="danger-button" disabled title="The default template cannot be deleted">Delete</button>{% endif %}
                 <a class="catalogue-export-button" href="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/export">Export</a>
@@ -205,6 +206,7 @@
     </div>
   </details>
 
+  {% endif %}
   {% if embedded_template_editor %}
   <details class="panel collapsible-panel slides-templates-editor-panel" id="catalogue-editor" open data-panel-state-key="admin:slides-templates-editor">
     <summary class="collapsible-summary">
@@ -338,6 +340,7 @@
   </div>
   {% endif %}
 
+  {% if not embedded_template_editor %}
   <details class="panel collapsible-panel import-export-panel" open data-panel-state-key="admin:import-export">
     <summary class="collapsible-summary">
       <div>
@@ -621,6 +624,7 @@
     </form>
   </dialog>
 
+  {% endif %}
 </section>
 {% endblock %}
 {% block extra_scripts %}
