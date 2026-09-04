@@ -6,12 +6,12 @@ on:
       create_release:
         description: "Create a GitHub release"
         required: false
-        default: false
+        default: true
         type: boolean
       final_release:
         description: "Mark this as a final release"
         required: false
-        default: false
+        default: true
         type: boolean
   push:
     tags:
