@@ -3010,6 +3010,8 @@ def describe_workspace_log_entry(log: dict[str, Any]) -> str:
 
 
 def classify_workspace_log_entry(log: dict[str, Any]) -> str:
+    if log.get('action') == 'login' and isinstance(log.get('details'), dict) and not log['details'].get('success', False):
+        return 'Error'
     if str(log.get('action') or '').endswith('_failed') or log.get('action') in {
         'process_dataset_failed', 'analyze_dataset_failed', 'analyze_dataset_warning',
         'map_dataset_vendors_failed', 'clear_dataset_vendors_failed',
@@ -3034,7 +3036,7 @@ def build_app_logs() -> list[dict[str, Any]]:
             details = details_text
         log = {
             'id': row['id'],
-            'username': str(row['username'] or ''),
+            'username': str(row['username'] or '').strip().casefold(),
             'action': action,
             'details': details,
             'details_text': details_text,
@@ -3205,8 +3207,13 @@ def login(
     password: str = Form(...),
     workspace_id: str | None = Form(default=None),
 ) -> Response:
+    submitted_username = username.strip().casefold()
     record = repository.get_user(username)
     if not record or not record.active or not verify_password(password, record.password_hash):
+        repository.add_log(submitted_username or '(blank)', 'login', json.dumps({
+            'success': False, 'result': 'failed', 'reason': 'invalid_credentials',
+            'workspace_id': workspace_id or '',
+        }))
         workspaces = workspace_registry.list()
         return render_template(
             request,
@@ -3221,6 +3228,10 @@ def login(
 
     if workspace_id:
         if record.role != 'super-admin' and not repository.user_has_workspace_access(record.username, workspace_id):
+            repository.add_log(record.username, 'login', json.dumps({
+                'success': False, 'result': 'failed', 'reason': 'workspace_access_denied',
+                'workspace_id': workspace_id,
+            }))
             return render_template(request, 'login.html', {
                 'error': 'You do not have access to that workspace.',
                 'error_tone': 'warning',
@@ -3231,6 +3242,10 @@ def login(
         try:
             activate_workspace(workspace_id)
         except ValueError as exc:
+            repository.add_log(record.username, 'login', json.dumps({
+                'success': False, 'result': 'failed', 'reason': 'workspace_activation_failed',
+                'workspace_id': workspace_id, 'error': str(exc),
+            }))
             return render_template(request, 'login.html', {
                 'error': str(exc), 'default_access_accounts': build_default_access_accounts(),
                 'workspaces': workspace_registry.list(), 'active_workspace': active_workspace,
@@ -3240,13 +3255,20 @@ def login(
     user = SessionUser(username=record.username, role=record.role)
     response = RedirectResponse('/workspace', status_code=status.HTTP_303_SEE_OTHER)
     create_session(response, user)
-    repository.add_log(username, 'login', 'User logged in')
+    repository.add_log(record.username, 'login', json.dumps({
+        'success': True, 'result': 'successful', 'role': record.role,
+        'workspace_id': active_workspace.id if active_workspace else '',
+        'workspace': active_workspace.name if active_workspace else '',
+    }))
     return response
 
 
 @app.get('/logout')
 def logout(request: Request) -> Response:
     token = request.cookies.get(SESSION_COOKIE)
+    session_user = SESSIONS.get(token or '')
+    if session_user:
+        repository.add_log(session_user.username, 'logout', json.dumps({'success': True}))
     if token:
         SESSIONS.pop(token, None)
     response = RedirectResponse('/login', status_code=status.HTTP_303_SEE_OTHER)
@@ -3746,6 +3768,24 @@ def app_logs(request: Request, user: SessionUser = Depends(current_user)) -> HTM
             'log_actions': sorted({log['action'] for log in logs if log['action']}, key=str.casefold),
         },
     )
+
+
+@app.post('/api/app-logs/button-click')
+async def audit_button_click(request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    """Record authenticated UI controls that do not have their own endpoint."""
+    try:
+        payload = await request.json()
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail='Invalid button audit payload.') from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='Invalid button audit payload.')
+    details = {
+        'page': str(payload.get('page') or '')[:200],
+        'label': str(payload.get('label') or '')[:160],
+        'control': str(payload.get('control') or '')[:120],
+    }
+    repository.add_log(user.username, 'ui_button_click', json.dumps(details))
+    return JSONResponse({'recorded': True})
 
 
 @app.get('/dashboard', response_class=HTMLResponse)

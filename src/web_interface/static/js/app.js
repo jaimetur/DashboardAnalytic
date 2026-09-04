@@ -3598,7 +3598,7 @@ if (appLogsPanel) {
     let visibleCount = 0;
     rows.forEach((row) => {
       const matches = (
-        (!userFilter || userFilter.value === 'all' || row.dataset.appLogUser === userFilter.value)
+        (!userFilter || userFilter.value === 'all' || String(row.dataset.appLogUser || '').toLocaleLowerCase() === String(userFilter.value || '').toLocaleLowerCase())
         && (!dateFilter || !dateFilter.value || row.dataset.appLogDate === dateFilter.value)
         && (!typeFilter || typeFilter.value === 'all' || row.dataset.appLogType === typeFilter.value)
         && (!actionFilter || actionFilter.value === 'all' || row.dataset.appLogAction === actionFilter.value)
@@ -3621,6 +3621,28 @@ if (appLogsPanel) {
     syncAppLogRows();
   });
   syncAppLogRows();
+}
+
+// Audit every deliberate button activation, including controls that only
+// change client-side state and therefore never reach an operational endpoint.
+// Input values are intentionally excluded from the payload.
+if (document.body.dataset.authenticatedUser) {
+  document.addEventListener('click', (event) => {
+    if (!event.isTrusted) return;
+    const control = event.target.closest?.('button, input[type="button"], input[type="submit"], [role="button"]');
+    if (!control || control.disabled || control.getAttribute('aria-disabled') === 'true') return;
+    const datasetEntry = Object.entries(control.dataset || {}).find(([key]) => !['authenticatedUser'].includes(key));
+    const payload = JSON.stringify({
+      page: window.location.pathname,
+      label: String(control.getAttribute('aria-label') || control.title || control.textContent || control.value || '').trim().replace(/\s+/g, ' ').slice(0, 160),
+      control: String(control.name || control.id || datasetEntry?.[0] || control.className || control.tagName).slice(0, 120),
+    });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/api/app-logs/button-click', new Blob([payload], {type: 'application/json'}));
+    } else {
+      fetch('/api/app-logs/button-click', {method: 'POST', credentials: 'same-origin', keepalive: true, headers: {'Content-Type': 'application/json'}, body: payload}).catch(() => {});
+    }
+  }, {capture: true});
 }
 
 document.querySelectorAll('[data-chart-aggregation-select]').forEach((select) => {

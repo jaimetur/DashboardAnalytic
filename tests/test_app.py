@@ -3197,3 +3197,40 @@ def test_app_logs_combines_operational_and_audit_activity(client) -> None:
     assert "Error" in response.text
     assert "Synthetic processing failure" in response.text
     assert "change_password" in response.text
+
+
+def test_app_logs_normalises_user_case_and_records_login_outcomes(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    failed = client.post('/login', data={
+        'username': 'ADMIN', 'password': 'wrong-password', 'workspace_id': 'default',
+    })
+    assert failed.status_code == 401
+    successful = client.post('/login', data={
+        'username': 'AdMiN', 'password': 'admin123', 'workspace_id': 'default',
+    }, follow_redirects=False)
+    assert successful.status_code == 303
+    app_module.repository.add_log('ADMIN', 'mixed_case_test', '{}')
+
+    response = client.get('/app-logs')
+
+    assert response.text.count('<option value="admin">admin</option>') == 1
+    assert 'data-app-log-user="admin"' in response.text
+    login_details = [json.loads(row['details']) for row in app_module.repository.list_logs() if row['action'] == 'login']
+    assert any(details['success'] is False and details['reason'] == 'invalid_credentials' for details in login_details)
+    assert any(details['success'] is True and details['result'] == 'successful' for details in login_details)
+
+
+def test_authenticated_button_click_is_recorded_without_form_values(client) -> None:
+    login(client)
+
+    response = client.post('/api/app-logs/button-click', json={
+        'page': '/reporting', 'label': 'View filtered dataset', 'control': 'reportChartViewerData',
+        'password': 'must-not-be-recorded',
+    })
+
+    assert response.status_code == 200
+    page = client.get('/app-logs').text
+    assert 'ui_button_click' in page
+    assert 'View filtered dataset' in page
+    assert 'must-not-be-recorded' not in page
