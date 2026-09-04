@@ -1699,9 +1699,20 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
     )
     data = frame[[group, period, state_column, *hierarchy_columns]].copy()
     if quality:
-        data["state"] = pd.to_numeric(data[state_column], errors="coerce").map(lambda value: "< 1.6" if pd.notna(value) and value < threshold else "≥ 1.6")
+        numeric_state = pd.to_numeric(data[state_column], errors="coerce")
+        # Missing and non-numeric KPI values are not samples and therefore
+        # must not affect either segment of a percentage chart.
+        data = data.loc[numeric_state.notna()].copy()
+        numeric_state = numeric_state.loc[data.index]
+        data["state"] = numeric_state.map(lambda value: "< 1.6" if value < threshold else "≥ 1.6")
     else:
-        raw = data[state_column].astype(str).str.casefold()
+        raw = data[state_column].astype("string").str.strip().str.casefold()
+        # SQLite/pandas sources can represent absent values as NULL, NaN,
+        # pandas <NA>, or an empty string. Exclude all of them before assigning
+        # status categories so they cannot be counted as Failed by fallback.
+        valid_state = raw.notna() & raw.ne("") & ~raw.isin({"nan", "<na>"})
+        data = data.loc[valid_state].copy()
+        raw = raw.loc[data.index]
         data["state"] = raw.map(lambda value: "Completed" if any(item in value for item in ("complete", "success", "pass", "ok")) else "Dropped" if "drop" in value else "Failed")
     data = data.dropna(subset=[group, period])
     row_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_row_")]
