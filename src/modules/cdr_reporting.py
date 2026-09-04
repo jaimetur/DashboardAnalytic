@@ -1513,6 +1513,151 @@ def _legend_caption(labels: tuple[str, ...], index: int, fallback: object) -> st
     return labels[index] if index < len(labels) else str(fallback)
 
 
+def _resolved_legend_items(
+    entry: CatalogEntry,
+    frame: pd.DataFrame,
+    metric: str | None,
+) -> list[tuple[str, str, int]]:
+    """Resolve the Legend field against chart dimensions or active filters.
+
+    A chart dimension/KPI produces a conventional coloured value legend.  A
+    field used only by a filter produces a text-only description of that
+    filter.  This keeps the template field authoritative instead of allowing
+    individual renderers to invent an unrelated legend.
+    """
+    requested = _legend_dimensions(entry.legend)
+    if not requested:
+        return []
+    if entry.chart_type.strip().casefold() == "threshold stacked vertical bars":
+        threshold = _catalog_threshold(entry)
+        threshold_caption = f"{threshold:g}"
+        return [(f"Threshold = {threshold_caption}", "", 0)]
+    row_dimensions = parse_catalog_grouping(entry.grouping_rows).dimensions
+    column_dimensions = parse_catalog_grouping(entry.grouping_columns).dimensions
+    kpi_dimensions = tuple(
+        part.strip(" `")
+        for part in re.split(r"\s+vs\s+", entry.kpi, flags=re.I)
+        if part.strip(" `")
+    )
+    chart_names = {
+        _normalise_catalog_name(value)
+        for value in (*row_dimensions, *column_dimensions, *kpi_dimensions)
+    }
+    chart_fields = [value for value in requested if _normalise_catalog_name(value) in chart_names]
+
+    is_distribution = entry.chart_type.strip().casefold() == "distribution stacked vertical bars"
+    bucket_names = {"bucket", "buckets", "ratebucket", "valuebucket"}
+    bucket_legend_requested = is_distribution and any(
+        _normalise_catalog_name(value) in bucket_names for value in requested
+    )
+
+    labels = frame.attrs.get("catalogue_dimension_labels", {})
+    resolved_columns: list[str] = []
+    for field in chart_fields:
+        normalized = _normalise_catalog_name(field)
+        column = next((
+            candidate for candidate, declared in labels.items()
+            if any(
+                _normalise_catalog_name(str(name)) == normalized
+                for name in (declared if isinstance(declared, tuple) else (declared,))
+            )
+        ), None)
+        if column is None and metric and _normalise_catalog_name(metric) == normalized:
+            column = metric
+        if column is None:
+            column = next(
+                (candidate for candidate in frame.columns if _normalise_catalog_name(str(candidate)) == normalized),
+                None,
+            )
+        if column and column not in resolved_columns:
+            resolved_columns.append(column)
+
+    items: list[tuple[str, str, int]] = []
+    is_cdf = "cdf" in entry.chart_type.casefold()
+    axis_columns = _chart_axis_hierarchy(frame)
+    if bucket_legend_requested and "__catalog_stack" in frame.columns:
+        buckets = list(frame["__catalog_stack"].dropna().drop_duplicates())
+        bucket_colours = _series_colours(
+            [(bucket,) for bucket in buckets], ["__catalog_stack"], frame,
+        )
+        items.extend(
+            (str(bucket), bucket_colours.get((bucket,), _colour(bucket, index)), 2)
+            for index, bucket in enumerate(buckets)
+        )
+    elif is_cdf and chart_fields and axis_columns:
+        combinations = _hierarchical_unique_keys(frame, axis_columns)
+        colours = _series_colours(combinations, axis_columns, frame, line_chart=True)
+        campaign_column = _period_column(frame)
+        campaigns = (
+            sorted(
+                frame[campaign_column].dropna().astype(str).map(_campaign_display_value).unique(),
+                key=_campaign_sort_key,
+            )
+            if campaign_column else []
+        )
+        latest_campaign = campaigns[-1] if len(campaigns) > 1 else None
+        for index, combination in enumerate(combinations):
+            mask = pd.Series(True, index=frame.index)
+            for column, value in zip(axis_columns, combination, strict=True):
+                mask &= frame[column].astype(str).eq(str(value))
+            subset = frame.loc[mask]
+            subset_campaigns = (
+                subset[campaign_column].dropna().astype(str).map(_campaign_display_value).unique()
+                if campaign_column else ()
+            )
+            width = 4 if latest_campaign is None or latest_campaign in subset_campaigns else 1
+            caption = _legend_key_caption(combination, axis_columns, frame, tuple(chart_fields))
+            items.append((caption, colours.get(combination, _colour(caption, index)), width))
+    elif resolved_columns:
+        values = frame[resolved_columns].dropna().drop_duplicates()
+        semantic_colours = {
+            "completed": "#4E79A7",
+            "dropped": "#F28E2B",
+            "failed": "#E15759",
+        }
+        for index, values_tuple in enumerate(values.itertuples(index=False, name=None)):
+            caption = " · ".join(str(value) for value in values_tuple)
+            colour = semantic_colours.get(caption.casefold()) or _operator_colour(caption) or _colour(caption, index)
+            items.append((caption, colour, 2))
+
+    filter_names = {
+        _normalise_catalog_name(value)
+        for value in requested
+        if _normalise_catalog_name(value) not in chart_names
+        and not (bucket_legend_requested and _normalise_catalog_name(value) in bucket_names)
+    }
+    for condition in parse_catalog_filters(entry.filters):
+        if _normalise_catalog_name(condition.column) not in filter_names:
+            continue
+        values = ", ".join(condition.values)
+        if condition.operator in {"IN", "NOT IN"} or len(condition.values) > 1:
+            values = f"({values})"
+        items.append((f"{condition.column} {condition.operator} {values}", "", 0))
+    return items
+
+
+def _apply_resolved_legend(
+    chart: BytesIO,
+    entry: CatalogEntry,
+    frame: pd.DataFrame,
+    metric: str | None,
+    position: str,
+) -> BytesIO:
+    items = _resolved_legend_items(entry, frame, metric)
+    if not items:
+        return chart
+    chart.seek(0)
+    image = Image.open(chart).convert("RGB")
+    _draw_chart_legend(
+        ImageDraw.Draw(image), items, position,
+        line_markers="cdf" in entry.chart_type.casefold(),
+    )
+    output = BytesIO()
+    image.save(output, format="PNG")
+    output.seek(0)
+    return output
+
+
 def _draw_chart_legend(
     draw: ImageDraw.ImageDraw,
     items: list[tuple[str, str, int]],
@@ -1523,6 +1668,8 @@ def _draw_chart_legend(
     side_x: int | None = None,
 ) -> None:
     """Draw a template legend in a row (top/bottom) or column (left/right)."""
+    if position == "none" or not items:
+        return
     position = parse_legend_position(position)
     # Legends are part of the chart, not ancillary metadata. Enforce a
     # readable minimum because the 1600px PNG is normally scaled down in the
@@ -1532,30 +1679,35 @@ def _draw_chart_legend(
     horizontal = position in {"top", "bottom"}
     if horizontal:
         # Dense CDFs can legitimately contain one curve per full hierarchy
-        # combination.  Fit their compact line legend inside the 1600×900
-        # canvas instead of letting the last rows fall below its lower edge.
-        columns = 6 if line_markers else 5
+        # combination. Reserve six evenly distributed entries per row for
+        # line legends (as used by CDF charts), rather than relying on a fixed
+        # step that can visually clip the sixth item on narrower renderers.
+        columns = min(max(len(items), 1), 6) if line_markers else 5
         row_height = font_size + 12
         rows = max(1, (len(items) + columns - 1) // columns)
         start_x = 100
+        available_width = 1400
+        column_width = available_width / columns
         start_y = 80 if position == "top" else 900 - (rows * row_height) - 8
         for index, (caption, colour, width) in enumerate(items):
-            x = start_x + (index % columns) * (220 if line_markers else 275)
+            x = start_x + (index % columns) * (column_width if line_markers else 275)
             y = start_y + (index // columns) * row_height
-            if line_markers:
+            text_only = not colour
+            if line_markers and not text_only:
                 draw.line((x, y + 11, x + 34, y + 11), fill=colour, width=max(width, 3))
-            else:
+            elif not text_only:
                 draw.rectangle((x, y, x + marker_size, y + marker_size), fill=colour)
-            draw.text((x + (43 if line_markers else 32), y - 1), caption[:28], fill="#263B4A", font=_font(font_size, True))
+            draw.text((x if text_only else x + (43 if line_markers else 32), y - 1), caption[:28], fill="#263B4A", font=_font(font_size, True))
         return
     x, start_y = (side_x if side_x is not None else (26 if position == "left" else 1380)), 112
     for index, (caption, colour, width) in enumerate(items):
         y = start_y + index * (font_size + 14)
-        if line_markers:
+        text_only = not colour
+        if line_markers and not text_only:
             draw.line((x, y + 11, x + 34, y + 11), fill=colour, width=max(width, 3))
-        else:
+        elif not text_only:
             draw.rectangle((x, y, x + marker_size, y + marker_size), fill=colour)
-        draw.text((x + (43 if line_markers else 32), y - 1), caption[:24], fill="#263B4A", font=_font(font_size, True))
+        draw.text((x if text_only else x + (43 if line_markers else 32), y - 1), caption[:24], fill="#263B4A", font=_font(font_size, True))
 
 
 def _catalogue_display_label(category: object, series: object) -> str:
@@ -2524,6 +2676,10 @@ def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame
     legend_dimensions = _legend_dimensions(entry.legend)
     legend_labels = _legend_labels(entry.legend)
     legend_position = parse_legend_position(entry.legend_position)
+    # Slash-separated captions are retained for old templates. All current
+    # field-based legends are resolved centrally after rendering, so the
+    # renderer cannot substitute its own states/buckets/series.
+    renderer_legend_position = legend_position if legend_labels else "none"
     frame, group, period = _source_for_spec(frames, spec, multivendor)
     metric = _metric_column(frame, spec)
     try:
@@ -2535,14 +2691,16 @@ def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame
     chart_type = entry.chart_type.casefold()
     if chart_type != "distribution stacked vertical bars" and "__catalog_stack" in frame.columns:
         frame[period] = frame[period].astype(str) + " · " + frame["__catalog_stack"].astype(str)
+    def finish(chart: BytesIO) -> BytesIO:
+        return chart if legend_labels else _apply_resolved_legend(chart, entry, frame, metric, legend_position)
     if spec["kind"] == "status_100":
-        return _render_status_100(chart_title, frame, group, period, metric=metric, legend_labels=legend_labels, legend_position=legend_position)
+        return finish(_render_status_100(chart_title, frame, group, period, metric=metric, legend_labels=legend_labels, legend_position=renderer_legend_position))
     if spec["kind"] == "quality_100":
-        return _render_status_100(chart_title, frame, group, period, True, spec.get("threshold", 1.6), metric, legend_labels, legend_position)
+        return finish(_render_status_100(chart_title, frame, group, period, True, spec.get("threshold", 1.6), metric, legend_labels, renderer_legend_position))
     if spec["kind"] == "failure_count":
-        return _render_failure_count(chart_title, frame, group, period, legend_labels, legend_position)
+        return finish(_render_failure_count(chart_title, frame, group, period, legend_labels, renderer_legend_position))
     if chart_type == "distribution stacked vertical bars":
-        return _render_stacked_distribution(chart_title, frame, group, period, "__catalog_stack", legend_labels, legend_position)
+        return finish(_render_stacked_distribution(chart_title, frame, group, period, "__catalog_stack", legend_labels, renderer_legend_position))
     # Non-stacked visuals have one visual series per row/column combination. A
     # rows-only chart remains a single category series rather than becoming the
     # misleading ``Operator · Operator`` label used by the earlier renderer.
@@ -2551,16 +2709,17 @@ def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame
         for category, series in frame[[group, period]].fillna("(blank)").itertuples(index=False, name=None)
     ]
     if spec["kind"] == "scatter":
-        return _render_scatter(chart_title, frame, "__catalog_label", metric, _column(frame, spec.get("x_metric", ())), (), legend_position)
+        return finish(_render_scatter(chart_title, frame, "__catalog_label", metric, _column(frame, spec.get("x_metric", ())), (), renderer_legend_position))
     if chart_type == "table":
-        return _render_table(chart_title, frame, group, period, metric)
+        return finish(_render_table(chart_title, frame, group, period, metric))
     if "vertical bars" in chart_type:
-        return _render_mean_column(
+        return finish(_render_mean_column(
             chart_title, frame, group, period, metric,
             aggregation="median" if chart_type == "median vertical bars" else "mean",
-            legend_dimensions=legend_dimensions, legend_position=legend_position,
-        )
-    return _render_cdf_line(chart_title, frame, group, period, metric, legend_dimensions, legend_position)
+            legend_dimensions=() if not legend_labels else legend_dimensions,
+            legend_position=renderer_legend_position,
+        ))
+    return finish(_render_cdf_line(chart_title, frame, group, period, metric, (), renderer_legend_position))
 
 
 def _chart_for_spec(title: str, frames: dict[str, pd.DataFrame], spec: dict, multivendor: bool) -> BytesIO:

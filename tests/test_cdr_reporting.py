@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_mean_column, _render_status_100, _series_colours, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_mean_column, _render_status_100, _resolved_legend_items, _series_colours, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -323,6 +323,78 @@ def test_legend_parser_supports_manual_captions_and_dimension_selection() -> Non
     assert _legend_dimensions('Completed/Dropped/Failed') == ()
     assert _legend_dimensions('Operator, Campaign') == ('Operator', 'Campaign')
     assert _legend_labels('Operator, Campaign') == ()
+
+
+def test_resolved_legend_uses_selected_chart_field_values_and_empty_disables_it() -> None:
+    frame = pd.DataFrame({'Test_Name': ['FDFS', 'FDTT', 'FDFS'], 'Test_Result': ['Completed', 'Failed', 'Completed']})
+    base = dict(
+        slide=5, slide_title='', slide_subtitle='', layout='', chart_title='', cdr_source='CDR-Data',
+        kpi='Test_Result', chart_type='100% Stacked Vertical Bars', filters='',
+        grouping_rows='Test_Name', grouping_columns='', legend_position='top',
+    )
+    assert _resolved_legend_items(CatalogEntry(legend='', **base), frame, 'Test_Result') == []
+    assert [item[0] for item in _resolved_legend_items(CatalogEntry(legend='Test_Name', **base), frame, 'Test_Result')] == ['FDFS', 'FDTT']
+
+
+def test_resolved_filter_legend_is_text_only() -> None:
+    entry = CatalogEntry(
+        slide=5, slide_title='', slide_subtitle='', layout='', chart_title='', cdr_source='CDR-Data',
+        kpi='Test_Result', chart_type='100% Stacked Vertical Bars', legend='Operator',
+        filters='Operator IN (Vodafone UK, EE);', grouping_rows='Test_Name', grouping_columns='',
+        legend_position='top',
+    )
+    items = _resolved_legend_items(entry, pd.DataFrame({'Test_Name': ['FDFS']}), 'Test_Result')
+    assert items == [('Operator IN (Vodafone UK, EE)', '', 0)]
+
+
+def test_cdf_resolved_legend_reproduces_historical_and_latest_line_widths() -> None:
+    frame = pd.DataFrame({
+        '__catalog_row_0': ['EE', 'EE'],
+        '__catalog_column_0': ['2026-Q1', '2026-Q2'],
+        'Campaign': ['2026-Q1', '2026-Q2'],
+        'KPI': [1.0, 2.0],
+    })
+    frame.attrs['catalogue_dimension_labels'] = {
+        '__catalog_row_0': ('Operator',),
+        '__catalog_column_0': ('Campaign',),
+    }
+    entry = CatalogEntry(
+        slide=1, slide_title='', slide_subtitle='', layout='', chart_title='', cdr_source='CDR-Data',
+        kpi='KPI', chart_type='CDF Lines', legend='Operator, Campaign', filters='',
+        grouping_rows='Operator', grouping_columns='Campaign', legend_position='top',
+    )
+    items = _resolved_legend_items(entry, frame, 'KPI')
+    assert [(caption, width) for caption, _colour_value, width in items] == [
+        ('EE · 2026-Q1', 1), ('EE · 2026-Q2', 4),
+    ]
+
+
+def test_threshold_chart_legend_is_a_textual_threshold_description() -> None:
+    entry = CatalogEntry(
+        slide=8, slide_title='', slide_subtitle='', layout='', chart_title='POLQA <1.6',
+        cdr_source='CDR-Speech', kpi='POLQA < 1.6 vs >= 1.6',
+        chart_type='Threshold Stacked Vertical Bars', legend='POLQA', filters='',
+        grouping_rows='Operator', grouping_columns='Campaign', legend_position='bottom',
+    )
+    assert _resolved_legend_items(entry, pd.DataFrame({'POLQA': [1.2, 2.1]}), 'POLQA') == [
+        ('Threshold = 1.6', '', 0),
+    ]
+
+
+def test_distribution_bucket_legend_uses_resolved_bucket_colours_not_filter_text() -> None:
+    frame = pd.DataFrame({
+        '__catalog_stack': ['20-100', '100+', '5-20', '1-5', '<1', '20-100'],
+    })
+    entry = CatalogEntry(
+        slide=10, slide_title='', slide_subtitle='', layout='', chart_title='FDTT DL (7s)',
+        cdr_source='CDR-Data', kpi='FDTT_Sustainable_MDR',
+        chart_type='Distribution Stacked Vertical Bars', legend='Buckets',
+        filters='Buckets = 1,5,20,100;', grouping_rows='Operator',
+        grouping_columns='Campaign x Rate Bucket', legend_position='bottom',
+    )
+    items = _resolved_legend_items(entry, frame, 'FDTT_Sustainable_MDR')
+    assert [caption for caption, _colour_value, _width in items] == ['20-100', '100+', '5-20', '1-5', '<1']
+    assert all(colour for _caption, colour, _width in items)
 
 
 def test_mean_chart_renders_selected_dimension_legend_at_requested_position() -> None:

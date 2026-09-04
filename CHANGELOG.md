@@ -12,7 +12,6 @@
 - Made incoming transfer approvals reliable across every super-admin page, expired stale pending offers after 15 minutes, reused equivalent retries, propagated terminal source cancellation to the destination, and respected standard HTTP/HTTPS ports when a complete destination URL is entered without an explicit port.
 - Preserved every explicitly filtered `IN` category in hierarchical chart grids even when it has zero matching samples, and strengthened/extended solid first-level row and column separators through their outer headings.
 - Increased and strengthened chart titles, axis values and bar-value labels across the shared renderers, and rebuilt legends with larger bold captions, markers, line samples and spacing for reliable preview and report scaling.
-- Fixed the Legend contract so field selections generate value-based legends in Average/Median and CDF charts, legacy slash-separated template captions remain supported, and Legend Position is applied by the shared renderer.
 - Normalised App Logs users to lowercase with case-insensitive filtering, recorded explicit successful/failed login outcomes, and limited UI auditing to meaningful operations with descriptive actions such as report or Chart Set generation.
 - Automatically opened and scrolled to the Charts Panel when a newly queued or retried Report Job completes successfully, matching the existing Charts Job workflow.
 - Preselected the two most recently uploaded processed CDRs of each Data, Voice and Speech type in E2E Reporting, falling back to the sole available dataset when only one exists.
@@ -34,6 +33,9 @@
 - Made automatic App Logs polling visually silent, and invalidated the active workspace-size snapshot after dataset, report and Chart Set files are created, completed, retried or removed.
 - Made incoming transfer approvals reliable across every super-admin page, expired stale pending offers after 15 minutes, reused equivalent retries, propagated terminal source cancellation to the destination, and respected standard HTTP/HTTPS ports when a complete destination URL is entered without an explicit port.
 - Reset Slides Template edited-cell and added-text highlighting after a successful save, making the persisted values the new baseline for subsequent edits.
+- Replaced coloured range keys in Threshold chart legends with a concise text-only `Threshold = value` caption derived from the configured KPI threshold.
+- Fitted CDF legends into six evenly spaced entries per row when positioned above or below the chart, while retaining each series' colour and line thickness.
+- Rendered Distribution chart bucket legends as the ordered, colour-matched bucket ranges used by the stacked bars instead of displaying the raw `Buckets` filter expression.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
@@ -45,6 +47,7 @@
 - Allowed admins to export or transfer shared Slides Templates and only their accessible workspaces, while keeping configuration/full-environment transfers and workspace imports restricted; removed forbidden options from their selector so transfer requests always include a valid target, made the initial destination handshake retry-safe and idempotent, persisted incoming offers, and made destination notification polling resilient to stale Docker-rendered pages and browser tab suspension.
 - Moved status-row inclusion out of the chart renderer and into explicit template filters such as `Test_Result IN (Completed, Dropped, Failed)`, making the denominator visible and editable while status charts continue to honour the selected KPI.
 - Rejected malformed Slides Template filters when adjacent conditions are missing their semicolon separator, located errors as `Slide: n - Chart: n`, validated manual filter-cell edits live with a self-updating warning, kept damaged templates open for correction, and stored each condition on its own line with editor-only bullet markers and quoted multiline CSV fields.
+- Fixed the shared Legend contract across every chart renderer: an empty field suppresses the legend, a selected chart KPI/dimension shows its actual plotted values, and a filter-only field shows the applied filter values as text; CDF legend samples also reproduce each curve's colour and historical/latest line thickness, while legacy slash-separated captions and Legend Position remain supported.
 
 #### 📚 Documentation:
 
