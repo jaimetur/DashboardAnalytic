@@ -604,7 +604,10 @@ def test_persisted_pending_transfer_offer_expires_after_approval_window(client, 
     try:
         app_module._cleanup_expired_export_packages()
         assert app_module.TRANSFER_OFFERS[offer_id]['status'] == 'expired'
-        persisted = json.loads(app_module._transfer_offer_state_path(offer_id).read_text(encoding='utf-8'))
+        persisted = next(
+            offer for offer in app_module.repository.list_transfer_offers()
+            if offer['id'] == offer_id
+        )
         assert persisted['status'] == 'expired'
     finally:
         app_module.TRANSFER_OFFERS.pop(offer_id, None)
@@ -1296,6 +1299,16 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
     assert 'Workspace: Default' in admin.text
     assert 'Clean orphaned rows' in admin.text
     assert 'value="users"' in admin.text
+    assert 'value="application_state"' in admin.text
+    assert 'value="report_templates"' in admin.text
+    assert 'value="transfer_offers"' in admin.text
+    assert 'Server transfer offers' in admin.text
+    assert '<optgroup label="Workspace Tables">' in admin.text
+    assert 'value="report_chart_jobs"' in admin.text
+    assert 'Chart Set jobs' in admin.text
+    assert 'value="report_runs"' in admin.text
+    assert 'Generated Reports jobs' in admin.text
+    assert 'Other tables' not in admin.text
     assert app_module.repository.dataset_rows_table_exists(987)
     assert app_module.repository.database_table_page('reporting_rows_data')['total_rows'] == 1
     cleanup = client.post('/admin/database/cleanup', follow_redirects=False)

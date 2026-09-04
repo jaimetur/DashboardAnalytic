@@ -38,7 +38,10 @@
 - Rendered `Threshold` legends as two colour-matched ranges derived from the configured value (`< threshold` and `≥ threshold`), matching the red and green stacked-chart segments.
 - Increased the visual weight of latest-campaign CDF legend samples so thick and thin curve styles remain clearly distinguishable in scaled previews and reports.
 - Sized CDF side-legend lanes asymmetrically: right legends sit close to an expanded plot without wasting canvas space, while left legends receive enough room for captions and the relocated y-axis percentages without overlap.
-- Prevented persisted Docker transfer offers from exhausting the per-source-address pending limit: a new request now supersedes older unreviewed requests from the same address even if its displayed server name changed, and superseded source handshakes terminate immediately instead of waiting for approval timeout.
+- Moved incoming transfer offers from hidden package-directory JSON files into the global SQLite database shared by Docker workers, automatically migrating legacy files; new requests supersede older unreviewed offers from the same source address and superseded handshakes terminate immediately.
+- Made Database Management discover and route every global configuration table, exposing Application state and Server transfer offers alongside Users and the Slides Templates registry in the Configuration Tables selector group.
+- Classified every table owned by the active workspace under Workspace Tables in Database Management, including `report_chart_jobs` as Chart Set jobs, while retaining dedicated groups for individual dataset and combined CDR row tables.
+- Renamed the visible Database Management label for `report_runs` to Generated Reports jobs without changing the physical workspace table.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.

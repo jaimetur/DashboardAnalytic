@@ -1837,7 +1837,14 @@ def _archive_file(archive: zipfile.ZipFile, source: Path, archive_name: str, pro
         progress_callback(source.stat().st_size)
 
 
-def _archive_database(archive: zipfile.ZipFile, database_path: Path, archive_name: str, scratch_dir: Path | None = None, progress_callback: Callable[[int], None] | None = None) -> None:
+def _archive_database(
+    archive: zipfile.ZipFile,
+    database_path: Path,
+    archive_name: str,
+    scratch_dir: Path | None = None,
+    progress_callback: Callable[[int], None] | None = None,
+    exclude_tables: tuple[str, ...] = (),
+) -> None:
     """Add a consistent SQLite snapshot, compacting databases with substantial free space."""
     if not database_path.exists():
         return
@@ -1854,6 +1861,10 @@ def _archive_database(archive: zipfile.ZipFile, database_path: Path, archive_nam
             else:
                 with sqlite3.connect(snapshot) as target:
                     source.backup(target)
+        if exclude_tables:
+            with sqlite3.connect(snapshot) as target:
+                for table in exclude_tables:
+                    target.execute(f'DELETE FROM "{table.replace(chr(34), chr(34) * 2)}"')
         _archive_file(archive, snapshot, archive_name, progress_callback)
 
 
@@ -1941,7 +1952,12 @@ def build_export_archive_file(target: str, destination: Path, workspace_ids: Ite
         application_database = application_config_dir / 'application.db'
         if not application_database.is_file():
             raise FileNotFoundError('The application configuration database was not found.')
-        _archive_database(archive, application_database, 'config/application.db', destination.parent, progress_callback)
+        # Transfer handshakes are local runtime state and must never be copied
+        # into the destination as part of a configuration/full export.
+        _archive_database(
+            archive, application_database, 'config/application.db', destination.parent,
+            progress_callback, exclude_tables=('transfer_offers',),
+        )
         for path in config_root.iterdir():
             if (
                 path == application_database
@@ -2117,6 +2133,7 @@ def _cleanup_expired_export_packages() -> None:
             if offer.get('status') in {'ready', 'failed', 'rejected', 'expired', 'cancelled'} and float(offer.get('finished_at', 0)) < cutoff
         ]:
             TRANSFER_OFFERS.pop(offer_id, None)
+            repository.delete_transfer_offer(offer_id)
             _transfer_offer_state_path(offer_id).unlink(missing_ok=True)
     for path in package_dir.iterdir():
         if path in active_paths or path.stat().st_mtime >= cutoff:
@@ -2190,6 +2207,7 @@ def _recover_unimported_transfer_packages() -> None:
                 'created_at': created_at,
                 'recovered': True,
             }
+            _save_transfer_offer(TRANSFER_OFFERS[offer_id])
 
 
 def recovered_transfer_packages() -> list[dict[str, Any]]:
@@ -2705,30 +2723,26 @@ def _transfer_offer_state_path(offer_id: str) -> Path:
 
 
 def _persist_transfer_offer(offer: dict[str, Any]) -> None:
-    """Persist handshake state so Docker restarts/workers cannot hide offers."""
-    directory = export_package_dir()
-    directory.mkdir(parents=True, exist_ok=True)
-    destination = _transfer_offer_state_path(str(offer['id']))
-    temporary = destination.with_suffix('.json.tmp')
-    temporary.write_text(json.dumps(offer, sort_keys=True, default=str), encoding='utf-8')
-    os.replace(temporary, destination)
+    """Persist handshake state in the global DB shared by all workers."""
+    repository.save_transfer_offer(offer)
 
 
 def _refresh_persisted_transfer_offers() -> None:
+    # One-time migration from the former package-directory JSON storage.
     directory = export_package_dir()
-    if not directory.is_dir():
-        return
-    for path in directory.glob('transfer-offer-*.json'):
-        try:
-            offer = json.loads(path.read_text(encoding='utf-8'))
-            offer_id = str(offer.get('id') or '')
-            if not offer_id:
+    if directory.is_dir():
+        for path in directory.glob('transfer-offer-*.json'):
+            try:
+                offer = json.loads(path.read_text(encoding='utf-8'))
+                if not isinstance(offer, dict) or not offer.get('id'):
+                    continue
+                repository.save_transfer_offer(offer)
+                path.unlink(missing_ok=True)
+            except (OSError, ValueError, TypeError, sqlite3.Error):
                 continue
-            current = TRANSFER_OFFERS.get(offer_id)
-            if current is None or float(offer.get('updated_at') or offer.get('created_at') or 0) > float(current.get('updated_at') or current.get('created_at') or 0):
-                TRANSFER_OFFERS[offer_id] = offer
-        except (OSError, ValueError, TypeError):
-            continue
+    persisted = {str(offer['id']): offer for offer in repository.list_transfer_offers()}
+    TRANSFER_OFFERS.clear()
+    TRANSFER_OFFERS.update(persisted)
 
 
 def _save_transfer_offer(offer: dict[str, Any]) -> None:
@@ -3082,16 +3096,20 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         for dataset in admin_datasets
     }
     database_table_groups: dict[str, list[dict[str, str]]] = {
-        'Config Tables': [], 'Workspace Tables': [], 'Individual dataset rows': [], 'Combined CDR rows': [], 'Other tables': [],
+        'Config Tables': [], 'Workspace Tables': [], 'Individual dataset rows': [], 'Combined CDR rows': [],
     }
     friendly_tables = {
+        'application_state': 'Application state',
         'audit_logs': 'Audit log',
         'dataset_profiles': 'Dataset profiles',
         'datasets': 'Datasets',
-        'report_runs': 'Generated reports',
+        'report_runs': 'Generated Reports jobs',
+        'report_chart_jobs': 'Chart Set jobs',
         'report_templates': 'Slides Templates registry',
+        'transfer_offers': 'Server transfer offers',
         'users': 'Users',
     }
+    global_database_tables = set(repository.list_global_database_tables()) if active_workspace else set()
     for table_name in repository.list_database_tables() if active_workspace else []:
         dataset_match = re.fullmatch(r'dataset_rows_(\d+)', table_name)
         reporting_match = re.fullmatch(r'reporting_rows_(data|voice|speech)', table_name)
@@ -3104,12 +3122,13 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
                 'name': table_name,
                 'label': f"Combined CDR-{reporting_match.group(1).title()}",
             })
-        elif table_name in {'users', 'report_templates'}:
-            database_table_groups['Config Tables'].append({'name': table_name, 'label': friendly_tables[table_name]})
-        elif table_name in friendly_tables:
-            database_table_groups['Workspace Tables'].append({'name': table_name, 'label': friendly_tables[table_name]})
+        elif table_name in global_database_tables:
+            database_table_groups['Config Tables'].append({'name': table_name, 'label': friendly_tables.get(table_name, table_name)})
         else:
-            database_table_groups['Other tables'].append({'name': table_name, 'label': table_name})
+            database_table_groups['Workspace Tables'].append({
+                'name': table_name,
+                'label': friendly_tables.get(table_name, table_name),
+            })
     export_options = [
         {'value': 'config', 'label': 'Config'},
         {'value': 'slides-templates', 'label': 'Slides Templates'},
@@ -6127,6 +6146,7 @@ def import_recovered_transfer_package(offer_id: str, user: SessionUser = Depends
         package_path = Path(str(offer.get('path') or ''))
         if not package_path.is_file():
             TRANSFER_OFFERS.pop(offer_id, None)
+            repository.delete_transfer_offer(offer_id)
             raise HTTPException(status_code=404, detail='The recovered transfer package is no longer available.')
         offer.update({'status': 'received', 'phase': 'starting recovered import', 'progress': 100.0, 'accepted_by': user.username})
     Thread(target=_run_received_transfer, args=(offer_id,), name=f'recovered-transfer-{offer_id[:8]}', daemon=True).start()
@@ -6141,6 +6161,7 @@ def delete_recovered_transfer_package(offer_id: str, user: SessionUser = Depends
             raise HTTPException(status_code=404, detail='The recovered transfer package is no longer available.')
         package_path = Path(str(offer.get('path') or ''))
         TRANSFER_OFFERS.pop(offer_id, None)
+        repository.delete_transfer_offer(offer_id)
     package_path.unlink(missing_ok=True)
     try:
         repository.add_log(user.username, 'delete_recovered_transfer_package', f'Deleted recovered {offer["content"]} transfer package.')

@@ -135,6 +135,12 @@ CREATE TABLE IF NOT EXISTS application_state (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS transfer_offers (
+    id TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_nocase
 ON users(username COLLATE NOCASE);
 """
@@ -571,7 +577,19 @@ class Repository:
 
     def _table_connection(self, table_name: str):
         """Select the owning database for workspace and global tables."""
-        return self.global_connection if table_name in {'users', 'report_templates'} else self.connection
+        return self.global_connection if table_name in self.list_global_database_tables() else self.connection
+
+    def list_global_database_tables(self) -> list[str]:
+        """Return every user table physically stored in application.db."""
+        with self.global_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+                ORDER BY name COLLATE NOCASE
+                """
+            ).fetchall()
+        return [str(row['name']) for row in rows]
 
     def list_database_tables(self) -> list[str]:
         """Return the editable user tables in the currently configured workspace database."""
@@ -585,13 +603,12 @@ class Repository:
                 """
             ).fetchall()
         names = [str(row['name']) for row in rows]
-        # Users and Slides Template metadata are global configuration tables;
-        # expose their names in the admin editor without duplicating them in
-        # the workspace database.
-        with self.global_connection() as global_conn:
-            for name in ('users', 'report_templates'):
-                if global_conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?", (name,)).fetchone() and name not in names:
-                    names.append(name)
+        # Discover every real global configuration table instead of maintaining
+        # a partial UI whitelist. This keeps Database Management aligned with
+        # schema additions such as persisted transfer offers.
+        for name in self.list_global_database_tables():
+            if name not in names:
+                names.append(name)
         return sorted(names, key=str.casefold)
 
     def remove_orphaned_dataset_row_tables(self) -> list[str]:
@@ -1902,6 +1919,41 @@ class Repository:
                     (message, now, now, *job_ids),
                 )
         return job_ids
+
+    def save_transfer_offer(self, offer: dict[str, Any]) -> None:
+        """Persist destination transfer handshake state in the global DB."""
+        offer_id = str(offer['id'])
+        updated_at = float(offer.get('updated_at') or offer.get('created_at') or 0)
+        with self.global_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO transfer_offers (id, payload_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    payload_json = excluded.payload_json,
+                    updated_at = excluded.updated_at
+                """,
+                (offer_id, json.dumps(offer, sort_keys=True, default=str), updated_at),
+            )
+
+    def list_transfer_offers(self) -> list[dict[str, Any]]:
+        with self.global_connection() as conn:
+            rows = conn.execute(
+                "SELECT payload_json FROM transfer_offers ORDER BY updated_at"
+            ).fetchall()
+        offers: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                payload = json.loads(row['payload_json'])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, dict) and payload.get('id'):
+                offers.append(payload)
+        return offers
+
+    def delete_transfer_offer(self, offer_id: str) -> None:
+        with self.global_connection() as conn:
+            conn.execute("DELETE FROM transfer_offers WHERE id = ?", (str(offer_id),))
 
     def list_logs(self, limit: int | None = 1000) -> list[sqlite3.Row]:
         with self.connection() as conn:
