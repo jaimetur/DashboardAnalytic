@@ -1220,6 +1220,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .recovered-transfer-import-button { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; min-height: 0; padding: 0; border: 1px solid rgba(15, 73, 105, 0.64); border-radius: 999px; background: linear-gradient(135deg, #155d83, #248caf); color: #fff; font-size: 1.45rem; font-weight: 900; line-height: 1; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.12); box-shadow: 0 8px 18px rgba(21, 93, 131, 0.2); }
 .recovered-transfer-import-button:hover:not(:disabled) { background: linear-gradient(135deg, #104966, #1c7190); border-color: rgba(10, 57, 82, 0.78); box-shadow: 0 10px 22px rgba(16, 73, 102, 0.28); transform: translateY(-1px); }
 .confirm-overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(9, 17, 24, 0.48); backdrop-filter: blur(12px); z-index: 10000; padding: 1rem; }
+.confirm-overlay.incoming-transfer-confirm { z-index: 10003; }
 .confirm-overlay[hidden] { display: none !important; }
 .confirm-panel { width: min(92vw, 480px); padding: 1.65rem; border-radius: 28px; background: linear-gradient(180deg, rgba(255, 251, 248, 0.98), rgba(250, 243, 240, 0.96)); box-shadow: 0 40px 90px rgba(18, 32, 43, 0.26); border: 1px solid rgba(255,255,255,0.68); text-align: left; }
 .confirm-overlay.report-chart-viewer-overlay { padding: 0.35rem; background: rgba(31, 19, 52, 0.56); }

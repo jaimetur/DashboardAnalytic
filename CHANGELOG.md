@@ -9,6 +9,7 @@
 - Added an Edit Slides Template action to the active Charts Panel, opening the exact generating template in a full editor modal without the template selector.
 
 #### 🚀 Enhancements:
+- Made incoming transfer approvals reliable across every super-admin page, expired stale pending offers after 15 minutes, reused equivalent retries, propagated terminal source cancellation to the destination, and respected standard HTTP/HTTPS ports when a complete destination URL is entered without an explicit port.
 - Preserved every explicitly filtered `IN` category in hierarchical chart grids even when it has zero matching samples, and strengthened/extended solid first-level row and column separators through their outer headings.
 - Increased and strengthened chart titles, axis values and bar-value labels across the shared renderers, and rebuilt legends with larger bold captions, markers, line samples and spacing for reliable preview and report scaling.
 - Fixed the Legend contract so field selections generate value-based legends in Average/Median and CDF charts, legacy slash-separated template captions remain supported, and Legend Position is applied by the shared renderer.
@@ -31,6 +32,7 @@
 - Accelerated the modal Slides Templates Editor with a dedicated lightweight route that skips the full Admin payload, workspace disk scans and unrelated management panels.
 - Clarified modal editor titles with the selected template name in quotation marks and enforced the neutral grey Close button styling.
 - Made automatic App Logs polling visually silent, and invalidated the active workspace-size snapshot after dataset, report and Chart Set files are created, completed, retried or removed.
+- Made incoming transfer approvals reliable across every super-admin page, expired stale pending offers after 15 minutes, reused equivalent retries, propagated terminal source cancellation to the destination, and respected standard HTTP/HTTPS ports when a complete destination URL is entered without an explicit port.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.

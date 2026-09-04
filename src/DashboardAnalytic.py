@@ -74,6 +74,7 @@ TRANSFER_JOBS: dict[str, dict[str, Any]] = {}
 TRANSFER_OFFERS: dict[str, dict[str, Any]] = {}
 TRANSFER_LOCK = Lock()
 EXPORT_PACKAGE_TTL = timedelta(hours=24)
+TRANSFER_OFFER_TTL = timedelta(minutes=15)
 DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
 application_config_dir = settings.database_path.parent
 
@@ -2065,7 +2066,9 @@ def _cleanup_expired_export_packages() -> None:
     package_dir = export_package_dir()
     if not package_dir.exists():
         return
-    cutoff = datetime.now(timezone.utc).timestamp() - EXPORT_PACKAGE_TTL.total_seconds()
+    now = datetime.now(timezone.utc).timestamp()
+    cutoff = now - EXPORT_PACKAGE_TTL.total_seconds()
+    offer_cutoff = now - TRANSFER_OFFER_TTL.total_seconds()
     active_paths: set[Path] = set()
     with EXPORT_JOBS_LOCK:
         for job in EXPORT_JOBS.values():
@@ -2091,14 +2094,19 @@ def _cleanup_expired_export_packages() -> None:
         for job_id in stale_import_jobs:
             IMPORT_JOBS.pop(job_id, None)
     with TRANSFER_LOCK:
+        # Pending offers are persisted across container restarts. Restore them
+        # before evaluating expiry so stale approvals cannot evade cleanup and
+        # permanently exhaust the per-source admission limit.
+        _refresh_persisted_transfer_offers()
         for job in TRANSFER_JOBS.values():
-            if job.get('status') not in {'ready', 'failed'}:
+            if job.get('status') not in {'ready', 'failed', 'cancelled'}:
                 active_paths.add(Path(str(job['path'])))
         for offer in TRANSFER_OFFERS.values():
             if offer.get('status') in {'receiving', 'received', 'importing', 'recovered'} and offer.get('path'):
                 active_paths.add(Path(str(offer['path'])))
-            if offer.get('status') == 'pending' and float(offer.get('created_at', 0)) < cutoff:
-                offer.update({'status': 'expired', 'error': 'The transfer offer expired before it was accepted.', 'finished_at': datetime.now(timezone.utc).timestamp()})
+            if offer.get('status') == 'pending' and float(offer.get('created_at', 0)) < offer_cutoff:
+                offer.update({'status': 'expired', 'phase': 'approval expired', 'error': 'The transfer offer expired before it was accepted.', 'finished_at': now})
+                _save_transfer_offer(offer)
         for job_id in [
             job_id for job_id, job in TRANSFER_JOBS.items()
             if job.get('status') in {'ready', 'failed'} and float(job.get('finished_at', 0)) < cutoff
@@ -2106,9 +2114,10 @@ def _cleanup_expired_export_packages() -> None:
             TRANSFER_JOBS.pop(job_id, None)
         for offer_id in [
             offer_id for offer_id, offer in TRANSFER_OFFERS.items()
-            if offer.get('status') in {'ready', 'failed', 'rejected', 'expired'} and float(offer.get('finished_at', 0)) < cutoff
+            if offer.get('status') in {'ready', 'failed', 'rejected', 'expired', 'cancelled'} and float(offer.get('finished_at', 0)) < cutoff
         ]:
             TRANSFER_OFFERS.pop(offer_id, None)
+            _transfer_offer_state_path(offer_id).unlink(missing_ok=True)
     for path in package_dir.iterdir():
         if path in active_paths or path.stat().st_mtime >= cutoff:
             continue
@@ -2624,7 +2633,8 @@ def normalize_transfer_destination(destination_url: str, destination_port: int |
     raw_url = destination_url.strip()
     if not raw_url:
         raise ValueError('Enter the destination server URL or IP address.')
-    if '://' not in raw_url:
+    has_explicit_scheme = '://' in raw_url
+    if not has_explicit_scheme:
         raw_url = f'http://{raw_url}'
     parsed = urlsplit(raw_url)
     if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password:
@@ -2638,7 +2648,15 @@ def normalize_transfer_destination(destination_url: str, destination_port: int |
     # An explicit URL port is authoritative. The dialog's prefilled 7278 is a
     # fallback for bare hostnames and must not silently replace :443, a Docker
     # published host port, or any other port already entered in the URL.
-    port = parsed_port or destination_port or DEFAULT_TRANSFER_PORT
+    if parsed_port:
+        port = parsed_port
+    elif has_explicit_scheme and destination_port == DEFAULT_TRANSFER_PORT:
+        # Port 7278 is the convenient default for a bare host/IP. A complete
+        # URL with that untouched form default should retain the standard
+        # HTTP/HTTPS port; :7278 can still be stated explicitly in the URL.
+        port = None
+    else:
+        port = destination_port or DEFAULT_TRANSFER_PORT
     if port is not None and not 1 <= int(port) <= 65535:
         raise ValueError('The destination port must be between 1 and 65535.')
     hostname = f'[{parsed.hostname}]' if ':' in parsed.hostname else parsed.hostname
@@ -2757,6 +2775,7 @@ def _run_transfer_job(job_id: str) -> None:
         workspace_ids = job.get('workspace_ids')
         package_path = Path(str(job['path']))
     offer_secret = secrets.token_urlsafe(32)
+    offer_id = ''
     headers = {'X-Dashboard-Transfer-Secret': offer_secret, 'Accept': 'application/json'}
     def cancellation_requested() -> bool:
         with TRANSFER_LOCK:
@@ -2795,7 +2814,14 @@ def _run_transfer_job(job_id: str) -> None:
                     with TRANSFER_LOCK:
                         job['phase'] = f'retrying destination connection ({attempt + 2}/3)'
                     sleep(1 << attempt)
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                try:
+                    detail = str(response.json().get('detail') or '').strip()
+                except (AttributeError, TypeError, ValueError):
+                    detail = ''
+                raise ValueError(detail or f'The destination server rejected the transfer request (HTTP {response.status_code}).') from exc
             offer_id = str(response.json().get('offer_id') or '')
             if not offer_id:
                 raise ValueError('The destination server did not create a transfer offer.')
@@ -2894,11 +2920,36 @@ def _run_transfer_job(job_id: str) -> None:
                 sleep(2)
             raise TimeoutError('The destination server did not finish importing the package within 24 hours.')
     except InterruptedError as exc:
+        if offer_id:
+            try:
+                httpx.delete(
+                    _transfer_api_url(destination, f'/api/import-export/transfers/offers/{offer_id}'),
+                    headers=headers,
+                    timeout=5.0,
+                )
+            except (httpx.HTTPError, OSError):
+                pass
         with TRANSFER_LOCK:
             job.update({'status': 'cancelled', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
     except Exception as exc:
+        # Do not strand an accepted or pending destination offer when the
+        # source has definitively abandoned the job. The remote DELETE is
+        # idempotent and deliberately leaves an already completed offer alone.
+        if offer_id:
+            try:
+                httpx.delete(
+                    _transfer_api_url(destination, f'/api/import-export/transfers/offers/{offer_id}'),
+                    headers=headers,
+                    timeout=5.0,
+                )
+            except (httpx.HTTPError, OSError):
+                pass
+        if isinstance(exc, httpx.ConnectError):
+            error = f'Could not connect to {destination}. The host was resolved, but no server accepted the connection at that address and port.'
+        else:
+            error = str(exc)
         with TRANSFER_LOCK:
-            job.update({'status': 'failed', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
+            job.update({'status': 'failed', 'error': error, 'finished_at': datetime.now(timezone.utc).timestamp()})
     finally:
         package_path.unlink(missing_ok=True)
 
@@ -5865,6 +5916,9 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     if payload.get('archive_version') != ARCHIVE_VERSION:
         raise HTTPException(status_code=409, detail='The source server uses an incompatible export package version.')
     source_address = request.client.host if request.client else 'unknown'
+    source = str(payload.get('source') or 'Dashboard Analytic server')[:160]
+    content = str(payload.get('content') or kind)[:160]
+    workspaces = [str(value)[:160] for value in payload.get('workspaces', []) if value] if isinstance(payload.get('workspaces'), list) else []
     secret_hash = hashlib.sha256(secret.encode('utf-8')).hexdigest()
     # The source retries transient first-contact failures. Return the original
     # offer if its response was lost, instead of showing duplicate approvals.
@@ -5878,14 +5932,38 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
         ), None)
         if existing_offer:
             return JSONResponse({'offer_id': existing_offer['id'], 'status': existing_offer['status']})
+        # A repeated click has a fresh secret but still represents the same
+        # unreviewed request. Supersede the equivalent pending offer so retries
+        # cannot fill all admission slots while the destination is unattended.
+        reusable_offer = next((
+            existing for existing in sorted(
+                TRANSFER_OFFERS.values(),
+                key=lambda item: float(item.get('created_at') or 0),
+                reverse=True,
+            )
+            if existing.get('status') == 'pending'
+            and existing.get('source_address') == source_address
+            and existing.get('source') == source
+            and existing.get('kind') == kind
+            and existing.get('content') == content
+            and list(existing.get('workspaces') or []) == workspaces
+        ), None)
+        if reusable_offer:
+            reusable_offer.update({
+                'secret_hash': secret_hash,
+                'phase': 'awaiting approval',
+                'created_at': datetime.now(timezone.utc).timestamp(),
+            })
+            _save_transfer_offer(reusable_offer)
+            return JSONResponse({'offer_id': reusable_offer['id'], 'status': reusable_offer['status'], 'reused': True})
     offer_id = uuid4().hex
     offer = {
         'id': offer_id,
-        'source': str(payload.get('source') or 'Dashboard Analytic server')[:160],
+        'source': source,
         'source_address': source_address,
         'kind': kind,
-        'content': str(payload.get('content') or kind)[:160],
-        'workspaces': [str(value)[:160] for value in payload.get('workspaces', []) if value] if isinstance(payload.get('workspaces'), list) else [],
+        'content': content,
+        'workspaces': workspaces,
         'secret_hash': secret_hash,
         'status': 'pending',
         'phase': 'awaiting approval',
@@ -5917,6 +5995,7 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
 
 @app.get('/api/import-export/transfers/offers/{offer_id}')
 def get_transfer_offer_status(offer_id: str, request: Request) -> JSONResponse:
+    _cleanup_expired_export_packages()
     secret = request.headers.get('X-Dashboard-Transfer-Secret', '')
     with TRANSFER_LOCK:
         _refresh_persisted_transfer_offers()
@@ -5990,6 +6069,7 @@ async def receive_transfer_package(offer_id: str, request: Request) -> JSONRespo
 
 @app.get('/admin/import-export/transfers/offers')
 def list_pending_transfer_offers(user: SessionUser = Depends(super_admin_user)) -> JSONResponse:
+    _cleanup_expired_export_packages()
     with TRANSFER_LOCK:
         _refresh_persisted_transfer_offers()
         offers = [
@@ -6053,6 +6133,7 @@ def delete_recovered_transfer_package(offer_id: str, user: SessionUser = Depends
 
 @app.post('/admin/import-export/transfers/offers/{offer_id}/accept')
 def accept_transfer_offer(offer_id: str, user: SessionUser = Depends(super_admin_user)) -> JSONResponse:
+    _cleanup_expired_export_packages()
     accepted_now = False
     with TRANSFER_LOCK:
         _refresh_persisted_transfer_offers()
@@ -6075,6 +6156,7 @@ def accept_transfer_offer(offer_id: str, user: SessionUser = Depends(super_admin
 
 @app.post('/admin/import-export/transfers/offers/{offer_id}/reject')
 def reject_transfer_offer(offer_id: str, user: SessionUser = Depends(super_admin_user)) -> JSONResponse:
+    _cleanup_expired_export_packages()
     with TRANSFER_LOCK:
         _refresh_persisted_transfer_offers()
         offer = TRANSFER_OFFERS.get(offer_id)

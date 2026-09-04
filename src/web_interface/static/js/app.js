@@ -3176,10 +3176,9 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
 (() => {
   // Do not depend exclusively on a server-rendered marker: a stale outer page
   // in front of an updated Docker backend could otherwise receive offers but
-  // never start the notification poll. Non-super-admin sessions are rejected
-  // by the endpoint and stop polling after that first authorization response.
-  if (!document.body.dataset.authenticatedUser) return;
-  let offerPollingAllowed = true;
+  // never start the notification poll. The rendered role keeps other users
+  // from making an endpoint request they are not authorised to perform.
+  if (document.body.dataset.authenticatedRole !== 'super-admin') return;
   let reviewingOffer = false;
   let pollingOffers = false;
   const pollAcceptedTransfer = async (offerId) => {
@@ -3213,7 +3212,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
     }); }, 1200);
   };
   const pollIncomingTransferOffers = async () => {
-    if (!offerPollingAllowed || reviewingOffer || pollingOffers) return;
+    if (reviewingOffer || pollingOffers) return;
     pollingOffers = true;
     try {
       const response = await fetch('/admin/import-export/transfers/offers', {
@@ -3222,7 +3221,8 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         cache: 'no-store',
       });
       if (response.status === 401 || response.status === 403) {
-        offerPollingAllowed = false;
+        // A configuration swap during an import can reject one request. Keep
+        // polling so a valid super-admin page recovers without being reloaded.
         return;
       }
       if (!response.ok) return;
@@ -3234,10 +3234,16 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         ? `\nWorkspaces: ${offer.workspaces.join(', ')}`
         : '';
       const sourceAddress = offer.source_address ? ` (${offer.source_address})` : '';
-      const accepted = await showConfirmDialog(
-        `${offer.source}${sourceAddress} wants to transfer “${offer.content}” to this server.${workspaceCopy}\n\nAfter the complete package is received, it will be imported automatically and may overwrite matching configuration or workspaces.`,
-        {title: 'Incoming server transfer', confirmLabel: 'Accept transfer', cancelLabel: 'Reject'},
-      );
+      confirmOverlay?.classList.add('incoming-transfer-confirm');
+      let accepted = false;
+      try {
+        accepted = await showConfirmDialog(
+          `${offer.source}${sourceAddress} wants to transfer “${offer.content}” to this server.${workspaceCopy}\n\nAfter the complete package is received, it will be imported automatically and may overwrite matching configuration or workspaces.`,
+          {title: 'Incoming server transfer', confirmLabel: 'Accept transfer', cancelLabel: 'Reject'},
+        );
+      } finally {
+        confirmOverlay?.classList.remove('incoming-transfer-confirm');
+      }
       const action = accepted ? 'accept' : 'reject';
       const decision = await fetch(`/admin/import-export/transfers/offers/${encodeURIComponent(offer.id)}/${action}`, {
         method: 'POST',

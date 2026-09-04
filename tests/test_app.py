@@ -522,6 +522,70 @@ def test_incoming_transfer_offer_survives_process_memory_loss(client, monkeypatc
     app_module.TRANSFER_OFFERS.pop(offer_id, None)
 
 
+def test_equivalent_pending_transfer_offer_is_reused_with_the_new_secret(client, monkeypatch, tmp_path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    monkeypatch.setattr(app_module, 'export_package_dir', lambda: tmp_path)
+    payload = {
+        'source': 'Retrying Docker source', 'archive_version': 1,
+        'kind': 'slides-templates', 'content': 'Slides Templates', 'workspaces': [],
+    }
+    first_secret = 'first-retry-transfer-secret-long-enough'
+    second_secret = 'second-retry-transfer-secret-long-enough'
+    first = client.post(
+        '/api/import-export/transfers/offers',
+        headers={'X-Dashboard-Transfer-Secret': first_secret},
+        json=payload,
+    )
+    second = client.post(
+        '/api/import-export/transfers/offers',
+        headers={'X-Dashboard-Transfer-Secret': second_secret},
+        json=payload,
+    )
+    offer_id = first.json()['offer_id']
+    try:
+        assert second.status_code == 200
+        assert second.json()['offer_id'] == offer_id
+        assert second.json()['reused'] is True
+        assert client.get(
+            f'/api/import-export/transfers/offers/{offer_id}',
+            headers={'X-Dashboard-Transfer-Secret': first_secret},
+        ).status_code == 404
+        assert client.get(
+            f'/api/import-export/transfers/offers/{offer_id}',
+            headers={'X-Dashboard-Transfer-Secret': second_secret},
+        ).status_code == 200
+    finally:
+        app_module.TRANSFER_OFFERS.pop(offer_id, None)
+
+
+def test_persisted_pending_transfer_offer_expires_after_approval_window(client, monkeypatch, tmp_path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    monkeypatch.setattr(app_module, 'export_package_dir', lambda: tmp_path)
+    secret = 'expiring-transfer-offer-secret-long-enough'
+    response = client.post(
+        '/api/import-export/transfers/offers',
+        headers={'X-Dashboard-Transfer-Secret': secret},
+        json={
+            'source': 'Expiring source', 'archive_version': 1,
+            'kind': 'slides-templates', 'content': 'Slides Templates', 'workspaces': [],
+        },
+    )
+    offer_id = response.json()['offer_id']
+    offer = app_module.TRANSFER_OFFERS[offer_id]
+    offer['created_at'] = time.time() - app_module.TRANSFER_OFFER_TTL.total_seconds() - 1
+    app_module._save_transfer_offer(offer)
+    app_module.TRANSFER_OFFERS.pop(offer_id)
+    try:
+        app_module._cleanup_expired_export_packages()
+        assert app_module.TRANSFER_OFFERS[offer_id]['status'] == 'expired'
+        persisted = json.loads(app_module._transfer_offer_state_path(offer_id).read_text(encoding='utf-8'))
+        assert persisted['status'] == 'expired'
+    finally:
+        app_module.TRANSFER_OFFERS.pop(offer_id, None)
+
+
 def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -606,6 +670,9 @@ def test_transfer_url_explicit_port_overrides_prefilled_default_port() -> None:
 
     assert app_module.normalize_transfer_destination('https://destination.example:8443', 7278) == 'https://destination.example:8443'
     assert app_module.normalize_transfer_destination('destination.example', 7278) == 'http://destination.example:7278'
+    assert app_module.normalize_transfer_destination('https://destination.example', 7278) == 'https://destination.example'
+    assert app_module.normalize_transfer_destination('http://destination.example', 7278) == 'http://destination.example'
+    assert app_module.normalize_transfer_destination('https://destination.example', 8443) == 'https://destination.example:8443'
 
 
 def test_admin_export_and_transfer_are_limited_to_templates_and_accessible_workspaces(client, monkeypatch) -> None:
