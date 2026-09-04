@@ -24,6 +24,8 @@ from pptx.enum.text import MSO_AUTO_SIZE
 from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 from pptx.util import Inches, Pt
 
+from src.utils.fonts import load_image_font
+
 
 TEMPLATE_NAMES = {
     "nsa": "Template_CDR_analysis.pptx",
@@ -851,11 +853,7 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.ImageFont:
-    path = "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf"
-    try:
-        return ImageFont.truetype(path, size)
-    except OSError:
-        return ImageFont.load_default()
+    return load_image_font(size, bold)
 
 
 def _column(frame: pd.DataFrame, candidates: Iterable[str]) -> str | None:

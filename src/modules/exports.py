@@ -12,6 +12,8 @@ from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
+from src.utils.fonts import load_image_font
+
 POWERPOINT_EXPORT_VERSION = "2026-07-14-v8"
 PPT_WIDTH_IN = 13.333
 PPT_HEIGHT_IN = 7.5
@@ -56,17 +58,7 @@ def _rgb(hex_color: str) -> RGBColor:
 
 
 def _load_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
-    candidates = [
-        "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
-        "/System/Library/Fonts/Helvetica.ttc",
-        "/System/Library/Fonts/SFNS.ttf",
-    ]
-    for candidate in candidates:
-        try:
-            return ImageFont.truetype(candidate, size=size)
-        except OSError:
-            continue
-    return ImageFont.load_default()
+    return load_image_font(size, bold)
 
 
 def _format_label(value: str) -> str:

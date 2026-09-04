@@ -24,4 +24,12 @@ __pycache__/
 # Workflows de GitHub
 .github/
 
+# Runtime data and development-only files are never copied by the Dockerfile.
+# Excluding them also prevents multi-GB workspace databases from being sent to
+# the Docker daemon when validating or building locally.
+config/
+data/
+dist/
+tests/
+.idea/
 
