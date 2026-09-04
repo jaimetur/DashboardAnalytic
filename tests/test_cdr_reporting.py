@@ -685,6 +685,27 @@ def test_hierarchical_grouping_keeps_campaign_bars_together_per_operator() -> No
     ]
 
 
+def test_campaign_aggregation_is_ordered_oldest_to_newest_for_every_chart_renderer() -> None:
+    entry = CatalogEntry(
+        5, 'Data failures', '', '', '', 'CDR-Data', 'Test_Result',
+        '100% Stacked Vertical Bars', '', '', 'Test_Name', 'Operator × Campaign',
+    )
+    frame = pd.DataFrame({
+        'Test_Name': ['FDFS', 'FDFS', 'FDFS', 'FDFS'],
+        'Operator': ['EE', 'VF', 'EE', 'VF'],
+        'Campaign': ['UK_Q2_2026', 'UK_Q2_2026', 'UK_Q1_2026', 'UK_Q1_2026'],
+        'Test_Result': ['Completed'] * 4,
+    })
+
+    grouped, _, _ = _apply_catalog_grouping(frame, entry, False, 'Test_Result')
+    keys = _hierarchical_unique_keys(grouped, ['__catalog_column_0', '__catalog_column_1'])
+
+    assert keys == [
+        ('EE', '2026-Q1'), ('EE', '2026-Q2'),
+        ('VF', '2026-Q1'), ('VF', '2026-Q2'),
+    ]
+
+
 def test_nsa_speech_catalogue_filters_produce_samples_and_use_latest_campaign() -> None:
     entries = load_catalog_csv(Path(__file__).parent / 'fixtures' / 'NSA Slide Template.csv', 'nsa')
     speech = pd.DataFrame({

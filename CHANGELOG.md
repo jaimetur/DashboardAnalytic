@@ -20,6 +20,7 @@
 - Accelerated repeated multi-platform Docker builds with a stable shared BuildKit cache and isolated Python dependencies from font/timezone package changes, preventing unnecessary slow ARM64 `pip` reinstalls.
 - Added an `Executed by` filter after `User` in App Logs, including preserved filter state and automatic option updates during live refreshes.
 - Unified the inactive Workspace, E2E Dashboard, E2E Reporting and Chart Builder tabs with the Chart Builder palette while preserving each module's existing active colour.
+- Ordered Campaign aggregation values chronologically from the oldest to the newest across every shared chart renderer, independently of dataset ingestion order.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.

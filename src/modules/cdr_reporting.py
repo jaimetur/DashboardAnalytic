@@ -1091,7 +1091,10 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         requested = explicit_dimension_values.get(normalized_dimension)
         if requested:
             if normalized_dimension == "campaign":
-                requested = [_campaign_display_value(value) for value in requested]
+                requested = sorted(
+                    dict.fromkeys(_campaign_display_value(value) for value in requested),
+                    key=_campaign_sort_key,
+                )
             elif normalized_dimension == "operator":
                 requested = [_normalise_report_operator(value) for value in requested]
             configured_dimension_values[target] = list(dict.fromkeys(requested))
@@ -1141,6 +1144,35 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         primary: row_spec.dimensions,
         series: column_spec.dimensions,
     }
+    # Source tables are commonly appended newest campaign first. Whenever
+    # Campaign participates in either aggregation axis, establish one shared
+    # hierarchy order here so every chart grammar sees oldest -> newest while
+    # retaining the first-seen order of all non-temporal dimensions.
+    hierarchy = [
+        *zip(row_display_columns, row_spec.dimensions, strict=True),
+        *zip(column_display_columns, column_spec.dimensions, strict=True),
+    ]
+    campaign_columns = [
+        column for column, dimension in hierarchy
+        if _normalise_catalog_name(dimension) == "campaign"
+    ]
+    needs_campaign_sort = any(
+        (observed := frame[column].drop_duplicates().tolist()) != sorted(observed, key=_campaign_sort_key)
+        for column in campaign_columns
+    ) if not frame.empty else False
+    if needs_campaign_sort:
+        sort_columns: list[str] = []
+        for index, (column, dimension) in enumerate(hierarchy):
+            values = frame[column].drop_duplicates().tolist()
+            if _normalise_catalog_name(dimension) == "campaign":
+                values = sorted(values, key=_campaign_sort_key)
+            ranks = {value: rank for rank, value in enumerate(values)}
+            sort_column = f"__catalog_sort_{index}"
+            frame[sort_column] = frame[column].map(ranks)
+            sort_columns.append(sort_column)
+        preserved_attrs = frame.attrs.copy()
+        frame = frame.sort_values(sort_columns, kind="stable").drop(columns=sort_columns)
+        frame.attrs = preserved_attrs
     return frame, primary, series
 
 
@@ -2314,7 +2346,7 @@ def _render_scatter(title: str, frame: pd.DataFrame, group: str | None, metric: 
     group_keys = [(str(label),) for label in data[group].drop_duplicates().tolist()]
     group_colours = _series_colours(group_keys, [group], data)
     legend_items: list[tuple[str, str, int]] = []
-    for index, (label, subset) in enumerate(data.groupby(group)):
+    for index, (label, subset) in enumerate(data.groupby(group, sort=False)):
         for x_value, y_value in subset[[x_metric, metric]].itertuples(index=False):
             x = left + (x_value - x_low) / (x_high - x_low) * width; y = top + height - (y_value - y_low) / (y_high - y_low) * height
             draw.ellipse((x - 4, y - 4, x + 4, y + 4), fill=group_colours.get((str(label),), _colour(label, index)))
@@ -2347,7 +2379,7 @@ def _render_mean_column(
     data = frame[[*axis_columns, metric]].copy()
     data.attrs = frame.attrs.copy()
     data[metric] = pd.to_numeric(data[metric], errors="coerce")
-    aggregate = data.dropna().groupby(axis_columns, dropna=False)[metric]
+    aggregate = data.dropna().groupby(axis_columns, dropna=False, sort=False)[metric]
     means = aggregate.median() if aggregation == "median" else aggregate.mean()
     if means.empty:
         return _empty_chart(title)
@@ -2402,9 +2434,9 @@ def _render_table(title: str, frame: pd.DataFrame, group: str | None, series: st
         return _empty_chart(title)
     has_series = bool(series) and not data[series].fillna("(all)").astype(str).eq("(all)").all()
     if has_series:
-        table = data.pivot_table(index=group, columns=series, values=metric, aggfunc="mean")
+        table = data.pivot_table(index=group, columns=series, values=metric, aggfunc="mean", sort=False)
     else:
-        table = data.groupby(group)[metric].mean().to_frame("Value")
+        table = data.groupby(group, sort=False)[metric].mean().to_frame("Value")
     image, draw = _canvas(title)
     headers = [str(table.index.name or "Category")] + [str(value) for value in table.columns]
     rows = [(str(index), *["" if pd.isna(value) else f"{float(value):.2f}" for value in values]) for index, values in table.head(18).iterrows()]
