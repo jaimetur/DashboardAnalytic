@@ -9,12 +9,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.txt ./requirements.txt
+# Keep the comparatively expensive, architecture-specific Python dependency
+# layer independent from OS presentation packages. A font or timezone change
+# must not force pip to run again under ARM64 emulation.
+RUN pip install --no-cache-dir -r requirements.txt
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tzdata fonts-liberation \
     && ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime \
     && echo ${TZ} > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir -r requirements.txt
 
 # Keep dependency layers cacheable, but make every application layer belong to
 # one exact Git commit. This also leaves a directly inspectable revision inside

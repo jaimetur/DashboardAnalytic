@@ -136,8 +136,10 @@ jobs:
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Use one explicit scope across commits and workflow entry points so
+          # both platform dependency layers survive application-only changes.
+          cache-from: type=gha,scope=dashboard-analytic-multiplatform-v1
+          cache-to: type=gha,mode=max,scope=dashboard-analytic-multiplatform-v1
 
       - name: Prepare Docker package
         run: |
