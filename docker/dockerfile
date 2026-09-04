@@ -16,6 +16,13 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Keep dependency layers cacheable, but make every application layer belong to
+# one exact Git commit. This also leaves a directly inspectable revision inside
+# the running container instead of relying on mutable tags such as `latest`.
+ARG SOURCE_REVISION=local
+LABEL org.opencontainers.image.revision="${SOURCE_REVISION}"
+RUN printf '%s\n' "${SOURCE_REVISION}" > /app/.source-revision
+
 COPY src ./src
 COPY assets ./assets
 COPY help ./help
