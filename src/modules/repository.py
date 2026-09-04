@@ -1936,6 +1936,44 @@ class Repository:
                 (offer_id, json.dumps(offer, sort_keys=True, default=str), updated_at),
             )
 
+    def replace_pending_transfer_offers(self, offer: dict[str, Any]) -> list[str]:
+        """Atomically supersede same-source pending offers and insert a new one."""
+        source_address = str(offer.get('source_address') or '')
+        now = float(offer.get('created_at') or datetime.now().timestamp())
+        superseded: list[str] = []
+        with self.global_connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            rows = conn.execute("SELECT id, payload_json FROM transfer_offers").fetchall()
+            for row in rows:
+                try:
+                    existing = json.loads(row['payload_json'])
+                except (TypeError, json.JSONDecodeError):
+                    continue
+                if (
+                    not isinstance(existing, dict)
+                    or existing.get('status') != 'pending'
+                    or str(existing.get('source_address') or '') != source_address
+                ):
+                    continue
+                existing.update({
+                    'status': 'cancelled',
+                    'phase': 'superseded by newer request',
+                    'error': 'This transfer offer was replaced by a newer request from the same server.',
+                    'finished_at': now,
+                    'updated_at': now,
+                })
+                existing_id = str(row['id'])
+                conn.execute(
+                    "UPDATE transfer_offers SET payload_json = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(existing, sort_keys=True, default=str), now, existing_id),
+                )
+                superseded.append(existing_id)
+            conn.execute(
+                "INSERT OR REPLACE INTO transfer_offers (id, payload_json, updated_at) VALUES (?, ?, ?)",
+                (str(offer['id']), json.dumps(offer, sort_keys=True, default=str), now),
+            )
+        return superseded
+
     def list_transfer_offers(self) -> list[dict[str, Any]]:
         with self.global_connection() as conn:
             rows = conn.execute(

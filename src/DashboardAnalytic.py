@@ -5975,24 +5975,6 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
             })
             _save_transfer_offer(reusable_offer)
             return JSONResponse({'offer_id': reusable_offer['id'], 'status': reusable_offer['status'], 'reused': True})
-        # A source UI can have only one active approval handshake. Persisted
-        # pending requests deliberately survive Docker restarts, but older
-        # requests for different content must not accumulate until the source
-        # admission limit is exhausted. Supersede them when that same server
-        # submits a fresh request.
-        now = datetime.now(timezone.utc).timestamp()
-        for existing in TRANSFER_OFFERS.values():
-            if (
-                existing.get('status') == 'pending'
-                and existing.get('source_address') == source_address
-            ):
-                existing.update({
-                    'status': 'cancelled',
-                    'phase': 'superseded by newer request',
-                    'error': 'This transfer offer was replaced by a newer request from the same server.',
-                    'finished_at': now,
-                })
-                _save_transfer_offer(existing)
     offer_id = uuid4().hex
     offer = {
         'id': offer_id,
@@ -6007,15 +5989,11 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
         'progress': 0.0,
         'created_at': datetime.now(timezone.utc).timestamp(),
     }
+    # Do this as one SQLite write transaction. Process-local locks cannot
+    # protect the handshake when Docker runs multiple application workers.
     with TRANSFER_LOCK:
-        pending_from_source = sum(
-            1 for existing in TRANSFER_OFFERS.values()
-            if existing.get('status') == 'pending' and existing.get('source_address') == source_address
-        )
-        if pending_from_source >= 5:
-            raise HTTPException(status_code=429, detail='Too many pending transfer offers from this server.')
-        TRANSFER_OFFERS[offer_id] = offer
-        _save_transfer_offer(offer)
+        repository.replace_pending_transfer_offers(offer)
+        _refresh_persisted_transfer_offers()
     try:
         repository.add_log('system', 'incoming_server_transfer_offer_received', json.dumps({
             'offer_id': offer_id,
