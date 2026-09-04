@@ -3570,7 +3570,11 @@ if (appLogsPanel) {
   const actionFilter = appLogsPanel.querySelector('[data-app-log-action-filter]');
   const clearFilters = appLogsPanel.querySelector('[data-app-log-clear-filters]');
   const noResults = appLogsPanel.querySelector('[data-app-log-no-results]');
-  const rows = Array.from(appLogsPanel.querySelectorAll('[data-app-log-row]'));
+  const body = appLogsPanel.querySelector('[data-app-log-body]');
+  const count = appLogsPanel.querySelector('[data-app-log-count]');
+  const refreshButton = appLogsPanel.querySelector('[data-app-log-refresh]');
+  let rows = Array.from(appLogsPanel.querySelectorAll('[data-app-log-row]'));
+  let refreshInProgress = false;
   const restoreSelectValue = (control, value) => {
     if (!control || !value) return;
     if (Array.from(control.options).some((option) => option.value === value)) control.value = value;
@@ -3608,6 +3612,54 @@ if (appLogsPanel) {
     });
     if (noResults) noResults.hidden = visibleCount > 0 || rows.length === 0;
   };
+  const replaceSelectOptions = (control, values, allLabel) => {
+    if (!control) return;
+    const selected = control.value || 'all';
+    control.replaceChildren(new Option(allLabel, 'all'), ...values.map((value) => new Option(value, value)));
+    control.value = Array.from(control.options).some((option) => option.value === selected) ? selected : 'all';
+  };
+  const createAppLogRow = (log) => {
+    const row = document.createElement('tr');
+    row.dataset.appLogRow = '';
+    row.dataset.appLogUser = String(log.username || '').toLocaleLowerCase();
+    row.dataset.appLogDate = String(log.date || '');
+    row.dataset.appLogType = String(log.log_type || 'Info');
+    row.dataset.appLogAction = String(log.action || '');
+    const values = [log.id, log.created_at, log.username];
+    values.forEach((value) => { const cell = document.createElement('td'); cell.textContent = String(value ?? ''); row.append(cell); });
+    const typeCell = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = `log-type-badge log-type-${String(log.log_type || 'Info').toLocaleLowerCase()}`;
+    badge.textContent = String(log.log_type || 'Info');
+    typeCell.append(badge);
+    row.append(typeCell);
+    const actionCell = document.createElement('td'); actionCell.textContent = String(log.action || ''); row.append(actionCell);
+    const detailsCell = document.createElement('td');
+    const details = document.createElement('code'); details.textContent = String(log.details_text || ''); detailsCell.append(details); row.append(detailsCell);
+    return row;
+  };
+  const refreshAppLogs = async () => {
+    if (refreshInProgress || !body || document.hidden) return;
+    refreshInProgress = true;
+    if (refreshButton) refreshButton.disabled = true;
+    try {
+      const response = await fetch('/api/app-logs', {headers: {'Accept': 'application/json'}, cache: 'no-store'});
+      if (!response.ok) throw new Error('Unable to refresh App Logs.');
+      const payload = await response.json();
+      const logs = Array.isArray(payload.logs) ? payload.logs : [];
+      rows = logs.map(createAppLogRow);
+      body.replaceChildren(...rows, ...(noResults ? [noResults] : []));
+      replaceSelectOptions(userFilter, [...new Set(logs.map((log) => String(log.username || '').toLocaleLowerCase()).filter(Boolean))].sort(), 'All users');
+      replaceSelectOptions(actionFilter, [...new Set(logs.map((log) => String(log.action || '')).filter(Boolean))].sort(), 'All actions');
+      if (count) count.textContent = `${logs.length} entries`;
+      syncAppLogRows();
+    } catch (_error) {
+      // Keep the last successfully rendered snapshot if a polling request fails.
+    } finally {
+      refreshInProgress = false;
+      if (refreshButton) refreshButton.disabled = false;
+    }
+  };
   [userFilter, dateFilter, typeFilter, actionFilter].filter(Boolean).forEach((filter) => filter.addEventListener('change', () => {
     persistAppLogFilters();
     syncAppLogRows();
@@ -3620,6 +3672,8 @@ if (appLogsPanel) {
     try { window.localStorage.removeItem(appLogFiltersStorageKey); } catch (_error) { /* Ignore unavailable browser storage. */ }
     syncAppLogRows();
   });
+  refreshButton?.addEventListener('click', refreshAppLogs);
+  window.setInterval(refreshAppLogs, 5000);
   syncAppLogRows();
 }
 

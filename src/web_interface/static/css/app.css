@@ -973,6 +973,9 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .app-logs-filters input, .app-logs-filters select { min-width: 0; width: 100%; }
 .app-logs-clear-button { min-height: 2.7rem; padding: 0.55rem 0.85rem; background: linear-gradient(145deg, #fff0aa, #f3cc4e); border-color: rgba(174, 124, 14, 0.52); color: #684707; box-shadow: 0 8px 18px rgba(190, 140, 17, 0.16); white-space: nowrap; }
 .app-logs-clear-button:hover:not(:disabled) { background: linear-gradient(145deg, #f8df7a, #e2ad24); border-color: rgba(139, 93, 0, 0.64); color: #493000; }
+.app-logs-heading-actions { display: flex; align-items: center; gap: 0.65rem; }
+.app-logs-refresh-button { min-height: 2.35rem; padding: 0.45rem 0.9rem; background: linear-gradient(145deg, #238d88, #0b7a75); border-color: rgba(5, 91, 87, 0.48); color: #fff; }
+.app-logs-refresh-button:hover:not(:disabled) { background: linear-gradient(145deg, #177d78, #075f5b); }
 .app-logs-table code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .table-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
 .danger-button { background: linear-gradient(135deg, #c65544, #df7758); }

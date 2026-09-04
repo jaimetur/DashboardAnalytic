@@ -3770,6 +3770,12 @@ def app_logs(request: Request, user: SessionUser = Depends(current_user)) -> HTM
     )
 
 
+@app.get('/api/app-logs')
+def app_logs_data(user: SessionUser = Depends(current_user)) -> JSONResponse:
+    """Return current workspace events for incremental App Logs refreshes."""
+    return JSONResponse({'logs': build_app_logs()})
+
+
 @app.get('/dashboard', response_class=HTMLResponse)
 def dashboard(
     request: Request,

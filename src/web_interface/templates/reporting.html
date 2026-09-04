@@ -26,17 +26,17 @@
       <form action="/reporting/netcheck-cdr" method="post" class="form-grid" data-report-job-form>
       <label>CDR Data <span class="form-label-hint">Select one or more</span>
         <select name="data_dataset_id" required multiple size="4" aria-describedby="cdr-selection-help">
-          {% for dataset in data_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}" data-uploaded-at="{{ dataset.uploaded_at }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
+          {% for dataset in data_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}" data-uploaded-at="{{ dataset.uploaded_at }}"{% if loop.index <= 2 %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
       <label>CDR Voice <span class="form-label-hint">Select one or more</span>
         <select name="voice_dataset_id" required multiple size="4" aria-describedby="cdr-selection-help">
-          {% for dataset in voice_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}" data-uploaded-at="{{ dataset.uploaded_at }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
+          {% for dataset in voice_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}" data-uploaded-at="{{ dataset.uploaded_at }}"{% if loop.index <= 2 %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
       <label>CDR Speech <span class="form-label-hint">Select one or more</span>
         <select name="speech_dataset_id" required multiple size="4" aria-describedby="cdr-selection-help">
-          {% for dataset in speech_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}" data-uploaded-at="{{ dataset.uploaded_at }}"{% if loop.first %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
+          {% for dataset in speech_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}" data-uploaded-at="{{ dataset.uploaded_at }}"{% if loop.index <= 2 %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
       <label>Technology
@@ -335,6 +335,20 @@
         null,
       );
     };
+    const retainLatestSelectedCdrPerType = () => {
+      if (scope.value !== 'multivendor') return;
+      cdrSelectors.forEach((select) => {
+        const selected = Array.from(select.selectedOptions);
+        if (selected.length <= 1) return;
+        const latest = selected.reduce(
+          (current, option) => !current || uploadedRecency(option) > uploadedRecency(current) ? option : current,
+          null,
+        );
+        selected.forEach((option) => { option.selected = option === latest; });
+        select.dispatchEvent(new Event('change', {bubbles: true}));
+      });
+    };
+    scope.addEventListener('change', retainLatestSelectedCdrPerType);
     const hasMulticampaignMultivendorSelection = () => (
       scope?.value === 'multivendor' && selectedCdrsByType().some(({options}) => options.length > 1)
     );

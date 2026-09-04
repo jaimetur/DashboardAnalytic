@@ -1884,7 +1884,7 @@ def test_dashboard_ignores_non_ready_dataset_id_in_selector_flow(client) -> None
     assert 'option value="2"' not in selector_fragment
 
 
-def test_reporting_preselects_latest_ready_cdr_of_each_type(client) -> None:
+def test_reporting_preselects_two_latest_ready_cdrs_of_each_type(client) -> None:
     login(client)
     uploads = [
         ('old-data.csv', 'data', b'Mean_Data_Rate,RAT_A\n10,ENDC\n'),
@@ -1908,10 +1908,15 @@ def test_reporting_preselects_latest_ready_cdr_of_each_type(client) -> None:
 
     assert 'value="3" data-vendor-mapped="false" data-uploaded-at=' in data_select
     assert 'selected>latest-data.csv' in data_select
+    assert 'value="1" data-vendor-mapped="false" data-uploaded-at=' in data_select
+    assert 'selected>old-data.csv' in data_select
+    assert data_select.count(' selected>') == 2
     assert 'value="2" data-vendor-mapped="false" data-uploaded-at=' in voice_select
     assert 'selected>voice.csv' in voice_select
+    assert voice_select.count(' selected>') == 1
     assert 'value="4" data-vendor-mapped="false" data-uploaded-at=' in speech_select
     assert 'selected>speech.csv' in speech_select
+    assert speech_select.count(' selected>') == 1
     assert 'if (active) catalogue.value = active.value;' in reporting.text
 
 
@@ -3193,10 +3198,15 @@ def test_app_logs_combines_operational_and_audit_activity(client) -> None:
     assert "Error only" in response.text
     assert "All users" in response.text
     assert "All actions" in response.text
+    assert 'data-app-log-refresh' in response.text
+    assert 'data-app-log-count' in response.text
     assert "Type" in response.text
     assert "Error" in response.text
     assert "Synthetic processing failure" in response.text
     assert "change_password" in response.text
+
+    payload = client.get('/api/app-logs').json()
+    assert any(log['action'] == 'process_dataset_failed' for log in payload['logs'])
 
 
 def test_app_logs_normalises_user_case_and_records_login_outcomes(client) -> None:
