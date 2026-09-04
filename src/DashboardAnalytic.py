@@ -2980,12 +2980,12 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         ],
     ]
     if user.role != 'super-admin':
+        # Do not leave a forbidden disabled option selected by default. A
+        # disabled selected option is omitted from FormData by browsers, so an
+        # admin's first export/transfer request had no export_target at all.
         export_options = [
-            {
-                **option,
-                'disabled': option['value'] != 'slides-templates' and not option['value'].startswith('workspace:'),
-            }
-            for option in export_options
+            option for option in export_options
+            if option['value'] == 'slides-templates' or option['value'].startswith('workspace:')
         ]
     admin_users = [
         {**dict(row), 'created_at': format_local_timestamp(row['created_at']), 'workspace_ids': repository.list_user_workspace_ids(int(row['id']))}

@@ -573,7 +573,7 @@ def test_admin_export_and_transfer_are_limited_to_templates_and_accessible_works
     assert 'data-panel-state-key="admin:import-export"' in panel.text
     assert 'Slides Templates</option>' in panel.text
     assert 'Transfer to other server' in panel.text
-    assert 'value="config" disabled>Config</option>' in panel.text
+    assert 'value="config"' not in panel.text
     assert 'value="workspace:default" >Workspace: Default</option>' in panel.text
     assert f'value="workspace:{restricted.id}"' not in panel.text
 
