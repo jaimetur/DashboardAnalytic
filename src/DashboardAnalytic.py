@@ -5966,7 +5966,6 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
             if (
                 existing.get('status') == 'pending'
                 and existing.get('source_address') == source_address
-                and existing.get('source') == source
             ):
                 existing.update({
                     'status': 'cancelled',

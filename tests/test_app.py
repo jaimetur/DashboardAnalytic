@@ -570,7 +570,7 @@ def test_new_transfer_offer_supersedes_old_pending_requests_from_same_server(cli
                 '/api/import-export/transfers/offers',
                 headers={'X-Dashboard-Transfer-Secret': f'superseding-transfer-secret-{index:02d}-long-enough'},
                 json={
-                    'source': 'Persistent Docker source', 'archive_version': 1,
+                    'source': f'Persistent Docker source {index}', 'archive_version': 1,
                     'kind': 'slides-templates', 'content': f'Slides Templates {index}', 'workspaces': [],
                 },
             )
