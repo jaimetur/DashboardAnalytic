@@ -150,11 +150,13 @@ def parse_catalog_filters(value: str) -> tuple[FilterCondition, ...]:
     if not value.strip():
         return ()
     conditions: list[FilterCondition] = []
-    for clause in (part.strip() for part in value.split(";") if part.strip()):
+    # A line break is also accepted as an AND separator because the template
+    # editor displays one condition per line. Semicolons remain the canonical
+    # persisted separator.
+    for clause in (part.strip() for part in re.split(r";|[\r\n]+", value) if part.strip()):
         match = re.fullmatch(r"(.+?)\s+(NOT\s+CONTAINS|NOT\s+IN|CONTAINS|IN|>=|<=|!=|=|>|<)\s+(.+)", clause, flags=re.I)
         if not match:
-            # Compatibility for the initial supplied templates. New templates must use the syntax above.
-            continue
+            raise ValueError(f"Invalid filter '{clause}': expected 'Column OP value' and a semicolon between conditions.")
         column, operator, raw_values = (part.strip() for part in match.groups())
         operator = re.sub(r"\s+", " ", operator).upper()
         # Existing quality-ratio rows describe both output states as "LQ < 1.6 vs ≥ 1.6".
@@ -164,9 +166,11 @@ def parse_catalog_filters(value: str) -> tuple[FilterCondition, ...]:
         if not column:
             raise ValueError(f"Invalid filter '{clause}': a column name is required.")
         if operator in {"IN", "NOT IN"}:
-            if not raw_values.startswith("(") or not raw_values.endswith(")"):
-                raise ValueError(f"Invalid filter '{clause}': IN values must use parentheses.")
-            values = tuple(item.strip() for item in raw_values[1:-1].split(",") if item.strip())
+            list_match = re.fullmatch(r"\(([^()]*)\)", raw_values)
+            if not list_match:
+                detail = "a semicolon is required after the closing parenthesis" if re.search(r"\)\s*\S", raw_values) else "IN values must use parentheses"
+                raise ValueError(f"Invalid filter '{clause}': {detail}.")
+            values = tuple(item.strip() for item in list_match.group(1).split(",") if item.strip())
         elif operator in {"CONTAINS", "NOT CONTAINS"}:
             # A contains condition accepts one term or a comma-separated list.
             # Parentheses are the canonical saved form for lists, but accept a
@@ -1742,12 +1746,6 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
         data["state"] = numeric_state.map(lambda value: "< 1.6" if value < threshold else "≥ 1.6")
     else:
         raw = data[state_column].astype("string").str.strip().str.casefold()
-        # SQLite/pandas sources can represent absent values as NULL, NaN,
-        # pandas <NA>, or an empty string. Exclude all of them before assigning
-        # status categories so they cannot be counted as Failed by fallback.
-        valid_state = raw.notna() & raw.ne("") & ~raw.isin({"nan", "<na>"})
-        data = data.loc[valid_state].copy()
-        raw = raw.loc[data.index]
         def status_category(value: str) -> str | None:
             return {
                 "completed": "Completed",
@@ -1756,9 +1754,6 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
             }.get(value)
 
         data["state"] = raw.map(status_category)
-        # Unknown non-empty statuses are not failures. Only the three explicit
-        # chart states participate in the percentage denominator.
-        data = data.loc[data["state"].notna()].copy()
     data = data.dropna(subset=[group, period])
     row_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_row_")]
     column_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_column_")]

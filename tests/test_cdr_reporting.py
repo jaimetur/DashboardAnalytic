@@ -406,6 +406,19 @@ def test_catalogue_filter_and_grouping_contract_is_parsed_and_applied() -> None:
     assert '__catalog_stack' not in grouped.columns
 
 
+def test_catalogue_filters_accept_lines_but_reject_a_missing_condition_separator() -> None:
+    conditions = parse_catalog_filters('Test Name CONTAINS FDFS\nTest_Result IN (Completed, Dropped, Failed)')
+    assert [condition.column for condition in conditions] == ['Test Name', 'Test_Result']
+
+    malformed = (
+        'Test Name CONTAINS FDFS;'
+        'Test_Result IN (Completed, Dropped, Failed)Operator IN (Vodafone UK, 3, EE);'
+        'G Level 4 IN (Belfast, Bristol, Cardiff, Edinburgh, London, Leeds, Sheffield);'
+    )
+    with pytest.raises(ValueError, match='semicolon is required'):
+        parse_catalog_filters(malformed)
+
+
 def test_multivendor_rendering_rewrites_operator_display_and_grouping_but_not_filters() -> None:
     entry = parse_catalog_csv(
         ','.join(CATALOG_HEADERS)
@@ -651,7 +664,7 @@ def test_status_chart_uses_nested_columns_without_a_row_grouping() -> None:
     assert hierarchy_renderer.call_args.args[3] == ['__catalog_column_0', '__catalog_column_1']
 
 
-def test_status_chart_excludes_empty_and_nan_states_from_percentage_data() -> None:
+def test_status_chart_leaves_status_row_inclusion_to_the_template_filter() -> None:
     frame = pd.DataFrame({
         'Operator': ['EE'] * 8,
         'Campaign': ['2026-Q2'] * 8,
@@ -665,8 +678,9 @@ def test_status_chart_excludes_empty_and_nan_states_from_percentage_data() -> No
 
     rendered_data = hierarchy_renderer.call_args.args[1]
     assert chart.getvalue() == b'filtered-status-chart'
-    assert rendered_data['Test_Result'].tolist() == ['Completed', 'Failed']
-    assert rendered_data['state'].tolist() == ['Completed', 'Failed']
+    assert len(rendered_data.index) == 8
+    assert rendered_data['state'].iloc[:2].tolist() == ['Completed', 'Failed']
+    assert rendered_data['state'].iloc[2:].isna().all()
 
 
 def test_status_chart_honours_selected_kpi_when_other_status_columns_exist() -> None:
@@ -687,7 +701,7 @@ def test_status_chart_honours_selected_kpi_when_other_status_columns_exist() -> 
     assert rendered_data['state'].tolist() == ['Completed', 'Failed']
 
 
-def test_status_chart_accepts_only_the_three_tableau_states() -> None:
+def test_status_chart_maps_only_the_three_tableau_states_without_filtering_rows() -> None:
     frame = pd.DataFrame({
         'Operator': ['EE'] * 8,
         'Campaign': ['2026-Q2'] * 8,
@@ -699,7 +713,9 @@ def test_status_chart_accepts_only_the_three_tableau_states() -> None:
         hierarchy_renderer.return_value = BytesIO(b'negative-statuses')
         _render_status_100('Data failures', frame, 'Operator', 'Campaign', metric='Test_Result')
 
-    assert hierarchy_renderer.call_args.args[1]['state'].tolist() == ['Failed', 'Completed']
+    states = hierarchy_renderer.call_args.args[1]['state']
+    assert states.iloc[:6].isna().all()
+    assert states.iloc[6:].tolist() == ['Failed', 'Completed']
 
 
 def test_data_cutoffs_are_excluded_from_tableau_status_denominator() -> None:

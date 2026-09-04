@@ -455,6 +455,13 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const fieldColumns = new Set(['Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend']);
   const assistedFields = new Set(['Layout', 'CDR source', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position']);
   const groupingColumns = new Set(['Rows Aggregation', 'Column Aggregation']);
+  const canonicalFilterValue = (value) => String(value || '')
+    .replace(/\u00a0/g, ' ')
+    .split(/\s*;\s*|\s*[\r\n]+\s*/)
+    .map((clause) => clause.trim())
+    .filter(Boolean)
+    .join('; ');
+  const displayedFilterValue = (value) => canonicalFilterValue(value).replace(/; /g, ';\n');
   const optionList = (field, cell) => {
     if (field === 'Layout') return suggestions.layouts || [];
     if (field === 'Chart type') return suggestions.chart_types || [];
@@ -502,7 +509,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       const value = listOperator && rawValue.includes(',') && !/^\(.+\)$/.test(rawValue) ? `(${rawValue})` : rawValue;
       return `${field} ${operator} ${value}`;
     }).filter(Boolean);
-    activeCell.textContent = clauses.join('; ');
+    activeCell.textContent = clauses.join(';\n');
   };
   const addFilterCondition = (condition = {}) => {
     if (!filterConditions || !activeCell) return;
@@ -755,11 +762,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   };
   const sharedSlideFields = ['Slide', 'Slide Tittle', 'Slide Subtittle', 'Layout'];
   const sharedValueKey = (field) => `catalogueShared${field.replace(/[^a-z0-9]+/gi, '')}`;
-  const rowValue = (row, field) => (
-    row.querySelector(`[data-catalogue-field="${field}"]`)?.textContent.trim()
-    ?? row.dataset[sharedValueKey(field)]
-    ?? ''
-  );
+  const rowValue = (row, field) => {
+    const value = row.querySelector(`[data-catalogue-field="${field}"]`)?.textContent.trim()
+      ?? row.dataset[sharedValueKey(field)]
+      ?? '';
+    return field === 'Filters' ? canonicalFilterValue(value) : value;
+  };
   const rowValues = (row) => Object.fromEntries(catalogueHeaders.map((header) => [header, rowValue(row, header)]));
   const createActionButton = (label, action, title, className = '') => {
     const button = document.createElement('button');
@@ -793,7 +801,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       cell.dataset.catalogueField = header;
       // Only a newly inserted sibling starts with blank chart fields. Rows
       // rebuilt for grouping, sorting or saving must retain every definition.
-      cell.textContent = blankChartFields && !retained.includes(header) ? '' : (source[header] || '');
+      const value = blankChartFields && !retained.includes(header) ? '' : (source[header] || '');
+      cell.textContent = header === 'Filters' ? displayedFilterValue(value) : value;
       row.append(cell);
     });
     return row;
@@ -852,13 +861,16 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     renderCatalogueRows(Array.from(body.querySelectorAll('tr')).map(rowValues));
   };
   const serialiseCatalogueContent = () => {
-    const escapeCsv = (value) => {
-      const text = String(value || '').replace(/\r?\n/g, '\\n');
+    const escapeCsv = (value, preserveLineBreaks = false) => {
+      const text = preserveLineBreaks ? String(value || '') : String(value || '').replace(/\r?\n/g, '\\n');
       return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
     };
     normaliseCatalogueRows();
     const rows = Array.from(table.querySelectorAll('tbody tr')).map((row) => (
-      catalogueHeaders.map((header) => escapeCsv(rowValue(row, header))).join(',')
+      catalogueHeaders.map((header) => {
+        const value = rowValue(row, header);
+        return escapeCsv(header === 'Filters' ? displayedFilterValue(value) : value, header === 'Filters');
+      }).join(',')
     ));
     return [catalogueHeaders.map(escapeCsv).join(','), ...rows].join('\n');
   };

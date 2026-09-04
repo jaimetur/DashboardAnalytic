@@ -3,9 +3,9 @@ Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type
 2,Executive Summary,,Title Only,,,,Transition Slide,,,,,Top
 3,Completed Call Ratio,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,"Call Family IN (VoLTE, MultiRAB, WhatsApp); Operator IN (Vodafone UK, 3, EE)",Call Family,Operator × Campaign,,Top
 4,Voice failures per Q/city,,Title and 1 column + Comments,,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,"Call Family IN (VoLTE, MultiRAB, WhatsApp); Call_Status IN (Failed, Dropped)",Call Family × G Level 4,Operator × Campaign,,Top
-5,Data failure,,Title and 2 rows + Comments right,,CDR-Data,Test_Result,100% Stacked Vertical Bars,"Test Family IN (httpBrowser, htttpBrowser, httpTransfer, YouTube, VideoStreaming)",Type_of_Test,Operator × Campaign,,Top
-5,Data failure,,Title and 2 rows + Comments right,,CDR-Data,Test_Result,100% Stacked Vertical Bars,Test_Name CONTAINS FDFS,Type_of_Test,Operator × Campaign,,Top
-6,Data failures - FDFS test,,Title and 1 column + Comments,,CDR-Data,Test_Result,100% Stacked Vertical Bars,Test_Name CONTAINS FDFS,Test Family × Test Name × Direction,Operator × Campaign,,Top
+5,Data failure,,Title and 2 rows + Comments right,,CDR-Data,Test_Result,100% Stacked Vertical Bars,"Test Family IN (httpBrowser, htttpBrowser, httpTransfer, YouTube, VideoStreaming); Test_Result IN (Completed, Dropped, Failed)",Type_of_Test,Operator × Campaign,,Top
+5,Data failure,,Title and 2 rows + Comments right,,CDR-Data,Test_Result,100% Stacked Vertical Bars,"Test_Name CONTAINS FDFS; Test_Result IN (Completed, Dropped, Failed)",Type_of_Test,Operator × Campaign,,Top
+6,Data failures - FDFS test,,Title and 1 column + Comments,,CDR-Data,Test_Result,100% Stacked Vertical Bars,"Test_Name CONTAINS FDFS; Test_Result IN (Completed, Dropped, Failed)",Test Family × Test Name × Direction,Operator × Campaign,,Top
 7,POLQA AVG MOS (Multirab&volte),,Title and 2 columns + Comments,,CDR-Speech,LQ,CDF Line,"Call_Status = Completed; Call Family IN (VoLTE, MultiRAB); Operator IN (Vodafone UK, 3, EE)",Operator,Campaign,,Top
 7,POLQA AVG MOS (Multirab&volte),,Title and 2 columns + Comments,,CDR-Speech,LQ,Average Vertical Bars,"Call_Status = Completed; Call Family IN (VoLTE, MultiRAB); Operator IN (Vodafone UK, 3, EE)",Operator,Campaign,,Top
 8,POLQA AVG MOS (WhatsApp),,Title and 3 columns + Comments,,CDR-Speech,LQ,CDF Line,"Call_Status = Completed; Call Family = WhatsApp; Operator IN (Vodafone UK, 3, EE)",Operator,Campaign,,Top
