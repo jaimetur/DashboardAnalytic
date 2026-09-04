@@ -455,6 +455,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const fieldColumns = new Set(['Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend']);
   const assistedFields = new Set(['Layout', 'CDR source', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position']);
   const groupingColumns = new Set(['Rows Aggregation', 'Column Aggregation']);
+  const validationAlert = document.querySelector('[data-catalogue-validation-alert]');
   const canonicalFilterValue = (value) => String(value || '')
     .replace(/\u00a0/g, ' ')
     .split(/\s*;\s*|\s*[\r\n]+\s*/)
@@ -462,6 +463,27 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     .filter(Boolean)
     .join('; ');
   const displayedFilterValue = (value) => canonicalFilterValue(value).replace(/; /g, ';\n');
+  const renderFilterCell = (cell, value) => {
+    const clauses = canonicalFilterValue(value).split('; ').filter(Boolean);
+    cell.replaceChildren(...clauses.map((clause, index) => {
+      const line = document.createElement('div');
+      line.className = 'catalogue-filter-cell-line';
+      line.textContent = `${clause}${index < clauses.length - 1 ? ';' : ''}`;
+      return line;
+    }));
+  };
+  const filterValueIsValid = (value) => canonicalFilterValue(value).split('; ').filter(Boolean).every((clause) => {
+    const match = clause.match(/^(.+?)\s+(NOT\s+CONTAINS|NOT\s+IN|CONTAINS|IN|>=|<=|!=|=|>|<)\s+(.+)$/i);
+    if (!match) return false;
+    const operator = match[2].replace(/\s+/g, ' ').toUpperCase();
+    return !['IN', 'NOT IN'].includes(operator) || /^\([^()]+\)$/.test(match[3].trim());
+  });
+  const refreshFilterValidationAlert = () => {
+    if (!validationAlert) return;
+    const filtersAreValid = Array.from(table.querySelectorAll('[data-catalogue-field="Filters"]'))
+      .every((cell) => !rowValue(cell.closest('tr'), 'Filters') || filterValueIsValid(rowValue(cell.closest('tr'), 'Filters')));
+    if (filtersAreValid) validationAlert.hidden = true;
+  };
   const optionList = (field, cell) => {
     if (field === 'Layout') return suggestions.layouts || [];
     if (field === 'Chart type') return suggestions.chart_types || [];
@@ -509,7 +531,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       const value = listOperator && rawValue.includes(',') && !/^\(.+\)$/.test(rawValue) ? `(${rawValue})` : rawValue;
       return `${field} ${operator} ${value}`;
     }).filter(Boolean);
-    activeCell.textContent = clauses.join(';\n');
+    renderFilterCell(activeCell, clauses.join('; '));
+    refreshFilterValidationAlert();
   };
   const addFilterCondition = (condition = {}) => {
     if (!filterConditions || !activeCell) return;
@@ -802,7 +825,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       // Only a newly inserted sibling starts with blank chart fields. Rows
       // rebuilt for grouping, sorting or saving must retain every definition.
       const value = blankChartFields && !retained.includes(header) ? '' : (source[header] || '');
-      cell.textContent = header === 'Filters' ? displayedFilterValue(value) : value;
+      if (header === 'Filters') renderFilterCell(cell, value);
+      else cell.textContent = value;
       row.append(cell);
     });
     return row;
@@ -1195,6 +1219,9 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const cell = selectedCellFromEvent(event);
     if (cell) selectCell(cell);
   });
+  table.addEventListener('input', (event) => {
+    if (event.target.closest?.('[data-catalogue-field="Filters"]')) refreshFilterValidationAlert();
+  });
   document.addEventListener('pointerdown', (event) => {
     if (!selectedCellFromEvent(event) && !helper.contains(event.target)) hideCellAssistance();
   });
@@ -1232,7 +1259,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       activeCell.textContent = displayChartType(selected[0]);
     } else if (field === 'Filters') {
       const clauses = selected.map((value) => `${value} = `).join('; ');
-      activeCell.textContent = current ? `${current}; ${clauses}` : clauses;
+      renderFilterCell(activeCell, current ? `${current}; ${clauses}` : clauses);
     } else if (field === 'Legend') {
       activeCell.textContent = selected.join(', ');
     } else {

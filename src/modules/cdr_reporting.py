@@ -230,6 +230,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
     if _canonical_catalog_headers(fieldnames) not in accepted_schemas:
         raise ValueError("The report template must use exactly these columns: " + ", ".join(CATALOG_HEADERS))
     entries: list[CatalogEntry] = []
+    chart_positions: defaultdict[int, int] = defaultdict(int)
     for line_number, row in enumerate(reader, start=2):
         row = {
             CATALOG_HEADER_ALIASES.get(_catalogue_header_key(key), key): value
@@ -258,6 +259,9 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             grouping_rows=((row.get("Rows Aggregation") or row.get("Grouping_Rows") or "").strip() or " × ".join(legacy_dimensions[:1])),
             grouping_columns=((row.get("Column Aggregation") or row.get("Grouping_Columns") or "").strip() or " × ".join(legacy_dimensions[1:])),
         )
+        if entry.source_kind:
+            chart_positions[entry.slide] += 1
+        editor_location = f"Slide {entry.slide} Chart {chart_positions[entry.slide]}" if entry.source_kind else f"Slide {entry.slide}"
         if entry.structural_type:
             if not entry.slide_title:
                 raise ValueError(f"Catalog row {line_number} requires Slide Tittle for a structural slide.")
@@ -295,7 +299,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             parse_catalog_grouping(entry.grouping_columns)
             parse_legend_position(entry.legend_position)
         except ValueError as exc:
-            raise ValueError(f"Catalog row {line_number}: {exc}") from exc
+            raise ValueError(f"{editor_location}: {exc}") from exc
         entries.append(entry)
     if not entries:
         raise ValueError("The report template does not contain any rows.")

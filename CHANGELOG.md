@@ -36,7 +36,7 @@
 - Sized the Charts Panel template editor modal to 90% of the browser viewport and reduced its embedded view to the editor itself, with a fixed visible action bar and scrolling confined to the template table.
 - Allowed admins to export or transfer shared Slides Templates and only their accessible workspaces, while keeping configuration/full-environment transfers and workspace imports restricted; removed forbidden options from their selector so transfer requests always include a valid target, made the initial destination handshake retry-safe and idempotent, persisted incoming offers, and made destination notification polling resilient to stale Docker-rendered pages and browser tab suspension.
 - Moved status-row inclusion out of the chart renderer and into explicit template filters such as `Test_Result IN (Completed, Dropped, Failed)`, making the denominator visible and editable while status charts continue to honour the selected KPI.
-- Rejected malformed Slides Template filters when adjacent conditions are missing their semicolon separator, kept damaged templates open for correction instead of crashing Admin, and stored each condition on its own line in both editor cells and quoted CSV filter fields.
+- Rejected malformed Slides Template filters when adjacent conditions are missing their semicolon separator, located errors by Slide and Chart, kept damaged templates open for correction with a self-clearing warning, and stored each condition on its own line with editor-only bullet markers and quoted multiline CSV fields.
 
 #### 📚 Documentation:
 
