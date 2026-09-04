@@ -33,10 +33,10 @@
 - Made automatic App Logs polling visually silent, and invalidated the active workspace-size snapshot after dataset, report and Chart Set files are created, completed, retried or removed.
 - Made incoming transfer approvals reliable across every super-admin page, expired stale pending offers after 15 minutes, reused equivalent retries, propagated terminal source cancellation to the destination, and respected standard HTTP/HTTPS ports when a complete destination URL is entered without an explicit port.
 - Reset Slides Template edited-cell and added-text highlighting after a successful save, making the persisted values the new baseline for subsequent edits.
-- Rendered `Threshold` legends as two colour-matched ranges derived from the configured value (`< threshold` and `≥ threshold`), matching the red and green stacked-chart segments.
 - Fitted CDF legends into six evenly spaced entries per row when positioned above or below the chart, while retaining each series' colour and line thickness.
-- Increased the visual weight of latest-campaign CDF legend samples so thick and thin curve styles remain clearly distinguishable in scaled previews and reports.
 - Rendered Distribution chart bucket legends as the ordered, colour-matched bucket ranges used by the stacked bars instead of displaying the raw `Buckets` filter expression.
+- Rendered `Threshold` legends as two colour-matched ranges derived from the configured value (`< threshold` and `≥ threshold`), matching the red and green stacked-chart segments.
+- Increased the visual weight of latest-campaign CDF legend samples so thick and thin curve styles remain clearly distinguishable in scaled previews and reports.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
