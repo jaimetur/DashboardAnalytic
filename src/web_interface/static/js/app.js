@@ -971,6 +971,16 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   };
   let savedCatalogueContent = '';
   const hasUnsavedCatalogueChanges = () => serialiseCatalogueContent() !== savedCatalogueContent;
+  const acceptCurrentCatalogueAsBaseline = () => {
+    table.querySelectorAll('[data-catalogue-field]').forEach((cell) => {
+      const field = cell.dataset.catalogueField || '';
+      const current = rowValue(cell.closest('tr'), field);
+      cell.dataset.originalValue = current;
+      cell.classList.remove('is-edited');
+      if (field === 'Filters') renderFilterCell(cell, current);
+      else cell.textContent = current;
+    });
+  };
   const renderChartPreview = (payload) => {
     if (!chartPreview || !chartPreviewTable || !chartPreviewTitle || !chartPreviewSummary) return;
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
@@ -1384,6 +1394,10 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || 'Unable to save the Slides Template.');
       savedCatalogueContent = contentField.value;
+      // The persisted CSV is now the comparison baseline. Remove both the
+      // edited-cell tint and any inline added-text marks; subsequent edits are
+      // compared with these newly saved values.
+      acceptCurrentCatalogueAsBaseline();
       hideLoadingOverlay();
       showInfoDialog(`Slides Template '${payload.template || 'selected template'}' has been saved.`, {
         title: 'Slides Template saved',

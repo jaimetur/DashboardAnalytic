@@ -33,6 +33,7 @@
 - Clarified modal editor titles with the selected template name in quotation marks and enforced the neutral grey Close button styling.
 - Made automatic App Logs polling visually silent, and invalidated the active workspace-size snapshot after dataset, report and Chart Set files are created, completed, retried or removed.
 - Made incoming transfer approvals reliable across every super-admin page, expired stale pending offers after 15 minutes, reused equivalent retries, propagated terminal source cancellation to the destination, and respected standard HTTP/HTTPS ports when a complete destination URL is entered without an explicit port.
+- Reset Slides Template edited-cell and added-text highlighting after a successful save, making the persisted values the new baseline for subsequent edits.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
