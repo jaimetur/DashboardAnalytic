@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_terminal_x_maximum, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_status_100, _series_colours, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_terminal_x_maximum, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_mean_column, _render_status_100, _series_colours, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -289,6 +289,32 @@ def test_catalogue_parses_legend_position_and_accepts_prior_schema() -> None:
     assert parse_catalog_csv(previous, 'nsa')[0].legend_position == 'top'
     two_columns = ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 2 columns + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
     assert parse_catalog_csv(two_columns, 'nsa')[0].legend_position == 'top'
+
+
+def test_legend_parser_supports_manual_captions_and_dimension_selection() -> None:
+    assert _legend_labels('Completed/Dropped/Failed') == ('Completed', 'Dropped', 'Failed')
+    assert _legend_dimensions('Completed/Dropped/Failed') == ()
+    assert _legend_dimensions('Operator, Campaign') == ('Operator', 'Campaign')
+    assert _legend_labels('Operator, Campaign') == ()
+
+
+def test_mean_chart_renders_selected_dimension_legend_at_requested_position() -> None:
+    frame = pd.DataFrame({
+        '__catalog_row_0': ['VF', '3'], '__catalog_column_0': ['2026-Q2', '2026-Q2'],
+        'Metric': [1.0, 2.0], '__catalog_primary': ['VF', '3'], '__catalog_series': ['2026-Q2', '2026-Q2'],
+    })
+    frame.attrs['catalogue_dimension_labels'] = {
+        '__catalog_row_0': 'Operator', '__catalog_column_0': 'Campaign',
+    }
+
+    with patch('src.modules.cdr_reporting._draw_chart_legend') as draw_legend:
+        _render_mean_column(
+            'Average', frame, '__catalog_primary', '__catalog_series', 'Metric',
+            legend_dimensions=('Operator',), legend_position='right',
+        )
+
+    assert {item[0] for item in draw_legend.call_args.args[1]} == {'VF', '3'}
+    assert draw_legend.call_args.args[2] == 'right'
 
 
 def test_status_chart_draws_legend_at_the_catalogue_position() -> None:

@@ -1166,10 +1166,8 @@ def preview_catalog_chart_data(
     include(series, 'Resolved Column Aggregation')
     include('__catalog_stack', 'Resolved Stack Aggregation')
 
-    # Legend is a set of explicit chart captions rather than a CDR field. It
-    # is still exposed in the preview so every chart-definition input is
-    # visible in one place.
-    legend_labels = ', '.join(_legend_labels(entry.legend)) or '(automatic)'
+    # Legend contains source dimensions selected by the template/editor.
+    legend_dimensions = ', '.join(_legend_dimensions(entry.legend)) or '(automatic)'
     if display_columns:
         full_result = pd.concat(
             [grouped[source].rename(label) for source, label in display_columns],
@@ -1177,7 +1175,7 @@ def preview_catalog_chart_data(
         ).copy()
     else:
         full_result = grouped.copy()
-    full_result.insert(len(full_result.columns), 'Legend captions', legend_labels)
+    full_result.insert(len(full_result.columns), 'Legend dimensions', legend_dimensions)
     filter_values = {
         str(column): sorted(
             {'' if pd.isna(value) else str(value) for value in full_result[column].tolist()},
@@ -1406,9 +1404,37 @@ def _operator_vendor_key(*labels: object) -> str:
     return str(labels[0]).strip() if labels else ""
 
 
+def _legend_dimensions(value: str) -> tuple[str, ...]:
+    """Return the ordered CDR dimensions selected in the Legend field."""
+    if "/" in value:
+        return ()
+    return tuple(dimension.strip() for dimension in value.split(",") if dimension.strip())
+
+
 def _legend_labels(value: str) -> tuple[str, ...]:
-    """Return explicit display captions declared in the template Legend field."""
-    return tuple(label.strip() for label in value.split(",") if label.strip())
+    """Return legacy/manual legend captions separated with slashes."""
+    if "/" not in value:
+        return ()
+    return tuple(label.strip() for label in value.split("/") if label.strip())
+
+
+def _legend_key_caption(
+    key: tuple[object, ...],
+    axis_columns: list[str],
+    frame: pd.DataFrame,
+    dimensions: tuple[str, ...],
+) -> str:
+    """Build a caption from the selected dimensions represented by an axis key."""
+    requested = {_normalise_catalog_name(value) for value in dimensions}
+    labels = frame.attrs.get("catalogue_dimension_labels", {})
+    selected_parts: list[str] = []
+    for index, column in enumerate(axis_columns):
+        declared = labels.get(column, column)
+        declared_names = declared if isinstance(declared, tuple) else (declared,)
+        if any(_normalise_catalog_name(str(name)) in requested for name in declared_names):
+            selected_parts.append(str(key[index]))
+    parts = selected_parts or [str(value) for value in key if str(value) != "(all)"]
+    return " · ".join(parts) or "(all)"
 
 
 def _legend_caption(labels: tuple[str, ...], index: int, fallback: object) -> str:
@@ -1425,13 +1451,18 @@ def _draw_chart_legend(
     side_x: int | None = None,
 ) -> None:
     """Draw a template legend in a row (top/bottom) or column (left/right)."""
+    # Legends are part of the chart, not ancillary metadata. Enforce a
+    # readable minimum because the 1600px PNG is normally scaled down in the
+    # report and preview viewers.
+    font_size = max(font_size, 17)
+    marker_size = 22
     horizontal = position in {"top", "bottom"}
     if horizontal:
         # Dense CDFs can legitimately contain one curve per full hierarchy
         # combination.  Fit their compact line legend inside the 1600×900
         # canvas instead of letting the last rows fall below its lower edge.
         columns = 6 if line_markers else 5
-        row_height = max(font_size + 7, 20)
+        row_height = font_size + 12
         rows = max(1, (len(items) + columns - 1) // columns)
         start_x = 100
         start_y = 80 if position == "top" else 900 - (rows * row_height) - 8
@@ -1439,19 +1470,19 @@ def _draw_chart_legend(
             x = start_x + (index % columns) * (220 if line_markers else 275)
             y = start_y + (index // columns) * row_height
             if line_markers:
-                draw.line((x, y + 9, x + 28, y + 9), fill=colour, width=width)
+                draw.line((x, y + 11, x + 34, y + 11), fill=colour, width=max(width, 3))
             else:
-                draw.rectangle((x, y, x + 18, y + 18), fill=colour)
-            draw.text((x + (37 if line_markers else 27), y - 1), caption[:28], fill="#34495A", font=_font(font_size))
+                draw.rectangle((x, y, x + marker_size, y + marker_size), fill=colour)
+            draw.text((x + (43 if line_markers else 32), y - 1), caption[:28], fill="#263B4A", font=_font(font_size, True))
         return
-    x, start_y = (side_x if side_x is not None else (26 if position == "left" else 1400)), 126
+    x, start_y = (side_x if side_x is not None else (26 if position == "left" else 1380)), 112
     for index, (caption, colour, width) in enumerate(items):
-        y = start_y + index * 28
+        y = start_y + index * (font_size + 14)
         if line_markers:
-            draw.line((x, y + 9, x + 28, y + 9), fill=colour, width=width)
+            draw.line((x, y + 11, x + 34, y + 11), fill=colour, width=max(width, 3))
         else:
-            draw.rectangle((x, y, x + 18, y + 18), fill=colour)
-        draw.text((x + (37 if line_markers else 25), y - 1), caption[:20], fill="#34495A", font=_font(font_size))
+            draw.rectangle((x, y, x + marker_size, y + marker_size), fill=colour)
+        draw.text((x + (43 if line_markers else 32), y - 1), caption[:24], fill="#263B4A", font=_font(font_size, True))
 
 
 def _catalogue_display_label(category: object, series: object) -> str:
@@ -1511,7 +1542,7 @@ def _hierarchical_complete_keys(frame: pd.DataFrame, columns: list[str]) -> list
 def _canvas(title: str) -> tuple[Image.Image, ImageDraw.ImageDraw]:
     image = Image.new("RGB", (1600, 900), "white")
     draw = ImageDraw.Draw(image)
-    draw.text((32, 24), title, fill="#23384A", font=_font(28, True))
+    draw.text((32, 20), title, fill="#1D3345", font=_font(40, True))
     return image, draw
 
 
@@ -1677,7 +1708,7 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
             if value >= .08: draw.text((x + 2, y + height / 2 - 8), f"{value:.0%}", fill="white", font=_font(16, True))
             running += height
         label = _catalogue_display_label(g, p)[:24]
-        label_font = _font(15)
+        label_font = _font(18, True)
         if _text_width(draw, label, label_font) > chart_width / len(combos) - 8:
             _draw_rotated_label(image, label, centre_x=x + bar_width / 2, bottom_y=chart_top + chart_height + 75, fill="#5A6B78", font=label_font)
         else:
@@ -1685,7 +1716,7 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
     for y in range(0, 101, 20):
         value_y = chart_top + chart_height - (y / 100 * chart_height)
         draw.line((chart_left - 20, value_y, chart_left + chart_width, value_y), fill="#E4E9ED", width=1)
-        draw.text((70, value_y - 8), f"{y}%", fill="#62727E", font=_font(16))
+        draw.text((64, value_y - 10), f"{y}%", fill="#4E6271", font=_font(18, True))
     _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colour, 2) for index, (state, colour) in enumerate(zip(states, colours, strict=True))], legend_position, font_size=16)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
@@ -1710,7 +1741,7 @@ def _render_status_100_hierarchy(
     # Reserve a dedicated header band below the chart title.  Rotated vendor /
     # operator captions can be tall, so they must never share the title area.
     row_labels = [" · ".join(str(value) for value in row_key) for row_key in row_keys]
-    row_label_font = _font(16)
+    row_label_font = _font(18, True)
     widest_row_label = max((_text_width(draw, label, row_label_font) for label in row_labels), default=0)
     # Leave a measured gutter for row labels, percentage ticks and a visual
     # gap before the plot.  Fixed gutters caused long FDFS/test-family labels
@@ -1773,7 +1804,7 @@ def _render_status_100_hierarchy(
         for tick in ticks:
             tick_y = pane_bottom - tick / 100 * row_height
             draw.line((chart_left, tick_y, chart_left + chart_width, tick_y), fill="#E8ECEF", width=1)
-            draw.text((chart_left - 43, tick_y - 7), f"{tick}%", fill="#7A8993", font=_font(13))
+            draw.text((chart_left - 50, tick_y - 9), f"{tick}%", fill="#566A78", font=_font(15, True))
 
         row_mask = pd.Series(True, index=data.index)
         for field, value in zip(row_hierarchy, row_key, strict=True):
@@ -1800,15 +1831,15 @@ def _render_status_100_hierarchy(
                 y = pane_bottom - running - segment_height
                 draw.rectangle((x, y, x + bar_width, y + segment_height), fill=colour)
                 if ratio >= 0.08:
-                    draw.text((x + 3, y + segment_height / 2 - 7), f"{ratio:.0%}", fill="white", font=_font(14, True))
+                    draw.text((x + 3, y + segment_height / 2 - 9), f"{ratio:.0%}", fill="white", font=_font(17, True), stroke_width=1, stroke_fill="#42515C")
                 running += segment_height
 
     for column_index, lower_caption in enumerate(lower_captions):
         centre = chart_left + (column_index + 0.5) * column_width
         if rotate_axis_captions:
-            _draw_rotated_label(image, lower_caption[:20], centre_x=centre, bottom_y=chart_top + chart_height + 86, fill="#62727E", font=_font(14))
+            _draw_rotated_label(image, lower_caption[:20], centre_x=centre, bottom_y=chart_top + chart_height + 90, fill="#4E6271", font=_font(16, True))
         else:
-            draw.text((centre - min(len(lower_caption) * 3.5, 62), chart_top + chart_height + 10), lower_caption[:20], fill="#62727E", font=_font(14))
+            draw.text((centre - min(len(lower_caption) * 4, 70), chart_top + chart_height + 10), lower_caption[:20], fill="#4E6271", font=_font(16, True))
 
     _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colour, 2) for index, (state, colour) in enumerate(zip(states, colours, strict=True))], legend_position)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0)
@@ -1853,15 +1884,15 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
     for index, (labels, values) in enumerate(counts.iterrows()):
         labels = labels if isinstance(labels, tuple) else (labels,)
         y = 120 + index * 42; x = 390
-        draw.text((28, y + 6), " · ".join(str(value) for value in labels)[:42], fill="#34495A", font=_font(14))
+        draw.text((28, y + 4), " · ".join(str(value) for value in labels)[:42], fill="#263B4A", font=_font(17, True))
         for state in ("Failed", "Dropped"):
             count = int(values.get(state, 0)); width = int(980 * count / maximum)
             if width:
                 draw.rectangle((x, y, x + width, y + 25), fill=colours[state])
-                if width > 26: draw.text((x + 5, y + 5), str(count), fill="white", font=_font(13, True))
+                if width > 26: draw.text((x + 5, y + 3), str(count), fill="white", font=_font(16, True), stroke_width=1, stroke_fill="#42515C")
             x += width
     _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colours[state], 2) for index, state in enumerate(("Failed", "Dropped"))], legend_position, font_size=13)
-    draw.text((390, 820), "# of failed / dropped sessions", fill="#62727E", font=_font(16))
+    draw.text((390, 820), "# of failed / dropped sessions", fill="#4E6271", font=_font(19, True))
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
@@ -1911,7 +1942,7 @@ def _render_failure_count_hierarchy(
             end += 1
         outer_groups.append((start, end, outer_values[start]))
         start = end
-    header_font = _font(15, True)
+    header_font = _font(18, True)
     rotate_outer_headers = any(
         _text_width(draw, caption[:20], header_font) + 14 > (end - start) * column_width
         for start, end, caption in outer_groups
@@ -1928,7 +1959,7 @@ def _render_failure_count_hierarchy(
     for column_index, column_key in enumerate(column_keys):
         lower_caption = " · ".join(str(value) for value in column_key[1:]) or str(column_key[0])
         centre = chart_left + (column_index + 0.5) * column_width
-        draw.text((centre - min(len(lower_caption) * 3.5, 58), chart_top - 21), lower_caption[:18], fill="#62727E", font=_font(12))
+        draw.text((centre - min(len(lower_caption) * 4, 68), chart_top - 23), lower_caption[:18], fill="#4E6271", font=_font(15, True))
         cell_left = chart_left + column_index * column_width
         if column_index and column_key[0] == column_keys[column_index - 1][0]:
             # Campaigns/child values under one Operator/Vendor are related,
@@ -1937,8 +1968,8 @@ def _render_failure_count_hierarchy(
         else:
             # A new first-level aggregation value begins a new solid group.
             draw.line((cell_left, outer_separator_top, cell_left, chart_top + chart_height + 25), fill="#AEBBC4", width=2)
-        draw.text((cell_left + 3, chart_top + chart_height + 7), "0", fill="#7A8993", font=_font(10))
-        draw.text((cell_left + column_width - 22, chart_top + chart_height + 7), str(maximum), fill="#7A8993", font=_font(10))
+        draw.text((cell_left + 3, chart_top + chart_height + 7), "0", fill="#566A78", font=_font(13, True))
+        draw.text((cell_left + column_width - 25, chart_top + chart_height + 7), str(maximum), fill="#566A78", font=_font(13, True))
 
     # Render each row hierarchy level in its own label column. Repeated outer
     # values are merged visually so Call Family remains distinct from G Level 4.
@@ -1952,7 +1983,7 @@ def _render_failure_count_hierarchy(
                 end += 1
             centre_y = chart_top + ((start + end) / 2) * row_height
             x = 20 + level * label_width
-            draw.text((x, centre_y - 8), values[start][:22], fill="#566A78", font=_font(12, level == 0))
+            draw.text((x, centre_y - 9), values[start][:22], fill="#405765", font=_font(14, True))
             start = end
 
     for row_index, row_key in enumerate(row_keys):
@@ -1980,7 +2011,7 @@ def _render_failure_count_hierarchy(
             # clipped white glyph against the bar edge.
             bar_height = max(12, min(22, row_height * 0.84))
             y = row_top + (row_height - bar_height) / 2
-            count_font = _font(10, True)
+            count_font = _font(12, True)
             outside_counts: list[str] = []
             for state in ("Failed", "Dropped"):
                 count = state_counts[state]
@@ -1994,7 +2025,7 @@ def _render_failure_count_hierarchy(
                         label_height = label_box[3] - label_box[1]
                         draw.text(
                             (x + (segment_width - label_width) / 2, y + (bar_height - label_height) / 2 - label_box[1]),
-                            label, fill="white", font=count_font,
+                            label, fill="white", font=count_font, stroke_width=1, stroke_fill="#42515C",
                         )
                     else:
                         outside_counts.append(label)
@@ -2063,11 +2094,11 @@ def _draw_hierarchical_axis_labels(
     # diagonal captions makes adjacent columns look misaligned and obscures
     # the grouping hierarchy.
     rotate_all_labels = any(
-        _text_width(draw, str(keys[start][level])[:20], _font(16, True)) + 12 > (end - start) * item_width
+        _text_width(draw, str(keys[start][level])[:20], _font(18, True)) + 12 > (end - start) * item_width
         for level in range(max(levels - 1, 0))
         for start, end in _hierarchy_spans(keys, level)
     ) or any(
-        _text_width(draw, str(key[-1])[:18], _font(14)) + 8 > item_width
+        _text_width(draw, str(key[-1])[:18], _font(16, True)) + 8 > item_width
         for key in keys
     )
     for level in range(max(levels - 1, 0)):
@@ -2075,7 +2106,7 @@ def _draw_hierarchical_axis_labels(
             centre = left + ((start + end) / 2) * item_width
             text = str(keys[start][level])[:20]
             y = top - 30 * (levels - level)
-            font = _font(16, True)
+            font = _font(18, True)
             if rotate_all_labels:
                 _draw_rotated_label(image, text, centre_x=centre, bottom_y=y + 24, fill="#566A78", font=font)
             else:
@@ -2084,7 +2115,7 @@ def _draw_hierarchical_axis_labels(
     for index, key in enumerate(keys):
         text = str(key[-1])[:18]
         centre = left + (index + .5) * item_width
-        font = _font(14)
+        font = _font(16, True)
         if rotate_all_labels:
             _draw_rotated_label(image, text, centre_x=centre, bottom_y=bottom + 78, fill="#62727E", font=font)
         else:
@@ -2223,8 +2254,7 @@ def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period:
         visible_values = [value for value in values if value <= high]
         if not visible_values:
             continue
-        label_parts = [str(value) for value in combination if str(value) != "(all)"]
-        label = " · ".join(label_parts) or "(all)"
+        label = _legend_key_caption(combination, grouping_columns, data, legend_labels)
         points = [(left + (value - low) / (high - low) * width, top + height - ((n + 1) / len(values)) * height) for n, value in enumerate(visible_values)]
         line_campaigns = subset["__cdf_campaign"].astype(str).unique() if latest_campaign else ()
         # A single-campaign chart has no historical curve to de-emphasise, so
@@ -2232,15 +2262,15 @@ def _render_cdf_line(title: str, frame: pd.DataFrame, group: str | None, period:
         line_width = 4 if campaign_count <= 1 or (latest_campaign and latest_campaign in line_campaigns) else 1
         colour = comparison_colours.get(combination, _colour(label, index))
         draw.line(points, fill=colour, width=line_width)
-        legend_items.append((_legend_caption(legend_labels, index, label), colour, line_width))
+        legend_items.append((label, colour, line_width))
     for tick in range(0, 101, 20):
-        y = top + height - tick / 100 * height; draw.line((left, y, left + width, y), fill="#E4E9ED", width=1); draw.text((20, y - 8), f"{tick}%", fill="#62727E", font=_font(15))
+        y = top + height - tick / 100 * height; draw.line((left, y, left + width, y), fill="#E4E9ED", width=1); draw.text((16, y - 10), f"{tick}%", fill="#4E6271", font=_font(18, True))
     for tick in range(0, 6):
         value = low + (high - low) * tick / 5
         x = left + width * tick / 5
         draw.line((x, top + height, x, top + height + 7), fill="#62727E", width=1)
-        draw.text((x - 16, top + height + 7), f"{value:.1f}", fill="#62727E", font=_font(14))
-    draw.text((left + width / 2 - 70, top + height + 29), metric.replace("_", " "), fill="#62727E", font=_font(17))
+        draw.text((x - 18, top + height + 7), f"{value:.1f}", fill="#4E6271", font=_font(16, True))
+    draw.text((left + width / 2 - 70, top + height + 31), metric.replace("_", " "), fill="#405765", font=_font(20, True))
     _draw_chart_legend(draw, legend_items, legend_position, font_size=11, line_markers=True)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
@@ -2264,14 +2294,23 @@ def _render_scatter(title: str, frame: pd.DataFrame, group: str | None, metric: 
         x_value = x_low + (x_high - x_low) * tick / 5; y_value = y_low + (y_high - y_low) * tick / 5
         draw.line((x, top + height, x, top + height + 7), fill="#62727E", width=1)
         draw.line((left - 7, y, left, y), fill="#62727E", width=1)
-        draw.text((x - 16, top + height + 7), f"{x_value:.0f}", fill="#62727E", font=_font(12))
-        draw.text((75, y - 7), f"{y_value:.1f}", fill="#62727E", font=_font(12))
-    draw.text((left + width / 2 - 120, top + height + 28), x_metric.replace("_", " "), fill="#62727E", font=_font(16)); draw.text((40, 95), metric.replace("_", " "), fill="#62727E", font=_font(16))
+        draw.text((x - 18, top + height + 7), f"{x_value:.0f}", fill="#4E6271", font=_font(16, True))
+        draw.text((68, y - 9), f"{y_value:.1f}", fill="#4E6271", font=_font(16, True))
+    draw.text((left + width / 2 - 120, top + height + 30), x_metric.replace("_", " "), fill="#405765", font=_font(20, True)); draw.text((40, 90), metric.replace("_", " "), fill="#405765", font=_font(20, True))
     _draw_chart_legend(draw, legend_items, legend_position, font_size=14)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
-def _render_mean_column(title: str, frame: pd.DataFrame, group: str | None, series: str | None, metric: str | None, aggregation: str = "mean") -> BytesIO:
+def _render_mean_column(
+    title: str,
+    frame: pd.DataFrame,
+    group: str | None,
+    series: str | None,
+    metric: str | None,
+    aggregation: str = "mean",
+    legend_dimensions: tuple[str, ...] = (),
+    legend_position: str = "top",
+) -> BytesIO:
     if frame.empty or not group or not metric:
         return _empty_chart(title)
     axis_columns = _chart_axis_hierarchy(frame) or ([group, series] if series and series != group else [group])
@@ -2293,7 +2332,7 @@ def _render_mean_column(title: str, frame: pd.DataFrame, group: str | None, seri
         height = (baseline - top) * float(value) / maximum
         x = left + (index + .5) * chart_width / len(means) - bar_width / 2
         draw.rectangle((x, baseline - height, x + bar_width, baseline), fill=group_colours.get(keys[index], _colour(label, index)))
-        draw.text((x, baseline - height - 28), f"{float(value):.2f}", fill="#34495A", font=_font(17))
+        draw.text((x, baseline - height - 31), f"{float(value):.2f}", fill="#263B4A", font=_font(20, True))
     _draw_top_column_group_separators(
         draw,
         keys,
@@ -2306,8 +2345,18 @@ def _render_mean_column(title: str, frame: pd.DataFrame, group: str | None, seri
     _draw_hierarchical_axis_labels(image, draw, keys, left, chart_width, top, baseline)
     _draw_vertical_label(
         image, metric.replace("_", " "), centre_x=48, centre_y=(top + baseline) / 2,
-        fill="#62727E", font=_font(18),
+        fill="#405765", font=_font(21, True),
     )
+    if legend_dimensions:
+        legend_items: list[tuple[str, str, int]] = []
+        seen_captions: set[str] = set()
+        for index, key in enumerate(keys):
+            caption = _legend_key_caption(key, axis_columns, data, legend_dimensions)
+            if caption in seen_captions:
+                continue
+            seen_captions.add(caption)
+            legend_items.append((caption, group_colours.get(key, _colour(key, index)), 2))
+        _draw_chart_legend(draw, legend_items, legend_position)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0)
     return output
 
@@ -2377,6 +2426,7 @@ def _catalog_spec(entry: CatalogEntry) -> dict:
 def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame], multivendor: bool) -> BytesIO:
     spec = _catalog_spec(entry)
     chart_title = entry.chart_title or entry.slide_title
+    legend_dimensions = _legend_dimensions(entry.legend)
     legend_labels = _legend_labels(entry.legend)
     legend_position = entry.legend_position
     frame, group, period = _source_for_spec(frames, spec, multivendor)
@@ -2406,12 +2456,16 @@ def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame
         for category, series in frame[[group, period]].fillna("(blank)").itertuples(index=False, name=None)
     ]
     if spec["kind"] == "scatter":
-        return _render_scatter(chart_title, frame, "__catalog_label", metric, _column(frame, spec.get("x_metric", ())), legend_labels, legend_position)
+        return _render_scatter(chart_title, frame, "__catalog_label", metric, _column(frame, spec.get("x_metric", ())), (), legend_position)
     if chart_type == "table":
         return _render_table(chart_title, frame, group, period, metric)
     if "vertical bars" in chart_type:
-        return _render_mean_column(chart_title, frame, group, period, metric, aggregation="median" if chart_type == "median vertical bars" else "mean")
-    return _render_cdf_line(chart_title, frame, group, period, metric, legend_labels, legend_position)
+        return _render_mean_column(
+            chart_title, frame, group, period, metric,
+            aggregation="median" if chart_type == "median vertical bars" else "mean",
+            legend_dimensions=legend_dimensions, legend_position=legend_position,
+        )
+    return _render_cdf_line(chart_title, frame, group, period, metric, legend_dimensions, legend_position)
 
 
 def _chart_for_spec(title: str, frames: dict[str, pd.DataFrame], spec: dict, multivendor: bool) -> BytesIO:
