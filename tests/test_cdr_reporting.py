@@ -687,6 +687,38 @@ def test_status_chart_honours_selected_kpi_when_other_status_columns_exist() -> 
     assert rendered_data['state'].tolist() == ['Completed', 'Failed']
 
 
+def test_status_chart_accepts_only_the_three_tableau_states() -> None:
+    frame = pd.DataFrame({
+        'Operator': ['EE'] * 8,
+        'Campaign': ['2026-Q2'] * 8,
+        'Test_Result': ['Incomplete', 'Unsuccessful', 'Aborted', 'Cancelled', 'Timeout', 'Cutoff', 'Failed', 'Completed'],
+        '__catalog_column_0': ['EE'] * 8,
+    })
+
+    with patch('src.modules.cdr_reporting._render_status_100_hierarchy') as hierarchy_renderer:
+        hierarchy_renderer.return_value = BytesIO(b'negative-statuses')
+        _render_status_100('Data failures', frame, 'Operator', 'Campaign', metric='Test_Result')
+
+    assert hierarchy_renderer.call_args.args[1]['state'].tolist() == ['Failed', 'Completed']
+
+
+def test_data_cutoffs_are_excluded_from_tableau_status_denominator() -> None:
+    frame = pd.DataFrame({
+        'Operator': ['EE'] * 1000,
+        'Campaign': ['2026-Q2'] * 1000,
+        'Test_Result': ['Completed'] * 692 + ['Cutoff'] * 278 + ['Failed'] * 30,
+        '__catalog_column_0': ['EE'] * 1000,
+    })
+
+    with patch('src.modules.cdr_reporting._render_status_100_hierarchy') as hierarchy_renderer:
+        hierarchy_renderer.return_value = BytesIO(b'tableau-status-ratio')
+        _render_status_100('Data failures', frame, 'Operator', 'Campaign', metric='Test_Result')
+
+    states = hierarchy_renderer.call_args.args[1]['state']
+    assert states.eq('Completed').sum() == 692
+    assert states.eq('Failed').sum() == 30
+
+
 def test_hierarchical_grouping_keeps_campaign_bars_together_per_operator() -> None:
     frame = pd.DataFrame({
         '__catalog_column_0': ['Vodafone', 'O2', 'Vodafone', 'O2'],

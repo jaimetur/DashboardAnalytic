@@ -35,7 +35,7 @@
 - Excluded null, NaN and empty status/KPI values from both the numerator and denominator of 100% stacked charts instead of misclassifying them as failures or valid quality samples.
 - Sized the Charts Panel template editor modal to 90% of the browser viewport and reduced its embedded view to the editor itself, with a fixed visible action bar and scrolling confined to the template table.
 - Allowed admins to export or transfer shared Slides Templates and only their accessible workspaces, while keeping configuration/full-environment transfers and workspace imports restricted; removed forbidden options from their selector so transfer requests always include a valid target, made the initial destination handshake retry-safe and idempotent, persisted incoming offers, and made destination notification polling resilient to stale Docker-rendered pages and browser tab suspension.
-- Excluded unknown and non-executed status values from 100% chart denominators, restricted Failed segments to explicitly failed/error states, and made status charts honour the selected KPI instead of silently preferring another status column present in processed data.
+- Matched Tableau's status denominator exactly: only literal Completed, Dropped and Failed values are included, while Cutoff, incomplete, unknown, non-executed, null and every other state are excluded; status charts also honour the selected KPI.
 
 #### 📚 Documentation:
 

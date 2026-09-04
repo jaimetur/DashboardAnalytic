@@ -1749,13 +1749,11 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
         data = data.loc[valid_state].copy()
         raw = raw.loc[data.index]
         def status_category(value: str) -> str | None:
-            if "drop" in value:
-                return "Dropped"
-            if any(item in value for item in ("fail", "error", "not complete", "not success", "not pass", "not ok", "nok")):
-                return "Failed"
-            if any(item in value for item in ("complete", "success", "pass")) or value == "ok":
-                return "Completed"
-            return None
+            return {
+                "completed": "Completed",
+                "dropped": "Dropped",
+                "failed": "Failed",
+            }.get(value)
 
         data["state"] = raw.map(status_category)
         # Unknown non-empty statuses are not failures. Only the three explicit
