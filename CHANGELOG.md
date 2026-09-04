@@ -16,6 +16,7 @@
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
+- Fixed NSA/SA session classification so native and MultiRAB calls use VoLTE, EPSFB or VoNR call modes before RAT fallback, while WhatsApp continues to use its explicit RAT.
 
 #### 📚 Documentation:
 

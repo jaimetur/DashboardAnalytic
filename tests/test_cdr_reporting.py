@@ -142,6 +142,32 @@ def test_speech_session_classification_uses_call_mode_when_sample_rat_is_blank()
     assert classify_sessions(speech, 'sa')['sample'].tolist() == ['native-vonr', 'whatsapp-nr']
 
 
+def test_voice_session_classification_prioritises_call_mode_over_rat() -> None:
+    voice = pd.DataFrame({
+        'sample': ['volte-lte', 'multirab-volte', 'epsfb', 'vonr-endc', 'whatsapp-endc', 'whatsapp-nr'],
+        'Session_Type': ['CALL', 'MultiRAB CALL', 'CALL', 'CALL', 'WhatsApp CALL', 'WhatsApp CALL'],
+        'RAT_A': ['LTE', 'LTE', 'NR/LTE', 'EN-DC', 'EN-DC', 'NR'],
+        'L1_Call_Mode_A': ['VoLTE', 'VoLTE', 'EPSFB', 'VoNR', 'VoIP', 'VoIP'],
+    })
+
+    assert classify_sessions(voice, 'nsa')['sample'].tolist() == [
+        'volte-lte', 'multirab-volte', 'epsfb', 'whatsapp-endc',
+    ]
+    assert classify_sessions(voice, 'sa')['sample'].tolist() == ['vonr-endc', 'whatsapp-nr']
+
+
+def test_multirab_lte_uses_nsa_fallback_when_call_mode_is_unknown() -> None:
+    voice = pd.DataFrame({
+        'sample': ['multirab-lte', 'native-lte'],
+        'Session_Type': ['MultiRAB CALL', 'CALL'],
+        'RAT_A': ['LTE', 'LTE'],
+        'L1_Call_Mode_A': ['CSFB', 'CSFB'],
+    })
+
+    assert classify_sessions(voice, 'nsa')['sample'].tolist() == ['multirab-lte']
+    assert classify_sessions(voice, 'sa').empty
+
+
 def test_workspace_vendor_assignment_writes_the_normalized_vendor_field() -> None:
     cdr = pd.DataFrame({
         'Operator': ['Vodafone UK', '3', 'O2 (UK)'],

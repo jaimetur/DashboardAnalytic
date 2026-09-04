@@ -595,28 +595,48 @@ def classify_sessions(df: pd.DataFrame, technology: str) -> pd.DataFrame:
     sample_rat_column = _first_existing(df, ["Sample_RAT_A"])
     normalized_rat_column = _first_existing(df, ["technology_primary"])
     rat_column = main_rat_column or sample_rat_column or normalized_rat_column
-    if not rat_column:
-        raise ValueError("The selected CDR does not contain RAT, RAT_A or Sample_RAT_A, required to separate NSA and SA sessions.")
-    # NetCheck exports use both ENDC and EN-DC (sometimes EN DC) for NSA.
-    # The business filter is the technology concept, not one file spelling.
-    marker = r"EN[- ]?DC" if technology == "nsa" else r"NR"
-    rat_values = df[rat_column].fillna("").astype(str).str.strip()
-    mask = rat_values.str.contains(marker, case=False, na=False, regex=True)
+    call_mode_columns = list(dict.fromkeys(filter(None, (
+        _first_existing(df, ["L1_Call_Mode_A", "L1_call_Mode_A"]),
+        _first_existing(df, ["L2_Call_Mode_A", "L2_call_Mode_A"]),
+    ))))
+    if not rat_column and not call_mode_columns:
+        raise ValueError("The selected CDR does not contain RAT or Call Mode fields required to separate NSA and SA sessions.")
 
-    # Speech CDRs populate Sample_RAT_A only for WhatsApp samples. Native and
-    # MultiRAB calls therefore need the documented call-mode fallback: VoLTE /
-    # EPSFB belongs to the NSA report and VoNR to the SA report. A populated
-    # sample RAT remains authoritative for WhatsApp and is never overridden.
-    if main_rat_column is None:
-        call_mode_column = _first_existing(df, ["L1_Call_Mode_A", "L1_call_Mode_A", "L2_Call_Mode_A", "L2_call_Mode_A"])
-        if call_mode_column:
-            call_mode = df[call_mode_column].fillna("").astype(str)
-            sample_is_explicit = (
-                df[sample_rat_column].fillna("").astype(str).str.strip().ne("")
-                if sample_rat_column else pd.Series(False, index=df.index)
-            )
-            fallback_marker = r"VoLTE|EPSFB" if technology == "nsa" else r"VoNR"
-            mask |= (~sample_is_explicit) & call_mode.str.contains(fallback_marker, case=False, na=False, regex=True)
+    # WhatsApp's explicit RAT describes the packet session and remains
+    # authoritative. Native and MultiRAB calls are classified by their call
+    # mode first: a plain LTE RAT is common for valid VoLTE calls and must not
+    # make those samples disappear from an NSA report.
+    rat_values = (
+        df[rat_column].fillna("").astype(str).str.strip()
+        if rat_column else pd.Series("", index=df.index, dtype="string")
+    )
+    call_modes = pd.Series("", index=df.index, dtype="string")
+    for column in call_mode_columns:
+        call_modes = call_modes.str.cat(df[column].fillna("").astype(str), sep=" ")
+    session_column = _first_existing(df, ["Session_Type", "session_type"])
+    session_values = (
+        df[session_column].fillna("").astype(str)
+        if session_column else pd.Series("", index=df.index, dtype="string")
+    )
+    whatsapp = session_values.str.contains("whatsapp", case=False, na=False)
+    recognised_call_mode = call_modes.str.contains(r"VoLTE|EPSFB|VoNR", case=False, na=False, regex=True)
+
+    rat_nsa = rat_values.str.contains(r"EN[- ]?DC", case=False, na=False, regex=True)
+    rat_sa = rat_values.str.contains(r"NR", case=False, na=False, regex=True) & ~rat_nsa
+    mode_nsa = call_modes.str.contains(r"VoLTE|EPSFB", case=False, na=False, regex=True)
+    mode_sa = call_modes.str.contains(r"VoNR", case=False, na=False, regex=True)
+    conflicting_call_mode = mode_nsa & mode_sa
+    mode_nsa &= ~conflicting_call_mode
+    mode_sa &= ~conflicting_call_mode
+    multirab_lte_fallback = (
+        session_values.str.contains("multirab", case=False, na=False)
+        & rat_values.str.contains(r"(?:^|/)LTE(?:/|$)", case=False, na=False, regex=True)
+    )
+
+    if technology == "nsa":
+        mask = (whatsapp & rat_nsa) | (~whatsapp & (mode_nsa | (~recognised_call_mode & (rat_nsa | multirab_lte_fallback))))
+    else:
+        mask = (whatsapp & rat_sa) | (~whatsapp & (mode_sa | (~recognised_call_mode & rat_sa)))
     return df[mask].copy()
 
 
