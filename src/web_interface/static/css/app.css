@@ -1338,3 +1338,123 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
   .upload-type-item { grid-template-columns: minmax(0, 1fr); }
   .upload-vendor-mapping-selectors { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Compact-phone contract (iPhone 13 base: 390 × 844 CSS pixels).
+   Wide data remains horizontally scrollable inside its own table/canvas; no
+   panel is allowed to widen the document or push actions off-screen. */
+@media (max-width: 480px) {
+  html, body { width: 100%; max-width: 100%; overflow-x: clip; }
+  .shell { width: 100%; max-width: 100%; padding: 0.55rem; }
+  main, .dashboard-stack, .workspace-grid, .dashboard-content-grid,
+  .panel, .collapsible-panel, .collapsible-panel-body, .hero-panel,
+  article, section, details, form { min-width: 0; max-width: 100%; }
+  .panel { padding: 0.9rem; border-radius: 14px; }
+  .spacious-stack, .dashboard-stack { gap: 0.75rem; }
+  h1 { font-size: 1.45rem; line-height: 1.12; }
+  h2 { font-size: 1.25rem; line-height: 1.18; overflow-wrap: anywhere; }
+  h3 { overflow-wrap: anywhere; }
+  .lede, .form-note { overflow-wrap: anywhere; }
+
+  .topbar { width: 100%; gap: 0.65rem; margin-bottom: 0.8rem; }
+  .title-block, .title-row, .brand-lockup { min-width: 0; max-width: 100%; }
+  .title-row { gap: 0.5rem; }
+  .brand-lockup { gap: 0.55rem; }
+  .brand-mark { width: 40px; height: 40px; }
+  .title-badge { min-width: 0; max-width: 100%; padding: 0.38rem 0.62rem; font-size: 0.7rem; white-space: normal; }
+  .topnav { width: 100%; margin-top: 0; gap: 0.4rem; justify-content: flex-start; }
+  .topnav > * { min-width: 0; max-width: 100%; }
+  .topnav-workspace-switcher { width: 100%; }
+  .topnav .topnav-workspace-badge { width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+  .topnav-workspace-menu { width: 100%; max-width: 100%; }
+  .topnav-link { padding: 0.52rem 0.7rem; font-size: 0.78rem; }
+
+  .module-tabs { width: 100%; }
+  .module-tabs-primary, .module-tabs-secondary { max-width: 100%; margin-left: 0; margin-right: 0; scrollbar-width: thin; }
+  .module-tabs-primary { padding-bottom: 0.15rem; }
+  .module-tab { padding: 0.58rem 0.68rem; font-size: 0.76rem; }
+
+  .section-head, .tight-head, .compact-toolbar, .collapsible-summary,
+  .workspace-switcher-actions, .workspace-panel-meta,
+  .report-chart-viewer-header, .report-chart-viewer-data-header {
+    flex-direction: column; align-items: stretch; min-width: 0; gap: 0.55rem;
+  }
+  .summary-inline-actions, .app-logs-heading-actions {
+    width: 100%; max-width: 100%; margin-left: 0 !important; justify-content: flex-start !important;
+    flex-wrap: wrap !important;
+  }
+  .summary-inline-actions .pill, .workspace-panel-meta .pill { max-width: 100%; white-space: normal !important; overflow-wrap: anywhere; }
+
+  .form-grid, .dataset-selector-grid, .metrics-grid, .metric-detail-grid,
+  .viz-grid, .reporting-form-grid, .app-logs-filters,
+  .catalogue-management-grid, .upload-form-grid, .vendor-mapping-grid,
+  .chart-builder-layout, .report-multicampaign-groups { grid-template-columns: minmax(0, 1fr) !important; }
+  input, select, textarea, .searchable-select-shell, .multiselect-shell { min-width: 0 !important; max-width: 100%; }
+  .searchable-select-menu, .multiselect-menu, .report-chart-preview-select-menu {
+    max-width: calc(100vw - 1rem); max-height: min(19rem, calc(100dvh - 1rem));
+  }
+
+  .inline-actions, .sidebar-actions, .form-actions, .reporting-submit-action,
+  .report-chart-set-controls, .report-jobs-bulk-actions,
+  .charts-jobs-bulk-actions, .import-export-actions,
+  .catalogue-management-actions, .database-management-toolbar,
+  .database-management-actions, .full-environment-workspace-toolbar,
+  .report-charts-footer-actions, .preview-actions, .doc-toolbar {
+    display: flex; width: 100%; flex-direction: column; align-items: stretch; gap: 0.5rem;
+  }
+  .form-actions > button, .reporting-submit-action > button,
+  .report-chart-set-controls > button, .report-jobs-bulk-actions > button,
+  .charts-jobs-bulk-actions > button, .import-export-actions > button,
+  .database-management-actions > button, .database-management-actions > form,
+  .database-management-actions > form > button, .report-charts-footer-actions > button,
+  .preview-actions > * { width: 100%; max-width: 100%; }
+  .report-chart-set-controls label, .database-management-toolbar label,
+  .database-management-toolbar select { width: 100%; min-width: 0; max-width: 100%; }
+
+  .report-charts-grid { grid-template-columns: minmax(0, 1fr); }
+  .report-chart-card { width: 100%; padding: 0.65rem; }
+  .chart-builder-canvas { width: 100%; min-height: 14rem; }
+
+  .table-wrap, .data-table-wrap, .queue-table-wrap,
+  .database-editor-wrap, .catalogue-workspace-table-wrap,
+  .slides-templates-editor-table-wrap > .table-wrap {
+    display: block; width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .database-pagination { width: 100%; justify-content: space-between; gap: 0.3rem; flex-wrap: wrap; }
+  .database-pagination button { flex: 1 1 auto; padding-inline: 0.55rem; }
+  .database-pagination span { flex: 1 0 100%; order: -1; text-align: center; }
+
+  .confirm-overlay, .loading-overlay, .report-chart-viewer-overlay,
+  .report-template-editor-overlay { padding: 0.35rem; }
+  .confirm-panel, .loading-panel { width: calc(100vw - 0.7rem); max-width: calc(100vw - 0.7rem); padding: 1rem; border-radius: 18px; }
+  .confirm-panel h3, .loading-panel h3 { font-size: 1.3rem; }
+  .confirm-actions { width: 100%; gap: 0.45rem; }
+  .confirm-actions > button { flex: 1 1 auto; min-width: 0; padding-inline: 0.75rem; }
+  .full-environment-workspace-dialog, .server-transfer-dialog { max-height: calc(100dvh - 0.7rem); overflow-y: auto; }
+
+  .confirm-panel.report-chart-viewer-dialog {
+    width: calc(100vw - 0.7rem) !important; height: calc(100dvh - 0.7rem) !important;
+    grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(13rem, 42dvh) auto auto;
+    gap: 0.55rem; padding: 0.65rem; overflow-y: auto;
+  }
+  .report-chart-viewer-image { grid-column: 1; grid-row: 2; min-height: 13rem; }
+  .report-chart-viewer-sandbox { grid-column: 1; grid-row: 3; max-height: none; overflow: visible; }
+  .report-chart-viewer-actions { grid-column: 1; grid-row: 4; grid-template-columns: 1fr; position: static; }
+  .report-chart-viewer-data-overlay { position: fixed; inset: 0.35rem; z-index: 230; }
+  .report-chart-viewer-data-dialog { padding: 0.65rem; }
+  .report-chart-viewer-data-header button { align-self: flex-end; }
+
+  .confirm-panel.catalogue-chart-preview-dialog {
+    width: calc(100vw - 0.7rem) !important; height: calc(100dvh - 0.7rem) !important;
+    max-width: none !important; max-height: none !important; padding: 0.65rem; overflow-y: auto;
+  }
+  .catalogue-chart-preview-sandbox { max-height: none; }
+  .confirm-panel.report-template-editor-dialog { width: calc(100vw - 0.7rem) !important; height: calc(100dvh - 0.7rem) !important; padding: 0.5rem; }
+  body[data-embedded-template-editor] .slides-templates-editor-table { --catalogue-actions-width: 132px; }
+
+  .doc-panel, .doc-markdown { padding: 0.85rem; }
+  .doc-markdown pre, .doc-markdown table { max-width: 100%; overflow-x: auto; }
+  .login-shell { gap: 0.75rem; }
+  .login-hero-card, .login-auth-card { padding: 1rem; }
+  .login-feature-grid { gap: 0.55rem; }
+}
