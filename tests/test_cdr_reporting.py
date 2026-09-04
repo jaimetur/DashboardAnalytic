@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from dataclasses import replace
 from datetime import datetime
 import pandas as pd
 import pytest
@@ -429,7 +430,7 @@ def test_catalogue_filters_accept_lines_but_reject_a_missing_condition_separator
     assert editable[0].filters.endswith('Operator IN (EE, 3)')
 
 
-def test_multivendor_rendering_rewrites_operator_display_and_grouping_but_not_filters() -> None:
+def test_multivendor_rendering_rewrites_display_and_grouping_and_excludes_unresolved_vendors() -> None:
     entry = parse_catalog_csv(
         ','.join(CATALOG_HEADERS)
         + '\n8,Operator comparison,Operator subtitle,Title and 1 column + Comments,Operator chart,CDR-Speech,LQ,Average Vertical Bars,Operator = Vodafone UK,Operator,Operator × Campaign,Operator,\n',
@@ -443,18 +444,21 @@ def test_multivendor_rendering_rewrites_operator_display_and_grouping_but_not_fi
     assert rendered.legend == 'Campaign'
     assert rendered.grouping_rows == 'Vendor'
     assert rendered.grouping_columns == 'Vendor × Campaign'
-    assert rendered.filters == 'Operator = Vodafone UK'
+    assert rendered.filters == 'Operator = Vodafone UK; vendor NOT CONTAINS (Mixed, Other)'
 
     frame = pd.DataFrame({
-        'Operator': ['Vodafone UK', '3'],
-        'report_vendor': ['Vodafone_Ericsson', '3_Nokia'],
-        'Campaign': ['UK_Q2_SA_2026', 'UK_Q2_SA_2026'],
-        'LQ': [3.8, 3.5],
+        'Operator': ['Vodafone UK', 'Vodafone UK', '3'],
+        'report_vendor': ['Vodafone_Ericsson', 'Vodafone_Mixed Vendor', '3_Nokia'],
+        'Campaign': ['UK_Q2_SA_2026', 'UK_Q2_SA_2026', 'UK_Q2_SA_2026'],
+        'LQ': [3.8, 3.6, 3.5],
     })
     filtered = _apply_catalog_filters(frame, rendered, True, 'LQ')
     grouped, primary, series = _apply_catalog_grouping(filtered, rendered, True, 'LQ')
     assert grouped[primary].tolist() == ['Vodafone_Ericsson']
     assert grouped[series].tolist() == ['Vodafone_Ericsson · 2026-Q2']
+
+    already_filtered = replace(entry, filters='vendor NOT CONTAINS (Mixed, Other)')
+    assert prepare_multivendor_catalog_entry(already_filtered).filters == already_filtered.filters
 
 
 def test_rows_only_grouping_uses_one_all_series_without_repeating_the_category() -> None:

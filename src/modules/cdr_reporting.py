@@ -839,9 +839,10 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
     """Apply the report-only multivendor wording and grouping interpretation.
 
     The stored template remains an operator-oriented definition.  For a
-    multivendor run, only grouping dimensions, display legends and titles are
-    transformed.  Filters deliberately remain untouched so an ``Operator``
-    condition continues to filter the physical CDR Operator column.
+    multivendor run, grouping dimensions, display legends and titles are
+    transformed and unresolved Mixed/Other vendor groups are excluded. Existing
+    ``Operator`` conditions remain untouched and keep filtering the physical CDR
+    Operator column.
     """
     def vendor_grouping(value: str) -> str:
         dimensions = parse_catalog_grouping(value).dimensions
@@ -849,6 +850,17 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
             "Vendor" if _normalise_catalog_name(dimension) == "operator" else dimension
             for dimension in dimensions
         )
+
+    filters = entry.filters.strip()
+    vendor_exclusion = "vendor NOT CONTAINS (Mixed, Other)"
+    has_vendor_exclusion = any(
+        _normalise_catalog_name(condition.column) in {"vendor", "reportvendor"}
+        and condition.operator == "NOT CONTAINS"
+        and {value.casefold() for value in condition.values}.issuperset({"mixed", "other"})
+        for condition in parse_catalog_filters(filters)
+    )
+    if entry.source_kind and not has_vendor_exclusion:
+        filters = f"{filters.rstrip(';')}; {vendor_exclusion}" if filters else vendor_exclusion
 
     return replace(
         entry,
@@ -858,6 +870,7 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
         legend=_replace_operator_label(entry.legend, "Campaign"),
         grouping_rows=vendor_grouping(entry.grouping_rows),
         grouping_columns=vendor_grouping(entry.grouping_columns),
+        filters=filters,
     )
 
 

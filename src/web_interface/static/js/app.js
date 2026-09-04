@@ -406,6 +406,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const table = editor.querySelector('[data-catalogue-editor-table]');
   const saveForm = editor.querySelector('[data-catalogue-editor-save]');
   const reenumerate = editor.querySelector('[data-catalogue-reenumerate]');
+  const closeDialog = editor.querySelector('[data-catalogue-editor-close-dialog]');
   const contentField = editor.querySelector('[data-catalogue-editor-content]');
   const heading = editor.querySelector('[data-catalogue-editor-heading]');
   const copy = editor.querySelector('[data-catalogue-editor-copy]');
@@ -464,13 +465,41 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     .filter(Boolean)
     .join('; ');
   const displayedFilterValue = (value) => canonicalFilterValue(value).replace(/; /g, ';\n');
-  const markCellEdited = (cell) => cell?.classList.add('is-edited');
-  const renderFilterCell = (cell, value) => {
+  const renderAddedText = (container, value, original = null) => {
+    const current = String(value || '');
+    if (original === null || current === String(original || '') || current.length <= String(original || '').length) {
+      container.append(document.createTextNode(current));
+      return;
+    }
+    const baseline = String(original || '');
+    let prefix = 0;
+    while (prefix < baseline.length && prefix < current.length && baseline[prefix] === current[prefix]) prefix += 1;
+    let suffix = 0;
+    while (suffix < baseline.length - prefix && baseline[baseline.length - 1 - suffix] === current[current.length - 1 - suffix]) suffix += 1;
+    const addedEnd = current.length - suffix;
+    container.append(document.createTextNode(current.slice(0, prefix)));
+    const added = document.createElement('mark');
+    added.className = 'catalogue-cell-added-text';
+    added.textContent = current.slice(prefix, addedEnd);
+    container.append(added, document.createTextNode(current.slice(addedEnd)));
+  };
+  const refreshCellEditedState = (cell) => {
+    if (!cell) return;
+    const current = cell.dataset.catalogueField === 'Filters' ? canonicalFilterValue(cell.textContent) : cell.textContent.trim();
+    cell.classList.toggle('is-edited', current !== (cell.dataset.originalValue || ''));
+  };
+  const renderFilterCell = (cell, value, original = null) => {
     const clauses = canonicalFilterValue(value).split('; ').filter(Boolean);
+    const originalClauses = original === null ? [] : canonicalFilterValue(original).split('; ').filter(Boolean);
     cell.replaceChildren(...clauses.map((clause, index) => {
       const line = document.createElement('div');
       line.className = 'catalogue-filter-cell-line';
-      line.textContent = `${clause}${index < clauses.length - 1 ? ';' : ''}`;
+      // Inserting a condition shifts every following line. Match an unchanged
+      // clause by content before falling back to its former position so moved
+      // conditions are not incorrectly painted as newly added text.
+      const originalClause = originalClauses.includes(clause) ? clause : (originalClauses[index] || '');
+      renderAddedText(line, clause, original === null ? null : originalClause);
+      if (index < clauses.length - 1) line.append(document.createTextNode(';'));
       return line;
     }));
   };
@@ -557,7 +586,10 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       return `${field} ${operator} ${value}`;
     }).filter(Boolean);
     renderFilterCell(activeCell, clauses.join('; '));
-    markCellEdited(activeCell);
+    refreshCellEditedState(activeCell);
+    if (activeCell.classList.contains('is-edited')) {
+      renderFilterCell(activeCell, clauses.join('; '), activeCell.dataset.originalValue || '');
+    }
     refreshFilterValidationAlert();
   };
   const addFilterCondition = (condition = {}) => {
@@ -821,6 +853,10 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const values = Object.fromEntries(catalogueHeaders.map((header) => [header, rowValue(row, header)]));
     values.__editedFields = Array.from(row.querySelectorAll('[data-catalogue-field].is-edited'))
       .map((cell) => cell.dataset.catalogueField);
+    values.__originalValues = Object.fromEntries(catalogueHeaders.map((header) => {
+      const cell = row.querySelector(`[data-catalogue-field="${header}"]`);
+      return [header, cell?.dataset.originalValue ?? rowValue(row, header)];
+    }));
     return values;
   };
   const createActionButton = (label, action, title, className = '') => {
@@ -856,7 +892,10 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       // Only a newly inserted sibling starts with blank chart fields. Rows
       // rebuilt for grouping, sorting or saving must retain every definition.
       const value = blankChartFields && !retained.includes(header) ? '' : (source[header] || '');
-      if (header === 'Filters') renderFilterCell(cell, value);
+      const originalValue = source.__originalValues?.[header] ?? value;
+      cell.dataset.originalValue = originalValue;
+      if (header === 'Filters') renderFilterCell(cell, value, source.__editedFields?.includes(header) ? originalValue : null);
+      else if (source.__editedFields?.includes(header)) renderAddedText(cell, value, originalValue);
       else cell.textContent = value;
       if (source.__editedFields?.includes(header)) cell.classList.add('is-edited');
       row.append(cell);
@@ -1060,7 +1099,11 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       if (!cell) return;
       if (mapping[key] === 'Filters') renderFilterCell(cell, value);
       else cell.textContent = value;
-      markCellEdited(cell);
+      refreshCellEditedState(cell);
+      if (cell.classList.contains('is-edited')) {
+        if (mapping[key] === 'Filters') renderFilterCell(cell, value, cell.dataset.originalValue || '');
+        else { cell.replaceChildren(); renderAddedText(cell, value, cell.dataset.originalValue || ''); }
+      }
     });
     showInfoDialog('The current preview values have been applied to this template row. Save the template to persist them.', {title: 'Template updated'});
   });
@@ -1245,7 +1288,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       const reenumerated = String(reenumeratedSlides.get(slide));
       row.dataset[sharedValueKey('Slide')] = reenumerated;
       const slideCell = row.querySelector('[data-catalogue-field="Slide"]');
-      if (slideCell) { slideCell.textContent = reenumerated; markCellEdited(slideCell); }
+      if (slideCell) { slideCell.textContent = reenumerated; refreshCellEditedState(slideCell); }
     });
     normaliseCatalogueRows();
   });
@@ -1259,7 +1302,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   });
   table.addEventListener('input', (event) => {
     const cell = event.target.closest?.('[data-catalogue-field]');
-    markCellEdited(cell);
+    refreshCellEditedState(cell);
     if (cell?.dataset.catalogueField === 'Filters') refreshFilterValidationAlert();
   });
   document.addEventListener('pointerdown', (event) => {
@@ -1276,13 +1319,21 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   helper.addEventListener('focusin', (event) => window.requestAnimationFrame(() => placeAssistanceMenu(event.target)));
   helper.addEventListener('click', (event) => window.requestAnimationFrame(() => placeAssistanceMenu(event.target)));
   table.addEventListener('focusout', (event) => {
-    if (event.target.closest?.('[data-catalogue-field="CDR source"]')) normaliseCatalogueRows();
+    const editedCell = event.target.closest?.('[data-catalogue-field]');
+    if (editedCell) {
+      const value = rowValue(editedCell.closest('tr'), editedCell.dataset.catalogueField);
+      if (editedCell.dataset.catalogueField === 'Filters') renderFilterCell(editedCell, value, editedCell.dataset.originalValue || '');
+      else { editedCell.replaceChildren(); renderAddedText(editedCell, value, editedCell.dataset.originalValue || ''); }
+      refreshCellEditedState(editedCell);
+    }
+    if (editedCell?.dataset.catalogueField === 'CDR source') normaliseCatalogueRows();
     window.requestAnimationFrame(() => {
       const focused = document.activeElement;
       if (!focused?.closest?.('[data-catalogue-field]') && !helper.contains(focused)) hideCellAssistance();
     });
   });
   addFilter?.addEventListener('click', () => addFilterCondition());
+  closeDialog?.addEventListener('click', () => window.parent.postMessage({type: 'dashboard-analytic:close-template-editor'}, window.location.origin));
   const displayChartType = (value) => String(value || '').replace(/\b\w+/g, (word) => (
     word.toLocaleLowerCase() === 'cdf'
       ? 'CDF' : `${word.charAt(0).toLocaleUpperCase()}${word.slice(1).toLocaleLowerCase()}`
@@ -1308,7 +1359,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       const additions = selected.filter((value) => !currentOrder.includes(value));
       activeCell.textContent = [...retained, ...additions].join(' × ');
     }
-    markCellEdited(activeCell);
+    refreshCellEditedState(activeCell);
+    if (activeCell.classList.contains('is-edited')) {
+      const value = rowValue(activeCell.closest('tr'), field);
+      if (field === 'Filters') renderFilterCell(activeCell, value, activeCell.dataset.originalValue || '');
+      else { activeCell.replaceChildren(); renderAddedText(activeCell, value, activeCell.dataset.originalValue || ''); }
+    }
     if (field === 'Filters') refreshFilterValidationAlert();
     activeCell.focus();
   });
@@ -1469,6 +1525,9 @@ document.querySelectorAll('[data-open-template-editor]').forEach((button) => {
 });
 adminTemplateEditor?.addEventListener('click', (event) => {
   if (event.target === adminTemplateEditor || event.target.closest('[data-admin-template-editor-close]')) closeAdminTemplateEditor();
+});
+window.addEventListener('message', (event) => {
+  if (event.origin === window.location.origin && event.data?.type === 'dashboard-analytic:close-template-editor') closeAdminTemplateEditor();
 });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && adminTemplateEditor && !adminTemplateEditor.hidden) closeAdminTemplateEditor();

@@ -26,7 +26,8 @@
 - Set the default server-transfer destination port to `7278`, while respecting a different port explicitly included in the destination URL.
 - Prefilled the server-transfer destination dialog with port `7278`, remembered the last URL and port used, and enabled Enter-key submission from either field.
 - Replaced the chart viewer's reset-zoom symbol with a clearer magnifying-glass icon while preserving its accessible Reset zoom action.
-- Opened Slides Templates Editor in the shared 90%-viewport editor dialog from each Admin template-management Edit action, showing the selected template name in its title, highlighting session-edited cells in pastel yellow and removing the permanent editor panel from the main Admin page.
+- Added `vendor NOT CONTAINS (Mixed, Other)` automatically to every Vendor Comparison chart at render time, allowing the same stored Slides Template to serve Operator and Vendor comparisons without unresolved vendor groups.
+- Opened Slides Templates Editor in the shared 90%-viewport editor dialog from each Admin template-management Edit action, showing the selected template name in its title, providing both footer and corner Close actions, highlighting changed cells in pale yellow and genuinely added text in a stronger yellow without misidentifying filter lines shifted by insertions, and removing the permanent editor panel from the main Admin page.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
