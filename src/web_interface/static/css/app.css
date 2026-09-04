@@ -968,7 +968,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .table-input, .table-select { min-width: 140px; padding: 0.7rem 0.85rem; }
 .table-help { margin-top: 0.35rem; color: var(--muted); font-size: 0.78rem; }
 .logs-filter-control { min-width: 190px; }
-.app-logs-filters { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)) auto; gap: 0.8rem; align-items: end; margin: 0.9rem 0 1.1rem; }
+.app-logs-filters { display: grid; grid-template-columns: repeat(5, minmax(135px, 1fr)) auto; gap: 0.8rem; align-items: end; margin: 0.9rem 0 1.1rem; }
 .app-logs-filters label { display: grid; gap: 0.35rem; color: var(--muted); font-size: 0.78rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
 .app-logs-filters input, .app-logs-filters select { min-width: 0; width: 100%; }
 .app-logs-clear-button { min-height: 2.7rem; padding: 0.55rem 0.85rem; background: linear-gradient(145deg, #fff0aa, #f3cc4e); border-color: rgba(174, 124, 14, 0.52); color: #684707; box-shadow: 0 8px 18px rgba(190, 140, 17, 0.16); white-space: nowrap; }

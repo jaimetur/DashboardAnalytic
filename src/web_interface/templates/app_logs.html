@@ -34,6 +34,12 @@
           {% for username in log_users %}<option value="{{ username }}">{{ username }}</option>{% endfor %}
         </select>
       </label>
+      <label>Executed by
+        <select data-app-log-executor-filter>
+          <option value="all">All executors</option>
+          {% for executor in log_executors %}<option value="{{ executor }}">{{ executor }}</option>{% endfor %}
+        </select>
+      </label>
       <label>Type
         <select data-app-log-type-filter>
           <option value="all">All events</option>
@@ -54,7 +60,7 @@
         <thead><tr><th>ID</th><th>Date</th><th>User</th><th>Executed by</th><th>Type</th><th>Action</th><th>Details</th></tr></thead>
         <tbody data-app-log-body>
           {% for row in logs %}
-          <tr data-app-log-row data-app-log-user="{{ row.username }}" data-app-log-date="{{ row.date }}" data-app-log-type="{{ row.log_type }}" data-app-log-action="{{ row.action }}">
+          <tr data-app-log-row data-app-log-user="{{ row.username }}" data-app-log-executor="{{ row.executed_by }}" data-app-log-date="{{ row.date }}" data-app-log-type="{{ row.log_type }}" data-app-log-action="{{ row.action }}">
             <td>{{ row.id }}</td>
             <td>{{ row.created_at }}</td>
             <td>{{ row.username }}</td>

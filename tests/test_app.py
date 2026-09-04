@@ -3193,10 +3193,12 @@ def test_app_logs_combines_operational_and_audit_activity(client) -> None:
     assert response.status_code == 200
     assert "App Logs" in response.text
     assert response.text.index('data-app-log-date-filter') < response.text.index('data-app-log-user-filter')
+    assert response.text.index('data-app-log-user-filter') < response.text.index('data-app-log-executor-filter')
     assert "All events" in response.text
     assert "Info only" in response.text
     assert "Error only" in response.text
     assert "All users" in response.text
+    assert "All executors" in response.text
     assert "All actions" in response.text
     assert 'data-app-log-refresh' in response.text
     assert 'data-app-log-count' in response.text
@@ -3221,11 +3223,14 @@ def test_app_logs_normalises_user_case_and_records_login_outcomes(client) -> Non
     }, follow_redirects=False)
     assert successful.status_code == 303
     app_module.repository.add_log('ADMIN', 'mixed_case_test', '{}')
+    app_module.repository.add_log('ADMIN', 'system_test', '{"executed_by": "SYSTEM"}')
 
     response = client.get('/app-logs')
 
     assert response.text.count('<option value="admin">admin</option>') == 1
     assert 'data-app-log-user="admin"' in response.text
+    assert '<option value="system">system</option>' in response.text
+    assert 'data-app-log-executor="system"' in response.text
     login_details = [json.loads(row['details']) for row in app_module.repository.list_logs() if row['action'] == 'login']
     assert any(details['success'] is False and details['reason'] == 'invalid_credentials' for details in login_details)
     assert any(details['success'] is True and details['result'] == 'successful' for details in login_details)

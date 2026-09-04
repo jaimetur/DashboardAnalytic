@@ -3781,6 +3781,7 @@ def app_logs(request: Request, user: SessionUser = Depends(current_user)) -> HTM
             'user': user,
             'logs': logs,
             'log_users': sorted({log['username'] for log in logs if log['username']}, key=str.casefold),
+            'log_executors': sorted({log['executed_by'] for log in logs if log['executed_by']}, key=str.casefold),
             'log_actions': sorted({log['action'] for log in logs if log['action']}, key=str.casefold),
         },
     )

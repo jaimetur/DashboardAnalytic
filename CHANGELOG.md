@@ -18,6 +18,7 @@
 - Added manual Refresh and five-second incremental polling to App Logs while preserving the active filters.
 - Clarified Chart Set audit stages as generation requested, rendering completed and published; App Logs retains the initiating user in `User` and identifies background execution as `system` in the new `Executed by` column.
 - Accelerated repeated multi-platform Docker builds with a stable shared BuildKit cache and isolated Python dependencies from font/timezone package changes, preventing unnecessary slow ARM64 `pip` reinstalls.
+- Added an `Executed by` filter after `User` in App Logs, including preserved filter state and automatic option updates during live refreshes.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.

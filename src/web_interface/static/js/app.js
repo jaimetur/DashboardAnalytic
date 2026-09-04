@@ -3565,6 +3565,7 @@ const appLogsPanel = document.querySelector('[data-app-logs-panel]');
 if (appLogsPanel) {
   const appLogFiltersStorageKey = 'dashboard-analytic:/app-logs:filters';
   const userFilter = appLogsPanel.querySelector('[data-app-log-user-filter]');
+  const executorFilter = appLogsPanel.querySelector('[data-app-log-executor-filter]');
   const dateFilter = appLogsPanel.querySelector('[data-app-log-date-filter]');
   const typeFilter = appLogsPanel.querySelector('[data-app-log-type-filter]');
   const actionFilter = appLogsPanel.querySelector('[data-app-log-action-filter]');
@@ -3582,6 +3583,7 @@ if (appLogsPanel) {
   try {
     const savedFilters = JSON.parse(window.localStorage.getItem(appLogFiltersStorageKey) || '{}');
     restoreSelectValue(userFilter, savedFilters.user);
+    restoreSelectValue(executorFilter, savedFilters.executor);
     if (dateFilter && /^\d{4}-\d{2}-\d{2}$/.test(savedFilters.date || '')) dateFilter.value = savedFilters.date;
     restoreSelectValue(typeFilter, savedFilters.type);
     restoreSelectValue(actionFilter, savedFilters.action);
@@ -3592,6 +3594,7 @@ if (appLogsPanel) {
     try {
       window.localStorage.setItem(appLogFiltersStorageKey, JSON.stringify({
         user: userFilter?.value || 'all', date: dateFilter?.value || '',
+        executor: executorFilter?.value || 'all',
         type: typeFilter?.value || 'all', action: actionFilter?.value || 'all',
       }));
     } catch (_error) {
@@ -3603,6 +3606,7 @@ if (appLogsPanel) {
     rows.forEach((row) => {
       const matches = (
         (!userFilter || userFilter.value === 'all' || String(row.dataset.appLogUser || '').toLocaleLowerCase() === String(userFilter.value || '').toLocaleLowerCase())
+        && (!executorFilter || executorFilter.value === 'all' || String(row.dataset.appLogExecutor || '').toLocaleLowerCase() === String(executorFilter.value || '').toLocaleLowerCase())
         && (!dateFilter || !dateFilter.value || row.dataset.appLogDate === dateFilter.value)
         && (!typeFilter || typeFilter.value === 'all' || row.dataset.appLogType === typeFilter.value)
         && (!actionFilter || actionFilter.value === 'all' || row.dataset.appLogAction === actionFilter.value)
@@ -3622,6 +3626,7 @@ if (appLogsPanel) {
     const row = document.createElement('tr');
     row.dataset.appLogRow = '';
     row.dataset.appLogUser = String(log.username || '').toLocaleLowerCase();
+    row.dataset.appLogExecutor = String(log.executed_by || '—').toLocaleLowerCase();
     row.dataset.appLogDate = String(log.date || '');
     row.dataset.appLogType = String(log.log_type || 'Info');
     row.dataset.appLogAction = String(log.action || '');
@@ -3650,6 +3655,7 @@ if (appLogsPanel) {
       rows = logs.map(createAppLogRow);
       body.replaceChildren(...rows, ...(noResults ? [noResults] : []));
       replaceSelectOptions(userFilter, [...new Set(logs.map((log) => String(log.username || '').toLocaleLowerCase()).filter(Boolean))].sort(), 'All users');
+      replaceSelectOptions(executorFilter, [...new Set(logs.map((log) => String(log.executed_by || '—').toLocaleLowerCase()).filter(Boolean))].sort(), 'All executors');
       replaceSelectOptions(actionFilter, [...new Set(logs.map((log) => String(log.action || '')).filter(Boolean))].sort(), 'All actions');
       if (count) count.textContent = `${logs.length} entries`;
       syncAppLogRows();
@@ -3660,12 +3666,13 @@ if (appLogsPanel) {
       if (refreshButton) refreshButton.disabled = false;
     }
   };
-  [userFilter, dateFilter, typeFilter, actionFilter].filter(Boolean).forEach((filter) => filter.addEventListener('change', () => {
+  [userFilter, executorFilter, dateFilter, typeFilter, actionFilter].filter(Boolean).forEach((filter) => filter.addEventListener('change', () => {
     persistAppLogFilters();
     syncAppLogRows();
   }));
   clearFilters?.addEventListener('click', () => {
     if (userFilter) userFilter.value = 'all';
+    if (executorFilter) executorFilter.value = 'all';
     if (dateFilter) dateFilter.value = '';
     if (typeFilter) typeFilter.value = 'all';
     if (actionFilter) actionFilter.value = 'all';
