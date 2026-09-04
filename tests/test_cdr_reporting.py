@@ -669,6 +669,24 @@ def test_status_chart_excludes_empty_and_nan_states_from_percentage_data() -> No
     assert rendered_data['state'].tolist() == ['Completed', 'Failed']
 
 
+def test_status_chart_honours_selected_kpi_when_other_status_columns_exist() -> None:
+    frame = pd.DataFrame({
+        'Operator': ['EE', 'EE'],
+        'Campaign': ['2026-Q2', '2026-Q2'],
+        'Call_Status': ['Completed', 'Completed'],
+        'Test_Result': ['Completed', 'Failed'],
+        '__catalog_column_0': ['EE', 'EE'],
+    })
+
+    with patch('src.modules.cdr_reporting._render_status_100_hierarchy') as hierarchy_renderer:
+        hierarchy_renderer.return_value = BytesIO(b'selected-status-kpi')
+        chart = _render_status_100('Data failures', frame, 'Operator', 'Campaign', metric='Test_Result')
+
+    rendered_data = hierarchy_renderer.call_args.args[1]
+    assert chart.getvalue() == b'selected-status-kpi'
+    assert rendered_data['state'].tolist() == ['Completed', 'Failed']
+
+
 def test_hierarchical_grouping_keeps_campaign_bars_together_per_operator() -> None:
     frame = pd.DataFrame({
         '__catalog_column_0': ['Vodafone', 'O2', 'Vodafone', 'O2'],

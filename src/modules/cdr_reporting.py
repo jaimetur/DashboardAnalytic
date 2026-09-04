@@ -1720,7 +1720,10 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
     if frame.empty or not group or not period:
         return _empty_chart(title)
     image, draw = _canvas(title)
-    state_column = metric if quality else _column(frame, ("Call_Status", "Test_Result", "status"))
+    # Honour the template/Interactive Preview KPI for status charts too. The
+    # former fallback could silently pick Call_Status from a processed frame
+    # even when the selected KPI was Test_Result.
+    state_column = metric or _column(frame, ("Call_Status", "Test_Result", "status"))
     if not state_column:
         return _empty_chart(title)
     states = ("< 1.6", "≥ 1.6") if quality else ("Completed", "Dropped", "Failed")
@@ -1779,7 +1782,10 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
             height = value * chart_height
             y = chart_top + chart_height - running - height
             draw.rectangle((x, y, x + bar_width, y + height), fill=colour)
-            if value >= .08: draw.text((x + 2, y + height / 2 - 8), f"{value:.0%}", fill="white", font=_font(16, True))
+            if value >= .08:
+                draw.text((x + 2, y + height / 2 - 8), f"{value:.1%}", fill="white", font=_font(16, True))
+            elif value >= .005:
+                draw.text((x + bar_width + 3, max(chart_top, y - 7)), f"{value:.1%}", fill=colour, font=_font(12, True))
             running += height
         label = _catalogue_display_label(g, p)[:24]
         label_font = _font(18, True)
@@ -1905,7 +1911,11 @@ def _render_status_100_hierarchy(
                 y = pane_bottom - running - segment_height
                 draw.rectangle((x, y, x + bar_width, y + segment_height), fill=colour)
                 if ratio >= 0.08:
-                    draw.text((x + 3, y + segment_height / 2 - 9), f"{ratio:.0%}", fill="white", font=_font(17, True), stroke_width=1, stroke_fill="#42515C")
+                    draw.text((x + 3, y + segment_height / 2 - 9), f"{ratio:.1%}", fill="white", font=_font(17, True), stroke_width=1, stroke_fill="#42515C")
+                elif ratio >= 0.005:
+                    # Small failure rates still matter. Put their label beside
+                    # the narrow segment instead of suppressing it entirely.
+                    draw.text((x + bar_width + 3, max(pane_top, y - 7)), f"{ratio:.1%}", fill=colour, font=_font(12, True))
                 running += segment_height
 
     for column_index, lower_caption in enumerate(lower_captions):
@@ -2515,7 +2525,7 @@ def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame
     if chart_type != "distribution stacked vertical bars" and "__catalog_stack" in frame.columns:
         frame[period] = frame[period].astype(str) + " · " + frame["__catalog_stack"].astype(str)
     if spec["kind"] == "status_100":
-        return _render_status_100(chart_title, frame, group, period, legend_labels=legend_labels, legend_position=legend_position)
+        return _render_status_100(chart_title, frame, group, period, metric=metric, legend_labels=legend_labels, legend_position=legend_position)
     if spec["kind"] == "quality_100":
         return _render_status_100(chart_title, frame, group, period, True, spec.get("threshold", 1.6), metric, legend_labels, legend_position)
     if spec["kind"] == "failure_count":
@@ -2544,7 +2554,7 @@ def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame
 
 def _chart_for_spec(title: str, frames: dict[str, pd.DataFrame], spec: dict, multivendor: bool) -> BytesIO:
     frame, group, period = _source_for_spec(frames, spec, multivendor); metric = _metric_column(frame, spec)
-    if spec["kind"] == "status_100": return _render_status_100(title, frame, group, period)
+    if spec["kind"] == "status_100": return _render_status_100(title, frame, group, period, metric=metric)
     if spec["kind"] == "quality_100": return _render_status_100(title, frame, group, period, True, spec.get("threshold", 1.6), metric)
     if spec["kind"] == "failure_count": return _render_failure_count(title, frame, group, period)
     if spec["kind"] == "scatter": return _render_scatter(title, frame, group, metric, _column(frame, spec.get("x_metric", ())))

@@ -32,9 +32,9 @@
 - Fixed Docker source-layer freshness by keying application layers to the exact Git commit while retaining dependency caching, and embedded the revision in every published image for verification.
 - Fixed undersized, non-bold Docker chart text by installing an Arial-compatible Linux font and sharing cross-platform font resolution across chart and export renderers.
 - Excluded null, NaN and empty status/KPI values from both the numerator and denominator of 100% stacked charts instead of misclassifying them as failures or valid quality samples.
-- Excluded unknown and non-executed status values from 100% chart denominators and restricted Failed segments to explicitly failed/error states.
 - Sized the Charts Panel template editor modal to 90% of the browser viewport and reduced its embedded view to the editor itself, with a fixed visible action bar and scrolling confined to the template table.
 - Allowed admins to export or transfer shared Slides Templates and only their accessible workspaces, while keeping configuration/full-environment transfers and workspace imports restricted; removed forbidden options from their selector so transfer requests always include a valid target, made the initial destination handshake retry-safe and idempotent, persisted incoming offers, and made destination notification polling resilient to stale Docker-rendered pages and browser tab suspension.
+- Excluded unknown and non-executed status values from 100% chart denominators, restricted Failed segments to explicitly failed/error states, and made status charts honour the selected KPI instead of silently preferring another status column present in processed data.
 
 #### 📚 Documentation:
 
