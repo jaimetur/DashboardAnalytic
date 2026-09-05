@@ -436,7 +436,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-chart-preview-image { grid-column: 1; display: grid; place-items: center; width: 100%; min-height: 0; height: auto; overflow: auto; border: 1px solid rgba(75, 32, 138, 0.2); border-radius: 8px; background: #fff; }
 .catalogue-chart-preview-image[hidden] { display: none !important; }
 .catalogue-chart-preview-image img { display: block; width: min(100%, 1200px); height: auto; object-fit: contain; }
-.report-jobs-table { min-width: 1210px; }
+.report-jobs-table { min-width: 1200px; }
 .report-chart-jobs-table { min-width: 980px; }
 .reporting-chart-jobs-panel { margin-top: 2.2rem; }
 .report-jobs-table th, .report-jobs-table td { vertical-align: middle; }
@@ -456,9 +456,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-job-dataset-kind { color: #5d3b86; font-weight: 800; margin-top: 0.18rem; }
 .report-job-progress { display: flex; align-items: center; gap: 0.45rem; min-width: 122px; font-variant-numeric: tabular-nums; }
 .report-job-progress progress { width: 82px; accent-color: #4b208a; }
-.report-jobs-table th:nth-child(12), .report-jobs-table td:nth-child(12) { width: 98px; min-width: 98px; max-width: 98px; }
-.report-jobs-table .report-job-progress { gap: 0.3rem; min-width: 92px; }
-.report-jobs-table .report-job-progress progress { width: 58px; }
+.report-jobs-table th:nth-child(12), .report-jobs-table td:nth-child(12) { width: 88px; min-width: 88px; max-width: 88px; }
+.report-jobs-table .report-job-progress { gap: 0.3rem; min-width: 82px; }
+.report-jobs-table .report-job-progress progress { width: 48px; }
 .report-jobs-table .queue-status-pill { box-sizing: border-box; max-width: 100%; padding: 0.34rem 0.46rem; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .report-job-actions { display: flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
 .report-job-download-button { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; padding: 0; border: 1px solid rgba(116, 87, 164, 0.62); border-radius: 999px; background: linear-gradient(145deg, #6d46a8, #9870d0); color: #fff; font-size: 1.2rem; line-height: 1; font-weight: 800; text-decoration: none; box-shadow: 0 8px 18px rgba(95, 69, 142, 0.18); }
