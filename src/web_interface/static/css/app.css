@@ -1344,11 +1344,11 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
    panel is allowed to widen the document or push actions off-screen. */
 @media (max-width: 480px) {
   html, body { width: 100%; max-width: 100%; overflow-x: clip; }
-  .shell { width: 100%; max-width: 100%; padding: 0.55rem; }
+  .shell { width: 100%; max-width: 100%; padding: 0.25rem; }
   main, .dashboard-stack, .workspace-grid, .dashboard-content-grid,
   .panel, .collapsible-panel, .collapsible-panel-body, .hero-panel,
   article, section, details, form { min-width: 0; max-width: 100%; }
-  .panel { padding: 0.9rem; border-radius: 14px; }
+  .panel { padding: 0.65rem; border-radius: 12px; }
   .spacious-stack, .dashboard-stack { gap: 0.75rem; }
   h1 { font-size: 1.45rem; line-height: 1.12; }
   h2 { font-size: 1.25rem; line-height: 1.18; overflow-wrap: anywhere; }
@@ -1409,6 +1409,9 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
   .preview-actions > * { width: 100%; max-width: 100%; }
   .report-chart-set-controls label, .database-management-toolbar label,
   .database-management-toolbar select { width: 100%; min-width: 0; max-width: 100%; }
+  .report-chart-set-controls { margin-bottom: 0.35rem; }
+  .report-chart-set-controls label { flex: 0 0 auto; }
+  .report-chart-set-controls .chart-set-picker { margin-bottom: 0; }
 
   .report-charts-grid { grid-template-columns: minmax(0, 1fr); }
   .report-chart-card { width: 100%; padding: 0.65rem; }
@@ -1420,6 +1423,29 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
     display: block; width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain;
     -webkit-overflow-scrolling: touch;
   }
+  .queue-table-wrap { overflow: visible; border: 0; }
+  .queue-table { display: block; min-width: 0; width: 100%; }
+  .queue-table thead { display: none; }
+  .queue-table tbody { display: grid; gap: 0.65rem; }
+  .queue-table tbody tr[data-dataset-row] {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0; overflow: hidden; border: 1px solid rgba(16, 49, 74, 0.16); border-radius: 11px; background: #fff;
+  }
+  .queue-table tbody tr[data-dataset-row] > td {
+    display: grid; grid-template-columns: minmax(5.2rem, 0.7fr) minmax(0, 1fr); align-items: start;
+    width: auto !important; min-width: 0 !important; padding: 0.48rem 0.55rem; border: 0; border-bottom: 1px solid rgba(16, 49, 74, 0.09);
+    white-space: normal;
+  }
+  .queue-table tbody tr[data-dataset-row] > td::before {
+    content: attr(data-label); padding-right: 0.45rem; color: #58707e; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  .queue-table tbody tr[data-dataset-row] > td[data-label="Dataset"],
+  .queue-table tbody tr[data-dataset-row] > td[data-label="Progress"],
+  .queue-table tbody tr[data-dataset-row] > td[data-label="Actions"] { grid-column: 1 / -1; }
+  .queue-table tbody tr[data-dataset-row] > td[data-label="Actions"] { border-bottom: 0; }
+  .queue-table .queue-dataset-path { font-size: 0.7rem; }
+  .queue-table .queue-actions { min-width: 0; flex-wrap: wrap; white-space: normal; }
+  .queue-table .queue-actions > *, .queue-table .queue-actions form { flex: 1 1 auto; }
   .database-pagination { width: 100%; justify-content: space-between; gap: 0.3rem; flex-wrap: wrap; }
   .database-pagination button { flex: 1 1 auto; padding-inline: 0.55rem; }
   .database-pagination span { flex: 1 0 100%; order: -1; text-align: center; }
@@ -1438,17 +1464,26 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
     gap: 0.55rem; padding: 0.65rem; overflow-y: auto;
   }
   .report-chart-viewer-image { grid-column: 1; grid-row: 2; min-height: 13rem; }
-  .report-chart-viewer-sandbox { grid-column: 1; grid-row: 3; max-height: none; overflow: visible; }
-  .report-chart-viewer-actions { grid-column: 1; grid-row: 4; grid-template-columns: 1fr; position: static; }
+  .report-chart-viewer-actions { grid-column: 1; grid-row: 3; grid-template-columns: 1fr; position: static; }
+  .report-chart-viewer-sandbox { grid-column: 1; grid-row: 4; max-height: none; overflow: visible; }
   .report-chart-viewer-data-overlay { position: fixed; inset: 0.35rem; z-index: 230; }
   .report-chart-viewer-data-dialog { padding: 0.65rem; }
   .report-chart-viewer-data-header button { align-self: flex-end; }
 
   .confirm-panel.catalogue-chart-preview-dialog {
     width: calc(100vw - 0.7rem) !important; height: calc(100dvh - 0.7rem) !important;
-    max-width: none !important; max-height: none !important; padding: 0.65rem; overflow-y: auto;
+    max-width: none !important; max-height: none !important; grid-template-rows: auto auto minmax(13rem, 42dvh) auto auto; padding: 0.65rem; overflow-y: auto;
   }
-  .catalogue-chart-preview-sandbox { max-height: none; }
+  .catalogue-chart-preview-image { grid-column: 1; grid-row: 3; min-height: 13rem; }
+  .catalogue-chart-preview-actions { grid-column: 1; grid-row: 4; }
+  .catalogue-chart-preview-sandbox { grid-column: 1; grid-row: 5; max-height: none; }
+  .workspace-switcher-actions, .workspace-select-form, .workspace-management,
+  .workspace-management-forms, .workspace-management-forms form { width: 100%; min-width: 0; align-items: stretch; }
+  .workspace-management { flex: 0 0 auto; align-self: stretch; }
+  .workspace-management[open] { display: block; box-sizing: border-box; width: 100%; max-width: 100%; padding: 0.55rem; overflow: visible; }
+  .workspace-management-forms form { padding-right: 0; border-right: 0; }
+  .workspace-management-forms input, .workspace-management-forms .workspace-user-picker { width: 100%; min-width: 0; }
+  .workspace-library { width: 100%; max-width: 100%; overflow-x: auto; }
   .confirm-panel.report-template-editor-dialog { width: calc(100vw - 0.7rem) !important; height: calc(100dvh - 0.7rem) !important; padding: 0.5rem; }
   body[data-embedded-template-editor] .slides-templates-editor-table { --catalogue-actions-width: 132px; }
 

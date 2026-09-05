@@ -187,18 +187,18 @@
         <tbody>
           {% for dataset in datasets %}
           <tr class="{% if selected_dataset and selected_dataset.id == dataset.id %}active-row{% endif %}" data-dataset-row data-dataset-id="{{ dataset.id }}" data-dataset-kind="{{ dataset.dataset_kind or 'generic' }}" data-queue-status="{{ dataset.status }}">
-            <td data-queue-id>{{ dataset.id }}</td>
-            <td>
+            <td data-label="ID" data-queue-id>{{ dataset.id }}</td>
+            <td data-label="Dataset">
               <div class="queue-dataset-name" data-queue-file-name>{{ dataset.file_name }}</div>
               <div class="queue-dataset-path" data-queue-file-path>{{ dataset.stored_path }}</div>
             </td>
-            <td data-queue-kind>{{ dataset.input_kind_label }}</td>
-            <td data-queue-rows>{{ dataset.row_count or 0 }}</td>
-            <td data-queue-size>{{ dataset.size_mb_label }}</td>
-            <td>
+            <td data-label="Input Type" data-queue-kind>{{ dataset.input_kind_label }}</td>
+            <td data-label="Rows" data-queue-rows>{{ dataset.row_count or 0 }}</td>
+            <td data-label="Size" data-queue-size>{{ dataset.size_mb_label }}</td>
+            <td data-label="Status">
               <span class="queue-status-pill queue-status-{{ dataset.status }}" data-queue-status-pill>{{ dataset.status_label }}</span>
             </td>
-            <td>
+            <td data-label="Progress">
               <div class="queue-progress-cell">
                 <div class="progress-shell visual-progress-shell">
                   <div class="progress-bar status-{{ dataset.status }}" data-queue-progress-bar style="width: {{ dataset.progress }}%"></div>
@@ -209,9 +209,9 @@
                 {% endif %}
               </div>
             </td>
-            <td data-queue-uploaded>{{ (dataset.uploaded_at_local or '').replace('T', ' ').replace(' ', '\n') }}</td>
-            <td data-queue-updated>{{ (dataset.updated_at_local or dataset.uploaded_at_local or '').replace('T', ' ').replace(' ', '\n') }}</td>
-            <td>
+            <td data-label="Uploaded" data-queue-uploaded>{{ (dataset.uploaded_at_local or '').replace('T', ' ').replace(' ', '\n') }}</td>
+            <td data-label="Updated" data-queue-updated>{{ (dataset.updated_at_local or dataset.uploaded_at_local or '').replace('T', ' ').replace(' ', '\n') }}</td>
+            <td data-label="Actions">
               <div class="queue-actions">
                 {% if dataset.status == 'ready' %}
                 <a class="ghost-link action-link-preview" href="/workspace/preview/{{ dataset.id }}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview</a>
