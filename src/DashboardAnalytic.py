@@ -44,7 +44,7 @@ DEFAULT_TRANSFER_PORT = 7278
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository
@@ -58,6 +58,9 @@ SESSIONS: dict[str, SessionUser] = {}
 ANALYSIS_CACHE: dict[str, dict[str, Any]] = {}
 DATAFRAME_CACHE: dict[str, pd.DataFrame] = {}
 CHART_PREVIEW_DATA_CACHE: dict[str, tuple[pd.DataFrame, dict[str, Any]]] = {}
+CHART_PREVIEW_FRAME_CACHE: dict[str, pd.DataFrame] = {}
+CHART_PREVIEW_FILTER_CACHE: dict[str, pd.DataFrame] = {}
+CHART_PREVIEW_CACHE_LOCK = Lock()
 STOP_REQUESTS: set[int] = set()
 STOP_REQUESTS_LOCK = Lock()
 DATASET_PROCESSING_LOCKS: dict[str, Lock] = {}
@@ -545,6 +548,7 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
     repository.db_path = workspace.database_path
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
+    _clear_chart_preview_caches()
     active_workspace = workspace
     if initialize:
         repository.initialize()
@@ -560,6 +564,7 @@ def close_active_workspace() -> None:
         workspace_registry.close_active(active_workspace.id)
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
+    _clear_chart_preview_caches()
     active_workspace = None
 
 
@@ -4120,6 +4125,54 @@ def _combined_reporting_frame(
     return classify_sessions(combined, technology)
 
 
+def _clear_chart_preview_caches() -> None:
+    """Drop workspace-bound preview frames when their backing data can change."""
+    with CHART_PREVIEW_CACHE_LOCK:
+        CHART_PREVIEW_FRAME_CACHE.clear()
+        CHART_PREVIEW_FILTER_CACHE.clear()
+        CHART_PREVIEW_DATA_CACHE.clear()
+
+
+def _chart_preview_cache_key(scope: str, material: dict[str, Any]) -> str:
+    workspace = str(active_workspace.database_path.resolve()) if active_workspace else ''
+    encoded = json.dumps({'scope': scope, 'workspace': workspace, **material}, sort_keys=True, default=str)
+    return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
+
+
+def _bounded_preview_frame(cache: dict[str, pd.DataFrame], key: str, loader: Callable[[], pd.DataFrame], limit: int) -> pd.DataFrame:
+    """Return one immutable cached frame while bounding preview memory usage."""
+    with CHART_PREVIEW_CACHE_LOCK:
+        cached = cache.get(key)
+    if cached is not None:
+        return cached
+    loaded = loader()
+    with CHART_PREVIEW_CACHE_LOCK:
+        cached = cache.setdefault(key, loaded)
+        while len(cache) > limit:
+            cache.pop(next(iter(cache)))
+    return cached
+
+
+def _cached_filtered_chart_frame(
+    source_key: str, frame: pd.DataFrame, entry: CatalogEntry, multivendor: bool,
+) -> pd.DataFrame:
+    """Reuse source/filter work when only grouping or presentation changes."""
+    key = _chart_preview_cache_key('filtered-chart-frame', {
+        'source_key': source_key,
+        'cdr_source': entry.cdr_source,
+        'chart_type': entry.chart_type,
+        'kpi': entry.kpi,
+        'filters': entry.filters,
+        'multivendor': multivendor,
+    })
+    return _bounded_preview_frame(
+        CHART_PREVIEW_FILTER_CACHE,
+        key,
+        lambda: prepare_catalog_chart_preview_frame(frame, entry, multivendor=multivendor)[0],
+        8,
+    )
+
+
 def _report_dataset_names(selected: dict[str, list[dict[str, Any]]]) -> dict[str, list[str]]:
     return {kind: [str(dataset['file_name']) for dataset in datasets] for kind, datasets in selected.items()}
 
@@ -4311,11 +4364,20 @@ async def temporary_chart_preview(request: Request, user: SessionUser = Depends(
         raise HTTPException(status_code=400, detail='Choose a valid CDR Source.')
     preview_dataset_ids = _temporary_preview_dataset_ids(editable, selected_ids, entry.source_kind)
     selected = _reporting_datasets(preview_dataset_ids, entry.source_kind)
-    frame = _combined_reporting_frame(selected, technology, [entry], multivendor)
-    if multivendor:
-        frame = ensure_report_vendor_group(frame)
+    frame_key = _chart_preview_cache_key('reporting-source-frame', {
+        'dataset_ids': preview_dataset_ids,
+        'dataset_versions': [(item['id'], item.get('updated_at'), item.get('processed_at'), item.get('normalization_version')) for item in selected],
+        'technology': technology,
+        'multivendor': multivendor,
+        'columns': reporting_query_columns(entry.source_kind, [entry], multivendor),
+    })
+    def load_frame() -> pd.DataFrame:
+        combined = _combined_reporting_frame(selected, technology, [entry], multivendor)
+        return ensure_report_vendor_group(combined) if multivendor else combined
+    frame = _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4)
+    filtered = _cached_filtered_chart_frame(frame_key, frame, entry, multivendor)
     try:
-        image = render_catalog_chart_preview(frame, entry, multivendor=multivendor)
+        image = render_catalog_chart_preview(filtered, entry, multivendor=multivendor, prefiltered=True)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(content=image, media_type='image/png', headers={'Cache-Control': 'no-store'})
@@ -4633,14 +4695,15 @@ def _chart_builder_context(payload: dict[str, Any]) -> tuple[pd.DataFrame, Catal
     selected_ids = {int(value) for value in payload.get('dataset_ids', [])}
     if not selected_ids:
         raise HTTPException(status_code=400, detail='Select at least one processed CDR Source.')
-    frames: list[pd.DataFrame] = []
+    selected_datasets: list[dict[str, Any]] = []
+    dataset_columns: dict[int, list[str]] = {}
     for dataset in repository.list_datasets():
         if int(dataset['id']) not in selected_ids or dataset['status'] != 'ready':
             continue
-        columns = repository.list_dataset_row_columns(int(dataset['id']))
-        if columns:
-            frames.append(repository.load_dataset_rows(int(dataset['id']), columns, {}))
-    if not frames:
+        item = serialize_dataset_row(dataset)
+        selected_datasets.append(item)
+        dataset_columns[int(dataset['id'])] = repository.list_dataset_row_columns(int(dataset['id']))
+    if not selected_datasets:
         raise HTTPException(status_code=400, detail='The selected CDR Sources are not ready.')
     definition = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
     entry = CatalogEntry(
@@ -4651,7 +4714,20 @@ def _chart_builder_context(payload: dict[str, Any]) -> tuple[pd.DataFrame, Catal
         grouping_rows=str(definition.get('grouping_rows') or ''), grouping_columns=str(definition.get('grouping_columns') or ''),
         legend_position=parse_legend_position(str(definition.get('legend_position') or 'Top')),
     )
-    return pd.concat(frames, ignore_index=True, sort=False), entry
+    frame_key = _chart_preview_cache_key('chart-builder-source-frame', {
+        'dataset_ids': sorted(selected_ids),
+        'dataset_versions': [(item['id'], item.get('updated_at'), item.get('processed_at'), item.get('normalization_version')) for item in selected_datasets],
+        'columns': dataset_columns,
+    })
+    def load_frame() -> pd.DataFrame:
+        frames = [
+            repository.load_dataset_rows(dataset_id, columns, {})
+            for dataset_id, columns in dataset_columns.items() if columns
+        ]
+        if not frames:
+            raise HTTPException(status_code=400, detail='The selected CDR Sources are not ready.')
+        return pd.concat(frames, ignore_index=True, sort=False)
+    return _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4), entry
 
 
 @app.get('/chart-builder', response_class=HTMLResponse)
@@ -4671,7 +4747,9 @@ async def chart_builder_preview(request: Request, user: SessionUser = Depends(cu
     payload = await request.json()
     frame, entry = _chart_builder_context(payload)
     try:
-        return Response(content=render_catalog_chart_preview(frame, entry), media_type='image/png', headers={'Cache-Control': 'no-store'})
+        source_key = _chart_preview_cache_key('chart-builder-selection', {'dataset_ids': payload.get('dataset_ids', [])})
+        filtered = _cached_filtered_chart_frame(source_key, frame, entry, False)
+        return Response(content=render_catalog_chart_preview(filtered, entry, prefiltered=True), media_type='image/png', headers={'Cache-Control': 'no-store'})
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -7117,7 +7195,8 @@ async def preview_report_template_chart_image(
         raise HTTPException(status_code=400, detail=f'Unable to preview this chart: {exc}') from exc
     if not entry.source_kind:
         raise HTTPException(status_code=400, detail='Only chart rows with a CDR source can be previewed.')
-    frames: list[pd.DataFrame] = []
+    selected_datasets: list[dict[str, Any]] = []
+    dataset_columns: dict[int, list[str]] = {}
     for dataset in repository.list_datasets():
         if str(dataset['dataset_kind'] or '').casefold() != entry.source_kind or dataset['status'] != 'ready':
             continue
@@ -7125,11 +7204,23 @@ async def preview_report_template_chart_image(
         repository.materialize_cdr_derived_dimensions(dataset_id)
         columns = repository.list_dataset_row_columns(dataset_id)
         if columns:
-            frames.append(repository.load_dataset_rows(dataset_id, columns, {}))
-    if not frames:
+            selected_datasets.append(serialize_dataset_row(dataset))
+            dataset_columns[dataset_id] = columns
+    if not selected_datasets:
         raise HTTPException(status_code=400, detail=f'No processed {entry.cdr_source} datasets are available in the active workspace.')
+    frame_key = _chart_preview_cache_key('template-editor-source-frame', {
+        'dataset_versions': [(item['id'], item.get('updated_at'), item.get('processed_at'), item.get('normalization_version')) for item in selected_datasets],
+        'columns': dataset_columns,
+    })
+    def load_frame() -> pd.DataFrame:
+        return pd.concat([
+            repository.load_dataset_rows(dataset_id, columns, {})
+            for dataset_id, columns in dataset_columns.items()
+        ], ignore_index=True, sort=False)
+    frame = _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4)
+    filtered = _cached_filtered_chart_frame(frame_key, frame, entry, False)
     try:
-        image = render_catalog_chart_preview(pd.concat(frames, ignore_index=True, sort=False), entry)
+        image = render_catalog_chart_preview(filtered, entry, prefiltered=True)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(content=image, media_type='image/png')

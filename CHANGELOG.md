@@ -45,6 +45,7 @@
 - Made transfer-offer replacement atomic across Docker workers: SQLite now cancels prior pending offers and inserts the new request in one write transaction, removing the stale in-memory admission check that could still return `Too many pending transfer offers`.
 - Made server-transfer startup self-repair the SQLite offer table for pre-migration Docker volumes and replaced the generic startup failure with actionable database, filesystem or expired-session diagnostics.
 - Added a compact-phone responsive layout for 390×844-class screens across every module: navigation, panels, forms and action bars collapse within the viewport, wide tables scroll inside their containers, and chart/data/template dialogs retain accessible controls without widening the page.
+- Accelerated every Interactive Preview by caching combined CDR frames and filter results separately, so presentation and aggregation edits no longer reload or refilter unchanged datasets; superseded browser render requests are now cancelled and ignored.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.

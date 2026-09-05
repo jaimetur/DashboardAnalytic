@@ -444,6 +444,8 @@
     let reportChartZoomStart = null;
     let reportChartPreviewTimer = null;
     let reportChartPreviewUrl = '';
+    let reportChartPreviewController = null;
+    let reportChartPreviewRequest = 0;
     let reportChartSets = {{ report_chart_sets | tojson }};
     let reportChartReportSets = {{ report_chart_report_sets | tojson }};
     const reportScopeLabel = (scope) => ({single: 'Operator Comparison', multivendor: 'Multivendor Comparison'}[scope] || scope || '');
@@ -1180,17 +1182,21 @@
       if (!reportChartViewerFields || !reportChartViewerSandbox) return;
       const regenerate = () => {
         if (reportChartPreviewTimer) window.clearTimeout(reportChartPreviewTimer);
+        reportChartPreviewController?.abort();
         reportChartPreviewTimer = window.setTimeout(async () => {
           const [source, identifier] = String(reportChartSetSelect?.value || '').split(':', 2);
           if (!source || !identifier) return;
+          const requestId = ++reportChartPreviewRequest;
+          reportChartPreviewController = new AbortController();
           try {
-            const response = await fetch('/api/reporting/chart-preview', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({source, identifier, chart_index: reportChartIndex, definition: viewerPreviewDefinition()})});
+            const response = await fetch('/api/reporting/chart-preview', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, signal: reportChartPreviewController.signal, body: JSON.stringify({source, identifier, chart_index: reportChartIndex, definition: viewerPreviewDefinition()})});
             if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload.detail || 'Unable to regenerate chart preview.'); }
             const image = await response.blob();
+            if (requestId !== reportChartPreviewRequest) return;
             if (reportChartPreviewUrl) URL.revokeObjectURL(reportChartPreviewUrl);
             reportChartPreviewUrl = URL.createObjectURL(image);
             loadReportChartViewerImage(reportChartPreviewUrl, chart.title);
-          } catch (error) { showInfoDialog(error.message || 'Unable to regenerate chart preview.', {title: 'Chart preview', tone: 'error'}); }
+          } catch (error) { if (error.name !== 'AbortError') showInfoDialog(error.message || 'Unable to regenerate chart preview.', {title: 'Chart preview', tone: 'error'}); }
         }, 350);
       };
       createInteractiveChartPreviewControls(reportChartViewerFields, definition, {

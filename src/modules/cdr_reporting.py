@@ -1277,13 +1277,24 @@ def preview_catalog_chart_data(
     }
 
 
-def render_catalog_chart_preview(frame: pd.DataFrame, entry: CatalogEntry, *, multivendor: bool = False) -> bytes:
+def render_catalog_chart_preview(
+    frame: pd.DataFrame,
+    entry: CatalogEntry,
+    *,
+    multivendor: bool = False,
+    prefiltered: bool = False,
+) -> bytes:
     """Render the same PNG chart used by a report for editor/report previews."""
     if not entry.source_kind:
         raise ValueError('Only chart rows with a CDR source can be previewed.')
     render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
-    normalised_frame = normalise_report_operator_aliases(frame)
-    return _chart_for_catalog_entry(render_entry, {render_entry.source_kind: normalised_frame}, multivendor).getvalue()
+    render_frame = frame if prefiltered else normalise_report_operator_aliases(frame)
+    return _chart_for_catalog_entry(
+        render_entry,
+        {render_entry.source_kind: render_frame},
+        multivendor,
+        prefiltered=prefiltered,
+    ).getvalue()
 
 
 def is_empty_catalog_chart(image: bytes, entry: CatalogEntry) -> bool:
@@ -2703,7 +2714,25 @@ def _catalog_spec(entry: CatalogEntry) -> dict:
     return spec
 
 
-def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame], multivendor: bool) -> BytesIO:
+def prepare_catalog_chart_preview_frame(
+    frame: pd.DataFrame, entry: CatalogEntry, *, multivendor: bool = False,
+) -> tuple[pd.DataFrame, CatalogEntry]:
+    """Return reusable chart rows after source and template filtering."""
+    render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
+    normalised = normalise_report_operator_aliases(frame)
+    spec = _catalog_spec(render_entry)
+    filtered, _group, _period = _source_for_spec({render_entry.source_kind: normalised}, spec, multivendor)
+    metric = _metric_column(filtered, spec)
+    return _apply_catalog_filters(filtered, render_entry, multivendor, metric), render_entry
+
+
+def _chart_for_catalog_entry(
+    entry: CatalogEntry,
+    frames: dict[str, pd.DataFrame],
+    multivendor: bool,
+    *,
+    prefiltered: bool = False,
+) -> BytesIO:
     spec = _catalog_spec(entry)
     chart_title = entry.chart_title or entry.slide_title
     legend_dimensions = _legend_dimensions(entry.legend)
@@ -2713,10 +2742,15 @@ def _chart_for_catalog_entry(entry: CatalogEntry, frames: dict[str, pd.DataFrame
     # field-based legends are resolved centrally after rendering, so the
     # renderer cannot substitute its own states/buckets/series.
     renderer_legend_position = legend_position if legend_labels else "none"
-    frame, group, period = _source_for_spec(frames, spec, multivendor)
+    if prefiltered:
+        frame = frames[spec["source"]].copy()
+        group = period = None
+    else:
+        frame, group, period = _source_for_spec(frames, spec, multivendor)
     metric = _metric_column(frame, spec)
     try:
-        frame = _apply_catalog_filters(frame, entry, multivendor, metric)
+        if not prefiltered:
+            frame = _apply_catalog_filters(frame, entry, multivendor, metric)
         frame, group, period = _apply_catalog_grouping(frame, entry, multivendor, metric)
     except ValueError:
         # A partial CDR upload should leave only the affected chart empty, not fail the report.

@@ -32,6 +32,7 @@
   if (!type || !sources || !fields || !canvas) return;
   let timer = null;
   let previewRequest = 0;
+  let previewController = null;
   const sourceOptions = Array.from(sources.options).map((option) => ({
     value: option.value, label: option.textContent, kind: option.dataset.kind, columns: option.dataset.columns,
   }));
@@ -60,9 +61,11 @@
   const preview = async () => {
     if (!selected().length || !definition().kpi) return;
     const requestId = ++previewRequest;
-    try { const response = await fetch('/api/chart-builder/preview', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({dataset_ids:selected(), definition:definition()})}); const body = await response.blob(); if (!response.ok) throw new Error(await body.text()); if (requestId !== previewRequest) return; const image = document.createElement('img'); image.src = URL.createObjectURL(body); image.alt = 'Temporary chart preview'; canvas.replaceChildren(image); } catch (error) { if (requestId === previewRequest) canvas.replaceChildren(Object.assign(document.createElement('p'), {textContent:'Choose a valid KPI and aggregation to generate the chart.'})); }
+    previewController?.abort();
+    previewController = new AbortController();
+    try { const response = await fetch('/api/chart-builder/preview', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, signal:previewController.signal, body:JSON.stringify({dataset_ids:selected(), definition:definition()})}); const body = await response.blob(); if (!response.ok) throw new Error(await body.text()); if (requestId !== previewRequest) return; const image = document.createElement('img'); image.src = URL.createObjectURL(body); image.alt = 'Temporary chart preview'; canvas.replaceChildren(image); } catch (error) { if (error.name !== 'AbortError' && requestId === previewRequest) canvas.replaceChildren(Object.assign(document.createElement('p'), {textContent:'Choose a valid KPI and aggregation to generate the chart.'})); }
   };
-  function queue() { window.clearTimeout(timer); timer = window.setTimeout(preview, 350); }
+  function queue() { window.clearTimeout(timer); previewController?.abort(); timer = window.setTimeout(preview, 350); }
   type.addEventListener('change', () => { filterSources(); render(); canvas.replaceChildren(Object.assign(document.createElement('p'), {textContent:'Select one or more processed CDR Sources.'})); });
   sources.addEventListener('change', () => { render(); queue(); });
   // The shared controls include native selects hidden behind searchable menus.

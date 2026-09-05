@@ -436,6 +436,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   let chartPreviewImageUrl = '';
   let chartPreviewRow = null;
   let chartPreviewTimer = null;
+  let chartPreviewController = null;
+  let chartPreviewRequest = 0;
   let chartPreviewDatasetPage = 0;
   const chartPreviewDatasetPageSize = 100;
   const chartPreviewDatasetFilters = new Map();
@@ -1039,6 +1041,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const current = definition || previewDefinitionFromRow(row);
     const regenerate = () => {
       if (chartPreviewTimer) window.clearTimeout(chartPreviewTimer);
+      chartPreviewController?.abort();
       chartPreviewTimer = window.setTimeout(() => previewGeneratedChart(row, previewDefinition(), false), 350);
     };
     createInteractiveChartPreviewControls(chartPreviewFields, current, {
@@ -1073,14 +1076,18 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const rowDefinition = {...previewDefinitionFromRow(resolvedRow), ...definition};
     const button = row.querySelector('[data-catalogue-row-action="chart-preview"]');
     if (button) button.disabled = true;
+    const requestId = ++chartPreviewRequest;
+    chartPreviewController?.abort();
+    chartPreviewController = new AbortController();
     if (showOverlay) showLoadingOverlay('Generating Chart Preview', 'Please wait while the chart preview is generated.');
     try {
-      const response = await fetch(endpoint, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({catalogue_content: catalogueContent, row_index: rowIndex, definition: rowDefinition})});
+      const response = await fetch(endpoint, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, signal: chartPreviewController.signal, body: JSON.stringify({catalogue_content: catalogueContent, row_index: rowIndex, definition: rowDefinition})});
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.detail || 'Unable to preview the generated chart.');
       }
       const image = await response.blob();
+      if (requestId !== chartPreviewRequest) return;
       if (chartPreviewImageUrl) URL.revokeObjectURL(chartPreviewImageUrl);
       chartPreviewImageUrl = URL.createObjectURL(image);
       if (chartPreviewImageContent) chartPreviewImageContent.src = chartPreviewImageUrl;
@@ -1095,7 +1102,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       }
       if (chartPreview) chartPreview.hidden = false;
     } catch (error) {
-      showInfoDialog(error instanceof Error ? error.message : 'Unable to preview the generated chart.', {title: 'Generated Chart Preview', tone: 'error'});
+      if (error.name !== 'AbortError') showInfoDialog(error instanceof Error ? error.message : 'Unable to preview the generated chart.', {title: 'Generated Chart Preview', tone: 'error'});
     } finally {
       if (showOverlay) hideLoadingOverlay();
       if (button) button.disabled = false;
