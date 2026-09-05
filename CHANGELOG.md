@@ -71,6 +71,7 @@
 - Unified chart actions around the chart-growth icon: Open Charts carries a green eye badge, while Download Charts carries the matching green download-arrow badge.
 - Centred the Slides Templates Management Default indicator, rendered Created and Last Updated as one date line plus one time line, and made Template name consume the flexible width left by the fixed metadata and action columns.
 - Prevented dataset renames from rendering and downloading the complete Admin page after updating the file and materialised references, returning only the renamed dataset metadata to avoid intermittent gateway timeouts.
+- Restored the two most recently uploaded processed CDRs of each Data, Voice and Speech type when switching from Vendor Comparison to Operator Comparison if that type had fewer than two selections, while preserving existing selections of two or more.
 
 #### 📚 Documentation:
 - Reorganised and rewrote the complete documentation for the current product: kept README as a concise introduction, module summary and deployment guide; added numbered Product Overview, Technical Considerations and dedicated Chart Builder articles; renamed the Data Ingestion guide to Workspace Management with a dedicated Data Ingestion section; renumbered the focused Help guides; and replaced long prose with structured workflows, bullets, examples, validation checklists and troubleshooting guidance.

@@ -346,7 +346,24 @@
         select.dispatchEvent(new Event('change', {bubbles: true}));
       });
     };
-    scope.addEventListener('change', retainLatestSelectedCdrPerType);
+    const restoreLatestOperatorComparisonCdrs = () => {
+      if (scope.value !== 'single') return;
+      cdrSelectors.forEach((select) => {
+        if (select.selectedOptions.length >= 2) return;
+        const latest = Array.from(select.options)
+          .map((option, index) => ({option, index}))
+          .sort((left, right) => uploadedRecency(right.option) - uploadedRecency(left.option) || left.index - right.index)
+          .slice(0, 2)
+          .map(({option}) => option);
+        const latestSet = new Set(latest);
+        Array.from(select.options).forEach((option) => { option.selected = latestSet.has(option); });
+        select.dispatchEvent(new Event('change', {bubbles: true}));
+      });
+    };
+    scope.addEventListener('change', () => {
+      retainLatestSelectedCdrPerType();
+      restoreLatestOperatorComparisonCdrs();
+    });
     const hasMulticampaignMultivendorSelection = () => (
       scope?.value === 'multivendor' && selectedCdrsByType().some(({options}) => options.length > 1)
     );
