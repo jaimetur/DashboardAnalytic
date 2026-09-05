@@ -4497,6 +4497,7 @@ def serialize_report_job(row: Any) -> dict[str, Any]:
     status_value = str(row['status'] or 'ready')
     output_available = status_value == 'ready' and _report_job_output_path(row) is not None
     slide_count = int(row['slide_count'] or 0)
+    charts_payload = _report_job_charts_payload(row) if output_available else None
     return {
         'id': report_id,
         'date': _local_report_date(row['created_at']),
@@ -4506,6 +4507,7 @@ def serialize_report_job(row: Any) -> dict[str, Any]:
         'dataset_groups': dataset_groups,
         'template': str(row['template_name'] or '—'),
         'slides': slide_count or None,
+        'charts': len(charts_payload.get('charts', [])) if charts_payload else None,
         'type': str(row['technology'] or '').upper() or '—',
         'multivendor': 'Yes' if str(row['scope'] or '').casefold() == 'multivendor' else 'No',
         'scope': 'Multivendor Comparison' if str(row['scope'] or '').casefold() == 'multivendor' else 'Operator Comparison',
@@ -4515,8 +4517,8 @@ def serialize_report_job(row: Any) -> dict[str, Any]:
         'error': str(row['last_error'] or ''),
         'download_url': f'/reporting/jobs/{report_id}/download' if output_available else None,
         'open_url': f'/reporting/jobs/{report_id}/open' if output_available else None,
-        'charts_url': f'/api/reporting/jobs/{report_id}/charts' if output_available and _report_job_charts_payload(row) else None,
-        'charts_download_url': f'/reporting/jobs/{report_id}/charts/download' if output_available and _report_job_charts_payload(row) else None,
+        'charts_url': f'/api/reporting/jobs/{report_id}/charts' if charts_payload else None,
+        'charts_download_url': f'/reporting/jobs/{report_id}/charts/download' if charts_payload else None,
         'delete_url': f'/reporting/jobs/{report_id}/delete',
         'stop_url': f'/reporting/jobs/{report_id}/stop' if status_value == 'processing' else None,
         'retry_url': f'/reporting/jobs/{report_id}/retry' if status_value in {'failed', 'stopped', 'ready'} else None,

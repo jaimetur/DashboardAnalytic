@@ -430,7 +430,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-chart-preview-image { grid-column: 1; display: grid; place-items: center; width: 100%; min-height: 0; height: auto; overflow: auto; border: 1px solid rgba(75, 32, 138, 0.2); border-radius: 8px; background: #fff; }
 .catalogue-chart-preview-image[hidden] { display: none !important; }
 .catalogue-chart-preview-image img { display: block; width: min(100%, 1200px); height: auto; object-fit: contain; }
-.report-jobs-table { min-width: 1120px; }
+.report-jobs-table { min-width: 1380px; }
 .report-chart-jobs-table { min-width: 980px; }
 .reporting-chart-jobs-panel { margin-top: 2.2rem; }
 .report-jobs-table th, .report-jobs-table td { vertical-align: middle; }
@@ -443,14 +443,14 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-chart-jobs-table tbody tr:hover { background: rgba(211, 198, 237, 0.62); }
 .report-jobs-table th:nth-child(2), .report-jobs-table td:nth-child(2) { min-width: 145px; }
 .report-jobs-table th:nth-child(3), .report-jobs-table td:nth-child(3) { width: 132px; min-width: 132px; max-width: 132px; white-space: normal; overflow-wrap: normal; }
-.report-jobs-table th:nth-child(5), .report-jobs-table td:nth-child(5) { width: 180px; min-width: 170px; max-width: 185px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
-.report-jobs-table th:nth-child(7), .report-jobs-table td:nth-child(7) { width: 130px; min-width: 124px; max-width: 134px; white-space: normal; }
-.report-jobs-table th:nth-child(10), .report-jobs-table td:nth-child(10) { width: 92px; min-width: 92px; max-width: 92px; }
+.report-jobs-table th:nth-child(6), .report-jobs-table td:nth-child(6) { width: 180px; min-width: 170px; max-width: 185px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.report-jobs-table th:nth-child(8), .report-jobs-table td:nth-child(8) { width: 130px; min-width: 124px; max-width: 134px; white-space: normal; }
+.report-jobs-table th:nth-child(12), .report-jobs-table td:nth-child(12) { width: 92px; min-width: 92px; max-width: 92px; }
 .report-job-datasets { display: flex; flex-direction: column; align-items: flex-start; gap: 0.12rem; white-space: normal !important; }
 .report-job-dataset-kind { color: #5d3b86; font-weight: 800; margin-top: 0.18rem; }
 .report-job-progress { display: flex; align-items: center; gap: 0.45rem; min-width: 122px; font-variant-numeric: tabular-nums; }
 .report-job-progress progress { width: 82px; accent-color: #4b208a; }
-.report-jobs-table th:nth-child(11), .report-jobs-table td:nth-child(11) { width: 98px; min-width: 98px; max-width: 98px; }
+.report-jobs-table th:nth-child(13), .report-jobs-table td:nth-child(13) { width: 98px; min-width: 98px; max-width: 98px; }
 .report-jobs-table .report-job-progress { gap: 0.3rem; min-width: 92px; }
 .report-jobs-table .report-job-progress progress { width: 58px; }
 .report-jobs-table .queue-status-pill { box-sizing: border-box; max-width: 100%; padding: 0.34rem 0.46rem; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -476,7 +476,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-job-actions .danger-button { background: linear-gradient(145deg, #8d1d2c, #d24e5b); border-color: rgba(141, 29, 44, 0.70); color: #fff; }
 .reporting-stack .report-job-actions .danger-button:hover:not(:disabled) { background: linear-gradient(145deg, #711622, #b63a48); border-color: rgba(113, 22, 34, 0.82); color: #fff; box-shadow: 0 10px 22px rgba(113, 22, 34, 0.28); }
 .reporting-stack .report-jobs-delete-all, .reporting-stack .report-chart-jobs-delete-all { min-height: 0; padding: 0.65rem 0.95rem; font-size: inherit; line-height: normal; white-space: nowrap; }
-.report-jobs-bulk-actions { display: flex; justify-content: flex-start; margin: 0 0 0.75rem; }
+.report-jobs-bulk-actions { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 0.65rem; margin: 0 0 0.75rem; }
 .catalogue-editor-scroll-hint { margin-left: 0.2rem; color: #536b78; font-size: 0.78rem; font-weight: 700; }
 .admin-stack .catalogue-reenumerate-button { background: linear-gradient(145deg, #d9d0ef, #bba8dc); border-color: rgba(116, 87, 164, 0.62); color: #49366c; box-shadow: 0 8px 18px rgba(95, 69, 142, 0.16); }
 .admin-stack .catalogue-reenumerate-button:hover:not(:disabled) { background: linear-gradient(145deg, #cbc0e6, #a891d1); color: #392855; }
