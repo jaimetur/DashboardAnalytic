@@ -1422,6 +1422,31 @@ def test_admin_dataset_management_renames_dataset_file_and_materialised_source_l
     assert 'Preview' in admin.text
 
 
+def test_admin_dataset_management_rename_returns_compact_json_for_interactive_table(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    upload = client.post(
+        '/dashboard/upload',
+        data={'dataset_kinds': 'data'},
+        files={'dataset_files': ('original-cdr.csv', BytesIO(b'Campaign,LQ\nUK_Q2_SA_2026,3.8\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    assert upload.status_code == 303
+
+    renamed = client.post(
+        '/admin/datasets/1/rename',
+        data={'file_name': 'renamed-cdr.csv'},
+        headers={'Accept': 'application/json'},
+        follow_redirects=False,
+    )
+
+    assert renamed.status_code == 200
+    assert renamed.json()['file_name'] == 'renamed-cdr.csv'
+    assert Path(renamed.json()['stored_path']).name == 'renamed-cdr.csv'
+    assert app_module.repository.get_dataset(1)['file_name'] == 'renamed-cdr.csv'
+
+
 def test_dashboard_upload_accepts_multiple_files(client) -> None:
     login(client)
 

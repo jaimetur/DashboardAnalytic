@@ -63,6 +63,14 @@
 - Moved status-row inclusion out of the chart renderer and into explicit template filters such as `Test_Result IN (Completed, Dropped, Failed)`, making the denominator visible and editable while status charts continue to honour the selected KPI.
 - Rejected malformed Slides Template filters when adjacent conditions are missing their semicolon separator, located errors as `Slide: n - Chart: n`, validated manual filter-cell edits live with a self-updating warning, kept damaged templates open for correction, and stored each condition on its own line with editor-only bullet markers and quoted multiline CSV fields.
 - Fixed the shared Legend contract across every chart renderer: an empty field suppresses the legend, a selected chart KPI/dimension shows its actual plotted values, and a filter-only field shows the applied filter values as text; CDF legend samples also reproduce each curve's colour and historical/latest line thickness, while legacy slash-separated captions and Legend Position remain supported.
+- Added native hover labels and accessible names to compact table action icons, strengthened the download arrows in Reports and Charts Jobs, and represented report downloads with a PPT presentation icon and explicit `Download PPT Report` tooltip beneath the green download arrow.
+- Tightened table action columns, widened and bolded template date columns, and converted Workspace Management actions to compact labelled icon buttons.
+- Replaced the dashboard action glyph with a clearer grid icon and widened Slides Templates Management actions so all controls stay on one row while reducing the Type column width.
+- Widened Dataset Management date columns to keep the date and time readable on separate lines, reduced unused action space and assigned the recovered table width to the dataset name without horizontal overflow.
+- Replaced the Show Dashboard glyph with a consistent vector speedometer and needle icon, and rebalanced Slides Templates Management by widening Type, preserving flexible space for Template name and fitting every action icon on one row.
+- Unified chart actions around the chart-growth icon: Open Charts carries a green eye badge, while Download Charts carries the matching green download-arrow badge.
+- Centred the Slides Templates Management Default indicator, rendered Created and Last Updated as one date line plus one time line, and made Template name consume the flexible width left by the fixed metadata and action columns.
+- Prevented dataset renames from rendering and downloading the complete Admin page after updating the file and materialised references, returning only the renamed dataset metadata to avoid intermittent gateway timeouts.
 
 #### 📚 Documentation:
 - Reorganised and rewrote the complete documentation for the current product: kept README as a concise introduction, module summary and deployment guide; added numbered Product Overview, Technical Considerations and dedicated Chart Builder articles; renamed the Data Ingestion guide to Workspace Management with a dedicated Data Ingestion section; renumbered the focused Help guides; and replaced long prose with structured workflows, bullets, examples, validation checklists and troubleshooting guidance.
@@ -324,13 +332,6 @@
 - Strengthened PowerPoint CDF grid/tick rendering and moved PowerPoint vertical axis labels even closer to the Y axes so the changes remain visible after slide scaling
 - Fixed PowerPoint metric KPI strips so all six KPI cards render instead of only `Max`
 - Fixed data filter ordering so `Test Name` appears between `Vendor` and `Region`
-- Added native hover labels and accessible names to compact table action icons, strengthened the download arrows in Reports and Charts Jobs, and represented report downloads with a PPT presentation icon and explicit `Download PPT Report` tooltip beneath the green download arrow.
-- Tightened table action columns, widened and bolded template date columns, and converted Workspace Management actions to compact labelled icon buttons.
-- Replaced the dashboard action glyph with a clearer grid icon and widened Slides Templates Management actions so all controls stay on one row while reducing the Type column width.
-- Widened Dataset Management date columns to keep the date and time readable on separate lines, reduced unused action space and assigned the recovered table width to the dataset name without horizontal overflow.
-- Replaced the Show Dashboard glyph with a consistent vector speedometer and needle icon, and rebalanced Slides Templates Management by widening Type, preserving flexible space for Template name and fitting every action icon on one row.
-- Unified chart actions around the chart-growth icon: Open Charts carries a green eye badge, while Download Charts carries the matching green download-arrow badge.
-- Centred the Slides Templates Management Default indicator, rendered Created and Last Updated as one date line plus one time line, and made Template name consume the flexible width left by the fixed metadata and action columns.
 
 #### 📚 Documentation:
 - Added `Readme` and `Changelog` navigation with Markdown document viewer

@@ -3683,7 +3683,7 @@ function bindAdminDatasetRenameForm(form) {
   const input = form.querySelector('[data-admin-dataset-name-input]');
   const save = form.querySelector('[data-admin-dataset-rename-save]');
   if (!(input instanceof HTMLInputElement) || !(save instanceof HTMLButtonElement)) return;
-  const savedName = input.value;
+  let savedName = input.value;
 
   input.addEventListener('focus', () => { save.hidden = false; });
   input.addEventListener('blur', () => {
@@ -3704,7 +3704,8 @@ function bindAdminDatasetRenameForm(form) {
     );
     try {
       const response = await fetch(form.action, {
-        method: 'POST', body: new FormData(form), credentials: 'same-origin', redirect: 'follow',
+        method: 'POST', body: new FormData(form), credentials: 'same-origin',
+        headers: {Accept: 'application/json'},
       });
       const content = await response.text();
       if (!response.ok) {
@@ -3712,15 +3713,18 @@ function bindAdminDatasetRenameForm(form) {
         try { message = JSON.parse(content).detail || message; } catch (_error) { /* Use fallback message. */ }
         throw new Error(message);
       }
-      const refreshedDocument = new DOMParser().parseFromString(content, 'text/html');
-      const refreshedPanel = refreshedDocument.querySelector('[data-panel-state-key="admin:datasets"]');
-      const currentPanel = form.closest('[data-panel-state-key="admin:datasets"]');
-      if (!refreshedPanel || !currentPanel) throw new Error('The refreshed Datasets Management panel is unavailable.');
-      refreshedPanel.open = currentPanel.open;
-      currentPanel.replaceWith(refreshedPanel);
-      refreshedPanel.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
-      refreshedPanel.querySelectorAll('[data-admin-dataset-rename-form]').forEach(bindAdminDatasetRenameForm);
-      window.requestAnimationFrame(() => sizeAdminDatasetNameColumn(refreshedPanel));
+      const payload = JSON.parse(content);
+      savedName = String(payload.file_name || input.value);
+      input.value = savedName;
+      input.setAttribute('size', String(savedName.length));
+      save.hidden = true;
+      const row = form.closest('tr');
+      const pathCell = row?.querySelector('td[data-label="Path"]');
+      if (pathCell) pathCell.textContent = String(payload.stored_path || '');
+      row?.querySelectorAll('[data-dataset-name]').forEach((control) => {
+        control.dataset.datasetName = savedName;
+      });
+      window.requestAnimationFrame(() => sizeAdminDatasetNameColumn(form.closest('[data-panel-state-key="admin:datasets"]')));
     } catch (error) {
       showInfoDialog(error instanceof Error ? error.message : 'The dataset could not be renamed.', {
         title: 'Dataset Rename Failed', tone: 'error',

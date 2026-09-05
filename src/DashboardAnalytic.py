@@ -5640,6 +5640,7 @@ async def upload_dataset(
 @app.post('/admin/datasets/{dataset_id}/rename')
 def rename_dataset_file(
     dataset_id: int,
+    request: Request,
     file_name: str = Form(...),
     user: SessionUser = Depends(admin_user),
 ) -> Response:
@@ -5687,6 +5688,12 @@ def rename_dataset_file(
         'previous_file': dataset['file_name'],
         'file': new_name,
     }))
+    if 'application/json' in request.headers.get('accept', '').casefold():
+        return JSONResponse({
+            'dataset_id': dataset_id,
+            'file_name': new_name,
+            'stored_path': str(new_path),
+        })
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 
