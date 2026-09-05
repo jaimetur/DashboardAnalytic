@@ -41,6 +41,18 @@ def test_login_page_loads(client) -> None:
     assert 'Default' in response.text
 
 
+def test_successful_login_and_authenticated_root_open_readme(client) -> None:
+    response = client.post(
+        '/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers['location'] == '/documents/view/readme'
+
+    root = client.get('/', follow_redirects=False)
+    assert root.status_code == 303
+    assert root.headers['location'] == '/documents/view/readme'
+
+
 def test_new_environment_creates_the_three_bootstrap_roles(client) -> None:
     import src.DashboardAnalytic as app_module
 

@@ -49,6 +49,7 @@
 - Unified Reports Jobs and Charts Jobs in one chronologically ordered panel and one physical `generated_jobs` workspace table, automatically migrating and removing the two legacy job tables; the panel includes explicit Tech and job Type columns, concise shared job metadata, a compact Progress column, each job type's original actions, a combined count and both bulk-delete controls.
 - Refined compact-phone layouts with narrower panel gutters, a readable card-based Dataset Management table, tighter Chart Set selection, visible expanded workspace management and chart-preview navigation/data actions positioned immediately below the chart before Interactive Preview controls.
 - Kept workspace sizes synchronized across the active-workspace header badge, header switcher and Workspace Management controls after background or AJAX file changes, and made the username badge an explicit hoverable keyboard-accessible change-password button.
+- Made Readme the default selected tab after signing in or opening the authenticated application root.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.

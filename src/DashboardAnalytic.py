@@ -3405,7 +3405,7 @@ def healthz() -> dict[str, str]:
 @app.get('/', response_class=HTMLResponse)
 def index(request: Request) -> HTMLResponse:
     if request.cookies.get(SESSION_COOKIE) in SESSIONS:
-        return RedirectResponse('/workspace', status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse('/documents/view/readme', status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse('/login', status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -3478,7 +3478,7 @@ def login(
             }, status_code=400)
 
     user = SessionUser(username=record.username, role=record.role)
-    response = RedirectResponse('/workspace', status_code=status.HTTP_303_SEE_OTHER)
+    response = RedirectResponse('/documents/view/readme', status_code=status.HTTP_303_SEE_OTHER)
     create_session(response, user)
     repository.add_log(record.username, 'login', json.dumps({
         'success': True, 'result': 'successful', 'role': record.role,
