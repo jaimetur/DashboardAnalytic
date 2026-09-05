@@ -54,8 +54,6 @@ E2E Reporting combines ready CDRs with a shared Slides Template.
 
 Chart Builder is the ad-hoc chart editor immediately after E2E Reporting in Help. It reuses Interactive Preview, filters sources by CDR Type, supports multiple processed datasets and creates temporary charts without modifying templates. See [Chart Builder Help](help/08-chart-builder.md) for examples.
 
-### Chart Builder
-
 Chart Builder reuses the shared Interactive Preview for ad-hoc analysis.
 
 - Choose Data, Voice or Speech first.
@@ -276,7 +274,6 @@ DashboardAnalytic/
 
 ## Current limitations
 
-- Background processing runs in the web process rather than an external worker service.
 - In-memory analytical caches do not survive a process restart.
 - SQLite is the current persistence model and may not suit very large concurrent deployments.
 - Smart Orchestrator Logs reporting is visible but not implemented.
