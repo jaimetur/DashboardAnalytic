@@ -1,4 +1,4 @@
-# 5. E2E Reporting
+# E2E Reporting
 
 Use **E2E Reporting → NetCheck CDR Reports** to create a PowerPoint report or a persistent set of PNG charts from processed CDR-Data, CDR-Voice and CDR-Speech datasets.
 
@@ -13,15 +13,29 @@ Choose the required technology:
 | NSA | Values containing `ENDC` in `RAT`, `RAT_A` or `Sample_RAT_A` |
 | SA | Values containing `NR` in the same fields |
 
-Choose **Operator Comparison** for normal operator analysis, or **Multivendor Comparison** when every selected CDR has a persisted Vendor mapping. In a multivendor report, grouping dimensions named `Operator` are resolved as the operator-vendor comparison field; `Operator` filters still apply to the physical CDR Operator column.
+Choose the scope:
 
-The reporting page warns when multivendor and multiple campaigns are selected together. It preselects the most recent CDR of each type, but you can retain any valid selection.
+- **Operator Comparison** uses the normalised operator dimension.
+- **Multivendor Comparison** requires every selected CDR to have a persisted Vendor mapping.
+- In Multivendor Comparison, `Operator` aggregations resolve to the operator-vendor comparison field.
+- `Operator` filters still apply to the physical CDR Operator column.
+
+Default dataset selection:
+
+- Operator Comparison selects the two newest CDRs of each type, or the only available CDR.
+- Changing to Vendor Comparison reduces multiple selections to the newest currently selected CDR of each type.
+- An existing single selection is preserved even when it is not the newest dataset in the workspace.
 
 ## Slides Templates
 
-PowerPoint reports are built from Slides Templates managed in **Admin → Slides Templates Management**. They are CSV definitions, not a fixed embedded report. Create, duplicate, import, rename, export and select NSA or SA templates there, then open one in **Slides Templates Editor**.
+PowerPoint reports use CSV Slides Templates managed in **Admin → Slides Templates Management**. Administrators can create, duplicate, import, rename, export and classify NSA/SA templates there.
 
-The common PowerPoint file in `assets/ppt-templates/Template_CDR_analysis.pptx` supplies slide masters and layouts. For each distinct `Slide` value, the renderer creates a slide from the declared `Layout`; chart rows sharing a slide number fill the available chart placeholders in order. Commentary placeholders are left blank for the analyst.
+The common `assets/ppt-templates/Template_CDR_analysis.pptx` supplies masters and layouts:
+
+- Each distinct `Slide` value creates one slide.
+- `Layout` chooses the named PowerPoint layout.
+- Chart rows sharing a slide fill chart placeholders in row order.
+- Commentary placeholders remain blank for the analyst.
 
 Templates are stored under `config/slides-templates/`. The documentation is static: saving a template never rewrites this file or publishes a current template definition into it.
 
@@ -37,13 +51,13 @@ Templates are stored under `config/slides-templates/`. The documentation is stat
 | `CDR source` | `CDR-Data`, `CDR-Voice` or `CDR-Speech`. Leave empty for structural slides. |
 | `KPI` | Processed CDR field to render. |
 | `Chart type` | Automated chart type or a structural slide type. |
-| `Filters` | Semicolon-separated conditions applied before aggregation. |
+| `Filters` | Conditions applied before aggregation, stored one per line and terminated with `;`. |
 | `Rows Aggregation` | Category/table-row hierarchy. Separate dimensions with `×`. |
 | `Column Aggregation` | Comparison-series/table-column hierarchy. Separate dimensions with `×`. |
-| `Legend` | Optional comma-separated legend labels or fields. |
+| `Legend` | Optional field whose chart values or applied filter values should be explained. Blank means no legend. |
 | `Legend Position` | `Top`, `Bottom`, `Left` or `Right`; blank defaults to `Top`. |
 
-The editor groups `Slide`, `Slide Tittle`, `Slide Subtittle` and `Layout` visually for multi-chart slides, but the CSV still stores those values on every row. It also provides a Filter Builder, contextual column suggestions and chart-data/chart-image previews.
+For multi-chart slides, the editor visually groups `Slide`, `Slide Tittle`, `Slide Subtittle` and `Layout`. The CSV still stores those values on every row. Assistance includes the Filter Builder, field suggestions and chart-data/chart-image previews.
 
 ### Structural slides
 
@@ -59,7 +73,7 @@ Example cover row (only the relevant values are shown):
 ```text
 Slide: 1
 Slide Tittle: NetCheck 5G Executive Report
-Slide Subtittle: 2026 Q2 · Operator Comparison
+Slide Subtittle: 2026-Q2 · Operator Comparison
 Layout: Title Page
 Chart type: Title Slide
 ```
@@ -228,17 +242,17 @@ Supported operators are:
 | Operator | Example |
 | --- | --- |
 | Equals / not equal | `Call_Status = Completed`, `Operator != EE` |
-| List inclusion / exclusion | `Operator IN (Vodafone, O2, 3, EE)`, `Campaign NOT IN (2025 Q4)` |
+| List inclusion / exclusion | `Operator IN (VF, O2, 3, EE)`, `Campaign NOT IN (2025-Q4)` |
 | Contains / not contains | `Test_Name CONTAINS FDFS`, `vendor NOT CONTAINS (Mixed, Other)` |
 | Numeric comparison | `LQ < 1.6`, `Mean_Data_Rate >= 20` |
 
-`IN`, `NOT IN`, `CONTAINS` and `NOT CONTAINS` accept comma-separated values enclosed in parentheses. The Filter Builder creates the same syntax.
+`IN`, `NOT IN`, `CONTAINS` and `NOT CONTAINS` accept comma-separated values. Parentheses are optional in Filter Builder input; the shared parser adds them to the generated expression.
 
 More filter examples:
 
 ```text
 Operator = Vodafone
-Campaign IN (2026 Q1, 2026 Q2)
+Campaign IN (2026-Q1, 2026-Q2)
 vendor NOT CONTAINS (Mixed, Other)
 Test_Name CONTAINS FDFS
 LQ >= 1.6; LQ < 4.0
@@ -246,7 +260,10 @@ LQ >= 1.6; LQ < 4.0
 
 Use `;` rather than a comma to join independent conditions. A comma only separates values belonging to the same `IN`, `NOT IN`, `CONTAINS` or `NOT CONTAINS` condition.
 
-`Call Family` and `Test Family` are materialised derived fields. They appear in CDR Preview with a light-grey background so they can be distinguished from columns that came directly from the source CDR. `Threshold = 1.6` configures threshold charts; `Buckets = 1,5,20,100` configures rate buckets for distribution charts.
+`Call Family` and `Test Family` are materialised derived fields and use a light-grey background in CDR Preview.
+
+- `Threshold = 1.6` configures threshold charts.
+- `Buckets = 1,5,20,100` configures distribution-chart ranges.
 
 ## Aggregations and legends
 
@@ -257,26 +274,62 @@ Rows Aggregation: Call Family × G Level 4
 Column Aggregation: Operator × Campaign
 ```
 
-Rows Aggregation supplies categories (or table rows); Column Aggregation supplies comparison series (or table columns). A blank Column Aggregation produces one `(all)` comparison. `Campaign` is commonly used to compare selected CDRs. In multivendor reports, `Operator` aggregation resolves to the mapped comparison field.
+- Rows Aggregation supplies categories or table rows.
+- Column Aggregation supplies comparison series or table columns.
+- Blank Column Aggregation produces one `(all)` comparison.
+- `Campaign` compares selected CDRs and is ordered oldest to newest.
+- In multivendor reports, `Operator` aggregation resolves to the mapped comparison field.
 
-Use `Legend` only when you need explicit display labels; otherwise the renderer derives captions from the aggregation values. Position the legend with `Legend Position`.
+Legend behaviour:
 
-For example, enter `2026 Q2, 2026 Q1` in `Legend` to supply two explicit captions for a two-series chart. Leave it blank when the aggregation values are already the desired labels. Use `Top` or `Bottom` for a horizontal legend; use `Left` or `Right` when a vertical legend leaves more room for the plot.
+- Blank means no legend.
+- A KPI or aggregation dimension produces entries from plotted values.
+- A field used only by Filters displays its applied values as contextual text.
+
+Special chart legends include:
+
+- CDF Lines reproduce series colour and relative line width.
+- Threshold charts show below/above-threshold colours and the configured threshold value.
+- Bucket legends show readable ranges derived from `Buckets`.
+
+Use `Top` or `Bottom` for a compact horizontal legend and `Left` or `Right` for a vertical legend. Side placement reserves plot space to prevent overlap.
 
 ### Multi-chart slides
 
-Rows with the same `Slide` number are separate charts on one PowerPoint slide. They must use the same `Slide Tittle`, `Slide Subtittle` and `Layout`, but may use different CDR sources, KPIs, filters and chart types. Choose a layout with enough chart placeholders for the number of rows in that slide. For example, put a CDF Line and an Average Vertical Bars row on Slide 8 to compare a throughput distribution with its headline average.
+Rows with the same `Slide` number create separate charts on one PowerPoint slide.
+
+- They must share `Slide Tittle`, `Slide Subtittle` and `Layout`.
+- They may use different sources, KPIs, filters and chart types.
+- The layout needs at least as many chart placeholders as chart rows.
+
+Example: place a CDF Line and Average Vertical Bars on Slide 8 to compare a throughput distribution with its headline average.
 
 ## Operators, vendors and colours
 
-Recognised historical operator aliases are normalised in the report only: Vodafone variants become `Vodafone`, Three variants become `3`, O2 variants become `O2`, and EE variants become `EE`. This does not alter the stored CDR.
+Recognised historical aliases resolve to `VF`, `O2`, `3` or `EE` for reporting. This does not alter the source workbook.
 
-For chart dimensions that use Vendor, vendor families use consistent colours: Ericsson green, Huawei red, Samsung yellow and NSN blue, with distinct shades where several operators share the vendor. Other vendors use clearly distinct neutral colours.
+Vendor colour families are stable:
+
+- Ericsson: green.
+- Huawei: red.
+- Samsung: yellow.
+- NSN: blue.
+- Multiple operators using one vendor receive distinct shades.
 
 ## Output and jobs
 
 **Generate PowerPoint Report** queues a report job. Its PPTX is stored in `output/reports/<report-name>/`; rendered PNG charts are stored in `output/reports/<report-name>/report-charts/`.
 
-**Generate Report Charts** queues an independent Charts Job and stores its set under `output/charts/<timestamp>/`. The Charts Panel lists standalone and report-generated sets, supports enlarged previews, downloads and cleanup. Reports Jobs and Charts Jobs retain their own status, progress and actions.
+**Generate Report Charts** queues a Chart Set job under `output/charts/<timestamp>/`.
 
-If a job fails, consult **App Logs** and retry it from its job panel after correcting the reported input or template issue.
+The Charts Panel supports:
+
+- report-generated and standalone sets;
+- enlarged Interactive Preview;
+- filtered-data inspection;
+- ZIP downloads and cleanup;
+- source-template editing for administrators.
+
+Reports and Chart Sets appear together in **Reports and Charts Jobs** and share the workspace `generated_jobs` table. The UI preserves the appropriate actions for each type.
+
+If a job fails, consult **App Logs** and retry it after correcting the reported input or template issue. Completed jobs can be relaunched in the same row; relaunch removes their previous output first.

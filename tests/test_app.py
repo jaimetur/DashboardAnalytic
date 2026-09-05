@@ -2816,16 +2816,22 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     help_documents = help_index.json()["documents"]
     assert help_documents[0]["relative_path"] == "00-help.md"
     assert help_documents[0]["number"] == "00"
-    assert help_documents[1]["label"] == "Configuration File"
-    assert any(item["relative_path"] == "02-web-interface.md" for item in help_documents)
+    assert help_documents[1]["label"] == "Product Overview"
+    assert help_documents[2]["label"] == "Technical Considerations"
+    assert any(item["relative_path"] == "04-web-interface.md" for item in help_documents)
     assert any(
-        item["relative_path"] == "04-e2e-dashboard.md"
+        item["relative_path"] == "06-e2e-dashboard.md"
         and item["label"] == "E2E Dashboard"
         for item in help_documents
     )
     assert any(
-        item["relative_path"] == "05-e2e-reporting.md"
+        item["relative_path"] == "07-e2e-reporting.md"
         and item["label"] == "E2E Reporting"
+        for item in help_documents
+    )
+    assert any(
+        item["relative_path"] == "08-chart-builder.md"
+        and item["label"] == "Chart Builder"
         for item in help_documents
     )
     excluded_help_documents = {
@@ -2837,10 +2843,10 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     }
     assert not excluded_help_documents.intersection(item["relative_path"] for item in help_documents)
 
-    help_article = client.get("/documents/view/help/02-web-interface.md")
+    help_article = client.get("/documents/view/help/04-web-interface.md")
     assert help_article.status_code == 200
     assert 'id="help-nav-list"' in help_article.text
-    assert "/api/documents/help/02-web-interface.md" in help_article.text
+    assert "/api/documents/help/04-web-interface.md" in help_article.text
     assert "`${number}. ${label}`" in help_article.text
 
 

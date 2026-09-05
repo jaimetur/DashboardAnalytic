@@ -226,19 +226,25 @@ def materialize_cdr_derived_columns(frame: pd.DataFrame) -> pd.DataFrame:
 HELP_HOME_DOCUMENT = '00-help.md'
 HELP_NAVIGATION_DOCUMENTS = (
     HELP_HOME_DOCUMENT,
-    '01-configuration-file.md',
-    '02-web-interface.md',
-    '03-data-ingestion.md',
-    '04-e2e-dashboard.md',
-    '05-e2e-reporting.md',
-    '06-admin-panel.md',
-    '07-docker-deployment.md',
-    '08-project-structure.md',
-    '09-roadmap.md',
+    '01-overview.md',
+    '02-technical-considerations.md',
+    '03-configuration.md',
+    '04-web-interface.md',
+    '05-data-ingestion.md',
+    '06-e2e-dashboard.md',
+    '07-e2e-reporting.md',
+    '08-chart-builder.md',
+    '09-administration.md',
+    '10-docker-deployment.md',
+    '11-project-structure.md',
+    '12-roadmap.md',
 )
 HELP_DOCUMENT_LABELS = {
-    '04-e2e-dashboard.md': 'E2E Dashboard',
-    '05-e2e-reporting.md': 'E2E Reporting',
+    '01-overview.md': 'Product Overview',
+    '02-technical-considerations.md': 'Technical Considerations',
+    '06-e2e-dashboard.md': 'E2E Dashboard',
+    '07-e2e-reporting.md': 'E2E Reporting',
+    '08-chart-builder.md': 'Chart Builder',
 }
 
 

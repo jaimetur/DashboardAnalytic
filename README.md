@@ -4,182 +4,106 @@
 
 # Dashboard Analytic
 
-Dashboard Analytic is a multi-user application for ingesting CDR-style datasets, profiling them automatically, visualising KPI analysis and producing dashboard or template-based PowerPoint outputs. Work is isolated in named workspaces.
+Dashboard Analytic is a multi-user web application for processing CDR datasets, exploring KPI performance, building charts and generating template-driven PowerPoint reports. Every workspace keeps its datasets, database and generated output isolated; users and Slides Templates are shared application configuration.
 
-## What the tool does today
+After login, the application opens the **Readme** tab by default.
 
-- Uploads `CSV`, `XLS`, `XLSX`, and `XLSM` datasets from the web UI
-- Detects CDR workbook structure automatically, including multi-sheet operator workbooks
-- Classifies imported datasets as `CDR-Voice`, `CDR-Speech`, `CDR-Data`, `Multivendor Mapping — VFUK`, `Multivendor Mapping — 3UK`, `Smart Orchestrator Logs`, or `Other`
-- Normalizes common dimensions such as market, period, operator, region, vendor, session type, direction, technology, and source sheet
-- Extracts reusable base metrics such as setup time, duration, quality score, throughput, latency, jitter, packet loss, and handovers
-- Builds dataset profiles and stores their status, progress, filter options, default metrics, and KPI snapshot in SQLite
-- Shows a `Data Processing Queue` with dataset status, progress, and retry actions
-- Keeps every workspace's datasets, SQLite database and input/export files isolated
-- Opens datasets from cached metadata, without forcing a full dataset reload on every page refresh
-- Applies adaptive filters and loads charts or tables only when the user requests `Update Dashboard`
-- Exports the active dashboard context to Word or PowerPoint
-- Provides read-only dataset previews in a separate tab, including Excel-style column filters and CDR-specific multi-select filters
-- Lets administrators inspect, edit, filter and delete rows in the active workspace database
-- Exposes embedded Readme, Changelog and Help viewers rendered from Markdown
+## Capabilities
 
-## E2E Reporting
+- Upload and process `CSV`, `XLS`, `XLSX` and `XLSM` files.
+- Classify CDR-Data, CDR-Voice, CDR-Speech, Smart Orchestrator Logs and VFUK/3UK mapping files.
+- Combine operator workbook sheets and materialise normalised reporting fields.
+- Preview complete datasets with pagination and Excel-style column filters.
+- Analyse one processed CDR in E2E Dashboard.
+- Create temporary ad-hoc charts in Chart Builder.
+- Generate NSA/SA PowerPoint reports and standalone Chart Sets.
+- Edit shared Slides Templates with validation, assistance and chart previews.
+- Track meaningful user/system events in App Logs.
+- Export, import or transfer configuration, templates and workspaces.
+- Manage workspace and global SQLite tables from the Admin interface.
 
-The top navigation separates the existing **E2E Dashboard** from **E2E Reporting**.
+## Modules and sections
 
-### Modules
+### Workspace
 
-- **NetCheck CDR Reports**: build a template-based PowerPoint from one or more processed Data, Voice and Speech CDRs. Select NSA or SA, stored Slides Templates and, when eligible, a multivendor scope based on vendors already mapped in Workspace.
-- **Report Charts**: queue rendering of every automated chart from the selected Slides Template using the same CDR selection, technology and scope, without creating a PowerPoint file. Timestamped workspace chart sets remain available for selection or complete deletion and support enlarged sequential viewing; their independent jobs expose progress, retry and open actions.
-- **Smart Orchestrator Logs Reports**: visible as the future reporting destination for processed Smart Orchestrator Log sources; automated log reporting is not implemented yet.
+Workspace owns data ingestion and workspace-local storage.
 
-Workspace accepts NetCheck CDR workbooks, Smart Orchestrator Logs, VFUK Vodafone and 3UK Three Multivendor Mapping files. It proposes each input type from its filename, supports per-file review for a batch and persists the confirmed type before processing. When ready VFUK and/or 3UK mappings already exist, CDR uploads also offer optional mapping selectors; mapping can also be run later from the CDR action. Reporting deliberately never maps CDRs itself. Vendor assignment follows the Vodafone/Three formula, including Vodafone's Ericsson/null mixed-vendor exception. Slides Templates are shared application configuration in `config/slides-templates/`; their metadata and global user accounts are stored in `config/application.db`, independently of workspaces. The shared PowerPoint master is in `assets/ppt-templates/`.
+- **Workspaces Management**: create, open, close, rename, duplicate or remove workspaces; review disk usage and access.
+- **Data Ingestion**: upload one or more source files and confirm each detected type.
+- **Queue and Status**: monitor processing, preview data, open Dashboard, map/clear vendors, stop, retry or delete datasets.
 
-### NetCheck CDR Reports workflow
+### E2E Dashboard
 
-1. Upload the three NetCheck workbooks (Data, Voice and Speech) in **Workspace** and wait until each one is marked `Processed`.
-2. If a multivendor report is required, upload the **VFUK** and/or **3UK** mapping workbooks first. When importing each CDR, select the required mapping(s) from its optional VFUK/3UK selectors, or use **Map Vendors** later from the queue. That dialog preselects the newest ready mapping of each type and can queue several unmapped CDRs together without blocking the workspace. Each CDR stores the calculated Vendor values.
-3. Open **E2E Reporting → NetCheck CDR Reports**.
-4. Select one or more processed CDRs for each required input type. CDRs of the same type are read from the shared reporting table, retaining campaign values for comparisons.
-5. Choose `NSA` or `SA`. NSA sessions are selected when the available RAT field contains `ENDC`; SA sessions are selected when it contains `NR`.
-6. Choose compatible Slides Templates and `Single-vendor` or `Multivendor`. Multivendor is enabled only when all three selected Data, Voice and Speech CDRs have a saved vendor mapping.
-7. Use **Generate Report Charts** to queue every automated template chart, or generate the PowerPoint report. Both continue on the server after leaving Reporting or signing out. **Reports Jobs** contains only PowerPoint reports; the separate **Charts Jobs** panel shows Chart Set progress, failures, retries and ready sets that can be opened in Report Charts. Each report is stored in `output/reports/<report-name>/`, with its PPTX and the rendered PNG charts in `report-charts/`; independent Chart Sets are stored in `output/charts/`. Each job stores its selected datasets, technology, scope and Slides Template in SQLite for auditability.
+E2E Dashboard analyses one ready Data, Voice or Speech CDR.
 
-All NSA, SA, single-vendor and multivendor reports use the single master/layout-only `assets/ppt-templates/Template_CDR_analysis.pptx`. The selected Slides Templates determine the technology-specific slide sequence, layouts and generated CDR charts; commentary placeholders remain blank for analyst input.
+- **Dashboard Controls**: dataset, KPI, adaptive filters and aggregations.
+- **Executive Dashboard**: context, sample counts, KPI cards and percentiles.
+- **Charts and Scorecards**: CDF curves and grouped comparisons.
+- **Processed Metrics**: filtered/aggregated results and Word/PowerPoint exports.
 
-Workspace preserves a dataset's original upload date when the same stored file is processed again. The separate **Updated** value reflects the latest processing activity, while the original upload date determines Workspace ordering and every automatic “latest dataset” selection for CDR and Multivendor Mapping controls.
+### E2E Reporting
 
-When a report combines historical campaigns, reporting normalises known UK operator aliases in memory before template filters and groupings run. For example, `Vodafone`/`Vodafone UK` become `Vodafone`; `O2(UK)`/`o2 - de` become `O2`; `3`/`Three`/`three(uk)` become `3`; and EE variants become `EE`. This report-only step also makes `Operator IN (Vodafone, O2, 3, EE)` match the corresponding historical spellings; it never changes the stored CDR data.
+E2E Reporting combines ready CDRs with a shared Slides Template.
 
-### Multivendor calculation and remapping
+- **Reporting module**: choose NetCheck CDR Reports or the future Smart Orchestrator Logs workflow.
+- **NetCheck CDR Reports**: select Data, Voice and Speech campaigns, NSA/SA, template and Operator/Vendor Comparison.
+- **Charts Panel**: browse report or standalone Chart Sets, open Interactive Preview, inspect filtered data and edit the source template when authorised.
+- **Reports and Charts Jobs**: one table for both background job types, with job-specific open, download, stop, retry, relaunch and delete actions.
 
-For Vodafone UK and Three, the report takes the first and last Global CI from the available CDR `Cell_ID_A`, `Cell_IDs_A`, `Cell_ID`, `Global CI`, `GCID`, `GCI`, `CGI` or `ECI` field; case and separator variations are accepted. Vodafone values are resolved only with the VFUK mapping and Three values only with the 3UK mapping. When a VFUK mapping is processed, Workspace materialises a `GCID` column for its `4G` rows as `eNodeB ID × 256 + Local Cell ID`, equivalent to the supplied hexadecimal Excel formula; it also materialises the existing `5G` convention as `gNodeB ID × 4096 + Local Cell ID`. A 3UK mapping materialises the same `GCID` value as its `Cid__ECI` (or `CId___ECI`) source field. Mapping previews show every source column, with `GCID` first and highlighted; the VFUK preview is deliberately limited to a selectable `4G` or `5G` sheet. O2 and EE retain the operator label because they have no multivendor segmentation in this workflow.
+### Chart Builder
 
-- Vodafone: identical first/last vendor produces `Vodafone_<vendor>`; the Ericsson/null and differing-vendor cases follow the supplied formula and resolve to `Vodafone_Mixed Vendor` or `Vodafone_Other Vendor`.
-- Three: identical first/last vendor produces `3_<vendor>`; all other combinations produce `3_Mixed Vendor`.
-- O2/EE are retained only as report comparison operators; they are not written into the CDR Vendor field.
-- **Clear Vendors** removes a previous mapping so the CDR can be mapped again using newer mapping files. Like mapping, it can process several CDRs through the background Workspace queue.
+Chart Builder is the ad-hoc chart editor immediately after E2E Reporting in Help. It reuses Interactive Preview, filters sources by CDR Type, supports multiple processed datasets and creates temporary charts without modifying templates. See [Chart Builder Help](help/08-chart-builder.md) for examples.
 
-## Current UI workflow
+### Chart Builder
 
-1. Sign in and select the workspace to open. The most recently opened workspace is preselected.
-2. In **Workspace Management**, create, open, close, rename, duplicate or remove workspaces as required. Closing the active workspace hides ingestion and queue operations and disables Dashboard and Reporting until one is opened.
-3. Upload a source file in `Data Ingestion`
-4. The dataset is queued, processed, and profiled automatically
-5. The queue updates the processing state and stores the resulting profile in the active workspace database
-6. Select a processed CDR in `Select Dataset`
-7. Use `Adaptive Filters` and press `Update Dashboard` to compute the full analysis
-8. Review KPI cards, scorecards, charts, and aggregated tables
-9. Export the current dashboard analysis to Word or PowerPoint if needed, or open **E2E Reporting** to create a template-backed CDR report
+Chart Builder reuses the shared Interactive Preview for ad-hoc analysis.
 
-An import captures its workspace database when it is queued. It therefore continues in the server after closing that workspace or signing out; reopening the workspace later shows its final status.
+- Choose Data, Voice or Speech first.
+- Select one or more processed datasets of that type.
+- Configure title, chart type, KPI, filters, ordered Rows/Columns aggregations and legend.
+- Preview changes without creating a report or altering a template.
 
-## Admin Export / Import
+### App Logs
 
-Administrators can create portable ZIP packages from **Admin → Export / Import**. `Config` exports application configuration, including `application.db` with users, roles, workspace permissions and Slides Template defaults, without the local workspace registry. `Config + Slides Templates` additionally includes the shared CSV templates. `Workspace: <name>` exports that workspace's database, uploaded files and generated exports. `Full Environment` combines configuration, templates and selected workspaces. Importing configuration replaces the global application database, so its users and IDs match the package exactly. Exports are prepared as server-side jobs in `data/transfer-packages/`; once ready, the browser downloads the ZIP directly instead of loading it into memory. Temporary packages expire after 24 hours. Before import, the application inspects the package and requires confirmation showing whether configuration, templates or same-named workspaces will be overwritten. An active workspace must be closed before it can be replaced. Super-admins can also transfer the selected content directly to another Dashboard Analytic server: the destination super-admin must accept the incoming offer before the source streams the package, after which the destination imports it automatically from disk.
+- Filter by User, Executed by, date, type and action.
+- Distinguish the initiating user from automatic `system` execution.
+- Refresh manually or automatically every five seconds.
+- Review authentication, ingestion, processing, generation and administration events.
 
-## Supported dataset behavior
+### Admin
 
-### Automatic ingestion
+- **Create user / Users**: account, role, password, status and workspace access management.
+- **Slides Templates Management**: create, import, duplicate, rename, export, delete and set defaults.
+- **Slides Template Editor**: validated grid editing, cell assistance, Filter Builder and shared Chart Preview.
+- **Export / Import**: portable ZIP jobs, Full Environment workspace selection, server-to-server transfer and recovered packages.
+- **Database Management**: grouped global/workspace tables, server-side filters, editing and cleanup.
+- **Datasets Management**: inspect and rename workspace datasets.
 
-- `XLSM` CDR workbooks are supported directly
-- `Multivendor_Mapping` workbooks are recognized as separate VFUK/3UK mappings and retained for CDR vendor mapping in Workspace
-- Known summary sheets such as `MASTER`, `RANKING`, and similar non-data tabs are ignored
-- Operator sheets are concatenated when needed
-- Duplicate uploads of the same stored file are reused instead of creating a new dataset row
-- Failed or stuck datasets can be retried from the queue or the selected dataset panel
+### Documentation tabs
 
-### Dataset profiling
+- **Readme**: this concise product and deployment guide.
+- **Changelog**: versioned release notes.
+- **Help**: detailed task and technical documentation.
 
-Each processed dataset stores:
+See [Product overview](help/01-overview.md) for a detailed tour of every module and [Technical considerations](help/02-technical-considerations.md) for calculation, normalisation, mapping, filtering, storage and performance rules.
 
-- processing status and progress
-- dataset kind
-- row and column counts
-- default metric
-- default aggregation
-- available metrics
-- available aggregations
-- adaptive filter values
-- summary payload
-- cached KPI snapshot
+## Quick workflow
 
-### Analytics
+1. Sign in and open or create a workspace.
+2. Upload the required source files in Workspace.
+3. Confirm their types and wait for **Processed**.
+4. Optionally map VFUK/3UK vendor data.
+5. Use Dashboard, Chart Builder or Reporting.
+6. Review long-running work in **Reports and Charts Jobs**.
+7. Check App Logs if an operation fails.
 
-The dashboard currently includes:
+## Requirements
 
-- KPI cards
-- percentile scorecard
-- CDF curve
-- comparison chart by aggregation
-- processed metrics table
+- Python 3.11 or newer for source development.
+- Docker Engine with Compose for the recommended service deployment.
+- Writable persistent configuration and data directories.
 
-Only KPI-like numeric CDR fields are offered as Dashboard metrics; geographic coordinates, identifiers and other technical metadata are excluded. Voice, speech and data datasets expose different KPI mixes based on the normalized columns available in the source.
-
-### Slides Templates and chart grouping
-
-The bundled `Template_CDR_analysis.pptx` contains masters and named layouts but no source slides. The generator creates one new presentation slide for every distinct `Slide` number in the selected NSA or SA Slides Templates, in ascending order. Each automated template row defines one chart; rows sharing the same slide number fill the selected layout's chart placeholders in row-major order.
-
-The CSV schema is: `Slide`, `Slide Tittle`, `Slide Subtittle`, `Layout`, `Chart Tittle`, `CDR source`, `KPI`, `Chart type`, `Filters`, `Rows Aggregation`, `Column Aggregation`, `Legend` and `Legend Position`. `Legend Position` accepts `Top`, `Bottom`, `Left` or `Right`: top/bottom draw a horizontal legend row, while left/right draw a vertical legend column. Blank values default to `Top`. `Chart type` also supports `Title Slide` and `Transition Slide`. These structural rows use only the slide title, subtitle and named layout and cannot contain CDR, KPI, chart, legend, filter or aggregation configuration.
-
-`Rows Aggregation` controls the visible category hierarchy. `Column Aggregation` controls comparison series and legend values; when it is empty, the renderer uses one `(all)` series and does not repeat the category in labels. For distribution charts, the final column aggregation is the stack/bucket dimension. This contract applies consistently to CDF, scatter, vertical bars, stacked bars and tables. Administrators can import legacy compatible files: the application offers to convert their headings, splits legacy `Grouping`, and assigns an appropriate default layout from the number of charts on each slide.
-
-## Performance model
-
-The workspace is intentionally split into two phases:
-
-- `cached open`: the dataset workspace opens from metadata already stored in SQLite
-- `on-demand analysis`: charts and tables are calculated only when `Update Dashboard` is triggered
-
-Additional analysis caching is applied per dataset file, metric, and filter combination. This avoids re-reading the same dataset on repeated refreshes of the same analytical view.
-
-For reporting, processed CDR rows are also synchronised into one shared table per CDR type. This avoids repeatedly concatenating the same campaign files and lets each report load only the fields required by its Slides Template.
-
-## Authentication and roles
-
-Supported roles:
-
-- `admin`
-- `super-admin` (can assign and change user/workspace access)
-- `user`
-
-Default local accounts:
-
-- `super / super123` (`super-admin`)
-- `admin / admin123` (`admin`)
-- `demo / demo123` (`user`)
-
-The `admin` panel provides:
-
-- user creation
-- user listing
-- dataset listing
-- named NSA/SA template management, import conversion, default selection, duplication, deletion and export
-
-`admin` users can manage `admin` and `user` accounts, but only `super-admin` users can create, promote or modify `super-admin` accounts and assign workspace access. Removing a user or workspace also removes every corresponding access relationship.
-- an in-browser template editor with contextual assistance for layouts, chart types, fields, legends, grouping and filter conditions
-- Database Management for the active workspace, with paginated table browsing, server-side multi-value filtering, row editing and row deletion
-
-Use the **App Logs** tab to review the active workspace's combined operational and audit history. Its User, Date, Type and Action filters are preserved after a page reload until cleared.
-
-## Embedded documentation
-
-The top navigation exposes:
-
-- `Readme`
-- `Changelog`
-- `Help`
-
-They render Markdown inside the application; Help also provides a numbered sidebar for its project-specific articles.
-
-## Local development
-
-### Requirements
-
-- Python `3.11+`
-- `pip`
-
-### Run from source
+## Run from source
 
 ```bash
 python3 -m venv .venv
@@ -189,113 +113,92 @@ pip install -r requirements.txt
 python -m uvicorn src.DashboardAnalytic:app --reload --port 7279
 ```
 
-Open:
+Open `http://127.0.0.1:7279`.
 
-```text
-http://127.0.0.1:7279
-```
-
-### Run tests
+Run tests with:
 
 ```bash
 pytest -q
 ```
 
-## Configuration model
+## Configuration
 
-[`storage-paths.conf`](storage-paths.conf) in the project root controls the local `APP_CONFIG_DIR`, `APP_DATA_DIR` and `APP_ASSETS_DIR` roots without editing Python. Environment variables take precedence, which keeps Docker and other deployments configurable. Databases and shared Slides Templates derive from the config root, PowerPoint masters from the assets root, and workspace data from the data root. Version and release date do not come from `.env`; they are defined in [`src/version.py`](src/version.py).
+Local storage roots can be set in [`storage-paths.conf`](storage-paths.conf). Environment variables override that file.
 
-Important runtime variables:
+| Variable | Purpose |
+| --- | --- |
+| `APP_NAME` | Application name shown in the UI. |
+| `APP_PORT` | Production HTTP port; the standard deployment uses `7278`. |
+| `APP_DEV_PORT` | Development service port. |
+| `APP_SECRET_KEY` | Private session-signing secret. |
+| `APP_CONFIG_DIR` | Global database and shared Slides Templates. |
+| `APP_DATA_DIR` | Workspace registry, workspaces and transfer packages. |
+| `APP_ASSETS_DIR` | Bundled assets and PowerPoint masters. |
+| `TZ` | Container timezone, for example `Europe/Madrid`. |
+| `HOST_CONFIG_DIR` | Host path mounted as persistent configuration. |
+| `HOST_DATA_DIR` | Host path mounted as persistent data. |
+| `IMAGE_REPOSITORY` | Published container repository. |
+| `IMAGE_TAG` | Container tag to deploy. |
+| `CONTAINER_NAME` | Production container name. |
 
-- `APP_PORT`
-- `APP_SECRET_KEY`
-- `APP_CONFIG_DIR`
-- `APP_DATA_DIR`
-- `APP_ASSETS_DIR`
-- `HOST_CONFIG_DIR`
-- `HOST_DATA_DIR`
-- `IMAGE_REPOSITORY`
-- `IMAGE_TAG`
-- `CONTAINER_NAME`
+Do not commit real secrets or customer data. Change the bootstrap passwords after the first deployment.
 
-The provided Docker `.env` file is intended for deployment-level configuration, not for application versioning.
+## Default accounts
+
+A new empty configuration database creates these accounts once:
+
+| Username | Initial password | Role |
+| --- | --- | --- |
+| `super` | `super123` | `super-admin` |
+| `admin` | `admin123` | `admin` |
+| `demo` | `demo123` | `user` |
+
+All three initially have access to the `Default` workspace. Accounts are not recreated or reset on later starts.
 
 ## Docker deployment
 
-### Development compose
+### Production
 
-Use the development compose only for local development. It mounts `src/` and enables reload mode.
+Production pulls the configured published image and persists `config/` and `data/` on the host.
+
+```bash
+docker compose --env-file docker/.env -f docker/docker-compose.yml up -d --pull always
+```
+
+Key behaviour:
+
+- Uses `${IMAGE_REPOSITORY}:${IMAGE_TAG}`.
+- Pulls the selected tag on start.
+- Supports native `linux/amd64` and `linux/arm64` images.
+- Includes `assets/ppt-templates/Template_CDR_analysis.pptx` in the image.
+- Mounts configuration and workspace data outside the container.
+- Exposes port `7278` by default.
+
+Check status and logs:
+
+```bash
+docker compose --env-file docker/.env -f docker/docker-compose.yml ps
+docker compose --env-file docker/.env -f docker/docker-compose.yml logs -f
+```
+
+### Development
+
+The development stack mounts source code and enables reload mode:
 
 ```bash
 docker compose --env-file docker/.env -f docker/docker-compose-dev.yml up --build
 ```
 
-### Production compose
-
-The production compose file is designed to pull a published Docker image instead of building locally. Published images include the bundled `assets/ppt-templates/Template_CDR_analysis.pptx` master required for PowerPoint reports:
-
-```bash
-docker compose --env-file docker/.env -f docker/docker-compose.yml up -d
-```
-
-Current production compose behavior:
-
-- uses `${IMAGE_REPOSITORY}:${IMAGE_TAG}`
-- uses `pull_policy: always`
-- persists database and data directories through mounted volumes
-
-## Docker Hub and GitHub Actions
-
-The repository includes GitHub Actions workflows for:
-
-- unit tests
-- Docker image build and push
-- source bundle packaging
-
-Docker image publication behavior:
-
-- Published tags are multi-platform manifests containing native `linux/amd64` and `linux/arm64` images. Docker automatically pulls the variant matching the host architecture; do not set `platform` in the production Compose file.
-- Every successful Docker build publishes both its version tag and a refreshed `latest` tag, including manually dispatched builds from a release branch.
-- `push` to `main` additionally refreshes the `main` tag.
-- push of a git tag like `v0.1.0` publishes a Docker tag like `0.1.0`
-- push to Docker Hub only happens if the repository secrets are configured
-
-Required GitHub repository secrets:
-
-- `DOCKERHUB_USERNAME`
-- `DOCKERHUB_TOKEN` or `DOCKERHUB_PASSWORD`
-
-Current Docker image naming:
-
-```text
-${DOCKERHUB_USERNAME}/dashboard-analytic
-```
-
-Recommended tags:
-
-- `latest`
-- `main`
-- `0.1.0`
-
-You can confirm the architectures published for a tag with:
-
-```bash
-docker buildx imagetools inspect ${DOCKERHUB_USERNAME}/dashboard-analytic:latest
-```
-
-## Synology NAS / DockerHand deployment
-
-For NAS deployment with DockerHand, use `docker/docker-compose.yml`, not the development compose.
-
-Example `.env` values:
+### Example production environment
 
 ```env
 APP_NAME=Dashboard Analytic
 APP_PORT=7278
-APP_SECRET_KEY=change-me-dashboard-analytic
+APP_SECRET_KEY=replace-with-a-long-private-value
 APP_CONFIG_DIR=/app/config
 APP_DATA_DIR=/app/data
 APP_ASSETS_DIR=/app/assets
+TZ=Europe/Madrid
 
 HOST_CONFIG_DIR=/volume1/docker/stacks/dashboardanalytic/config
 HOST_DATA_DIR=/volume1/docker/stacks/dashboardanalytic/data
@@ -305,75 +208,92 @@ IMAGE_TAG=latest
 CONTAINER_NAME=dashboardanalytic
 ```
 
-Recommended stack layout:
+### Persistent layout
 
 ```text
-/volume1/docker/stacks/dashboardanalytic/
-  docker-compose.yml
-  .env
-  config/
-    slides-templates/          # shared editable Slides Templates library
-  data/
-    workspaces/
-      workspace-registry.db    # local workspace registry and active state
-      <Workspace Name>/
-        <Workspace Name>.db
-        input/
-        exports/
+<deployment-root>/
+├── config/
+│   ├── application.db
+│   └── slides-templates/
+└── data/
+    ├── transfer-packages/
+    └── workspaces/
+        ├── workspace-registry.db
+        └── <workspace>/
+            ├── <workspace>.db
+            ├── input/
+            └── output/
+                ├── reports/
+                └── charts/
+```
+
+Back up both persistent roots. Backing up only the container does not preserve application state.
+
+### Safe update
+
+1. Back up `HOST_CONFIG_DIR` and `HOST_DATA_DIR`.
+2. Set the intended `IMAGE_TAG`.
+3. Pull and restart the Compose stack.
+4. Sign in and confirm users, workspace access and templates.
+5. Open a workspace and verify its datasets.
+6. Generate a small Chart Set or report before normal production use.
+
+## GitHub Actions and images
+
+The repository workflows run tests, build/push images and package source bundles.
+
+- Version tags publish the corresponding image tag.
+- Successful builds refresh `latest` according to workflow rules.
+- Pushes to `main` refresh the `main` tag.
+- Published manifests include AMD64 and ARM64 variants.
+- Build cache accelerates unchanged dependency layers while source layers are invalidated by the current commit.
+
+Required repository secrets:
+
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN` or `DOCKERHUB_PASSWORD`
+
+Inspect a published manifest:
+
+```bash
+docker buildx imagetools inspect ${DOCKERHUB_USERNAME}/dashboard-analytic:latest
 ```
 
 ## Repository layout
 
-- `src/`
-  - FastAPI entrypoint
-  - ingestion, analytics, exports, auth, repository layers
-  - Jinja templates, CSS, and JS assets
-- `tests/`
-  - unit and lightweight integration coverage
-- `docker/`
-  - development and production compose files
-  - Dockerfile
-  - deployment `.env`
-- `help/`
-  - project documentation
-- `config/`
-  - application configuration and shared Slides Templates
-- `data/`
-  - workspace registry plus isolated workspace directories, databases and files
-
-## Main routes
-
-- `/login`
-- `/dashboard`
-- `/dashboard/upload`
-- `/dashboard/retry/{dataset_id}`
-- `/dashboard/analyze`
-- `/dashboard/export/word`
-- `/dashboard/export/powerpoint`
-- `/documents/view/readme`
-- `/documents/view/changelog`
-- `/admin`
-- `/healthz`
+```text
+DashboardAnalytic/
+├── src/                    # FastAPI application, modules and browser UI
+├── tests/                  # Unit and integration tests
+├── docker/                 # Dockerfiles, Compose and environment settings
+├── assets/ppt-templates/   # PowerPoint master/layout file
+├── config/                 # Global database and Slides Templates
+├── data/workspaces/        # Workspace registry and isolated workspace data
+├── help/                   # Detailed in-app documentation
+├── README.md
+└── CHANGELOG.md
+```
 
 ## Current limitations
 
-- dataset processing runs in background tasks inside the web process, not in an external worker
-- progress is coarse-grained, not a true step-by-step backend pipeline
-- analytics caching is in memory, not persisted as a long-lived analytical cache
-- SQLite is enough for the current app, but not the final storage model for very large multi-user deployments
-- Smart Orchestrator Logs reporting and scoring/GAP automation remain future work
+- Background processing runs in the web process rather than an external worker service.
+- In-memory analytical caches do not survive a process restart.
+- SQLite is the current persistence model and may not suit very large concurrent deployments.
+- Smart Orchestrator Logs reporting is visible but not implemented.
+- Scoring and GAP automation remain planned work.
 
-## Recommended next steps
+## More documentation
 
-- move processing to a dedicated worker queue
-- persist heavy analytical aggregates instead of recomputing them on demand
-- improve large-scale storage strategy for massive dataset libraries
-- add richer domain-specific KPI packs and report templates
-
-## Remote repository
-
-Expected Git remote:
-
-```text
-https://github.com/jaimetur/DashboardAnalytic.git
-```
+- [Help home](help/00-help.md)
+- [Product overview](help/01-overview.md)
+- [Technical considerations](help/02-technical-considerations.md)
+- [Configuration](help/03-configuration.md)
+- [Web interface](help/04-web-interface.md)
+- [Data ingestion](help/05-data-ingestion.md)
+- [E2E Dashboard](help/06-e2e-dashboard.md)
+- [E2E Reporting](help/07-e2e-reporting.md)
+- [Chart Builder](help/08-chart-builder.md)
+- [Administration](help/09-administration.md)
+- [Docker deployment](help/10-docker-deployment.md)
+- [Project structure](help/11-project-structure.md)
+- [Roadmap](help/12-roadmap.md)
