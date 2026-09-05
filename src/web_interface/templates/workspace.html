@@ -81,14 +81,14 @@
                 </td>{% endif %}
                 <td>
                   <div class="workspace-row-actions">
-                    <button type="submit" form="workspace-save-{{ item.id }}" class="workspace-action-save" {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>Save</button>
+                    <button type="submit" form="workspace-save-{{ item.id }}" class="workspace-action-save icon-action" aria-label="Save workspace" title="Save workspace" {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>✓</button>
                     <form method="post" action="/workspace/duplicate" data-loading-label="Duplicating workspace" data-loading-copy="Please wait while the workspace database, datasets and associated files are copied.">
                       <input type="hidden" name="workspace_id" value="{{ item.id }}">
-                      <button type="submit" class="workspace-action-duplicate" {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>Duplicate</button>
+                      <button type="submit" class="workspace-action-duplicate icon-action" aria-label="Duplicate workspace" title="Duplicate workspace" {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>⧉</button>
                     </form>
                     <form method="post" action="/workspace/delete" data-workspace-delete-form data-workspace-name="{{ item.name }}">
                       <input type="hidden" name="workspace_id" value="{{ item.id }}">
-                      <button type="submit" class="workspace-action-remove" {% if not workspace_access.get(item.id, false) or (active_workspace and item.id == active_workspace.id) %}disabled{% endif %}>Remove</button>
+                      <button type="submit" class="workspace-action-remove icon-action" aria-label="Remove workspace" title="Remove workspace" {% if not workspace_access.get(item.id, false) or (active_workspace and item.id == active_workspace.id) %}disabled{% endif %}>×</button>
                     </form>
                   </div>
                 </td>
@@ -145,7 +145,7 @@
     <summary class="collapsible-summary">
       <div>
         <p class="eyebrow">Data Processing</p>
-        <h2>Queue and Status</h2>
+        <h2>Datasets</h2>
       </div>
       <span class="collapse-chip">Collapse</span>
     </summary>
@@ -214,9 +214,9 @@
             <td data-label="Actions">
               <div class="queue-actions">
                 {% if dataset.status == 'ready' %}
-                <a class="ghost-link action-link-preview" href="/workspace/preview/{{ dataset.id }}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview</a>
+                <a class="ghost-link action-link-preview" href="/workspace/preview/{{ dataset.id }}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview" title="Preview dataset" aria-label="Preview dataset">Preview</a>
                 <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
-                  <button type="submit" class="danger-button">Delete</button>
+                  <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
                 </form>
                 {% if dataset.can_map_vendors or dataset.dataset_kind in ['data', 'voice', 'speech'] %}
                 {% if dataset.dataset_kind in ['data', 'voice', 'speech'] %}
@@ -225,6 +225,8 @@
                   href="/dashboard?dataset_id={{ dataset.id }}{% if dataset.dataset_kind %}&input_kind={{ dataset.dataset_kind }}{% endif %}"
                   data-dashboard-open-link
                   data-dataset-id="{{ dataset.id }}"
+                  title="Show dashboard"
+                  aria-label="Show dashboard"
                   {% if dataset.dataset_kind %}data-input-kind="{{ dataset.dataset_kind }}"{% endif %}
                 >Show Dashboard</a>
                 {% endif %}
@@ -244,19 +246,19 @@
                 {% elif dataset.status == 'processing' %}
                 <span class="ghost-link action-link-disabled" aria-disabled="true">View</span>
                 <form method="post" action="/dashboard/stop/{{ dataset.id }}" data-confirm="Stop processing for '{{ dataset.file_name }}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
-                  <button type="submit" class="danger-button">Stop</button>
+                  <button type="submit" class="danger-button icon-action" aria-label="Stop processing" title="Stop processing">■</button>
                 </form>
                 {% elif dataset.status == 'queued' %}
                 <span class="ghost-link action-link-disabled" aria-disabled="true">View</span>
                 <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete queued dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
-                  <button type="submit" class="danger-button">Delete</button>
+                  <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
                 </form>
                 {% elif dataset.status in ['failed', 'stopped'] %}
                 <form method="post" action="/dashboard/retry/{{ dataset.id }}" data-loading-label="Retrying dataset processing">
-                  <button type="submit" class="warning-button">Retry</button>
+                  <button type="submit" class="warning-button icon-action" aria-label="Retry processing" title="Retry processing">↻</button>
                 </form>
                 <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
-                  <button type="submit" class="danger-button">Delete</button>
+                  <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
                 </form>
                 {% endif %}
               </div>

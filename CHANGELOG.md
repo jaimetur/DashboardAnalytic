@@ -50,6 +50,7 @@
 - Refined compact-phone layouts with narrower panel gutters, a readable card-based Dataset Management table, tighter Chart Set selection, visible expanded workspace management and chart-preview navigation/data actions positioned immediately below the chart before Interactive Preview controls.
 - Kept workspace sizes synchronized across the active-workspace header badge, header switcher and Workspace Management controls after background or AJAX file changes, and made the username badge an explicit hoverable keyboard-accessible change-password button.
 - Made Readme the default selected tab after signing in or opening the authenticated application root.
+- Renamed the Workspace queue heading to Datasets, made Dataset Management readable as ordered cards on compact screens, and replaced dataset, user, template and database row actions with compact circular icon controls carrying accessible labels.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
@@ -65,6 +66,7 @@
 
 #### 📚 Documentation:
 - Reorganised and rewrote the complete documentation for the current product: kept README as a concise introduction, module summary and deployment guide; added numbered Product Overview, Technical Considerations and dedicated Chart Builder articles; renamed the Data Ingestion guide to Workspace Management with a dedicated Data Ingestion section; renumbered the focused Help guides; and replaced long prose with structured workflows, bullets, examples, validation checklists and troubleshooting guidance.
+- Added the dedicated Chart Builder guide immediately after E2E Reporting in Help, with examples for CDR Type, multi-dataset selection, Interactive Preview, ordered aggregations and Filter Builder troubleshooting.
 
 ---
 
@@ -322,6 +324,13 @@
 - Strengthened PowerPoint CDF grid/tick rendering and moved PowerPoint vertical axis labels even closer to the Y axes so the changes remain visible after slide scaling
 - Fixed PowerPoint metric KPI strips so all six KPI cards render instead of only `Max`
 - Fixed data filter ordering so `Test Name` appears between `Vendor` and `Region`
+- Added native hover labels and accessible names to compact table action icons, strengthened the download arrows in Reports and Charts Jobs, and represented report downloads with a PPT presentation icon and explicit `Download PPT Report` tooltip beneath the green download arrow.
+- Tightened table action columns, widened and bolded template date columns, and converted Workspace Management actions to compact labelled icon buttons.
+- Replaced the dashboard action glyph with a clearer grid icon and widened Slides Templates Management actions so all controls stay on one row while reducing the Type column width.
+- Widened Dataset Management date columns to keep the date and time readable on separate lines, reduced unused action space and assigned the recovered table width to the dataset name without horizontal overflow.
+- Replaced the Show Dashboard glyph with a consistent vector speedometer and needle icon, and rebalanced Slides Templates Management by widening Type, preserving flexible space for Template name and fitting every action icon on one row.
+- Unified chart actions around the chart-growth icon: Open Charts carries a green eye badge, while Download Charts carries the matching green download-arrow badge.
+- Centred the Slides Templates Management Default indicator, rendered Created and Last Updated as one date line plus one time line, and made Template name consume the flexible width left by the fixed metadata and action columns.
 
 #### 📚 Documentation:
 - Added `Readme` and `Changelog` navigation with Markdown document viewer

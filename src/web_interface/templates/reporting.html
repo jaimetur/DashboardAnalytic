@@ -118,9 +118,9 @@
             <td title="{{ job.error }}"><span class="queue-status-pill queue-status-{{ job.status | lower | replace('_', '-') }}">{{ job.status | title }}</span></td>
             <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%</span></div></td>
             <td><div class="report-job-actions">
-              {% if job.download_url %}<a class="report-job-download-button report-job-report-download-button" href="{{ job.download_url }}" download title="Download report" aria-label="Download report"></a>{% else %}<span class="report-job-download-button report-job-report-download-button action-link-disabled" title="Report download unavailable" aria-label="Report download unavailable"></span>{% endif %}
+              {% if job.download_url %}<a class="report-job-download-button report-job-report-download-button" href="{{ job.download_url }}" download title="Download PPT Report" aria-label="Download PPT Report"></a>{% else %}<span class="report-job-download-button report-job-report-download-button action-link-disabled" title="PPT Report download unavailable" aria-label="PPT Report download unavailable"></span>{% endif %}
               {% if job.charts_download_url %}<a class="report-job-download-button report-job-charts-download-button" href="{{ job.charts_download_url }}" download title="Download report charts as ZIP" aria-label="Download report charts as ZIP"></a>{% endif %}
-              {% if job.charts_url %}<button type="button" class="report-job-charts-button" title="Open rendered report charts" aria-label="Open rendered report charts" data-report-job-charts="{{ job.charts_url }}">👁</button>{% endif %}
+              {% if job.charts_url %}<button type="button" class="report-job-charts-button" title="Open rendered report charts" aria-label="Open rendered report charts" data-report-job-charts="{{ job.charts_url }}">📈</button>{% endif %}
               {% if job.retry_url %}<button type="button" class="report-job-retry-button" title="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry report' }}" aria-label="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry report' }}" data-report-job-retry="{{ job.retry_url }}" data-report-job-id="{{ job.id }}" data-report-job-status="{{ job.status }}" data-report-job-name="{{ job.report_name }}">↻</button>{% endif %}
               {% if job.stop_url %}<button type="button" class="report-job-stop-button" title="Stop report" aria-label="Stop report" data-report-job-stop="{{ job.stop_url }}" data-report-job-name="{{ job.report_name }}">■</button>{% endif %}
               <button type="button" class="danger-button" title="Delete report" aria-label="Delete report" data-report-job-delete="{{ job.delete_url }}" data-report-job-id="{{ job.id }}" data-report-job-name="{{ job.report_name }}">✕</button>
@@ -132,7 +132,7 @@
             <td>{{ job.id }}</td><td>{{ job.generated_by }}</td><td>{{ job.date }}</td><td>{{ job.type or '-' }}</td><td>Charts</td><td>{{ job.template or '-' }}</td><td>{{ job.scope or '-' }}</td><td>-</td><td>{{ job.charts if job.charts is not none else '-' }}</td><td class="report-job-datasets">{% if job.dataset_groups %}{% for group in job.dataset_groups %}<span class="report-job-dataset-kind">{{ group.kind }}:</span>{% for name in group.names %}<span>{{ name }}</span>{% endfor %}{% endfor %}{% else %}Historical Chart Set{% endif %}</td>
             <td title="{{ job.error }}"><span class="queue-status-pill queue-status-{{ job.status | lower | replace('_', '-') }}">{{ job.status | title }}</span></td>
             <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%</span></div></td>
-            <td><div class="report-job-actions">{% if job.charts_download_url %}<a class="report-job-download-button report-job-charts-download-button" href="{{ job.charts_download_url }}" download title="Download Chart Set PNGs as ZIP" aria-label="Download Chart Set PNGs as ZIP"></a>{% endif %}{% if job.open_url %}<button type="button" class="report-job-charts-button" title="Open generated Chart Set" aria-label="Open generated Chart Set" data-report-chart-job-open="{{ job.open_url }}">👁</button>{% endif %}{% if job.retry_url %}<button type="button" class="report-job-retry-button" title="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry Chart Set' }}" aria-label="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry Chart Set' }}" data-report-chart-job-retry="{{ job.retry_url }}" data-report-chart-job-name="{{ job.template }}" data-report-chart-job-status="{{ job.status }}" data-report-chart-job-generation="{{ job.generation or '' }}">↻</button>{% endif %}{% if job.stop_url %}<button type="button" class="report-job-stop-button" title="Stop Chart Set" aria-label="Stop Chart Set" data-report-chart-job-stop="{{ job.stop_url }}" data-report-chart-job-name="{{ job.template }}">■</button>{% endif %}<button type="button" class="danger-button" title="Delete Chart Set job" data-report-chart-job-delete="{{ job.delete_url }}" data-report-chart-job-generation="{{ job.generation or '' }}" data-report-chart-job-name="{{ job.template }}">✕</button></div></td>
+            <td><div class="report-job-actions">{% if job.charts_download_url %}<a class="report-job-download-button report-job-charts-download-button" href="{{ job.charts_download_url }}" download title="Download Chart Set PNGs as ZIP" aria-label="Download Chart Set PNGs as ZIP"></a>{% endif %}{% if job.open_url %}<button type="button" class="report-job-charts-button" title="Open generated Chart Set" aria-label="Open generated Chart Set" data-report-chart-job-open="{{ job.open_url }}">📈</button>{% endif %}{% if job.retry_url %}<button type="button" class="report-job-retry-button" title="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry Chart Set' }}" aria-label="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry Chart Set' }}" data-report-chart-job-retry="{{ job.retry_url }}" data-report-chart-job-name="{{ job.template }}" data-report-chart-job-status="{{ job.status }}" data-report-chart-job-generation="{{ job.generation or '' }}">↻</button>{% endif %}{% if job.stop_url %}<button type="button" class="report-job-stop-button" title="Stop Chart Set" aria-label="Stop Chart Set" data-report-chart-job-stop="{{ job.stop_url }}" data-report-chart-job-name="{{ job.template }}">■</button>{% endif %}<button type="button" class="danger-button" title="Delete Chart Set job" aria-label="Delete Chart Set job" data-report-chart-job-delete="{{ job.delete_url }}" data-report-chart-job-generation="{{ job.generation or '' }}" data-report-chart-job-name="{{ job.template }}">✕</button></div></td>
           </tr>
           {% endfor %}
         </tbody>
@@ -607,14 +607,14 @@
           const download = reportActionLink('', job.download_url, true);
           download.className = 'report-job-download-button report-job-report-download-button';
           download.download = '';
-          download.title = 'Download report';
-          download.setAttribute('aria-label', 'Download report');
+          download.title = 'Download PPT Report';
+          download.setAttribute('aria-label', 'Download PPT Report');
           actions.append(download);
         } else {
           const disabled = document.createElement('span');
           disabled.className = 'report-job-download-button report-job-report-download-button action-link-disabled';
-          disabled.title = 'Report download unavailable';
-          disabled.setAttribute('aria-label', 'Report download unavailable');
+          disabled.title = 'PPT Report download unavailable';
+          disabled.setAttribute('aria-label', 'PPT Report download unavailable');
           actions.append(disabled);
         }
         if (job.charts_download_url) {
@@ -629,7 +629,7 @@
           const charts = document.createElement('button');
           charts.type = 'button';
           charts.className = 'report-job-charts-button';
-          charts.textContent = '👁';
+          charts.textContent = '📈';
           charts.title = 'Open rendered report charts';
           charts.setAttribute('aria-label', 'Open rendered report charts');
           charts.dataset.reportJobCharts = job.charts_url;
@@ -722,10 +722,10 @@
         progress.append(meter, percentage); progressCell.append(progress);
         const actionsCell = document.createElement('td'); const actions = document.createElement('div'); actions.className = 'report-job-actions';
         if (job.charts_download_url) { const download = reportActionLink('', job.charts_download_url, true); download.className = 'report-job-download-button report-job-charts-download-button'; download.download = ''; download.title = 'Download Chart Set PNGs as ZIP'; download.setAttribute('aria-label', 'Download Chart Set PNGs as ZIP'); actions.append(download); }
-        if (job.open_url) { const open = document.createElement('button'); open.type = 'button'; open.className = 'report-job-charts-button'; open.textContent = '👁'; open.title = 'Open generated Chart Set'; open.setAttribute('aria-label', 'Open generated Chart Set'); open.dataset.reportChartJobOpen = job.open_url; actions.append(open); }
+        if (job.open_url) { const open = document.createElement('button'); open.type = 'button'; open.className = 'report-job-charts-button'; open.textContent = '📈'; open.title = 'Open generated Chart Set'; open.setAttribute('aria-label', 'Open generated Chart Set'); open.dataset.reportChartJobOpen = job.open_url; actions.append(open); }
         if (job.retry_url) { const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'report-job-retry-button'; retry.textContent = '↻'; const relaunchReadyJob = String(job.status || '').toLowerCase() === 'ready'; retry.title = relaunchReadyJob ? 'Relaunch Job' : 'Retry Chart Set'; retry.setAttribute('aria-label', retry.title); retry.dataset.reportChartJobRetry = job.retry_url; retry.dataset.reportChartJobName = job.template; retry.dataset.reportChartJobStatus = job.status || ''; retry.dataset.reportChartJobGeneration = job.generation || ''; actions.append(retry); }
         if (job.stop_url) { const stop = document.createElement('button'); stop.type = 'button'; stop.className = 'report-job-stop-button'; stop.textContent = '■'; stop.title = 'Stop Chart Set'; stop.setAttribute('aria-label', 'Stop Chart Set'); stop.dataset.reportChartJobStop = job.stop_url; stop.dataset.reportChartJobName = job.template; actions.append(stop); }
-        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'danger-button'; remove.textContent = '✕'; remove.title = 'Delete Chart Set job'; remove.dataset.reportChartJobDelete = job.delete_url; remove.dataset.reportChartJobGeneration = job.generation || ''; remove.dataset.reportChartJobName = job.template; actions.append(remove);
+        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'danger-button'; remove.textContent = '✕'; remove.title = 'Delete Chart Set job'; remove.setAttribute('aria-label', 'Delete Chart Set job'); remove.dataset.reportChartJobDelete = job.delete_url; remove.dataset.reportChartJobGeneration = job.generation || ''; remove.dataset.reportChartJobName = job.template; actions.append(remove);
         actionsCell.append(actions); row.append(progressCell, actionsCell); return row;
       }));
       syncCombinedJobSummary();
