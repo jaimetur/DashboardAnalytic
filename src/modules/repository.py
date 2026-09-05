@@ -63,19 +63,20 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS report_runs (
+CREATE TABLE IF NOT EXISTS generated_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    report_type TEXT NOT NULL,
+    job_type TEXT NOT NULL CHECK(job_type IN ('report', 'chart_set')),
+    report_type TEXT NOT NULL DEFAULT '',
     technology TEXT NOT NULL,
     scope TEXT NOT NULL,
-    data_dataset_id INTEGER NOT NULL,
-    voice_dataset_id INTEGER NOT NULL,
-    speech_dataset_id INTEGER NOT NULL,
+    data_dataset_id INTEGER,
+    voice_dataset_id INTEGER,
+    speech_dataset_id INTEGER,
     mapping_dataset_id INTEGER,
     vodafone_mapping_dataset_id INTEGER,
     three_mapping_dataset_id INTEGER,
     template_name TEXT NOT NULL,
-    output_file TEXT NOT NULL,
+    output_file TEXT NOT NULL DEFAULT '',
     created_by TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     dataset_ids_json TEXT NOT NULL DEFAULT '{}',
@@ -85,24 +86,8 @@ CREATE TABLE IF NOT EXISTS report_runs (
     progress INTEGER NOT NULL DEFAULT 100,
     last_error TEXT,
     output_path TEXT,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    finished_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS report_chart_jobs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    technology TEXT NOT NULL,
-    scope TEXT NOT NULL,
-    dataset_ids_json TEXT NOT NULL DEFAULT '{}',
-    dataset_names_json TEXT NOT NULL DEFAULT '{}',
-    template_name TEXT NOT NULL,
     chart_count INTEGER NOT NULL DEFAULT 0,
     generation TEXT,
-    created_by TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    status TEXT NOT NULL DEFAULT 'queued',
-    progress INTEGER NOT NULL DEFAULT 0,
-    last_error TEXT,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     finished_at TEXT
 );
@@ -239,8 +224,7 @@ class Repository:
         with self.connection() as conn:
             conn.executescript(SCHEMA)
             self._ensure_dataset_profile_columns(conn)
-            self._ensure_report_run_columns(conn)
-            self._ensure_report_chart_job_columns(conn)
+            self._migrate_generated_jobs(conn)
             self._cleanup_duplicate_datasets(conn)
             self._migrate_legacy_vendor_mapping_profiles(conn)
             conn.execute(
@@ -444,49 +428,73 @@ class Repository:
                     (dataset_id,),
                 )
 
-    def _ensure_report_run_columns(self, conn: sqlite3.Connection) -> None:
-        existing_columns = {row['name'] for row in conn.execute("PRAGMA table_info(report_runs)").fetchall()}
-        if 'vodafone_mapping_dataset_id' not in existing_columns:
-            conn.execute("ALTER TABLE report_runs ADD COLUMN vodafone_mapping_dataset_id INTEGER")
-        if 'three_mapping_dataset_id' not in existing_columns:
-            conn.execute("ALTER TABLE report_runs ADD COLUMN three_mapping_dataset_id INTEGER")
+    def _migrate_generated_jobs(self, conn: sqlite3.Connection) -> None:
+        """Merge the two legacy job tables into the single generated-jobs table."""
+        tables = {str(row['name']) for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()}
+        if 'report_runs' in tables:
+            self._ensure_legacy_report_run_columns(conn)
+            conn.execute(
+                """
+                INSERT INTO generated_jobs (
+                    id, job_type, report_type, technology, scope, data_dataset_id, voice_dataset_id,
+                    speech_dataset_id, mapping_dataset_id, vodafone_mapping_dataset_id,
+                    three_mapping_dataset_id, template_name, output_file, created_by, created_at,
+                    dataset_ids_json, dataset_names_json, slide_count, status, progress,
+                    last_error, output_path, updated_at, finished_at
+                )
+                SELECT id, 'report', report_type, technology, scope, data_dataset_id, voice_dataset_id,
+                    speech_dataset_id, mapping_dataset_id, vodafone_mapping_dataset_id,
+                    three_mapping_dataset_id, template_name, output_file, created_by, created_at,
+                    dataset_ids_json, dataset_names_json, slide_count, status, progress,
+                    last_error, output_path, COALESCE(updated_at, created_at), finished_at
+                FROM report_runs ORDER BY id
+                """
+            )
+            conn.execute('DROP TABLE report_runs')
+        if 'report_chart_jobs' in tables:
+            self._ensure_legacy_report_chart_job_columns(conn)
+            conn.execute(
+                """
+                INSERT INTO generated_jobs (
+                    job_type, technology, scope, dataset_ids_json, dataset_names_json,
+                    template_name, chart_count, generation, created_by, created_at,
+                    status, progress, last_error, updated_at, finished_at
+                )
+                SELECT 'chart_set', technology, scope, dataset_ids_json, dataset_names_json,
+                    template_name, chart_count, generation, created_by, created_at,
+                    status, progress, last_error, COALESCE(updated_at, created_at), finished_at
+                FROM report_chart_jobs ORDER BY id
+                """
+            )
+            conn.execute('DROP TABLE report_chart_jobs')
+
+    def _ensure_legacy_report_run_columns(self, conn: sqlite3.Connection) -> None:
+        columns = {row['name'] for row in conn.execute("PRAGMA table_info(report_runs)").fetchall()}
         migrations = {
-            'dataset_ids_json': "TEXT NOT NULL DEFAULT '{}'",
-            'dataset_names_json': "TEXT NOT NULL DEFAULT '{}'",
-            'slide_count': 'INTEGER NOT NULL DEFAULT 0',
-            'status': "TEXT NOT NULL DEFAULT 'ready'",
-            'progress': 'INTEGER NOT NULL DEFAULT 100',
-            'last_error': 'TEXT',
-            'output_path': 'TEXT',
-            'updated_at': 'TEXT',
-            'finished_at': 'TEXT',
+            'vodafone_mapping_dataset_id': 'INTEGER', 'three_mapping_dataset_id': 'INTEGER',
+            'dataset_ids_json': "TEXT NOT NULL DEFAULT '{}'", 'dataset_names_json': "TEXT NOT NULL DEFAULT '{}'",
+            'slide_count': 'INTEGER NOT NULL DEFAULT 0', 'status': "TEXT NOT NULL DEFAULT 'ready'",
+            'progress': 'INTEGER NOT NULL DEFAULT 100', 'last_error': 'TEXT', 'output_path': 'TEXT',
+            'updated_at': 'TEXT', 'finished_at': 'TEXT',
         }
         for column, definition in migrations.items():
-            if column not in existing_columns:
+            if column not in columns:
                 conn.execute(f"ALTER TABLE report_runs ADD COLUMN {column} {definition}")
-        conn.execute("UPDATE report_runs SET updated_at = COALESCE(updated_at, created_at)")
 
-    def _ensure_report_chart_job_columns(self, conn: sqlite3.Connection) -> None:
-        """Keep independently persisted Report Charts jobs complete."""
+    def _ensure_legacy_report_chart_job_columns(self, conn: sqlite3.Connection) -> None:
         columns = {row['name'] for row in conn.execute("PRAGMA table_info(report_chart_jobs)").fetchall()}
         migrations = {
-            'dataset_ids_json': "TEXT NOT NULL DEFAULT '{}'",
-            'dataset_names_json': "TEXT NOT NULL DEFAULT '{}'",
-            'template_name': "TEXT NOT NULL DEFAULT ''",
-            'chart_count': 'INTEGER NOT NULL DEFAULT 0',
-            'generation': 'TEXT',
-            'created_by': "TEXT NOT NULL DEFAULT ''",
-            'created_at': 'TEXT',
-            'status': "TEXT NOT NULL DEFAULT 'queued'",
-            'progress': 'INTEGER NOT NULL DEFAULT 0',
-            'last_error': 'TEXT',
-            'updated_at': 'TEXT',
-            'finished_at': 'TEXT',
+            'dataset_ids_json': "TEXT NOT NULL DEFAULT '{}'", 'dataset_names_json': "TEXT NOT NULL DEFAULT '{}'",
+            'template_name': "TEXT NOT NULL DEFAULT ''", 'chart_count': 'INTEGER NOT NULL DEFAULT 0',
+            'generation': 'TEXT', 'created_by': "TEXT NOT NULL DEFAULT ''", 'created_at': 'TEXT',
+            'status': "TEXT NOT NULL DEFAULT 'queued'", 'progress': 'INTEGER NOT NULL DEFAULT 0',
+            'last_error': 'TEXT', 'updated_at': 'TEXT', 'finished_at': 'TEXT',
         }
         for column, definition in migrations.items():
             if column not in columns:
                 conn.execute(f"ALTER TABLE report_chart_jobs ADD COLUMN {column} {definition}")
-        conn.execute("UPDATE report_chart_jobs SET updated_at = COALESCE(updated_at, created_at)")
 
     def _ensure_report_template_columns(self, conn: sqlite3.Connection) -> None:
         """Keep template metadata complete and one promoted template per technology."""
@@ -1669,10 +1677,10 @@ class Repository:
         with self.connection() as conn:
             conn.execute(
                 """
-                INSERT INTO report_runs (
-                    report_type, technology, scope, data_dataset_id, voice_dataset_id, speech_dataset_id,
+                INSERT INTO generated_jobs (
+                    job_type, report_type, technology, scope, data_dataset_id, voice_dataset_id, speech_dataset_id,
                     mapping_dataset_id, vodafone_mapping_dataset_id, three_mapping_dataset_id, template_name, output_file, created_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES ('report', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (report_type, technology, scope, data_dataset_id, voice_dataset_id, speech_dataset_id,
                  None, vodafone_mapping_dataset_id, three_mapping_dataset_id, template_name, output_file, created_by),
@@ -1681,9 +1689,9 @@ class Repository:
     def list_report_runs(self, limit: int | None = 50) -> list[sqlite3.Row]:
         with self.connection() as conn:
             if limit is None:
-                return list(conn.execute("SELECT * FROM report_runs ORDER BY id DESC").fetchall())
+                return list(conn.execute("SELECT * FROM generated_jobs WHERE job_type = 'report' ORDER BY id DESC").fetchall())
             return list(conn.execute(
-                "SELECT * FROM report_runs ORDER BY id DESC LIMIT ?", (limit,)
+                "SELECT * FROM generated_jobs WHERE job_type = 'report' ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall())
 
     def create_report_job(
@@ -1696,11 +1704,11 @@ class Repository:
         with self.connection() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO report_runs (
-                    report_type, technology, scope, data_dataset_id, voice_dataset_id, speech_dataset_id,
+                INSERT INTO generated_jobs (
+                    job_type, report_type, technology, scope, data_dataset_id, voice_dataset_id, speech_dataset_id,
                     template_name, output_file, created_by, created_at, dataset_ids_json, dataset_names_json,
                     slide_count, status, progress, output_path, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?)
+                ) VALUES ('report', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?)
                 """,
                 (
                     report_type, technology, scope, data_dataset_id, voice_dataset_id, speech_dataset_id,
@@ -1732,15 +1740,15 @@ class Repository:
         with self.connection() as conn:
             # A user can stop a worker between any two progress updates.  Do
             # not let a late update from that worker revive the stopped job.
-            conn.execute(f"UPDATE report_runs SET {', '.join(assignments)} WHERE id = ? AND status <> 'stopped'", values)
+            conn.execute(f"UPDATE generated_jobs SET {', '.join(assignments)} WHERE id = ? AND job_type = 'report' AND status <> 'stopped'", values)
 
     def stop_report_job(self, report_id: int) -> bool:
         """Stop a queued or running report job without deleting its audit row."""
         now = local_now_iso()
         with self.connection() as conn:
             cursor = conn.execute(
-                "UPDATE report_runs SET status = 'stopped', last_error = '', updated_at = ?, finished_at = ? "
-                "WHERE id = ? AND status IN ('queued', 'processing')",
+                "UPDATE generated_jobs SET status = 'stopped', last_error = '', updated_at = ?, finished_at = ? "
+                "WHERE id = ? AND job_type = 'report' AND status IN ('queued', 'processing')",
                 (now, now, report_id),
             )
             return cursor.rowcount == 1
@@ -1749,8 +1757,8 @@ class Repository:
         """Reset a completed, failed or stopped report job for reuse."""
         with self.connection() as conn:
             cursor = conn.execute(
-                "UPDATE report_runs SET status = 'queued', progress = 0, last_error = '', finished_at = NULL, updated_at = ? "
-                "WHERE id = ? AND status IN ('failed', 'stopped', 'ready')",
+                "UPDATE generated_jobs SET status = 'queued', progress = 0, last_error = '', finished_at = NULL, updated_at = ? "
+                "WHERE id = ? AND job_type = 'report' AND status IN ('failed', 'stopped', 'ready')",
                 (local_now_iso(), report_id),
             )
             return cursor.rowcount == 1
@@ -1770,8 +1778,8 @@ class Repository:
                 "SELECT dataset_id FROM dataset_profiles WHERE status IN ('queued', 'processing')"
             ).fetchall() if 'dataset_profiles' in tables else []
             report_rows = conn.execute(
-                "SELECT id FROM report_runs WHERE status IN ('queued', 'processing')"
-            ).fetchall() if 'report_runs' in tables else []
+                "SELECT id FROM generated_jobs WHERE job_type = 'report' AND status IN ('queued', 'processing')"
+            ).fetchall() if 'generated_jobs' in tables else []
             dataset_ids = [int(row['dataset_id']) for row in dataset_rows]
             report_ids = [int(row['id']) for row in report_rows]
             if dataset_ids:
@@ -1784,7 +1792,7 @@ class Repository:
             if report_ids:
                 placeholders = ','.join('?' for _ in report_ids)
                 conn.execute(
-                    f"UPDATE report_runs SET status = 'failed', progress = 100, last_error = ?, updated_at = ?, finished_at = ? "
+                    f"UPDATE generated_jobs SET status = 'failed', progress = 100, last_error = ?, updated_at = ?, finished_at = ? "
                     f"WHERE id IN ({placeholders})",
                     (message, now, now, *report_ids),
                 )
@@ -1792,13 +1800,13 @@ class Repository:
 
     def get_report_run(self, report_id: int) -> sqlite3.Row | None:
         with self.connection() as conn:
-            return conn.execute("SELECT * FROM report_runs WHERE id = ?", (report_id,)).fetchone()
+            return conn.execute("SELECT * FROM generated_jobs WHERE id = ? AND job_type = 'report'", (report_id,)).fetchone()
 
     def delete_report_run(self, report_id: int) -> sqlite3.Row | None:
         with self.connection() as conn:
-            report = conn.execute("SELECT * FROM report_runs WHERE id = ?", (report_id,)).fetchone()
+            report = conn.execute("SELECT * FROM generated_jobs WHERE id = ? AND job_type = 'report'", (report_id,)).fetchone()
             if report:
-                conn.execute("DELETE FROM report_runs WHERE id = ?", (report_id,))
+                conn.execute("DELETE FROM generated_jobs WHERE id = ? AND job_type = 'report'", (report_id,))
             return report
 
     def create_report_chart_job(
@@ -1808,10 +1816,10 @@ class Repository:
         with self.connection() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO report_chart_jobs (
-                    technology, scope, dataset_ids_json, dataset_names_json, template_name,
+                INSERT INTO generated_jobs (
+                    job_type, technology, scope, dataset_ids_json, dataset_names_json, template_name,
                     created_by, created_at, status, progress, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)
+                ) VALUES ('chart_set', ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)
                 """,
                 (
                     technology, scope, json.dumps(dataset_ids), json.dumps(dataset_names), template_name,
@@ -1849,15 +1857,15 @@ class Repository:
         with self.connection() as conn:
             # See update_report_job: stopped work must remain stopped even if
             # its in-process thread reaches a later progress checkpoint.
-            conn.execute(f"UPDATE report_chart_jobs SET {', '.join(assignments)} WHERE id = ? AND status <> 'stopped'", values)
+            conn.execute(f"UPDATE generated_jobs SET {', '.join(assignments)} WHERE id = ? AND job_type = 'chart_set' AND status <> 'stopped'", values)
 
     def stop_report_chart_job(self, job_id: int) -> bool:
         """Stop a queued or running Chart Set job."""
         now = local_now_iso()
         with self.connection() as conn:
             cursor = conn.execute(
-                "UPDATE report_chart_jobs SET status = 'stopped', last_error = '', updated_at = ?, finished_at = ? "
-                "WHERE id = ? AND status IN ('queued', 'processing')",
+                "UPDATE generated_jobs SET status = 'stopped', last_error = '', updated_at = ?, finished_at = ? "
+                "WHERE id = ? AND job_type = 'chart_set' AND status IN ('queued', 'processing')",
                 (now, now, job_id),
             )
             return cursor.rowcount == 1
@@ -1866,8 +1874,8 @@ class Repository:
         """Reset one failed, stopped or completed Chart Set job for reuse."""
         with self.connection() as conn:
             cursor = conn.execute(
-                "UPDATE report_chart_jobs SET status = 'queued', progress = 0, last_error = '', chart_count = 0, "
-                "generation = NULL, finished_at = NULL, updated_at = ? WHERE id = ? AND status IN ('failed', 'stopped', 'ready')",
+                "UPDATE generated_jobs SET status = 'queued', progress = 0, last_error = '', chart_count = 0, "
+                "generation = NULL, finished_at = NULL, updated_at = ? WHERE id = ? AND job_type = 'chart_set' AND status IN ('failed', 'stopped', 'ready')",
                 (local_now_iso(), job_id),
             )
             return cursor.rowcount == 1
@@ -1875,18 +1883,18 @@ class Repository:
     def list_report_chart_jobs(self, limit: int | None = 50) -> list[sqlite3.Row]:
         with self.connection() as conn:
             if limit is None:
-                return list(conn.execute("SELECT * FROM report_chart_jobs ORDER BY id DESC").fetchall())
-            return list(conn.execute("SELECT * FROM report_chart_jobs ORDER BY id DESC LIMIT ?", (limit,)).fetchall())
+                return list(conn.execute("SELECT * FROM generated_jobs WHERE job_type = 'chart_set' ORDER BY id DESC").fetchall())
+            return list(conn.execute("SELECT * FROM generated_jobs WHERE job_type = 'chart_set' ORDER BY id DESC LIMIT ?", (limit,)).fetchall())
 
     def get_report_chart_job(self, job_id: int) -> sqlite3.Row | None:
         with self.connection() as conn:
-            return conn.execute("SELECT * FROM report_chart_jobs WHERE id = ?", (job_id,)).fetchone()
+            return conn.execute("SELECT * FROM generated_jobs WHERE id = ? AND job_type = 'chart_set'", (job_id,)).fetchone()
 
     def delete_report_chart_job(self, job_id: int) -> sqlite3.Row | None:
         with self.connection() as conn:
-            job = conn.execute("SELECT * FROM report_chart_jobs WHERE id = ?", (job_id,)).fetchone()
+            job = conn.execute("SELECT * FROM generated_jobs WHERE id = ? AND job_type = 'chart_set'", (job_id,)).fetchone()
             if job:
-                conn.execute("DELETE FROM report_chart_jobs WHERE id = ?", (job_id,))
+                conn.execute("DELETE FROM generated_jobs WHERE id = ? AND job_type = 'chart_set'", (job_id,))
             return job
 
     def delete_report_chart_jobs_for_generations(self, generations: list[str]) -> int:
@@ -1897,7 +1905,7 @@ class Repository:
         placeholders = ','.join('?' for _ in unique_generations)
         with self.connection() as conn:
             cursor = conn.execute(
-                f"DELETE FROM report_chart_jobs WHERE generation IN ({placeholders})",
+                f"DELETE FROM generated_jobs WHERE job_type = 'chart_set' AND generation IN ({placeholders})",
                 unique_generations,
             )
             return int(cursor.rowcount)
@@ -1908,13 +1916,13 @@ class Repository:
         now = local_now_iso()
         with self.connection() as conn:
             rows = conn.execute(
-                "SELECT id FROM report_chart_jobs WHERE status IN ('queued', 'processing')"
+                "SELECT id FROM generated_jobs WHERE job_type = 'chart_set' AND status IN ('queued', 'processing')"
             ).fetchall()
             job_ids = [int(row['id']) for row in rows]
             if job_ids:
                 placeholders = ','.join('?' for _ in job_ids)
                 conn.execute(
-                    f"UPDATE report_chart_jobs SET status = 'failed', progress = 100, last_error = ?, updated_at = ?, finished_at = ? "
+                    f"UPDATE generated_jobs SET status = 'failed', progress = 100, last_error = ?, updated_at = ?, finished_at = ? "
                     f"WHERE id IN ({placeholders})",
                     (message, now, now, *job_ids),
                 )

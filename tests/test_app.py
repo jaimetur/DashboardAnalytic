@@ -1304,10 +1304,10 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
     assert 'value="transfer_offers"' in admin.text
     assert 'Server transfer offers' in admin.text
     assert '<optgroup label="Workspace Tables">' in admin.text
-    assert 'value="report_chart_jobs"' in admin.text
-    assert 'Chart Set jobs' in admin.text
-    assert 'value="report_runs"' in admin.text
-    assert 'Generated Reports jobs' in admin.text
+    assert 'value="generated_jobs"' in admin.text
+    assert 'Generated jobs' in admin.text
+    assert 'value="report_chart_jobs"' not in admin.text
+    assert 'value="report_runs"' not in admin.text
     assert 'Other tables' not in admin.text
     assert app_module.repository.dataset_rows_table_exists(987)
     assert app_module.repository.database_table_page('reporting_rows_data')['total_rows'] == 1
