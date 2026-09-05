@@ -64,7 +64,7 @@
 - Fixed the shared Legend contract across every chart renderer: an empty field suppresses the legend, a selected chart KPI/dimension shows its actual plotted values, and a filter-only field shows the applied filter values as text; CDF legend samples also reproduce each curve's colour and historical/latest line thickness, while legacy slash-separated captions and Legend Position remain supported.
 
 #### 📚 Documentation:
-- Reorganised and rewrote the complete documentation for the current product: kept README as a concise introduction, module summary and deployment guide; added numbered Product Overview, Technical Considerations and dedicated Chart Builder articles; renumbered the focused Help guides; and replaced long prose with structured workflows, bullets, examples, validation checklists and troubleshooting guidance.
+- Reorganised and rewrote the complete documentation for the current product: kept README as a concise introduction, module summary and deployment guide; added numbered Product Overview, Technical Considerations and dedicated Chart Builder articles; renamed the Data Ingestion guide to Workspace Management with a dedicated Data Ingestion section; renumbered the focused Help guides; and replaced long prose with structured workflows, bullets, examples, validation checklists and troubleshooting guidance.
 
 ---
 

@@ -210,4 +210,4 @@ Admin is available to `admin` and `super-admin` roles, with permission-sensitive
 | `admin` | User operations allowed by policy, Slides Templates, accessible-workspace export/transfer and database administration. |
 | `super-admin` | Full account/workspace access management, configuration/full-environment portability and incoming transfer approval. |
 
-For storage rules, calculated fields, filter syntax, reporting semantics and migration behaviour, continue with [Technical considerations](02-technical-considerations.md).
+For the detailed Workspace/Data Ingestion workflow, continue with [Workspace Management](05-workspace-management.md). For storage rules, calculated fields, filter syntax, reporting semantics and migration behaviour, continue with [Technical considerations](02-technical-considerations.md).

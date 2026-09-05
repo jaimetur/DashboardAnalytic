@@ -7,7 +7,7 @@ Use this Help centre for detailed workflows, examples and technical rules. For a
 - New to the product? Read [Product Overview](01-overview.md).
 - Comparing results with another tool? Read [Technical Considerations](02-technical-considerations.md).
 - Installing the service? Read [Configuration](03-configuration.md) and [Docker Deployment](10-docker-deployment.md).
-- Uploading data? Read [Data Ingestion](05-data-ingestion.md).
+- Uploading data? Read the [Data Ingestion](05-workspace-management.md#data-ingestion) section in Workspace Management.
 - Building a dashboard? Read [E2E Dashboard](06-e2e-dashboard.md).
 - Generating charts or PowerPoint? Read [E2E Reporting](07-e2e-reporting.md).
 - Managing users, templates or transfers? Read [Administration](09-administration.md).
@@ -18,7 +18,7 @@ Use this Help centre for detailed workflows, examples and technical rules. For a
 2. [Technical Considerations](02-technical-considerations.md) — normalisation, filters, aggregation, legends, vendor mapping, storage and performance.
 3. [Configuration](03-configuration.md) — runtime variables, storage roots and initial access.
 4. [Web Interface](04-web-interface.md) — shared navigation, dialogs, tables and responsive behaviour.
-5. [Data Ingestion](05-data-ingestion.md) — uploads, classification, processing, previews and mappings.
+5. [Workspace Management](05-workspace-management.md) — workspaces, data ingestion, processing, previews and mappings.
 6. [E2E Dashboard](06-e2e-dashboard.md) — interactive single-dataset analysis and exports.
 7. [E2E Reporting](07-e2e-reporting.md) — reports, Chart Sets, templates, chart recipes and jobs.
 8. [Chart Builder](08-chart-builder.md) — temporary ad-hoc chart construction.

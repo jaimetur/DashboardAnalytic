@@ -230,7 +230,7 @@ HELP_NAVIGATION_DOCUMENTS = (
     '02-technical-considerations.md',
     '03-configuration.md',
     '04-web-interface.md',
-    '05-data-ingestion.md',
+    '05-workspace-management.md',
     '06-e2e-dashboard.md',
     '07-e2e-reporting.md',
     '08-chart-builder.md',
@@ -245,6 +245,7 @@ HELP_DOCUMENT_LABELS = {
     '06-e2e-dashboard.md': 'E2E Dashboard',
     '07-e2e-reporting.md': 'E2E Reporting',
     '08-chart-builder.md': 'Chart Builder',
+    '05-workspace-management.md': 'Workspace Management',
 }
 
 

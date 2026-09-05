@@ -1,4 +1,15 @@
-# Data ingestion
+# Workspace Management
+
+Workspace Management is the first operational module. It controls isolated workspaces, their storage, dataset ingestion, processing queue and vendor mapping workflows.
+
+## Workspaces Management
+
+- Create, open, close, rename, duplicate and delete workspaces.
+- Review workspace size and access.
+- Keep databases, uploaded files and generated output isolated.
+- Open a workspace before using Dashboard, Reporting or Chart Builder.
+
+## Data Ingestion
 
 Workspace accepts `CSV`, `XLS`, `XLSX` and `XLSM`. Only successfully processed datasets can be used by Dashboard, Chart Builder or Reporting.
 

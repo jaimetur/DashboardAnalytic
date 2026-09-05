@@ -85,7 +85,7 @@ Chart Builder reuses the shared Interactive Preview for ad-hoc analysis.
 - **Changelog**: versioned release notes.
 - **Help**: detailed task and technical documentation.
 
-See [Product overview](help/01-overview.md) for a detailed tour of every module and [Technical considerations](help/02-technical-considerations.md) for calculation, normalisation, mapping, filtering, storage and performance rules.
+See [Product overview](help/01-overview.md) for a detailed tour of every module and [Technical considerations](help/02-technical-considerations.md) for calculation, normalisation, mapping, filtering, storage and performance rules. The detailed Workspace guide is [Workspace Management](help/05-workspace-management.md), including its Data Ingestion section.
 
 ## Quick workflow
 
@@ -289,7 +289,7 @@ DashboardAnalytic/
 - [Technical considerations](help/02-technical-considerations.md)
 - [Configuration](help/03-configuration.md)
 - [Web interface](help/04-web-interface.md)
-- [Data ingestion](help/05-data-ingestion.md)
+- [Workspace Management](help/05-workspace-management.md)
 - [E2E Dashboard](help/06-e2e-dashboard.md)
 - [E2E Reporting](help/07-e2e-reporting.md)
 - [Chart Builder](help/08-chart-builder.md)
