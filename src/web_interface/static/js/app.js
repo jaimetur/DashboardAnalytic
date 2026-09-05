@@ -1673,6 +1673,45 @@ document.querySelectorAll('.collapsible-panel').forEach((panel) => {
   });
 })();
 
+(() => {
+  const activeSize = document.querySelector('[data-header-active-workspace-size]');
+  const headerOptions = Array.from(document.querySelectorAll('[data-header-workspace-option]'));
+  const workspaceSelectOptions = Array.from(document.querySelectorAll('[data-workspace-select] option[data-workspace-name]'));
+  const workspaceTableSizes = Array.from(document.querySelectorAll('[data-workspace-size][data-workspace-id]'));
+  if (!activeSize && !headerOptions.length && !workspaceTableSizes.length) return;
+  const refreshWorkspaceSizes = async () => {
+    if (document.hidden) return;
+    try {
+      const response = await fetch('/api/workspaces/sizes', {credentials: 'same-origin', cache: 'no-store'});
+      if (!response.ok) return;
+      const payload = await response.json();
+      const sizes = payload.sizes || {};
+      if (activeSize) {
+        const size = payload.active_workspace_id ? sizes[payload.active_workspace_id] : '';
+        activeSize.textContent = size ? ` (${size})` : '';
+      }
+      headerOptions.forEach((option) => {
+        const size = sizes[option.value];
+        const target = option.querySelector('[data-header-workspace-size]');
+        if (target && size) target.textContent = size;
+      });
+      workspaceSelectOptions.forEach((option) => {
+        const size = sizes[option.value];
+        if (size) option.textContent = `${option.dataset.workspaceName} (${size})`;
+      });
+      workspaceTableSizes.forEach((target) => {
+        const size = sizes[target.dataset.workspaceId];
+        if (size) target.textContent = size;
+      });
+    } catch (_error) {
+      // The next lightweight refresh will retry without interrupting the page.
+    }
+  };
+  refreshWorkspaceSizes();
+  window.setInterval(refreshWorkspaceSizes, 5000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshWorkspaceSizes(); });
+})();
+
 const loadingOverlay = document.getElementById('loading-overlay');
 const loadingTitle = document.getElementById('loading-title');
 const loadingCopy = document.getElementById('loading-copy');

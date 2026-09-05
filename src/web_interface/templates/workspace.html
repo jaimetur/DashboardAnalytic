@@ -21,7 +21,7 @@
         <label>Open workspace
           <select name="workspace_id" data-workspace-select>
             {% for item in workspaces %}
-            <option value="{{ item.id }}" data-workspace-access="{{ 'true' if workspace_access.get(item.id, false) else 'false' }}" {% if not workspace_access.get(item.id, false) %}disabled{% endif %} {% if active_workspace and item.id == active_workspace.id %}selected{% endif %}>{{ item.name }} ({{ workspace_sizes.get(item.id, '0 MB') }})</option>
+            <option value="{{ item.id }}" data-workspace-name="{{ item.name }}" data-workspace-access="{{ 'true' if workspace_access.get(item.id, false) else 'false' }}" {% if not workspace_access.get(item.id, false) %}disabled{% endif %} {% if active_workspace and item.id == active_workspace.id %}selected{% endif %}>{{ item.name }} ({{ workspace_sizes.get(item.id, '0 MB') }})</option>
             {% endfor %}
           </select>
         </label>
@@ -66,7 +66,7 @@
                   </form>
                   <input form="workspace-save-{{ item.id }}" aria-label="Workspace name: {{ item.name }}" name="name" required maxlength="100" value="{{ item.name }}" data-workspace-name-input {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>
                 </td>
-                <td><span class="workspace-size">{{ workspace_sizes.get(item.id, '0 MB') }}</span></td>
+                <td><span class="workspace-size" data-workspace-size data-workspace-id="{{ item.id }}">{{ workspace_sizes.get(item.id, '0 MB') }}</span></td>
                 {% if user.role == 'super-admin' %}<td>
                   <div class="workspace-access-editor">
                     <details class="workspace-user-picker" data-workspace-user-picker>

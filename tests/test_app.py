@@ -1162,7 +1162,7 @@ def test_workspace_management_lists_restricted_workspaces_without_enabling_actio
 
     page = client.get('/workspace')
     assert page.status_code == 200
-    assert f'value="{restricted.id}" data-workspace-access="false" disabled' in page.text
+    assert f'value="{restricted.id}" data-workspace-name="Restricted workspace" data-workspace-access="false" disabled' in page.text
     assert 'Restricted workspace (' in page.text
     assert 'workspace-no-access-row' in page.text
     assert 'No access' in page.text

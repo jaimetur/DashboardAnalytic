@@ -3649,6 +3649,19 @@ def workspace(
     )
 
 
+@app.get('/api/workspaces/sizes')
+def workspace_sizes_status(user: SessionUser = Depends(current_user)) -> JSONResponse:
+    """Return current display sizes after operation-specific cache invalidation."""
+    workspaces = workspace_registry.list()
+    access = workspace_access_map(user, workspaces)
+    visible = [item for item in workspaces if access.get(item.id, False)]
+    return JSONResponse({
+        'active_workspace_id': active_workspace.id if active_workspace else None,
+        'active_workspace_name': active_workspace.name if active_workspace else 'None',
+        'sizes': {item.id: format_workspace_size(workspace_disk_usage(item)) for item in visible},
+    })
+
+
 def require_workspace_admin(user: SessionUser) -> None:
     if user.role not in {'admin', 'super-admin'}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Only administrators can manage workspaces.')
@@ -4995,6 +5008,7 @@ def _run_report_chart_job(
                 'job_id': job_id, 'executed_by': 'system', 'error': str(exc),
             }))
             task_repository.update_report_chart_job(job_id, status='failed', progress=100, last_error=str(exc), finished=True)
+            invalidate_workspace_size_cache(task_repository.db_path.parent)
             invalidate_workspace_size_cache(task_repository.db_path.parent)
 
 

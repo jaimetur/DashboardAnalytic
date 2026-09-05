@@ -67,7 +67,11 @@ label { display: grid; gap: 0.45rem; color: var(--muted); }
 .topnav { display: flex; gap: 0.8rem; flex-wrap: wrap; justify-content: flex-end; align-self: flex-start; margin-top: 1.5rem; }
 .topnav .topnav-link, .pill, .ghost-link { padding: 0.65rem 0.95rem; border-radius: 999px; background: rgba(255, 255, 255, 0.72); border: 1px solid var(--line); }
 .topnav-link { display: inline-flex; align-items: center; justify-content: center; font-weight: 600; box-shadow: 0 8px 20px rgba(18, 32, 43, 0.08); }
-.topnav button.topnav-user-badge { font: inherit; cursor: pointer; }
+.topnav-user-control { display: inline-flex; min-width: 0; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 999px; background: transparent; color: inherit; font: inherit; box-shadow: none; cursor: pointer; }
+.topnav-user-control:hover:not(:disabled), .topnav-user-control:focus-visible { background: transparent; box-shadow: none; transform: none; }
+.topnav-user-control .topnav-user-badge { cursor: pointer; transition: filter 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease; }
+.topnav-user-control:hover .topnav-user-badge, .topnav-user-control:focus-visible .topnav-user-badge { filter: brightness(1.08) saturate(1.08); transform: translateY(-1px); box-shadow: 0 14px 30px rgba(18, 32, 43, 0.20); }
+.topnav-user-control:focus-visible { outline: 3px solid rgba(11, 122, 117, 0.28); outline-offset: 3px; }
 .topnav-workspace-switcher { position: absolute; top: 1.5rem; left: 50%; z-index: 30; transform: translateX(-50%); }
 .topnav .topnav-workspace-badge { display: flex; justify-content: space-between; gap: 0.65rem; min-width: 15rem; background: linear-gradient(145deg, rgba(16, 49, 74, 0.92), rgba(11, 122, 117, 0.86)); border-color: rgba(11, 122, 117, 0.58); color: #fff; font-weight: 700; box-shadow: 0 12px 28px rgba(7, 93, 89, 0.26); cursor: pointer; list-style: none; white-space: nowrap; }
 .topnav .topnav-workspace-badge::-webkit-details-marker { display: none; }
@@ -83,7 +87,9 @@ label { display: grid; gap: 0.45rem; color: var(--muted); }
 .topnav-workspace-menu button.is-unavailable:disabled { background: #e4e8eb; color: #7b8790; }
 .topnav-workspace-menu button.is-unavailable:disabled span { color: #8d989f; }
 .topnav-workspace-menu button span { font-size: 0.7rem; font-weight: 600; opacity: 0.88; }
+.topnav-workspace-menu button [data-header-workspace-size] { font: inherit; opacity: 1; }
 .topnav .topnav-user-badge-admin { background: linear-gradient(135deg, #c84a4a, #e06a5a); border-color: rgba(200, 74, 74, 0.28); color: rgba(255, 255, 255, 0.96); box-shadow: 0 12px 28px rgba(200, 74, 74, 0.24); }
+.topnav .topnav-user-badge-super-admin { background: linear-gradient(135deg, #9f3038, #d45555); border-color: rgba(159, 48, 56, 0.34); color: rgba(255, 255, 255, 0.98); box-shadow: 0 12px 28px rgba(159, 48, 56, 0.26); }
 .topnav .topnav-user-badge-user { background: linear-gradient(135deg, #0b7a75, #1aa29b); border-color: rgba(11, 122, 117, 0.28); color: rgba(255, 255, 255, 0.96); box-shadow: 0 12px 28px rgba(11, 122, 117, 0.22); }
 a.topnav-link-doc { background: linear-gradient(135deg, #f3f5f7, #e8edf2); border-color: rgba(126, 139, 152, 0.24); color: #44515d; }
 a.topnav-link-workspace { background: linear-gradient(135deg, #d7f2ec, #bde8df); border-color: rgba(32, 144, 124, 0.34); color: #176b61; }
@@ -430,7 +436,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-chart-preview-image { grid-column: 1; display: grid; place-items: center; width: 100%; min-height: 0; height: auto; overflow: auto; border: 1px solid rgba(75, 32, 138, 0.2); border-radius: 8px; background: #fff; }
 .catalogue-chart-preview-image[hidden] { display: none !important; }
 .catalogue-chart-preview-image img { display: block; width: min(100%, 1200px); height: auto; object-fit: contain; }
-.report-jobs-table { min-width: 1380px; }
+.report-jobs-table { min-width: 1210px; }
 .report-chart-jobs-table { min-width: 980px; }
 .reporting-chart-jobs-panel { margin-top: 2.2rem; }
 .report-jobs-table th, .report-jobs-table td { vertical-align: middle; }
@@ -444,13 +450,13 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-jobs-table th:nth-child(2), .report-jobs-table td:nth-child(2) { min-width: 145px; }
 .report-jobs-table th:nth-child(3), .report-jobs-table td:nth-child(3) { width: 132px; min-width: 132px; max-width: 132px; white-space: normal; overflow-wrap: normal; }
 .report-jobs-table th:nth-child(6), .report-jobs-table td:nth-child(6) { width: 180px; min-width: 170px; max-width: 185px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
-.report-jobs-table th:nth-child(8), .report-jobs-table td:nth-child(8) { width: 130px; min-width: 124px; max-width: 134px; white-space: normal; }
-.report-jobs-table th:nth-child(12), .report-jobs-table td:nth-child(12) { width: 92px; min-width: 92px; max-width: 92px; }
+.report-jobs-table th:nth-child(7), .report-jobs-table td:nth-child(7) { width: 130px; min-width: 124px; max-width: 134px; white-space: normal; }
+.report-jobs-table th:nth-child(11), .report-jobs-table td:nth-child(11) { width: 92px; min-width: 92px; max-width: 92px; }
 .report-job-datasets { display: flex; flex-direction: column; align-items: flex-start; gap: 0.12rem; white-space: normal !important; }
 .report-job-dataset-kind { color: #5d3b86; font-weight: 800; margin-top: 0.18rem; }
 .report-job-progress { display: flex; align-items: center; gap: 0.45rem; min-width: 122px; font-variant-numeric: tabular-nums; }
 .report-job-progress progress { width: 82px; accent-color: #4b208a; }
-.report-jobs-table th:nth-child(13), .report-jobs-table td:nth-child(13) { width: 98px; min-width: 98px; max-width: 98px; }
+.report-jobs-table th:nth-child(12), .report-jobs-table td:nth-child(12) { width: 98px; min-width: 98px; max-width: 98px; }
 .report-jobs-table .report-job-progress { gap: 0.3rem; min-width: 92px; }
 .report-jobs-table .report-job-progress progress { width: 58px; }
 .report-jobs-table .queue-status-pill { box-sizing: border-box; max-width: 100%; padding: 0.34rem 0.46rem; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

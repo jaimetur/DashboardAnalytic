@@ -1150,7 +1150,8 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert 'latestCampaignOption' in page.text
     assert "select.dispatchEvent(new Event('change', {bubbles: true}))" in page.text
     assert 'Reports and Charts Jobs' in page.text
-    assert '<th>Tech</th><th>Type</th><th>Report Name</th>' in page.text
+    assert '<th>Tech</th><th>Type</th><th>Template</th>' in page.text
+    assert '<th>Report Name</th>' not in page.text
     assert 'data-report-job-stop' in page.text
     assert 'data-report-chart-job-stop' in page.text
 
