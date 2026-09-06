@@ -3803,8 +3803,13 @@ def save_workspace(
 def duplicate_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
     require_workspace_admin(user)
     require_workspace_access(user, workspace_id)
-    workspace: Workspace | None = None
-    try:
+    source = workspace_registry.get(workspace_id)
+    if source is None:
+        return RedirectResponse('/workspace?workspace_error=Workspace+not+found.', status_code=status.HTTP_303_SEE_OTHER)
+
+    def run_duplication() -> None:
+      workspace: Workspace | None = None
+      try:
         workspace = workspace_registry.duplicate(workspace_id)
         # A duplicate must retain the origin workspace membership.  Otherwise
         # an administrator who is allowed to duplicate a workspace could not
@@ -3816,7 +3821,7 @@ def duplicate_workspace(workspace_id: str = Form(...), user: SessionUser = Depen
         ]
         repository.set_workspace_user_access(workspace.id, source_members)
         invalidate_workspace_size_cache(workspace.database_path.parent)
-    except Exception as exc:
+      except Exception:
         # Do not leave a registered but inaccessible/partially configured
         # workspace behind when the filesystem copy or permission copy fails.
         if workspace is not None:
@@ -3825,11 +3830,8 @@ def duplicate_workspace(workspace_id: str = Form(...), user: SessionUser = Depen
                 repository.remove_workspace_access(workspace.id)
             except Exception:
                 pass
-        return RedirectResponse(
-            f'/workspace?{urlencode({"workspace_error": f"Unable to duplicate the workspace: {exc}"})}',
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-    return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": f"Created {workspace.name}."})}', status_code=status.HTTP_303_SEE_OTHER)
+    Thread(target=run_duplication, name=f'workspace-duplicate-{workspace_id}', daemon=True).start()
+    return RedirectResponse('/workspace?workspace_notice=Workspace+duplication+started.+The+copy+will+appear+when+ready.', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get('/workspace/duplicate')

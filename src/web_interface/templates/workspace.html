@@ -633,4 +633,30 @@
   });
 })();
 </script>
+<script>
+(() => {
+  const message = document.querySelector('[data-workspace-result]')?.textContent.trim() || '';
+  const started = message.startsWith('Workspace duplication started.');
+  if (started) {
+    sessionStorage.setItem('workspace-duplication-pending', String(document.querySelectorAll('.workspace-library-row').length));
+  }
+  const pending = sessionStorage.getItem('workspace-duplication-pending');
+  if (pending === null) return;
+  const baseline = Number(pending);
+  const timer = window.setInterval(async () => {
+    try {
+      const response = await fetch('/workspace', {credentials: 'same-origin', headers: {'X-Requested-With': 'XMLHttpRequest'}});
+      if (!response.ok) return;
+      const html = await response.text();
+      const count = (html.match(/class="workspace-library-row/g) || []).length;
+      if (count > baseline) {
+        window.clearInterval(timer);
+        sessionStorage.removeItem('workspace-duplication-pending');
+        showInfoDialog('El workspace duplicado se ha creado correctamente.', {title: 'Duplicación completada'});
+      }
+    } catch (_error) { /* keep polling while the copy runs */ }
+  }, 3000);
+  window.setTimeout(() => { window.clearInterval(timer); }, 10 * 60 * 1000);
+})();
+</script>
 {% endblock %}
