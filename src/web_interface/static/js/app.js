@@ -94,6 +94,15 @@ function limitSeriesCollectionByX(seriesCollection, xMaxOverride) {
   };
 
   const refreshAll = () => document.querySelectorAll(selector).forEach(refreshTable);
+  document.addEventListener('mobile-card-pagination:refresh', (event) => {
+    const source = event.target;
+    if (!(source instanceof Element)) return;
+    const collection = source.closest(selector);
+    if (!collection) return;
+    const state = states.get(collection);
+    if (event.detail?.reset && state) state.page = 0;
+    refreshTable(collection);
+  });
   const scheduleRefresh = () => {
     if (scheduled) return;
     scheduled = true;
@@ -3991,6 +4000,9 @@ if (appLogsPanel) {
       if (matches) visibleCount += 1;
     });
     if (noResults) noResults.hidden = visibleCount > 0 || rows.length === 0;
+    // The mobile card pager has its own display state. Notify it after every
+    // filter pass so the first matching log is immediately visible.
+    body?.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {bubbles: true, detail: {reset: true}}));
   };
   const replaceSelectOptions = (control, values, allLabel) => {
     if (!control) return;
@@ -4169,6 +4181,7 @@ if (queueNode) {
     document.querySelectorAll('[data-dataset-row]').forEach((row) => {
       row.hidden = Boolean(selectedKind && row.dataset.datasetKind !== selectedKind);
     });
+    queueNode.querySelector('.queue-table')?.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {bubbles: true, detail: {reset: true}}));
   };
   queueTypeFilter?.addEventListener('change', applyQueueTypeFilter);
   applyQueueTypeFilter();
