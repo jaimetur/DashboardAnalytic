@@ -4166,7 +4166,7 @@ if (queueNode) {
             <button type="submit" class="danger-button">Delete</button>
           </form>
           ${isCdr ? `<a class="ghost-link action-link-primary" href="${openHref}" data-dashboard-open-link data-dataset-id="${dataset.id}"${datasetKind ? ` data-input-kind="${String(datasetKind)}"` : ''}>Show Dashboard</a>` : ''}
-          ${canClearVendors ? `<button type="button" class="action-link-clear-vendors" data-vendor-clear-open data-dataset-id="${dataset.id}">Clear Vendors</button>` : ''}
+          ${canClearVendors ? `<button type="button" class="action-link-clear-vendors" data-vendor-clear-open data-dataset-id="${dataset.id}" title="Clear vendor mapping" aria-label="Clear vendor mapping">Clear Vendors</button>` : ''}
           ${canMapVendors ? `<button type="button" class="ghost-link action-link-map-vendors" data-vendor-map-open data-dataset-id="${dataset.id}" data-dataset-name="${fileName}">Map Vendors</button>` : ''}
         `;
       } else if (dataset.status === 'processing') {

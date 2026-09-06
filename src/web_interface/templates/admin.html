@@ -193,7 +193,7 @@
                 <button type="button" class="catalogue-edit-button icon-action" aria-label="Edit template" data-open-template-editor="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier | urlencode }}/editor" data-template-name="{{ catalogue.name }}" title="Edit template">✎</button>
                 <form action="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/duplicate" method="post"><button type="submit" class="catalogue-duplicate-button icon-action" aria-label="Duplicate template" title="Duplicate template">⧉</button></form>
                 {% if not catalogue.active %}<form action="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/delete" method="post" data-confirm="Delete template {{ catalogue.name }}? This cannot be undone."><button type="submit" class="danger-button icon-action" aria-label="Delete template" title="Delete template">×</button></form>{% else %}<button type="button" class="danger-button icon-action" aria-label="Delete template" disabled title="The default template cannot be deleted">×</button>{% endif %}
-                <a class="catalogue-export-button icon-action" aria-label="Export template" title="Export template" href="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/export">⇩</a>
+                <a class="catalogue-export-button icon-action" aria-label="Export template" title="Export template" href="/admin/report-templates/{{ catalogue.technology }}/{{ catalogue.identifier }}/export">⬇</a>
               </div>
             </td>
           </tr>

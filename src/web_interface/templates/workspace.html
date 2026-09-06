@@ -231,7 +231,7 @@
                 >Show Dashboard</a>
                 {% endif %}
                 {% if dataset.can_clear_vendors %}
-                <button type="button" class="action-link-clear-vendors" data-vendor-clear-open data-dataset-id="{{ dataset.id }}">Clear Vendors</button>
+                <button type="button" class="action-link-clear-vendors" data-vendor-clear-open data-dataset-id="{{ dataset.id }}" title="Clear vendor mapping" aria-label="Clear vendor mapping">Clear Vendors</button>
                 {% endif %}
                 {% if dataset.can_map_vendors %}
                 <button
