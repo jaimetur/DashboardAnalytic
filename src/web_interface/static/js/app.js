@@ -23,6 +23,89 @@ function limitSeriesCollectionByX(seriesCollection, xMaxOverride) {
     .filter((item) => item.labels.length > 0 && item.series.length > 0);
 }
 
+// Card-shaped tables are much easier to scan on a compact phone when their
+// rows are bounded. The pager is deliberately client-side: each source table
+// keeps its existing server/API pagination and this only controls the mobile
+// card presentation of the rows already available to the page.
+(() => {
+  const selector = [
+    'table.queue-table', 'table.users-table', 'table.catalogue-workspace-table',
+    'table.report-jobs-table', 'table.workspace-library-table', 'table.recovered-transfer-table',
+    'table.app-logs-table', 'table.admin-datasets-table', 'table.database-editor-table',
+    '.report-charts-grid',
+  ].join(', ');
+  const compactViewport = window.matchMedia('(max-width: 480px)');
+  const pageSize = 2;
+  const states = new WeakMap();
+  let scheduled = false;
+
+  const cardRows = (collection) => {
+    if (collection.matches('.report-charts-grid')) {
+      return Array.from(collection.querySelectorAll(':scope > .report-chart-card'))
+        .filter((card) => !card.hidden && !card.hasAttribute('data-mobile-card-pagination-ignore'));
+    }
+    return Array.from(collection.tBodies)
+      .flatMap((body) => Array.from(body.rows))
+      .filter((row) => !row.hidden
+        && !row.classList.contains('database-empty-row')
+        && !row.hasAttribute('data-app-log-no-results')
+        && !row.hasAttribute('data-mobile-card-pagination-ignore'));
+  };
+
+  const refreshTable = (table) => {
+    let state = states.get(table);
+    if (!state) {
+      const pager = document.createElement('nav');
+      pager.className = 'mobile-card-pagination';
+      pager.hidden = true;
+      pager.setAttribute('aria-label', table.matches('.report-charts-grid') ? 'Chart pages' : 'Card pages');
+      pager.innerHTML = '<button type="button" data-mobile-card-first>First</button><button type="button" data-mobile-card-previous>Previous</button><span data-mobile-card-page-label>Page 1 of 1</span><button type="button" data-mobile-card-next>Next</button><button type="button" data-mobile-card-last>Last</button>';
+      const placeAfter = table.closest('.table-wrap, .data-table-wrap, .queue-table-wrap, .database-editor-wrap, .catalogue-workspace-table-wrap') || table;
+      placeAfter.insertAdjacentElement('afterend', pager);
+      state = {page: 0, pager};
+      states.set(table, state);
+      pager.addEventListener('click', (event) => {
+        const button = event.target.closest('button');
+        if (!button) return;
+        const rows = cardRows(table);
+        const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+        if (button.hasAttribute('data-mobile-card-first')) state.page = 0;
+        if (button.hasAttribute('data-mobile-card-previous')) state.page = Math.max(0, state.page - 1);
+        if (button.hasAttribute('data-mobile-card-next')) state.page = Math.min(pageCount - 1, state.page + 1);
+        if (button.hasAttribute('data-mobile-card-last')) state.page = pageCount - 1;
+        refreshTable(table);
+      });
+    }
+    const rows = cardRows(table);
+    if (!compactViewport.matches) {
+      rows.forEach((row) => row.classList.remove('mobile-card-page-hidden'));
+      state.pager.hidden = true;
+      return;
+    }
+    const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+    state.page = Math.min(state.page, pageCount - 1);
+    rows.forEach((row, index) => row.classList.toggle('mobile-card-page-hidden', Math.floor(index / pageSize) !== state.page));
+    state.pager.hidden = rows.length <= pageSize;
+    state.pager.querySelector('[data-mobile-card-page-label]').textContent = `Page ${state.page + 1} of ${pageCount}`;
+    state.pager.querySelector('[data-mobile-card-first]').disabled = state.page === 0;
+    state.pager.querySelector('[data-mobile-card-previous]').disabled = state.page === 0;
+    state.pager.querySelector('[data-mobile-card-next]').disabled = state.page >= pageCount - 1;
+    state.pager.querySelector('[data-mobile-card-last]').disabled = state.page >= pageCount - 1;
+  };
+
+  const refreshAll = () => document.querySelectorAll(selector).forEach(refreshTable);
+  const scheduleRefresh = () => {
+    if (scheduled) return;
+    scheduled = true;
+    window.requestAnimationFrame(() => { scheduled = false; refreshAll(); });
+  };
+  compactViewport.addEventListener('change', scheduleRefresh);
+  new MutationObserver((mutations) => {
+    if (mutations.some((mutation) => mutation.type === 'childList' || mutation.attributeName === 'hidden')) scheduleRefresh();
+  }).observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ['hidden']});
+  refreshAll();
+})();
+
 function drawLineChart(svg, labels, series, width, height, padding, axisLabels = {}, xMaxOverride = null, xMinOverride = null) {
   const palette = ['#0b7a75', '#dd653e', '#245a96', '#b84d3a', '#6d46a8', '#228a5d', '#c78b1d', '#4d6a88'];
   const rawSeriesCollection = Array.isArray(series) && series.length > 0 && typeof series[0] === 'object' && Array.isArray(series[0].series)

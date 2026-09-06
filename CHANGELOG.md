@@ -50,6 +50,7 @@
 - Made Readme the default selected tab after signing in or opening the authenticated application root.
 - Renamed the Workspace queue heading to Datasets and replaced dataset, user, template and database row actions with compact circular icon controls carrying accessible hover labels and clearer download symbols.
 - Consolidated the 390×844 compact-phone layout across every module with a single-line login title and compact three-card feature summary, tighter panels, forms, non-overflowing protected-role labels and Export / Import controls; responsive cards for Users, Slides Templates, Reports and Charts Jobs, Datasets, Workspaces, transfers, App Logs and dynamic Database Management rows; labels above values, up to three short fields per row, paired dates, full-width IDs and left-aligned action rows; visible Manage Workspaces content; and viewport-fitted chart, data and Slides Template editors with narrow action and slide columns, compact fixed controls, vertically stacked row actions, table-only scrolling and iOS-safe editable font sizes that prevent focus zoom.
+- Paginated compact-phone card tables and Chart Set thumbnails after two visible items with shared First, Previous, Next and Last controls that automatically follow live table refreshes, active filters and generated chart updates.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
