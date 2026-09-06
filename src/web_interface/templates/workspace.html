@@ -28,7 +28,8 @@
         <button type="submit" class="workspace-action-open" data-workspace-open {% if active_workspace %}disabled{% endif %}>Open</button>
         <button type="submit" formaction="/workspace/close" class="workspace-action-close" data-workspace-close disabled>Close</button>
       </form>
-      {% if user.role in ['admin', 'super-admin'] %}
+    </div>
+    {% if user.role in ['admin', 'super-admin'] %}
       <details class="workspace-management">
         <summary>Manage workspaces</summary>
         <div class="workspace-management-forms">
@@ -98,8 +99,7 @@
           </table>
         </div>
       </details>
-      {% endif %}
-    </div>
+    {% endif %}
   </article>
 
   {% if active_workspace %}
