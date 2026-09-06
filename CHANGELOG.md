@@ -57,6 +57,7 @@
 - Increased the desktop Chart Preview dialog height cap and used the dynamic viewport height so it makes slightly better use of available vertical space without changing the compact-phone layout.
 - Standardised Vendor Comparison ordering so every operator lists mapped vendors in the same Ericsson, Huawei, Samsung and NSN sequence whenever those vendors exist, while keeping Campaign values chronological.
 - Made workspace duplication preserve the source workspace's access membership, and deferred reporting-row synchronization until a report actually needs it so copied workspaces open promptly instead of rebuilding their complete CDR cache.
+- Exposed the persistent Workspace registry in Database Management under Config Tables as a safe read-only view, while retaining Workspace Management as the sole editor for workspace paths and identities.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.

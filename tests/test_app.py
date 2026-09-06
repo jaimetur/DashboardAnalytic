@@ -1327,6 +1327,8 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
     assert 'value="report_templates"' in admin.text
     assert 'value="transfer_offers"' in admin.text
     assert 'Server transfer offers' in admin.text
+    assert 'value="__workspace_registry__"' in admin.text
+    assert 'Workspace registry' in admin.text
     assert '<optgroup label="Workspace Tables">' in admin.text
     assert 'value="generated_jobs"' in admin.text
     assert 'Generated jobs' in admin.text
@@ -1339,6 +1341,13 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
     assert cleanup.status_code == 303
     assert not app_module.repository.dataset_rows_table_exists(987)
     assert app_module.repository.database_table_page('reporting_rows_data')['total_rows'] == 0
+
+    workspace_registry = client.get('/admin/database/table', params={'table': '__workspace_registry__', 'limit': 100})
+    assert workspace_registry.status_code == 200
+    workspace_payload = workspace_registry.json()
+    assert any(column['name'] == 'name' for column in workspace_payload['columns'])
+    assert any(row['id'] == 'default' for row in workspace_payload['rows'])
+    assert all(column['primary_key'] for column in workspace_payload['columns'])
 
     users = client.get("/admin/database/table", params={"table": "users", "limit": 100})
     assert users.status_code == 200

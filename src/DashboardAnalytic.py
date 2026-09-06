@@ -47,7 +47,7 @@ from src.modules.auth import SessionUser, verify_password
 from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
-from src.modules.repository import Repository
+from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE
 from src.modules.workspaces import Workspace, WorkspaceRegistry
 from src.version import __app_name__, __release_date__, __version__
 from src.utils.filesystem import ensure_directories, safe_join
@@ -102,6 +102,7 @@ workspace_registry = WorkspaceRegistry(
     settings.slides_templates_dir,
     legacy_workspace_registry_path(),
 )
+repository.set_workspace_registry_database(workspace_registry.registry_path)
 active_workspace: Workspace | None = None
 _workspace_size_cache: dict[str, tuple[float, int]] = {}
 _workspace_size_cache_lock = Lock()
@@ -680,6 +681,7 @@ async def lifespan(_: FastAPI):
     )
     workspace_registry.initialize()
     repository.set_global_database(settings.database_path.parent / 'application.db')
+    repository.set_workspace_registry_database(workspace_registry.registry_path)
     # Workspace schema cleanup and interrupted-job recovery happen when a
     # workspace becomes active.  Scanning every workspace here opens and
     # checkpoints every SQLite database, which can leave startup blocked for
@@ -3116,6 +3118,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         'Config Tables': [], 'Workspace Tables': [], 'Individual dataset rows': [], 'Combined CDR rows': [],
     }
     friendly_tables = {
+        WORKSPACE_REGISTRY_TABLE: 'Workspace registry',
         'application_state': 'Application state',
         'audit_logs': 'Audit log',
         'dataset_profiles': 'Dataset profiles',
@@ -3138,7 +3141,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
                 'name': table_name,
                 'label': f"Combined CDR-{reporting_match.group(1).title()}",
             })
-        elif table_name in global_database_tables:
+        elif table_name in global_database_tables or table_name == WORKSPACE_REGISTRY_TABLE:
             database_table_groups['Config Tables'].append({'name': table_name, 'label': friendly_tables.get(table_name, table_name)})
         else:
             database_table_groups['Workspace Tables'].append({

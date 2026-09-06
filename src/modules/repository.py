@@ -16,6 +16,7 @@ from src.modules.auth import hash_password
 
 
 DATABASE_BLANK_FILTER = '__database_blank__'
+WORKSPACE_REGISTRY_TABLE = '__workspace_registry__'
 
 
 def local_now_iso() -> str:
@@ -140,9 +141,10 @@ class UserRecord:
 
 
 class Repository:
-    def __init__(self, db_path: Path, global_db_path: Path | None = None) -> None:
+    def __init__(self, db_path: Path, global_db_path: Path | None = None, workspace_registry_db_path: Path | None = None) -> None:
         self.db_path = db_path
         self.global_db_path = global_db_path or db_path
+        self.workspace_registry_db_path = workspace_registry_db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.global_db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -175,6 +177,23 @@ class Repository:
     def set_global_database(self, path: Path) -> None:
         self.global_db_path = path
         self.global_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def set_workspace_registry_database(self, path: Path) -> None:
+        self.workspace_registry_db_path = path
+        self.workspace_registry_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    @contextmanager
+    def workspace_registry_connection(self) -> Iterator[sqlite3.Connection]:
+        if self.workspace_registry_db_path is None:
+            raise ValueError('The workspace registry database is not available.')
+        conn = sqlite3.connect(self.workspace_registry_db_path, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 30000")
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
 
     def replace_global_database_snapshot(self, snapshot_path: Path) -> None:
         """Replace the global database and discard stale SQLite sidecars."""
@@ -583,7 +602,14 @@ class Repository:
 
     def _table_connection(self, table_name: str):
         """Select the owning database for workspace and global tables."""
+        if table_name == WORKSPACE_REGISTRY_TABLE:
+            return self.workspace_registry_connection
         return self.global_connection if table_name in self.list_global_database_tables() else self.connection
+
+    @staticmethod
+    def _physical_database_table_name(table_name: str) -> str:
+        """Map the Database Management registry alias to its real SQLite table."""
+        return 'workspaces' if table_name == WORKSPACE_REGISTRY_TABLE else table_name
 
     def list_global_database_tables(self) -> list[str]:
         """Return every user table physically stored in application.db."""
@@ -615,6 +641,8 @@ class Repository:
         for name in self.list_global_database_tables():
             if name not in names:
                 names.append(name)
+        if self.workspace_registry_db_path is not None and self.workspace_registry_db_path.is_file():
+            names.append(WORKSPACE_REGISTRY_TABLE)
         return sorted(names, key=str.casefold)
 
     def remove_orphaned_dataset_row_tables(self) -> list[str]:
@@ -698,15 +726,19 @@ class Repository:
             raise ValueError('The selected table does not exist in the active workspace database.')
         page_size = max(1, min(int(limit), 250))
         page_offset = max(0, int(offset))
-        quoted_table = self._quote_identifier(table_name)
+        physical_table_name = self._physical_database_table_name(table_name)
+        quoted_table = self._quote_identifier(physical_table_name)
         with self._table_connection(table_name)() as conn:
-            column_rows = self._database_table_metadata(conn, table_name)
+            column_rows = self._database_table_metadata(conn, physical_table_name)
             where_clause, parameters = self._database_filter_clause(column_rows, filters)
             columns = [
                 {
                     'name': str(row['name']),
                     'type': str(row['type'] or ''),
-                    'primary_key': bool(row['pk']),
+                    # Workspace registry paths and identifiers are maintained
+                    # atomically by Workspace Management; Database Management
+                    # exposes the table for inspection only.
+                    'primary_key': bool(row['pk']) or table_name == WORKSPACE_REGISTRY_TABLE,
                     'not_null': bool(row['notnull']),
                 }
                 for row in column_rows
@@ -743,10 +775,11 @@ class Repository:
         """Return globally distinct values for an Excel-like server-side filter."""
         if table_name not in self.list_database_tables():
             raise ValueError('The selected table does not exist in the active workspace database.')
-        quoted_table = self._quote_identifier(table_name)
+        physical_table_name = self._physical_database_table_name(table_name)
+        quoted_table = self._quote_identifier(physical_table_name)
         result_limit = max(1, min(int(limit), 500))
         with self._table_connection(table_name)() as conn:
-            metadata = self._database_table_metadata(conn, table_name)
+            metadata = self._database_table_metadata(conn, physical_table_name)
             if column_name not in {str(row['name']) for row in metadata}:
                 raise ValueError('The selected filter column does not exist in the active workspace database.')
             where_clause, parameters = self._database_filter_clause(metadata, filters)
@@ -768,6 +801,8 @@ class Repository:
         """Persist safe, non-key cell edits made by an administrator."""
         if table_name not in self.list_database_tables():
             raise ValueError('The selected table does not exist in the active workspace database.')
+        if table_name == WORKSPACE_REGISTRY_TABLE:
+            raise ValueError('Use Workspace Management to change workspace registry records.')
         if not isinstance(updates, dict) or not updates:
             raise ValueError('Enter at least one changed value before saving.')
         quoted_table = self._quote_identifier(table_name)
@@ -793,6 +828,8 @@ class Repository:
         """Delete one row selected in Database Management by its SQLite rowid."""
         if table_name not in self.list_database_tables():
             raise ValueError('The selected table does not exist in the active workspace database.')
+        if table_name == WORKSPACE_REGISTRY_TABLE:
+            raise ValueError('Use Workspace Management to remove workspace registry records.')
         quoted_table = self._quote_identifier(table_name)
         with self._table_connection(table_name)() as conn:
             result = conn.execute(f"DELETE FROM {quoted_table} WHERE rowid = ?", (int(rowid),))
