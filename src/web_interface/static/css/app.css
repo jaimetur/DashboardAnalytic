@@ -180,6 +180,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .workspace-switcher-panel { background: linear-gradient(145deg, #10314a, #08736d) !important; color: white; }
 .workspace-switcher-panel .eyebrow, .workspace-switcher-panel .lede { color: rgba(255,255,255,0.8); }
 .workspace-switcher-panel .workspace-count-pill { background: linear-gradient(135deg, #e8f6ff, #c5e8fa); border-color: rgba(255,255,255,0.60); color: #0b4770; box-shadow: 0 8px 18px rgba(3, 47, 57, 0.20); }
+.workspace-status-pill { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600; line-height: 1.1; background: #e8edf3; color: #44515f; border: 1px solid #cbd5df; }
+.workspace-status-duplicating { background: #fff3d6; color: #8a5a00; border-color: #f0cf83; }
 .workspace-panel-meta { display: flex; align-items: center; justify-content: flex-end; gap: 0.65rem; flex-wrap: wrap; }
 .dataset-summary-panel { background: linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(237, 244, 249, 0.94)); }
 .dashboard-stack .module-hero-dashboard { background: linear-gradient(135deg, #0c4c8c, #68b8ff) !important; border-color: rgba(12, 76, 140, 0.68); color: #fff; }

@@ -3427,6 +3427,15 @@ def index(request: Request) -> HTMLResponse:
 @app.get('/login', response_class=HTMLResponse)
 def login_page(request: Request) -> HTMLResponse:
     workspaces = workspace_registry.list()
+    # Repair status for copies created by older versions: a copy whose on-disk
+    # footprint is still smaller than its source is necessarily in progress.
+    by_name = {item.name.casefold(): item for item in workspaces}
+    for item in workspaces:
+        if item.status == 'ready' and ' - copy' in item.name.casefold():
+            source_name = item.name.casefold().split(' - copy', 1)[0]
+            source = by_name.get(source_name)
+            if source and workspace_disk_usage(item) < workspace_disk_usage(source):
+                object.__setattr__(item, 'status', 'duplicating')
     selected_workspace_id = active_workspace.id if active_workspace else workspace_registry.most_recent().id
     return render_template(
         request, 'login.html',
@@ -3674,6 +3683,23 @@ def workspace_sizes_status(user: SessionUser = Depends(current_user)) -> JSONRes
         'active_workspace_name': active_workspace.name if active_workspace else 'None',
         'sizes': {item.id: format_workspace_size(workspace_disk_usage(item)) for item in visible},
     })
+
+
+@app.get('/api/workspaces/status')
+def workspace_status(user: SessionUser = Depends(current_user)) -> JSONResponse:
+    """Lightweight live data for the Workspace Management table."""
+    workspaces = workspace_registry.list()
+    access = workspace_access_map(user, workspaces)
+    # A copy changes continuously; do not serve its 15-second size snapshot
+    # to the five-second Workspace Management poller.
+    for item in workspaces:
+        if item.status == 'duplicating':
+            invalidate_workspace_size_cache(item.database_path.parent)
+    return JSONResponse({'workspaces': [
+        {'id': item.id, 'status': item.status, 'size': format_workspace_size(workspace_disk_usage(item))}
+        for item in workspaces
+        if access.get(item.id, False) or (user.role in {'admin', 'super-admin'} and item.status == 'duplicating')
+    ]}, headers={'Cache-Control': 'no-store'})
 
 
 def require_workspace_admin(user: SessionUser) -> None:

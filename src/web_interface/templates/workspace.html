@@ -54,6 +54,7 @@
               <tr>
                 <th>Workspace</th>
                 <th>Size</th>
+                <th>Status</th>
                 {% if user.role == 'super-admin' %}<th>Users with access</th>{% endif %}
                 <th>Actions</th>
               </tr>
@@ -68,6 +69,7 @@
                   <input form="workspace-save-{{ item.id }}" aria-label="Workspace name: {{ item.name }}" name="name" required maxlength="100" value="{{ item.name }}" data-workspace-name-input {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>
                 </td>
                 <td data-label="Size"><span class="workspace-size" data-workspace-size data-workspace-id="{{ item.id }}">{{ workspace_sizes.get(item.id, '0 MB') }}</span></td>
+                <td data-label="Status"><span class="workspace-status-pill workspace-status-{{ item.status }}" data-workspace-status data-workspace-id="{{ item.id }}">{{ 'Ready' if item.status == 'ready' else 'Duplicating' }}</span></td>
                 {% if user.role == 'super-admin' %}<td data-label="Users with access">
                   <div class="workspace-access-editor">
                     <details class="workspace-user-picker" data-workspace-user-picker>
@@ -364,6 +366,12 @@
   const result = document.querySelector('[data-workspace-result]');
   const message = result?.textContent.trim();
   if (!message || typeof showInfoDialog !== 'function') return;
+  if (message.startsWith('Workspace duplication started.')) {
+    const url = new URL(window.location.href);
+    ['workspace_notice', 'workspace_warning', 'workspace_error'].forEach((key) => url.searchParams.delete(key));
+    history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    return;
+  }
   const tone = result.dataset.workspaceResultTone || 'info';
   const title = tone === 'error' ? 'Workspace Error' : tone === 'warning' ? 'Workspace Warning' : message.startsWith('Created and opened ') ? 'Workspace Created' : message.startsWith('Opened ') ? 'Workspace Opened' : message === 'Workspace closed.' ? 'Workspace Closed' : 'Workspace Updated';
   const clearResultQuery = () => {
@@ -635,13 +643,36 @@
 </script>
 <script>
 (() => {
+  const management = document.querySelector('.workspace-management');
+  const savedOpen = localStorage.getItem('workspace-management-open');
+  if (management && savedOpen === '1') management.open = true;
+  management?.addEventListener('toggle', () => localStorage.setItem('workspace-management-open', management.open ? '1' : '0'));
+  document.querySelectorAll('form[action="/workspace/duplicate"]').forEach((form) => form.addEventListener('submit', () => {
+    localStorage.setItem('workspace-management-open', management?.open ? '1' : '0');
+  }));
+  if (sessionStorage.getItem('workspace-management-open') === '1') {
+    document.querySelector('.workspace-management')?.setAttribute('open', '');
+    sessionStorage.removeItem('workspace-management-open');
+  }
   const message = document.querySelector('[data-workspace-result]')?.textContent.trim() || '';
   const started = message.startsWith('Workspace duplication started.');
   if (started) {
     sessionStorage.setItem('workspace-duplication-pending', String(document.querySelectorAll('.workspace-library-row').length));
   }
   const pending = sessionStorage.getItem('workspace-duplication-pending');
-  if (pending === null) return;
+  const current = Object.fromEntries([...document.querySelectorAll('.workspace-library-row')].map((row) => [
+    row.querySelector('[data-workspace-name-input]')?.value || '',
+    row.querySelector('.workspace-status-ready') ? 'ready' : 'duplicating',
+  ]));
+  let previous = {};
+  try { previous = JSON.parse(localStorage.getItem('workspace-statuses') || '{}'); } catch (_) {}
+  localStorage.setItem('workspace-statuses', JSON.stringify(current));
+  const completed = Object.keys(current).some((name) => name.toLowerCase().includes(' - copy') && previous[name] === 'duplicating' && current[name] === 'ready');
+  if (pending !== null && completed) {
+    sessionStorage.removeItem('workspace-duplication-pending');
+    showInfoDialog('The workspace duplication has completed successfully.', {title: 'Duplication completed'});
+  }
+  return;
   const baseline = Number(pending);
   const timer = window.setInterval(async () => {
     try {
@@ -649,17 +680,72 @@
       if (!response.ok) return;
       const html = await response.text();
       const count = (html.match(/class="workspace-library-row/g) || []).length;
-      const sizes = [...html.matchAll(/data-workspace-size[^>]*>([0-9.]+) MB/g)].map((m) => Number(m[1]));
-      const sourceSize = Math.max(...[...document.querySelectorAll('[data-workspace-size]')].map((el) => Number.parseFloat(el.textContent) || 0));
-      const ready = count > baseline && sizes.some((size) => sourceSize === 0 ? size > 0 : size >= sourceSize * 0.95);
+      const parsed = new DOMParser().parseFromString(html, 'text/html');
+      const rows = [...parsed.querySelectorAll('.workspace-library-row')];
+      const entries = rows.map((row) => ({
+        name: row.querySelector('[data-workspace-name-input]')?.value || '',
+        size: Number.parseFloat(row.querySelector('[data-workspace-size]')?.textContent || '') || 0,
+      }));
+      const ready = rows.some((row) => {
+        const entry = entries[rows.indexOf(row)];
+        if (!entry.name.toLowerCase().includes(' - copy')) return false;
+        if (!row.querySelector('.workspace-status-ready')) return false;
+        const source = entries.find((candidate) => candidate.name.toLowerCase() === entry.name.toLowerCase().split(' - copy', 1)[0]);
+        return Boolean(source);
+      });
       if (ready) {
         window.clearInterval(timer);
         sessionStorage.removeItem('workspace-duplication-pending');
-        showInfoDialog('El workspace duplicado se ha creado correctamente.', {title: 'Duplicación completada'});
+        sessionStorage.setItem('workspace-management-open', '1');
+        window.location.reload();
       }
     } catch (_error) { /* keep polling while the copy runs */ }
   }, 3000);
   window.setTimeout(() => { window.clearInterval(timer); }, 10 * 60 * 1000);
+})();
+</script>
+<script>
+(() => {
+  const refreshTable = async () => {
+    const before = new Map([...document.querySelectorAll('[data-workspace-status]')].map((node) => [node.dataset.workspaceId, node.textContent.trim()]));
+    try {
+      const response = await fetch('/api/workspaces/status', {credentials: 'same-origin', cache: 'no-store'});
+      if (!response.ok) return;
+      const payload = await response.json();
+      let completed = false;
+      payload.workspaces.forEach((workspace) => {
+        const size = document.querySelector(`[data-workspace-size][data-workspace-id="${workspace.id}"]`);
+        const status = document.querySelector(`[data-workspace-status][data-workspace-id="${workspace.id}"]`);
+        if (size) size.textContent = workspace.size;
+        if (!status) return;
+        const label = workspace.status === 'ready' ? 'Ready' : 'Duplicating';
+        completed ||= before.get(workspace.id) === 'Duplicating' && label === 'Ready';
+        status.textContent = label;
+        status.classList.toggle('workspace-status-ready', label === 'Ready');
+        status.classList.toggle('workspace-status-duplicating', label === 'Duplicating');
+      });
+      if (completed) {
+        const page = await fetch('/workspace', {credentials: 'same-origin', cache: 'no-store'});
+        if (page.ok) {
+          const document = new DOMParser().parseFromString(await page.text(), 'text/html');
+          const replacement = document.querySelector('.workspace-library-table');
+          const table = window.document.querySelector('.workspace-library-table');
+          if (table && replacement) table.replaceWith(replacement);
+        }
+        showInfoDialog('The workspace duplication has completed successfully.', {title: 'Duplication completed'});
+      }
+    } catch (_) { /* keep the next interval tick alive */ }
+  };
+  if (document.querySelector('.workspace-status-duplicating')) {
+    refreshTable();
+    const timer = window.setInterval(() => {
+      if (!document.querySelector('.workspace-status-duplicating')) {
+        window.clearInterval(timer);
+        return;
+      }
+      refreshTable();
+    }, 5000);
+  }
 })();
 </script>
 {% endblock %}

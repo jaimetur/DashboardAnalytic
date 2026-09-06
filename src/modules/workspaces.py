@@ -18,6 +18,7 @@ class Workspace:
     slides_templates_dir: Path
     created_at: str
     last_opened_at: str
+    status: str = 'ready'
 
 
 class WorkspaceRegistry:
@@ -59,6 +60,7 @@ class WorkspaceRegistry:
                 )
                 """
             )
+            if 'status' not in {row['name'] for row in conn.execute('PRAGMA table_info(workspaces)')}: conn.execute("ALTER TABLE workspaces ADD COLUMN status TEXT NOT NULL DEFAULT 'ready'")
             conn.execute("CREATE TABLE IF NOT EXISTS workspace_state (key TEXT PRIMARY KEY, value TEXT)")
             if not conn.execute("SELECT 1 FROM workspaces LIMIT 1").fetchone():
                 now = self._now()
@@ -243,7 +245,12 @@ class WorkspaceRegistry:
             input_dir=Path(row['input_dir']), output_dir=Path(row['output_dir']),
             export_dir=Path(row['export_dir']), slides_templates_dir=Path(row['slides_templates_dir']),
             created_at=str(row['created_at']), last_opened_at=str(row['last_opened_at']),
+            status=str(row['status']) if 'status' in row.keys() else 'ready',
         )
+
+    def set_status(self, workspace_id: str, status: str) -> None:
+        with self._connection() as conn:
+            conn.execute('UPDATE workspaces SET status = ? WHERE id = ?', (status, workspace_id))
 
     def list(self) -> list[Workspace]:
         with self._connection() as conn:
@@ -303,6 +310,7 @@ class WorkspaceRegistry:
             copy_number += 1
 
         duplicate = self.create(duplicate_name)
+        self.set_status(duplicate.id, 'duplicating')
         target_root = duplicate.database_path.parent
         try:
             # ``create`` has prepared the target root. Replace it with an
@@ -332,6 +340,7 @@ class WorkspaceRegistry:
         # actual last-opened workspace in Login's default selection.
         with self._connection() as conn:
             conn.execute("UPDATE workspaces SET last_opened_at = '' WHERE id = ?", (duplicate.id,))
+        self.set_status(duplicate.id, 'ready')
         return self.get(duplicate.id)  # type: ignore[return-value]
 
     def rename(self, workspace_id: str, name: str) -> Workspace:
