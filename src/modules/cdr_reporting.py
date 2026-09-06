@@ -537,19 +537,28 @@ def _report_vendor_operator(value: object) -> str:
     return _normalise_report_operator(operator or text)
 
 
+def _normalise_report_vendor(value: object) -> str:
+    """Canonicalise only the operator prefix of a materialised vendor label."""
+    text = str(value or "").strip()
+    operator, separator, vendor = text.partition("_")
+    normalized_operator = _normalise_report_operator(operator or text)
+    return f"{normalized_operator}_{vendor}" if separator else normalized_operator
+
+
 def normalise_report_operator_aliases(frame: pd.DataFrame) -> pd.DataFrame:
     """Canonicalise report-only operator labels without mutating stored CDRs.
 
     The normalisation applies to the physical ``Operator`` field used by
-    template filters and to legacy operator-only values in ``report_vendor``.
-    Mapped values such as ``Vodafone_Ericsson`` are intentionally left intact.
+    template filters and to the operator prefix of materialised
+    ``report_vendor`` labels. Vendor suffixes remain intact, so for example
+    ``Vodafone_Ericsson`` becomes ``VF_Ericsson``.
     """
     result = frame.copy()
     for column in result.columns:
         if _normalise_catalog_name(str(column)) == "operator":
             result[column] = result[column].map(_normalise_report_operator)
     if "report_vendor" in result.columns:
-        result["report_vendor"] = result["report_vendor"].map(_normalise_report_operator)
+        result["report_vendor"] = result["report_vendor"].map(_normalise_report_vendor)
     return result
 
 

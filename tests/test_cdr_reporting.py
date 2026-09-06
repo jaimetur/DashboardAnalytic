@@ -75,6 +75,14 @@ def test_h3g_is_not_normalised_as_operator_three() -> None:
     assert normalise_report_operator_aliases(frame)["Operator"].tolist() == ["H3G", "H3G UK", "3"]
 
 
+def test_report_vendor_aliases_normalise_only_the_operator_prefix() -> None:
+    frame = pd.DataFrame({"report_vendor": ["Vodafone_Ericsson", "Three UK_Nokia", "O2 (UK)_Huawei", "EE_Ericsson", "H3G_Huawei"]})
+
+    assert normalise_report_operator_aliases(frame)["report_vendor"].tolist() == [
+        "VF_Ericsson", "3_Nokia", "O2_Huawei", "EE_Ericsson", "H3G_Huawei",
+    ]
+
+
 def test_reporting_cache_resolves_separator_variants_and_refreshes_derived_dimensions(tmp_path) -> None:
     repository = Repository(tmp_path / 'workspace.db')
     repository.replace_dataset_rows(1, pd.DataFrame({
