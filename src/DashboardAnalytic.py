@@ -3832,6 +3832,19 @@ def duplicate_workspace(workspace_id: str = Form(...), user: SessionUser = Depen
     return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": f"Created {workspace.name}."})}', status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.get('/workspace/duplicate')
+def duplicate_workspace_get(user: SessionUser = Depends(current_user)) -> Response:
+    """Keep direct/proxy GET requests from surfacing a misleading 404 page.
+
+    Duplication is intentionally a POST-only state-changing operation; a direct
+    navigation should return the user to Workspace with an actionable message.
+    """
+    return RedirectResponse(
+        '/workspace?workspace_warning=Use+the+Duplicate+workspace+button+to+submit+the+duplication+request.',
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @app.post('/workspace/delete')
 def delete_workspace(
     workspace_id: str = Form(...),
@@ -3839,7 +3852,13 @@ def delete_workspace(
     user: SessionUser = Depends(current_user),
 ) -> Response:
     require_workspace_admin(user)
-    require_workspace_access(user, workspace_id)
+    # Allow administrators to clean up orphaned registry entries whose database
+    # was removed or became inaccessible; valid workspaces still require access.
+    registered_workspace = workspace_registry.get(workspace_id)
+    if registered_workspace is None:
+        return RedirectResponse('/workspace?workspace_error=Workspace+not+found.', status_code=status.HTTP_303_SEE_OTHER)
+    if registered_workspace.database_path.exists():
+        require_workspace_access(user, workspace_id)
     if active_workspace and active_workspace.id == workspace_id:
         return RedirectResponse('/workspace?workspace_warning=Close+the+workspace+before+removing+it.', status_code=status.HTTP_303_SEE_OTHER)
     try:
