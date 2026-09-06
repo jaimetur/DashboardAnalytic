@@ -643,7 +643,7 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .report-chart-card:focus-visible { outline: 3px solid rgba(111, 72, 166, 0.45); outline-offset: 3px; }
 .report-chart-viewer-overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 0.35rem; background: rgba(31, 19, 52, 0.56); z-index: 110; }
 .report-chart-viewer-overlay[hidden] { display: none !important; }
-.report-chart-viewer-dialog { position: relative; width: min(calc(100vw - 1rem), 1840px); height: min(calc(100vh - 0.7rem), 1100px); max-width: none; max-height: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 390px); grid-template-rows: auto minmax(0, 1fr) auto; gap: 1rem; padding: 1.25rem 1.4rem; }
+.report-chart-viewer-dialog { position: relative; width: min(calc(100vw - 1rem), 1840px); height: min(calc(100dvh - 0.7rem), 1200px); max-width: none; max-height: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 390px); grid-template-rows: auto minmax(0, 1fr) auto; gap: 1rem; padding: 1.25rem 1.4rem; }
 .report-chart-viewer-header, .report-chart-viewer-actions { grid-column: 1 / -1; }
 .report-chart-viewer-image { grid-column: 1; grid-row: 2; }
 .report-chart-viewer-header { display: flex; justify-content: space-between; align-items: start; gap: 1rem; }
@@ -1259,7 +1259,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .confirm-overlay[hidden] { display: none !important; }
 .confirm-panel { width: min(92vw, 480px); padding: 1.65rem; border-radius: 28px; background: linear-gradient(180deg, rgba(255, 251, 248, 0.98), rgba(250, 243, 240, 0.96)); box-shadow: 0 40px 90px rgba(18, 32, 43, 0.26); border: 1px solid rgba(255,255,255,0.68); text-align: left; }
 .confirm-overlay.report-chart-viewer-overlay { padding: 0.35rem; background: rgba(31, 19, 52, 0.56); }
-.confirm-panel.report-chart-viewer-dialog { width: min(calc(100vw - 1rem), 1840px) !important; height: min(calc(100vh - 0.7rem), 1100px) !important; max-width: none !important; max-height: none !important; }
+.confirm-panel.report-chart-viewer-dialog { width: min(calc(100vw - 1rem), 1840px) !important; height: min(calc(100dvh - 0.7rem), 1200px) !important; max-width: none !important; max-height: none !important; }
 .confirm-icon { display: inline-grid; place-items: center; width: 54px; height: 54px; margin-bottom: 0.9rem; border-radius: 18px; background: linear-gradient(135deg, rgba(200, 74, 74, 0.16), rgba(224, 106, 90, 0.24)); color: #bb3c3c; font-family: "Space Grotesk", "Segoe UI", sans-serif; font-size: 1.6rem; font-weight: 700; box-shadow: inset 0 1px 0 rgba(255,255,255,0.65); }
 .info-icon { background: linear-gradient(135deg, rgba(16, 49, 74, 0.16), rgba(8, 115, 109, 0.24)); color: #08736d; }
 .info-overlay[data-tone="warning"] .info-icon { background: linear-gradient(135deg, rgba(202, 133, 18, 0.18), rgba(238, 181, 65, 0.28)); color: #9b6104; }

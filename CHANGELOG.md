@@ -54,6 +54,7 @@
 - Made Vendor Comparison resolve template `Operator` filters from the base prefix of materialised `Operator_Vendor` values, promote Operator legends to the full Vendor values, preserve full vendor identities in row and column aggregations, and retain native vendor exclusions such as Mixed and Other.
 - Normalised Vendor Comparison display labels by applying the standard report aliases to the operator prefix of `Operator_Vendor` values, such as `VF_Ericsson`, `3_Nokia` and `O2_Huawei`.
 - Matched Vendor Comparison legend markers to the exact vendor-family colours used by their rendered bars instead of assigning a separate operator-based legend palette.
+- Increased the desktop Chart Preview dialog height cap and used the dynamic viewport height so it makes slightly better use of available vertical space without changing the compact-phone layout.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
