@@ -3997,6 +3997,10 @@ if (appLogsPanel) {
         && (!actionFilter || actionFilter.value === 'all' || row.dataset.appLogAction === actionFilter.value)
       );
       row.hidden = !matches;
+      // Card-table rules use grid display on compact phones. Keep an explicit
+      // inline display state too, so a filtered-out App Log can never remain
+      // visible because of a card presentation rule.
+      row.style.display = matches ? '' : 'none';
       if (matches) visibleCount += 1;
     });
     if (noResults) noResults.hidden = visibleCount > 0 || rows.length === 0;

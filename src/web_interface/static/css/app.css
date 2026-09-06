@@ -1523,9 +1523,13 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
   .catalogue-chart-preview-sandbox { grid-column: 1; grid-row: 5; max-height: none; }
   .workspace-switcher-actions, .workspace-select-form, .workspace-management,
   .workspace-management-forms, .workspace-management-forms form { width: 100%; min-width: 0; align-items: stretch; }
-  .workspace-management { flex: 0 0 auto; align-self: stretch; }
-  .workspace-management[open] { display: block; box-sizing: border-box; width: 100%; max-width: 100%; padding: 0.55rem; overflow: visible; }
-  .workspace-management-forms form { padding-right: 0; border-right: 0; }
+  .workspace-management { display: block; flex: 0 0 auto; width: 100%; align-self: stretch; position: relative; z-index: 2; }
+  .workspace-management > summary { display: block; box-sizing: border-box; width: 100%; }
+  .workspace-management[open] { display: grid !important; box-sizing: border-box; width: 100%; max-width: 100%; grid-template-columns: minmax(0, 1fr); gap: 0.7rem; padding: 0.55rem; overflow: visible; }
+  .workspace-management[open] > summary, .workspace-management[open] > .workspace-management-forms,
+  .workspace-management[open] > .workspace-library { display: block; width: 100%; min-width: 0; }
+  .workspace-management-forms { margin-top: 0; }
+  .workspace-management-forms form { display: flex; padding-right: 0; border-right: 0; }
   .workspace-management-forms input, .workspace-management-forms .workspace-user-picker { width: 100%; min-width: 0; }
   .workspace-library { width: 100%; max-width: 100%; overflow: visible; border: 0; }
   .confirm-panel.report-template-editor-dialog { width: calc(100vw - 0.7rem) !important; height: calc(100dvh - 0.7rem) !important; padding: 0.4rem; gap: 0.35rem; }
@@ -1593,6 +1597,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
     display: grid; grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr)); overflow: visible;
     border: 1px solid rgba(16, 49, 74, 0.16); border-radius: 11px; background: #fff;
   }
+  .app-logs-table tbody tr[hidden] { display: none !important; }
   .workspace-library-table .workspace-library-row td { background: #fff; color: #10314a; }
   .workspace-library-table .workspace-library-row.active-workspace-row td { background: #e7f5f3; color: #0a534f; }
   .workspace-library-table .workspace-library-row.workspace-no-access-row td { background: #eef1f3; color: #687984; }
