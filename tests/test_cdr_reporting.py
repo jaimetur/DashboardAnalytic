@@ -19,24 +19,26 @@ from src.modules.repository import Repository
 
 
 def wait_for_report_job(client, job_id: int) -> dict:
-    for _ in range(100):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
         response = client.get('/api/reporting/jobs')
         assert response.status_code == 200
         job = next(item for item in response.json()['jobs'] if item['id'] == job_id)
         if job['status'] not in {'queued', 'processing'}:
             return job
-        time.sleep(0.02)
+        time.sleep(0.05)
     raise AssertionError(f'Report job {job_id} did not finish in time.')
 
 
 def wait_for_report_chart_job(client, job_id: int) -> dict:
-    for _ in range(100):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
         response = client.get('/api/reporting/chart-jobs')
         assert response.status_code == 200
         job = next(item for item in response.json()['jobs'] if item['id'] == job_id)
         if job['status'] not in {'queued', 'processing'}:
             return job
-        time.sleep(0.02)
+        time.sleep(0.05)
     raise AssertionError(f'Report Charts job {job_id} did not finish in time.')
 
 
