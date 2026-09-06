@@ -522,7 +522,7 @@ def test_multivendor_rendering_rewrites_display_and_grouping_and_excludes_unreso
     assert rendered.slide_title == 'Vendor comparison'
     assert rendered.slide_subtitle == 'Vendor subtitle'
     assert rendered.chart_title == 'Vendor chart'
-    assert rendered.legend == 'Operator'
+    assert rendered.legend == 'Vendor'
     assert rendered.grouping_rows == 'Vendor'
     assert rendered.grouping_columns == 'Vendor × Campaign'
     assert rendered.filters == 'Operator = Vodafone UK; vendor NOT CONTAINS (Mixed, Other)'
@@ -565,7 +565,9 @@ def test_multivendor_operator_filters_match_vendor_prefixes_and_keep_full_groupi
         'Vodafone_Ericsson · 2025-Q4', 'Vodafone_Huawei · 2026-Q1',
         '3_Nokia · 2025-Q4', 'O2_Ericsson · 2026-Q1',
     ]
-    assert [caption for caption, _colour, _width in _resolved_legend_items(rendered, grouped, 'LQ')] == ['VF', '3', 'O2']
+    assert [caption for caption, _colour, _width in _resolved_legend_items(rendered, grouped, 'LQ')] == [
+        'Vodafone_Ericsson', 'Vodafone_Huawei', '3_Nokia', 'O2_Ericsson',
+    ]
 
 
 def test_rows_only_grouping_uses_one_all_series_without_repeating_the_category() -> None:

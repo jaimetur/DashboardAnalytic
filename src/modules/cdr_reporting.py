@@ -874,10 +874,10 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
         slide_title=_replace_operator_label(entry.slide_title, "Vendor"),
         slide_subtitle=_replace_operator_label(entry.slide_subtitle, "Vendor"),
         chart_title=_replace_operator_label(entry.chart_title, "Vendor"),
-        # The requested legend remains authoritative: an Operator legend on a
-        # Vendor Comparison is rendered from the base operator prefix, while a
-        # Vendor legend deliberately shows the full Operator_Vendor values.
-        legend=entry.legend,
+        # Vendor Comparison legends identify the concrete materialised vendor
+        # group.  Thus an Operator legend from the reusable template becomes a
+        # Vendor legend and displays values such as Vodafone_Ericsson.
+        legend=_replace_operator_label(entry.legend, "Vendor"),
         grouping_rows=vendor_grouping(entry.grouping_rows),
         grouping_columns=vendor_grouping(entry.grouping_columns),
         filters=filters,
@@ -1534,8 +1534,6 @@ def _legend_key_caption(
         declared_normalized = {_normalise_catalog_name(str(name)) for name in declared_names}
         if declared_normalized & requested:
             selected_parts.append(str(key[index]))
-        elif "operator" in requested and "vendor" in declared_normalized:
-            selected_parts.append(_report_vendor_operator(key[index]))
     parts = selected_parts or [str(value) for value in key if str(value) != "(all)"]
     return " · ".join(parts) or "(all)"
 
@@ -1580,11 +1578,7 @@ def _resolved_legend_items(
         _normalise_catalog_name(value)
         for value in (*row_dimensions, *column_dimensions, *kpi_dimensions)
     }
-    chart_fields = [
-        value for value in requested
-        if _normalise_catalog_name(value) in chart_names
-        or (_normalise_catalog_name(value) == "operator" and "vendor" in chart_names)
-    ]
+    chart_fields = [value for value in requested if _normalise_catalog_name(value) in chart_names]
 
     is_distribution = entry.chart_type.strip().casefold() == "distribution stacked vertical bars"
     bucket_names = {"bucket", "buckets", "ratebucket", "valuebucket"}
@@ -1598,11 +1592,7 @@ def _resolved_legend_items(
         normalized = _normalise_catalog_name(field)
         column = next((
             candidate for candidate, declared in labels.items()
-            if any(
-                _normalise_catalog_name(str(name)) == normalized
-                or (normalized == "operator" and _normalise_catalog_name(str(name)) == "vendor")
-                for name in (declared if isinstance(declared, tuple) else (declared,))
-            )
+            if any(_normalise_catalog_name(str(name)) == normalized for name in (declared if isinstance(declared, tuple) else (declared,)))
         ), None)
         if column is None and metric and _normalise_catalog_name(metric) == normalized:
             column = metric
@@ -1657,15 +1647,8 @@ def _resolved_legend_items(
             "dropped": "#F28E2B",
             "failed": "#E15759",
         }
-        seen_captions: set[str] = set()
         for index, values_tuple in enumerate(values.itertuples(index=False, name=None)):
-            caption = " · ".join(
-                _report_vendor_operator(value) if _normalise_catalog_name(field) == "operator" else str(value)
-                for field, value in zip(chart_fields, values_tuple, strict=True)
-            )
-            if caption in seen_captions:
-                continue
-            seen_captions.add(caption)
+            caption = " · ".join(str(value) for value in values_tuple)
             colour = semantic_colours.get(caption.casefold()) or _operator_colour(caption) or _colour(caption, index)
             items.append((caption, colour, 2))
 
@@ -1673,7 +1656,6 @@ def _resolved_legend_items(
         _normalise_catalog_name(value)
         for value in requested
         if _normalise_catalog_name(value) not in chart_names
-        and not (_normalise_catalog_name(value) == "operator" and "vendor" in chart_names)
         and not (bucket_legend_requested and _normalise_catalog_name(value) in bucket_names)
     }
     for condition in parse_catalog_filters(entry.filters):
