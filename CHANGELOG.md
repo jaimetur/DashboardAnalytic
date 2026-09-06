@@ -73,6 +73,8 @@
 - Prevented dataset renames from rendering and downloading the complete Admin page after updating the file and materialised references, returning only the renamed dataset metadata to avoid intermittent gateway timeouts.
 - Restored the two most recently uploaded processed CDRs of each Data, Voice and Speech type when switching from Vendor Comparison to Operator Comparison if that type had fewer than two selections, while preserving existing selections of two or more.
 
+- Converted simple Users, Slides Templates, Reports and Charts Jobs, Workspace, recovered-transfer and App Logs tables into responsive mobile cards that place multiple short fields on each row when space permits, keep long fields full-width, and stack every value beneath its column label.
+
 #### 📚 Documentation:
 - Reorganised and rewrote the complete documentation for the current product: kept README as a concise introduction, module summary and deployment guide; added numbered Product Overview, Technical Considerations and dedicated Chart Builder articles; renamed the Data Ingestion guide to Workspace Management with a dedicated Data Ingestion section; renumbered the focused Help guides; and replaced long prose with structured workflows, bullets, examples, validation checklists and troubleshooting guidance.
 - Added the dedicated Chart Builder guide immediately after E2E Reporting in Help, with examples for CDR Type, multi-dataset selection, Interactive Preview, ordered aggregations and Filter Builder troubleshooting.
