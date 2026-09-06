@@ -3857,8 +3857,7 @@ def delete_workspace(
     registered_workspace = workspace_registry.get(workspace_id)
     if registered_workspace is None:
         return RedirectResponse('/workspace?workspace_error=Workspace+not+found.', status_code=status.HTTP_303_SEE_OTHER)
-    if registered_workspace.database_path.exists():
-        require_workspace_access(user, workspace_id)
+    require_workspace_access(user, workspace_id)
     if active_workspace and active_workspace.id == workspace_id:
         return RedirectResponse('/workspace?workspace_warning=Close+the+workspace+before+removing+it.', status_code=status.HTTP_303_SEE_OTHER)
     try:

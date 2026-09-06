@@ -59,7 +59,7 @@
 - Made workspace duplication preserve the source workspace's access membership, and deferred reporting-row synchronization until a report actually needs it so copied workspaces open promptly instead of rebuilding their complete CDR cache.
 - Exposed the persistent Workspace registry in Database Management under Config Tables as a safe read-only view, while retaining Workspace Management as the sole editor for workspace paths and identities.
 - Added an explicit redirect for direct GET requests to the POST-only workspace duplication endpoint, preventing deployed proxies from showing a misleading “page not found” response.
-- Allowed administrators to remove orphaned Workspace registry entries when their database file is missing, while preserving access checks for valid workspaces.
+- Allowed workspace administrators to remove incomplete duplicate-workspace registrations when a long-running copy is interrupted before access membership is persisted.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
