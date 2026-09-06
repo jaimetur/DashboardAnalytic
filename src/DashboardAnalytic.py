@@ -7260,8 +7260,12 @@ def export_report_catalogue(technology: str, user: SessionUser = Depends(admin_u
     technology = technology.strip().lower()
     if technology not in TEMPLATE_NAMES:
         raise HTTPException(status_code=404, detail='Report technology not found')
-    entries = reporting_catalog_entries(technology)
     active = next((item for item in report_catalogue_options(technology) if item['active']), None)
+    if not active:
+        raise HTTPException(status_code=404, detail='Slides Template not found')
+    # Export is a file retrieval operation. Keep legacy/manual filter captions
+    # intact even when they cannot be executed as current Filter Builder rules.
+    entries = load_catalog_csv(active['path'], technology, validate_filters=False)
     filename = template_download_filename(active['name']) if active else f'{technology.upper()} Slide Template.csv'
     return Response(
         content=catalogue_csv(entries),
@@ -7285,7 +7289,7 @@ def export_selected_report_catalogue(
     if not catalogue:
         raise HTTPException(status_code=404, detail='Slides Template not found')
     return Response(
-        content=catalogue_csv(load_catalog_csv(catalogue['path'], technology)),
+        content=catalogue_csv(load_catalog_csv(catalogue['path'], technology, validate_filters=False)),
         media_type='text/csv; charset=utf-8',
         headers={'Content-Disposition': f'attachment; filename="{template_download_filename(catalogue["name"])}"'},
     )
@@ -7299,7 +7303,7 @@ def export_named_report_catalogue(technology: str, catalogue_id: str, user: Sess
     catalogue = next((item for item in report_catalogue_options(technology) if item['identifier'] == catalogue_id), None)
     if not catalogue:
         raise HTTPException(status_code=404, detail='Slides Template not found')
-    entries = load_catalog_csv(catalogue['path'], technology)
+    entries = load_catalog_csv(catalogue['path'], technology, validate_filters=False)
     filename = template_download_filename(catalogue['name'])
     return Response(
         content=catalogue_csv(entries),

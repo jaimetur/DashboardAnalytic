@@ -72,6 +72,7 @@
 - Prevented dataset renames from rendering and downloading the complete Admin page after updating the file and materialised references, returning only the renamed dataset metadata to avoid intermittent gateway timeouts.
 - Restored the two most recently uploaded processed CDRs of each Data, Voice and Speech type when switching from Vendor Comparison to Operator Comparison if that type had fewer than two selections, while preserving existing selections of two or more.
 - Prevented normal admins from focusing or editing super-admin role controls by rendering the protected role as static text.
+- Fixed Slides Template CSV exports so legacy manual filter/caption text does not incorrectly block downloading a template.
 
 #### 📚 Documentation:
 - Reorganised and rewrote the complete documentation for the current product: kept README as a concise introduction, module summary and deployment guide; added numbered Product Overview, Technical Considerations and dedicated Chart Builder articles; renamed the Data Ingestion guide to Workspace Management with a dedicated Data Ingestion section; renumbered the focused Help guides; and replaced long prose with structured workflows, bullets, examples, validation checklists and troubleshooting guidance.
