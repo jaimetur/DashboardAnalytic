@@ -3969,7 +3969,7 @@ if (appLogsPanel) {
     const savedFilters = JSON.parse(window.localStorage.getItem(appLogFiltersStorageKey) || '{}');
     restoreSelectValue(userFilter, savedFilters.user);
     restoreSelectValue(executorFilter, savedFilters.executor);
-    if (dateFilter && /^\d{4}-\d{2}-\d{2}$/.test(savedFilters.date || '')) dateFilter.value = savedFilters.date;
+    restoreSelectValue(dateFilter, savedFilters.date);
     restoreSelectValue(typeFilter, savedFilters.type);
     restoreSelectValue(actionFilter, savedFilters.action);
   } catch (_error) {
@@ -3978,7 +3978,7 @@ if (appLogsPanel) {
   const persistAppLogFilters = () => {
     try {
       window.localStorage.setItem(appLogFiltersStorageKey, JSON.stringify({
-        user: userFilter?.value || 'all', date: dateFilter?.value || '',
+        user: userFilter?.value || 'all', date: dateFilter?.value || 'all',
         executor: executorFilter?.value || 'all',
         type: typeFilter?.value || 'all', action: actionFilter?.value || 'all',
       }));
@@ -3992,7 +3992,7 @@ if (appLogsPanel) {
       const matches = (
         (!userFilter || userFilter.value === 'all' || String(row.dataset.appLogUser || '').toLocaleLowerCase() === String(userFilter.value || '').toLocaleLowerCase())
         && (!executorFilter || executorFilter.value === 'all' || String(row.dataset.appLogExecutor || '').toLocaleLowerCase() === String(executorFilter.value || '').toLocaleLowerCase())
-        && (!dateFilter || !dateFilter.value || row.dataset.appLogDate === dateFilter.value)
+        && (!dateFilter || dateFilter.value === 'all' || row.dataset.appLogDate === dateFilter.value)
         && (!typeFilter || typeFilter.value === 'all' || row.dataset.appLogType === typeFilter.value)
         && (!actionFilter || actionFilter.value === 'all' || row.dataset.appLogAction === actionFilter.value)
       );
@@ -4008,10 +4008,10 @@ if (appLogsPanel) {
     // filter pass so the first matching log is immediately visible.
     body?.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {bubbles: true, detail: {reset: true}}));
   };
-  const replaceSelectOptions = (control, values, allLabel) => {
+  const replaceSelectOptions = (control, values, allLabel, optionLabel = (value) => value) => {
     if (!control) return;
     const selected = control.value || 'all';
-    control.replaceChildren(new Option(allLabel, 'all'), ...values.map((value) => new Option(value, value)));
+    control.replaceChildren(new Option(allLabel, 'all'), ...values.map((value) => new Option(optionLabel(value), value)));
     control.value = Array.from(control.options).some((option) => option.value === selected) ? selected : 'all';
   };
   const createAppLogRow = (log) => {
@@ -4051,6 +4051,8 @@ if (appLogsPanel) {
       body.replaceChildren(...rows, ...(noResults ? [noResults] : []));
       replaceSelectOptions(userFilter, [...new Set(logs.map((log) => String(log.username || '').toLocaleLowerCase()).filter(Boolean))].sort(), 'All users');
       replaceSelectOptions(executorFilter, [...new Set(logs.map((log) => String(log.executed_by || '—').toLocaleLowerCase()).filter(Boolean))].sort(), 'All executors');
+      replaceSelectOptions(dateFilter, [...new Set(logs.map((log) => String(log.date || '')).filter(Boolean))].sort().reverse(), 'All dates');
+      replaceSelectOptions(typeFilter, [...new Set(logs.map((log) => String(log.log_type || '')).filter(Boolean))].sort(), 'All events', (value) => `${value} only`);
       replaceSelectOptions(actionFilter, [...new Set(logs.map((log) => String(log.action || '')).filter(Boolean))].sort(), 'All actions');
       if (count) count.textContent = `${logs.length} entries`;
       syncAppLogRows();
@@ -4068,7 +4070,7 @@ if (appLogsPanel) {
   clearFilters?.addEventListener('click', () => {
     if (userFilter) userFilter.value = 'all';
     if (executorFilter) executorFilter.value = 'all';
-    if (dateFilter) dateFilter.value = '';
+    if (dateFilter) dateFilter.value = 'all';
     if (typeFilter) typeFilter.value = 'all';
     if (actionFilter) actionFilter.value = 'all';
     try { window.localStorage.removeItem(appLogFiltersStorageKey); } catch (_error) { /* Ignore unavailable browser storage. */ }

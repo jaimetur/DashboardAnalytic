@@ -26,7 +26,10 @@
     {% if active_workspace %}
     <div class="app-logs-filters" aria-label="App Log filters">
       <label>Date
-        <input type="date" data-app-log-date-filter>
+        <select data-app-log-date-filter>
+          <option value="all">All dates</option>
+          {% for date in log_dates %}<option value="{{ date }}">{{ date }}</option>{% endfor %}
+        </select>
       </label>
       <label>User
         <select data-app-log-user-filter>
@@ -43,8 +46,7 @@
       <label>Type
         <select data-app-log-type-filter>
           <option value="all">All events</option>
-          <option value="Info">Info only</option>
-          <option value="Error">Error only</option>
+          {% for log_type in log_types %}<option value="{{ log_type }}">{{ log_type }} only</option>{% endfor %}
         </select>
       </label>
       <label>Action

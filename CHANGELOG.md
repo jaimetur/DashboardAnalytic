@@ -78,6 +78,7 @@
 - Fixed application startup failures caused by SQLite `database is locked` errors when an existing worker held a database while another process attempted to reset its journal mode.
 - Prevented startup from scanning, migrating and checkpointing every workspace database; only the active workspace is now recovered at launch, while other workspaces are handled when opened.
 - Fixed the compact-phone Manage Workspaces disclosure by moving it out of the parent action layout, retaining the native open `details` layout required by Mobile Safari and rendering its workspace table as readable cards.
+- Made every App Logs filter derive its selectable values, including dates and event types, from the rows currently shown in the table and refresh those options together with the live log data.
 
 #### 📚 Documentation:
 - Reorganised and rewrote the complete documentation for the current product: kept README as a concise introduction, module summary and deployment guide; added numbered Product Overview, Technical Considerations and dedicated Chart Builder articles; renamed the Data Ingestion guide to Workspace Management with a dedicated Data Ingestion section; renumbered the focused Help guides; and replaced long prose with structured workflows, bullets, examples, validation checklists and troubleshooting guidance.
