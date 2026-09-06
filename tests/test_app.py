@@ -958,7 +958,7 @@ def test_reupload_preserves_original_upload_date_for_dataset_ordering(client) ->
 
     workspace = client.get('/workspace')
     assert workspace.text.index('<th>ID</th>') < workspace.text.index('<th>Dataset</th>')
-    assert '<td data-queue-id>1</td>' in workspace.text
+    assert 'data-queue-id>1</td>' in workspace.text
     assert '<th>Uploaded</th>' in workspace.text
     assert '<th>Updated</th>' in workspace.text
     assert workspace.text.index('<th>Uploaded</th>') < workspace.text.index('<th>Updated</th>')
@@ -992,7 +992,7 @@ def test_workspace_management_save_updates_name_and_user_access(client) -> None:
     assert '<th>Workspace</th>' in workspace_page.text
     assert '<th>Size</th>' in workspace_page.text
     assert 'Save access' not in workspace_page.text
-    assert 'class="workspace-action-save"' in workspace_page.text
+    assert 'class="workspace-action-save icon-action"' in workspace_page.text
     users_page = client.get('/admin')
     demo_row = users_page.text.split(f'aria-label="Filter workspaces for {demo["username"]}"', 1)[1].split('</details>', 1)[0]
     assert f'value="{germany.id}"' in demo_row
@@ -1518,7 +1518,7 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     assert workspace_response.status_code == 200
     assert 'data-queue-type-filter' in workspace_response.text
     assert 'value="">All Types' in workspace_response.text
-    assert 'href="/workspace/preview/1" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview</a>' in workspace_response.text
+    assert 'href="/workspace/preview/1" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview"' in workspace_response.text
     assert 'Show Dashboard</a>' in workspace_response.text
 
     preview_response = client.get("/workspace/preview/1")
