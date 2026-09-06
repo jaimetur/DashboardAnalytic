@@ -4017,17 +4017,26 @@ if (appLogsPanel) {
   };
   const refreshFilterOptionsFromTableRows = () => {
     // Compact-phone pagination keeps non-current cards in the DOM. They are
-    // still rows of this table, so filters must cover the complete loaded
-    // table rather than only the currently displayed page or active filters.
+    // still rows of this table. Each selector is a facet: its values come
+    // from every loaded row that matches the other active filters, never just
+    // the current card page.
     const tableRows = rows;
-    const valuesFor = (name, normalise = (value) => value) => [...new Set(
-      tableRows.map((row) => normalise(String(row.dataset[name] || ''))).filter(Boolean),
+    const rowMatchesOtherFilters = (row, excludedFilter) => (
+      (excludedFilter === 'user' || !userFilter || userFilter.value === 'all' || String(row.dataset.appLogUser || '').toLocaleLowerCase() === String(userFilter.value || '').toLocaleLowerCase())
+      && (excludedFilter === 'executor' || !executorFilter || executorFilter.value === 'all' || String(row.dataset.appLogExecutor || '').toLocaleLowerCase() === String(executorFilter.value || '').toLocaleLowerCase())
+      && (excludedFilter === 'date' || !dateFilter || dateFilter.value === 'all' || row.dataset.appLogDate === dateFilter.value)
+      && (excludedFilter === 'type' || !typeFilter || typeFilter.value === 'all' || row.dataset.appLogType === typeFilter.value)
+      && (excludedFilter === 'action' || !actionFilter || actionFilter.value === 'all' || row.dataset.appLogAction === actionFilter.value)
+    );
+    const valuesFor = (name, excludedFilter, normalise = (value) => value) => [...new Set(
+      tableRows.filter((row) => rowMatchesOtherFilters(row, excludedFilter))
+        .map((row) => normalise(String(row.dataset[name] || ''))).filter(Boolean),
     )].sort();
-    replaceSelectOptions(userFilter, valuesFor('appLogUser', (value) => value.toLocaleLowerCase()), 'All users');
-    replaceSelectOptions(executorFilter, valuesFor('appLogExecutor', (value) => value.toLocaleLowerCase()), 'All executors');
-    replaceSelectOptions(dateFilter, valuesFor('appLogDate').reverse(), 'All dates');
-    replaceSelectOptions(typeFilter, valuesFor('appLogType'), 'All events', (value) => `${value} only`);
-    replaceSelectOptions(actionFilter, valuesFor('appLogAction'), 'All actions');
+    replaceSelectOptions(userFilter, valuesFor('appLogUser', 'user', (value) => value.toLocaleLowerCase()), 'All users');
+    replaceSelectOptions(executorFilter, valuesFor('appLogExecutor', 'executor', (value) => value.toLocaleLowerCase()), 'All executors');
+    replaceSelectOptions(dateFilter, valuesFor('appLogDate', 'date').reverse(), 'All dates');
+    replaceSelectOptions(typeFilter, valuesFor('appLogType', 'type'), 'All events', (value) => `${value} only`);
+    replaceSelectOptions(actionFilter, valuesFor('appLogAction', 'action'), 'All actions');
   };
   const createAppLogRow = (log) => {
     const row = document.createElement('tr');
