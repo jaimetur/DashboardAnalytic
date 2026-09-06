@@ -676,27 +676,28 @@ async def lifespan(_: FastAPI):
     )
     workspace_registry.initialize()
     repository.set_global_database(settings.database_path.parent / 'application.db')
-    # Versions before the global configuration database could leave copies of
-    # users/template metadata inside workspace databases.  Clean every
-    # workspace at startup so only config/application.db can own that state.
-    for workspace in workspace_registry.list():
-        workspace_repository = Repository(workspace.database_path, repository.global_db_path)
-        workspace_repository.initialize()
-        workspace_repository.remove_legacy_global_tables()
-        interrupted_datasets, interrupted_reports = workspace_repository.fail_interrupted_background_jobs()
-        interrupted_chart_jobs = workspace_repository.fail_interrupted_report_chart_jobs()
-        if interrupted_datasets or interrupted_reports or interrupted_chart_jobs:
-            workspace_repository.add_log(
-                'system',
-                'recover_interrupted_background_jobs',
-                json.dumps({'datasets': interrupted_datasets, 'reports': interrupted_reports, 'chart_jobs': interrupted_chart_jobs}),
-            )
+    # Workspace schema cleanup and interrupted-job recovery happen when a
+    # workspace becomes active.  Scanning every workspace here opens and
+    # checkpoints every SQLite database, which can leave startup blocked for
+    # minutes on installations with large reporting-row stores.
     export_package_dir().mkdir(parents=True, exist_ok=True)
     _recover_unimported_transfer_packages()
     _cleanup_expired_export_packages()
     migrate_uk_slides_templates_to_global_config()
     if (workspace_id := workspace_registry.active_id()):
         activate_workspace(workspace_id)
+        interrupted_datasets, interrupted_reports = repository.fail_interrupted_background_jobs()
+        interrupted_chart_jobs = repository.fail_interrupted_report_chart_jobs()
+        if interrupted_datasets or interrupted_reports or interrupted_chart_jobs:
+            repository.add_log(
+                'system',
+                'recover_interrupted_background_jobs',
+                json.dumps({
+                    'datasets': interrupted_datasets,
+                    'reports': interrupted_reports,
+                    'chart_jobs': interrupted_chart_jobs,
+                }),
+            )
     yield
 
 
