@@ -559,7 +559,11 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
     active_workspace = workspace
     if initialize:
         repository.initialize()
-        synchronize_reporting_row_store()
+        # The workspace database is self-contained.  In particular, a
+        # duplicate already includes its reporting-row store, so rebuilding
+        # every ready CDR here can take minutes and make opening the copied
+        # workspace look like a server failure.  Reporting materialises the
+        # exact columns it needs lazily in ``_combined_reporting_frame``.
         for technology in TEMPLATE_NAMES:
             synchronize_template_file_names(technology)
     return workspace
@@ -3712,8 +3716,11 @@ def select_workspace(
         return RedirectResponse(f'{target}?workspace_error=You+do+not+have+access+to+that+workspace.', status_code=status.HTTP_303_SEE_OTHER)
     try:
         activate_workspace(workspace_id)
-    except ValueError as exc:
-        return RedirectResponse(f'{target}?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
+    except Exception as exc:
+        return RedirectResponse(
+            f'{target}?{urlencode({"workspace_error": f"Unable to open the selected workspace: {exc}"})}',
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
     return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -3793,10 +3800,32 @@ def save_workspace(
 def duplicate_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
     require_workspace_admin(user)
     require_workspace_access(user, workspace_id)
+    workspace: Workspace | None = None
     try:
         workspace = workspace_registry.duplicate(workspace_id)
-    except ValueError as exc:
-        return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
+        # A duplicate must retain the origin workspace membership.  Otherwise
+        # an administrator who is allowed to duplicate a workspace could not
+        # open the new copy afterwards.
+        source_members = [
+            str(account['username'])
+            for account in repository.list_users()
+            if workspace_id in repository.list_user_workspace_ids(int(account['id']))
+        ]
+        repository.set_workspace_user_access(workspace.id, source_members)
+        invalidate_workspace_size_cache(workspace.database_path.parent)
+    except Exception as exc:
+        # Do not leave a registered but inaccessible/partially configured
+        # workspace behind when the filesystem copy or permission copy fails.
+        if workspace is not None:
+            try:
+                workspace_registry.delete(workspace.id, delete_files=True)
+                repository.remove_workspace_access(workspace.id)
+            except Exception:
+                pass
+        return RedirectResponse(
+            f'/workspace?{urlencode({"workspace_error": f"Unable to duplicate the workspace: {exc}"})}',
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
     return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": f"Created {workspace.name}."})}', status_code=status.HTTP_303_SEE_OTHER)
 
 

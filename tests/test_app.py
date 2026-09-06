@@ -1055,8 +1055,17 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
     assert duplicated.status_code == 303
     copied_workspace = next(item for item in app_module.workspace_registry.list() if item.name == 'Default - Copy')
     assert copied_workspace.database_path.name == 'Default - Copy.db'
+    assert app_module.repository.user_has_workspace_access('admin', copied_workspace.id)
     with app_module.repository.connection() as conn:
         assert conn.execute('SELECT COUNT(*) FROM datasets').fetchone()[0] == 1
+
+    copied_selected = client.post('/workspace/select', data={'workspace_id': copied_workspace.id}, follow_redirects=False)
+    assert copied_selected.status_code == 303
+    assert app_module.active_workspace is not None
+    assert app_module.active_workspace.id == copied_workspace.id
+
+    selected = client.post('/workspace/select', data={'workspace_id': 'default'}, follow_redirects=False)
+    assert selected.status_code == 303
 
     cannot_remove_open = client.post('/workspace/delete', data={'workspace_id': 'default'}, follow_redirects=False)
     assert cannot_remove_open.headers['location'].startswith('/workspace?workspace_warning=')
