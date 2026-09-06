@@ -35,7 +35,7 @@ function limitSeriesCollectionByX(seriesCollection, xMaxOverride) {
     '.report-charts-grid',
   ].join(', ');
   const compactViewport = window.matchMedia('(max-width: 480px)');
-  const pageSize = 2;
+  const pageSize = 1;
   const states = new WeakMap();
   let scheduled = false;
 
@@ -59,7 +59,7 @@ function limitSeriesCollectionByX(seriesCollection, xMaxOverride) {
       pager.className = 'mobile-card-pagination';
       pager.hidden = true;
       pager.setAttribute('aria-label', table.matches('.report-charts-grid') ? 'Chart pages' : 'Card pages');
-      pager.innerHTML = '<button type="button" data-mobile-card-first>First</button><button type="button" data-mobile-card-previous>Previous</button><span data-mobile-card-page-label>Page 1 of 1</span><button type="button" data-mobile-card-next>Next</button><button type="button" data-mobile-card-last>Last</button>';
+      pager.innerHTML = '<button type="button" data-mobile-card-first aria-label="First page" title="First page">⏮</button><button type="button" data-mobile-card-previous aria-label="Previous page" title="Previous page">⬅</button><span data-mobile-card-page-label>Page 1 of 1</span><button type="button" data-mobile-card-next aria-label="Next page" title="Next page">➡</button><button type="button" data-mobile-card-last aria-label="Last page" title="Last page">⏭</button>';
       const placeAfter = table.closest('.table-wrap, .data-table-wrap, .queue-table-wrap, .database-editor-wrap, .catalogue-workspace-table-wrap') || table;
       placeAfter.insertAdjacentElement('afterend', pager);
       state = {page: 0, pager};
