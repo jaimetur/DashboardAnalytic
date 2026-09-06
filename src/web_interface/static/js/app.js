@@ -4007,12 +4007,27 @@ if (appLogsPanel) {
     // The mobile card pager has its own display state. Notify it after every
     // filter pass so the first matching log is immediately visible.
     body?.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {bubbles: true, detail: {reset: true}}));
+    refreshFilterOptionsFromTableRows();
   };
   const replaceSelectOptions = (control, values, allLabel, optionLabel = (value) => value) => {
     if (!control) return;
     const selected = control.value || 'all';
     control.replaceChildren(new Option(allLabel, 'all'), ...values.map((value) => new Option(optionLabel(value), value)));
     control.value = Array.from(control.options).some((option) => option.value === selected) ? selected : 'all';
+  };
+  const refreshFilterOptionsFromTableRows = () => {
+    // Compact-phone pagination keeps non-current cards in the DOM. They are
+    // still rows of this table, so filters must cover the complete loaded
+    // table rather than only the currently displayed page or active filters.
+    const tableRows = rows;
+    const valuesFor = (name, normalise = (value) => value) => [...new Set(
+      tableRows.map((row) => normalise(String(row.dataset[name] || ''))).filter(Boolean),
+    )].sort();
+    replaceSelectOptions(userFilter, valuesFor('appLogUser', (value) => value.toLocaleLowerCase()), 'All users');
+    replaceSelectOptions(executorFilter, valuesFor('appLogExecutor', (value) => value.toLocaleLowerCase()), 'All executors');
+    replaceSelectOptions(dateFilter, valuesFor('appLogDate').reverse(), 'All dates');
+    replaceSelectOptions(typeFilter, valuesFor('appLogType'), 'All events', (value) => `${value} only`);
+    replaceSelectOptions(actionFilter, valuesFor('appLogAction'), 'All actions');
   };
   const createAppLogRow = (log) => {
     const row = document.createElement('tr');
@@ -4049,11 +4064,6 @@ if (appLogsPanel) {
       const logs = Array.isArray(payload.logs) ? payload.logs : [];
       rows = logs.map(createAppLogRow);
       body.replaceChildren(...rows, ...(noResults ? [noResults] : []));
-      replaceSelectOptions(userFilter, [...new Set(logs.map((log) => String(log.username || '').toLocaleLowerCase()).filter(Boolean))].sort(), 'All users');
-      replaceSelectOptions(executorFilter, [...new Set(logs.map((log) => String(log.executed_by || '—').toLocaleLowerCase()).filter(Boolean))].sort(), 'All executors');
-      replaceSelectOptions(dateFilter, [...new Set(logs.map((log) => String(log.date || '')).filter(Boolean))].sort().reverse(), 'All dates');
-      replaceSelectOptions(typeFilter, [...new Set(logs.map((log) => String(log.log_type || '')).filter(Boolean))].sort(), 'All events', (value) => `${value} only`);
-      replaceSelectOptions(actionFilter, [...new Set(logs.map((log) => String(log.action || '')).filter(Boolean))].sort(), 'All actions');
       if (count) count.textContent = `${logs.length} entries`;
       syncAppLogRows();
     } catch (_error) {
