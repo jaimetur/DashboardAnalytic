@@ -93,7 +93,7 @@
             <td>
               {% if user.role != 'super-admin' and row['role'] == 'super-admin' %}
               <input type="hidden" name="role" value="super-admin" form="user-update-{{ row['id'] }}">
-              <input class="table-input" type="text" value="super-admin" aria-label="Role for {{ row['username'] }}" readonly>
+              <span class="table-input user-role-locked" aria-label="Role for {{ row['username'] }}: super-admin" title="Only super-admins can modify a super-admin role"><span class="user-role-full-label">super-admin</span><span class="user-role-compact-label" aria-hidden="true">super</span></span>
               {% else %}
               <select class="table-select" name="role" form="user-update-{{ row['id'] }}">
                 <option value="user" {% if row['role'] == 'user' %}selected{% endif %}>user</option>
@@ -763,9 +763,13 @@
     }
     const headers = columns.map((column) => `<th title="${escapeHtml(column.type || 'SQLite value')}"><span>${escapeHtml(column.name)}${column.primary_key ? ' · key' : ''}</span><button type="button" class="database-column-filter ${filters[column.name]?.length ? 'is-filtered' : ''}" data-database-column-filter="${escapeHtml(column.name)}" aria-label="Filter ${escapeHtml(column.name)}" title="Filter ${escapeHtml(column.name)}">⌄${filters[column.name]?.length ? ` ${filters[column.name].length}` : ''}</button></th>`).join('');
     const body = rows.length ? rows.map((row) => {
-      const cells = columns.map((column) => `<td><input class="database-editor-cell" data-database-column="${escapeHtml(column.name)}" value="${escapeHtml(text(row[column.name]))}" ${column.primary_key ? 'disabled title="Primary-key values are protected"' : ''}></td>`).join('');
-      return `<tr data-database-rowid="${escapeHtml(row.__database_rowid__)}">${cells}<td class="database-editor-actions"><button type="button" class="icon-action" aria-label="Save row" title="Save row" data-database-save-row>✓</button><button type="button" class="database-editor-delete icon-action" aria-label="Delete row" title="Delete row" data-database-delete-row>×</button></td></tr>`;
-    }).join('') : `<tr><td colspan="${columns.length + 1}">No rows in this table.</td></tr>`;
+      const cells = columns.map((column) => {
+        const columnName = escapeHtml(column.name);
+        const filtered = Boolean(filters[column.name]?.length);
+        return `<td data-label="${columnName}"><div class="database-card-field-heading"><span>${columnName}${column.primary_key ? ' · key' : ''}</span><button type="button" class="database-column-filter ${filtered ? 'is-filtered' : ''}" data-database-column-filter="${columnName}" aria-label="Filter ${columnName}" title="Filter ${columnName}">⌄${filtered ? ` ${filters[column.name].length}` : ''}</button></div><input class="database-editor-cell" data-database-column="${columnName}" value="${escapeHtml(text(row[column.name]))}" ${column.primary_key ? 'disabled title="Primary-key values are protected"' : ''}></td>`;
+      }).join('');
+      return `<tr data-database-rowid="${escapeHtml(row.__database_rowid__)}">${cells}<td class="database-editor-actions" data-label="Actions"><button type="button" class="icon-action" aria-label="Save row" title="Save row" data-database-save-row>✓</button><button type="button" class="database-editor-delete icon-action" aria-label="Delete row" title="Delete row" data-database-delete-row>×</button></td></tr>`;
+    }).join('') : `<tr class="database-empty-row"><td colspan="${columns.length + 1}">No rows in this table.</td></tr>`;
     table.innerHTML = `<thead><tr>${headers}<th>Actions</th></tr></thead><tbody>${body}</tbody>`;
     table.querySelectorAll('[data-database-column-filter]').forEach((button) => button.addEventListener('click', () => openFilter(button.dataset.databaseColumnFilter, button)));
     table.querySelectorAll('[data-database-save-row]').forEach((button) => button.addEventListener('click', () => saveRow(button.closest('tr'))));

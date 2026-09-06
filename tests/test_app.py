@@ -1265,7 +1265,10 @@ def test_admin_panel_is_available_for_admin(client) -> None:
     response = client.get("/admin")
     assert response.status_code == 200
     assert "Admin panel" in response.text
-    assert 'value="super-admin" aria-label="Role for super" readonly' in response.text
+    assert '<span class="table-input user-role-locked" aria-label="Role for super: super-admin"' in response.text
+    assert '<span class="user-role-full-label">super-admin</span>' in response.text
+    assert '<span class="user-role-compact-label" aria-hidden="true">super</span>' in response.text
+    assert 'type="text" value="super-admin" aria-label="Role for super"' not in response.text
     assert 'name="username" value="super" form="user-update-1" autocomplete="off" readonly data-user-autofill-guard required disabled' in response.text
     assert 'name="password" value="" placeholder="••••••••" autocomplete="off" spellcheck="false" readonly form="user-update-1" data-user-password data-user-autofill-guard' in response.text
     assert 'data-user-password-toggle' in response.text
