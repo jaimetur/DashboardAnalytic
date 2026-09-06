@@ -597,6 +597,28 @@ def test_multivendor_operator_filters_match_vendor_prefixes_and_keep_full_groupi
     ]
 
 
+def test_multivendor_grouping_uses_the_same_vendor_order_for_each_operator() -> None:
+    entry = CatalogEntry(
+        1, "", "", "", "", "CDR-Speech", "LQ", "Average Vertical Bars",
+        "Vendor", "", "Vendor", "Campaign", "Top",
+    )
+    frame = pd.DataFrame({
+        "report_vendor": [
+            "VF_Samsung", "VF_NSN", "VF_Huawei", "VF_Ericsson",
+            "3_Huawei", "3_Samsung", "3_Ericsson",
+        ],
+        "Campaign": ["2026 Q2"] * 7,
+        "LQ": [4.0] * 7,
+    })
+
+    grouped, primary, _series = _apply_catalog_grouping(frame, entry, True, "LQ")
+
+    assert grouped[primary].drop_duplicates().tolist() == [
+        "VF_Ericsson", "VF_Huawei", "VF_Samsung", "VF_NSN",
+        "3_Ericsson", "3_Huawei", "3_Samsung",
+    ]
+
+
 def test_rows_only_grouping_uses_one_all_series_without_repeating_the_category() -> None:
     entry = parse_catalog_csv(
         ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Speech,LQ,Average Vertical Bars,,Operator,,,\n',

@@ -4,7 +4,7 @@
 ---
 
 ## Release: v0.2.2
-### Release Date: 2026-09-04
+### Release Date: 2026-09-07
 #### 🌟 New Features:
 - Added an Edit Slides Template action to the active Charts Panel, opening the exact generating template in a full editor modal without the template selector.
 
@@ -55,6 +55,7 @@
 - Normalised Vendor Comparison display labels by applying the standard report aliases to the operator prefix of `Operator_Vendor` values, such as `VF_Ericsson`, `3_Nokia` and `O2_Huawei`.
 - Matched Vendor Comparison legend markers to the exact vendor-family colours used by their rendered bars instead of assigning a separate operator-based legend palette.
 - Increased the desktop Chart Preview dialog height cap and used the dynamic viewport height so it makes slightly better use of available vertical space without changing the compact-phone layout.
+- Standardised Vendor Comparison ordering so every operator lists mapped vendors in the same Ericsson, Huawei, Samsung and NSN sequence whenever those vendors exist, while keeping Campaign values chronological.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
