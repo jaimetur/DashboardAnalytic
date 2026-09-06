@@ -83,6 +83,25 @@ def test_report_vendor_aliases_normalise_only_the_operator_prefix() -> None:
     ]
 
 
+def test_vendor_legend_colours_match_the_vendor_bar_colours() -> None:
+    entry = CatalogEntry(
+        1, "", "", "", "", "CDR-Speech", "LQ", "Average Vertical Bars",
+        "Vendor", "", "Vendor", "", "Right",
+    )
+    frame = pd.DataFrame({
+        "__catalog_row_0": ["VF_Ericsson", "VF_Samsung", "VF_Huawei", "3_Huawei"],
+        "LQ": [4.64, 4.65, 4.64, 4.64],
+    })
+    frame.attrs["catalogue_dimension_labels"] = {"__catalog_row_0": "Vendor"}
+    keys = [(value,) for value in frame["__catalog_row_0"]]
+
+    legend = _resolved_legend_items(entry, frame, "LQ")
+
+    assert {caption: colour for caption, colour, _width in legend} == {
+        key[0]: colour for key, colour in _series_colours(keys, ["__catalog_row_0"], frame).items()
+    }
+
+
 def test_reporting_cache_resolves_separator_variants_and_refreshes_derived_dimensions(tmp_path) -> None:
     repository = Repository(tmp_path / 'workspace.db')
     repository.replace_dataset_rows(1, pd.DataFrame({

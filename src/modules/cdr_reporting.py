@@ -1651,6 +1651,8 @@ def _resolved_legend_items(
             items.append((caption, colours.get(combination, _colour(caption, index)), width))
     elif resolved_columns:
         values = frame[resolved_columns].dropna().drop_duplicates()
+        legend_keys = [key if isinstance(key, tuple) else (key,) for key in values.itertuples(index=False, name=None)]
+        legend_colours = _series_colours(legend_keys, resolved_columns, frame)
         semantic_colours = {
             "completed": "#4E79A7",
             "dropped": "#F28E2B",
@@ -1658,7 +1660,12 @@ def _resolved_legend_items(
         }
         for index, values_tuple in enumerate(values.itertuples(index=False, name=None)):
             caption = " · ".join(str(value) for value in values_tuple)
-            colour = semantic_colours.get(caption.casefold()) or _operator_colour(caption) or _colour(caption, index)
+            colour = (
+                semantic_colours.get(caption.casefold())
+                or legend_colours.get(legend_keys[index])
+                or _operator_colour(caption)
+                or _colour(caption, index)
+            )
             items.append((caption, colour, 2))
 
     filter_names = {
