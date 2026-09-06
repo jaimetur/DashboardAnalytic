@@ -1459,7 +1459,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
   .queue-table thead { display: none; }
   .queue-table tbody { display: grid; gap: 0.65rem; }
   .queue-table tbody tr[data-dataset-row] {
-    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
     gap: 0; overflow: hidden; border: 1px solid rgba(16, 49, 74, 0.16); border-radius: 11px; background: #fff;
   }
   .queue-table tbody tr[data-dataset-row] > td {
@@ -1611,7 +1611,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
   .admin-datasets-table { display: block; width: 100%; table-layout: auto; }
   .admin-datasets-table thead { display: none; }
   .admin-datasets-table tbody { display: grid; gap: 0.65rem; }
-  .admin-datasets-table tbody tr { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid rgba(16, 49, 74, 0.16); border-radius: 11px; background: #fff; overflow: hidden; }
+  .admin-datasets-table tbody tr { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); border: 1px solid rgba(16, 49, 74, 0.16); border-radius: 11px; background: #fff; overflow: hidden; }
   .admin-datasets-table tbody td { display: flex; flex-direction: column; align-items: stretch; gap: 0.22rem; width: auto !important; min-width: 0 !important; padding: 0.48rem 0.55rem; border: 0; border-bottom: 1px solid rgba(16, 49, 74, 0.09); overflow-wrap: anywhere; }
   .admin-datasets-table tbody td::before { content: attr(data-label); color: #58707e; font-size: 0.66rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
   .admin-datasets-table tbody td:nth-child(1), .admin-datasets-table tbody td:nth-child(2), .admin-datasets-table tbody td:nth-child(3), .admin-datasets-table tbody td:nth-child(7) { grid-column: 1 / -1; }

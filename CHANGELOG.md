@@ -72,7 +72,6 @@
 - Centred the Slides Templates Management Default indicator, rendered Created and Last Updated as one date line plus one time line, and made Template name consume the flexible width left by the fixed metadata and action columns.
 - Prevented dataset renames from rendering and downloading the complete Admin page after updating the file and materialised references, returning only the renamed dataset metadata to avoid intermittent gateway timeouts.
 - Restored the two most recently uploaded processed CDRs of each Data, Voice and Speech type when switching from Vendor Comparison to Operator Comparison if that type had fewer than two selections, while preserving existing selections of two or more.
-
 - Converted simple Users, Slides Templates, Reports and Charts Jobs, Workspace, recovered-transfer and App Logs tables into responsive mobile cards that place multiple short fields on each row when space permits, keep long fields full-width, and stack every value beneath its column label.
 
 #### 📚 Documentation:
