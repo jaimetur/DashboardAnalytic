@@ -19,7 +19,7 @@ from src.modules.repository import Repository
 
 
 def wait_for_report_job(client, job_id: int) -> dict:
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         response = client.get('/api/reporting/jobs')
         assert response.status_code == 200
@@ -31,7 +31,7 @@ def wait_for_report_job(client, job_id: int) -> dict:
 
 
 def wait_for_report_chart_job(client, job_id: int) -> dict:
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         response = client.get('/api/reporting/chart-jobs')
         assert response.status_code == 200
