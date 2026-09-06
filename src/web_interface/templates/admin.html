@@ -784,6 +784,7 @@
     last.disabled = offset + pageSize >= totalRows;
     pagination.hidden = totalRows <= pageSize;
     renderActiveFilters();
+    table.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {bubbles: true, detail: {reset: true}}));
   };
 
   const loadTable = async () => {
