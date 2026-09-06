@@ -649,7 +649,10 @@
       if (!response.ok) return;
       const html = await response.text();
       const count = (html.match(/class="workspace-library-row/g) || []).length;
-      if (count > baseline) {
+      const sizes = [...html.matchAll(/data-workspace-size[^>]*>([0-9.]+) MB/g)].map((m) => Number(m[1]));
+      const sourceSize = Math.max(...[...document.querySelectorAll('[data-workspace-size]')].map((el) => Number.parseFloat(el.textContent) || 0));
+      const ready = count > baseline && sizes.some((size) => sourceSize === 0 ? size > 0 : size >= sourceSize * 0.95);
+      if (ready) {
         window.clearInterval(timer);
         sessionStorage.removeItem('workspace-duplication-pending');
         showInfoDialog('El workspace duplicado se ha creado correctamente.', {title: 'Duplicación completada'});
