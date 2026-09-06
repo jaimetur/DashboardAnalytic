@@ -522,7 +522,7 @@ def test_multivendor_rendering_rewrites_display_and_grouping_and_excludes_unreso
     assert rendered.slide_title == 'Vendor comparison'
     assert rendered.slide_subtitle == 'Vendor subtitle'
     assert rendered.chart_title == 'Vendor chart'
-    assert rendered.legend == 'Campaign'
+    assert rendered.legend == 'Operator'
     assert rendered.grouping_rows == 'Vendor'
     assert rendered.grouping_columns == 'Vendor × Campaign'
     assert rendered.filters == 'Operator = Vodafone UK; vendor NOT CONTAINS (Mixed, Other)'
@@ -540,6 +540,32 @@ def test_multivendor_rendering_rewrites_display_and_grouping_and_excludes_unreso
 
     already_filtered = replace(entry, filters='vendor NOT CONTAINS (Mixed, Other)')
     assert prepare_multivendor_catalog_entry(already_filtered).filters == already_filtered.filters
+
+
+def test_multivendor_operator_filters_match_vendor_prefixes_and_keep_full_grouping_values() -> None:
+    entry = parse_catalog_csv(
+        ','.join(CATALOG_HEADERS)
+        + '\n8,Operator comparison,,Title and 1 column + Comments,Operator chart,CDR-Speech,LQ,Average Vertical Bars,"Operator IN (Vodafone UK, 3, O2)",Operator,Operator × Campaign,Operator,Top\n',
+        'nsa',
+    )[0]
+    rendered = prepare_multivendor_catalog_entry(entry)
+    frame = pd.DataFrame({
+        'Operator': ['Vodafone UK', 'Vodafone UK', '3', 'O2', 'EE'],
+        'report_vendor': ['Vodafone_Ericsson', 'Vodafone_Huawei', '3_Nokia', 'O2_Ericsson', 'EE_Nokia'],
+        'Campaign': ['2025 Q4', '2026 Q1', '2025 Q4', '2026 Q1', '2026 Q1'],
+        'LQ': [3.8, 3.7, 3.6, 3.5, 3.4],
+    })
+
+    filtered = _apply_catalog_filters(frame, rendered, True, 'LQ')
+    grouped, primary, series = _apply_catalog_grouping(filtered, rendered, True, 'LQ')
+
+    assert filtered['report_vendor'].tolist() == ['Vodafone_Ericsson', 'Vodafone_Huawei', '3_Nokia', 'O2_Ericsson']
+    assert grouped[primary].tolist() == ['Vodafone_Ericsson', 'Vodafone_Huawei', '3_Nokia', 'O2_Ericsson']
+    assert grouped[series].tolist() == [
+        'Vodafone_Ericsson · 2025-Q4', 'Vodafone_Huawei · 2026-Q1',
+        '3_Nokia · 2025-Q4', 'O2_Ericsson · 2026-Q1',
+    ]
+    assert [caption for caption, _colour, _width in _resolved_legend_items(rendered, grouped, 'LQ')] == ['VF', '3', 'O2']
 
 
 def test_rows_only_grouping_uses_one_all_series_without_repeating_the_category() -> None:

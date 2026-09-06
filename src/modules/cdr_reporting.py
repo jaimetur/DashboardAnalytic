@@ -530,6 +530,13 @@ def _normalise_report_operator(value: object) -> str:
     return text
 
 
+def _report_vendor_operator(value: object) -> str:
+    """Return the report operator prefix from an ``Operator_Vendor`` value."""
+    text = str(value or "").strip()
+    operator, _separator, _vendor = text.partition("_")
+    return _normalise_report_operator(operator or text)
+
+
 def normalise_report_operator_aliases(frame: pd.DataFrame) -> pd.DataFrame:
     """Canonicalise report-only operator labels without mutating stored CDRs.
 
@@ -841,8 +848,8 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
     The stored template remains an operator-oriented definition.  For a
     multivendor run, grouping dimensions, display legends and titles are
     transformed and unresolved Mixed/Other vendor groups are excluded. Existing
-    ``Operator`` conditions remain untouched and keep filtering the physical CDR
-    Operator column.
+    ``Operator`` conditions remain untouched.  During filtering they resolve
+    against the operator prefix of the materialised ``Operator_Vendor`` value.
     """
     def vendor_grouping(value: str) -> str:
         dimensions = parse_catalog_grouping(value).dimensions
@@ -867,7 +874,10 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
         slide_title=_replace_operator_label(entry.slide_title, "Vendor"),
         slide_subtitle=_replace_operator_label(entry.slide_subtitle, "Vendor"),
         chart_title=_replace_operator_label(entry.chart_title, "Vendor"),
-        legend=_replace_operator_label(entry.legend, "Campaign"),
+        # The requested legend remains authoritative: an Operator legend on a
+        # Vendor Comparison is rendered from the base operator prefix, while a
+        # Vendor legend deliberately shows the full Operator_Vendor values.
+        legend=entry.legend,
         grouping_rows=vendor_grouping(entry.grouping_rows),
         grouping_columns=vendor_grouping(entry.grouping_columns),
         filters=filters,
@@ -1006,14 +1016,21 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
     for condition in parse_catalog_filters(entry.filters):
         if _normalise_catalog_name(condition.column) in {"threshold", "buckets"}:
             continue
-        # Operator filters always refer to the source CDR Operator field. Only
-        # grouping dimensions are promoted to Vendor for multivendor reports.
-        column = _catalog_column(result, condition.column, multivendor, metric, operator_as_vendor=False)
+        # A Vendor Comparison materialises values as Operator_Vendor. Template
+        # Operator filters therefore match that value's operator prefix (for
+        # example Vodafone against Vodafone_Ericsson), while Vendor filters
+        # still retain their native full-value semantics such as excluding
+        # Mixed and Other vendor groups.
+        is_operator_filter = _normalise_catalog_name(condition.column) == "operator"
+        column = _group_column(result, True) if multivendor and is_operator_filter else _catalog_column(
+            result, condition.column, multivendor, metric, operator_as_vendor=False,
+        )
         if not column:
             raise ValueError(f"Slide {entry.slide}: filter column '{condition.column}' does not exist in {entry.cdr_source}.")
         series = result[column]
-        is_operator_filter = _normalise_catalog_name(condition.column) == "operator"
-        comparison_series = series.map(_normalise_report_operator) if is_operator_filter else series
+        comparison_series = series.map(_report_vendor_operator) if multivendor and is_operator_filter else (
+            series.map(_normalise_report_operator) if is_operator_filter else series
+        )
         if condition.operator in {">", ">=", "<", "<=", "=", "!="}:
             target = condition.values[0]
             if (
@@ -1514,8 +1531,11 @@ def _legend_key_caption(
     for index, column in enumerate(axis_columns):
         declared = labels.get(column, column)
         declared_names = declared if isinstance(declared, tuple) else (declared,)
-        if any(_normalise_catalog_name(str(name)) in requested for name in declared_names):
+        declared_normalized = {_normalise_catalog_name(str(name)) for name in declared_names}
+        if declared_normalized & requested:
             selected_parts.append(str(key[index]))
+        elif "operator" in requested and "vendor" in declared_normalized:
+            selected_parts.append(_report_vendor_operator(key[index]))
     parts = selected_parts or [str(value) for value in key if str(value) != "(all)"]
     return " · ".join(parts) or "(all)"
 
@@ -1560,7 +1580,11 @@ def _resolved_legend_items(
         _normalise_catalog_name(value)
         for value in (*row_dimensions, *column_dimensions, *kpi_dimensions)
     }
-    chart_fields = [value for value in requested if _normalise_catalog_name(value) in chart_names]
+    chart_fields = [
+        value for value in requested
+        if _normalise_catalog_name(value) in chart_names
+        or (_normalise_catalog_name(value) == "operator" and "vendor" in chart_names)
+    ]
 
     is_distribution = entry.chart_type.strip().casefold() == "distribution stacked vertical bars"
     bucket_names = {"bucket", "buckets", "ratebucket", "valuebucket"}
@@ -1576,6 +1600,7 @@ def _resolved_legend_items(
             candidate for candidate, declared in labels.items()
             if any(
                 _normalise_catalog_name(str(name)) == normalized
+                or (normalized == "operator" and _normalise_catalog_name(str(name)) == "vendor")
                 for name in (declared if isinstance(declared, tuple) else (declared,))
             )
         ), None)
@@ -1632,8 +1657,15 @@ def _resolved_legend_items(
             "dropped": "#F28E2B",
             "failed": "#E15759",
         }
+        seen_captions: set[str] = set()
         for index, values_tuple in enumerate(values.itertuples(index=False, name=None)):
-            caption = " · ".join(str(value) for value in values_tuple)
+            caption = " · ".join(
+                _report_vendor_operator(value) if _normalise_catalog_name(field) == "operator" else str(value)
+                for field, value in zip(chart_fields, values_tuple, strict=True)
+            )
+            if caption in seen_captions:
+                continue
+            seen_captions.add(caption)
             colour = semantic_colours.get(caption.casefold()) or _operator_colour(caption) or _colour(caption, index)
             items.append((caption, colour, 2))
 
@@ -1641,6 +1673,7 @@ def _resolved_legend_items(
         _normalise_catalog_name(value)
         for value in requested
         if _normalise_catalog_name(value) not in chart_names
+        and not (_normalise_catalog_name(value) == "operator" and "vendor" in chart_names)
         and not (bucket_legend_requested and _normalise_catalog_name(value) in bucket_names)
     }
     for condition in parse_catalog_filters(entry.filters):
