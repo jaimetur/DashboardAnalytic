@@ -1624,8 +1624,14 @@ def catalog_chart_hover_targets(
             state_data, state_column, quality=spec['kind'] == 'quality_100', threshold=spec.get('threshold', 1.6),
         )
         if column_hierarchy or len(row_hierarchy) > 1:
-            rows = _hierarchical_unique_keys(state_data, row_hierarchy) if column_hierarchy else [()]
-            columns = _hierarchical_unique_keys(state_data, column_hierarchy or row_hierarchy)
+            # Match _render_status_100_hierarchy: a multi-level row grouping
+            # without explicit column levels is rendered as nested columns,
+            # not as panes.  Keeping the same axes prevents strict zip()
+            # from pairing its empty pane key with the original row fields.
+            render_rows = row_hierarchy if column_hierarchy else []
+            active_columns = column_hierarchy or row_hierarchy
+            rows = _hierarchical_unique_keys(state_data, render_rows) if render_rows else [()]
+            columns = _hierarchical_unique_keys(state_data, active_columns)
             if not rows or not columns:
                 return []
             canvas, draw = _canvas('')
@@ -1633,10 +1639,9 @@ def catalog_chart_hover_targets(
             chart_left = max(205, min(540, 24 + max((_text_width(draw, label, _font(18, True)) for label in row_labels), default=0) + 92))
             row_height, column_width = 510 / len(rows), (1395 - chart_left) / len(columns)
             bar_width = max(18, min(86, column_width * 0.68))
-            active_columns = column_hierarchy or row_hierarchy
             for row_index, row_key in enumerate(rows):
                 row_mask = pd.Series(True, index=state_data.index); pane_top = 245 + row_index * row_height; pane_bottom = pane_top + row_height
-                for field, value in zip(row_hierarchy, row_key, strict=True): row_mask &= state_data[field].astype(str).eq(str(value))
+                for field, value in zip(render_rows, row_key, strict=True): row_mask &= state_data[field].astype(str).eq(str(value))
                 for column_index, column_key in enumerate(columns):
                     mask = row_mask.copy()
                     for field, value in zip(active_columns, column_key, strict=True): mask &= state_data[field].astype(str).eq(str(value))

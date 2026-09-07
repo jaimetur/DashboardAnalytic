@@ -1223,6 +1223,25 @@ def test_failure_count_hover_targets_use_the_renderer_width_for_field_legends() 
     assert sorted(target['x'] for target in targets) == [289.0, 914.0]
 
 
+def test_status_100_hover_targets_support_multi_level_row_grouping() -> None:
+    entry = parse_catalog_csv(
+        ','.join(CATALOG_HEADERS)
+        + '\n12,Success Ratio per Type of Test (Vendor Split),,Title and 1 column + Comments,Success Ratio per Type of Test (Vendor Split),CDR-Data,Result Group,100% Stacked Vertical Bars,,Type_of_Test × Vendor,,Result Group,Right\n',
+        'nsa',
+    )[0]
+    frame = pd.DataFrame({
+        'Type_of_Test': ['FTP', 'HTTP', 'FTP', 'HTTP'],
+        'Vendor': ['EE', 'EE', '3', '3'],
+        'Result Group': ['Completed', 'Failed', 'Completed', 'Cutoff'],
+    })
+
+    targets = catalog_chart_hover_targets(frame, entry)
+
+    assert len(targets) == 12
+    assert {target['label'] for target in targets} == {'FTP · EE', 'HTTP · EE', 'FTP · 3', 'HTTP · 3'}
+    assert any(target['height'] > 0 for target in targets)
+
+
 def test_cdf_hover_targets_use_the_same_clipped_domain_as_the_renderer() -> None:
     entry = CatalogEntry(
         13, 'POLQA CDF', '', '', '', 'CDR-Speech', 'LQ', 'CDF Line', 'Operator × Campaign', '', 'Operator', 'Campaign', 'Top',
