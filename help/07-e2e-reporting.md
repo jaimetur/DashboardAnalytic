@@ -94,7 +94,9 @@ Automated rows support:
 - `100% Stacked Vertical Bars`
 - `Count Stacked Horizontal Bars`
 - `CDF Line`
+- `Multi KPI CDF Lines`
 - `Scatter`
+- `Map`
 - `Table`
 - `Average Vertical Bars`
 - `Median Vertical Bars`
@@ -155,6 +157,20 @@ Legend Position: Bottom
 
 With two operators and two campaigns, the example produces four CDF lines. A single campaign is emphasised; with multiple campaigns the latest campaign is emphasised within each comparison family.
 
+#### Multi KPI CDF Lines
+
+Use this type for a Tableau worksheet that places several continuous measures in one view. Separate KPI names with `|`; the renderer keeps the shared filters, aggregations and legend and places one CDF panel per measure.
+
+```text
+CDR source: CDR-Data
+KPI: NR_PCell_SINR_Avg | LTE_PCell_SINR_Avg
+Chart type: Multi KPI CDF Lines
+Filters: Test_Result = Completed; Test_Name = FDTT http DL MT
+Rows Aggregation: Operator
+Column Aggregation: Campaign
+Legend Position: Right
+```
+
 #### Average Vertical Bars and Median Vertical Bars
 
 Use for one numeric summary per aggregation combination. Choose `Average Vertical Bars` for mean values or `Median Vertical Bars` where outliers should have less influence.
@@ -213,6 +229,21 @@ Filters: Call_Status = Completed; Call Family = WhatsApp
 Rows Aggregation: Operator
 Column Aggregation: Campaign
 Legend Position: Bottom
+```
+
+#### Map
+
+Use latitude and longitude fields in `Latitude vs Longitude` order. Aggregation dimensions and the legend determine how points are grouped and coloured.
+
+```text
+CDR source: CDR-Data
+KPI: Test_Start_Latitude vs Test_Start_Longitude
+Chart type: Map
+Filters: G_Level_4 = London
+Rows Aggregation: Operator
+Column Aggregation: Campaign
+Legend: Test_Result
+Legend Position: Right
 ```
 
 #### Table

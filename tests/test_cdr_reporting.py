@@ -930,8 +930,12 @@ def test_multi_kpi_cdf_lines_render_each_tableau_measure() -> None:
     })
 
     image = render_catalog_chart_preview(frame, entry)
+    targets = catalog_chart_hover_targets(frame, entry)
 
     assert image.startswith(b'\x89PNG\r\n\x1a\n')
+    assert {target['label'] for target in targets} == {'NR SINR', 'LTE SINR'}
+    assert any(target['x'] < 750 for target in targets)
+    assert any(target['x'] > 750 for target in targets)
 
 
 def test_not_contains_filter_excludes_each_comma_separated_term() -> None:

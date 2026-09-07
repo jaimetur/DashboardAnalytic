@@ -995,7 +995,7 @@ def _catalog_column(
             lambda value: max(5, math.ceil(value / 5) * 5) if pd.notna(value) else pd.NA
         )
         return "__catalog_nr_ul_total_bw"
-    if normalized == "totalbw ltenr" or normalized == "totalbwltenr":
+    if normalized == "totalbwltenr":
         lte = _catalog_column(frame, "LTE DL Aggregated BW (MHz)", multivendor)
         nr = _column(frame, ("NR_DL_PCell_Bandwidth", "NR DL PCell Bandwidth"))
         if not lte and not nr:
@@ -1503,6 +1503,40 @@ def catalog_chart_hover_targets(
     """Describe interactive hit areas using the exact coordinate system of preview PNGs."""
     render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
     spec = _catalog_spec(render_entry)
+    if spec["kind"] == "multi_cdf":
+        metric_targets: list[dict[str, object]] = []
+        metrics = spec.get("metrics", ())
+        columns = 2 if len(metrics) > 1 else 1
+        rows = (len(metrics) + columns - 1) // columns
+        cell_width = 1500 / columns
+        cell_height = 820 / rows
+        scale = min((cell_width - 18) / 1500, (cell_height - 10) / 900)
+        rendered_width = 1500 * scale
+        rendered_height = 900 * scale
+        for index, candidate in enumerate(metrics):
+            child = replace(
+                render_entry,
+                chart_title=candidate,
+                kpi=candidate,
+                chart_type="CDF Line",
+            )
+            offset_x = (index % columns) * cell_width + (cell_width - rendered_width) / 2
+            offset_y = 80 + (index // columns) * cell_height + (cell_height - rendered_height) / 2
+            for target in catalog_chart_hover_targets(frame, child, multivendor=multivendor, prefiltered=prefiltered):
+                transformed = dict(target)
+                for key in ("x", "width"):
+                    if key in transformed:
+                        transformed[key] = float(transformed[key]) * scale + (offset_x if key == "x" else 0)
+                for key in ("y", "height"):
+                    if key in transformed:
+                        transformed[key] = float(transformed[key]) * scale + (offset_y if key == "y" else 0)
+                if "points" in transformed:
+                    transformed["points"] = [
+                        [float(x) * scale + offset_x, float(y) * scale + offset_y]
+                        for x, y in transformed["points"]
+                    ]
+                metric_targets.append(transformed)
+        return metric_targets
     data = frame.copy() if prefiltered else normalise_report_operator_aliases(frame)
     try:
         if not prefiltered:
