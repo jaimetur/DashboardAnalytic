@@ -474,6 +474,7 @@
     let reportChartPreviewUrl = '';
     let reportChartPreviewController = null;
     let reportChartPreviewRequest = 0;
+    const reportChartViewerContextCache = new Map();
     let reportChartSets = {{ report_chart_sets | tojson }};
     let reportChartReportSets = {{ report_chart_report_sets | tojson }};
     const reportScopeLabel = (scope) => ({single: 'Operator Comparison', multivendor: 'Multivendor Comparison'}[scope] || scope || '');
@@ -1365,6 +1366,30 @@
         reportChartViewerInteractive.setAttribute('aria-expanded', 'false');
       }
     };
+    const chartViewerContextKey = (source, identifier, chartIndex) => `${source}:${identifier}:${chartIndex}`;
+    const fetchChartViewerContext = (source, identifier, chartIndex) => {
+      const key = chartViewerContextKey(source, identifier, chartIndex);
+      const cached = reportChartViewerContextCache.get(key);
+      if (cached) return cached;
+      const params = new URLSearchParams({source, identifier, chart_index: String(chartIndex)});
+      const request = fetch(`/api/reporting/chart-preview/context?${params}`, {credentials: 'same-origin'})
+        .then(async (response) => {
+          const definition = await response.json();
+          if (!response.ok) throw new Error(definition.detail || 'Unable to load chart definition.');
+          return definition;
+        })
+        .catch((error) => {
+          reportChartViewerContextCache.delete(key);
+          throw error;
+        });
+      reportChartViewerContextCache.set(key, request);
+      return request;
+    };
+    const prefetchAdjacentChartViewerContexts = (source, identifier) => {
+      [reportChartIndex - 1, reportChartIndex + 1]
+        .filter((index) => index >= 0 && index < reportCharts.length)
+        .forEach((index) => { fetchChartViewerContext(source, identifier, index).catch(() => {}); });
+    };
     const loadChartViewerSandbox = async (chart, session) => {
       const [source, identifier] = String(reportChartSetSelect?.value || '').split(':', 2);
       if (!source || !identifier || !reportChartViewerSandbox) return;
@@ -1375,12 +1400,10 @@
         reportChartViewerInteractive.setAttribute('aria-expanded', 'false');
       }
       try {
-        const params = new URLSearchParams({source, identifier, chart_index: String(reportChartIndex)});
-        const response = await fetch(`/api/reporting/chart-preview/context?${params}`, {credentials: 'same-origin'});
-        const definition = await response.json();
-        if (!response.ok) throw new Error(definition.detail || 'Unable to load chart definition.');
+        const definition = await fetchChartViewerContext(source, identifier, reportChartIndex);
         if (session !== reportChartViewerSession) return;
         renderSharedChartViewerSandbox(definition, chart);
+        prefetchAdjacentChartViewerContexts(source, identifier);
       } catch (error) { showInfoDialog(error.message || 'Unable to load chart definition.', {title: 'Chart preview', tone: 'error'}); }
     };
     const closeReportChartViewerColumnFilter = () => {
