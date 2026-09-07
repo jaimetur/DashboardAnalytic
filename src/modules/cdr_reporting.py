@@ -486,8 +486,11 @@ VENDOR_COLOUR_VARIANTS = {
     # the same vendor receive contrasting shades from that vendor's family.
     "ericsson": ("#2E8B57", "#0D5A34", "#65B984", "#176B42"),
     "huawei": ("#E15759", "#A61E2B", "#F58B8E", "#C43D4D"),
-    "samsung": ("#D9A514", "#9A7000", "#F2CC5C", "#C28D00"),
+    "samsung": ("#7B3FB5", "#54258A", "#A56BD5", "#8E4FC2"),
     "nsn": ("#4E79A7", "#123B68", "#63A4E8", "#365A9B"),
+    "mixed": ("#D9A514", "#9A7000", "#F2CC5C", "#C28D00"),
+    "other": ("#D9A514", "#9A7000", "#F2CC5C", "#C28D00"),
+    "blank": ("#7A8791", "#58656F", "#A8B1B8", "#687580"),
 }
 
 # A consistent vendor sequence makes Vendor Comparison charts comparable from
@@ -1607,6 +1610,8 @@ def _vendor_label(value: object) -> str:
 
 def _vendor_colour_family(vendor: str) -> str | None:
     normalized = vendor.casefold()
+    if not normalized or normalized in {"(blank)", "blank", "nan", "none"}:
+        return "blank"
     return next((family for family in VENDOR_COLOUR_VARIANTS if family in normalized), None)
 
 

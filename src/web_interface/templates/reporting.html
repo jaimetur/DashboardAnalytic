@@ -1343,7 +1343,6 @@
         },
       });
       reportChartViewerSandbox.hidden = compactChartViewerViewport.matches;
-      loadReportChartHoverTargets();
       if (reportChartViewerData) reportChartViewerData.hidden = false;
       if (reportChartViewerInteractive) {
         reportChartViewerInteractive.hidden = false;
@@ -1630,6 +1629,11 @@
       if (reportChartViewerMeta) reportChartViewerMeta.textContent = `${chart.source} · ${chart.chart_type}`;
       loadReportChartViewerImage(chart.image_url, chart.title);
       loadChartViewerSandbox(chart, session);
+      // Tooltip geometry belongs to the stored chart, so load it immediately
+      // after starting the lightweight Interactive Preview request.
+      window.requestAnimationFrame(() => {
+        if (session === reportChartViewerSession) loadReportChartHoverTargets({});
+      });
       closeReportChartViewerData();
       if (reportChartViewerInteractive) reportChartViewerInteractive.setAttribute('aria-expanded', 'false');
       reportChartViewer.querySelectorAll('[data-report-chart-navigate]').forEach((button) => {

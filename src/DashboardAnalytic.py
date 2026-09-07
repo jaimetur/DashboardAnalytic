@@ -36,7 +36,9 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import QueryParams
+from starlette.requests import ClientDisconnect
 from starlette.background import BackgroundTask
 
 DEFAULT_TRANSFER_PORT = 7278
@@ -4194,7 +4196,10 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
     for entry in catalog_entries:
         if entry.source_kind != dataset_kind:
             continue
-        requested.add(entry.kpi)
+        # Scatter and Map KPIs declare their two coordinates as
+        # ``latitude vs longitude``. They are physical CDR columns, not one
+        # combined column name.
+        requested.update(part.strip(' `') for part in re.split(r'\s+vs\s+', entry.kpi, flags=re.IGNORECASE) if part.strip())
         requested.update(_legend_dimensions(entry.legend))
         requested.update(parse_catalog_grouping(entry.grouping_rows).dimensions)
         requested.update(parse_catalog_grouping(entry.grouping_columns).dimensions)
@@ -4483,16 +4488,18 @@ async def temporary_chart_preview(request: Request, user: SessionUser = Depends(
     return Response(content=image, media_type='image/png', headers={'Cache-Control': 'no-store'})
 
 
-@app.post('/api/reporting/chart-preview/hover')
-async def temporary_chart_preview_hover(request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
-    """Return semantic chart hit areas for the interactive PNG preview."""
+def _temporary_chart_preview_hover_targets(payload: dict[str, Any]) -> list[dict[str, object]]:
+    """Build preview hover targets without delaying lightweight viewer setup requests."""
     try:
-        payload = await request.json()
         source = str(payload.get('source') or '')
         identifier = str(payload.get('identifier') or '')
         chart_index = int(payload.get('chart_index'))
         entry, selected_ids, technology, multivendor = _temporary_chart_preview_context(source, identifier, chart_index)
         editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
+        if source == 'standalone' and not editable:
+            stored_targets = _stored_chart_hover_targets(identifier, chart_index)
+            if stored_targets is not None:
+                return stored_targets
         entry = replace(entry, **_temporary_chart_definition_changes(editable))
         preview_dataset_ids = _temporary_preview_dataset_ids(editable, selected_ids, entry.source_kind)
     except (TypeError, ValueError) as exc:
@@ -4511,7 +4518,36 @@ async def temporary_chart_preview_hover(request: Request, user: SessionUser = De
         return ensure_report_vendor_group(combined) if multivendor else combined
     frame = _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4)
     filtered = _cached_filtered_chart_frame(frame_key, frame, entry, multivendor)
-    return JSONResponse({'targets': catalog_chart_hover_targets(filtered, entry, multivendor=multivendor, prefiltered=True)})
+    return catalog_chart_hover_targets(filtered, entry, multivendor=multivendor, prefiltered=True)
+
+
+def _stored_chart_hover_targets(generation: str, chart_index: int) -> list[dict[str, object]] | None:
+    """Read precomputed semantic targets saved beside a generated Chart Set PNG."""
+    if not _valid_report_chart_generation(generation):
+        return None
+    try:
+        manifest = json.loads((report_charts_directory() / generation / 'manifest.json').read_text(encoding='utf-8'))
+        chart = manifest.get('charts', [])[chart_index]
+        target_file = str(chart.get('hover_file') or '')
+        if not re.fullmatch(r'chart-\d+\.hover\.json', target_file):
+            return None
+        targets = json.loads((report_charts_directory() / generation / target_file).read_text(encoding='utf-8'))
+    except (IndexError, OSError, ValueError, json.JSONDecodeError, TypeError):
+        return None
+    return targets if isinstance(targets, list) else None
+
+
+@app.post('/api/reporting/chart-preview/hover')
+async def temporary_chart_preview_hover(request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    """Return semantic chart hit areas for the interactive PNG preview."""
+    try:
+        payload = await request.json()
+    except ClientDisconnect:
+        # The browser deliberately aborts superseded hover requests while the
+        # user navigates. That is not an application error.
+        return Response(status_code=204)
+    targets = await run_in_threadpool(_temporary_chart_preview_hover_targets, payload)
+    return JSONResponse({'targets': targets})
 
 
 @app.post('/api/reporting/chart-preview/data')
@@ -5082,12 +5118,14 @@ def _run_report_chart_job(
                             'empty_placeholder': is_empty_catalog_chart(image, entry), 'rss_mb': _reporting_memory_mb(),
                         })
                         rendered += 1
+                        hover_targets = catalog_chart_hover_targets(frame, entry, multivendor=multivendor)
                         yield ({
                             'order': order,
                             'slide': entry.slide,
                             'title': entry.chart_title or entry.slide_title or f'Slide {entry.slide}',
                             'source': entry.cdr_source,
                             'chart_type': entry.chart_type,
+                            'hover_targets': hover_targets,
                         }, image)
                         task_repository.update_report_chart_job(job_id, status='processing', progress=57 + int(rendered * 38 / len(chart_entries)))
                     del frame
@@ -5303,7 +5341,13 @@ def persist_report_charts(
             used_indexes.add(chart_index)
             file_name = f'chart-{chart_index:03d}.png'
             (staging / file_name).write_bytes(image)
-            manifest_charts.append((chart_index, {key: value for key, value in chart.items() if key != 'order'} | {'file': file_name}))
+            hover_targets = chart.get('hover_targets')
+            metadata = {key: value for key, value in chart.items() if key not in {'order', 'hover_targets'}} | {'file': file_name}
+            if isinstance(hover_targets, list):
+                hover_file = f'chart-{chart_index:03d}.hover.json'
+                (staging / hover_file).write_text(json.dumps(hover_targets, ensure_ascii=False), encoding='utf-8')
+                metadata['hover_file'] = hover_file
+            manifest_charts.append((chart_index, metadata))
         manifest_charts.sort(key=lambda item: item[0])
         manifest = {
             'template': template_name,

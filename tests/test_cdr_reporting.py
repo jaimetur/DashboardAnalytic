@@ -739,7 +739,7 @@ def test_chart_colours_use_vendor_families_for_one_operator() -> None:
 
     assert colours == {
         ('Vodafone', 'Ericsson'): '#2E8B57', ('Vodafone', 'Huawei'): '#E15759',
-        ('Vodafone', 'Samsung'): '#D9A514', ('Vodafone', 'NSN'): '#4E79A7',
+        ('Vodafone', 'Samsung'): '#7B3FB5', ('Vodafone', 'NSN'): '#4E79A7',
     }
 
 
@@ -752,6 +752,41 @@ def test_chart_colours_detect_a_single_operator_from_composite_vendor_values() -
 
     assert colours[('3_Ericsson',)] == '#2E8B57'
     assert len(set(colours.values())) == 3
+
+
+def test_primary_vendor_dimension_assigns_semantic_colours_to_special_vendors() -> None:
+    keys = [
+        ('(blank)',), ('Vodafone_Ericsson',), ('Vodafone_Mixed Vendor',), ('Vodafone_Huawei',),
+        ('Vodafone_Other Vendor',), ('Vodafone_NSN',), ('3_Ericsson',), ('3_Mixed Vendor',),
+        ('3_Huawei',), ('3_Samsung',),
+    ]
+    frame = pd.DataFrame({'__catalog_column_0': []})
+    frame.attrs['catalogue_dimension_labels'] = {'__catalog_column_0': ('Vendor',)}
+
+    colours = _series_colours(keys, ['__catalog_column_0'], frame)
+
+    assert colours == {
+        ('(blank)',): '#7A8791', ('Vodafone_Ericsson',): '#2E8B57',
+        ('Vodafone_Mixed Vendor',): '#D9A514', ('Vodafone_Huawei',): '#E15759',
+        ('Vodafone_Other Vendor',): '#D9A514', ('Vodafone_NSN',): '#4E79A7',
+        ('3_Ericsson',): '#0D5A34', ('3_Mixed Vendor',): '#9A7000',
+        ('3_Huawei',): '#A61E2B', ('3_Samsung',): '#7B3FB5',
+    }
+
+
+def test_reporting_query_columns_splits_map_coordinates() -> None:
+    import src.DashboardAnalytic as app_module
+
+    entry = CatalogEntry(
+        9, 'Map', '', '', 'DL Thput vs RF', 'CDR-Data',
+        'Test_Start_Latitude vs Test_Start_Longitude', 'Map', '', 'Test Name IN (FDTT http DL MT)', 'Test_Result', '', 'Right',
+    )
+
+    columns = app_module.reporting_query_columns('data', [entry], False)
+
+    assert 'Test_Start_Latitude' in columns
+    assert 'Test_Start_Longitude' in columns
+    assert 'Test_Start_Latitude vs Test_Start_Longitude' not in columns
 
 
 def test_catalogue_filter_contract_supports_not_in_and_not_contains() -> None:
@@ -1355,6 +1390,18 @@ def test_persisted_chart_set_keeps_template_order_when_rendered_by_cdr_source(cl
     manifest = json.loads((app_module.report_charts_directory() / chart_set['generation'] / 'manifest.json').read_text(encoding='utf-8'))
     assert [chart['title'] for chart in manifest['charts']] == ['Data chart', 'Voice chart', 'Speech chart']
     assert [chart['file'] for chart in manifest['charts']] == ['chart-001.png', 'chart-002.png', 'chart-003.png']
+
+
+def test_chart_set_persists_precomputed_hover_targets(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    chart_set = app_module.persist_report_charts(
+        'NSA Slide Template', 'single',
+        [({'slide': 1, 'title': 'Chart', 'source': 'data', 'chart_type': 'Bar', 'hover_targets': [{'kind': 'bar', 'x': 1}]}, b'PNG')],
+        {'data': 1, 'voice': 1, 'speech': 1},
+    )
+
+    assert app_module._stored_chart_hover_targets(chart_set['generation'], 0) == [{'kind': 'bar', 'x': 1}]
 
 
 def test_retrying_a_failed_chart_job_reuses_its_row(client) -> None:
