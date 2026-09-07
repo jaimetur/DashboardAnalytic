@@ -5323,7 +5323,7 @@ def report_chart_set(generation: str, user: SessionUser = Depends(current_user))
 
 
 @app.post('/reporting/chart-sets/delete-all')
-def delete_all_report_chart_sets(user: SessionUser = Depends(current_user)) -> JSONResponse:
+def delete_all_report_chart_sets(user: SessionUser = Depends(admin_user)) -> JSONResponse:
     """Remove every standalone Chart Set and every Charts Job row."""
     chart_sets = list_persisted_report_chart_sets()
     charts_root = report_charts_directory()
@@ -5339,7 +5339,7 @@ def delete_all_report_chart_sets(user: SessionUser = Depends(current_user)) -> J
 
 
 @app.post('/reporting/chart-sets/{generation}/delete')
-def delete_report_chart_set(generation: str, user: SessionUser = Depends(current_user)) -> JSONResponse:
+def delete_report_chart_set(generation: str, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     if not _valid_report_chart_generation(generation):
         raise HTTPException(status_code=404, detail='Chart set not found.')
     directory = safe_join(report_charts_directory(), generation)
@@ -5358,7 +5358,7 @@ def report_chart_jobs(user: SessionUser = Depends(current_user)) -> JSONResponse
 
 
 @app.post('/reporting/chart-jobs/{job_id}/delete')
-def delete_report_chart_job(job_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
+def delete_report_chart_job(job_id: int, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     job = repository.get_report_chart_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail='Report Charts job not found.')
@@ -5488,7 +5488,7 @@ def report_job_chart_image(report_id: int, chart_file: str, user: SessionUser = 
 
 
 @app.post('/reporting/jobs/{report_id}/charts/delete')
-def delete_report_job_charts(report_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
+def delete_report_job_charts(report_id: int, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     """Delete only the rendered-chart folder belonging to one report."""
     report = repository.get_report_run(report_id)
     directory = _report_job_charts_directory(report) if report else None
@@ -5501,7 +5501,7 @@ def delete_report_job_charts(report_id: int, user: SessionUser = Depends(current
 
 
 @app.post('/reporting/jobs/{report_id}/delete')
-def delete_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
+def delete_report_job(report_id: int, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     report = repository.delete_report_run(report_id)
     if not report:
         raise HTTPException(status_code=404, detail='Report job not found.')
@@ -5519,7 +5519,7 @@ def stop_report_job(report_id: int, user: SessionUser = Depends(current_user)) -
 
 
 @app.post('/reporting/jobs/delete-all')
-def delete_all_report_jobs(user: SessionUser = Depends(current_user)) -> JSONResponse:
+def delete_all_report_jobs(user: SessionUser = Depends(admin_user)) -> JSONResponse:
     """Delete every persisted PowerPoint report job and its generated file."""
     reports = repository.list_report_runs(limit=None)
     for report in reports:

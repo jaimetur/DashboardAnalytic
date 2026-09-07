@@ -3986,7 +3986,7 @@ if (appLogsPanel) {
       // Persistence is a convenience and must not block filtering.
     }
   };
-  const syncAppLogRows = () => {
+  const syncAppLogRows = ({resetMobilePage = false} = {}) => {
     let visibleCount = 0;
     rows.forEach((row) => {
       const matches = (
@@ -4004,9 +4004,12 @@ if (appLogsPanel) {
       if (matches) visibleCount += 1;
     });
     if (noResults) noResults.hidden = visibleCount > 0 || rows.length === 0;
-    // The mobile card pager has its own display state. Notify it after every
-    // filter pass so the first matching log is immediately visible.
-    body?.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {bubbles: true, detail: {reset: true}}));
+    // New filters should start at their first matching entry.  A manual or
+    // background refresh retains the current card, unless that page no
+    // longer exists after the refreshed rows are applied.
+    body?.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {
+      bubbles: true, detail: {reset: resetMobilePage},
+    }));
     refreshFilterOptionsFromTableRows();
   };
   const replaceSelectOptions = (control, values, allLabel, optionLabel = (value) => value) => {
@@ -4084,7 +4087,7 @@ if (appLogsPanel) {
   };
   [userFilter, executorFilter, dateFilter, typeFilter, actionFilter].filter(Boolean).forEach((filter) => filter.addEventListener('change', () => {
     persistAppLogFilters();
-    syncAppLogRows();
+    syncAppLogRows({resetMobilePage: true});
   }));
   clearFilters?.addEventListener('click', () => {
     if (userFilter) userFilter.value = 'all';
@@ -4093,11 +4096,11 @@ if (appLogsPanel) {
     if (typeFilter) typeFilter.value = 'all';
     if (actionFilter) actionFilter.value = 'all';
     try { window.localStorage.removeItem(appLogFiltersStorageKey); } catch (_error) { /* Ignore unavailable browser storage. */ }
-    syncAppLogRows();
+    syncAppLogRows({resetMobilePage: true});
   });
   refreshButton?.addEventListener('click', () => refreshAppLogs({manual: true}));
   window.setInterval(refreshAppLogs, 5000);
-  syncAppLogRows();
+  syncAppLogRows({resetMobilePage: true});
 }
 
 document.querySelectorAll('[data-chart-aggregation-select]').forEach((select) => {

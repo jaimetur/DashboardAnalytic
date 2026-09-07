@@ -653,7 +653,7 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .report-chart-viewer-header p { margin: 0; color: var(--muted); }
 .report-chart-viewer-close { min-width: 2.3rem; min-height: 2.3rem; padding: 0; border-radius: 999px; background: #eee5fb; border-color: #cdb7ed; color: #5c358d; font-size: 1.55rem; line-height: 1; box-shadow: none; }
 .report-chart-viewer-close:hover:not(:disabled) { background: #dfd0f6; color: #43266e; box-shadow: none; }
-.report-chart-viewer-image { position: relative; min-height: 0; overflow: hidden; padding: 0; border: 1px solid rgba(75, 32, 138, 0.18); border-radius: 10px; background: #fff; }
+.report-chart-viewer-image { position: relative; min-width: 0; min-height: 0; overflow: hidden; padding: 0; border: 1px solid rgba(75, 32, 138, 0.18); border-radius: 10px; background: #fff; }
 .report-chart-viewer-image canvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
 .report-chart-viewer-sandbox { grid-column: 2; grid-row: 2; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; align-content: stretch; gap: 0.45rem; overflow: auto; padding: 0.8rem; border: 1px solid rgba(75, 32, 138, 0.20); border-radius: 10px; background: #fbf8ff; }
 .report-chart-viewer-sandbox[hidden] { display: none !important; }
@@ -759,6 +759,15 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 @media (max-width: 900px) { .report-chart-viewer-dialog { grid-template-columns: 1fr; grid-template-rows: auto minmax(18rem, 1fr) auto auto; } .report-chart-viewer-image, .report-chart-viewer-sandbox { grid-column: 1; } .report-chart-viewer-sandbox { grid-row: 3; max-height: 22rem; } .report-chart-viewer-actions { grid-row: 4; grid-template-columns: 1fr; } }
 .report-chart-zoom-selection { position: absolute; border: 2px solid rgba(75, 32, 138, 0.92); background: rgba(157, 121, 208, 0.18); pointer-events: none; }
 .report-chart-zoom-selection[hidden] { display: none !important; }
+.report-chart-arrow-icon { display: block; width: 1.1rem; height: 1.1rem; margin: auto; fill: none; stroke: currentColor; stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; }
+.report-chart-viewer-image > .report-chart-pan-button { position: absolute; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 2.5rem; height: 2.5rem; min-height: 0; padding: 0; border: 1px solid #bda0df; border-radius: 999px; background: rgba(238, 229, 251, 0.9); color: #513587; box-shadow: 0 2px 8px rgba(54, 30, 86, 0.2); touch-action: manipulation; }
+.report-chart-viewer-image > .report-chart-pan-button[data-report-chart-pan="left"] { left: 0.4rem; }
+.report-chart-viewer-image > .report-chart-pan-button[data-report-chart-pan="right"] { right: 0.4rem; }
+.report-chart-viewer-image > .report-chart-pan-button[data-report-chart-pan="up"] { top: 0.4rem; left: 50%; transform: translateX(-50%); }
+.report-chart-viewer-image > .report-chart-pan-button[data-report-chart-pan="down"] { top: auto; bottom: 0.4rem; left: 50%; transform: translateX(-50%); }
+.report-chart-viewer-image > .report-chart-pan-button[hidden] { display: none !important; }
+.report-chart-viewer-image > .report-chart-pan-button:disabled { opacity: 0.35; cursor: default; }
+.report-chart-viewer-image > .report-chart-pan-button:hover:not(:disabled) { background: #dfd0f6; color: #43266e; }
 .report-chart-viewer-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 390px); gap: 1rem; align-items: center; }
 .report-chart-viewer-navigation, .report-chart-viewer-filtered-data-action { display: flex; justify-content: center; gap: 0.65rem; }
 .report-chart-viewer-navigation button { min-width: 2.7rem; padding: 0.45rem 0.7rem; font-size: 1.1rem; }
@@ -1612,23 +1621,30 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 @media (max-height: 600px) and (orientation: landscape) {
   .confirm-panel.report-chart-viewer-dialog {
     width: calc(100vw - 0.7rem) !important; height: calc(100dvh - 0.7rem) !important;
-    grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto;
-    gap: 0.55rem; padding: 0.65rem; overflow: hidden;
+    grid-template-columns: minmax(0, 1fr) auto auto; grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: 0.3rem; padding: 0.35rem; overflow: hidden;
   }
+  /* Share the header row with the existing action buttons without duplicating
+     controls or changing their portrait layout. */
+  .report-chart-viewer-dialog > .report-chart-viewer-header,
+  .report-chart-viewer-dialog > .report-chart-viewer-actions { display: contents; }
+  .report-chart-viewer-dialog > .report-chart-viewer-header > div { grid-column: 1; grid-row: 1; align-self: center; }
+  .report-chart-viewer-dialog > .report-chart-viewer-header > .report-chart-viewer-close { grid-column: 3; grid-row: 1; min-width: 2rem; min-height: 2rem; }
   .report-chart-viewer-header { flex-direction: row; align-items: center; gap: 0.45rem; min-width: 0; }
   .report-chart-viewer-header > div { min-width: 0; }
   .report-chart-viewer-header .eyebrow, .report-chart-viewer-header p:not(.eyebrow) { display: none; }
   .report-chart-viewer-header h3 { overflow: hidden; font-size: 0.95rem; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
   .report-chart-viewer-close { flex: 0 0 auto; align-self: center; }
-  .report-chart-viewer-image { grid-column: 1; grid-row: 2; min-height: 0; }
+  .report-chart-viewer-image { grid-column: 1 / -1; grid-row: 2; min-height: 0; }
   .report-chart-viewer-actions { grid-column: 1; grid-row: 3; grid-template-columns: 1fr; gap: 0.45rem; position: static; }
-  .report-chart-viewer-navigation { width: 100%; justify-content: stretch; gap: 0.35rem; }
-  .report-chart-viewer-navigation button { flex: 1 1 0; min-width: 0; min-height: 2.35rem; padding-inline: 0.25rem; }
-  .report-chart-viewer-filtered-data-action { width: 100%; gap: 0.45rem; }
+  .report-chart-viewer-navigation { grid-column: 1 / -1; grid-row: 3; width: 100%; justify-content: center; gap: 0.35rem; }
+  .report-chart-viewer-navigation button { flex: 0 0 2rem; min-width: 2rem; min-height: 1.8rem; padding: 0.15rem 0.3rem; font-size: 0.95rem; line-height: 1; }
+  .report-chart-viewer-navigation .report-chart-viewer-zoom-button svg { width: 1rem; height: 1rem; }
+  .report-chart-viewer-filtered-data-action { grid-column: 2; grid-row: 1; align-items: center; width: auto; gap: 0.3rem; }
   .report-chart-viewer-filtered-data-action .report-chart-viewer-data-button,
-  .report-chart-viewer-filtered-data-action .report-chart-viewer-interactive-button { flex: 1 1 0; justify-content: center; min-width: 0; min-height: 2.2rem; padding-inline: 0.45rem; }
+  .report-chart-viewer-filtered-data-action .report-chart-viewer-interactive-button { flex: 0 0 auto; align-self: center; justify-content: center; min-width: 0; min-height: 2rem; padding: 0.25rem 0.4rem; font-size: 0.72rem; white-space: nowrap; }
   .report-chart-viewer-interactive-button { display: inline-flex; }
-  .report-chart-viewer-sandbox { grid-column: 1; grid-row: 2; z-index: 3; align-self: stretch; max-height: none; margin: 0.35rem; overflow: auto; background: rgba(251, 248, 255, 0.99); box-shadow: 0 12px 28px rgba(54, 30, 86, 0.24); }
+  .report-chart-viewer-sandbox { grid-column: 1 / -1; grid-row: 2; z-index: 3; align-self: stretch; max-height: none; margin: 0.35rem; overflow: auto; background: rgba(251, 248, 255, 0.99); box-shadow: 0 12px 28px rgba(54, 30, 86, 0.24); }
   .report-chart-viewer-data-overlay { position: fixed; inset: 0.35rem; z-index: 230; }
 }
 

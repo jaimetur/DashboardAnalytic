@@ -20,6 +20,41 @@ def login(client) -> None:
     assert response.status_code == 303
 
 
+def test_reporting_deletion_requires_admin(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    endpoints = [
+        '/reporting/chart-sets/delete-all',
+        '/reporting/chart-sets/missing/delete',
+        '/reporting/chart-jobs/999999/delete',
+        '/reporting/jobs/999999/charts/delete',
+        '/reporting/jobs/999999/delete',
+        '/reporting/jobs/delete-all',
+    ]
+    for username, password, allowed in [
+        ('demo', 'demo123', False),
+        ('admin', 'admin123', True),
+        ('super', 'super123', True),
+    ]:
+        response = client.post('/login', data={'username': username, 'password': password}, follow_redirects=False)
+        assert response.status_code == 303
+        page = client.get('/reporting')
+        assert page.status_code == 200
+        assert ('data-report-chart-set-delete>Delete Selected' in page.text) == allowed
+        assert ('class="report-jobs-bulk-actions"' in page.text) == allowed
+        # Live job renderers must not recreate delete buttons for normal users.
+        assert ('remove.dataset.reportJobDelete = job.delete_url' in page.text) == allowed
+        assert ('remove.dataset.reportChartJobDelete = job.delete_url' in page.text) == allowed
+        marker = app_module.settings.output_dir / 'reports' / 'permission-check.txt'
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text('Preserve for normal users', encoding='utf-8')
+        for endpoint in endpoints:
+            result = client.post(endpoint)
+            expected = (200 if endpoint.endswith('delete-all') else 404) if allowed else 403
+            assert result.status_code == expected
+        assert marker.exists() == (not allowed)
+
+
 def login_super(client) -> None:
     response = client.post("/login", data={"username": "super", "password": "super123"}, follow_redirects=False)
     assert response.status_code == 303

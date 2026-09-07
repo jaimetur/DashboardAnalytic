@@ -80,9 +80,11 @@
             <div class="chart-set-picker-options" data-chart-set-picker-options role="listbox" aria-label="Chart Sets"></div>
           </details>
         </label>
+        {% if user.role in ['admin', 'super-admin'] %}
         <button type="button" class="danger-button report-chart-set-delete" data-report-chart-set-delete>Delete Selected</button>
         <button type="button" class="danger-button report-chart-set-delete-all" data-report-chart-set-delete-all>Delete All Charts Sets</button>
         <button type="button" class="danger-button report-chart-set-delete-all" data-report-charts-delete-all-reports>Delete All Reports</button>
+        {% endif %}
       </div>
       <p class="lede" data-report-charts-copy>Each chart uses the selected CDRs, technology, scope and Slides Template. Click any chart to enlarge it.</p>
       <div class="report-charts-grid" data-report-charts-body></div>
@@ -106,7 +108,9 @@
       <div class="summary-inline-actions"><span class="pill" data-report-jobs-count>{{ (report_jobs | length) + (report_chart_jobs | length) }} jobs</span><span class="collapse-chip">Collapse</span></div>
     </summary>
     <div class="collapsible-panel-body">
+      {% if user.role in ['admin', 'super-admin'] %}
       <div class="report-jobs-bulk-actions"><button type="button" class="danger-button report-jobs-delete-all" data-report-jobs-delete-all>Delete All Reports</button><button type="button" class="danger-button report-chart-jobs-delete-all" data-report-chart-sets-delete-all-from-jobs>Delete All Charts Sets</button></div>
+      {% endif %}
       <p class="lede">Report and Chart Set generation continues on the server after leaving Reporting or signing out. Each job retains its own download, open, retry, stop and delete actions.</p>
       <div class="table-wrap">
       <table class="report-jobs-table">
@@ -123,7 +127,7 @@
               {% if job.charts_url %}<button type="button" class="report-job-charts-button" title="Open rendered report charts" aria-label="Open rendered report charts" data-report-job-charts="{{ job.charts_url }}">📈</button>{% endif %}
               {% if job.retry_url %}<button type="button" class="report-job-retry-button" title="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry report' }}" aria-label="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry report' }}" data-report-job-retry="{{ job.retry_url }}" data-report-job-id="{{ job.id }}" data-report-job-status="{{ job.status }}" data-report-job-name="{{ job.report_name }}">↻</button>{% endif %}
               {% if job.stop_url %}<button type="button" class="report-job-stop-button" title="Stop report" aria-label="Stop report" data-report-job-stop="{{ job.stop_url }}" data-report-job-name="{{ job.report_name }}">■</button>{% endif %}
-              <button type="button" class="danger-button" title="Delete report" aria-label="Delete report" data-report-job-delete="{{ job.delete_url }}" data-report-job-id="{{ job.id }}" data-report-job-name="{{ job.report_name }}">✕</button>
+              {% if user.role in ['admin', 'super-admin'] %}<button type="button" class="danger-button" title="Delete report" aria-label="Delete report" data-report-job-delete="{{ job.delete_url }}" data-report-job-id="{{ job.id }}" data-report-job-name="{{ job.report_name }}">✕</button>{% endif %}
             </div></td>
           </tr>
           {% endfor %}
@@ -132,7 +136,7 @@
             <td>{{ job.id }}</td><td>{{ job.generated_by }}</td><td>{{ job.date }}</td><td>{{ job.type or '-' }}</td><td>Charts</td><td>{{ job.template or '-' }}</td><td>{{ job.scope or '-' }}</td><td>-</td><td>{{ job.charts if job.charts is not none else '-' }}</td><td class="report-job-datasets">{% if job.dataset_groups %}{% for group in job.dataset_groups %}<span class="report-job-dataset-kind">{{ group.kind }}:</span>{% for name in group.names %}<span>{{ name }}</span>{% endfor %}{% endfor %}{% else %}Historical Chart Set{% endif %}</td>
             <td title="{{ job.error }}"><span class="queue-status-pill queue-status-{{ job.status | lower | replace('_', '-') }}">{{ job.status | title }}</span></td>
             <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%</span></div></td>
-            <td><div class="report-job-actions">{% if job.charts_download_url %}<a class="report-job-download-button report-job-charts-download-button" href="{{ job.charts_download_url }}" download title="Download Chart Set PNGs as ZIP" aria-label="Download Chart Set PNGs as ZIP"></a>{% endif %}{% if job.open_url %}<button type="button" class="report-job-charts-button" title="Open generated Chart Set" aria-label="Open generated Chart Set" data-report-chart-job-open="{{ job.open_url }}">📈</button>{% endif %}{% if job.retry_url %}<button type="button" class="report-job-retry-button" title="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry Chart Set' }}" aria-label="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry Chart Set' }}" data-report-chart-job-retry="{{ job.retry_url }}" data-report-chart-job-name="{{ job.template }}" data-report-chart-job-status="{{ job.status }}" data-report-chart-job-generation="{{ job.generation or '' }}">↻</button>{% endif %}{% if job.stop_url %}<button type="button" class="report-job-stop-button" title="Stop Chart Set" aria-label="Stop Chart Set" data-report-chart-job-stop="{{ job.stop_url }}" data-report-chart-job-name="{{ job.template }}">■</button>{% endif %}<button type="button" class="danger-button" title="Delete Chart Set job" aria-label="Delete Chart Set job" data-report-chart-job-delete="{{ job.delete_url }}" data-report-chart-job-generation="{{ job.generation or '' }}" data-report-chart-job-name="{{ job.template }}">✕</button></div></td>
+<td><div class="report-job-actions">{% if job.charts_download_url %}<a class="report-job-download-button report-job-charts-download-button" href="{{ job.charts_download_url }}" download title="Download Chart Set PNGs as ZIP" aria-label="Download Chart Set PNGs as ZIP"></a>{% endif %}{% if job.open_url %}<button type="button" class="report-job-charts-button" title="Open generated Chart Set" aria-label="Open generated Chart Set" data-report-chart-job-open="{{ job.open_url }}">📈</button>{% endif %}{% if job.retry_url %}<button type="button" class="report-job-retry-button" title="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry Chart Set' }}" aria-label="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry Chart Set' }}" data-report-chart-job-retry="{{ job.retry_url }}" data-report-chart-job-name="{{ job.template }}" data-report-chart-job-status="{{ job.status }}" data-report-chart-job-generation="{{ job.generation or '' }}">↻</button>{% endif %}{% if job.stop_url %}<button type="button" class="report-job-stop-button" title="Stop Chart Set" aria-label="Stop Chart Set" data-report-chart-job-stop="{{ job.stop_url }}" data-report-chart-job-name="{{ job.template }}">■</button>{% endif %}{% if user.role in ['admin', 'super-admin'] %}<button type="button" class="danger-button" title="Delete Chart Set job" aria-label="Delete Chart Set job" data-report-chart-job-delete="{{ job.delete_url }}" data-report-chart-job-generation="{{ job.generation or '' }}" data-report-chart-job-name="{{ job.template }}">✕</button>{% endif %}</div></td>
           </tr>
           {% endfor %}
         </tbody>
@@ -171,6 +175,10 @@
     <div class="report-chart-viewer-image" data-report-chart-viewer-image>
       <canvas data-report-chart-viewer-canvas aria-label="Selected report chart. Drag to select an area to zoom."></canvas>
       <div class="report-chart-zoom-selection" data-report-chart-zoom-selection hidden></div>
+      <button type="button" class="report-chart-pan-button" data-report-chart-pan="up" title="Move chart up" aria-label="Move chart up" hidden><svg class="report-chart-arrow-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20V4m-7 7 7-7 7 7"></path></svg></button>
+      <button type="button" class="report-chart-pan-button" data-report-chart-pan="down" title="Move chart down" aria-label="Move chart down" hidden><svg class="report-chart-arrow-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v16m-7-7 7 7 7-7"></path></svg></button>
+      <button type="button" class="report-chart-pan-button" data-report-chart-pan="left" title="Move chart left" aria-label="Move chart left" hidden><svg class="report-chart-arrow-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 12H4m7-7-7 7 7 7"></path></svg></button>
+      <button type="button" class="report-chart-pan-button" data-report-chart-pan="right" title="Move chart right" aria-label="Move chart right" hidden><svg class="report-chart-arrow-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 12h16m-7-7 7 7-7 7"></path></svg></button>
     </div>
     <section id="report-chart-viewer-interactive-panel" class="report-chart-viewer-sandbox" data-report-chart-viewer-sandbox hidden>
       <p class="eyebrow">Interactive preview</p>
@@ -179,10 +187,12 @@
     </section>
     <div class="report-chart-viewer-actions" aria-label="Chart navigation and filtered data actions">
       <div class="report-chart-viewer-navigation" aria-label="Chart navigation">
-        <button type="button" class="report-chart-viewer-zoom-button" data-report-chart-zoom-reset title="Reset zoom" aria-label="Reset zoom"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.25"></circle><path d="m15.1 15.1 5.15 5.15M7.5 10.5h6"></path></svg></button>
+        <button type="button" class="report-chart-viewer-zoom-button" data-report-chart-zoom="in" title="Zoom in" aria-label="Zoom in"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8"></circle><path d="m16 16 6 6M6 10h8M10 6v8"></path></svg></button>
+        <button type="button" class="report-chart-viewer-zoom-button" data-report-chart-zoom="out" title="Zoom out" aria-label="Zoom out"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8"></circle><path d="m16 16 6 6M6 10h8"></path></svg></button>
+        <button type="button" class="report-chart-viewer-zoom-button" data-report-chart-zoom-reset title="Reset zoom" aria-label="Reset zoom"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8"></circle><path d="m16 16 6 6"></path><text x="10" y="10.5" text-anchor="middle" dominant-baseline="middle" fill="currentColor" stroke="none" font-family="Arial, sans-serif" font-size="8" font-weight="700">1:1</text></svg></button>
         <button type="button" data-report-chart-navigate="first" title="First chart" aria-label="First chart">⏮</button>
-        <button type="button" data-report-chart-navigate="previous" title="Previous chart" aria-label="Previous chart">←</button>
-        <button type="button" data-report-chart-navigate="next" title="Next chart" aria-label="Next chart">→</button>
+        <button type="button" data-report-chart-navigate="previous" title="Previous chart" aria-label="Previous chart"><svg class="report-chart-arrow-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 12H4m7-7-7 7 7 7"></path></svg></button>
+        <button type="button" data-report-chart-navigate="next" title="Next chart" aria-label="Next chart"><svg class="report-chart-arrow-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 12h16m-7-7 7 7-7 7"></path></svg></button>
         <button type="button" data-report-chart-navigate="last" title="Last chart" aria-label="Last chart">⏭</button>
       </div>
       <div class="report-chart-viewer-filtered-data-action">
@@ -684,6 +694,7 @@
           stop.dataset.reportJobStop = job.stop_url; stop.dataset.reportJobName = job.report_name;
           actions.append(stop);
         }
+        {% if user.role in ['admin', 'super-admin'] %}
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'danger-button';
@@ -694,6 +705,7 @@
         remove.dataset.reportJobId = job.id;
         remove.dataset.reportJobName = job.report_name;
         actions.append(remove);
+        {% endif %}
         actionsCell.append(actions);
         row.append(progressCell, actionsCell);
         return row;
@@ -753,7 +765,9 @@
         if (job.open_url) { const open = document.createElement('button'); open.type = 'button'; open.className = 'report-job-charts-button'; open.textContent = '📈'; open.title = 'Open generated Chart Set'; open.setAttribute('aria-label', 'Open generated Chart Set'); open.dataset.reportChartJobOpen = job.open_url; actions.append(open); }
         if (job.retry_url) { const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'report-job-retry-button'; retry.textContent = '↻'; const relaunchReadyJob = String(job.status || '').toLowerCase() === 'ready'; retry.title = relaunchReadyJob ? 'Relaunch Job' : 'Retry Chart Set'; retry.setAttribute('aria-label', retry.title); retry.dataset.reportChartJobRetry = job.retry_url; retry.dataset.reportChartJobName = job.template; retry.dataset.reportChartJobStatus = job.status || ''; retry.dataset.reportChartJobGeneration = job.generation || ''; actions.append(retry); }
         if (job.stop_url) { const stop = document.createElement('button'); stop.type = 'button'; stop.className = 'report-job-stop-button'; stop.textContent = '■'; stop.title = 'Stop Chart Set'; stop.setAttribute('aria-label', 'Stop Chart Set'); stop.dataset.reportChartJobStop = job.stop_url; stop.dataset.reportChartJobName = job.template; actions.append(stop); }
+        {% if user.role in ['admin', 'super-admin'] %}
         const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'danger-button'; remove.textContent = '✕'; remove.title = 'Delete Chart Set job'; remove.setAttribute('aria-label', 'Delete Chart Set job'); remove.dataset.reportChartJobDelete = job.delete_url; remove.dataset.reportChartJobGeneration = job.generation || ''; remove.dataset.reportChartJobName = job.template; actions.append(remove);
+        {% endif %}
         actionsCell.append(actions); row.append(progressCell, actionsCell); return row;
       }));
       syncCombinedJobSummary();
@@ -922,8 +936,9 @@
       chartSetPickerCloseTimer = null;
     };
     reportChartSetPicker?.addEventListener('pointerenter', cancelChartSetPickerClose);
-    reportChartSetPicker?.addEventListener('pointerleave', () => {
+    reportChartSetPicker?.addEventListener('pointerleave', (event) => {
       cancelChartSetPickerClose();
+      if (event.pointerType !== 'mouse' || !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
       chartSetPickerCloseTimer = window.setTimeout(() => {
         reportChartSetPicker.open = false;
         chartSetPickerCloseTimer = null;
@@ -980,7 +995,25 @@
     };
     reportChartSetDeleteAll?.addEventListener('click', deleteAllChartSets);
     reportChartSetsDeleteAllFromJobs?.addEventListener('click', deleteAllChartSets);
+    const updateReportChartPanControls = () => {
+      const viewport = reportChartViewport;
+      const zoomed = reportChartImage && viewport && (
+        viewport.width < reportChartImage.naturalWidth - 0.01 ||
+        viewport.height < reportChartImage.naturalHeight - 0.01
+      );
+      reportChartViewerImage?.querySelectorAll('[data-report-chart-pan]').forEach((button) => {
+        button.hidden = !zoomed;
+        // Moving the image left/up reveals pixels farther right/down.
+        const vertical = ['up', 'down'].includes(button.dataset.reportChartPan);
+        const offset = vertical ? viewport?.y : viewport?.x;
+        const extent = vertical ? viewport?.height : viewport?.width;
+        const fullExtent = vertical ? reportChartImage?.naturalHeight : reportChartImage?.naturalWidth;
+        button.disabled = !zoomed || (['left', 'up'].includes(button.dataset.reportChartPan)
+          ? offset + extent >= fullExtent - 0.01 : offset <= 0.01);
+      });
+    };
     const drawReportChartViewer = () => {
+      updateReportChartPanControls();
       if (!reportChartViewerCanvas || !reportChartViewerImage || !reportChartImage || !reportChartViewport) return;
       const width = reportChartViewerImage.clientWidth;
       const height = reportChartViewerImage.clientHeight;
@@ -988,8 +1021,6 @@
       const scale = window.devicePixelRatio || 1;
       reportChartViewerCanvas.width = Math.round(width * scale);
       reportChartViewerCanvas.height = Math.round(height * scale);
-      reportChartViewerCanvas.style.width = `${width}px`;
-      reportChartViewerCanvas.style.height = `${height}px`;
       const context = reportChartViewerCanvas.getContext('2d');
       if (!context) return;
       context.setTransform(scale, 0, 0, scale, 0, 0);
@@ -1016,6 +1047,7 @@
       };
       reportChartImage = image;
       reportChartViewport = null;
+      updateReportChartPanControls();
       image.src = url;
     };
     const sandboxFields = [
@@ -1417,6 +1449,38 @@
       reportChartViewport = {x: 0, y: 0, width: reportChartImage.naturalWidth, height: reportChartImage.naturalHeight};
       drawReportChartViewer();
     };
+    const changeReportChartZoom = (factor) => {
+      if (!reportChartImage || !reportChartViewport) return;
+      const current = reportChartViewport;
+      const fullWidth = reportChartImage.naturalWidth;
+      const fullHeight = reportChartImage.naturalHeight;
+      const width = Math.min(fullWidth, Math.max(fullWidth / 64, current.width * factor));
+      const height = Math.min(fullHeight, Math.max(fullHeight / 64, current.height * factor));
+      reportChartViewport = {
+        x: Math.max(0, Math.min(fullWidth - width, current.x + (current.width - width) / 2)),
+        y: Math.max(0, Math.min(fullHeight - height, current.y + (current.height - height) / 2)),
+        width, height,
+      };
+      reportChartZoomStart = null;
+      if (reportChartZoomSelection) reportChartZoomSelection.hidden = true;
+      drawReportChartViewer();
+    };
+    const panReportChart = (direction) => {
+      if (!reportChartImage || !reportChartViewport) return;
+      const current = reportChartViewport;
+      const vertical = ['up', 'down'].includes(direction);
+      const axis = vertical ? 'y' : 'x';
+      const extent = vertical ? current.height : current.width;
+      const fullExtent = vertical ? reportChartImage.naturalHeight : reportChartImage.naturalWidth;
+      const step = extent * 0.2 * (['left', 'up'].includes(direction) ? 1 : -1);
+      reportChartViewport = {
+        ...current,
+        [axis]: Math.max(0, Math.min(fullExtent - extent, current[axis] + step)),
+      };
+      reportChartZoomStart = null;
+      if (reportChartZoomSelection) reportChartZoomSelection.hidden = true;
+      drawReportChartViewer();
+    };
     const pointInReportChart = (event) => {
       const rect = reportChartViewerCanvas?.getBoundingClientRect();
       if (!rect) return null;
@@ -1471,7 +1535,22 @@
       reportChartZoomStart = null;
       if (reportChartZoomSelection) reportChartZoomSelection.hidden = true;
     });
-    window.addEventListener('resize', drawReportChartViewer);
+    // Rotation and browser chrome can resize the chart after window.resize.
+    // Observe its actual container and repaint after layout, preserving zoom.
+    let reportChartResizeFrame = null;
+    const scheduleReportChartRedraw = () => {
+      if (reportChartResizeFrame !== null) return;
+      reportChartResizeFrame = window.requestAnimationFrame(() => {
+        reportChartResizeFrame = null;
+        reportChartZoomStart = null;
+        if (reportChartZoomSelection) reportChartZoomSelection.hidden = true;
+        if (!reportChartViewer?.hidden) drawReportChartViewer();
+      });
+    };
+    const reportChartResizeObserver = new ResizeObserver(scheduleReportChartRedraw);
+    if (reportChartViewerImage) reportChartResizeObserver.observe(reportChartViewerImage);
+    window.addEventListener('resize', scheduleReportChartRedraw);
+    window.visualViewport?.addEventListener('resize', scheduleReportChartRedraw);
     const openReportChartViewer = (index) => {
       if (!reportCharts.length || !reportChartViewer) return;
       reportChartIndex = Math.max(0, Math.min(index, reportCharts.length - 1));
@@ -1508,6 +1587,16 @@
       }
       if (event.target.closest('[data-report-chart-zoom-reset]')) {
         resetReportChartZoom();
+        return;
+      }
+      const zoom = event.target.closest('[data-report-chart-zoom]')?.dataset.reportChartZoom;
+      if (zoom) {
+        changeReportChartZoom(zoom === 'in' ? 0.8 : 1.25);
+        return;
+      }
+      const pan = event.target.closest('[data-report-chart-pan]')?.dataset.reportChartPan;
+      if (pan) {
+        panReportChart(pan);
         return;
       }
       const navigation = event.target.closest('[data-report-chart-navigate]')?.dataset.reportChartNavigate;
