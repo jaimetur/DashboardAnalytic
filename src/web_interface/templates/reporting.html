@@ -1003,13 +1003,13 @@
       );
       reportChartViewerImage?.querySelectorAll('[data-report-chart-pan]').forEach((button) => {
         button.hidden = !zoomed;
-        // Moving the image left/up reveals pixels farther right/down.
+        // Pan buttons move the visible viewport in their labelled direction.
         const vertical = ['up', 'down'].includes(button.dataset.reportChartPan);
         const offset = vertical ? viewport?.y : viewport?.x;
         const extent = vertical ? viewport?.height : viewport?.width;
         const fullExtent = vertical ? reportChartImage?.naturalHeight : reportChartImage?.naturalWidth;
         button.disabled = !zoomed || (['left', 'up'].includes(button.dataset.reportChartPan)
-          ? offset + extent >= fullExtent - 0.01 : offset <= 0.01);
+          ? offset <= 0.01 : offset + extent >= fullExtent - 0.01);
       });
     };
     const drawReportChartViewer = () => {
@@ -1472,7 +1472,7 @@
       const axis = vertical ? 'y' : 'x';
       const extent = vertical ? current.height : current.width;
       const fullExtent = vertical ? reportChartImage.naturalHeight : reportChartImage.naturalWidth;
-      const step = extent * 0.2 * (['left', 'up'].includes(direction) ? 1 : -1);
+      const step = extent * 0.2 * (['left', 'up'].includes(direction) ? -1 : 1);
       reportChartViewport = {
         ...current,
         [axis]: Math.max(0, Math.min(fullExtent - extent, current[axis] + step)),
