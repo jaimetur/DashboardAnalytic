@@ -5349,10 +5349,14 @@ def _run_report_chart_job(
                         task_repository.update_report_chart_job(job_id, status='processing', progress=12 + int(rendered * 83 / len(chart_entries)))
                         for order, entry in entries:
                             _ensure_report_job_active(task_repository, job_id, chart_job=True)
-                            hover_future = hover_executor.submit(
-                                catalog_chart_hover_targets, frame, entry, multivendor=multivendor,
-                            ) if hover_executor else None
-                            image = render_catalog_chart_preview(frame, entry, multivendor=multivendor)
+                            try:
+                                hover_future = hover_executor.submit(
+                                    catalog_chart_hover_targets, frame, entry, multivendor=multivendor,
+                                ) if hover_executor else None
+                                image = render_catalog_chart_preview(frame, entry, multivendor=multivendor)
+                            except Exception as exc:
+                                chart_name = entry.chart_title or entry.slide_title or 'Untitled chart'
+                                raise ValueError(f"Slide {entry.slide}, chart '{chart_name}': {exc}") from exc
                             for _attempt in range(2):
                                 if not is_empty_catalog_chart(image, entry):
                                     break
@@ -5375,7 +5379,11 @@ def _run_report_chart_job(
                             task_repository.update_report_chart_job(
                                 job_id, status='processing', progress=12 + int((rendered + .5) * 83 / len(chart_entries)),
                             )
-                            hover_targets = hover_future.result() if hover_future else None
+                            try:
+                                hover_targets = hover_future.result() if hover_future else None
+                            except Exception as exc:
+                                chart_name = entry.chart_title or entry.slide_title or 'Untitled chart'
+                                raise ValueError(f"Slide {entry.slide}, chart '{chart_name}' tooltip generation: {exc}") from exc
                             rendered += 1
                             task_repository.update_report_chart_job(
                                 job_id, status='processing', progress=12 + int(rendered * 83 / len(chart_entries)),

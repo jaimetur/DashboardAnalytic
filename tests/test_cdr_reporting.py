@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, assign_cdr_vendors, catalog_chart_hover_targets, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, assign_cdr_vendors, catalog_chart_hover_targets, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -851,6 +851,19 @@ def test_reporting_query_columns_splits_map_coordinates() -> None:
     assert 'Test_Start_Latitude' in columns
     assert 'Test_Start_Longitude' in columns
     assert 'Test_Start_Latitude vs Test_Start_Longitude' not in columns
+
+
+def test_map_renderer_keeps_a_colour_key_for_every_filtered_point() -> None:
+    frame = pd.DataFrame({
+        'Latitude': [51.5, 51.51, 51.52],
+        'Longitude': [-0.12, -0.11, -0.10],
+        'Operator': ['VF', 'EE', 'VF'],
+        'Campaign': ['2026 Q2', '2026 Q2', '2026 Q1'],
+    })
+
+    image = _render_map('Coverage', frame, 'Operator', 'Campaign', 'Latitude', 'Longitude')
+
+    assert image.getvalue().startswith(b'\x89PNG\r\n\x1a\n')
 
 
 def test_reporting_query_columns_splits_multi_kpi_cdf_metrics() -> None:

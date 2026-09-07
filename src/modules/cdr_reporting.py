@@ -3067,14 +3067,24 @@ def _render_map(title: str, frame: pd.DataFrame, group: str | None, series: str 
     for fraction in (.2, .4, .6, .8):
         draw.line((left + width * fraction, top, left + width * fraction, top + height), fill="#D8E5DF", width=1)
         draw.line((left, top + height * fraction, left + width, top + height * fraction), fill="#D8E5DF", width=1)
-    keys = [(str(row[0]), str(row[1])) if series and group and series != group else (str(row[0]),) for row in data[[group, series] if series and group and series != group else [group] if group else []].fillna('(blank)').itertuples(index=False, name=None)] if group else [('All',)] * len(data)
-    unique_keys = list(dict.fromkeys(keys)); colours = _series_colours(unique_keys, [group, series] if series and group and series != group else [group] if group else [], data)
+    key_columns = [group, series] if series and group and series != group else [group] if group else []
+    # Keep each point's colour key in an indexable array.  Building the keys
+    # and drawing rows with a strict ``zip`` made a Chart Set fail whenever a
+    # pandas iterator exposed fewer rows than a parallel key iterator.  Both
+    # arrays are now derived from this filtered map frame and indexed together.
+    key_values = (
+        data[key_columns].fillna('(blank)').astype(str).to_numpy()
+        if key_columns else None
+    )
+    keys = [tuple(values) for values in key_values] if key_values is not None else [('All',)] * len(data)
+    unique_keys = list(dict.fromkeys(keys)); colours = _series_colours(unique_keys, key_columns, data)
     legend_items: list[tuple[str, str, int]] = []
-    for index, (key, row) in enumerate(zip(keys, data.itertuples(index=False), strict=True)):
+    for index, row in enumerate(data.itertuples(index=False)):
+        key = keys[index]
         lat = float(getattr(row, latitude)); lon = float(getattr(row, longitude)); x = left + (lon - lon_low) / (lon_high - lon_low) * width; y = top + height - (lat - lat_low) / (lat_high - lat_low) * height
         colour = colours.get(key, _colour(key, index)); draw.ellipse((x - 4, y - 4, x + 4, y + 4), fill=colour, outline="#FFFFFF", width=1)
     for index, key in enumerate(unique_keys):
-        label = _legend_key_caption(key, [group, series] if series and group and series != group else [group] if group else [], data, legend_labels) or ' · '.join(key)
+        label = _legend_key_caption(key, key_columns, data, legend_labels) or ' · '.join(key)
         legend_items.append((label, colours.get(key, _colour(key, index)), 2))
     _draw_chart_legend(draw, legend_items[:10], legend_position, font_size=13)
     draw.text((left, top + height + 16), longitude.replace('_', ' '), fill="#405765", font=_font(17, True)); draw.text((26, top - 25), latitude.replace('_', ' '), fill="#405765", font=_font(17, True))
