@@ -61,6 +61,7 @@
 - Added an explicit redirect for direct GET requests to the POST-only workspace duplication endpoint, preventing deployed proxies from showing a misleading “page not found” response.
 - Allowed workspace administrators to remove incomplete duplicate-workspace registrations when a long-running copy is interrupted before access membership is persisted.
 - Moved workspace duplication to a background worker so the HTTP request returns before large filesystem copies complete, preventing proxy timeouts and cleaning up failed partial copies automatically.
+- Reworked the compact Chart Preview into a viewport-fitted landscape canvas with full-width chart navigation; the Interactive panel now opens over the chart from a button alongside View filtered dataset.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
