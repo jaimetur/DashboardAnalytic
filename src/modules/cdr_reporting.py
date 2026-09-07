@@ -1434,7 +1434,15 @@ def catalog_chart_hover_targets(
             subset = values
             for column, value in zip(axes, key, strict=True): subset = subset[subset[column].astype(str) == str(value)]
             ordered = sorted(subset[metric].tolist())
-            for index, value in enumerate(ordered): targets.append({'kind': 'line', 'x': left + (value - low) / (high - low) * width, 'y': top + height - ((index + 1) / len(ordered)) * height, 'label': metric.replace('_', ' '), 'legend': caption(key, axes), 'value': f'{value:.2f}', 'cumulative': f'{(index + 1) / len(ordered):.1%}'})
+            series = caption(key, axes)
+            # A CDF can contain millions of source samples. Its PNG is a
+            # continuous line, so a bounded set of evenly spaced vertices is
+            # sufficient for hit testing and avoids a huge delayed JSON reply.
+            sample_count = min(len(ordered), 480)
+            indexes = range(len(ordered)) if sample_count == len(ordered) else sorted({round(index * (len(ordered) - 1) / (sample_count - 1)) for index in range(sample_count)})
+            for index in indexes:
+                value = ordered[index]
+                targets.append({'kind': 'line', 'series': series, 'x': left + (value - low) / (high - low) * width, 'y': top + height - ((index + 1) / len(ordered)) * height, 'label': metric.replace('_', ' '), 'legend': series, 'value': f'{value:.2f}', 'cumulative': f'{(index + 1) / len(ordered):.1%}'})
     return targets
 
 

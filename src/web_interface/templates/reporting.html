@@ -324,6 +324,8 @@
     let reportChartViewerColumnFilterMenu = null;
     let reportChartHoverTargets = [];
     let reportChartHoverRequest = 0;
+    let reportChartHoverController = null;
+    let reportChartViewerSession = 0;
     let reportChartViewerColumnFilterCloseTimer = null;
     compactChartViewerViewport.addEventListener('change', () => {
       if (reportChartViewer?.hidden || reportChartViewerInteractive?.hidden || !reportChartViewerSandbox) return;
@@ -1057,16 +1059,22 @@
     const hideReportChartHoverTooltip = () => {
       if (reportChartHoverTooltip) reportChartHoverTooltip.hidden = true;
     };
-    const loadReportChartHoverTargets = async () => {
+    const loadReportChartHoverTargets = async (definition = viewerPreviewDefinition()) => {
       const [source, identifier] = String(reportChartSetSelect?.value || '').split(':', 2);
       if (!source || !identifier) return;
       const requestId = ++reportChartHoverRequest;
+      const session = reportChartViewerSession;
+      const chartIndex = reportChartIndex;
+      reportChartHoverController?.abort();
+      reportChartHoverController = new AbortController();
+      reportChartHoverTargets = [];
+      hideReportChartHoverTooltip();
       try {
-        const response = await fetch('/api/reporting/chart-preview/hover', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({source, identifier, chart_index: reportChartIndex, definition: viewerPreviewDefinition()})});
+        const response = await fetch('/api/reporting/chart-preview/hover', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, signal: reportChartHoverController.signal, body: JSON.stringify({source, identifier, chart_index: chartIndex, definition})});
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || 'Unable to load chart values.');
-        if (requestId === reportChartHoverRequest) reportChartHoverTargets = Array.isArray(payload.targets) ? payload.targets : [];
-      } catch (_) { if (requestId === reportChartHoverRequest) reportChartHoverTargets = []; }
+        if (requestId === reportChartHoverRequest && session === reportChartViewerSession && chartIndex === reportChartIndex) reportChartHoverTargets = Array.isArray(payload.targets) ? payload.targets : [];
+      } catch (error) { if (error.name !== 'AbortError' && requestId === reportChartHoverRequest) reportChartHoverTargets = []; }
     };
     reportChartViewerCanvas?.addEventListener('mouseleave', hideReportChartHoverTooltip);
     reportChartViewerCanvas?.addEventListener('mousemove', (event) => {
@@ -1075,9 +1083,17 @@
       if (!pointer || pointer.x < reportChartDrawRect.x || pointer.x > reportChartDrawRect.x + reportChartDrawRect.width || pointer.y < reportChartDrawRect.y || pointer.y > reportChartDrawRect.y + reportChartDrawRect.height) return hideReportChartHoverTooltip();
       const sourceX = reportChartViewport.x + (pointer.x - reportChartDrawRect.x) * reportChartViewport.width / reportChartDrawRect.width;
       const sourceY = reportChartViewport.y + (pointer.y - reportChartDrawRect.y) * reportChartViewport.height / reportChartDrawRect.height;
-      const lineRadius = 18 * reportChartViewport.width / reportChartDrawRect.width;
+      const lineRadius = 32 * reportChartViewport.width / reportChartDrawRect.width;
+      const lineCandidates = reportChartHoverTargets.filter((item) => item.kind === 'line');
+      const lineTarget = lineCandidates.map((item, index) => {
+        const previous = lineCandidates[index - 1];
+        if (!previous || previous.series !== item.series) return {item, distance: Math.hypot(sourceX - item.x, sourceY - item.y)};
+        const deltaX = item.x - previous.x; const deltaY = item.y - previous.y;
+        const ratio = Math.max(0, Math.min(1, ((sourceX - previous.x) * deltaX + (sourceY - previous.y) * deltaY) / (deltaX ** 2 + deltaY ** 2 || 1)));
+        return {item: ratio < 0.5 ? previous : item, distance: Math.hypot(sourceX - (previous.x + ratio * deltaX), sourceY - (previous.y + ratio * deltaY))};
+      }).filter(({distance}) => distance <= lineRadius).sort((left, right) => left.distance - right.distance)[0]?.item;
       const target = reportChartHoverTargets.find((item) => item.kind === 'bar' && sourceX >= item.x && sourceX <= item.x + item.width && sourceY >= item.y && sourceY <= item.y + item.height)
-        || reportChartHoverTargets.filter((item) => item.kind === 'line').map((item) => ({item, distance: Math.hypot(sourceX - item.x, sourceY - item.y)})).filter(({distance}) => distance <= lineRadius).sort((left, right) => left.distance - right.distance)[0]?.item;
+        || lineTarget;
       if (!target) return hideReportChartHoverTooltip();
       reportChartHoverTooltip.textContent = `${target.label} · ${target.legend}: ${target.value}${target.cumulative ? ` · ${target.cumulative}` : ''}`;
       reportChartHoverTooltip.style.left = `${Math.min(reportChartViewerImage.clientWidth - 12, pointer.x + 14)}px`;
@@ -1261,7 +1277,7 @@
             if (reportChartPreviewUrl) URL.revokeObjectURL(reportChartPreviewUrl);
             reportChartPreviewUrl = URL.createObjectURL(image);
             loadReportChartViewerImage(reportChartPreviewUrl, chart.title);
-            loadReportChartHoverTargets();
+            loadReportChartHoverTargets(definition);
           } catch (error) { showInfoDialog(error.message || 'Unable to regenerate chart preview.', {title: 'Chart preview', tone: 'error'}); }
         }, 350);
       };
@@ -1282,14 +1298,15 @@
           const requestId = ++reportChartPreviewRequest;
           reportChartPreviewController = new AbortController();
           try {
-            const response = await fetch('/api/reporting/chart-preview', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, signal: reportChartPreviewController.signal, body: JSON.stringify({source, identifier, chart_index: reportChartIndex, definition: viewerPreviewDefinition()})});
+            const definition = viewerPreviewDefinition();
+            const response = await fetch('/api/reporting/chart-preview', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, signal: reportChartPreviewController.signal, body: JSON.stringify({source, identifier, chart_index: reportChartIndex, definition})});
             if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload.detail || 'Unable to regenerate chart preview.'); }
             const image = await response.blob();
             if (requestId !== reportChartPreviewRequest) return;
             if (reportChartPreviewUrl) URL.revokeObjectURL(reportChartPreviewUrl);
             reportChartPreviewUrl = URL.createObjectURL(image);
             loadReportChartViewerImage(reportChartPreviewUrl, chart.title);
-            loadReportChartHoverTargets();
+            loadReportChartHoverTargets(definition);
           } catch (error) { if (error.name !== 'AbortError') showInfoDialog(error.message || 'Unable to regenerate chart preview.', {title: 'Chart preview', tone: 'error'}); }
         }, 350);
       };
@@ -1321,7 +1338,7 @@
         reportChartViewerInteractive.setAttribute('aria-expanded', 'false');
       }
     };
-    const loadChartViewerSandbox = async (chart) => {
+    const loadChartViewerSandbox = async (chart, session) => {
       const [source, identifier] = String(reportChartSetSelect?.value || '').split(':', 2);
       if (!source || !identifier || !reportChartViewerSandbox) return;
       reportChartViewerSandbox.hidden = true;
@@ -1335,6 +1352,7 @@
         const response = await fetch(`/api/reporting/chart-preview/context?${params}`, {credentials: 'same-origin'});
         const definition = await response.json();
         if (!response.ok) throw new Error(definition.detail || 'Unable to load chart definition.');
+        if (session !== reportChartViewerSession) return;
         renderSharedChartViewerSandbox(definition, chart);
       } catch (error) { showInfoDialog(error.message || 'Unable to load chart definition.', {title: 'Chart preview', tone: 'error'}); }
     };
@@ -1590,13 +1608,16 @@
     window.visualViewport?.addEventListener('resize', scheduleReportChartRedraw);
     const openReportChartViewer = (index) => {
       if (!reportCharts.length || !reportChartViewer) return;
+      const session = ++reportChartViewerSession;
+      reportChartHoverTargets = [];
+      hideReportChartHoverTooltip();
       reportChartIndex = Math.max(0, Math.min(index, reportCharts.length - 1));
       const chart = reportCharts[reportChartIndex];
       if (reportChartViewerTitle) reportChartViewerTitle.textContent = `Slide ${chart.slide} · ${chart.title}`;
       if (reportChartViewerCount) reportChartViewerCount.textContent = `Chart ${reportChartIndex + 1} of ${reportCharts.length}`;
       if (reportChartViewerMeta) reportChartViewerMeta.textContent = `${chart.source} · ${chart.chart_type}`;
       loadReportChartViewerImage(chart.image_url, chart.title);
-      loadChartViewerSandbox(chart);
+      loadChartViewerSandbox(chart, session);
       closeReportChartViewerData();
       if (reportChartViewerInteractive) reportChartViewerInteractive.setAttribute('aria-expanded', 'false');
       reportChartViewer.querySelectorAll('[data-report-chart-navigate]').forEach((button) => {
@@ -1605,7 +1626,7 @@
       });
       reportChartViewer.hidden = false;
     };
-    const closeReportChartViewer = () => { closeReportChartViewerData(); if (reportChartViewer) reportChartViewer.hidden = true; if (reportChartPreviewUrl) { URL.revokeObjectURL(reportChartPreviewUrl); reportChartPreviewUrl = ''; } };
+    const closeReportChartViewer = () => { ++reportChartViewerSession; reportChartHoverController?.abort(); reportChartHoverTargets = []; hideReportChartHoverTooltip(); closeReportChartViewerData(); if (reportChartViewer) reportChartViewer.hidden = true; if (reportChartPreviewUrl) { URL.revokeObjectURL(reportChartPreviewUrl); reportChartPreviewUrl = ''; } };
     reportChartsBody?.addEventListener('click', (event) => {
       const card = event.target.closest('[data-report-chart-index]');
       if (card) openReportChartViewer(Number(card.dataset.reportChartIndex));
