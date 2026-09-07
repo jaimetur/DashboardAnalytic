@@ -875,7 +875,7 @@ def test_status_chart_honours_selected_kpi_when_other_status_columns_exist() -> 
     assert rendered_data['state'].tolist() == ['Completed', 'Failed']
 
 
-def test_status_chart_maps_only_the_three_tableau_states_without_filtering_rows() -> None:
+def test_status_chart_maps_cutoff_to_a_visible_failure_segment_without_filtering_rows() -> None:
     frame = pd.DataFrame({
         'Operator': ['EE'] * 8,
         'Campaign': ['2026-Q2'] * 8,
@@ -888,8 +888,10 @@ def test_status_chart_maps_only_the_three_tableau_states_without_filtering_rows(
         _render_status_100('Data failures', frame, 'Operator', 'Campaign', metric='Test_Result')
 
     states = hierarchy_renderer.call_args.args[1]['state']
-    assert states.iloc[:6].isna().all()
-    assert states.iloc[6:].tolist() == ['Failed', 'Completed']
+    assert states.iloc[:5].isna().all()
+    assert states.iloc[5:].tolist() == ['Cutoff', 'Failed', 'Completed']
+    assert hierarchy_renderer.call_args.args[4] == ('Completed', 'Cutoff', 'Failed')
+    assert hierarchy_renderer.call_args.args[5] == ('#2C9A62', '#D8555F', '#E26A70')
 
 
 def test_data_cutoffs_are_excluded_from_tableau_status_denominator() -> None:

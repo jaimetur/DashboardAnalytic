@@ -15,7 +15,7 @@
 
 #### 🚀 Enhancements:
 - Made incoming transfer approvals reliable across every super-admin page, expired stale pending offers after 15 minutes, reused equivalent retries, propagated terminal source cancellation to the destination, and respected standard HTTP/HTTPS ports when a complete destination URL is entered without an explicit port.
-- Preserved every explicitly filtered `IN` category in hierarchical chart grids even when it has zero matching samples, and strengthened/extended solid first-level row and column separators through their outer headings.
+- Preserved every explicitly filtered `IN` category in hierarchical chart grids even when it has zero matching samples, rendered status bars without unpainted `Cutoff` remainders with Completed in green and Cutoff/Dropped/Failed in red shades, and strengthened/extended solid first-level row and column separators through their outer headings.
 - Increased and strengthened chart titles, axis values and bar-value labels across the shared renderers, and rebuilt legends with larger bold captions, markers, line samples and spacing for reliable preview and report scaling.
 - Normalised App Logs users to lowercase with case-insensitive filtering, recorded explicit successful/failed login outcomes, and limited UI auditing to meaningful operations with descriptive actions such as report or Chart Set generation.
 - Automatically opened and scrolled to the Charts Panel when a newly queued or retried Report Job completes successfully, matching the existing Charts Job workflow.

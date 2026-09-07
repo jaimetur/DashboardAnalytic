@@ -1371,12 +1371,10 @@ def catalog_chart_hover_targets(
         state_column = metric or _column(data, ('Call_Status', 'Test_Result', 'status'))
         if not state_column:
             return []
-        states = ('< 1.6', '≥ 1.6') if spec['kind'] == 'quality_100' else ('Completed', 'Dropped', 'Failed')
         state_data = data[[group, period, state_column, *hierarchy_columns]].dropna(subset=[group, period]).copy()
-        if spec['kind'] == 'quality_100':
-            numeric = pd.to_numeric(state_data[state_column], errors='coerce'); state_data = state_data.loc[numeric.notna()].copy(); state_data['state'] = numeric.loc[state_data.index].map(lambda value: '< 1.6' if value < spec.get('threshold', 1.6) else '≥ 1.6')
-        else:
-            state_data['state'] = state_data[state_column].astype('string').str.strip().str.casefold().map({'completed': 'Completed', 'dropped': 'Dropped', 'failed': 'Failed'})
+        state_data, states, _colours = _status_chart_categories(
+            state_data, state_column, quality=spec['kind'] == 'quality_100', threshold=spec.get('threshold', 1.6),
+        )
         if column_hierarchy or len(row_hierarchy) > 1:
             rows = _hierarchical_unique_keys(state_data, row_hierarchy) if column_hierarchy else [()]
             columns = _hierarchical_unique_keys(state_data, column_hierarchy or row_hierarchy)
@@ -2076,6 +2074,28 @@ def _empty_chart(title: str) -> BytesIO:
     return output
 
 
+def _status_chart_categories(
+    data: pd.DataFrame, state_column: str, *, quality: bool, threshold: float,
+) -> tuple[pd.DataFrame, tuple[str, ...], tuple[str, ...]]:
+    """Classify every non-empty result so 100% bars have no unpainted remainder."""
+    result = data.copy()
+    if quality:
+        numeric = pd.to_numeric(result[state_column], errors="coerce")
+        result = result.loc[numeric.notna()].copy()
+        result["state"] = numeric.loc[result.index].map(lambda value: "< 1.6" if value < threshold else "≥ 1.6")
+        return result, ("< 1.6", "≥ 1.6"), ("#C83E4D", "#2C9A62")
+    normalised = result[state_column].astype("string").str.strip().str.casefold()
+    result["state"] = normalised.map({
+        "completed": "Completed", "drop": "Dropped", "dropped": "Dropped", "failed": "Failed", "cutoff": "Cutoff",
+    })
+    present = [str(value) for value in result["state"].dropna().drop_duplicates()]
+    preferred = [state for state in ("Completed", "Cutoff", "Dropped", "Failed") if state in present]
+    states = tuple([*preferred, *sorted((state for state in present if state not in preferred), key=str.casefold)])
+    failure_colours = ("#C83E4D", "#D8555F", "#E26A70", "#AE2F42", "#F08A8F", "#8F2035")
+    colours = tuple("#2C9A62" if state == "Completed" else failure_colours[index % len(failure_colours)] for index, state in enumerate(states))
+    return result, states, colours
+
+
 def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, period: str | None, quality: bool = False, threshold: float = 1.6, metric: str | None = None, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
     if frame.empty or not group or not period:
         return _empty_chart(title)
@@ -2086,30 +2106,12 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
     state_column = metric or _column(frame, ("Call_Status", "Test_Result", "status"))
     if not state_column:
         return _empty_chart(title)
-    states = ("< 1.6", "≥ 1.6") if quality else ("Completed", "Dropped", "Failed")
-    colours = ("#E15759", "#59A14F") if quality else ("#4E79A7", "#F28E2B", "#E15759")
     hierarchy_columns = sorted(
         [column for column in frame.columns if column.startswith("__catalog_row_") or column.startswith("__catalog_column_")],
         key=lambda column: (0 if column.startswith("__catalog_row_") else 1, int(column.rsplit("_", 1)[1])),
     )
     data = frame[[group, period, state_column, *hierarchy_columns]].copy()
-    if quality:
-        numeric_state = pd.to_numeric(data[state_column], errors="coerce")
-        # Missing and non-numeric KPI values are not samples and therefore
-        # must not affect either segment of a percentage chart.
-        data = data.loc[numeric_state.notna()].copy()
-        numeric_state = numeric_state.loc[data.index]
-        data["state"] = numeric_state.map(lambda value: "< 1.6" if value < threshold else "≥ 1.6")
-    else:
-        raw = data[state_column].astype("string").str.strip().str.casefold()
-        def status_category(value: str) -> str | None:
-            return {
-                "completed": "Completed",
-                "dropped": "Dropped",
-                "failed": "Failed",
-            }.get(value)
-
-        data["state"] = raw.map(status_category)
+    data, states, colours = _status_chart_categories(data, state_column, quality=quality, threshold=threshold)
     data = data.dropna(subset=[group, period])
     row_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_row_")]
     column_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_column_")]
