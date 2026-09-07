@@ -44,7 +44,7 @@ LEGACY_ROWS_COLUMNS_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layo
 LEGACY_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "CDR source", "KPI", "Chart type", "Filters", "Grouping")
 CATALOG_SOURCE_KINDS = {"cdr-data": "data", "cdr-voice": "voice", "cdr-speech": "speech"}
 CHART_TYPES = {
-    "100% stacked vertical bars", "count stacked horizontal bars", "cdf line", "scatter", "table",
+    "100% stacked vertical bars", "count stacked horizontal bars", "cdf line", "multi kpi cdf lines", "scatter", "table",
     "distribution stacked vertical bars", "threshold stacked vertical bars", "average vertical bars", "median vertical bars", "map",
 }
 STRUCTURAL_SLIDE_TYPES = {"title slide", "transition slide"}
@@ -944,6 +944,18 @@ def _catalog_column(
         # Tableau's Vendor_V3 calculation is materialised by ingestion as the
         # combined Operator_Vendor value in ``vendor``/``report_vendor``.
         return _column(frame, ("report_vendor", "vendor", "Vendor"))
+    if normalized in {"resultgroup", "testresultgroup"}:
+        source = _column(frame, ("Test_Result", "Test Result", "Call_Status", "status"))
+        if not source:
+            return None
+        values = frame[source].astype("string").str.strip().str.casefold()
+        frame["__catalog_result_group"] = values.map({
+            "completed": "Success",
+            "visible completed": "Success",
+            "cutoff": "Failure",
+            "failed": "Failure",
+        }).astype("string")
+        return "__catalog_result_group"
     if normalized == "firstltepccarfcn":
         source = _column(frame, ("LTE_PCC_EARFCN", "LTE PCC EARFCN"))
         if not source:
@@ -1609,7 +1621,14 @@ def _source_for_spec(frames: dict[str, pd.DataFrame], spec: dict, multivendor: b
 
 
 def _metric_column(frame: pd.DataFrame, spec: dict) -> str | None:
-    return _column(frame, spec.get("metric", ()))
+    metric = _column(frame, spec.get("metric", ()))
+    if metric:
+        return metric
+    for candidate in spec.get("metric", ()):
+        resolved = _catalog_column(frame, candidate, False)
+        if resolved:
+            return resolved
+    return None
 
 
 def _operator_colour(label: object) -> str | None:
@@ -2774,16 +2793,22 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
 
 
 def _combine_charts(title: str, charts: list[BytesIO]) -> BytesIO:
-    """Place the two chart grammars used together by the supplied templates."""
+    """Place several chart grammars in a compact grid."""
     usable = [Image.open(chart).convert("RGB") for chart in charts]
     if not usable:
         return _empty_chart(title)
     image, _ = _canvas(title)
-    width = image.width // len(usable)
+    columns = 2 if len(usable) > 1 else 1
+    rows = (len(usable) + columns - 1) // columns
+    width = image.width // columns
+    height = (image.height - 80) // rows
     for index, chart in enumerate(usable):
-        chart.thumbnail((width - 18, image.height - 85))
-        x = index * width + (width - chart.width) // 2
-        image.paste(chart, (x, 80 + (image.height - 80 - chart.height) // 2))
+        chart.thumbnail((width - 18, height - 10))
+        column = index % columns
+        row = index // columns
+        x = column * width + (width - chart.width) // 2
+        y = 80 + row * height + (height - chart.height) // 2
+        image.paste(chart, (x, y))
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0)
     return output
 
@@ -3101,7 +3126,12 @@ def _catalog_spec(entry: CatalogEntry) -> dict:
     chart_type = entry.chart_type.casefold()
     metric_parts = tuple(part.strip(" `") for part in re.split(r"\s+vs\s+", entry.kpi, flags=re.I) if part.strip())
     spec: dict = {"source": entry.source_kind, "metric": metric_parts[:1] or (entry.kpi,)}
-    if "scatter" in chart_type:
+    if chart_type == "multi kpi cdf lines":
+        metrics = tuple(part.strip(" `") for part in entry.kpi.split("|") if part.strip())
+        spec["kind"] = "multi_cdf"
+        spec["metric"] = metrics[:1]
+        spec["metrics"] = metrics
+    elif "scatter" in chart_type:
         spec["kind"] = "scatter"
         spec["x_metric"] = metric_parts[1:] or ("Playing_RSRP_NR_Avg", "NR_RSRP_Avg")
     elif chart_type == "map":
@@ -3172,6 +3202,16 @@ def _chart_for_catalog_entry(
         return finish(_render_failure_count(chart_title, frame, group, period, legend_labels, renderer_legend_position))
     if spec["kind"] == "map":
         return finish(_render_map(chart_title, frame, group, period, metric, _column(frame, spec.get("x_metric", ())), legend_labels, renderer_legend_position))
+    if spec["kind"] == "multi_cdf":
+        charts = []
+        for candidate in spec.get("metrics", ()):
+            resolved = _column(frame, (candidate,)) or _catalog_column(frame, candidate, multivendor)
+            if resolved:
+                charts.append(_render_cdf_line(
+                    candidate, frame, group, period, resolved, legend_dimensions,
+                    renderer_legend_position, layout_legend_position=legend_position,
+                ))
+        return _combine_charts(chart_title, charts) if charts else _empty_chart(chart_title)
     if chart_type == "distribution stacked vertical bars":
         return finish(_render_stacked_distribution(chart_title, frame, group, period, "__catalog_stack", legend_labels, renderer_legend_position))
     # Non-stacked visuals have one visual series per row/column combination. A

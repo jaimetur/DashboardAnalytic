@@ -462,7 +462,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-jobs-table th:nth-child(3), .report-jobs-table td:nth-child(3) { width: 132px; min-width: 132px; max-width: 132px; white-space: normal; overflow-wrap: normal; }
 .report-jobs-table th:nth-child(6), .report-jobs-table td:nth-child(6) { width: 180px; min-width: 170px; max-width: 185px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .report-jobs-table th:nth-child(7), .report-jobs-table td:nth-child(7) { width: 130px; min-width: 124px; max-width: 134px; white-space: normal; }
-.report-jobs-table th:nth-child(11), .report-jobs-table td:nth-child(11) { width: 250px; min-width: 190px; max-width: 300px; }
+.report-jobs-table th:nth-child(11), .report-jobs-table td:nth-child(11) { width: 160px; min-width: 130px; max-width: 180px; }
 .report-job-datasets { display: flex; flex-direction: column; align-items: flex-start; gap: 0.12rem; white-space: normal !important; }
 .report-job-dataset-kind { color: #5d3b86; font-weight: 800; margin-top: 0.18rem; }
 .report-job-progress { display: flex; align-items: center; gap: 0.45rem; min-width: 122px; font-variant-numeric: tabular-nums; }
@@ -474,7 +474,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-job-status { overflow-wrap: anywhere; }
 .report-job-error { margin: 0.32rem 0 0; color: #9d3026; font-size: 0.74rem; font-weight: 650; line-height: 1.28; }
 .app-log-summary { margin: 0 0 0.3rem; color: #243f51; font-size: 0.82rem; font-weight: 650; line-height: 1.35; }
-.report-job-actions { display: flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+.report-job-actions { display: flex; max-width: 7rem; flex-wrap: wrap; align-items: center; gap: 0.35rem; white-space: normal; }
 .report-job-download-button { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; padding: 0; border: 1px solid rgba(116, 87, 164, 0.62); border-radius: 999px; background: linear-gradient(145deg, #6d46a8, #9870d0); color: #fff; font-size: 1.2rem; line-height: 1; font-weight: 800; text-decoration: none; box-shadow: 0 8px 18px rgba(95, 69, 142, 0.18); }
 .report-job-download-button:hover:not(.action-link-disabled) { background: linear-gradient(145deg, #4f2d82, #7549b0); border-color: rgba(79, 45, 130, 0.78); color: #fff; box-shadow: 0 10px 22px rgba(79, 45, 130, 0.32); transform: translateY(-1px); }
 .report-job-download-button.action-link-disabled { background: linear-gradient(135deg, #e3e8ec, #d5dde4); border-color: rgba(126, 139, 152, 0.24); color: #7a8792; box-shadow: none; cursor: not-allowed; }
@@ -1744,7 +1744,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
   .report-jobs-table .report-job-actions, .recovered-transfer-table .table-actions,
   .workspace-library-table .workspace-row-actions, .admin-datasets-table .admin-dataset-actions,
   .database-editor-table .database-editor-actions {
-    flex-wrap: nowrap; justify-content: flex-start; gap: 0.3rem; white-space: nowrap;
+    max-width: none; flex-wrap: nowrap; justify-content: flex-start; gap: 0.3rem; white-space: nowrap;
   }
   .users-table td:nth-child(8), .catalogue-workspace-table td:nth-child(6),
   .report-jobs-table td:nth-child(13), .workspace-library-table td[data-label="Actions"],

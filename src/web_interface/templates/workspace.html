@@ -246,12 +246,12 @@
                 {% endif %}
                 {% endif %}
                 {% elif dataset.status == 'processing' %}
-                <span class="ghost-link action-link-disabled" aria-disabled="true">View</span>
+                <span class="ghost-link action-link-preview action-link-disabled" aria-disabled="true" title="Preview unavailable while processing" aria-label="Preview unavailable while processing">Preview</span>
                 <form method="post" action="/dashboard/stop/{{ dataset.id }}" data-confirm="Stop processing for '{{ dataset.file_name }}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
                   <button type="submit" class="danger-button icon-action" aria-label="Stop processing" title="Stop processing">■</button>
                 </form>
                 {% elif dataset.status == 'queued' %}
-                <span class="ghost-link action-link-disabled" aria-disabled="true">View</span>
+                <span class="ghost-link action-link-preview action-link-disabled" aria-disabled="true" title="Preview unavailable while queued" aria-label="Preview unavailable while queued">Preview</span>
                 <form method="post" action="/dashboard/delete/{{ dataset.id }}" data-confirm="Delete queued dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
                   <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
                 </form>

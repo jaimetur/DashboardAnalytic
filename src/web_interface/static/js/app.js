@@ -1144,7 +1144,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       ],
       textFields: {chart_title: true},
       // Keep these option sets identical to the persisted Chart Viewer.
-      chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars'],
+      chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
       cdrSources: ['CDR-Data', 'CDR-Voice', 'CDR-Speech'],
       legendPositions: ['Top', 'Bottom', 'Left', 'Right'],
       onChange: regenerate,
@@ -4286,35 +4286,35 @@ if (queueNode) {
         .replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       if (dataset.status === 'ready') {
         actions.innerHTML = `
-          <a class="ghost-link action-link-preview" href="/workspace/preview/${dataset.id}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview</a>
+          <a class="ghost-link action-link-preview" href="/workspace/preview/${dataset.id}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview" title="Preview dataset" aria-label="Preview dataset">Preview</a>
           <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete dataset '${fileName}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
-            <button type="submit" class="danger-button">Delete</button>
+            <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
           </form>
-          ${isCdr ? `<a class="ghost-link action-link-primary" href="${openHref}" data-dashboard-open-link data-dataset-id="${dataset.id}"${datasetKind ? ` data-input-kind="${String(datasetKind)}"` : ''}>Show Dashboard</a>` : ''}
+          ${isCdr ? `<a class="ghost-link action-link-primary" href="${openHref}" data-dashboard-open-link data-dataset-id="${dataset.id}" title="Show dashboard" aria-label="Show dashboard"${datasetKind ? ` data-input-kind="${String(datasetKind)}"` : ''}>Show Dashboard</a>` : ''}
           ${canClearVendors ? `<button type="button" class="action-link-clear-vendors" data-vendor-clear-open data-dataset-id="${dataset.id}" title="Clear vendor mapping" aria-label="Clear vendor mapping">Clear Vendors</button>` : ''}
           ${canMapVendors ? `<button type="button" class="ghost-link action-link-map-vendors" data-vendor-map-open data-dataset-id="${dataset.id}" data-dataset-name="${fileName}">Map Vendors</button>` : ''}
         `;
       } else if (dataset.status === 'processing') {
         actions.innerHTML = `
-          <span class="ghost-link action-link-disabled" aria-disabled="true">Preview</span>
+          <span class="ghost-link action-link-preview action-link-disabled" aria-disabled="true" title="Preview unavailable while processing" aria-label="Preview unavailable while processing">Preview</span>
           <form method="post" action="/dashboard/stop/${dataset.id}" data-confirm="Stop processing for '${dataset.file_name}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
-            <button type="submit" class="danger-button">Stop</button>
+            <button type="submit" class="danger-button icon-action" aria-label="Stop processing" title="Stop processing">■</button>
           </form>
         `;
       } else if (dataset.status === 'queued') {
         actions.innerHTML = `
-          <span class="ghost-link action-link-disabled" aria-disabled="true">Preview</span>
+          <span class="ghost-link action-link-preview action-link-disabled" aria-disabled="true" title="Preview unavailable while queued" aria-label="Preview unavailable while queued">Preview</span>
           <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete queued dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
-            <button type="submit" class="danger-button">Delete</button>
+            <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
           </form>
         `;
       } else if (dataset.status === 'failed' || dataset.status === 'stopped') {
         actions.innerHTML = `
           <form method="post" action="/dashboard/retry/${dataset.id}" data-loading-label="Retrying dataset processing">
-            <button type="submit" class="warning-button">Retry</button>
+            <button type="submit" class="warning-button icon-action" aria-label="Retry processing" title="Retry processing">↻</button>
           </form>
           <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
-            <button type="submit" class="danger-button">Delete</button>
+            <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
           </form>
         `;
       }

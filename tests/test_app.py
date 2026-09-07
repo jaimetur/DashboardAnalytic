@@ -1579,6 +1579,29 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     assert 'href="/workspace/preview/1" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview Dataset</a>' in dashboard_response.text
 
 
+def test_queued_dataset_actions_remain_compact_icons_during_live_updates(client) -> None:
+    login(client)
+    import src.DashboardAnalytic as app_module
+
+    source = app_module.settings.input_dir / 'queued.csv'
+    source.write_text('value\n1\n', encoding='utf-8')
+    dataset_id, _ = app_module.repository.add_dataset(source.name, str(source), 'admin')
+    app_module.repository.update_dataset_profile(dataset_id, status='queued', progress=0)
+
+    page = client.get('/workspace')
+    assert page.status_code == 200
+    assert 'action-link-preview action-link-disabled' in page.text
+    assert 'Preview unavailable while queued' in page.text
+    assert 'class="danger-button icon-action" aria-label="Delete dataset"' in page.text
+
+    script = client.get('/static/js/app.js')
+    assert 'action-link-preview action-link-disabled' in script.text
+    assert 'class="danger-button icon-action" aria-label="Delete dataset"' in script.text
+
+    styles = client.get('/static/css/app.css')
+    assert '.report-job-actions { display: flex; max-width: 7rem; flex-wrap: wrap;' in styles.text
+
+
 def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> None:
     login(client)
     client.post(

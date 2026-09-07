@@ -4212,7 +4212,11 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
         # Scatter and Map KPIs declare their two coordinates as
         # ``latitude vs longitude``. They are physical CDR columns, not one
         # combined column name.
-        requested.update(part.strip(' `') for part in re.split(r'\s+vs\s+', entry.kpi, flags=re.IGNORECASE) if part.strip())
+        requested.update(
+            part.strip(' `')
+            for part in re.split(r'\s+vs\s+|\s*\|\s*', entry.kpi, flags=re.IGNORECASE)
+            if part.strip()
+        )
         requested.update(_legend_dimensions(entry.legend))
         requested.update(parse_catalog_grouping(entry.grouping_rows).dimensions)
         requested.update(parse_catalog_grouping(entry.grouping_columns).dimensions)
@@ -4230,6 +4234,8 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
         'tputabove': {'Mean_Data_Rate', 'Test_Name'},
         'tputbelow': {'Mean_Data_Rate', 'Test_Name'},
         'ttfp10sratio': {'VideoStream_Time_to_First_Picture'},
+        'resultgroup': {'Test_Result'},
+        'testresultgroup': {'Test_Result'},
     }
     for identity, dependencies in derived_dependencies.items():
         if identity in requested_identities:
