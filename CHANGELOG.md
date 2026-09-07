@@ -47,6 +47,7 @@
 - Added native hover labels and accessible names to compact table action icons, strengthened the download arrows in Reports and Charts Jobs, and represented report downloads with a PPT presentation icon and explicit `Download PPT Report` tooltip beneath the green download arrow.
 - Refined Workspace, Dataset and Slides Templates management tables with compact labelled actions, clearer Dashboard and chart glyphs, balanced metadata columns, readable date/time lines and flexible names without horizontal overflow.
 - Ordered the combined Chart Set selector from newest to oldest across Report and standalone Chart Sets, and automatically select the newest available set regardless of its type.
+- Allowed a CDR uploaded in a multi-file Workspace batch to select a VFUK or 3UK Vendor Mapping from the same batch; mappings are queued and processed before their dependent CDRs, while the upload dialog now distinguishes file transfer from the continuing background processing queue.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.

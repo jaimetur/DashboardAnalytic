@@ -1855,6 +1855,32 @@ def test_workspace_batch_upload_keeps_vendor_mapping_choices_aligned_per_file(cl
     assert '>3_Nokia<' in client.get('/workspace/preview/2').text
 
 
+def test_workspace_batch_upload_processes_uploaded_mapping_before_its_cdr(client) -> None:
+    login(client)
+
+    response = client.post(
+        '/dashboard/upload',
+        data={
+            'dataset_kinds': ['mapping_three', 'data'],
+            'vodafone_mapping_dataset_ids': ['', ''],
+            'three_mapping_dataset_ids': ['', 'upload:0'],
+        },
+        files=[
+            ('dataset_files', ('Multivendor_Mapping_3UK.csv', BytesIO(b'Cid__ECI,Vendor\n200,Nokia\n'), 'text/csv')),
+            ('dataset_files', ('cdr_data.csv', BytesIO(b'Operator,Cell_ID_A,score\n3,200 -> 200,91\n'), 'text/csv')),
+        ],
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    preview = client.get('/workspace/preview/2')
+    assert '>3_Nokia<' in preview.text
+
+    import src.DashboardAnalytic as app_module
+    cdr = app_module.serialize_dataset_row(app_module.repository.get_dataset(2))
+    assert cdr['vendor_mapping_applied'] is True
+
+
 def test_vfuk_preview_limits_mapping_sheets_and_displays_materialised_gcid(client) -> None:
     login(client)
     workbook = BytesIO()

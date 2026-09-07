@@ -5879,37 +5879,45 @@ async def upload_dataset(
     if any(kind not in UPLOAD_DATASET_KINDS for kind in selected_kinds):
         raise HTTPException(status_code=422, detail='Unsupported dataset type selection.')
 
-    def parse_mapping_selection(values: list[str] | None, label: str) -> list[int | None]:
+    def parse_mapping_selection(values: list[str] | None, label: str) -> list[str | None]:
         if not values:
             return [None] * len(dataset_files)
         if len(values) != len(dataset_files):
             raise HTTPException(status_code=422, detail=f'Choose one {label} value for every uploaded file.')
-        selected_ids: list[int | None] = []
+        selected_ids: list[str | None] = []
         for value in values:
             value = str(value or '').strip()
-            if not value:
-                selected_ids.append(None)
-                continue
-            try:
-                selected_ids.append(int(value))
-            except ValueError as exc:
-                raise HTTPException(status_code=422, detail=f'Invalid {label} selection.') from exc
+            selected_ids.append(value or None)
         return selected_ids
 
     selected_vodafone_mappings = parse_mapping_selection(vodafone_mapping_dataset_ids, 'VFUK mapping')
     selected_three_mappings = parse_mapping_selection(three_mapping_dataset_ids, '3UK mapping')
-    for index, selected_kind in enumerate(selected_kinds or [''] * len(dataset_files)):
-        if selected_kind not in CDR_DATASET_KINDS:
-            continue
+
+    def validate_mapping_selection(selection: str | None, expected_kind: str, label: str) -> None:
+        if not selection:
+            return
+        if selection.startswith('upload:'):
+            try:
+                upload_index = int(selection.removeprefix('upload:'))
+                selected_kind = selected_kinds[upload_index]
+            except (IndexError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=f'Invalid {label} selection.') from exc
+            if selected_kind != expected_kind:
+                raise HTTPException(status_code=422, detail=f'The selected uploaded file is not a {label}.')
+            return
         try:
-            if selected_vodafone_mappings[index]:
-                _reporting_dataset(selected_vodafone_mappings[index], 'mapping_vodafone')
-            if selected_three_mappings[index]:
-                _reporting_dataset(selected_three_mappings[index], 'mapping_three')
-        except HTTPException:
-            raise
+            mapping_id = int(selection)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f'Invalid {label} selection.') from exc
+        _reporting_dataset(mapping_id, expected_kind)
+
+    for index, selected_kind in enumerate(selected_kinds or [''] * len(dataset_files)):
+        if selected_kind in CDR_DATASET_KINDS:
+            validate_mapping_selection(selected_vodafone_mappings[index], 'mapping_vodafone', 'VFUK mapping')
+            validate_mapping_selection(selected_three_mappings[index], 'mapping_three', '3UK mapping')
 
     queued_dataset_ids: list[int] = []
+    uploaded_datasets: list[dict[str, Any]] = []
     for index, dataset_file in enumerate(dataset_files):
         extension = Path(dataset_file.filename or '').suffix.lower()
         destination = safe_join(settings.input_dir, dataset_file.filename or f'upload{extension}')
@@ -5919,23 +5927,69 @@ async def upload_dataset(
         selected_kind = selected_kinds[index] if selected_kinds else None
         if selected_kind:
             repository.update_dataset_profile(dataset_id, dataset_kind=selected_kind)
-        vodafone_mapping_dataset_id = selected_vodafone_mappings[index] if selected_kind in CDR_DATASET_KINDS else None
-        three_mapping_dataset_id = selected_three_mappings[index] if selected_kind in CDR_DATASET_KINDS else None
-        repository.add_log(user.username, 'upload_dataset' if created else 'reprocess_dataset', json.dumps({
-            'file': destination.name,
-            'dataset_kind': selected_kind or 'auto-detected',
+        uploaded_datasets.append({
+            'index': index,
+            'dataset_id': dataset_id,
+            'destination': destination,
+            'dataset_kind': selected_kind,
+            'created': created,
+            'vodafone_mapping_selection': selected_vodafone_mappings[index],
+            'three_mapping_selection': selected_three_mappings[index],
+        })
+        queued_dataset_ids.append(dataset_id)
+
+    def resolve_mapping_selection(
+        selection: str | None, expected_kind: str, label: str,
+    ) -> int | None:
+        if not selection:
+            return None
+        if selection.startswith('upload:'):
+            try:
+                upload_index = int(selection.removeprefix('upload:'))
+                uploaded = uploaded_datasets[upload_index]
+            except (IndexError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=f'Invalid {label} selection.') from exc
+            if uploaded['dataset_kind'] != expected_kind:
+                raise HTTPException(status_code=422, detail=f'The selected uploaded file is not a {label}.')
+            return int(uploaded['dataset_id'])
+        try:
+            mapping_id = int(selection)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f'Invalid {label} selection.') from exc
+        _reporting_dataset(mapping_id, expected_kind)
+        return mapping_id
+
+    # Process mappings before CDRs uploaded in the same request. Background
+    # tasks run in submission order, so the selected mapping is ready when its
+    # dependent CDR begins optional Vendor enrichment.
+    for uploaded in sorted(
+        uploaded_datasets,
+        key=lambda item: 0 if item['dataset_kind'] in {'mapping_vodafone', 'mapping_three'} else 1,
+    ):
+        dataset_kind = uploaded['dataset_kind']
+        vodafone_mapping_dataset_id = (
+            resolve_mapping_selection(uploaded['vodafone_mapping_selection'], 'mapping_vodafone', 'VFUK mapping')
+            if dataset_kind in CDR_DATASET_KINDS else None
+        )
+        three_mapping_dataset_id = (
+            resolve_mapping_selection(uploaded['three_mapping_selection'], 'mapping_three', '3UK mapping')
+            if dataset_kind in CDR_DATASET_KINDS else None
+        )
+        repository.add_log(user.username, 'upload_dataset' if uploaded['created'] else 'reprocess_dataset', json.dumps({
+            'file': uploaded['destination'].name,
+            'dataset_kind': dataset_kind or 'auto-detected',
+            'dataset_id': uploaded['dataset_id'],
             'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
             'three_mapping_dataset_id': three_mapping_dataset_id,
         }))
         enqueue_dataset_processing(
             background_tasks,
-            dataset_id,
-            destination,
+            int(uploaded['dataset_id']),
+            uploaded['destination'],
             user.username,
             vodafone_mapping_dataset_id,
             three_mapping_dataset_id,
         )
-        queued_dataset_ids.append(dataset_id)
 
     if not queued_dataset_ids:
         return RedirectResponse('/workspace', status_code=status.HTTP_303_SEE_OTHER)
