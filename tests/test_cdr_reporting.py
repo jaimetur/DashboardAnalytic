@@ -1122,6 +1122,22 @@ def test_cdf_hover_targets_use_the_same_clipped_domain_as_the_renderer() -> None
     assert all(target['x'] <= left + width for target in targets)
 
 
+def test_cdf_hover_targets_are_bounded_per_series() -> None:
+    entry = CatalogEntry(
+        13, 'POLQA CDF', '', '', '', 'CDR-Speech', 'LQ', 'CDF Line', 'Operator', '', 'Operator', '', 'Top',
+    )
+    frame = pd.DataFrame({
+        'Session_Type': ['WhatsApp CALL'] * 2_000,
+        'Operator': ['VF'] * 1_000 + ['EE'] * 1_000,
+        'LQ': list(range(1_000)) * 2,
+    })
+
+    targets = catalog_chart_hover_targets(frame, entry)
+
+    assert len([target for target in targets if target['legend'].startswith('VF')]) == 120
+    assert len([target for target in targets if target['legend'].startswith('EE')]) == 120
+
+
 def test_failure_count_keeps_zero_count_hierarchy_categories_from_all_filtered_rows() -> None:
     entry = parse_catalog_csv(
         ','.join(CATALOG_HEADERS)
@@ -1289,6 +1305,7 @@ def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None
     assert subtitle_paragraph.font.color.rgb == RGBColor(36, 90, 150)
     assert not any(shape.name == 'catalogue-subtitle' for shape in slide.shapes)
     manifest = json.loads((tmp_path / 'charts' / 'manifest.json').read_text(encoding='utf-8'))
+    assert manifest['generate_tooltips'] is True
     assert all((tmp_path / 'charts' / chart['hover_file']).is_file() for chart in manifest['charts'])
 
 
@@ -1319,6 +1336,28 @@ def test_layout_only_template_builds_one_new_slide_per_catalogue_number(tmp_path
     ]
     assert generated.slides[0].placeholders[0].text == 'Quarterly report'
     assert generated.slides[0].placeholders[1].text == 'NSA analysis'
+
+
+def test_powerpoint_report_can_disable_tooltip_sidecars(tmp_path) -> None:
+    catalogue = parse_catalog_csv(
+        ','.join(CATALOG_HEADERS)
+        + '\n8,Completed Call Ratio,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n',
+        'nsa',
+    )
+    chart_directory = tmp_path / 'charts'
+
+    render_cdr_report(
+        tmp_path / 'without-tooltips.pptx',
+        Path('assets/ppt-templates/Template_CDR_analysis.pptx'),
+        {'data': pd.DataFrame(), 'speech': pd.DataFrame(), 'voice': pd.DataFrame({
+            'Campaign': ['Q1'], 'Operator': ['EE'], 'Call_Status': ['Completed'],
+        })},
+        'nsa', False, catalogue, chart_output_dir=chart_directory, generate_tooltips=False,
+    )
+
+    manifest = json.loads((chart_directory / 'manifest.json').read_text(encoding='utf-8'))
+    assert manifest['generate_tooltips'] is False
+    assert not list(chart_directory.glob('*.hover.json'))
 
 
 def test_reporting_module_is_available_to_authenticated_users(client) -> None:
@@ -1366,6 +1405,7 @@ def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client) ->
         slide_count=1, template_name='NSA Slide Template', output_file='stop-test.pptx',
         output_path=app_module.settings.output_dir / 'reports' / 'stop-test.pptx', created_by='admin',
     )
+    assert app_module.repository.get_report_run(report_id)['generate_tooltips'] == 1
     app_module.repository.update_report_job(report_id, status='processing', progress=40)
     stopped_report = client.post(f'/reporting/jobs/{report_id}/stop')
     assert stopped_report.status_code == 200
@@ -1378,8 +1418,9 @@ def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client) ->
     chart_id = app_module.repository.create_report_chart_job(
         technology='nsa', scope='single', dataset_ids={'data': [1], 'voice': [2], 'speech': [3]},
         dataset_names={'data': ['Data'], 'voice': ['Voice'], 'speech': ['Speech']},
-        template_name='NSA Slide Template', created_by='admin',
+        template_name='NSA Slide Template', created_by='admin', generate_tooltips=False,
     )
+    assert app_module.repository.get_report_chart_job(chart_id)['generate_tooltips'] == 0
     app_module.repository.update_report_chart_job(chart_id, status='processing', progress=40)
     stopped_chart = client.post(f'/reporting/chart-jobs/{chart_id}/stop')
     assert stopped_chart.status_code == 200
@@ -1445,6 +1486,23 @@ def test_chart_set_persists_precomputed_hover_targets(client) -> None:
     )
 
     assert app_module._stored_chart_hover_targets(chart_set['generation'], 0) == [{'kind': 'bar', 'x': 1}]
+
+
+def test_chart_set_can_disable_tooltips_without_creating_sidecars(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    chart_set = app_module.persist_report_charts(
+        'NSA Slide Template', 'single',
+        [({'slide': 1, 'title': 'Chart', 'source': 'data', 'chart_type': 'Bar'}, b'PNG')],
+        {'data': 1, 'voice': 1, 'speech': 1},
+        generate_tooltips=False,
+    )
+    generation_dir = app_module.report_charts_directory() / chart_set['generation']
+    manifest = json.loads((generation_dir / 'manifest.json').read_text(encoding='utf-8'))
+
+    assert manifest['generate_tooltips'] is False
+    assert not list(generation_dir.glob('*.hover.json'))
+    assert app_module._chart_set_tooltips_enabled(chart_set['generation']) is False
 
 
 def test_chart_set_writes_sidecars_directly_to_its_final_generation(tmp_path: Path) -> None:

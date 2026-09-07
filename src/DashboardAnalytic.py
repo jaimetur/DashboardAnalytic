@@ -4519,10 +4519,14 @@ def _temporary_chart_preview_hover_targets(payload: dict[str, Any]) -> list[dict
         entry, selected_ids, technology, multivendor = _temporary_chart_preview_context(source, identifier, chart_index)
         editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
         if source == 'standalone' and not editable:
+            if not _chart_set_tooltips_enabled(identifier):
+                return []
             stored_targets = _stored_chart_hover_targets(identifier, chart_index)
             if stored_targets is not None:
                 return stored_targets
         if source == 'report' and not editable:
+            if not _report_tooltips_enabled(identifier):
+                return []
             stored_targets = _stored_report_hover_targets(identifier, chart_index)
             if stored_targets is not None:
                 return stored_targets
@@ -4548,6 +4552,28 @@ def _temporary_chart_preview_hover_targets(payload: dict[str, Any]) -> list[dict
     if source == 'standalone' and not editable:
         _store_chart_hover_targets(identifier, chart_index, targets)
     return targets
+
+
+def _chart_set_tooltips_enabled(generation: str) -> bool:
+    """Return whether a saved Chart Set permits semantic hover targets."""
+    if not _valid_report_chart_generation(generation):
+        return True
+    try:
+        manifest = json.loads((report_charts_directory() / generation / 'manifest.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError, json.JSONDecodeError, TypeError):
+        return True
+    return manifest.get('generate_tooltips') is not False if isinstance(manifest, dict) else True
+
+
+def _report_tooltips_enabled(report_id: str) -> bool:
+    """Return whether a saved PowerPoint report permits semantic hover targets."""
+    try:
+        row = repository.get_report_run(int(report_id))
+        directory = _report_job_charts_directory(row) if row else None
+        manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8')) if directory else {}
+    except (OSError, ValueError, json.JSONDecodeError, TypeError):
+        return True
+    return manifest.get('generate_tooltips') is not False if isinstance(manifest, dict) else True
 
 
 def _stored_chart_hover_targets(generation: str, chart_index: int) -> list[dict[str, object]] | None:
@@ -4914,15 +4940,23 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
     ]
     report_job_rows = repository.list_report_runs(limit=None)
     report_jobs = [serialize_report_job(row) for row in report_job_rows]
-    report_chart_report_sets = sorted(
-        (job for job in report_jobs if job.get('charts_url')),
-        key=lambda job: str(job.get('charts_date') or job.get('date') or ''), reverse=True,
-    )
+    report_chart_report_sets = [job for job in report_jobs if job.get('charts_url')]
     report_rows_by_id = {int(row['id']): row for row in report_job_rows}
-    default_report_charts = (
-        _report_job_charts_payload(report_rows_by_id[int(report_chart_report_sets[0]['id'])])
-        if report_chart_report_sets else None
+    available_chart_sets = sorted(
+        [
+            *({'kind': 'report', 'value': report} for report in report_chart_report_sets),
+            *({'kind': 'standalone', 'value': chart_set} for chart_set in report_chart_sets),
+        ],
+        key=lambda item: str(item['value'].get('charts_date') or item['value'].get('generated_at') or item['value'].get('date') or ''),
+        reverse=True,
     )
+    default_report_charts = None
+    if available_chart_sets:
+        newest = available_chart_sets[0]
+        if newest['kind'] == 'report':
+            default_report_charts = _report_job_charts_payload(report_rows_by_id[int(newest['value']['id'])])
+        else:
+            default_report_charts = load_persisted_report_charts(str(newest['value']['generation']))
     return render_template(request, 'reporting.html', {
         'user': user,
         'data_datasets': [dataset for dataset in ready_datasets if dataset.get('dataset_kind') == 'data'],
@@ -4932,7 +4966,7 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
         'report_jobs': report_jobs, 'report_chart_report_sets': report_chart_report_sets,
         'report_chart_jobs': [serialize_report_chart_job(row) for row in chart_job_rows],
         'report_chart_sets': report_chart_sets,
-        'report_charts': default_report_charts or (load_persisted_report_charts(report_chart_sets[0]['generation']) if report_chart_sets else None),
+        'report_charts': default_report_charts,
     })
 
 
@@ -5166,64 +5200,66 @@ def _run_report_chart_job(
                 rendered = 0
                 empty_charts: list[dict[str, Any]] = []
                 chart_metrics: list[dict[str, Any]] = []
-                for kind in ('data', 'voice', 'speech'):
-                    entries = [
-                        (order, entry) for order, entry in enumerate(chart_entries)
-                        if entry.source_kind == kind
-                    ]
-                    if not entries:
-                        continue
-                    _ensure_report_job_active(task_repository, job_id, chart_job=True)
-                    frame = _combined_reporting_frame(selected[kind], technology, catalog_entries, multivendor, task_repository)
-                    if multivendor:
-                        frame = ensure_report_vendor_group(frame)
-                    task_repository.update_report_chart_job(job_id, status='processing', progress=12 + int(rendered * 83 / len(chart_entries)))
-                    for order, entry in entries:
+                hover_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='chart-hover') if generate_tooltips else None
+                try:
+                    for kind in ('data', 'voice', 'speech'):
+                        entries = [
+                            (order, entry) for order, entry in enumerate(chart_entries)
+                            if entry.source_kind == kind
+                        ]
+                        if not entries:
+                            continue
                         _ensure_report_job_active(task_repository, job_id, chart_job=True)
-                        hover_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='chart-hover') if generate_tooltips else None
-                        hover_future = hover_executor.submit(
-                            catalog_chart_hover_targets, frame, entry, multivendor=multivendor,
-                        ) if hover_executor else None
-                        image = render_catalog_chart_preview(frame, entry, multivendor=multivendor)
-                        for _attempt in range(2):
-                            if not is_empty_catalog_chart(image, entry):
-                                break
-                            # Rebuild this CDR frame before retrying.  A retry
-                            # against the same pressured DataFrame could only
-                            # reproduce the same empty placeholder.
-                            del image
-                            del frame
-                            gc.collect()
-                            frame = _combined_reporting_frame(selected[kind], technology, catalog_entries, multivendor, task_repository)
-                            if multivendor:
-                                frame = ensure_report_vendor_group(frame)
+                        frame = _combined_reporting_frame(selected[kind], technology, catalog_entries, multivendor, task_repository)
+                        if multivendor:
+                            frame = ensure_report_vendor_group(frame)
+                        task_repository.update_report_chart_job(job_id, status='processing', progress=12 + int(rendered * 83 / len(chart_entries)))
+                        for order, entry in entries:
+                            _ensure_report_job_active(task_repository, job_id, chart_job=True)
+                            hover_future = hover_executor.submit(
+                                catalog_chart_hover_targets, frame, entry, multivendor=multivendor,
+                            ) if hover_executor else None
                             image = render_catalog_chart_preview(frame, entry, multivendor=multivendor)
-                        if is_empty_catalog_chart(image, entry):
-                            empty_charts.append({'slide': entry.slide, 'source': entry.cdr_source, 'source_rows': len(frame.index)})
-                        chart_metrics.append({
-                            'slide': entry.slide, 'source': entry.cdr_source, 'source_rows': len(frame.index),
-                            'empty_placeholder': is_empty_catalog_chart(image, entry), 'rss_mb': _reporting_memory_mb(),
-                        })
-                        task_repository.update_report_chart_job(
-                            job_id, status='processing', progress=12 + int((rendered + .5) * 83 / len(chart_entries)),
-                        )
-                        hover_targets = hover_future.result() if hover_future else None
-                        if hover_executor:
-                            hover_executor.shutdown(wait=True)
-                        rendered += 1
-                        task_repository.update_report_chart_job(
-                            job_id, status='processing', progress=12 + int(rendered * 83 / len(chart_entries)),
-                        )
-                        yield ({
-                            'order': order,
-                            'slide': entry.slide,
-                            'title': entry.chart_title or entry.slide_title or f'Slide {entry.slide}',
-                            'source': entry.cdr_source,
-                            'chart_type': entry.chart_type,
-                            **({'hover_targets': hover_targets} if isinstance(hover_targets, list) else {}),
-                        }, image)
-                    del frame
-                    gc.collect()
+                            for _attempt in range(2):
+                                if not is_empty_catalog_chart(image, entry):
+                                    break
+                                # Rebuild this CDR frame before retrying.  A retry
+                                # against the same pressured DataFrame could only
+                                # reproduce the same empty placeholder.
+                                del image
+                                del frame
+                                gc.collect()
+                                frame = _combined_reporting_frame(selected[kind], technology, catalog_entries, multivendor, task_repository)
+                                if multivendor:
+                                    frame = ensure_report_vendor_group(frame)
+                                image = render_catalog_chart_preview(frame, entry, multivendor=multivendor)
+                            if is_empty_catalog_chart(image, entry):
+                                empty_charts.append({'slide': entry.slide, 'source': entry.cdr_source, 'source_rows': len(frame.index)})
+                            chart_metrics.append({
+                                'slide': entry.slide, 'source': entry.cdr_source, 'source_rows': len(frame.index),
+                                'empty_placeholder': is_empty_catalog_chart(image, entry), 'rss_mb': _reporting_memory_mb(),
+                            })
+                            task_repository.update_report_chart_job(
+                                job_id, status='processing', progress=12 + int((rendered + .5) * 83 / len(chart_entries)),
+                            )
+                            hover_targets = hover_future.result() if hover_future else None
+                            rendered += 1
+                            task_repository.update_report_chart_job(
+                                job_id, status='processing', progress=12 + int(rendered * 83 / len(chart_entries)),
+                            )
+                            yield ({
+                                'order': order,
+                                'slide': entry.slide,
+                                'title': entry.chart_title or entry.slide_title or f'Slide {entry.slide}',
+                                'source': entry.cdr_source,
+                                'chart_type': entry.chart_type,
+                                **({'hover_targets': hover_targets} if isinstance(hover_targets, list) else {}),
+                            }, image)
+                        del frame
+                        gc.collect()
+                finally:
+                    if hover_executor:
+                        hover_executor.shutdown(wait=True)
                 if empty_charts:
                     task_repository.add_log(username, 'chart_set_rendering_warning', json.dumps({
                         'job_id': job_id, 'executed_by': 'system', 'charts': empty_charts,
@@ -5238,6 +5274,7 @@ def _run_report_chart_job(
                 before_publish=lambda generation: task_repository.update_report_chart_job(
                     job_id, status='processing', generation=generation,
                 ),
+                generate_tooltips=generate_tooltips,
             )
             _ensure_report_job_active(task_repository, job_id, chart_job=True)
             task_repository.update_report_chart_job(
@@ -5404,6 +5441,7 @@ def persist_report_charts(
     dataset_counts: dict[str, int],
     output_dir: Path | None = None,
     before_publish: Callable[[str], None] | None = None,
+    generate_tooltips: bool = True,
 ) -> dict[str, Any]:
     """Persist a new timestamped Chart Set directly in its final directory."""
     _migrate_report_charts_root(output_dir)
@@ -5459,6 +5497,7 @@ def persist_report_charts(
             'dataset_counts': _report_chart_dataset_counts(dataset_counts),
             'generation': target.name,
             'generated_at': generated_at.isoformat(timespec='seconds'),
+            'generate_tooltips': generate_tooltips,
             'charts': [chart for _, chart in manifest_charts],
         }
         # The manifest is the completion marker consumed by selectors. Write

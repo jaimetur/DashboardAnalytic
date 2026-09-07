@@ -3543,7 +3543,7 @@ document.querySelectorAll('form[data-loading-label]').forEach((form) => {
 function showConfirmDialog(message, options = {}) {
   if (!confirmOverlay || !confirmTitle || !confirmCopy || !confirmAccept || !confirmCancel) {
     const accepted = window.confirm(message || 'Are you sure?');
-    return Promise.resolve(options.optionLabel ? {accepted, optionChecked: false} : accepted);
+    return Promise.resolve(options.optionLabel ? {accepted, optionChecked: Boolean(options.optionChecked)} : accepted);
   }
 
   confirmTitle.textContent = options.title || 'Confirm action';
@@ -3554,7 +3554,7 @@ function showConfirmDialog(message, options = {}) {
   const hasOption = Boolean(options.optionLabel && confirmOption && confirmOptionInput && confirmOptionLabel);
   if (hasOption) {
     confirmOptionLabel.textContent = options.optionLabel;
-    confirmOptionInput.checked = false;
+    confirmOptionInput.checked = Boolean(options.optionChecked);
     confirmOption.hidden = false;
   }
   confirmOverlay.hidden = false;

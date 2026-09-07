@@ -50,6 +50,9 @@ CHART_TYPES = {
 STRUCTURAL_SLIDE_TYPES = {"title slide", "transition slide"}
 PRESERVED_CHART_TYPES = {"not automated (preserve)"}
 FILTER_OPERATORS = ("CONTAINS", "NOT CONTAINS", "IN", "NOT IN", ">=", "<=", "!=", "=", ">", "<")
+# The rendered CDF is 1,165 pixels wide. More than one hit-test vertex per
+# ten pixels does not improve pointer precision, but greatly inflates sidecars.
+MAX_CDF_HOVER_TARGETS_PER_SERIES = 120
 
 
 def _catalogue_header_key(value: str) -> str:
@@ -1564,7 +1567,7 @@ def catalog_chart_hover_targets(
             # A CDF can contain millions of source samples. Its PNG is a
             # continuous line, so a bounded set of evenly spaced vertices is
             # sufficient for hit testing and avoids a huge delayed JSON reply.
-            sample_count = min(len(visible_values), 480)
+            sample_count = min(len(visible_values), MAX_CDF_HOVER_TARGETS_PER_SERIES)
             indexes = range(len(visible_values)) if sample_count == len(visible_values) else sorted({round(index * (len(visible_values) - 1) / (sample_count - 1)) for index in range(sample_count)})
             for index in indexes:
                 value = visible_values[index]
@@ -3555,5 +3558,8 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
     gc.collect()
     presentation.save(destination)
     if chart_output_dir is not None:
-        (chart_output_dir / 'manifest.json').write_text(json.dumps({'charts': rendered_charts}), encoding='utf-8')
+        (chart_output_dir / 'manifest.json').write_text(
+            json.dumps({'generate_tooltips': generate_tooltips, 'charts': rendered_charts}),
+            encoding='utf-8',
+        )
     return destination

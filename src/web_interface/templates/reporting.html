@@ -487,7 +487,7 @@
       return `Standalone Charts: ${chartSet.generated_at} · ${chartSet.template} · ${reportScopeLabel(chartSet.scope)} (Data:${counts.data} | Voice:${counts.voice} | Speech:${counts.speech})`;
     };
     const reportChartReportSetLabel = (report) => `Report Charts: ${report.report_name}`;
-    const newestFirst = (items, field) => [...items].sort((left, right) => String(right[field] || '').localeCompare(String(left[field] || '')));
+    const chartSetTimestamp = (item) => String(item?.charts_date || item?.generated_at || item?.date || '');
     const renderChartSetPickerText = (container, option) => {
       const fullText = option?.textContent || 'Select a Chart Set';
       const prefix = option?.classList.contains('chart-set-option-standalone') ? 'Standalone Charts: '
@@ -504,21 +504,23 @@
     const rebuildReportChartSetSelector = (selectedValue = '') => {
       if (!reportChartSetSelect) return;
       const options = [
-        ...newestFirst(reportChartReportSets, 'charts_date').map((report) => {
+        ...reportChartReportSets.map((report) => {
           const option = document.createElement('option');
           option.className = 'chart-set-option-report';
           option.value = `report:${report.id}`;
           option.textContent = reportChartReportSetLabel(report);
+          option.dataset.chartSetTimestamp = chartSetTimestamp(report);
           return option;
         }),
-        ...newestFirst(reportChartSets, 'generated_at').map((chartSet) => {
+        ...reportChartSets.map((chartSet) => {
           const option = document.createElement('option');
           option.className = 'chart-set-option-standalone';
           option.value = `standalone:${chartSet.generation}`;
           option.textContent = reportChartSetLabel(chartSet);
+          option.dataset.chartSetTimestamp = chartSetTimestamp(chartSet);
           return option;
         }),
-      ];
+      ].sort((left, right) => String(right.dataset.chartSetTimestamp || '').localeCompare(String(left.dataset.chartSetTimestamp || '')));
       reportChartSetSelect.replaceChildren(...options);
       reportChartSetSelect.value = options.some((option) => option.value === selectedValue)
         ? selectedValue : options[0]?.value || '';
@@ -806,9 +808,16 @@
     reportForm?.addEventListener('submit', async (event) => {
       event.preventDefault();
       if (!reportForm.reportValidity() || !(await reviewMultivendorCampaigns())) return;
+      const confirmation = await showConfirmDialog(
+        'Generate the PowerPoint report with the selected CDRs and Slides Template?',
+        {title: 'Generate PowerPoint Report', confirmLabel: 'Generate', optionLabel: 'Generate interactive tooltips', optionChecked: true},
+      );
+      if (!confirmation.accepted) return;
+      const formData = new FormData(reportForm);
+      formData.set('generate_tooltips', String(confirmation.optionChecked));
       showLoadingOverlay('Queueing PowerPoint report', 'The report will be generated on the server. You can leave this page while it runs.');
       try {
-        const response = await fetch(reportForm.action, {method: 'POST', body: new FormData(reportForm), credentials: 'same-origin'});
+        const response = await fetch(reportForm.action, {method: 'POST', body: formData, credentials: 'same-origin'});
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || 'Unable to queue the report.');
         hideLoadingOverlay();
@@ -831,7 +840,7 @@
       let selectedChartSet = payload.generation ? `standalone:${payload.generation}` : '';
       if (payload.report_job_id) {
         const reportId = Number(payload.report_job_id);
-        const reportSet = {id: reportId, report_name: payload.report_name || '', charts_url: `/api/reporting/jobs/${reportId}/charts`, date: payload.generated_at || ''};
+        const reportSet = {id: reportId, report_name: payload.report_name || '', charts_url: `/api/reporting/jobs/${reportId}/charts`, charts_date: payload.generated_at || ''};
         const index = reportChartReportSets.findIndex((item) => Number(item.id) === reportId);
         if (index >= 0) reportChartReportSets[index] = {...reportChartReportSets[index], ...reportSet};
         else reportChartReportSets = [reportSet, ...reportChartReportSets];
@@ -1701,9 +1710,16 @@
     reportChartsButton?.addEventListener('click', async () => {
       if (!reportForm?.reportValidity()) return;
       if (!(await reviewMultivendorCampaigns())) return;
+      const confirmation = await showConfirmDialog(
+        'Generate the selected report charts with the current CDRs and Slides Template?',
+        {title: 'Generate Report Charts', confirmLabel: 'Generate', optionLabel: 'Generate interactive tooltips', optionChecked: true},
+      );
+      if (!confirmation.accepted) return;
+      const formData = new FormData(reportForm);
+      formData.set('generate_tooltips', String(confirmation.optionChecked));
       showLoadingOverlay('Queueing Report Charts', 'The Chart Set will be rendered on the server. You can leave this page while it runs.');
       try {
-        const response = await fetch('/reporting/netcheck-cdr/charts', {method: 'POST', body: new FormData(reportForm), credentials: 'same-origin'});
+        const response = await fetch('/reporting/netcheck-cdr/charts', {method: 'POST', body: formData, credentials: 'same-origin'});
         const responseBody = await response.text();
         let payload = {};
         try {
