@@ -417,12 +417,7 @@ def _load_excel_dataset(file_path: Path, progress_callback: Callable[[int], None
             progress_callback(55)
         return df
 
-    if len(data_frames) == 1 and data_frames[0]['source_sheet'].nunique() == 1 and data_frames[0]['source_sheet'].iat[0] not in {
-        'Vodafone',
-        'Telefonica',
-        'Operator4',
-        'Operator5',
-    }:
+    if len(data_frames) == 1 and data_frames[0]['source_sheet'].nunique() == 1:
         dataset = _normalise_dataset(data_frames[0], file_path)
         if progress_callback:
             progress_callback(55)

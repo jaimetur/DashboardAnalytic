@@ -1858,6 +1858,10 @@ def test_workspace_batch_upload_keeps_vendor_mapping_choices_aligned_per_file(cl
 def test_workspace_batch_upload_processes_uploaded_mapping_before_its_cdr(client) -> None:
     login(client)
 
+    upload_page = client.get('/dashboard')
+    assert upload_page.status_code == 200
+    assert 'uploaded with this batch' not in upload_page.text
+
     response = client.post(
         '/dashboard/upload',
         data={

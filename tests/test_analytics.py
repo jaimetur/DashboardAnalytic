@@ -99,20 +99,20 @@ def test_load_dataset_ignores_hidden_excel_helper_sheets(tmp_path) -> None:
 def test_load_dataset_uses_only_operator_sheets_after_kpi_definition(tmp_path) -> None:
     workbook = tmp_path / "operator_sheets.xlsx"
     source = pd.DataFrame({
-        "Campaign": ["UK_Q2_2026"], "Operator": ["Vodafone"],
+        "Campaign": ["DE_Q2_2026"], "Operator": ["Telekom"],
         "Test_Name": ["FDFS HTTPS UL ST"], "Test_Result": ["Completed"],
     })
     with pd.ExcelWriter(workbook, engine="openpyxl") as writer:
         pd.DataFrame({"KPI": ["Definition"]}).to_excel(writer, sheet_name="KPI Definition", index=False)
-        source.to_excel(writer, sheet_name="Vodafone", index=False)
-        source.assign(Operator="Vodafone VoNR").to_excel(writer, sheet_name="Vodafone VoNR", index=False)
-        source.assign(Operator="EE").to_excel(writer, sheet_name="EE", index=False)
+        source.to_excel(writer, sheet_name="Telekom", index=False)
+        source.assign(Operator="Telekom VoNR").to_excel(writer, sheet_name="Telekom VoNR", index=False)
+        source.assign(Operator="Orange").to_excel(writer, sheet_name="Orange", index=False)
         source.assign(Operator="Ranking").to_excel(writer, sheet_name="RANKING", index=False)
 
     dataset = load_dataset(workbook)
 
-    assert dataset["source_sheet"].tolist() == ["Vodafone", "EE"]
-    assert dataset["Operator"].tolist() == ["Vodafone", "EE"]
+    assert dataset["source_sheet"].tolist() == ["Telekom", "Orange"]
+    assert dataset["Operator"].tolist() == ["Telekom", "Orange"]
 
 
 def test_load_dataset_reads_cp1252_three_mapping_csv(tmp_path) -> None:

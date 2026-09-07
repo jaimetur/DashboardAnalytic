@@ -448,7 +448,7 @@
         .filter((candidate) => candidate !== entry && candidate.select.value === kind)
         .map((candidate) => ({
           value: `upload:${candidate.index}`,
-          label: `${candidate.file.name} · uploaded with this batch`,
+          label: candidate.file.name,
         }));
       const processedMappings = (kind === 'mapping_vodafone' ? vodafoneMappings : threeMappings)
         .map((mapping) => ({
