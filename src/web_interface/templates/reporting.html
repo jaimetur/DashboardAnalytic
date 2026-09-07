@@ -1227,7 +1227,7 @@
         }
         if (key === 'chart_type') {
           control = document.createElement('select');
-          ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars'].forEach((value) => control.add(new Option(value, value, false, value.toLowerCase() === String(definition[key] || '').toLowerCase())));
+          ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'].forEach((value) => control.add(new Option(value, value, false, value.toLowerCase() === String(definition[key] || '').toLowerCase())));
         } else if (key === 'cdr_source') {
           control = document.createElement('select');
           ['CDR-Data', 'CDR-Voice', 'CDR-Speech'].forEach((value) => control.add(new Option(value, value, false, value.toLowerCase() === String(definition[key] || '').toLowerCase())));
@@ -1322,7 +1322,7 @@
         // Keep popovers within the active Chart Preview overlay so they are
         // neither hidden behind it nor detached from its stacking context.
         menuContainer: reportChartViewer,
-        chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars'],
+        chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
         onChange: regenerate,
         onSourceChange: (next) => {
           const sourceKey = previewSourceKey(next.cdr_source);

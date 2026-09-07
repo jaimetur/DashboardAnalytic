@@ -44,7 +44,7 @@ LEGACY_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", 
 CATALOG_SOURCE_KINDS = {"cdr-data": "data", "cdr-voice": "voice", "cdr-speech": "speech"}
 CHART_TYPES = {
     "100% stacked vertical bars", "count stacked horizontal bars", "cdf line", "scatter", "table",
-    "distribution stacked vertical bars", "threshold stacked vertical bars", "average vertical bars", "median vertical bars",
+    "distribution stacked vertical bars", "threshold stacked vertical bars", "average vertical bars", "median vertical bars", "map",
 }
 STRUCTURAL_SLIDE_TYPES = {"title slide", "transition slide"}
 PRESERVED_CHART_TYPES = {"not automated (preserve)"}
@@ -2738,6 +2738,38 @@ def _render_cdf_line(
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
+def _render_map(title: str, frame: pd.DataFrame, group: str | None, series: str | None, latitude: str | None, longitude: str | None, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
+    """Render a self-contained latitude/longitude point map for report output."""
+    if frame.empty or not latitude or not longitude:
+        return _empty_chart(title)
+    columns = [latitude, longitude, *([group] if group else []), *([series] if series and series != group else [])]
+    data = frame[columns].copy(); data.attrs = frame.attrs.copy()
+    data[latitude] = pd.to_numeric(data[latitude], errors="coerce"); data[longitude] = pd.to_numeric(data[longitude], errors="coerce")
+    data = data.dropna(subset=[latitude, longitude])
+    if data.empty:
+        return _empty_chart(title)
+    image, draw = _canvas(title); left, top, width, height = 120, 135, 1260, 610
+    lon_low, lon_high = float(data[longitude].min()), float(data[longitude].max()); lat_low, lat_high = float(data[latitude].min()), float(data[latitude].max())
+    lon_padding = max((lon_high - lon_low) * .06, .004); lat_padding = max((lat_high - lat_low) * .06, .004)
+    lon_low -= lon_padding; lon_high += lon_padding; lat_low -= lat_padding; lat_high += lat_padding
+    draw.rectangle((left, top, left + width, top + height), fill="#EDF4F0", outline="#B9CDC4", width=2)
+    for fraction in (.2, .4, .6, .8):
+        draw.line((left + width * fraction, top, left + width * fraction, top + height), fill="#D8E5DF", width=1)
+        draw.line((left, top + height * fraction, left + width, top + height * fraction), fill="#D8E5DF", width=1)
+    keys = [(str(row[0]), str(row[1])) if series and group and series != group else (str(row[0]),) for row in data[[group, series] if series and group and series != group else [group] if group else []].fillna('(blank)').itertuples(index=False, name=None)] if group else [('All',)] * len(data)
+    unique_keys = list(dict.fromkeys(keys)); colours = _series_colours(unique_keys, [group, series] if series and group and series != group else [group] if group else [], data)
+    legend_items: list[tuple[str, str, int]] = []
+    for index, (key, row) in enumerate(zip(keys, data.itertuples(index=False), strict=True)):
+        lat = float(getattr(row, latitude)); lon = float(getattr(row, longitude)); x = left + (lon - lon_low) / (lon_high - lon_low) * width; y = top + height - (lat - lat_low) / (lat_high - lat_low) * height
+        colour = colours.get(key, _colour(key, index)); draw.ellipse((x - 4, y - 4, x + 4, y + 4), fill=colour, outline="#FFFFFF", width=1)
+    for index, key in enumerate(unique_keys):
+        label = _legend_key_caption(key, [group, series] if series and group and series != group else [group] if group else [], data, legend_labels) or ' · '.join(key)
+        legend_items.append((label, colours.get(key, _colour(key, index)), 2))
+    _draw_chart_legend(draw, legend_items[:10], legend_position, font_size=13)
+    draw.text((left, top + height + 16), longitude.replace('_', ' '), fill="#405765", font=_font(17, True)); draw.text((26, top - 25), latitude.replace('_', ' '), fill="#405765", font=_font(17, True))
+    output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
+
+
 def _render_scatter(title: str, frame: pd.DataFrame, group: str | None, metric: str | None, x_metric: str | None, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
     if frame.empty or not group or not metric or not x_metric: return _empty_chart(title)
     data = frame[[group, metric, x_metric]].copy(); data.attrs = frame.attrs.copy(); data[metric] = pd.to_numeric(data[metric], errors="coerce"); data[x_metric] = pd.to_numeric(data[x_metric], errors="coerce"); data = data.dropna()
@@ -2875,6 +2907,9 @@ def _catalog_spec(entry: CatalogEntry) -> dict:
     if "scatter" in chart_type:
         spec["kind"] = "scatter"
         spec["x_metric"] = metric_parts[1:] or ("Playing_RSRP_NR_Avg", "NR_RSRP_Avg")
+    elif chart_type == "map":
+        spec["kind"] = "map"
+        spec["x_metric"] = metric_parts[1:] or ("Test_Start_Longitude", "Test Start Longitude")
     elif chart_type == "count stacked horizontal bars":
         spec["kind"] = "failure_count"
     elif "100%" in chart_type or chart_type == "threshold stacked vertical bars":
@@ -2938,6 +2973,8 @@ def _chart_for_catalog_entry(
         return finish(_render_status_100(chart_title, frame, group, period, True, spec.get("threshold", 1.6), metric, legend_labels, renderer_legend_position))
     if spec["kind"] == "failure_count":
         return finish(_render_failure_count(chart_title, frame, group, period, legend_labels, renderer_legend_position))
+    if spec["kind"] == "map":
+        return finish(_render_map(chart_title, frame, group, period, metric, _column(frame, spec.get("x_metric", ())), legend_labels, renderer_legend_position))
     if chart_type == "distribution stacked vertical bars":
         return finish(_render_stacked_distribution(chart_title, frame, group, period, "__catalog_stack", legend_labels, renderer_legend_position))
     # Non-stacked visuals have one visual series per row/column combination. A

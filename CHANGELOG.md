@@ -12,6 +12,7 @@
 - Added an Edit Slides Template action to the active Charts Panel, opening the exact generating template in a full editor modal without the template selector.
 - Added manual Refresh and silent five-second polling to App Logs, preserving active filters and the Executed by selector's state and options; filters are faceted from every loaded row matching the other active filters, including compact-phone cards.
 - Added a Cancel operation action to outgoing server-transfer progress, cooperatively stopping connection, approval waiting, export or transmission and cleaning temporary output.
+- Added the NSA `Tableau Charts` Slides Template with one slide per Tableau dashboard visualization, translated filters and aggregations, and a latitude/longitude Map chart type.
 
 #### 🚀 Enhancements:
 - Made incoming transfer approvals reliable across every super-admin page, expired stale pending offers after 15 minutes, reused equivalent retries, propagated terminal source cancellation to the destination, and respected standard HTTP/HTTPS ports when a complete destination URL is entered without an explicit port.
