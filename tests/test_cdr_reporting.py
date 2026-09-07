@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_mean_column, _render_status_100, _resolved_legend_items, _series_colours, assign_cdr_vendors, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_mean_column, _render_status_100, _resolved_legend_items, _series_colours, assign_cdr_vendors, catalog_chart_hover_targets, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -1006,6 +1006,45 @@ def test_failure_count_uses_row_and_column_hierarchies_without_flattening() -> N
     assert chart.getvalue() == b'nested-failure-chart'
     assert hierarchy_renderer.call_args.args[2] == ['__catalog_row_0', '__catalog_row_1']
     assert hierarchy_renderer.call_args.args[3] == ['__catalog_column_0', '__catalog_column_1']
+
+
+def test_failure_count_hover_targets_cover_rendered_horizontal_segments() -> None:
+    entry = parse_catalog_csv(
+        ','.join(CATALOG_HEADERS)
+        + '\n9,Voice failures per Q/city,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,,Call Family × G Level 4,Operator × Campaign,Failed/Dropped,Right\n',
+        'nsa',
+    )[0]
+    frame = pd.DataFrame({
+        'Session_Type': ['VoLTE', 'VoLTE', 'VoLTE'], 'G_Level_4': ['London', 'London', 'Belfast'],
+        'Operator': ['EE', 'EE', '3'], 'Campaign': ['Q2', 'Q2', 'Q3'],
+        'Call_Status': ['Failed', 'Dropped', 'Completed'],
+    })
+
+    targets = catalog_chart_hover_targets(frame, entry)
+
+    assert {(target['legend'], target['value']) for target in targets} == {('Failed', '1'), ('Dropped', '1')}
+    assert all(target['width'] > 0 and target['height'] > 0 for target in targets)
+
+
+def test_cdf_hover_targets_use_the_same_clipped_domain_as_the_renderer() -> None:
+    entry = CatalogEntry(
+        13, 'POLQA CDF', '', '', '', 'CDR-Speech', 'LQ', 'CDF Line', 'Operator × Campaign', '', 'Operator', 'Campaign', 'Top',
+    )
+    values = list(range(1, 100)) + [1000]
+    frame = pd.DataFrame({
+        'Session_Type': ['WhatsApp CALL'] * 300, 'Operator': ['VF'] * 100 + ['3'] * 100 + ['EE'] * 100,
+        'Campaign': ['UK_Q2_2026'] * 300, 'LQ': values * 3,
+    })
+
+    targets = catalog_chart_hover_targets(frame, entry)
+    low = 1.0
+    high = _cdf_terminal_x_maximum([values, values, values], low, 1000.0)
+    left, top, width, height = _cdf_plot_geometry('top')
+    vf_last = [target for target in targets if target['legend'].startswith('VF')][-1]
+
+    assert vf_last['x'] == pytest.approx(left + (99.0 - low) / (high - low) * width)
+    assert vf_last['y'] == pytest.approx(top + height - 99 / 100 * height)
+    assert all(target['x'] <= left + width for target in targets)
 
 
 def test_failure_count_keeps_zero_count_hierarchy_categories_from_all_filtered_rows() -> None:

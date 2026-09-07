@@ -1365,8 +1365,67 @@ def catalog_chart_hover_targets(
 
     chart_type = render_entry.chart_type.casefold()
     hierarchy_columns = [column for column in data.columns if column.startswith('__catalog_row_') or column.startswith('__catalog_column_')]
-    row_hierarchy = [column for column in hierarchy_columns if column.startswith('__catalog_row_')]
-    column_hierarchy = [column for column in hierarchy_columns if column.startswith('__catalog_column_')]
+    row_hierarchy = sorted(
+        (column for column in hierarchy_columns if column.startswith('__catalog_row_')),
+        key=lambda column: int(column.rsplit('_', 1)[1]),
+    )
+    column_hierarchy = sorted(
+        (column for column in hierarchy_columns if column.startswith('__catalog_column_')),
+        key=lambda column: int(column.rsplit('_', 1)[1]),
+    )
+    if spec['kind'] == 'failure_count' and group:
+        status = _column(data, ('Call_Status', 'Test_Result', 'status'))
+        if not status:
+            return []
+        failed = data[data[status].astype(str).str.contains('failed|drop|cutoff', case=False, na=False)].copy()
+        failed['__catalog_failure_state'] = failed[status].astype(str).map(
+            lambda value: 'Dropped' if 'drop' in value.casefold() else 'Failed'
+        )
+        if column_hierarchy or len(row_hierarchy) > 1:
+            render_rows = row_hierarchy if column_hierarchy else []
+            render_columns = column_hierarchy or row_hierarchy
+            rows = _hierarchical_complete_keys(data, render_rows) if render_rows else [()]
+            columns = _hierarchical_complete_keys(data, render_columns)
+            if not rows or not columns:
+                return []
+            counts = failed.groupby([*render_rows, *render_columns, '__catalog_failure_state'], dropna=False).size()
+            levels = list(range(len(render_rows) + len(render_columns)))
+            maximum = max(int(counts.groupby(level=levels).sum().max()), 1) if not counts.empty else 1
+            chart_left, chart_top, chart_height = 285, 245, 510
+            chart_width = 980 if parse_legend_position(render_entry.legend_position) == 'right' else 1250
+            row_height, column_width = chart_height / len(rows), chart_width / len(columns)
+            active_columns = column_hierarchy or row_hierarchy
+            for row_index, row_key in enumerate(rows):
+                row_top = chart_top + row_index * row_height
+                for column_index, column_key in enumerate(columns):
+                    key_prefix = (*row_key, *column_key)
+                    x = chart_left + column_index * column_width + 4
+                    y = row_top + (row_height - max(12, min(22, row_height * .84))) / 2
+                    height = max(12, min(22, row_height * .84))
+                    label = ' · '.join(map(str, (*row_key, *column_key)))
+                    for state_index, state in enumerate(('Failed', 'Dropped')):
+                        value = int(counts.get((*key_prefix, state), 0))
+                        width = max(column_width - 10, 1) * value / maximum
+                        if width:
+                            targets.append({'kind': 'bar', 'x': x, 'y': y, 'width': width, 'height': height, 'label': label, 'legend': _legend_caption(legend_labels, state_index, state), 'value': str(value)})
+                        x += width
+            return targets
+        has_series = bool(period) and not data[period].fillna('(all)').astype(str).eq('(all)').all()
+        fields = [group, period] if has_series else [group]
+        counts = failed.groupby([*fields, '__catalog_failure_state'], dropna=False).size().unstack(fill_value=0)
+        keys = _hierarchical_complete_keys(data, fields)
+        index = pd.Index([key[0] for key in keys], name=fields[0]) if len(fields) == 1 else pd.MultiIndex.from_tuples(keys, names=fields)
+        counts = counts.reindex(index, fill_value=0).head(16)
+        maximum = max(int(counts.sum(axis=1).max()), 1) if not counts.empty else 1
+        for row_index, (key, values) in enumerate(counts.iterrows()):
+            key = key if isinstance(key, tuple) else (key,)
+            x, y = 390, 120 + row_index * 42
+            for state_index, state in enumerate(('Failed', 'Dropped')):
+                value = int(values.get(state, 0)); width = int(980 * value / maximum)
+                if width:
+                    targets.append({'kind': 'bar', 'x': x, 'y': y, 'width': width, 'height': 25, 'label': ' · '.join(map(str, key)), 'legend': _legend_caption(legend_labels, state_index, state), 'value': str(value)})
+                x += width
+        return targets
     if spec['kind'] in {'status_100', 'quality_100'} and group and period:
         state_column = metric or _column(data, ('Call_Status', 'Test_Result', 'status'))
         if not state_column:
@@ -1429,20 +1488,30 @@ def catalog_chart_hover_targets(
     if spec['kind'] == 'cdf_mean' and group and metric:
         axes = _chart_axis_hierarchy(data) or [group, *([period] if period and period != group else [])]; values = data[[*axes, metric]].copy(); values[metric] = pd.to_numeric(values[metric], errors='coerce'); values = values.dropna()
         if values.empty: return []
-        low, high = float(values[metric].min()), float(values[metric].max()); high = high if high > low else low + 1; left, top, width, height = _cdf_plot_geometry(parse_legend_position(render_entry.legend_position))
+        low, observed_high = float(values[metric].min()), float(values[metric].max())
+        series_values = []
         for key in _hierarchical_unique_keys(values, axes):
             subset = values
             for column, value in zip(axes, key, strict=True): subset = subset[subset[column].astype(str) == str(value)]
             ordered = sorted(subset[metric].tolist())
+            if ordered:
+                series_values.append((key, ordered))
+        high = _cdf_terminal_x_maximum([ordered for _, ordered in series_values], low, observed_high)
+        high = high if high > low else low + 1
+        left, top, width, height = _cdf_plot_geometry(parse_legend_position(render_entry.legend_position))
+        for key, ordered in series_values:
+            visible_values = [value for value in ordered if value <= high]
+            if not visible_values:
+                continue
             series = caption(key, axes)
             # A CDF can contain millions of source samples. Its PNG is a
             # continuous line, so a bounded set of evenly spaced vertices is
             # sufficient for hit testing and avoids a huge delayed JSON reply.
-            sample_count = min(len(ordered), 480)
-            indexes = range(len(ordered)) if sample_count == len(ordered) else sorted({round(index * (len(ordered) - 1) / (sample_count - 1)) for index in range(sample_count)})
+            sample_count = min(len(visible_values), 480)
+            indexes = range(len(visible_values)) if sample_count == len(visible_values) else sorted({round(index * (len(visible_values) - 1) / (sample_count - 1)) for index in range(sample_count)})
             for index in indexes:
-                value = ordered[index]
-                targets.append({'kind': 'line', 'series': series, 'x': left + (value - low) / (high - low) * width, 'y': top + height - ((index + 1) / len(ordered)) * height, 'label': metric.replace('_', ' '), 'legend': series, 'value': f'{value:.2f}', 'cumulative': f'{(index + 1) / len(ordered):.1%}'})
+                value = visible_values[index]
+                targets.append({'kind': 'line', 'series': '\x1f'.join(map(str, key)), 'x': left + (value - low) / (high - low) * width, 'y': top + height - ((index + 1) / len(ordered)) * height, 'label': metric.replace('_', ' '), 'legend': series, 'value': f'{value:.2f}', 'cumulative': f'{(index + 1) / len(ordered):.1%}'})
     return targets
 
 

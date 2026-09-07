@@ -1084,14 +1084,26 @@
       const sourceX = reportChartViewport.x + (pointer.x - reportChartDrawRect.x) * reportChartViewport.width / reportChartDrawRect.width;
       const sourceY = reportChartViewport.y + (pointer.y - reportChartDrawRect.y) * reportChartViewport.height / reportChartDrawRect.height;
       const lineRadius = 32 * reportChartViewport.width / reportChartDrawRect.width;
-      const lineCandidates = reportChartHoverTargets.filter((item) => item.kind === 'line');
-      const lineTarget = lineCandidates.map((item, index) => {
-        const previous = lineCandidates[index - 1];
-        if (!previous || previous.series !== item.series) return {item, distance: Math.hypot(sourceX - item.x, sourceY - item.y)};
+      const lineGroups = new Map();
+      reportChartHoverTargets.filter((item) => item.kind === 'line').forEach((item) => {
+        const points = lineGroups.get(item.series) || [];
+        points.push(item);
+        lineGroups.set(item.series, points);
+      });
+      let nearestLine = null;
+      lineGroups.forEach((points) => points.forEach((item, index) => {
+        const previous = points[index - 1];
+        if (!previous) {
+          const distance = Math.hypot(sourceX - item.x, sourceY - item.y);
+          if (distance <= lineRadius && (!nearestLine || distance < nearestLine.distance)) nearestLine = {item, distance};
+          return;
+        }
         const deltaX = item.x - previous.x; const deltaY = item.y - previous.y;
         const ratio = Math.max(0, Math.min(1, ((sourceX - previous.x) * deltaX + (sourceY - previous.y) * deltaY) / (deltaX ** 2 + deltaY ** 2 || 1)));
-        return {item: ratio < 0.5 ? previous : item, distance: Math.hypot(sourceX - (previous.x + ratio * deltaX), sourceY - (previous.y + ratio * deltaY))};
-      }).filter(({distance}) => distance <= lineRadius).sort((left, right) => left.distance - right.distance)[0]?.item;
+        const distance = Math.hypot(sourceX - (previous.x + ratio * deltaX), sourceY - (previous.y + ratio * deltaY));
+        if (distance <= lineRadius && (!nearestLine || distance < nearestLine.distance)) nearestLine = {item: ratio < .5 ? previous : item, distance};
+      }));
+      const lineTarget = nearestLine?.item;
       const target = reportChartHoverTargets.find((item) => item.kind === 'bar' && sourceX >= item.x && sourceX <= item.x + item.width && sourceY >= item.y && sourceY <= item.y + item.height)
         || lineTarget;
       if (!target) return hideReportChartHoverTooltip();
