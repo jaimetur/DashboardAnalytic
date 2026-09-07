@@ -5111,7 +5111,7 @@ def generate_netcheck_cdr_report(
         raise HTTPException(status_code=400, detail=f"Unable to load the selected {technology.upper()} report template: {exc}") from exc
     generated_at = datetime.now().strftime('%Y%m%d-%H%M%S')
     scope_token = 'vendor-comparison' if multivendor else 'operator-comparison'
-    file_name = f"NetCheck_CDR_{technology.upper()}_{scope_token}_{generated_at}.pptx"
+    file_name = f"{generated_at}_NetCheck_CDR_{technology.upper()}_{scope_token}.pptx"
     report_dir = _report_job_directory(file_name)
     destination = safe_join(report_dir, file_name)
     dataset_ids = {kind: [int(dataset['id']) for dataset in datasets] for kind, datasets in selected.items()}

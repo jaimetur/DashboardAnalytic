@@ -48,6 +48,7 @@
 - Refined Workspace, Dataset and Slides Templates management tables with compact labelled actions, clearer Dashboard and chart glyphs, balanced metadata columns, readable date/time lines and flexible names without horizontal overflow.
 - Ordered the combined Chart Set selector from newest to oldest across Report and standalone Chart Sets, and automatically select the newest available set regardless of its type.
 - Allowed a CDR uploaded in a multi-file Workspace batch to select a VFUK or 3UK Vendor Mapping from the same batch; mappings are queued and processed before their dependent CDRs, while the upload dialog now distinguishes file transfer from the continuing background processing queue.
+- Prefixed generated PowerPoint report names and their dedicated output folders with the creation timestamp for chronological filesystem ordering.
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.

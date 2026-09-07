@@ -1637,9 +1637,12 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
 
     assert report.status_code == 202
     job = wait_for_report_job(client, report.json()['job_id'])
+    import src.DashboardAnalytic as app_module
+
     assert job['status'] == 'ready'
     assert job['slides'] == 17
-    assert re.search(r'NetCheck_CDR_NSA_operator-comparison_\d{8}-\d{6}\.pptx', job['report_name'])
+    assert re.fullmatch(r'\d{8}-\d{6}_NetCheck_CDR_NSA_operator-comparison\.pptx', job['report_name'])
+    assert app_module._report_job_directory(job['report_name']).name == Path(job['report_name']).stem
     download = client.get(job['download_url'])
     assert download.status_code == 200
     assert download.headers['content-type'].startswith('application/vnd.openxmlformats-officedocument.presentationml.presentation')
@@ -1647,7 +1650,6 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
     opened = client.get(job['open_url'])
     assert opened.status_code == 200
     assert opened.headers['content-disposition'].startswith('inline;')
-    import src.DashboardAnalytic as app_module
     stale_file = app_module._report_job_directory(job['report_name']) / 'stale-output.txt'
     stale_file.write_text('remove me', encoding='utf-8')
     relaunched = client.post(job['retry_url'])
