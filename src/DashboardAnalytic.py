@@ -49,7 +49,7 @@ from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
 from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, catalog_chart_hover_targets, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
-from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
+from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE
 from src.modules.workspaces import Workspace, WorkspaceRegistry
 from src.version import __app_name__, __release_date__, __version__
@@ -4189,7 +4189,7 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
     longer transfers every historical source field just to render its charts.
     """
     requested = {
-        'Operator', 'Campaign', 'vendor', 'report_vendor',
+        'source_sheet', 'Operator', 'Campaign', 'vendor', 'report_vendor',
         'RAT', 'RAT_A', 'Sample_RAT_A', 'technology_primary',
         'L1_Call_Mode_A', 'L2_Call_Mode_A', 'Session_Type', 'session_type',
         'Type_of_Test', 'Test_Name', 'test_name', 'Test_Type', 'test_type',
@@ -4245,7 +4245,14 @@ def _combined_reporting_frame(
     combined = task_repository.load_reporting_rows(dataset_kind, dataset_ids, columns)
     if combined.empty:
         raise ValueError(f'The selected {dataset_kind.title()} CDRs have no materialised reporting rows.')
-    return classify_sessions(combined, technology)
+    if 'source_sheet' in combined.columns:
+        source_sheet_keys = combined['source_sheet'].fillna('').astype(str).str.strip().str.casefold()
+        combined = combined.loc[~source_sheet_keys.isin(CDR_IGNORED_SHEET_KEYS)].copy()
+    # Data tests may legitimately fall back to LTE or report NR SA at the
+    # failure instant. Treating that sample RAT as a report-wide NSA/SA filter
+    # silently removes valid attempts and corrupts completion percentages.
+    # Voice and Speech still require call/session classification by technology.
+    return combined if dataset_kind == 'data' else classify_sessions(combined, technology)
 
 
 def _clear_chart_preview_caches() -> None:

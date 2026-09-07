@@ -76,6 +76,26 @@ def test_load_dataset_combines_cdr_workbook_operator_sheets(tmp_path) -> None:
     assert set(dataset["dataset_kind"]) == {"voice"}
 
 
+def test_load_dataset_ignores_hidden_excel_helper_sheets(tmp_path) -> None:
+    workbook = tmp_path / "sample_data.xlsx"
+    source = pd.DataFrame({
+        "Campaign": ["UK_Q2_2026"],
+        "Operator": ["EE"],
+        "Test_Name": ["FDFS HTTPS UL ST"],
+        "Test_Result": ["Cutoff"],
+        "RAT": ["LTE"],
+    })
+    with pd.ExcelWriter(workbook, engine="openpyxl") as writer:
+        source.to_excel(writer, sheet_name="EE", index=False)
+        source.to_excel(writer, sheet_name="TMP_CLIPBOARD", index=False)
+        writer.book["TMP_CLIPBOARD"].sheet_state = "veryHidden"
+
+    dataset = load_dataset(workbook)
+
+    assert len(dataset) == 1
+    assert dataset["source_sheet"].tolist() == ["EE"]
+
+
 def test_load_dataset_reads_cp1252_three_mapping_csv(tmp_path) -> None:
     mapping = tmp_path / "Multivendor_Mapping_3UK.csv"
     mapping.write_bytes("CId___ECI,Vendor,Site_Name\n123,Ericsson,Leeds ° North\n".encode("cp1252"))

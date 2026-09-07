@@ -198,6 +198,44 @@ def test_multirab_lte_uses_nsa_fallback_when_call_mode_is_unknown() -> None:
     assert classify_sessions(voice, 'sa').empty
 
 
+def test_combined_reporting_frame_keeps_every_data_attempt_before_template_filters(tmp_path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    repository = Repository(tmp_path / 'workspace.db')
+    dataset_id = 1
+    rows = pd.DataFrame({
+        'source_sheet': ['EE', 'EE', 'EE', 'TMP_CLIPBOARD'],
+        'Campaign': ['UK_Q2_2026'] * 4,
+        'Operator': ['EE'] * 4,
+        'Test_Name': ['FDFS HTTPS UL ST'] * 4,
+        'Test_Result': ['Cutoff'] * 4,
+        'G_Level_4': ['London'] * 4,
+        'RAT': ['EN-DC', 'LTE', 'NR SA', 'EN-DC'],
+    })
+    repository.replace_dataset_rows(dataset_id, rows)
+    entry = CatalogEntry(
+        slide=5, slide_title='Data failures', slide_subtitle='', layout='', chart_title='',
+        cdr_source='CDR-Data', kpi='Test_Result', chart_type='100% Stacked Vertical Bars',
+        legend='Test_Result', filters=(
+            'Test Name CONTAINS FDFS; Test_Result IN (Completed, Cutoff, Failed); '
+            'Operator IN (Vodafone UK, 3, EE); G Level 4 IN (London)'
+        ), grouping_rows='Test_Name',
+        grouping_columns='Operator × Campaign', legend_position='Right',
+    )
+
+    frame = app_module._combined_reporting_frame(
+        [{'id': dataset_id, 'dataset_kind': 'data'}],
+        'nsa', [entry], False, repository,
+    )
+
+    assert frame['RAT'].tolist() == ['EN-DC', 'LTE', 'NR SA']
+    assert frame['source_sheet'].tolist() == ['EE', 'EE', 'EE']
+    preview, summary = app_module.preview_catalog_chart_data(frame, entry, limit=100)
+    assert summary['matched_rows'] == 3
+    assert preview['Filter · Test_Result'].tolist() == ['Cutoff', 'Cutoff', 'Cutoff']
+    assert preview['Resolved Column Aggregation'].tolist() == ['EE · 2026-Q2'] * 3
+
+
 def test_workspace_vendor_assignment_writes_the_normalized_vendor_field() -> None:
     cdr = pd.DataFrame({
         'Operator': ['Vodafone UK', '3', 'O2 (UK)'],

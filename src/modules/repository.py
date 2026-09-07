@@ -1130,7 +1130,7 @@ class Repository:
         return re.sub(r'[^a-z0-9]+', '', str(column).casefold())
 
     REPORTING_CORE_COLUMNS = (
-        'Campaign', 'Operator', 'vendor', 'report_vendor', 'RAT', 'RAT_A', 'Sample_RAT_A',
+        'source_sheet', 'Campaign', 'Operator', 'vendor', 'report_vendor', 'RAT', 'RAT_A', 'Sample_RAT_A',
         'technology_primary', 'L1_Call_Mode_A', 'L2_Call_Mode_A', 'Session_Type',
         'session_type', 'Type_of_Test', 'Test_Name', 'test_name', 'Test_Type', 'test_type',
     )

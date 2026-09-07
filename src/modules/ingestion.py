@@ -18,7 +18,9 @@ CDR_IGNORED_SHEETS = {
     'RANKING 5G',
     'Lists',
     'SetupEnviroment',
+    'TMP_CLIPBOARD',
 }
+CDR_IGNORED_SHEET_KEYS = frozenset(name.strip().casefold() for name in CDR_IGNORED_SHEETS)
 CAMPAIGN_PATTERN = re.compile(r'(?P<market>[A-Z]{2})_Q(?P<quarter>\d)_(?P<year>\d{4})')
 
 
@@ -349,7 +351,10 @@ def _normalise_dataset(df: pd.DataFrame, file_path: Path) -> pd.DataFrame:
 
 def _load_excel_dataset(file_path: Path, progress_callback: Callable[[int], None] | None = None) -> pd.DataFrame:
     workbook = load_workbook(filename=file_path, read_only=True, data_only=True)
-    candidate_sheets = [sheet_name for sheet_name in workbook.sheetnames if sheet_name not in CDR_IGNORED_SHEETS]
+    candidate_sheets = [
+        sheet.title for sheet in workbook.worksheets
+        if sheet.sheet_state == 'visible' and sheet.title.strip().casefold() not in CDR_IGNORED_SHEET_KEYS
+    ]
     total_rows = sum(max(workbook[sheet_name].max_row or 0, 1) for sheet_name in candidate_sheets) or 1
 
     if progress_callback:

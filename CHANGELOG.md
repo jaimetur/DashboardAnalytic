@@ -52,7 +52,7 @@
 
 #### 🐛 Bug fixes:
 - Fixed Interactive Preview legend positions so title-case selector values such as `Left` are normalised before rendering instead of falling back to the right-hand side.
-- Fixed NSA/SA session classification so native and MultiRAB calls use VoLTE, EPSFB or VoNR call modes before RAT fallback, while WhatsApp continues to use its explicit RAT.
+- Fixed NSA/SA reporting accuracy by restricting RAT/call-mode session classification to Voice and Speech CDRs, retaining every Data attempt before the template's explicit filters, excluding hidden workbook helper sheets such as `TMP_CLIPBOARD`, and continuing to classify native and MultiRAB calls through VoLTE, EPSFB or VoNR before RAT fallback while WhatsApp uses its explicit RAT.
 - Fixed Docker source-layer freshness by keying application layers to the exact Git commit while retaining dependency caching, and embedded the revision in every published image for verification.
 - Fixed undersized, non-bold Docker chart text by installing an Arial-compatible Linux font and sharing cross-platform font resolution across chart and export renderers.
 - Excluded null, NaN and empty status/KPI values from both the numerator and denominator of 100% stacked charts instead of misclassifying them as failures or valid quality samples.
