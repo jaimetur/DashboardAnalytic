@@ -54,7 +54,7 @@ FILTER_OPERATORS = ("CONTAINS", "NOT CONTAINS", "IN", "NOT IN", ">=", "<=", "!="
 # ten pixels does not improve pointer precision, but greatly inflates sidecars.
 MAX_CDF_HOVER_TARGETS_PER_SERIES = 120
 # Increment when renderer coordinates or semantic hit-area geometry changes.
-HOVER_TARGETS_VERSION = 2
+HOVER_TARGETS_VERSION = 3
 
 
 def _catalogue_header_key(value: str) -> str:
@@ -1420,6 +1420,7 @@ def catalog_chart_hover_targets(
         return []
     metric = _metric_column(data, spec)
     legend_labels = _legend_labels(render_entry.legend)
+    renderer_legend_position = parse_legend_position(render_entry.legend_position) if legend_labels else 'none'
     targets: list[dict[str, object]] = []
 
     def caption(key: tuple[object, ...], columns: list[str]) -> str:
@@ -1454,7 +1455,7 @@ def catalog_chart_hover_targets(
             levels = list(range(len(render_rows) + len(render_columns)))
             maximum = max(int(counts.groupby(level=levels).sum().max()), 1) if not counts.empty else 1
             chart_left, chart_top, chart_height = 285, 245, 510
-            chart_width = 980 if parse_legend_position(render_entry.legend_position) == 'right' else 1250
+            chart_width = 980 if renderer_legend_position == 'right' else 1250
             row_height, column_width = chart_height / len(rows), chart_width / len(columns)
             active_columns = column_hierarchy or row_hierarchy
             for row_index, row_key in enumerate(rows):

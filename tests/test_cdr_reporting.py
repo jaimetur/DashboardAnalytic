@@ -1139,6 +1139,24 @@ def test_failure_count_hover_targets_cover_rendered_horizontal_segments() -> Non
     assert all(target['width'] > 0 and target['height'] > 0 for target in targets)
 
 
+def test_failure_count_hover_targets_use_the_renderer_width_for_field_legends() -> None:
+    entry = parse_catalog_csv(
+        ','.join(CATALOG_HEADERS)
+        + '\n9,Voice failures,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,,Call Family,Operator × Campaign,Call_Status,Right\n',
+        'nsa',
+    )[0]
+    frame = pd.DataFrame({
+        'Session_Type': ['VoLTE', 'VoLTE'], 'Operator': ['EE', '3'],
+        'Campaign': ['Q2', 'Q2'], 'Call_Status': ['Failed', 'Failed'],
+    })
+
+    targets = catalog_chart_hover_targets(frame, entry)
+
+    # A field legend is resolved after rendering, so the horizontal plot keeps
+    # the full 1250-pixel renderer width instead of reserving a right lane.
+    assert sorted(target['x'] for target in targets) == [289.0, 914.0]
+
+
 def test_cdf_hover_targets_use_the_same_clipped_domain_as_the_renderer() -> None:
     entry = CatalogEntry(
         13, 'POLQA CDF', '', '', '', 'CDR-Speech', 'LQ', 'CDF Line', 'Operator × Campaign', '', 'Operator', 'Campaign', 'Top',
@@ -1344,7 +1362,7 @@ def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None
     assert not any(shape.name == 'catalogue-subtitle' for shape in slide.shapes)
     manifest = json.loads((tmp_path / 'charts' / 'manifest.json').read_text(encoding='utf-8'))
     assert manifest['generate_tooltips'] is True
-    assert manifest['hover_targets_version'] == 2
+    assert manifest['hover_targets_version'] == 3
     assert all((tmp_path / 'charts' / chart['hover_file']).is_file() for chart in manifest['charts'])
 
 

@@ -158,6 +158,48 @@ def _make_unique_headers(headers: Iterable[object]) -> list[str]:
     return unique_headers
 
 
+def _operator_sheet_names(workbook) -> list[str]:
+    """Return the contiguous operator-sheet block following KPI Definition.
+
+    NetCheck CDR workbooks place their operator extracts immediately after the
+    KPI Definition worksheet.  Later worksheets are helper material and must
+    never become CDR rows.  When a workbook carries a technology-specific
+    duplicate such as ``Vodafone VoNR``, the plain operator sheet is the
+    canonical extract and wins over that variant.
+    """
+    worksheets = list(workbook.worksheets)
+    definition_index = next(
+        (
+            index for index, sheet in enumerate(worksheets)
+            if sheet.title.strip().casefold() == 'kpi definition'
+        ),
+        None,
+    )
+    if definition_index is None:
+        return [
+            sheet.title for sheet in worksheets
+            if sheet.sheet_state == 'visible' and sheet.title.strip().casefold() not in CDR_IGNORED_SHEET_KEYS
+        ]
+
+    candidates: list[str] = []
+    for sheet in worksheets[definition_index + 1:]:
+        key = sheet.title.strip().casefold()
+        if sheet.sheet_state != 'visible' or key in CDR_IGNORED_SHEET_KEYS:
+            break
+        candidates.append(sheet.title)
+
+    candidate_keys = {name.strip().casefold() for name in candidates}
+    return [
+        name for name in candidates
+        if not any(
+            key != name.strip().casefold()
+            and name.strip().casefold().startswith(f'{key}{separator}')
+            for key in candidate_keys
+            for separator in (' ', '-', '_')
+        )
+    ]
+
+
 def get_excel_sheet_columns(file_path: Path, sheet_name: str) -> list[str]:
     """Return a worksheet's source headers using the ingestion naming rules."""
     if file_path.suffix.lower() not in {'.xlsx', '.xlsm'}:
@@ -351,10 +393,7 @@ def _normalise_dataset(df: pd.DataFrame, file_path: Path) -> pd.DataFrame:
 
 def _load_excel_dataset(file_path: Path, progress_callback: Callable[[int], None] | None = None) -> pd.DataFrame:
     workbook = load_workbook(filename=file_path, read_only=True, data_only=True)
-    candidate_sheets = [
-        sheet.title for sheet in workbook.worksheets
-        if sheet.sheet_state == 'visible' and sheet.title.strip().casefold() not in CDR_IGNORED_SHEET_KEYS
-    ]
+    candidate_sheets = _operator_sheet_names(workbook)
     total_rows = sum(max(workbook[sheet_name].max_row or 0, 1) for sheet_name in candidate_sheets) or 1
 
     if progress_callback:

@@ -96,6 +96,25 @@ def test_load_dataset_ignores_hidden_excel_helper_sheets(tmp_path) -> None:
     assert dataset["source_sheet"].tolist() == ["EE"]
 
 
+def test_load_dataset_uses_only_operator_sheets_after_kpi_definition(tmp_path) -> None:
+    workbook = tmp_path / "operator_sheets.xlsx"
+    source = pd.DataFrame({
+        "Campaign": ["UK_Q2_2026"], "Operator": ["Vodafone"],
+        "Test_Name": ["FDFS HTTPS UL ST"], "Test_Result": ["Completed"],
+    })
+    with pd.ExcelWriter(workbook, engine="openpyxl") as writer:
+        pd.DataFrame({"KPI": ["Definition"]}).to_excel(writer, sheet_name="KPI Definition", index=False)
+        source.to_excel(writer, sheet_name="Vodafone", index=False)
+        source.assign(Operator="Vodafone VoNR").to_excel(writer, sheet_name="Vodafone VoNR", index=False)
+        source.assign(Operator="EE").to_excel(writer, sheet_name="EE", index=False)
+        source.assign(Operator="Ranking").to_excel(writer, sheet_name="RANKING", index=False)
+
+    dataset = load_dataset(workbook)
+
+    assert dataset["source_sheet"].tolist() == ["Vodafone", "EE"]
+    assert dataset["Operator"].tolist() == ["Vodafone", "EE"]
+
+
 def test_load_dataset_reads_cp1252_three_mapping_csv(tmp_path) -> None:
     mapping = tmp_path / "Multivendor_Mapping_3UK.csv"
     mapping.write_bytes("CId___ECI,Vendor,Site_Name\n123,Ericsson,Leeds ° North\n".encode("cp1252"))
