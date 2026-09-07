@@ -4059,6 +4059,7 @@ if (appLogsPanel) {
     row.append(typeCell);
     const actionCell = document.createElement('td'); actionCell.textContent = String(log.action || ''); row.append(actionCell);
     const detailsCell = document.createElement('td');
+    const summary = document.createElement('p'); summary.className = 'app-log-summary'; summary.textContent = String(log.summary || ''); detailsCell.append(summary);
     const details = document.createElement('code'); details.textContent = String(log.details_text || ''); detailsCell.append(details); row.append(detailsCell);
     return row;
   };

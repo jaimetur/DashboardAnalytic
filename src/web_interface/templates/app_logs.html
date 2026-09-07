@@ -69,7 +69,7 @@
             <td>{{ row.executed_by }}</td>
             <td><span class="log-type-badge log-type-{{ row.log_type | lower }}">{{ row.log_type }}</span></td>
             <td>{{ row.action }}</td>
-            <td><code>{{ row.details_text }}</code></td>
+            <td><p class="app-log-summary">{{ row.summary }}</p><code>{{ row.details_text }}</code></td>
           </tr>
           {% else %}
           <tr><td colspan="7"><article class="empty-state-inline">No application log entries yet.</article></td></tr>

@@ -119,7 +119,7 @@
           {% for job in report_jobs %}
           <tr data-job-kind="report" data-job-date="{{ job.date }}">
             <td>{{ job.id }}</td><td>{{ job.generated_by }}</td><td>{{ job.date }}</td><td>{{ job.type or '-' }}</td><td>Report</td><td>{{ job.template or '-' }}</td><td>{{ job.scope or '-' }}</td><td>{{ job.slides if job.slides is not none else '-' }}</td><td>{{ job.charts if job.charts is not none else '-' }}</td><td class="report-job-datasets">{% if job.dataset_groups %}{% for group in job.dataset_groups %}<span class="report-job-dataset-kind">{{ group.kind }}:</span>{% for name in group.names %}<span>{{ name }}</span>{% endfor %}{% endfor %}{% else %}Historical report{% endif %}</td>
-            <td title="{{ job.error }}"><span class="queue-status-pill queue-status-{{ job.status | lower | replace('_', '-') }}">{{ job.status | title }}</span></td>
+            <td class="report-job-status"{% if job.error %} title="{{ job.error }}"{% endif %}><span class="queue-status-pill queue-status-{{ job.status | lower | replace('_', '-') }}">{{ job.status | title }}</span>{% if job.error and job.status | lower in ['failed', 'stopped'] %}<p class="report-job-error">{{ job.error }}</p>{% endif %}</td>
             <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%</span></div></td>
             <td><div class="report-job-actions">
               {% if job.download_url %}<a class="report-job-download-button report-job-report-download-button" href="{{ job.download_url }}" download title="Download PPT Report" aria-label="Download PPT Report"></a>{% else %}<span class="report-job-download-button report-job-report-download-button action-link-disabled" title="PPT Report download unavailable" aria-label="PPT Report download unavailable"></span>{% endif %}
@@ -134,7 +134,7 @@
           {% for job in report_chart_jobs %}
           <tr data-job-kind="charts" data-job-date="{{ job.date }}">
             <td>{{ job.id }}</td><td>{{ job.generated_by }}</td><td>{{ job.date }}</td><td>{{ job.type or '-' }}</td><td>Charts</td><td>{{ job.template or '-' }}</td><td>{{ job.scope or '-' }}</td><td>-</td><td>{{ job.charts if job.charts is not none else '-' }}</td><td class="report-job-datasets">{% if job.dataset_groups %}{% for group in job.dataset_groups %}<span class="report-job-dataset-kind">{{ group.kind }}:</span>{% for name in group.names %}<span>{{ name }}</span>{% endfor %}{% endfor %}{% else %}Historical Chart Set{% endif %}</td>
-            <td title="{{ job.error }}"><span class="queue-status-pill queue-status-{{ job.status | lower | replace('_', '-') }}">{{ job.status | title }}</span></td>
+            <td class="report-job-status"{% if job.error %} title="{{ job.error }}"{% endif %}><span class="queue-status-pill queue-status-{{ job.status | lower | replace('_', '-') }}">{{ job.status | title }}</span>{% if job.error and job.status | lower in ['failed', 'stopped'] %}<p class="report-job-error">{{ job.error }}</p>{% endif %}</td>
             <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%</span></div></td>
 <td><div class="report-job-actions">{% if job.charts_download_url %}<a class="report-job-download-button report-job-charts-download-button" href="{{ job.charts_download_url }}" download title="Download Chart Set PNGs as ZIP" aria-label="Download Chart Set PNGs as ZIP"></a>{% endif %}{% if job.open_url %}<button type="button" class="report-job-charts-button" title="Open generated Chart Set" aria-label="Open generated Chart Set" data-report-chart-job-open="{{ job.open_url }}">📈</button>{% endif %}{% if job.retry_url %}<button type="button" class="report-job-retry-button" title="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry Chart Set' }}" aria-label="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry Chart Set' }}" data-report-chart-job-retry="{{ job.retry_url }}" data-report-chart-job-name="{{ job.template }}" data-report-chart-job-status="{{ job.status }}" data-report-chart-job-generation="{{ job.generation or '' }}">↻</button>{% endif %}{% if job.stop_url %}<button type="button" class="report-job-stop-button" title="Stop Chart Set" aria-label="Stop Chart Set" data-report-chart-job-stop="{{ job.stop_url }}" data-report-chart-job-name="{{ job.template }}">■</button>{% endif %}{% if user.role in ['admin', 'super-admin'] %}<button type="button" class="danger-button" title="Delete Chart Set job" aria-label="Delete Chart Set job" data-report-chart-job-delete="{{ job.delete_url }}" data-report-chart-job-generation="{{ job.generation or '' }}" data-report-chart-job-name="{{ job.template }}">✕</button>{% endif %}</div></td>
           </tr>
@@ -592,6 +592,7 @@
     const statusLabel = (job) => String(job.status || '').replace(/^./, (letter) => letter.toUpperCase());
     const statusBadgeCell = (job) => {
       const node = document.createElement('td');
+      node.className = 'report-job-status';
       if (job.error) node.title = job.error;
       const badge = document.createElement('span');
       const status = String(job.status || 'queued').toLowerCase().replace(/_/g, '-');
@@ -599,6 +600,12 @@
       badge.className = `queue-status-pill queue-status-${supported.includes(status) ? status : 'queued'}`;
       badge.textContent = statusLabel(job);
       node.append(badge);
+      if (['failed', 'stopped'].includes(status) && job.error) {
+        const error = document.createElement('p');
+        error.className = 'report-job-error';
+        error.textContent = String(job.error);
+        node.append(error);
+      }
       return node;
     };
     const cell = (value, title = '') => {

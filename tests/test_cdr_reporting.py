@@ -1863,6 +1863,41 @@ def test_report_chart_generation_failures_return_json_and_are_logged(client, mon
     assert app_log['log_type'] == 'Error'
     assert app_log['username'] == 'admin'
     assert app_log['executed_by'] == 'system'
+    assert app_log['summary'] == 'Chart Set job 1 failed: Synthetic renderer failure'
+    assert 'Synthetic renderer failure' in client.get('/reporting').text
+    assert 'Chart Set job 1 failed: Synthetic renderer failure' in client.get('/app-logs').text
+
+
+def test_report_generation_failures_show_the_error_and_are_logged(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    for filename, kind, content in (
+        ('NetCheck_CDR_Data.csv', 'data', b'RAT,Operator,Mean_Data_Rate\nENDC,Vodafone UK,42\n'),
+        ('NetCheck_CDR_Voice.csv', 'voice', b'RAT_A,Operator,Call_Status\nENDC,Vodafone UK,Completed\n'),
+        ('NetCheck_CDR_Speech.csv', 'speech', b'Sample_RAT_A,Operator,LQ\nENDC,Vodafone UK,3.8\n'),
+    ):
+        assert client.post('/dashboard/upload', data={'dataset_kinds': kind}, files={
+            'dataset_files': (filename, BytesIO(content), 'text/csv'),
+        }).status_code == 200
+
+    def fail_render(*_args, **_kwargs):
+        raise RuntimeError('Synthetic PowerPoint failure')
+
+    monkeypatch.setattr(app_module, 'render_cdr_report', fail_render)
+    response = client.post('/reporting/netcheck-cdr', data={
+        'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
+        'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',
+    })
+
+    assert response.status_code == 202
+    job = wait_for_report_job(client, response.json()['job_id'])
+    assert job['status'] == 'failed'
+    assert job['error'] == 'Synthetic PowerPoint failure'
+    app_log = next(row for row in app_module.build_app_logs() if row['action'] == 'export_netcheck_cdr_report_failed')
+    assert app_log['summary'] == 'Report job 1 failed: Synthetic PowerPoint failure'
+    assert 'Synthetic PowerPoint failure' in client.get('/reporting').text
+    assert 'Report job 1 failed: Synthetic PowerPoint failure' in client.get('/app-logs').text
 
 
 def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, monkeypatch) -> None:

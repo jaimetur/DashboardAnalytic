@@ -3233,6 +3233,15 @@ def describe_workspace_log_entry(log: dict[str, Any]) -> str:
             return f"Dataset {details.get('dataset_id')} renamed to {details.get('file', 'the new file name')}."
         if log['action'] == 'analyze_dataset':
             return f"Analysis requested for dataset {details.get('dataset_id')}."
+        if log['action'] == 'export_netcheck_cdr_report_failed':
+            return f"Report job {details.get('report_id')} failed: {details.get('error', 'Unknown generation error')}"
+        if log['action'] == 'chart_set_generation_failed':
+            return f"Chart Set job {details.get('job_id')} failed: {details.get('error', 'Unknown generation error')}"
+        if log['action'] == 'recover_interrupted_background_jobs':
+            reports = details.get('reports') or []
+            chart_jobs = details.get('chart_jobs') or []
+            if reports or chart_jobs:
+                return f"Application restart interrupted report jobs {reports} and Chart Set jobs {chart_jobs}."
     return str(log.get('details_text') or log.get('details') or '')
 
 
@@ -3244,6 +3253,9 @@ def classify_workspace_log_entry(log: dict[str, Any]) -> str:
         'map_dataset_vendors_failed', 'clear_dataset_vendors_failed',
     }:
         return 'Error'
+    if log.get('action') == 'recover_interrupted_background_jobs' and isinstance(log.get('details'), dict):
+        if log['details'].get('reports') or log['details'].get('chart_jobs'):
+            return 'Error'
     return 'Info'
 
 
