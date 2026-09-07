@@ -1343,6 +1343,103 @@ def render_catalog_chart_preview(
     ).getvalue()
 
 
+def catalog_chart_hover_targets(
+    frame: pd.DataFrame, entry: CatalogEntry, *, multivendor: bool = False, prefiltered: bool = False,
+) -> list[dict[str, object]]:
+    """Describe interactive hit areas using the exact coordinate system of preview PNGs."""
+    render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
+    spec = _catalog_spec(render_entry)
+    data = frame.copy() if prefiltered else normalise_report_operator_aliases(frame)
+    try:
+        if not prefiltered:
+            data = _apply_catalog_filters(data, render_entry, multivendor, _metric_column(data, spec))
+        data, group, period = _apply_catalog_grouping(data, render_entry, multivendor, _metric_column(data, spec))
+    except ValueError:
+        return []
+    metric = _metric_column(data, spec)
+    legend_labels = _legend_labels(render_entry.legend)
+    targets: list[dict[str, object]] = []
+
+    def caption(key: tuple[object, ...], columns: list[str]) -> str:
+        return _legend_key_caption(tuple(str(value) for value in key), columns, data, _legend_dimensions(render_entry.legend)) or 'Series'
+
+    chart_type = render_entry.chart_type.casefold()
+    hierarchy_columns = [column for column in data.columns if column.startswith('__catalog_row_') or column.startswith('__catalog_column_')]
+    row_hierarchy = [column for column in hierarchy_columns if column.startswith('__catalog_row_')]
+    column_hierarchy = [column for column in hierarchy_columns if column.startswith('__catalog_column_')]
+    if spec['kind'] in {'status_100', 'quality_100'} and group and period:
+        state_column = metric or _column(data, ('Call_Status', 'Test_Result', 'status'))
+        if not state_column:
+            return []
+        states = ('< 1.6', '≥ 1.6') if spec['kind'] == 'quality_100' else ('Completed', 'Dropped', 'Failed')
+        state_data = data[[group, period, state_column, *hierarchy_columns]].dropna(subset=[group, period]).copy()
+        if spec['kind'] == 'quality_100':
+            numeric = pd.to_numeric(state_data[state_column], errors='coerce'); state_data = state_data.loc[numeric.notna()].copy(); state_data['state'] = numeric.loc[state_data.index].map(lambda value: '< 1.6' if value < spec.get('threshold', 1.6) else '≥ 1.6')
+        else:
+            state_data['state'] = state_data[state_column].astype('string').str.strip().str.casefold().map({'completed': 'Completed', 'dropped': 'Dropped', 'failed': 'Failed'})
+        if column_hierarchy or len(row_hierarchy) > 1:
+            rows = _hierarchical_unique_keys(state_data, row_hierarchy) if column_hierarchy else [()]
+            columns = _hierarchical_unique_keys(state_data, column_hierarchy or row_hierarchy)
+            if not rows or not columns:
+                return []
+            canvas, draw = _canvas('')
+            row_labels = [' · '.join(map(str, key)) for key in rows]
+            chart_left = max(205, min(540, 24 + max((_text_width(draw, label, _font(18, True)) for label in row_labels), default=0) + 92))
+            row_height, column_width = 510 / len(rows), (1395 - chart_left) / len(columns)
+            bar_width = max(18, min(86, column_width * 0.68))
+            active_columns = column_hierarchy or row_hierarchy
+            for row_index, row_key in enumerate(rows):
+                row_mask = pd.Series(True, index=state_data.index); pane_top = 245 + row_index * row_height; pane_bottom = pane_top + row_height
+                for field, value in zip(row_hierarchy, row_key, strict=True): row_mask &= state_data[field].astype(str).eq(str(value))
+                for column_index, column_key in enumerate(columns):
+                    mask = row_mask.copy()
+                    for field, value in zip(active_columns, column_key, strict=True): mask &= state_data[field].astype(str).eq(str(value))
+                    subset = state_data.loc[mask]
+                    if subset.empty: continue
+                    x = chart_left + column_index * column_width + (column_width - bar_width) / 2; running = 0.0
+                    for state in states:
+                        value = float(subset['state'].eq(state).sum()) / len(subset); height = value * row_height; y = pane_bottom - running - height
+                        targets.append({'kind': 'bar', 'x': x, 'y': y, 'width': bar_width, 'height': height, 'label': ' · '.join(map(str, (*row_key, *column_key))), 'legend': _legend_caption(legend_labels, states.index(state), state), 'value': f'{value:.1%}'})
+                        running += height
+            return targets
+        combos = [(str(g), str(p)) for g, p in state_data[[group, period]].drop_duplicates().itertuples(index=False)]
+        for index, key in enumerate(combos):
+            subset = state_data[(state_data[group].astype(str) == key[0]) & (state_data[period].astype(str) == key[1])]; total = max(len(subset), 1); x = 145 + index * (1300 / len(combos)) + 12; running = 0
+            for state in states:
+                value = len(subset[subset['state'] == state]) / total; height = value * 640; y = 115 + 640 - running - height
+                targets.append({'kind': 'bar', 'x': x, 'y': y, 'width': max(20, min(72, 1300 // max(len(combos) * 2, 1))), 'height': height, 'label': _catalogue_display_label(*key), 'legend': _legend_caption(legend_labels, states.index(state), state), 'value': f'{value:.1%}'})
+                running += height
+        return targets
+    if chart_type == 'distribution stacked vertical bars' and group and period and '__catalog_stack' in data:
+        axes = _chart_axis_hierarchy(data, distribution=True) or [group, period]; combinations = _hierarchical_unique_keys(data, axes); buckets = list(data['__catalog_stack'].drop_duplicates())
+        for index, key in enumerate(combinations):
+            subset = data
+            for column, value in zip(axes, key, strict=True): subset = subset[subset[column].astype(str) == str(value)]
+            total = max(len(subset), 1); x = 125 + index * (1260 / len(combinations)) + 10; running = 0
+            for bucket_index, bucket in enumerate(buckets):
+                value = len(subset[subset['__catalog_stack'] == bucket]) / total; height = value * 475; y = 260 + 475 - running - height
+                targets.append({'kind': 'bar', 'x': x, 'y': y, 'width': max(20, min(70, 1260 // max(len(combinations) * 2, 1))), 'height': height, 'label': ' · '.join(map(str, key)), 'legend': _legend_caption(legend_labels, bucket_index, bucket), 'value': f'{value:.1%}'})
+                running += height
+        return targets
+    if 'vertical bars' in chart_type and group and metric:
+        axes = _chart_axis_hierarchy(data) or ([group, period] if period and period != group else [group]); values = data[[*axes, metric]].copy(); values[metric] = pd.to_numeric(values[metric], errors='coerce'); grouped = values.dropna().groupby(axes, dropna=False, sort=False)[metric]; means = grouped.median() if chart_type == 'median vertical bars' else grouped.mean()
+        maximum = max(float(means.max()), 1.0) if not means.empty else 1.0; bar_width = min(150, max(30, 1165 / max(len(means) * 1.7, 1)))
+        for index, (key, value) in enumerate(means.items()):
+            key = key if isinstance(key, tuple) else (key,); height = 400 * float(value) / maximum; x = 155 + (index + .5) * 1165 / len(means) - bar_width / 2
+            targets.append({'kind': 'bar', 'x': x, 'y': 680 - height, 'width': bar_width, 'height': height, 'label': ' · '.join(map(str, key)), 'legend': caption(key, axes), 'value': f'{float(value):.2f}'})
+        return targets
+    if spec['kind'] == 'cdf_mean' and group and metric:
+        axes = _chart_axis_hierarchy(data) or [group, *([period] if period and period != group else [])]; values = data[[*axes, metric]].copy(); values[metric] = pd.to_numeric(values[metric], errors='coerce'); values = values.dropna()
+        if values.empty: return []
+        low, high = float(values[metric].min()), float(values[metric].max()); high = high if high > low else low + 1; left, top, width, height = _cdf_plot_geometry(parse_legend_position(render_entry.legend_position))
+        for key in _hierarchical_unique_keys(values, axes):
+            subset = values
+            for column, value in zip(axes, key, strict=True): subset = subset[subset[column].astype(str) == str(value)]
+            ordered = sorted(subset[metric].tolist())
+            for index, value in enumerate(ordered): targets.append({'kind': 'line', 'x': left + (value - low) / (high - low) * width, 'y': top + height - ((index + 1) / len(ordered)) * height, 'label': metric.replace('_', ' '), 'legend': caption(key, axes), 'value': f'{value:.2f}', 'cumulative': f'{(index + 1) / len(ordered):.1%}'})
+    return targets
+
+
 def is_empty_catalog_chart(image: bytes, entry: CatalogEntry) -> bool:
     """Identify the intentional no-samples placeholder emitted by the renderer."""
     title = entry.chart_title or entry.slide_title

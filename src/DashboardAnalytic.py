@@ -44,7 +44,7 @@ DEFAULT_TRANSFER_PORT = 7278
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, catalog_chart_hover_targets, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE
@@ -4481,6 +4481,37 @@ async def temporary_chart_preview(request: Request, user: SessionUser = Depends(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(content=image, media_type='image/png', headers={'Cache-Control': 'no-store'})
+
+
+@app.post('/api/reporting/chart-preview/hover')
+async def temporary_chart_preview_hover(request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    """Return semantic chart hit areas for the interactive PNG preview."""
+    try:
+        payload = await request.json()
+        source = str(payload.get('source') or '')
+        identifier = str(payload.get('identifier') or '')
+        chart_index = int(payload.get('chart_index'))
+        entry, selected_ids, technology, multivendor = _temporary_chart_preview_context(source, identifier, chart_index)
+        editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
+        entry = replace(entry, **_temporary_chart_definition_changes(editable))
+        preview_dataset_ids = _temporary_preview_dataset_ids(editable, selected_ids, entry.source_kind)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f'Invalid chart hover request: {exc}') from exc
+    if not entry.source_kind:
+        raise HTTPException(status_code=400, detail='Choose a valid CDR Source.')
+    selected = _reporting_datasets(preview_dataset_ids, entry.source_kind)
+    frame_key = _chart_preview_cache_key('reporting-source-frame', {
+        'dataset_ids': preview_dataset_ids,
+        'dataset_versions': [(item['id'], item.get('updated_at'), item.get('processed_at'), item.get('normalization_version')) for item in selected],
+        'technology': technology, 'multivendor': multivendor,
+        'columns': reporting_query_columns(entry.source_kind, [entry], multivendor),
+    })
+    def load_frame() -> pd.DataFrame:
+        combined = _combined_reporting_frame(selected, technology, [entry], multivendor)
+        return ensure_report_vendor_group(combined) if multivendor else combined
+    frame = _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4)
+    filtered = _cached_filtered_chart_frame(frame_key, frame, entry, multivendor)
+    return JSONResponse({'targets': catalog_chart_hover_targets(filtered, entry, multivendor=multivendor, prefiltered=True)})
 
 
 @app.post('/api/reporting/chart-preview/data')

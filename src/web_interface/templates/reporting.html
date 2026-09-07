@@ -175,6 +175,7 @@
     <div class="report-chart-viewer-image" data-report-chart-viewer-image>
       <canvas data-report-chart-viewer-canvas aria-label="Selected report chart. Drag to select an area to zoom."></canvas>
       <div class="report-chart-zoom-selection" data-report-chart-zoom-selection hidden></div>
+      <div class="report-chart-hover-tooltip" data-report-chart-hover-tooltip role="status" hidden></div>
       <button type="button" class="report-chart-pan-button" data-report-chart-pan="up" title="Move chart up" aria-label="Move chart up" hidden><svg class="report-chart-arrow-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20V4m-7 7 7-7 7 7"></path></svg></button>
       <button type="button" class="report-chart-pan-button" data-report-chart-pan="down" title="Move chart down" aria-label="Move chart down" hidden><svg class="report-chart-arrow-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v16m-7-7 7 7 7-7"></path></svg></button>
       <button type="button" class="report-chart-pan-button" data-report-chart-pan="left" title="Move chart left" aria-label="Move chart left" hidden><svg class="report-chart-arrow-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 12H4m7-7-7 7 7 7"></path></svg></button>
@@ -307,6 +308,7 @@
     const reportChartViewerMeta = document.querySelector('[data-report-chart-viewer-meta]');
     const reportChartViewerImage = document.querySelector('[data-report-chart-viewer-image]');
     const reportChartViewerCanvas = document.querySelector('[data-report-chart-viewer-canvas]');
+    const reportChartHoverTooltip = document.querySelector('[data-report-chart-hover-tooltip]');
     const reportChartZoomSelection = document.querySelector('[data-report-chart-zoom-selection]');
     const reportChartViewerSandbox = document.querySelector('[data-report-chart-viewer-sandbox]');
     const reportChartViewerFields = document.querySelector('[data-report-chart-viewer-fields]');
@@ -320,6 +322,8 @@
     let reportChartViewerDatasetPage = 0;
     const reportChartViewerDatasetPageSize = 100;
     let reportChartViewerColumnFilterMenu = null;
+    let reportChartHoverTargets = [];
+    let reportChartHoverRequest = 0;
     let reportChartViewerColumnFilterCloseTimer = null;
     compactChartViewerViewport.addEventListener('change', () => {
       if (reportChartViewer?.hidden || reportChartViewerInteractive?.hidden || !reportChartViewerSandbox) return;
@@ -1050,6 +1054,36 @@
       updateReportChartPanControls();
       image.src = url;
     };
+    const hideReportChartHoverTooltip = () => {
+      if (reportChartHoverTooltip) reportChartHoverTooltip.hidden = true;
+    };
+    const loadReportChartHoverTargets = async () => {
+      const [source, identifier] = String(reportChartSetSelect?.value || '').split(':', 2);
+      if (!source || !identifier) return;
+      const requestId = ++reportChartHoverRequest;
+      try {
+        const response = await fetch('/api/reporting/chart-preview/hover', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({source, identifier, chart_index: reportChartIndex, definition: viewerPreviewDefinition()})});
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || 'Unable to load chart values.');
+        if (requestId === reportChartHoverRequest) reportChartHoverTargets = Array.isArray(payload.targets) ? payload.targets : [];
+      } catch (_) { if (requestId === reportChartHoverRequest) reportChartHoverTargets = []; }
+    };
+    reportChartViewerCanvas?.addEventListener('mouseleave', hideReportChartHoverTooltip);
+    reportChartViewerCanvas?.addEventListener('mousemove', (event) => {
+      if (!reportChartDrawRect || !reportChartViewport || !reportChartHoverTooltip || !reportChartHoverTargets.length) return hideReportChartHoverTooltip();
+      const pointer = pointInReportChart(event);
+      if (!pointer || pointer.x < reportChartDrawRect.x || pointer.x > reportChartDrawRect.x + reportChartDrawRect.width || pointer.y < reportChartDrawRect.y || pointer.y > reportChartDrawRect.y + reportChartDrawRect.height) return hideReportChartHoverTooltip();
+      const sourceX = reportChartViewport.x + (pointer.x - reportChartDrawRect.x) * reportChartViewport.width / reportChartDrawRect.width;
+      const sourceY = reportChartViewport.y + (pointer.y - reportChartDrawRect.y) * reportChartViewport.height / reportChartDrawRect.height;
+      const lineRadius = 18 * reportChartViewport.width / reportChartDrawRect.width;
+      const target = reportChartHoverTargets.find((item) => item.kind === 'bar' && sourceX >= item.x && sourceX <= item.x + item.width && sourceY >= item.y && sourceY <= item.y + item.height)
+        || reportChartHoverTargets.filter((item) => item.kind === 'line').map((item) => ({item, distance: Math.hypot(sourceX - item.x, sourceY - item.y)})).filter(({distance}) => distance <= lineRadius).sort((left, right) => left.distance - right.distance)[0]?.item;
+      if (!target) return hideReportChartHoverTooltip();
+      reportChartHoverTooltip.textContent = `${target.label} · ${target.legend}: ${target.value}${target.cumulative ? ` · ${target.cumulative}` : ''}`;
+      reportChartHoverTooltip.style.left = `${Math.min(reportChartViewerImage.clientWidth - 12, pointer.x + 14)}px`;
+      reportChartHoverTooltip.style.top = `${Math.max(8, pointer.y - 12)}px`;
+      reportChartHoverTooltip.hidden = false;
+    });
     const sandboxFields = [
       ['chart_type', 'Chart Type'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['filters', 'Filters'],
       ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
@@ -1227,6 +1261,7 @@
             if (reportChartPreviewUrl) URL.revokeObjectURL(reportChartPreviewUrl);
             reportChartPreviewUrl = URL.createObjectURL(image);
             loadReportChartViewerImage(reportChartPreviewUrl, chart.title);
+            loadReportChartHoverTargets();
           } catch (error) { showInfoDialog(error.message || 'Unable to regenerate chart preview.', {title: 'Chart preview', tone: 'error'}); }
         }, 350);
       };
@@ -1254,6 +1289,7 @@
             if (reportChartPreviewUrl) URL.revokeObjectURL(reportChartPreviewUrl);
             reportChartPreviewUrl = URL.createObjectURL(image);
             loadReportChartViewerImage(reportChartPreviewUrl, chart.title);
+            loadReportChartHoverTargets();
           } catch (error) { if (error.name !== 'AbortError') showInfoDialog(error.message || 'Unable to regenerate chart preview.', {title: 'Chart preview', tone: 'error'}); }
         }, 350);
       };
@@ -1278,6 +1314,7 @@
         },
       });
       reportChartViewerSandbox.hidden = compactChartViewerViewport.matches;
+      loadReportChartHoverTargets();
       if (reportChartViewerData) reportChartViewerData.hidden = false;
       if (reportChartViewerInteractive) {
         reportChartViewerInteractive.hidden = false;
