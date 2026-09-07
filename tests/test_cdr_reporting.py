@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_mean_column, _render_status_100, _resolved_legend_items, _series_colours, assign_cdr_vendors, catalog_chart_hover_targets, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, assign_cdr_vendors, catalog_chart_hover_targets, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -710,6 +710,32 @@ def test_operator_vendor_column_groups_keep_campaign_bars_in_their_operator_pale
     assert colours['3_Ericsson'] == '#F28E2B'
 
 
+def test_neutral_operator_colour_matches_between_campaign_bars_and_legend() -> None:
+    bars = _hierarchy_group_colours([
+        ('O2', '2026 Q1'), ('O2', '2026 Q2'),
+        ('Vodafone', '2026 Q1'), ('Vodafone', '2026 Q2'),
+        ('3', '2026 Q1'), ('3', '2026 Q2'),
+        ('EE', '2026 Q1'), ('EE', '2026 Q2'),
+        ('Lebara', '2026 Q1'), ('Lebara', '2026 Q2'),
+    ])
+    legend = _hierarchy_group_colours([
+        ('O2',), ('Vodafone',), ('3',), ('EE',), ('Lebara',),
+    ])
+
+    assert bars['Lebara'] == legend['Lebara']
+
+
+def test_table_renders_percentages_for_a_categorical_metric() -> None:
+    frame = pd.DataFrame({
+        'Test': ['Browse', 'Browse', 'Transfer'],
+        'Result': ['Completed', 'Failed', 'Completed'],
+    })
+
+    rendered = _render_table('Result ratio', frame, 'Test', None, 'Result')
+
+    assert rendered.getbuffer().nbytes > 0
+
+
 def test_chart_colours_use_vendor_families_for_multi_operator_dimensions() -> None:
     keys = [('Vodafone', 'Ericsson'), ('Vodafone', 'Huawei'), ('3', 'Ericsson'), ('3', 'Huawei')]
     frame = pd.DataFrame({'__catalog_row_0': [], '__catalog_row_1': []})
@@ -787,6 +813,20 @@ def test_reporting_query_columns_splits_map_coordinates() -> None:
     assert 'Test_Start_Latitude' in columns
     assert 'Test_Start_Longitude' in columns
     assert 'Test_Start_Latitude vs Test_Start_Longitude' not in columns
+
+
+def test_reporting_query_columns_include_calculated_dimension_dependencies() -> None:
+    import src.DashboardAnalytic as app_module
+
+    entry = CatalogEntry(
+        22, 'LTE PCell ARFCN', '', '', 'LTE PCell ARFCN', 'CDR-Data',
+        'First LTE PCC ARFCN', '100% Stacked Vertical Bars',
+        'First LTE PCC ARFCN', 'Tput Above IN (above100, above20)', 'Operator', '', 'Right',
+    )
+
+    columns = app_module.reporting_query_columns('data', [entry], False)
+
+    assert {'LTE_PCC_EARFCN', 'Mean_Data_Rate', 'Test_Name'} <= set(columns)
 
 
 def test_catalogue_filter_contract_supports_not_in_and_not_contains() -> None:
@@ -1223,6 +1263,7 @@ def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None
         'nsa',
         False,
         parse_catalog_csv(catalogue, 'nsa'),
+        chart_output_dir=tmp_path / 'charts',
     )
 
     generated = Presentation(destination)
@@ -1247,6 +1288,8 @@ def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None
     assert subtitle_paragraph.font.size.pt == 16
     assert subtitle_paragraph.font.color.rgb == RGBColor(36, 90, 150)
     assert not any(shape.name == 'catalogue-subtitle' for shape in slide.shapes)
+    manifest = json.loads((tmp_path / 'charts' / 'manifest.json').read_text(encoding='utf-8'))
+    assert all((tmp_path / 'charts' / chart['hover_file']).is_file() for chart in manifest['charts'])
 
 
 def test_layout_only_template_builds_one_new_slide_per_catalogue_number(tmp_path) -> None:
@@ -1402,6 +1445,31 @@ def test_chart_set_persists_precomputed_hover_targets(client) -> None:
     )
 
     assert app_module._stored_chart_hover_targets(chart_set['generation'], 0) == [{'kind': 'bar', 'x': 1}]
+
+
+def test_chart_set_writes_sidecars_directly_to_its_final_generation(tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    published: list[str] = []
+
+    def rendered_charts():
+        generation = published[0]
+        assert (tmp_path / 'charts' / generation).is_dir()
+        assert not list((tmp_path / 'charts').glob('.report-charts-*'))
+        yield ({
+            'slide': 1, 'title': 'Chart', 'source': 'data', 'chart_type': 'Bar',
+            'hover_targets': [{'kind': 'bar', 'x': 1}],
+        }, b'PNG')
+
+    chart_set = app_module.persist_report_charts(
+        'NSA Slide Template', 'single', rendered_charts(),
+        {'data': 1, 'voice': 0, 'speech': 0}, tmp_path,
+        before_publish=published.append,
+    )
+
+    generation_dir = tmp_path / 'charts' / chart_set['generation']
+    assert (generation_dir / 'chart-001.png').read_bytes() == b'PNG'
+    assert json.loads((generation_dir / 'chart-001.hover.json').read_text(encoding='utf-8')) == [{'kind': 'bar', 'x': 1}]
 
 
 def test_retrying_a_failed_chart_job_reuses_its_row(client) -> None:

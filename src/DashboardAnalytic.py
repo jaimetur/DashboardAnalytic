@@ -18,6 +18,7 @@ import sqlite3
 import warnings
 import tempfile
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
@@ -408,7 +409,7 @@ def reporting_catalog_entries(technology: str):
     return load_catalog_csv(reporting_catalog_path(technology), technology)
 
 
-def catalogue_editor_columns() -> dict[str, list[str]]:
+def catalogue_editor_columns(datasets: Iterable[Any] | None = None) -> dict[str, list[str]]:
     """Offer the processed CDR fields that can be used in the template editor."""
     common = {'Operator', 'Campaign', 'source_sheet', 'vendor', 'RAT_A', 'RAT'}
     derived = {'Call Family', 'Test Family', 'Rate Bucket', 'Threshold', 'Buckets'}
@@ -417,7 +418,7 @@ def catalogue_editor_columns() -> dict[str, list[str]]:
         'cdr-voice': set(common) | {'Call_Status', 'Session_Type', 'Call_Setup_Time', 'G Level 4'},
         'cdr-speech': set(common) | {'Call_Status', 'Session_Type', 'LQ', 'G Level 4'},
     }
-    for dataset in repository.list_datasets():
+    for dataset in datasets if datasets is not None else repository.list_datasets():
         kind = str(dataset['dataset_kind'] or '').casefold()
         source = f'cdr-{kind}'
         if source not in columns or dataset['status'] != 'ready':
@@ -4204,6 +4205,23 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
         requested.update(parse_catalog_grouping(entry.grouping_rows).dimensions)
         requested.update(parse_catalog_grouping(entry.grouping_columns).dimensions)
         requested.update(condition.column for condition in parse_catalog_filters(entry.filters))
+    requested_identities = {
+        re.sub(r'[^a-z0-9]', '', str(column).casefold())
+        for column in requested
+    }
+    # Calculated Tableau dimensions are reconstructed in the renderer. Include
+    # their physical dependencies in the compact reporting table so job output
+    # matches Interactive Preview and direct rendering.
+    derived_dependencies = {
+        'vendorv3': {'vendor', 'report_vendor'},
+        'firstltepccarfcn': {'LTE_PCC_EARFCN'},
+        'tputabove': {'Mean_Data_Rate', 'Test_Name'},
+        'tputbelow': {'Mean_Data_Rate', 'Test_Name'},
+        'ttfp10sratio': {'VideoStream_Time_to_First_Picture'},
+    }
+    for identity, dependencies in derived_dependencies.items():
+        if identity in requested_identities:
+            requested.update(dependencies)
     # Derived grouping/filter labels resolve from their source fields above;
     # empty presentation fields are not database column requests.
     return sorted(column for column in requested if str(column).strip())
@@ -4434,9 +4452,13 @@ def _temporary_preview_dataset_ids(editable: dict[str, Any], selected_ids: dict[
 def temporary_chart_preview_context(source: str, identifier: str, chart_index: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Return an immutable chart definition for the interactive viewer sandbox."""
     entry, selected_ids, _technology, _multivendor = _temporary_chart_preview_context(source, identifier, chart_index)
-    columns = catalogue_editor_columns()
+    dataset_rows = repository.list_datasets()
+    selected_dataset_ids = {value for values in selected_ids.values() for value in values}
+    # The controls only need the schemas backing this Chart Set. Inspecting
+    # every historic dataset made opening the panel increasingly expensive.
+    columns = catalogue_editor_columns(row for row in dataset_rows if int(row['id']) in selected_dataset_ids)
     datasets_by_source: dict[str, list[dict[str, Any]]] = {'cdr-data': [], 'cdr-voice': [], 'cdr-speech': []}
-    for row in repository.list_datasets():
+    for row in dataset_rows:
         kind = str(row['dataset_kind'] or '').casefold()
         if row['status'] == 'ready' and kind in {'data', 'voice', 'speech'}:
             datasets_by_source[f'cdr-{kind}'].append({'value': str(row['id']), 'label': str(row['file_name'])})
@@ -4500,6 +4522,10 @@ def _temporary_chart_preview_hover_targets(payload: dict[str, Any]) -> list[dict
             stored_targets = _stored_chart_hover_targets(identifier, chart_index)
             if stored_targets is not None:
                 return stored_targets
+        if source == 'report' and not editable:
+            stored_targets = _stored_report_hover_targets(identifier, chart_index)
+            if stored_targets is not None:
+                return stored_targets
         entry = replace(entry, **_temporary_chart_definition_changes(editable))
         preview_dataset_ids = _temporary_preview_dataset_ids(editable, selected_ids, entry.source_kind)
     except (TypeError, ValueError) as exc:
@@ -4518,7 +4544,10 @@ def _temporary_chart_preview_hover_targets(payload: dict[str, Any]) -> list[dict
         return ensure_report_vendor_group(combined) if multivendor else combined
     frame = _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4)
     filtered = _cached_filtered_chart_frame(frame_key, frame, entry, multivendor)
-    return catalog_chart_hover_targets(filtered, entry, multivendor=multivendor, prefiltered=True)
+    targets = catalog_chart_hover_targets(filtered, entry, multivendor=multivendor, prefiltered=True)
+    if source == 'standalone' and not editable:
+        _store_chart_hover_targets(identifier, chart_index, targets)
+    return targets
 
 
 def _stored_chart_hover_targets(generation: str, chart_index: int) -> list[dict[str, object]] | None:
@@ -4535,6 +4564,45 @@ def _stored_chart_hover_targets(generation: str, chart_index: int) -> list[dict[
     except (IndexError, OSError, ValueError, json.JSONDecodeError, TypeError):
         return None
     return targets if isinstance(targets, list) else None
+
+
+def _stored_report_hover_targets(report_id: str, chart_index: int) -> list[dict[str, object]] | None:
+    """Read targets generated with a PowerPoint report chart."""
+    try:
+        row = repository.get_report_run(int(report_id))
+        directory = _report_job_charts_directory(row) if row else None
+        manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8')) if directory else {}
+        chart = manifest.get('charts', [])[chart_index]
+        target_file = str(chart.get('hover_file') or '')
+        if not re.fullmatch(r'slide-\d+-chart-\d+\.hover\.json', target_file):
+            return None
+        targets = json.loads((directory / target_file).read_text(encoding='utf-8'))
+    except (IndexError, OSError, ValueError, json.JSONDecodeError, TypeError):
+        return None
+    return targets if isinstance(targets, list) else None
+
+
+def _store_chart_hover_targets(generation: str, chart_index: int, targets: list[dict[str, object]]) -> None:
+    """Persist the first on-demand target calculation beside its Chart Set PNG."""
+    if not _valid_report_chart_generation(generation):
+        return
+    directory = report_charts_directory() / generation
+    try:
+        with CHART_PREVIEW_CACHE_LOCK:
+            manifest_path = directory / 'manifest.json'
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            chart = manifest.get('charts', [])[chart_index]
+            file_name = str(chart.get('file') or '')
+            if not re.fullmatch(r'chart-\d+\.png', file_name):
+                return
+            hover_file = f'{Path(file_name).stem}.hover.json'
+            temporary = directory / f'.{hover_file}.tmp'
+            temporary.write_text(json.dumps(targets, ensure_ascii=False), encoding='utf-8')
+            temporary.replace(directory / hover_file)
+            chart['hover_file'] = hover_file
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
+    except (IndexError, OSError, ValueError, json.JSONDecodeError, TypeError):
+        return
 
 
 @app.post('/api/reporting/chart-preview/hover')
@@ -4743,7 +4811,7 @@ def _ensure_report_job_active(task_repository: Repository, report_id: int, *, ch
 def _run_netcheck_report_job(
     report_id: int, task_repository: Repository, selected: dict[str, list[dict[str, Any]]],
     technology: str, multivendor: bool, catalog_entries: list[Any], template: Path,
-    destination: Path, username: str, catalogue_name: str,
+    destination: Path, username: str, catalogue_name: str, generate_tooltips: bool = True,
 ) -> None:
     """Serialize every report/chart render for one workspace."""
     workspace_key = str(task_repository.db_path.resolve())
@@ -4752,14 +4820,14 @@ def _run_netcheck_report_job(
     with workspace_lock:
         _run_netcheck_report_job_locked(
             report_id, task_repository, selected, technology, multivendor, catalog_entries,
-            template, destination, username, catalogue_name,
+            template, destination, username, catalogue_name, generate_tooltips,
         )
 
 
 def _run_netcheck_report_job_locked(
     report_id: int, task_repository: Repository, selected: dict[str, list[dict[str, Any]]],
     technology: str, multivendor: bool, catalog_entries: list[Any], template: Path,
-    destination: Path, username: str, catalogue_name: str,
+    destination: Path, username: str, catalogue_name: str, generate_tooltips: bool = True,
 ) -> None:
     """Generate a report independently of the request/session that started it."""
     try:
@@ -4768,25 +4836,33 @@ def _run_netcheck_report_job_locked(
         loaded_kinds: set[str] = set()
         chart_metrics: list[dict[str, Any]] = []
         chart_entries = [entry for entry in catalog_entries if entry.source_kind]
+        rendered_count = 0
         def load_frame(kind: str) -> pd.DataFrame:
             _ensure_report_job_active(task_repository, report_id)
             frame = _combined_reporting_frame(selected[kind], technology, catalog_entries, multivendor, task_repository)
             if multivendor:
                 frame = ensure_report_vendor_group(frame)
             loaded_kinds.add(kind)
-            task_repository.update_report_job(report_id, status='processing', progress=10 + len(loaded_kinds) * 12)
             return frame
+        def chart_rendered(entry: Any, source_rows: int, empty: bool) -> None:
+            nonlocal rendered_count
+            rendered_count += 1
+            chart_metrics.append({
+                'slide': entry.slide, 'source': entry.cdr_source, 'source_rows': source_rows,
+                'empty_placeholder': empty, 'rss_mb': _reporting_memory_mb(),
+            })
+            task_repository.update_report_job(
+                report_id, status='processing', progress=10 + int(rendered_count * 85 / max(len(chart_entries), 1)),
+            )
         destination.parent.mkdir(parents=True, exist_ok=True)
         _ensure_report_job_active(task_repository, report_id)
-        task_repository.update_report_job(report_id, status='processing', progress=60)
+        task_repository.update_report_job(report_id, status='processing', progress=10)
         render_cdr_report(
             destination, template, None, technology, multivendor, catalog_entries,
             chart_output_dir=destination.parent / 'report-charts',
             frame_loader=load_frame,
-            on_chart_rendered=lambda entry, source_rows, empty: chart_metrics.append({
-                'slide': entry.slide, 'source': entry.cdr_source, 'source_rows': source_rows,
-                'empty_placeholder': empty, 'rss_mb': _reporting_memory_mb(),
-            }),
+            on_chart_rendered=chart_rendered,
+            generate_tooltips=generate_tooltips,
         )
         gc.collect()
         _ensure_report_job_active(task_repository, report_id)
@@ -4799,6 +4875,7 @@ def _run_netcheck_report_job_locked(
             'scope': 'multivendor' if multivendor else 'single',
             'slides_templates': catalogue_name,
             'file': destination.name,
+            'generate_tooltips': generate_tooltips,
             'chart_metrics': chart_metrics,
         }))
     except ReportJobStopped:
@@ -4931,6 +5008,7 @@ def generate_netcheck_cdr_report(
     technology: str = Form(...),
     report_scope: str = Form('single'),
     slides_templates: str = Form(''),
+    generate_tooltips: bool = Form(True),
     user: SessionUser = Depends(current_user),
 ) -> JSONResponse:
     technology = technology.strip().lower()
@@ -4977,16 +5055,18 @@ def generate_netcheck_cdr_report(
         dataset_ids=dataset_ids, dataset_names=_report_dataset_names(selected),
         slide_count=len({entry.slide for entry in catalog_entries}), template_name=selected_catalogue['name'],
         output_file=file_name, output_path=destination, created_by=user.username,
+        generate_tooltips=generate_tooltips,
     )
     task_repository = Repository(Path(repository.db_path))
     Thread(
         target=_run_netcheck_report_job,
-        args=(report_id, task_repository, selected, technology, multivendor, catalog_entries, template, destination, user.username, selected_catalogue['name']),
+        args=(report_id, task_repository, selected, technology, multivendor, catalog_entries, template, destination, user.username, selected_catalogue['name'], generate_tooltips),
         name=f'report-{report_id}', daemon=True,
     ).start()
     repository.add_log(user.username, 'generate_powerpoint_report_requested', json.dumps({
         'report_id': report_id, 'technology': technology, 'scope': report_scope,
         'template': selected_catalogue['name'], 'datasets': dataset_ids,
+        'generate_tooltips': generate_tooltips,
     }))
     return JSONResponse({'job_id': report_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
 
@@ -4999,6 +5079,7 @@ def generate_netcheck_cdr_charts(
     technology: str = Form(...),
     report_scope: str = Form('single'),
     slides_templates: str = Form(''),
+    generate_tooltips: bool = Form(True),
     user: SessionUser = Depends(current_user),
 ) -> JSONResponse:
     """Queue every automated chart in the selected Slides Template."""
@@ -5032,16 +5113,18 @@ def generate_netcheck_cdr_charts(
     job_id = repository.create_report_chart_job(
         technology=technology, scope=report_scope, dataset_ids=dataset_ids,
         dataset_names=_report_dataset_names(selected), template_name=selected_catalogue['name'], created_by=user.username,
+        generate_tooltips=generate_tooltips,
     )
     task_repository = Repository(Path(repository.db_path), repository.global_db_path)
     output_dir = Path(settings.output_dir)
     repository.add_log(user.username, 'chart_set_generation_requested', json.dumps({
         'job_id': job_id, 'technology': technology, 'scope': report_scope, 'template': selected_catalogue['name'],
         'datasets': dataset_ids,
+        'generate_tooltips': generate_tooltips,
     }))
     Thread(
         target=_run_report_chart_job,
-        args=(job_id, task_repository, dataset_ids, technology, report_scope, selected_catalogue['name'], output_dir, user.username),
+        args=(job_id, task_repository, dataset_ids, technology, report_scope, selected_catalogue['name'], output_dir, user.username, generate_tooltips),
         name=f'report-charts-{job_id}', daemon=True,
     ).start()
     return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
@@ -5049,7 +5132,7 @@ def generate_netcheck_cdr_charts(
 
 def _run_report_chart_job(
     job_id: int, task_repository: Repository, dataset_ids: dict[str, list[int]], technology: str,
-    report_scope: str, template_name: str, output_dir: Path, username: str,
+    report_scope: str, template_name: str, output_dir: Path, username: str, generate_tooltips: bool = True,
 ) -> None:
     """Render one persisted Chart Set without holding the HTTP request open."""
     workspace_key = str(task_repository.db_path.resolve())
@@ -5094,9 +5177,13 @@ def _run_report_chart_job(
                     frame = _combined_reporting_frame(selected[kind], technology, catalog_entries, multivendor, task_repository)
                     if multivendor:
                         frame = ensure_report_vendor_group(frame)
-                    task_repository.update_report_chart_job(job_id, status='processing', progress=12 + int(rendered * 45 / len(chart_entries)))
+                    task_repository.update_report_chart_job(job_id, status='processing', progress=12 + int(rendered * 83 / len(chart_entries)))
                     for order, entry in entries:
                         _ensure_report_job_active(task_repository, job_id, chart_job=True)
+                        hover_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='chart-hover') if generate_tooltips else None
+                        hover_future = hover_executor.submit(
+                            catalog_chart_hover_targets, frame, entry, multivendor=multivendor,
+                        ) if hover_executor else None
                         image = render_catalog_chart_preview(frame, entry, multivendor=multivendor)
                         for _attempt in range(2):
                             if not is_empty_catalog_chart(image, entry):
@@ -5117,17 +5204,24 @@ def _run_report_chart_job(
                             'slide': entry.slide, 'source': entry.cdr_source, 'source_rows': len(frame.index),
                             'empty_placeholder': is_empty_catalog_chart(image, entry), 'rss_mb': _reporting_memory_mb(),
                         })
+                        task_repository.update_report_chart_job(
+                            job_id, status='processing', progress=12 + int((rendered + .5) * 83 / len(chart_entries)),
+                        )
+                        hover_targets = hover_future.result() if hover_future else None
+                        if hover_executor:
+                            hover_executor.shutdown(wait=True)
                         rendered += 1
-                        hover_targets = catalog_chart_hover_targets(frame, entry, multivendor=multivendor)
+                        task_repository.update_report_chart_job(
+                            job_id, status='processing', progress=12 + int(rendered * 83 / len(chart_entries)),
+                        )
                         yield ({
                             'order': order,
                             'slide': entry.slide,
                             'title': entry.chart_title or entry.slide_title or f'Slide {entry.slide}',
                             'source': entry.cdr_source,
                             'chart_type': entry.chart_type,
-                            'hover_targets': hover_targets,
+                            **({'hover_targets': hover_targets} if isinstance(hover_targets, list) else {}),
                         }, image)
-                        task_repository.update_report_chart_job(job_id, status='processing', progress=57 + int(rendered * 38 / len(chart_entries)))
                     del frame
                     gc.collect()
                 if empty_charts:
@@ -5311,22 +5405,32 @@ def persist_report_charts(
     output_dir: Path | None = None,
     before_publish: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """Persist a new timestamped Report Charts set without removing older sets."""
+    """Persist a new timestamped Chart Set directly in its final directory."""
     _migrate_report_charts_root(output_dir)
     destination = report_charts_directory(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
     _migrate_legacy_report_charts(output_dir)
-    staging = Path(tempfile.mkdtemp(prefix='.report-charts-', dir=destination))
+    # Versions before v0.2.2 could leave hidden staging directories behind
+    # after a worker stopped. Only remove old remnants, since a recent one may
+    # still belong to a worker started by another application process.
+    stale_before = datetime.now().timestamp() - 6 * 60 * 60
+    for child in destination.glob('.report-charts-*'):
+        try:
+            if child.is_dir() and child.stat().st_mtime < stale_before:
+                shutil.rmtree(child, ignore_errors=True)
+        except OSError:
+            continue
+    generated_at = datetime.now().astimezone()
+    generation = generated_at.strftime('%Y%m%d-%H%M%S')
+    suffix = 2
+    target = destination / generation
+    while target.exists():
+        target = destination / f'{generation}-{suffix}'
+        suffix += 1
+    target.mkdir(parents=True)
+    if before_publish:
+        before_publish(target.name)
     try:
-        # Rendering is complete now. Use this completion time everywhere the
-        # completed Chart Set is identified or displayed.
-        generated_at = datetime.now().astimezone()
-        generation = generated_at.strftime('%Y%m%d-%H%M%S')
-        suffix = 2
-        target = destination / generation
-        while target.exists():
-            target = destination / f'{generation}-{suffix}'
-            suffix += 1
         manifest_charts: list[tuple[int, dict[str, Any]]] = []
         used_indexes: set[int] = set()
         for fallback_index, (chart, image) in enumerate(rendered_charts, start=1):
@@ -5340,12 +5444,12 @@ def persist_report_charts(
                     chart_index += 1
             used_indexes.add(chart_index)
             file_name = f'chart-{chart_index:03d}.png'
-            (staging / file_name).write_bytes(image)
+            (target / file_name).write_bytes(image)
             hover_targets = chart.get('hover_targets')
             metadata = {key: value for key, value in chart.items() if key not in {'order', 'hover_targets'}} | {'file': file_name}
             if isinstance(hover_targets, list):
                 hover_file = f'chart-{chart_index:03d}.hover.json'
-                (staging / hover_file).write_text(json.dumps(hover_targets, ensure_ascii=False), encoding='utf-8')
+                (target / hover_file).write_text(json.dumps(hover_targets, ensure_ascii=False), encoding='utf-8')
                 metadata['hover_file'] = hover_file
             manifest_charts.append((chart_index, metadata))
         manifest_charts.sort(key=lambda item: item[0])
@@ -5357,12 +5461,11 @@ def persist_report_charts(
             'generated_at': generated_at.isoformat(timespec='seconds'),
             'charts': [chart for _, chart in manifest_charts],
         }
-        (staging / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
-        if before_publish:
-            before_publish(target.name)
-        staging.replace(target)
+        # The manifest is the completion marker consumed by selectors. Write
+        # it last so an in-progress generation is never offered as ready.
+        (target / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
     except Exception:
-        shutil.rmtree(staging, ignore_errors=True)
+        shutil.rmtree(target, ignore_errors=True)
         raise
     payload = _report_chart_payload(manifest, target.name, output_dir)
     if payload is None:
@@ -5489,12 +5592,16 @@ def retry_report_chart_job(job_id: int, user: SessionUser = Depends(current_user
         raise HTTPException(status_code=409, detail='This Chart Set job is no longer available for retry.')
     task_repository = Repository(Path(repository.db_path), repository.global_db_path)
     output_dir = Path(settings.output_dir)
+    generate_tooltips = bool(previous['generate_tooltips'])
     Thread(
         target=_run_report_chart_job,
-        args=(job_id, task_repository, normalized_ids, technology, str(previous['scope'] or 'single'), template_name, output_dir, user.username),
+        args=(job_id, task_repository, normalized_ids, technology, str(previous['scope'] or 'single'), template_name, output_dir, user.username, generate_tooltips),
         name=f'report-charts-{job_id}', daemon=True,
     ).start()
-    repository.add_log(user.username, 'retry_report_chart_job', json.dumps({'job_id': job_id, 'reused': True, 'relaunched': previous_status == 'ready'}))
+    repository.add_log(user.username, 'retry_report_chart_job', json.dumps({
+        'job_id': job_id, 'reused': True, 'relaunched': previous_status == 'ready',
+        'generate_tooltips': generate_tooltips,
+    }))
     return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
 
 
@@ -5657,12 +5764,15 @@ def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) 
     if not repository.retry_report_job(report_id):
         raise HTTPException(status_code=409, detail='This report job is no longer available for relaunch.')
     task_repository = Repository(Path(repository.db_path))
+    generate_tooltips = bool(previous['generate_tooltips'])
     Thread(
         target=_run_netcheck_report_job,
-        args=(report_id, task_repository, selected, technology, multivendor, catalog_entries, settings.ppt_templates_dir / TEMPLATE_NAMES[technology], destination, user.username, template_option['name']),
+        args=(report_id, task_repository, selected, technology, multivendor, catalog_entries, settings.ppt_templates_dir / TEMPLATE_NAMES[technology], destination, user.username, template_option['name'], generate_tooltips),
         name=f'report-{report_id}', daemon=True,
     ).start()
-    repository.add_log(user.username, 'retry_report_job', json.dumps({'report_id': report_id, 'reused': True}))
+    repository.add_log(user.username, 'retry_report_job', json.dumps({
+        'report_id': report_id, 'reused': True, 'generate_tooltips': generate_tooltips,
+    }))
     return JSONResponse({'job_id': report_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
 
 

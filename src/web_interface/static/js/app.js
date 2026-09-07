@@ -2642,7 +2642,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       const hidden = document.createElement('input'); hidden.type = 'hidden'; hidden.name = 'filters';
       const builder = document.createElement('div'); builder.className = 'report-chart-filter-builder';
       const conditions = document.createElement('div'); conditions.className = 'report-chart-filter-conditions';
-      const parsedField = document.createElement('input'); parsedField.type = 'text'; parsedField.className = 'report-chart-preview-parsed'; parsedField.readOnly = true; parsedField.placeholder = 'Parsed filter'; parsedField.setAttribute('aria-label', 'Parsed filter');
+      const parsedField = document.createElement('input'); parsedField.type = 'text'; parsedField.className = 'report-chart-preview-parsed'; parsedField.readOnly = true; parsedField.placeholder = 'No filters applied'; parsedField.setAttribute('aria-label', 'Applied filters');
       const sync = () => { hidden.value = Array.from(conditions.children).map((row) => { const [column, operator] = row.querySelectorAll('select'); const value = row.querySelector('[data-report-chart-filter-value]'); const rawValue = value?.value.trim(); const parserValue = ['IN', 'NOT IN'].includes(operator?.value) && rawValue && !/^\(.*\)$/.test(rawValue) ? `(${rawValue})` : rawValue; return column?.value && operator?.value && parserValue ? `${column.value} ${operator.value} ${parserValue}` : ''; }).filter(Boolean).join('; '); parsedField.value = hidden.value; hidden.dispatchEvent(new Event('input')); };
       const addCondition = (condition = {}) => {
         const row = document.createElement('div'); row.className = 'report-chart-filter-condition';
@@ -2700,7 +2700,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     }
     control.name = key; control.dataset.previewDisplay = String(definition[key] || ''); control.setAttribute('aria-label', label); field.append(control);
     if (key === 'grouping_rows' || key === 'grouping_columns') {
-      const parsed = document.createElement('input'); parsed.type = 'text'; parsed.className = 'report-chart-preview-parsed'; parsed.readOnly = true; parsed.placeholder = `Parsed ${label}`; parsed.setAttribute('aria-label', `Parsed ${label}`);
+      const parsed = document.createElement('input'); parsed.type = 'text'; parsed.className = 'report-chart-preview-parsed'; parsed.readOnly = true; parsed.placeholder = `No ${label.toLowerCase()} selected`; parsed.setAttribute('aria-label', `Selected ${label.toLowerCase()}`);
       const syncParsed = () => { parsed.value = orderedSelectedValues(control).join(' × '); };
       control.addEventListener('input', syncParsed); control.addEventListener('change', syncParsed); syncParsed(); field.append(parsed);
     }

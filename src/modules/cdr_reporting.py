@@ -9,6 +9,7 @@ import json
 import re
 import unicodedata
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from io import BytesIO
 from itertools import product
@@ -934,6 +935,59 @@ def _catalog_column(
         return _group_column(frame, multivendor) if operator_as_vendor else _column(frame, ("Operator", "operator"))
     if normalized in {"vendor", "reportvendor"}:
         return _group_column(frame, multivendor) if multivendor else _column(frame, ("Vendor", "vendor"))
+    if normalized == "vendorv3":
+        # Tableau's Vendor_V3 calculation is materialised by ingestion as the
+        # combined Operator_Vendor value in ``vendor``/``report_vendor``.
+        return _column(frame, ("report_vendor", "vendor", "Vendor"))
+    if normalized == "firstltepccarfcn":
+        source = _column(frame, ("LTE_PCC_EARFCN", "LTE PCC EARFCN"))
+        if not source:
+            return None
+        frame["__catalog_first_lte_pcc_arfcn"] = frame[source].astype("string").str.split("->", n=1).str[0].str.strip()
+        return "__catalog_first_lte_pcc_arfcn"
+    if normalized in {"tputabove", "tputbelow"}:
+        rate_column = _column(frame, ("Mean_Data_Rate", "Mean Data Rate"))
+        test_column = _column(frame, ("Test_Name", "Test Name"))
+        if not rate_column or not test_column:
+            return None
+        rates = pd.to_numeric(frame[rate_column], errors="coerce")
+        tests = frame[test_column].fillna("").astype(str).str.casefold()
+        output = pd.Series(pd.NA, index=frame.index, dtype="string")
+        downlink = tests.eq("fdtt http dl mt")
+        uplink = tests.eq("fdtt udp ul st")
+        if normalized == "tputabove":
+            for mask, thresholds in (
+                (downlink, ((100, "above100"), (20, "above20"), (5, "above5"), (2, "above2"), (0, "above 0"))),
+                (uplink, ((20, "above20"), (10, "above10"), (3, "above3"), (1, "above1"), (0, "above0"))),
+            ):
+                remaining = mask & rates.notna()
+                for threshold, label in thresholds:
+                    selected = remaining & rates.gt(threshold)
+                    output.loc[selected] = label
+                    remaining &= ~selected
+        else:
+            for mask, thresholds, above in (
+                (downlink, ((2, "below2"), (5, "below5"), (20, "below20"), (100, "below100")), 100),
+                (uplink, ((1, "below1"), (3, "below3"), (10, "below10"), (20, "below20")), 20),
+            ):
+                remaining = mask & rates.notna()
+                for threshold, label in thresholds:
+                    selected = remaining & rates.lt(threshold)
+                    output.loc[selected] = label
+                    remaining &= ~selected
+                output.loc[remaining & rates.gt(above)] = "Above"
+        target = f"__catalog_{normalized}"
+        frame[target] = output
+        return target
+    if normalized in {"ttfp10sratio", "ttfpgreaterthan10sratio"}:
+        value_column = _column(frame, ("VideoStream_Time_to_First_Picture", "VideoStream Time to First Picture"))
+        if not value_column:
+            return None
+        values = pd.to_numeric(frame[value_column], errors="coerce")
+        frame["__catalog_ttfp_10s_ratio"] = values.map(
+            lambda value: pd.NA if pd.isna(value) else ("Above 10s" if value >= 10 else "Below 10s")
+        ).astype("string")
+        return "__catalog_ttfp_10s_ratio"
     if normalized == "callfamily":
         materialized = _column(frame, ("Call Family", "Call_Family", "call_family"))
         if materialized:
@@ -1575,7 +1629,8 @@ def _hierarchy_group_colours(keys: list[tuple[object, ...]], level: int = 0) -> 
     """Colour one hierarchy level consistently, with readable variants."""
     colours: dict[str, str] = {}
     offsets: dict[str, int] = {}
-    for index, key in enumerate(keys):
+    neutral_index = 0
+    for key in keys:
         group = str(key[level]) if len(key) > level else ""
         if group in colours:
             continue
@@ -1585,7 +1640,12 @@ def _hierarchy_group_colours(keys: list[tuple[object, ...]], level: int = 0) -> 
             colours[group] = OPERATOR_COLOUR_VARIANTS[base][offset % len(OPERATOR_COLOUR_VARIANTS[base])]
             offsets[base] = offset + 1
         else:
-            colours[group] = _colour(group, index)
+            # Use the category's position among neutral groups. The same
+            # dimension may reach the renderer as Operator x Campaign while
+            # its legend contains each Operator only once; a global bar index
+            # assigned different colours to the same label in those two lists.
+            colours[group] = _colour(group, neutral_index)
+            neutral_index += 1
     return colours
 
 
@@ -1695,7 +1755,11 @@ def _series_colours(
         palette = _hierarchy_group_colours([(value,) for value in palette_keys])
         return {key: palette[palette_key] for key, palette_key in zip(keys, palette_keys, strict=True)}
 
-    return {key: _colour("", index) for index, key in enumerate(keys)}
+    # Keep a non-semantic category stable across subordinate dimensions such
+    # as Campaign. Legends contain each primary category once, whereas bars or
+    # lines may contain several hierarchy combinations for that category.
+    primary_colours = _hierarchy_group_colours(keys)
+    return {key: primary_colours[str(key[0]) if key else ""] for key in keys}
 
 
 def _operator_hierarchy_level(keys: list[tuple[object, ...]], axis_columns: list[str]) -> int:
@@ -1860,6 +1924,18 @@ def _resolved_legend_items(
             width = 4 if latest_campaign is None or latest_campaign in subset_campaigns else 1
             caption = _legend_key_caption(combination, axis_columns, frame, tuple(chart_fields))
             items.append((caption, colours.get(combination, _colour(caption, index)), width))
+    elif (
+        resolved_columns
+        and metric
+        and resolved_columns[0] == metric
+        and ("100%" in entry.chart_type.casefold() or entry.chart_type.casefold() == "threshold stacked vertical bars")
+    ):
+        _state_data, states, colours = _status_chart_categories(
+            frame[[metric]].copy(), metric,
+            quality=entry.chart_type.casefold() == "threshold stacked vertical bars",
+            threshold=_catalog_threshold(entry),
+        )
+        items.extend((state, colour, 2) for state, colour in zip(states, colours, strict=True))
     elif resolved_columns:
         values = frame[resolved_columns].dropna().drop_duplicates()
         legend_keys = [key if isinstance(key, tuple) else (key,) for key in values.itertuples(index=False, name=None)]
@@ -2166,15 +2242,31 @@ def _status_chart_categories(
         result = result.loc[numeric.notna()].copy()
         result["state"] = numeric.loc[result.index].map(lambda value: "< 1.6" if value < threshold else "≥ 1.6")
         return result, ("< 1.6", "≥ 1.6"), ("#C83E4D", "#2C9A62")
-    normalised = result[state_column].astype("string").str.strip().str.casefold()
-    result["state"] = normalised.map({
+    values = result[state_column].astype("string").str.strip()
+    normalised = values.str.casefold()
+    semantic = normalised.map({
         "completed": "Completed", "drop": "Dropped", "dropped": "Dropped", "failed": "Failed", "cutoff": "Cutoff",
     })
+    # Status KPIs intentionally ignore unknown outcomes. Other categorical
+    # KPIs (RAT, CA state, ARFCN, threshold buckets) retain their native values.
+    result["state"] = (
+        semantic if semantic.notna().any() else values
+    ).replace({"": pd.NA, "<NA>": pd.NA, "NaN": pd.NA, "nan": pd.NA})
     present = [str(value) for value in result["state"].dropna().drop_duplicates()]
     preferred = [state for state in ("Completed", "Cutoff", "Dropped", "Failed") if state in present]
     states = tuple([*preferred, *sorted((state for state in present if state not in preferred), key=str.casefold)])
     failure_colours = ("#C83E4D", "#D8555F", "#E26A70", "#AE2F42", "#F08A8F", "#8F2035")
-    colours = tuple("#2C9A62" if state == "Completed" else failure_colours[index % len(failure_colours)] for index, state in enumerate(states))
+    neutral_index = 0
+    colours_list: list[str] = []
+    for state_index, state in enumerate(states):
+        if state == "Completed":
+            colours_list.append("#2C9A62")
+        elif state in {"Cutoff", "Dropped", "Failed"}:
+            colours_list.append(failure_colours[state_index % len(failure_colours)])
+        else:
+            colours_list.append(_colour(state, neutral_index))
+            neutral_index += 1
+    colours = tuple(colours_list)
     return result, states, colours
 
 
@@ -2930,23 +3022,48 @@ def _render_mean_column(
     return output
 
 
-def _render_table(title: str, frame: pd.DataFrame, group: str | None, series: str | None, metric: str | None) -> BytesIO:
-    """Render a compact mean-value table grouped exactly as declared in the template."""
+def _render_table(
+    title: str,
+    frame: pd.DataFrame,
+    group: str | None,
+    series: str | None,
+    metric: str | None,
+    *,
+    percentiles: bool = False,
+) -> BytesIO:
+    """Render numeric summaries or categorical ratios from a template table."""
     if frame.empty or not group or not metric:
         return _empty_chart(title)
     data = frame[[group, series, metric]].copy() if series else frame[[group, metric]].copy()
-    data[metric] = pd.to_numeric(data[metric], errors="coerce")
-    data = data.dropna(subset=[metric])
-    if data.empty:
-        return _empty_chart(title)
+    numeric_metric = pd.to_numeric(data[metric], errors="coerce")
     has_series = bool(series) and not data[series].fillna("(all)").astype(str).eq("(all)").all()
-    if has_series:
-        table = data.pivot_table(index=group, columns=series, values=metric, aggfunc="mean", sort=False)
+    value_suffix = ""
+    if numeric_metric.notna().any():
+        data[metric] = numeric_metric
+        data = data.dropna(subset=[metric])
+        if percentiles:
+            table = data.groupby(group, sort=False)[metric].quantile([.1, .5, .9]).unstack()
+            table.columns = ["P10", "P50", "P90"]
+        elif has_series:
+            table = data.pivot_table(index=group, columns=series, values=metric, aggfunc="mean", sort=False)
+        else:
+            table = data.groupby(group, sort=False)[metric].mean().to_frame("Value")
     else:
-        table = data.groupby(group, sort=False)[metric].mean().to_frame("Value")
+        # Tableau count/percent-of-total tables commonly use a categorical KPI
+        # such as Test_Result. Preserve that meaning instead of coercing every
+        # value to NaN and returning an empty chart.
+        categorical = data.dropna(subset=[group, metric]).copy()
+        if categorical.empty:
+            return _empty_chart(title)
+        columns = [series, metric] if has_series else [metric]
+        table = pd.crosstab(categorical[group], [categorical[column] for column in columns], normalize="index") * 100
+        value_suffix = "%"
     image, draw = _canvas(title)
     headers = [str(table.index.name or "Category")] + [str(value) for value in table.columns]
-    rows = [(str(index), *["" if pd.isna(value) else f"{float(value):.2f}" for value in values]) for index, values in table.head(18).iterrows()]
+    rows = [
+        (str(index), *["" if pd.isna(value) else f"{float(value):.2f}{value_suffix}" for value in values])
+        for index, values in table.head(18).iterrows()
+    ]
     col_width = min(310, 1450 // max(len(headers), 1)); row_height = 34; left, top = 55, 115
     for col, header in enumerate(headers):
         x = left + col * col_width
@@ -3061,7 +3178,10 @@ def _chart_for_catalog_entry(
     if spec["kind"] == "scatter":
         return finish(_render_scatter(chart_title, frame, "__catalog_label", metric, _column(frame, spec.get("x_metric", ())), (), renderer_legend_position))
     if chart_type == "table":
-        return finish(_render_table(chart_title, frame, group, period, metric))
+        return finish(_render_table(
+            chart_title, frame, group, period, metric,
+            percentiles="percentile" in chart_title.casefold(),
+        ))
     if "vertical bars" in chart_type:
         return finish(_render_mean_column(
             chart_title, frame, group, period, metric,
@@ -3311,7 +3431,8 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
                       multivendor: bool, catalog: list[CatalogEntry] | None = None,
                       chart_output_dir: Path | None = None,
                       frame_loader: Callable[[str], pd.DataFrame] | None = None,
-                      on_chart_rendered: Callable[[CatalogEntry, int, bool], None] | None = None) -> Path:
+                      on_chart_rendered: Callable[[CatalogEntry, int, bool], None] | None = None,
+                      generate_tooltips: bool = True) -> Path:
     if not template.exists():
         raise FileNotFoundError(f"Reporting template not found: {template.name}")
     if not catalog:
@@ -3349,6 +3470,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
     for entry in render_catalog:
         catalogue_slides[entry.slide].append(entry)
 
+    hover_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='report-hover') if generate_tooltips else None
     for number in sorted(catalogue_slides):
         slide_entries = catalogue_slides[number]
         header = slide_entries[0]
@@ -3393,6 +3515,9 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
             # unnoticed drift in normalisation, multivendor preparation or
             # catalogue filtering between preview and export.
             source_frame = frame_for(entry.source_kind)
+            hover_future = hover_executor.submit(
+                catalog_chart_hover_targets, source_frame, entry, multivendor=multivendor,
+            ) if hover_executor else None
             chart_bytes = render_catalog_chart_preview(source_frame, entry, multivendor=multivendor)
             # Rebuild the source frame before retrying an unexpected empty
             # chart. Retrying the same already-loaded frame cannot recover a
@@ -3405,6 +3530,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
                 gc.collect()
                 source_frame = frame_for(entry.source_kind)
                 chart_bytes = render_catalog_chart_preview(source_frame, entry, multivendor=multivendor)
+            hover_targets = hover_future.result() if hover_future else None
             if on_chart_rendered:
                 on_chart_rendered(entry, len(source_frame.index), is_empty_catalog_chart(chart_bytes, entry))
             if chart_output_dir is not None:
@@ -3418,7 +3544,13 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
                     'chart_type': entry.chart_type,
                     'file': file_name,
                 })
+                if isinstance(hover_targets, list):
+                    hover_file = f'slide-{number:03d}-chart-{chart_index:02d}.hover.json'
+                    (chart_output_dir / hover_file).write_text(json.dumps(hover_targets, ensure_ascii=False), encoding='utf-8')
+                    rendered_charts[-1]['hover_file'] = hover_file
             slide.shapes.add_picture(BytesIO(chart_bytes), *placement)
+    if hover_executor:
+        hover_executor.shutdown(wait=True)
     cached_frames.clear()
     gc.collect()
     presentation.save(destination)

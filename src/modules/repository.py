@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS generated_jobs (
     output_path TEXT,
     chart_count INTEGER NOT NULL DEFAULT 0,
     generation TEXT,
+    generate_tooltips INTEGER NOT NULL DEFAULT 1,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     finished_at TEXT
 );
@@ -241,6 +242,7 @@ class Repository:
         with self.connection() as conn:
             conn.executescript(SCHEMA)
             self._ensure_dataset_profile_columns(conn)
+            self._ensure_generated_job_columns(conn)
             self._migrate_generated_jobs(conn)
             self._cleanup_duplicate_datasets(conn)
             self._migrate_legacy_vendor_mapping_profiles(conn)
@@ -486,6 +488,15 @@ class Repository:
                 """
             )
             conn.execute('DROP TABLE report_chart_jobs')
+
+    def _ensure_generated_job_columns(self, conn: sqlite3.Connection) -> None:
+        """Keep persisted job options available after schema upgrades."""
+        tables = {str(row['name']) for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
+        if 'generated_jobs' not in tables:
+            return
+        columns = {str(row['name']) for row in conn.execute("PRAGMA table_info(generated_jobs)").fetchall()}
+        if 'generate_tooltips' not in columns:
+            conn.execute("ALTER TABLE generated_jobs ADD COLUMN generate_tooltips INTEGER NOT NULL DEFAULT 1")
 
     def _ensure_legacy_report_run_columns(self, conn: sqlite3.Connection) -> None:
         columns = {row['name'] for row in conn.execute("PRAGMA table_info(report_runs)").fetchall()}
@@ -1734,7 +1745,7 @@ class Repository:
         data_dataset_id: int, voice_dataset_id: int, speech_dataset_id: int,
         dataset_ids: dict[str, list[int]], dataset_names: dict[str, list[str]],
         slide_count: int, template_name: str, output_file: str, output_path: Path,
-        created_by: str,
+        created_by: str, generate_tooltips: bool = True,
     ) -> int:
         with self.connection() as conn:
             cursor = conn.execute(
@@ -1742,13 +1753,13 @@ class Repository:
                 INSERT INTO generated_jobs (
                     job_type, report_type, technology, scope, data_dataset_id, voice_dataset_id, speech_dataset_id,
                     template_name, output_file, created_by, created_at, dataset_ids_json, dataset_names_json,
-                    slide_count, status, progress, output_path, updated_at
-                ) VALUES ('report', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?)
+                    slide_count, status, progress, output_path, generate_tooltips, updated_at
+                ) VALUES ('report', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?)
                 """,
                 (
                     report_type, technology, scope, data_dataset_id, voice_dataset_id, speech_dataset_id,
                     template_name, output_file, created_by, local_now_iso(), json.dumps(dataset_ids), json.dumps(dataset_names),
-                    slide_count, str(output_path), local_now_iso(),
+                    slide_count, str(output_path), int(generate_tooltips), local_now_iso(),
                 ),
             )
             return int(cursor.lastrowid)
@@ -1846,19 +1857,19 @@ class Repository:
 
     def create_report_chart_job(
         self, *, technology: str, scope: str, dataset_ids: dict[str, list[int]],
-        dataset_names: dict[str, list[str]], template_name: str, created_by: str,
+        dataset_names: dict[str, list[str]], template_name: str, created_by: str, generate_tooltips: bool = True,
     ) -> int:
         with self.connection() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO generated_jobs (
                     job_type, technology, scope, dataset_ids_json, dataset_names_json, template_name,
-                    created_by, created_at, status, progress, updated_at
-                ) VALUES ('chart_set', ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)
+                    created_by, created_at, status, progress, generate_tooltips, updated_at
+                ) VALUES ('chart_set', ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?)
                 """,
                 (
                     technology, scope, json.dumps(dataset_ids), json.dumps(dataset_names), template_name,
-                    created_by, local_now_iso(), local_now_iso(),
+                    created_by, local_now_iso(), int(generate_tooltips), local_now_iso(),
                 ),
             )
             return int(cursor.lastrowid)
