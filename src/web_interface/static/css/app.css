@@ -447,8 +447,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-chart-preview-image { grid-column: 1; display: grid; place-items: center; width: 100%; min-height: 0; height: auto; overflow: auto; border: 1px solid rgba(75, 32, 138, 0.2); border-radius: 8px; background: #fff; }
 .catalogue-chart-preview-image[hidden] { display: none !important; }
 .catalogue-chart-preview-image img { display: block; width: min(100%, 1200px); height: auto; object-fit: contain; }
-.report-jobs-table { min-width: 1200px; }
-.report-chart-jobs-table { min-width: 980px; }
+.report-jobs-table, .report-chart-jobs-table { width: 100%; min-width: 0; table-layout: fixed; }
 .reporting-chart-jobs-panel { margin-top: 2.2rem; }
 .report-jobs-table th, .report-jobs-table td { vertical-align: middle; }
 .report-chart-jobs-table th, .report-chart-jobs-table td { vertical-align: middle; }
@@ -458,23 +457,35 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-chart-jobs-table tbody tr:nth-child(even) { background: rgba(247, 239, 246, 0.72); }
 .report-jobs-table tbody tr:hover { background: rgba(211, 198, 237, 0.62); }
 .report-chart-jobs-table tbody tr:hover { background: rgba(211, 198, 237, 0.62); }
-.report-jobs-table th:nth-child(2), .report-jobs-table td:nth-child(2) { min-width: 145px; }
-.report-jobs-table th:nth-child(3), .report-jobs-table td:nth-child(3) { width: 132px; min-width: 132px; max-width: 132px; white-space: normal; overflow-wrap: normal; }
-.report-jobs-table th:nth-child(6), .report-jobs-table td:nth-child(6) { width: 180px; min-width: 170px; max-width: 185px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
-.report-jobs-table th:nth-child(7), .report-jobs-table td:nth-child(7) { width: 130px; min-width: 124px; max-width: 134px; white-space: normal; }
-.report-jobs-table th:nth-child(11), .report-jobs-table td:nth-child(11) { width: 160px; min-width: 130px; max-width: 180px; }
+.report-jobs-table th:nth-child(1), .report-jobs-table td:nth-child(1) { width: 4%; min-width: 52px; }
+.report-jobs-table th:nth-child(2), .report-jobs-table td:nth-child(2) { width: 11%; min-width: 145px; white-space: normal; overflow-wrap: anywhere; }
+.report-jobs-table th:nth-child(3), .report-jobs-table td:nth-child(3) { width: 9%; min-width: 132px; max-width: none; white-space: normal; overflow-wrap: anywhere; }
+.report-jobs-table th:nth-child(4), .report-jobs-table td:nth-child(4) { width: 5%; min-width: 62px; }
+.report-jobs-table th:nth-child(5), .report-jobs-table td:nth-child(5) { width: 6%; min-width: 68px; }
+.report-jobs-table th:nth-child(6), .report-jobs-table td:nth-child(6) { width: 13%; min-width: 0; max-width: none; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.report-jobs-table th:nth-child(7), .report-jobs-table td:nth-child(7) { width: 9%; min-width: 0; max-width: none; white-space: normal; }
+.report-jobs-table th:nth-child(8), .report-jobs-table td:nth-child(8),
+.report-jobs-table th:nth-child(9), .report-jobs-table td:nth-child(9) { width: 6%; min-width: 72px; }
+.report-jobs-table th:nth-child(10), .report-jobs-table td:nth-child(10) { width: 20%; min-width: 240px; max-width: none; white-space: normal; }
+.report-jobs-table th:nth-child(11), .report-jobs-table td:nth-child(11) { width: 11%; min-width: 0; max-width: none; }
 .report-job-datasets { display: flex; flex-direction: column; align-items: flex-start; gap: 0.12rem; white-space: normal !important; }
 .report-job-dataset-kind { color: #5d3b86; font-weight: 800; margin-top: 0.18rem; }
 .report-job-progress { display: flex; align-items: center; gap: 0.45rem; min-width: 122px; font-variant-numeric: tabular-nums; }
 .report-job-progress progress { width: 82px; accent-color: #4b208a; }
-.report-jobs-table th:nth-child(12), .report-jobs-table td:nth-child(12) { width: 88px; min-width: 88px; max-width: 88px; }
+.report-jobs-table th:nth-child(12), .report-jobs-table td:nth-child(12) { width: 10%; min-width: 110px; max-width: none; }
 .report-jobs-table .report-job-progress { gap: 0.3rem; min-width: 82px; }
 .report-jobs-table .report-job-progress progress { width: 48px; }
 .report-jobs-table .queue-status-pill { box-sizing: border-box; max-width: 100%; padding: 0.34rem 0.46rem; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .report-job-status { overflow-wrap: anywhere; }
 .report-job-error { margin: 0.32rem 0 0; color: #9d3026; font-size: 0.74rem; font-weight: 650; line-height: 1.28; }
 .app-log-summary { margin: 0 0 0.3rem; color: #243f51; font-size: 0.82rem; font-weight: 650; line-height: 1.35; }
-.report-job-actions { display: flex; max-width: 7rem; flex-wrap: wrap; align-items: center; gap: 0.35rem; white-space: normal; }
+.report-jobs-table th:last-child, .report-jobs-table td:last-child,
+.report-chart-jobs-table th:last-child, .report-chart-jobs-table td:last-child { width: 12rem; min-width: 12rem; }
+.report-job-actions { display: flex; max-width: none; flex-wrap: nowrap; align-items: center; gap: 0.2rem; white-space: nowrap; }
+.report-jobs-table th, .report-jobs-table td,
+.report-chart-jobs-table th, .report-chart-jobs-table td { min-width: 0; overflow-wrap: anywhere; }
+.report-jobs-table .report-job-actions > a, .report-jobs-table .report-job-actions > button, .report-jobs-table .report-job-actions > span,
+.report-chart-jobs-table .report-job-actions > a, .report-chart-jobs-table .report-job-actions > button, .report-chart-jobs-table .report-job-actions > span { flex: 0 0 1.75rem; width: 1.75rem; height: 1.75rem; }
 .report-job-download-button { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; padding: 0; border: 1px solid rgba(116, 87, 164, 0.62); border-radius: 999px; background: linear-gradient(145deg, #6d46a8, #9870d0); color: #fff; font-size: 1.2rem; line-height: 1; font-weight: 800; text-decoration: none; box-shadow: 0 8px 18px rgba(95, 69, 142, 0.18); }
 .report-job-download-button:hover:not(.action-link-disabled) { background: linear-gradient(145deg, #4f2d82, #7549b0); border-color: rgba(79, 45, 130, 0.78); color: #fff; box-shadow: 0 10px 22px rgba(79, 45, 130, 0.32); transform: translateY(-1px); }
 .report-job-download-button.action-link-disabled { background: linear-gradient(135deg, #e3e8ec, #d5dde4); border-color: rgba(126, 139, 152, 0.24); color: #7a8792; box-shadow: none; cursor: not-allowed; }

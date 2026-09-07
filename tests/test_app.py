@@ -1653,7 +1653,15 @@ def test_queued_dataset_actions_remain_compact_icons_during_live_updates(client)
     assert 'class="danger-button icon-action" aria-label="Delete dataset"' in script.text
 
     styles = client.get('/static/css/app.css')
-    assert '.report-job-actions { display: flex; max-width: 7rem; flex-wrap: wrap;' in styles.text
+    assert '.report-job-actions { display: flex; max-width: none; flex-wrap: nowrap;' in styles.text
+    assert '.report-jobs-table th:nth-child(2), .report-jobs-table td:nth-child(2) { width: 11%; min-width: 145px;' in styles.text
+    assert '.report-jobs-table th:nth-child(10), .report-jobs-table td:nth-child(10) { width: 20%; min-width: 240px;' in styles.text
+    assert '.report-jobs-table th:nth-child(1), .report-jobs-table td:nth-child(1) { width: 4%; min-width: 52px;' in styles.text
+    assert '.report-jobs-table th:nth-child(3), .report-jobs-table td:nth-child(3) { width: 9%; min-width: 132px;' in styles.text
+    assert '.report-jobs-table th:nth-child(4), .report-jobs-table td:nth-child(4) { width: 5%; min-width: 62px;' in styles.text
+    assert '.report-jobs-table th:nth-child(5), .report-jobs-table td:nth-child(5) { width: 6%; min-width: 68px;' in styles.text
+    assert '.report-jobs-table th:nth-child(8), .report-jobs-table td:nth-child(8),\n.report-jobs-table th:nth-child(9), .report-jobs-table td:nth-child(9) { width: 6%; min-width: 72px;' in styles.text
+    assert '.report-jobs-table th:nth-child(12), .report-jobs-table td:nth-child(12) { width: 10%; min-width: 110px;' in styles.text
 
 
 def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> None:
