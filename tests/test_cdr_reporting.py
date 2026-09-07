@@ -1242,6 +1242,29 @@ def test_status_100_hover_targets_support_multi_level_row_grouping() -> None:
     assert any(target['height'] > 0 for target in targets)
 
 
+def test_status_100_hover_targets_support_tableau_dashboard_geography_hierarchy() -> None:
+    entry = parse_catalog_csv(
+        ','.join(CATALOG_HEADERS)
+        + '\n1,SR Dashboard,,Title and 3 columns + Comments,Success Ratio per glevel,CDR-Data,Result Group,100% Stacked Vertical Bars,,G_Level_2 × G_Level_1 × Operator,,Result Group,Right\n',
+        'nsa',
+    )[0]
+    frame = pd.DataFrame({
+        'G_Level_2': ['England', 'England', 'Scotland', 'Scotland'],
+        'G_Level_1': ['North', 'North', 'Central', 'Central'],
+        'Operator': ['EE', '3', 'EE', '3'],
+        'Result Group': ['Completed', 'Failed', 'Completed', 'Cutoff'],
+    })
+
+    targets = catalog_chart_hover_targets(frame, entry)
+
+    assert len(targets) == 12
+    assert {target['label'] for target in targets} == {
+        'England · North · EE', 'England · North · 3',
+        'Scotland · Central · EE', 'Scotland · Central · 3',
+    }
+    assert any(target['height'] > 0 for target in targets)
+
+
 def test_cdf_hover_targets_use_the_same_clipped_domain_as_the_renderer() -> None:
     entry = CatalogEntry(
         13, 'POLQA CDF', '', '', '', 'CDR-Speech', 'LQ', 'CDF Line', 'Operator × Campaign', '', 'Operator', 'Campaign', 'Top',
