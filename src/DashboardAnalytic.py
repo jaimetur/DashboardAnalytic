@@ -47,7 +47,7 @@ DEFAULT_TRANSFER_PORT = 7278
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, catalog_chart_hover_targets, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, catalog_chart_hover_targets, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE
@@ -4551,6 +4551,8 @@ def _temporary_chart_preview_hover_targets(payload: dict[str, Any]) -> list[dict
     targets = catalog_chart_hover_targets(filtered, entry, multivendor=multivendor, prefiltered=True)
     if source == 'standalone' and not editable:
         _store_chart_hover_targets(identifier, chart_index, targets)
+    if source == 'report' and not editable:
+        _store_report_hover_targets(identifier, chart_index, targets)
     return targets
 
 
@@ -4582,6 +4584,8 @@ def _stored_chart_hover_targets(generation: str, chart_index: int) -> list[dict[
         return None
     try:
         manifest = json.loads((report_charts_directory() / generation / 'manifest.json').read_text(encoding='utf-8'))
+        if manifest.get('hover_targets_version') != HOVER_TARGETS_VERSION:
+            return None
         chart = manifest.get('charts', [])[chart_index]
         target_file = str(chart.get('hover_file') or '')
         if not re.fullmatch(r'chart-\d+\.hover\.json', target_file):
@@ -4598,6 +4602,8 @@ def _stored_report_hover_targets(report_id: str, chart_index: int) -> list[dict[
         row = repository.get_report_run(int(report_id))
         directory = _report_job_charts_directory(row) if row else None
         manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8')) if directory else {}
+        if manifest.get('hover_targets_version') != HOVER_TARGETS_VERSION:
+            return None
         chart = manifest.get('charts', [])[chart_index]
         target_file = str(chart.get('hover_file') or '')
         if not re.fullmatch(r'slide-\d+-chart-\d+\.hover\.json', target_file):
@@ -4626,6 +4632,32 @@ def _store_chart_hover_targets(generation: str, chart_index: int, targets: list[
             temporary.write_text(json.dumps(targets, ensure_ascii=False), encoding='utf-8')
             temporary.replace(directory / hover_file)
             chart['hover_file'] = hover_file
+            manifest['hover_targets_version'] = HOVER_TARGETS_VERSION
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
+    except (IndexError, OSError, ValueError, json.JSONDecodeError, TypeError):
+        return
+
+
+def _store_report_hover_targets(report_id: str, chart_index: int, targets: list[dict[str, object]]) -> None:
+    """Replace an obsolete report sidecar with targets matching the current renderer."""
+    try:
+        row = repository.get_report_run(int(report_id))
+        directory = _report_job_charts_directory(row) if row else None
+        if directory is None:
+            return
+        with CHART_PREVIEW_CACHE_LOCK:
+            manifest_path = directory / 'manifest.json'
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            chart = manifest.get('charts', [])[chart_index]
+            file_name = str(chart.get('file') or '')
+            if not re.fullmatch(r'slide-\d+-chart-\d+\.png', file_name):
+                return
+            hover_file = f'{Path(file_name).stem}.hover.json'
+            temporary = directory / f'.{hover_file}.tmp'
+            temporary.write_text(json.dumps(targets, ensure_ascii=False), encoding='utf-8')
+            temporary.replace(directory / hover_file)
+            chart['hover_file'] = hover_file
+            manifest['hover_targets_version'] = HOVER_TARGETS_VERSION
             manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
     except (IndexError, OSError, ValueError, json.JSONDecodeError, TypeError):
         return
@@ -5498,6 +5530,7 @@ def persist_report_charts(
             'generation': target.name,
             'generated_at': generated_at.isoformat(timespec='seconds'),
             'generate_tooltips': generate_tooltips,
+            'hover_targets_version': HOVER_TARGETS_VERSION,
             'charts': [chart for _, chart in manifest_charts],
         }
         # The manifest is the completion marker consumed by selectors. Write

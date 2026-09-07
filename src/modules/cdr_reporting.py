@@ -53,6 +53,8 @@ FILTER_OPERATORS = ("CONTAINS", "NOT CONTAINS", "IN", "NOT IN", ">=", "<=", "!="
 # The rendered CDF is 1,165 pixels wide. More than one hit-test vertex per
 # ten pixels does not improve pointer precision, but greatly inflates sidecars.
 MAX_CDF_HOVER_TARGETS_PER_SERIES = 120
+# Increment when renderer coordinates or semantic hit-area geometry changes.
+HOVER_TARGETS_VERSION = 2
 
 
 def _catalogue_header_key(value: str) -> str:
@@ -3559,7 +3561,11 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
     presentation.save(destination)
     if chart_output_dir is not None:
         (chart_output_dir / 'manifest.json').write_text(
-            json.dumps({'generate_tooltips': generate_tooltips, 'charts': rendered_charts}),
+            json.dumps({
+                'generate_tooltips': generate_tooltips,
+                'hover_targets_version': HOVER_TARGETS_VERSION,
+                'charts': rendered_charts,
+            }),
             encoding='utf-8',
         )
     return destination

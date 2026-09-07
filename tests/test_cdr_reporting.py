@@ -1306,6 +1306,7 @@ def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None
     assert not any(shape.name == 'catalogue-subtitle' for shape in slide.shapes)
     manifest = json.loads((tmp_path / 'charts' / 'manifest.json').read_text(encoding='utf-8'))
     assert manifest['generate_tooltips'] is True
+    assert manifest['hover_targets_version'] == 2
     assert all((tmp_path / 'charts' / chart['hover_file']).is_file() for chart in manifest['charts'])
 
 
@@ -1486,6 +1487,22 @@ def test_chart_set_persists_precomputed_hover_targets(client) -> None:
     )
 
     assert app_module._stored_chart_hover_targets(chart_set['generation'], 0) == [{'kind': 'bar', 'x': 1}]
+
+
+def test_chart_set_ignores_obsolete_hover_target_geometry(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    chart_set = app_module.persist_report_charts(
+        'NSA Slide Template', 'single',
+        [({'slide': 1, 'title': 'Chart', 'source': 'data', 'chart_type': 'Bar', 'hover_targets': [{'kind': 'bar', 'x': 1}]}, b'PNG')],
+        {'data': 1, 'voice': 1, 'speech': 1},
+    )
+    manifest_path = app_module.report_charts_directory() / chart_set['generation'] / 'manifest.json'
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    manifest['hover_targets_version'] = 1
+    manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+
+    assert app_module._stored_chart_hover_targets(chart_set['generation'], 0) is None
 
 
 def test_chart_set_can_disable_tooltips_without_creating_sidecars(client) -> None:
