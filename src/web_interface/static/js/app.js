@@ -3045,10 +3045,12 @@ function selectFullEnvironmentWorkspaces() {
   const cancel = overlay.querySelector('[data-full-environment-cancel]');
   const selectAll = overlay.querySelector('[data-full-environment-select-all]');
   const selectNone = overlay.querySelector('[data-full-environment-select-none]');
+  const generatedOutputs = overlay.querySelector('[data-full-environment-generated-outputs]');
   const error = overlay.querySelector('[data-full-environment-workspace-error]');
   overlay.hidden = false;
   document.body.classList.add('loading-active');
   if (error instanceof HTMLElement) error.hidden = true;
+  if (generatedOutputs instanceof HTMLInputElement) generatedOutputs.checked = true;
   return new Promise((resolve) => {
     const close = (selection) => {
       overlay.hidden = true;
@@ -3067,7 +3069,10 @@ function selectFullEnvironmentWorkspaces() {
         if (error instanceof HTMLElement) error.hidden = false;
         return;
       }
-      close(selected);
+      close({
+        workspaceIds: selected,
+        includeGeneratedOutputs: generatedOutputs instanceof HTMLInputElement ? generatedOutputs.checked : true,
+      });
     };
     const dismiss = () => close(null);
     const checkAll = () => { checkboxes.forEach((checkbox) => { checkbox.checked = true; }); if (error instanceof HTMLElement) error.hidden = true; };
@@ -3156,10 +3161,11 @@ function selectTransferDestination() {
 document.querySelectorAll('[data-export-package-form]').forEach((form) => {
   const exportTarget = form.querySelector('select[name="export_target"]');
   const transferButton = form.querySelector('[data-server-transfer]');
-  let selectedFullWorkspaceIds = null;
+  let selectedFullEnvironment = null;
   const confirmGeneratedOutputs = async (formData, operation) => {
     const target = String(formData.get('export_target') || '');
-    if (target !== 'full-environment' && !target.startsWith('workspace:')) {
+    if (target === 'full-environment') return true;
+    if (!target.startsWith('workspace:')) {
       formData.set('include_generated_outputs', 'true');
       return true;
     }
@@ -3178,25 +3184,26 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
   };
   exportTarget?.addEventListener('change', async () => {
     if (!(exportTarget instanceof HTMLSelectElement) || exportTarget.value !== 'full-environment') {
-      selectedFullWorkspaceIds = null;
+      selectedFullEnvironment = null;
       return;
     }
     const selection = await selectFullEnvironmentWorkspaces();
     if (selection === null) {
       exportTarget.value = 'config';
-      selectedFullWorkspaceIds = null;
+      selectedFullEnvironment = null;
       return;
     }
-    selectedFullWorkspaceIds = selection;
+    selectedFullEnvironment = selection;
   });
   transferButton?.addEventListener('click', async () => {
     if (!(form instanceof HTMLFormElement)) return;
     const formData = new FormData(form);
     if (formData.get('export_target') === 'full-environment') {
-      const workspaceIds = selectedFullWorkspaceIds || await selectFullEnvironmentWorkspaces();
-      if (workspaceIds === null) return;
-      selectedFullWorkspaceIds = workspaceIds;
-      workspaceIds.forEach((workspaceId) => formData.append('workspace_ids', workspaceId));
+      const selection = selectedFullEnvironment || await selectFullEnvironmentWorkspaces();
+      if (selection === null) return;
+      selectedFullEnvironment = selection;
+      selection.workspaceIds.forEach((workspaceId) => formData.append('workspace_ids', workspaceId));
+      formData.set('include_generated_outputs', String(selection.includeGeneratedOutputs));
     }
     if (!await confirmGeneratedOutputs(formData, 'Transfer')) return;
     const destination = await selectTransferDestination();
@@ -3290,9 +3297,11 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
     if (!(form instanceof HTMLFormElement)) return;
     const formData = new FormData(form);
     if (formData.get('export_target') === 'full-environment') {
-      const workspaceIds = selectedFullWorkspaceIds || await selectFullEnvironmentWorkspaces();
-      if (workspaceIds === null) return;
-      workspaceIds.forEach((workspaceId) => formData.append('workspace_ids', workspaceId));
+      const selection = selectedFullEnvironment || await selectFullEnvironmentWorkspaces();
+      if (selection === null) return;
+      selectedFullEnvironment = selection;
+      selection.workspaceIds.forEach((workspaceId) => formData.append('workspace_ids', workspaceId));
+      formData.set('include_generated_outputs', String(selection.includeGeneratedOutputs));
     }
     if (!await confirmGeneratedOutputs(formData, 'Export')) return;
     showLoadingOverlay(form.dataset.loadingLabel, form.dataset.loadingCopy);

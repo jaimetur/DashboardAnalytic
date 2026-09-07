@@ -438,7 +438,17 @@ def test_workspace_export_can_exclude_generated_reports_and_chart_sets(client, t
     app_module.build_export_archive_file('workspace:default', excluded_archive, include_generated_outputs=False)
     with zipfile.ZipFile(excluded_archive) as archive:
         assert json.loads(archive.read('manifest.json'))['includes_generated_outputs'] is False
-        assert not any(name.startswith('workspace/output/') for name in archive.namelist())
+    assert not any(name.startswith('workspace/output/') for name in archive.namelist())
+
+
+def test_full_environment_selector_offers_generated_outputs_by_default(client) -> None:
+    login_super(client)
+
+    response = client.get('/admin')
+
+    assert response.status_code == 200
+    assert 'data-full-environment-generated-outputs' in response.text
+    assert 'Include generated reports and Chart Sets' in response.text
 
 
 def test_voice_and_speech_import_without_measured_kpis_remain_ready(client) -> None:
