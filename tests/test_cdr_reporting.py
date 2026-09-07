@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, assign_cdr_vendors, catalog_chart_hover_targets, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, assign_cdr_vendors, catalog_chart_hover_targets, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -853,6 +853,21 @@ def test_reporting_query_columns_splits_map_coordinates() -> None:
     assert 'Test_Start_Latitude vs Test_Start_Longitude' not in columns
 
 
+def test_reporting_query_columns_splits_multi_kpi_cdf_metrics() -> None:
+    import src.DashboardAnalytic as app_module
+
+    entry = CatalogEntry(
+        43, 'FDTT DL SINR', '', '', 'FDTT DL SINR', 'CDR-Data',
+        'NR_PCell_SINR_Avg | LTE_PCell_SINR_Avg', 'Multi KPI CDF Lines',
+        'Operator', 'Test_Result IN (Completed)', 'Operator', '', 'Right',
+    )
+
+    columns = app_module.reporting_query_columns('data', [entry], False)
+
+    assert {'NR_PCell_SINR_Avg', 'LTE_PCell_SINR_Avg'} <= set(columns)
+    assert 'NR_PCell_SINR_Avg | LTE_PCell_SINR_Avg' not in columns
+
+
 def test_reporting_query_columns_include_calculated_dimension_dependencies() -> None:
     import src.DashboardAnalytic as app_module
 
@@ -883,6 +898,40 @@ def test_catalogue_filter_contract_supports_not_in_and_not_contains() -> None:
         'LQ': [3.2, 4.0, 3.8], 'Operator': ['EE', 'EE', 'O2'],
     })
     assert _apply_catalog_filters(frame, entry, False, 'LQ')['Operator'].tolist() == ['EE']
+
+
+def test_tableau_result_group_filter_uses_the_workbook_bins() -> None:
+    entry = CatalogEntry(
+        1, 'Failures', '', '', 'Failures', 'CDR-Data', 'Result Group',
+        '100% Stacked Vertical Bars', 'Result Group', 'Result Group NOT IN (Success)',
+        'Operator', '', 'Right',
+    )
+    frame = pd.DataFrame({
+        'Operator': ['EE'] * 5,
+        'Test_Result': ['Completed', 'Visible Completed', 'Cutoff', 'Failed', 'Unknown'],
+    })
+
+    filtered = _apply_catalog_filters(frame, entry, False, None)
+
+    assert filtered['Test_Result'].tolist() == ['Cutoff', 'Failed', 'Unknown']
+
+
+def test_multi_kpi_cdf_lines_render_each_tableau_measure() -> None:
+    entry = CatalogEntry(
+        1, 'Radio quality', '', '', 'Radio quality', 'CDR-Data',
+        'NR SINR | LTE SINR', 'Multi KPI CDF Lines', 'Operator', '',
+        'Operator', 'Campaign', 'Right',
+    )
+    frame = pd.DataFrame({
+        'Operator': ['EE', 'EE', 'VF', 'VF'],
+        'Campaign': ['2026 Q1', '2026 Q2', '2026 Q1', '2026 Q2'],
+        'NR SINR': [4.0, 5.0, 6.0, 7.0],
+        'LTE SINR': [8.0, 9.0, 10.0, 11.0],
+    })
+
+    image = render_catalog_chart_preview(frame, entry)
+
+    assert image.startswith(b'\x89PNG\r\n\x1a\n')
 
 
 def test_not_contains_filter_excludes_each_comma_separated_term() -> None:

@@ -416,6 +416,50 @@ def test_full_environment_export_job_uses_selected_workspaces(client) -> None:
     assert [workspace['name'] for workspace in manifest['workspaces']] == ['Default']
 
 
+def test_workspace_export_can_exclude_generated_reports_and_chart_sets(client, tmp_path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login_super(client)
+    report = app_module.settings.output_dir / 'reports' / 'generated.pptx'
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_bytes(b'report')
+    chart = app_module.settings.output_dir / 'charts' / '20260907-120000' / 'chart-1.png'
+    chart.parent.mkdir(parents=True, exist_ok=True)
+    chart.write_bytes(b'chart')
+
+    included_archive = tmp_path / 'included.zip'
+    app_module.build_export_archive_file('workspace:default', included_archive, include_generated_outputs=True)
+    with zipfile.ZipFile(included_archive) as archive:
+        assert json.loads(archive.read('manifest.json'))['includes_generated_outputs'] is True
+        assert 'workspace/output/reports/generated.pptx' in archive.namelist()
+        assert 'workspace/output/charts/20260907-120000/chart-1.png' in archive.namelist()
+
+    excluded_archive = tmp_path / 'excluded.zip'
+    app_module.build_export_archive_file('workspace:default', excluded_archive, include_generated_outputs=False)
+    with zipfile.ZipFile(excluded_archive) as archive:
+        assert json.loads(archive.read('manifest.json'))['includes_generated_outputs'] is False
+        assert not any(name.startswith('workspace/output/') for name in archive.namelist())
+
+
+def test_voice_and_speech_import_without_measured_kpis_remain_ready(client) -> None:
+    login(client)
+
+    for filename, kind, content in (
+        ('voice.csv', 'voice', b'Operator,Call_Status\nOrange,Completed\n'),
+        ('speech.csv', 'speech', b'Operator,Test_Result\nOrange,Completed\n'),
+    ):
+        response = client.post(
+            '/dashboard/upload', data={'dataset_kinds': kind},
+            files={'dataset_files': (filename, BytesIO(content), 'text/csv')},
+        )
+        assert response.status_code == 200
+
+    import src.DashboardAnalytic as app_module
+    datasets = app_module.repository.list_datasets()
+    assert [dataset['status'] for dataset in datasets] == ['ready', 'ready']
+    assert all('attempt_count' in json.loads(dataset['available_metrics_json']) for dataset in datasets)
+
+
 def test_admin_import_job_reuses_the_inspected_disk_upload(client) -> None:
     login_super(client)
     exported = client.get('/admin/import-export/export?export_target=config')
@@ -700,7 +744,7 @@ def test_outgoing_server_transfer_waits_for_acceptance_and_streams_package(clien
             state['uploaded'] = True
             return FakeResponse({'status': 'received'})
 
-    def fake_export(target, destination, workspace_ids=None, progress_callback=None):
+    def fake_export(target, destination, workspace_ids=None, progress_callback=None, include_generated_outputs=True):
         destination.write_bytes(b'streamed-transfer-package')
         if progress_callback:
             progress_callback(len(b'streamed-transfer-package'))

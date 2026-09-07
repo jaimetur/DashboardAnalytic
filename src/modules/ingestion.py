@@ -378,7 +378,6 @@ def _normalise_dataset(df: pd.DataFrame, file_path: Path) -> pd.DataFrame:
     dataset['packet_loss_pct'] = _average_columns(dataset, ['RTP_Packet_Loss_A', 'RTP_Packet_Loss_B', 'Packet_Loss_Score'])
     dataset['jitter_ms'] = _average_columns(dataset, ['RTP_Jitter_Avg_A', 'RTP_Jitter_Avg_B'])
     dataset['handovers'] = _first_available_series(dataset, ['Handovers_Info', 'Handovers_Info_A', 'Playing_Handovers']).map(_count_items)
-
     dataset['technology_primary'] = _first_available_series(
         dataset,
         ['RAT', 'RAT_A', 'L2_call_Mode_A', 'Playing_Technology'],
@@ -461,7 +460,11 @@ def load_dataset(file_path: Path, progress_callback: Callable[[int], None] | Non
 
 
 def summarise_dataset(df: pd.DataFrame) -> DatasetSummary:
-    numeric_columns = df.select_dtypes(include=['number']).columns.tolist()
+    numeric_columns = [
+        column for column in df.columns
+        if not pd.api.types.is_bool_dtype(df[column])
+        and pd.to_numeric(df[column], errors='coerce').notna().any()
+    ]
     categorical_columns = [column for column in df.columns.tolist() if column not in numeric_columns]
     return DatasetSummary(
         rows=len(df.index),

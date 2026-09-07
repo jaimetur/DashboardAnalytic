@@ -29,7 +29,7 @@ DEFAULT_METRICS: dict[str, list[str]] = {
     'voice': ['POLQA_LQ_Avg', 'quality_score', 'Call_Setup_Time', 'Call_Duration', 'setup_time_seconds'],
     'speech': ['LQ', 'quality_score', 'Receive_Delay', 'jitter_ms', 'packet_loss_pct'],
     'data': ['Mean_Data_Rate', 'throughput_mbps', 'TCP_Throughput', 'Test_Duration', 'setup_time_seconds'],
-    'generic': ['quality_score'],
+    'generic': ['quality_score', 'attempt_count'],
 }
 AGGREGATION_CANDIDATES: dict[str, list[str]] = {
     'voice': ['operator', 'session_type', 'region', 'city', 'vendor', 'technology_primary', 'source_sheet', 'market', 'period'],
@@ -227,11 +227,12 @@ def _infer_metric(df: pd.DataFrame, requested_metric: str, dataset_kind: str) ->
         return candidate
     for metric in DEFAULT_METRICS.get(dataset_kind, []) + DEFAULT_METRICS['generic']:
         column = _resolve_column(df, metric)
-        if column and pd.api.types.is_numeric_dtype(df[column]) and pd.to_numeric(df[column], errors='coerce').notna().any():
+        if column and pd.to_numeric(df[column], errors='coerce').notna().any():
             return column
     numeric_columns = [
-        column for column in df.select_dtypes(include=['number']).columns.tolist()
-        if pd.to_numeric(df[column], errors='coerce').notna().any()
+        column for column in df.columns
+        if not pd.api.types.is_bool_dtype(df[column])
+        and pd.to_numeric(df[column], errors='coerce').notna().any()
     ]
     if not numeric_columns:
         raise ValueError('No numeric metric available to analyse')

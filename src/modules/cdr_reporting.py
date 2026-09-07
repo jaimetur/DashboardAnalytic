@@ -6,6 +6,7 @@ import csv
 import gc
 import io
 import json
+import math
 import re
 import unicodedata
 from collections import defaultdict
@@ -956,6 +957,85 @@ def _catalog_column(
             "failed": "Failure",
         }).astype("string")
         return "__catalog_result_group"
+    if normalized == "lowratesession":
+        rate = _column(frame, ("Mean_Data_Rate", "Mean Data Rate"))
+        test = _column(frame, ("Test_Name", "Test Name"))
+        if not rate or not test:
+            return None
+        rates = pd.to_numeric(frame[rate], errors="coerce")
+        tests = frame[test].fillna("").astype(str).str.casefold()
+        frame["__catalog_low_rate_session"] = pd.Series(pd.NA, index=frame.index, dtype="Int64")
+        downlink = tests.eq("fdtt http dl mt")
+        uplink = tests.eq("fdtt udp ul st")
+        frame.loc[downlink, "__catalog_low_rate_session"] = rates.loc[downlink].lt(100).astype("Int64")
+        frame.loc[uplink, "__catalog_low_rate_session"] = rates.loc[uplink].lt(20).astype("Int64")
+        return "__catalog_low_rate_session"
+    if normalized in {"ltedlaggregatedbwmhz", "ltedltestbandwidthavgint"}:
+        source = _column(frame, ("LTE_DL_Test_Bandwidth_Avg", "LTE DL Test Bandwidth Avg"))
+        if not source:
+            return None
+        values = pd.to_numeric(frame[source], errors="coerce")
+        frame["__catalog_lte_dl_aggregated_bw"] = values.map(
+            lambda value: max(5, math.ceil(value / 5) * 5) if pd.notna(value) else pd.NA
+        )
+        return "__catalog_lte_dl_aggregated_bw"
+    if normalized == "nrdlpcellnumerology1bandwidthnumber":
+        source = _column(frame, ("NR_PCell_Numerology1_Bandwidth", "NR PCell Numerology1 Bandwidth"))
+        if not source:
+            return None
+        extracted = frame[source].astype("string").str.split("->", n=1).str[0].str.extract(r"\[\s*([0-9.]+)\s*\]", expand=False)
+        frame["__catalog_nr_numerology1_bandwidth"] = pd.to_numeric(extracted, errors="coerce")
+        return "__catalog_nr_numerology1_bandwidth"
+    if normalized == "nrultotalbandwidthmhz":
+        source = _column(frame, ("NR_UL_RBs_Avg", "NR UL RBs Avg"))
+        if not source:
+            return None
+        values = pd.to_numeric(frame[source], errors="coerce") * 12 * 30 / 1000
+        frame["__catalog_nr_ul_total_bw"] = values.map(
+            lambda value: max(5, math.ceil(value / 5) * 5) if pd.notna(value) else pd.NA
+        )
+        return "__catalog_nr_ul_total_bw"
+    if normalized == "totalbw ltenr" or normalized == "totalbwltenr":
+        lte = _catalog_column(frame, "LTE DL Aggregated BW (MHz)", multivendor)
+        nr = _column(frame, ("NR_DL_PCell_Bandwidth", "NR DL PCell Bandwidth"))
+        if not lte and not nr:
+            return None
+        lte_values = pd.to_numeric(frame[lte], errors="coerce") if lte else pd.Series(0.0, index=frame.index)
+        nr_values = pd.to_numeric(frame[nr], errors="coerce") if nr else pd.Series(0.0, index=frame.index)
+        frame["__catalog_total_bw_lte_nr"] = lte_values.fillna(0) + nr_values.fillna(0)
+        return "__catalog_total_bw_lte_nr"
+    if normalized in {
+        "emocnnnshystorical", "emocnnnshystoricalnew", "emocnnnshystoricalnew2",
+        "emocnnnshystoricalwithoperator",
+    }:
+        test_time = _column(frame, ("Test_Start_Time", "Test Start Time"))
+        nns_date = _column(frame, ("NNS Activation Date (F)", "NNS_Activation_Date_F"))
+        mocn_date = _column(frame, ("MOCN Activation Date (F)", "MOCN_Activation_Date_F"))
+        if not test_time or (not nns_date and not mocn_date):
+            return None
+        comparison = pd.to_datetime(frame[test_time], errors="coerce")
+        if normalized != "emocnnnshystoricalnew2":
+            campaign = _column(frame, ("Campaign", "campaign"))
+            cutoffs = {
+                "UK_Q4_2025_NSA": pd.Timestamp("2025-12-09"),
+                "UK_Q1_2026": pd.Timestamp("2026-03-24"),
+                "UK_Q2_2026": pd.Timestamp("2026-06-02"),
+            }
+            if campaign:
+                comparison = frame[campaign].map(cutoffs).fillna(comparison)
+        nns = pd.to_datetime(frame[nns_date], errors="coerce") if nns_date else pd.Series(pd.NaT, index=frame.index)
+        mocn = pd.to_datetime(frame[mocn_date], errors="coerce") if mocn_date else pd.Series(pd.NaT, index=frame.index)
+        result = pd.Series("Legacy", index=frame.index, dtype="string")
+        result.loc[mocn.notna() & comparison.notna() & mocn.le(comparison)] = "eMOCN"
+        result.loc[nns.notna() & comparison.notna() & nns.le(comparison)] = "NNS"
+        if normalized == "emocnnnshystoricalwithoperator":
+            host = _column(frame, ("Host Network", "Host_Network"))
+            if host:
+                mask = result.eq("eMOCN")
+                result.loc[mask] = "eMOCN - " + frame.loc[mask, host].fillna("(blank)").astype(str)
+        target = f"__catalog_{normalized}"
+        frame[target] = result
+        return target
     if normalized == "firstltepccarfcn":
         source = _column(frame, ("LTE_PCC_EARFCN", "LTE PCC EARFCN"))
         if not source:

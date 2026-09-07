@@ -3157,6 +3157,25 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
   const exportTarget = form.querySelector('select[name="export_target"]');
   const transferButton = form.querySelector('[data-server-transfer]');
   let selectedFullWorkspaceIds = null;
+  const confirmGeneratedOutputs = async (formData, operation) => {
+    const target = String(formData.get('export_target') || '');
+    if (target !== 'full-environment' && !target.startsWith('workspace:')) {
+      formData.set('include_generated_outputs', 'true');
+      return true;
+    }
+    const result = await showConfirmDialog(
+      `Include generated reports and Chart Sets in this Workspace ${operation}?`,
+      {
+        title: `${operation} Workspace`,
+        confirmLabel: operation,
+        optionLabel: 'Include generated reports and Chart Sets',
+        optionChecked: true,
+      },
+    );
+    if (!result.accepted) return false;
+    formData.set('include_generated_outputs', String(result.optionChecked));
+    return true;
+  };
   exportTarget?.addEventListener('change', async () => {
     if (!(exportTarget instanceof HTMLSelectElement) || exportTarget.value !== 'full-environment') {
       selectedFullWorkspaceIds = null;
@@ -3179,6 +3198,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       selectedFullWorkspaceIds = workspaceIds;
       workspaceIds.forEach((workspaceId) => formData.append('workspace_ids', workspaceId));
     }
+    if (!await confirmGeneratedOutputs(formData, 'Transfer')) return;
     const destination = await selectTransferDestination();
     if (!destination) return;
     formData.set('destination_url', destination.destinationUrl);
@@ -3274,6 +3294,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       if (workspaceIds === null) return;
       workspaceIds.forEach((workspaceId) => formData.append('workspace_ids', workspaceId));
     }
+    if (!await confirmGeneratedOutputs(formData, 'Export')) return;
     showLoadingOverlay(form.dataset.loadingLabel, form.dataset.loadingCopy);
     try {
       const response = await fetch(form.action, {

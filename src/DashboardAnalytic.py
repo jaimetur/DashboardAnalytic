@@ -193,6 +193,10 @@ def format_preview_gcid(value: object) -> object:
 def materialize_cdr_derived_columns(frame: pd.DataFrame) -> pd.DataFrame:
     """Add stable, report-facing CDR dimensions as inspectable columns."""
     result = frame.copy()
+    # A CDR can legitimately contain only categorical attempt outcomes. Keep
+    # it importable and analyzable by exposing its count when no measured KPI
+    # is available, without adding this reporting-only field to generic data.
+    result['attempt_count'] = pd.Series(1, index=result.index, dtype='Int64')
     columns = {str(column).casefold(): str(column) for column in result.columns}
 
     def column(*names: str) -> str | None:
@@ -874,7 +878,11 @@ def derive_available_metrics(df) -> list[str]:
         'POLQA_LQ_Avg', 'LQ', 'Mean_Data_Rate', 'quality_score', 'throughput_mbps', 'setup_time_seconds', 'duration_seconds',
         'jitter_ms', 'packet_loss_pct', 'latency_ms', 'Call_Setup_Time', 'Call_Duration', 'Receive_Delay', 'TCP_RTT_Service_Access_Delay',
     ]
-    numeric_columns = df.select_dtypes(include=['number']).columns.tolist()
+    numeric_columns = [
+        column for column in df.columns
+        if not pd.api.types.is_bool_dtype(df[column])
+        and pd.to_numeric(df[column], errors='coerce').notna().any()
+    ]
     ordered = [column for column in preferred if column in numeric_columns and is_metric_candidate(column)]
     ordered.extend(column for column in numeric_columns if column not in ordered and is_metric_candidate(column))
     return ordered[:20]
@@ -1914,14 +1922,22 @@ def _workspace_archive_metadata(workspace: Workspace) -> dict[str, Any]:
         'id': workspace.id,
         'name': workspace.name,
         'source_input_dir': str(workspace.input_dir),
+        'source_output_dir': str(workspace.output_dir),
         'access_usernames': access_usernames,
     }
 
 
-def _archive_workspace(archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str, scratch_dir: Path | None = None, progress_callback: Callable[[int], None] | None = None) -> None:
-    _archive_database(archive, workspace.database_path, f'{archive_prefix}/database.sqlite', scratch_dir, progress_callback)
+def _archive_workspace(
+    archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str, scratch_dir: Path | None = None,
+    progress_callback: Callable[[int], None] | None = None, include_generated_outputs: bool = True,
+) -> None:
+    _archive_database(
+        archive, workspace.database_path, f'{archive_prefix}/database.sqlite', scratch_dir, progress_callback,
+        exclude_tables=() if include_generated_outputs else ('generated_jobs',),
+    )
     _archive_tree(archive, workspace.input_dir, f'{archive_prefix}/input', progress_callback=progress_callback)
-    _archive_tree(archive, workspace.export_dir, f'{archive_prefix}/exports', progress_callback=progress_callback)
+    if include_generated_outputs:
+        _archive_tree(archive, workspace.output_dir, f'{archive_prefix}/output', progress_callback=progress_callback)
 
 
 def export_archive_filename(target: str) -> str:
@@ -1957,7 +1973,10 @@ def _selected_export_workspaces(workspace_ids: Iterable[str] | None) -> list[Wor
     return [available[workspace_id] for workspace_id in selected_ids]
 
 
-def build_export_archive_file(target: str, destination: Path, workspace_ids: Iterable[str] | None = None, progress_callback: Callable[[int], None] | None = None) -> str:
+def build_export_archive_file(
+    target: str, destination: Path, workspace_ids: Iterable[str] | None = None,
+    progress_callback: Callable[[int], None] | None = None, include_generated_outputs: bool = True,
+) -> str:
     """Create a portable archive on disk, keeping large exports out of RAM."""
     filename = export_archive_filename(target)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -2024,9 +2043,13 @@ def build_export_archive_file(target: str, destination: Path, workspace_ids: Ite
                 'version': ARCHIVE_VERSION,
                 'kind': 'workspace',
                 'workspace': _workspace_archive_metadata(workspace),
+                'includes_generated_outputs': include_generated_outputs,
             }
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
-            _archive_workspace(archive, workspace, 'workspace', destination.parent, progress_callback)
+            _archive_workspace(
+                archive, workspace, 'workspace', destination.parent, progress_callback,
+                include_generated_outputs=include_generated_outputs,
+            )
         elif target == 'full-environment':
             workspaces = _selected_export_workspaces(workspace_ids)
             manifest = {
@@ -2034,6 +2057,7 @@ def build_export_archive_file(target: str, destination: Path, workspace_ids: Ite
                 'version': ARCHIVE_VERSION,
                 'kind': 'full-environment',
                 'includes_slides_templates': True,
+                'includes_generated_outputs': include_generated_outputs,
                 'workspaces': [
                     {**_workspace_archive_metadata(workspace), 'archive_path': f'workspaces/{index}'}
                     for index, workspace in enumerate(workspaces, start=1)
@@ -2042,7 +2066,10 @@ def build_export_archive_file(target: str, destination: Path, workspace_ids: Ite
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             archive_configuration(archive, include_templates=True)
             for entry, workspace in zip(manifest['workspaces'], workspaces, strict=True):
-                _archive_workspace(archive, workspace, str(entry['archive_path']), destination.parent, progress_callback)
+                _archive_workspace(
+                    archive, workspace, str(entry['archive_path']), destination.parent, progress_callback,
+                    include_generated_outputs=include_generated_outputs,
+                )
         else:
             raise ValueError('Select a valid export option.')
     return filename
@@ -2077,7 +2104,9 @@ def _tree_size(source: Path, *, exclude_slides_templates: bool = False) -> int:
     return total
 
 
-def estimate_export_bytes(target: str, workspace_ids: Iterable[str] | None = None) -> int:
+def estimate_export_bytes(
+    target: str, workspace_ids: Iterable[str] | None = None, include_generated_outputs: bool = True,
+) -> int:
     """Estimate input bytes so the UI can show meaningful export progress."""
     total = _file_size(application_config_dir / 'application.db')
     if target in {'config', 'config-with-templates', 'full-environment'}:
@@ -2091,10 +2120,13 @@ def estimate_export_bytes(target: str, workspace_ids: Iterable[str] | None = Non
     elif target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
         if workspace:
-            total = _file_size(workspace.database_path) + _tree_size(workspace.input_dir) + _tree_size(workspace.export_dir)
+            total = _file_size(workspace.database_path) + _tree_size(workspace.input_dir)
+            if include_generated_outputs:
+                total += _tree_size(workspace.output_dir)
     if target == 'full-environment':
         total += sum(
-            _file_size(workspace.database_path) + _tree_size(workspace.input_dir) + _tree_size(workspace.export_dir)
+            _file_size(workspace.database_path) + _tree_size(workspace.input_dir)
+            + (_tree_size(workspace.output_dir) if include_generated_outputs else 0)
             for workspace in _selected_export_workspaces(workspace_ids)
         )
     return max(total, 1)
@@ -2250,7 +2282,7 @@ def recovered_transfer_packages() -> list[dict[str, Any]]:
         ], key=lambda offer: offer['created_at'] or '', reverse=True)
 
 
-def _run_export_job(job_id: str, target: str, workspace_ids: list[str] | None) -> None:
+def _run_export_job(job_id: str, target: str, workspace_ids: list[str] | None, include_generated_outputs: bool) -> None:
     with EXPORT_JOBS_LOCK:
         job = EXPORT_JOBS.get(job_id)
         if not job:
@@ -2258,7 +2290,7 @@ def _run_export_job(job_id: str, target: str, workspace_ids: list[str] | None) -
         job['status'] = 'processing'
     destination = Path(str(job['path']))
     partial_path = destination.with_suffix('.part')
-    bytes_total = estimate_export_bytes(target, workspace_ids)
+    bytes_total = estimate_export_bytes(target, workspace_ids, include_generated_outputs)
     bytes_done = 0
     with EXPORT_JOBS_LOCK:
         job.update({'bytes_total': bytes_total, 'bytes_done': 0, 'progress': 0})
@@ -2270,7 +2302,10 @@ def _run_export_job(job_id: str, target: str, workspace_ids: list[str] | None) -
             job.update({'bytes_done': bytes_done, 'progress': min(99, round(bytes_done * 100 / bytes_total, 1))})
 
     try:
-        filename = build_export_archive_file(target, partial_path, workspace_ids, progress_callback)
+        filename = build_export_archive_file(
+            target, partial_path, workspace_ids, progress_callback,
+            include_generated_outputs=include_generated_outputs,
+        )
         partial_path.replace(destination)
         with EXPORT_JOBS_LOCK:
             job.update({'status': 'ready', 'filename': filename, 'size': destination.stat().st_size, 'bytes_done': bytes_total, 'progress': 100, 'finished_at': datetime.now(timezone.utc).timestamp()})
@@ -2281,7 +2316,9 @@ def _run_export_job(job_id: str, target: str, workspace_ids: list[str] | None) -
             job.update({'status': 'failed', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
 
 
-def start_export_job(target: str, workspace_ids: Iterable[str] | None = None) -> dict[str, Any]:
+def start_export_job(
+    target: str, workspace_ids: Iterable[str] | None = None, include_generated_outputs: bool = True,
+) -> dict[str, Any]:
     """Start a disk-backed ZIP build that continues independently of the page."""
     filename = export_archive_filename(target)
     _cleanup_expired_export_packages()
@@ -2300,10 +2337,14 @@ def start_export_job(target: str, workspace_ids: Iterable[str] | None = None) ->
         'path': str(destination),
         'created_at': datetime.now(timezone.utc).timestamp(),
         'workspace_ids': selected_workspace_ids,
+        'include_generated_outputs': include_generated_outputs,
     }
     with EXPORT_JOBS_LOCK:
         EXPORT_JOBS[job_id] = job
-    Thread(target=_run_export_job, args=(job_id, target, selected_workspace_ids), name=f'export-{job_id[:8]}', daemon=True).start()
+    Thread(
+        target=_run_export_job, args=(job_id, target, selected_workspace_ids, include_generated_outputs),
+        name=f'export-{job_id[:8]}', daemon=True,
+    ).start()
     return job
 
 
@@ -2433,6 +2474,9 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
     try:
         for source, destination in (
             (payload / 'input', workspace.input_dir),
+            (payload / 'output', workspace.output_dir),
+            # Archives created before generated Chart Sets were included used
+            # this reports-only directory name.
             (payload / 'exports', workspace.export_dir),
         ):
             if source.exists():
@@ -2448,11 +2492,20 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
             if getattr(exc, 'errno', None) != errno.EXDEV:
                 raise
             shutil.copy2(database_snapshot, workspace.database_path)
-        source_input_dir = workspace_info.get('source_input_dir') if workspace_info else None
-        with sqlite3.connect(workspace.database_path) as connection:
-            connection.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
-            if source_input_dir:
-                connection.execute('UPDATE datasets SET stored_path = REPLACE(stored_path, ?, ?)', (str(source_input_dir), str(workspace.input_dir)))
+            source_input_dir = workspace_info.get('source_input_dir') if workspace_info else None
+            source_output_dir = workspace_info.get('source_output_dir') if workspace_info else None
+            with sqlite3.connect(workspace.database_path) as connection:
+                connection.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
+                if source_input_dir:
+                    connection.execute('UPDATE datasets SET stored_path = REPLACE(stored_path, ?, ?)', (str(source_input_dir), str(workspace.input_dir)))
+                has_generated_jobs = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'generated_jobs'"
+                ).fetchone()
+                if source_output_dir and has_generated_jobs:
+                    connection.execute(
+                        'UPDATE generated_jobs SET output_path = REPLACE(output_path, ?, ?)',
+                        (str(source_output_dir), str(workspace.output_dir)),
+                    )
     except Exception:
         workspace_registry.remove(workspace.id)
         repository.remove_workspace_access(workspace.id)
@@ -2809,6 +2862,7 @@ def _run_transfer_job(job_id: str) -> None:
         destination = str(job['destination'])
         target = str(job['target'])
         workspace_ids = job.get('workspace_ids')
+        include_generated_outputs = bool(job.get('include_generated_outputs', True))
         package_path = Path(str(job['path']))
     offer_secret = secrets.token_urlsafe(32)
     offer_id = ''
@@ -2887,7 +2941,12 @@ def _run_transfer_job(job_id: str) -> None:
                 raise TimeoutError('The destination server did not accept the transfer within one hour.')
 
             with TRANSFER_LOCK:
-                job.update({'status': 'exporting', 'export_total': estimate_export_bytes(target, workspace_ids), 'exported_bytes': 0, 'progress': 0.0})
+                job.update({
+                    'status': 'exporting',
+                    'export_total': estimate_export_bytes(target, workspace_ids, include_generated_outputs),
+                    'exported_bytes': 0,
+                    'progress': 0.0,
+                })
             stop_if_cancelled()
 
             def update_export_progress(written: int) -> None:
@@ -2897,7 +2956,10 @@ def _run_transfer_job(job_id: str) -> None:
                     total = max(int(job.get('export_total') or 1), 1)
                     job['progress'] = round(min(100.0, job['exported_bytes'] * 100.0 / total), 1)
 
-            filename = build_export_archive_file(target, package_path, workspace_ids, update_export_progress)
+            filename = build_export_archive_file(
+                target, package_path, workspace_ids, update_export_progress,
+                include_generated_outputs=include_generated_outputs,
+            )
             package_size = package_path.stat().st_size
             with TRANSFER_LOCK:
                 job.update({'status': 'transferring', 'filename': filename, 'size': package_size, 'bytes_sent': 0, 'progress': 0.0})
@@ -2990,7 +3052,10 @@ def _run_transfer_job(job_id: str) -> None:
         package_path.unlink(missing_ok=True)
 
 
-def start_transfer_job(destination_url: str, destination_port: int | None, target: str, workspace_ids: Iterable[str] | None, user: SessionUser) -> dict[str, Any]:
+def start_transfer_job(
+    destination_url: str, destination_port: int | None, target: str, workspace_ids: Iterable[str] | None,
+    user: SessionUser, include_generated_outputs: bool = True,
+) -> dict[str, Any]:
     require_export_permission(user, target)
     destination = normalize_transfer_destination(destination_url, destination_port)
     _cleanup_expired_export_packages()
@@ -3008,6 +3073,7 @@ def start_transfer_job(destination_url: str, destination_port: int | None, targe
         'destination': destination,
         'target': target,
         'workspace_ids': selected_workspace_ids,
+        'include_generated_outputs': include_generated_outputs,
         'path': str(package_dir / f'transfer-{job_id}.zip'),
         'status': 'queued',
         'created_at': datetime.now(timezone.utc).timestamp(),
@@ -4236,6 +4302,16 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
         'ttfp10sratio': {'VideoStream_Time_to_First_Picture'},
         'resultgroup': {'Test_Result'},
         'testresultgroup': {'Test_Result'},
+        'lowratesession': {'Mean_Data_Rate', 'Test_Name'},
+        'ltedlaggregatedbwmhz': {'LTE_DL_Test_Bandwidth_Avg'},
+        'ltedltestbandwidthavgint': {'LTE_DL_Test_Bandwidth_Avg'},
+        'nrdlpcellnumerology1bandwidthnumber': {'NR_PCell_Numerology1_Bandwidth'},
+        'nrultotalbandwidthmhz': {'NR_UL_RBs_Avg'},
+        'totalbwltenr': {'LTE_DL_Test_Bandwidth_Avg', 'NR_DL_PCell_Bandwidth'},
+        'emocnnnshystorical': {'Campaign', 'Test_Start_Time', 'NNS Activation Date (F)', 'MOCN Activation Date (F)'},
+        'emocnnnshystoricalnew': {'Campaign', 'Test_Start_Time', 'NNS Activation Date (F)', 'MOCN Activation Date (F)'},
+        'emocnnnshystoricalnew2': {'Test_Start_Time', 'NNS Activation Date (F)', 'MOCN Activation Date (F)'},
+        'emocnnnshystoricalwithoperator': {'Campaign', 'Test_Start_Time', 'NNS Activation Date (F)', 'MOCN Activation Date (F)', 'Host Network'},
     }
     for identity, dependencies in derived_dependencies.items():
         if identity in requested_identities:
@@ -6718,6 +6794,7 @@ def create_admin_transfer_job(
     destination_port: int | None = Form(None),
     export_target: str = Form(...),
     workspace_ids: list[str] | None = Form(None),
+    include_generated_outputs: bool = Form(True),
     user: SessionUser = Depends(admin_user),
 ) -> JSONResponse:
     require_export_permission(user, export_target)
@@ -6728,6 +6805,7 @@ def create_admin_transfer_job(
             export_target,
             workspace_ids if export_target == 'full-environment' else None,
             user,
+            include_generated_outputs=include_generated_outputs,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -6787,11 +6865,15 @@ def export_admin_package(
 def create_admin_export_job(
     export_target: str = Form(...),
     workspace_ids: list[str] | None = Form(None),
+    include_generated_outputs: bool = Form(True),
     user: SessionUser = Depends(admin_user),
 ) -> JSONResponse:
     require_export_permission(user, export_target)
     try:
-        job = start_export_job(export_target, workspace_ids if export_target == 'full-environment' else None)
+        job = start_export_job(
+            export_target, workspace_ids if export_target == 'full-environment' else None,
+            include_generated_outputs=include_generated_outputs,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return JSONResponse({
