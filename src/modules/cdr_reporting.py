@@ -256,17 +256,29 @@ def parse_calculated_dimensions(payload: object) -> tuple[CalculatedDimension, .
 
 def calculated_dimensions_json(dimensions: Iterable[CalculatedDimension]) -> list[dict[str, object]]:
     """Return the stable, editable JSON representation for template metadata."""
+    def compact_column_aliases(value: str) -> str:
+        """Keep distinct physical fallbacks while removing case-only duplicates."""
+        aliases: list[str] = []
+        seen: set[str] = set()
+        for candidate in str(value).split("|"):
+            candidate = candidate.strip()
+            key = _normalise_catalog_name(candidate)
+            if candidate and key not in seen:
+                aliases.append(candidate)
+                seen.add(key)
+        return "|".join(aliases)
+
     def condition_text(condition: FilterCondition) -> str:
         values = ", ".join(condition.values)
         value = f"({values})" if condition.operator in {"IN", "NOT IN"} or len(condition.values) > 1 else values
-        return f"{condition.column} {condition.operator} {value}"
+        return f"{compact_column_aliases(condition.column)} {condition.operator} {value}"
 
     return [
         {
             "name": dimension.name,
             "sources": list(dimension.sources),
             "default": dimension.default,
-            "default_from": "|".join(dimension.default_from),
+            "default_from": compact_column_aliases("|".join(dimension.default_from)),
             "rules": [
                 {"when": "; ".join(condition_text(condition) for condition in rule.conditions), "value": rule.value}
                 for rule in dimension.rules

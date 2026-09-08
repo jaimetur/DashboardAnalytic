@@ -466,6 +466,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .calculated-dimension-rule-summary .calculated-dimension-fallback { display: block; background: #fff6cf; color: #654b0d; font-weight: 750; }
 .calculated-dimension-actions { display: flex; align-items: center; gap: 0.3rem; }
 .calculated-dimension-actions button { align-items: center; border-radius: 999px; display: inline-flex; height: 2rem; justify-content: center; min-width: 2rem; padding: 0.3rem; }
+.calculated-dimensions-manager-actions { display: flex; align-items: center; gap: 0.65rem; margin-top: 1.15rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.calculated-dimensions-close { background: #bd3232; border-color: #962525; color: #fff; }
+.calculated-dimensions-close:hover:not(:disabled) { background: #a52828; border-color: #7e1e1e; color: #fff; }
 .calculated-dimension-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.7rem; margin-top: 0.85rem; padding-top: 0.85rem; border-top: 1px solid var(--line); }
 .calculated-dimension-editor > label, .calculated-dimension-editor fieldset { display: grid; gap: 0.35rem; margin: 0; }
 .calculated-dimension-editor .calculated-dimension-rules { grid-column: 1 / -1; }

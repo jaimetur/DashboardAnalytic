@@ -33,13 +33,29 @@ def test_cdr_materialisation_adds_workspace_dimensions_to_dataset_rows() -> None
     import pandas as pd
     import src.DashboardAnalytic as app_module
 
-    frame = app_module.materialize_cdr_derived_columns(pd.DataFrame({
+    dimensions = app_module.parse_calculated_dimensions(app_module.default_calculated_dimensions())
+    frame = app_module.materialize_calculated_dimensions(pd.DataFrame({
         'Session_Type': ['VoLTE'], 'Type_of_Test': ['HTTP'], 'Test_Name': ['YouTube'],
-    }), 'data')
+    }), dimensions, 'cdr-data')
 
-    assert 'attempt_count' in frame.columns
     assert 'Call Family' not in frame.columns
     assert frame['Test Family'].tolist() == ['YouTube']
+
+
+def test_calculated_dimension_rules_ignore_case_and_compact_redundant_field_aliases() -> None:
+    import pandas as pd
+    from src.modules.cdr_reporting import calculated_dimensions_json, materialize_calculated_dimensions, parse_calculated_dimensions
+
+    dimensions = parse_calculated_dimensions([{
+        'name': 'Test Family', 'sources': ['cdr-data'], 'default': '', 'default_from': 'Test_Name|test_name',
+        'rules': [{'when': 'Test_Name|test_name CONTAINS YOUTUBE', 'value': 'YouTube'}],
+    }])
+    frame = materialize_calculated_dimensions(pd.DataFrame({'test_name': ['youtube']}), dimensions, 'cdr-data')
+
+    assert frame['Test Family'].tolist() == ['YouTube']
+    payload = calculated_dimensions_json(dimensions)[0]
+    assert payload['default_from'] == 'Test_Name'
+    assert payload['rules'][0]['when'] == 'Test_Name CONTAINS YOUTUBE'
 
 
 def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) -> None:

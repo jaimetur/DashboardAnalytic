@@ -6,6 +6,23 @@ function formatAxisValue(value) {
   return numeric.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
 }
 
+function configureCalculatedDimensionSourceMenu(sourceMenu, overlay) {
+  let leaveTimer = null;
+  const closeMenu = () => { sourceMenu.open = false; };
+  const clearLeaveTimer = () => { if (leaveTimer) { window.clearTimeout(leaveTimer); leaveTimer = null; } };
+  sourceMenu.addEventListener('pointerenter', clearLeaveTimer);
+  sourceMenu.addEventListener('pointerleave', () => {
+    clearLeaveTimer();
+    leaveTimer = window.setTimeout(closeMenu, 700);
+  });
+  sourceMenu.addEventListener('focusout', () => {
+    window.setTimeout(() => { if (!sourceMenu.matches(':focus-within')) closeMenu(); }, 0);
+  });
+  overlay.addEventListener('pointerdown', (event) => {
+    if (!sourceMenu.contains(event.target)) closeMenu();
+  });
+}
+
 document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEach((host) => {
   const manage = host.querySelector('[data-workspace-manage-calculated-dimensions]');
   let dimensions = [];
@@ -27,16 +44,20 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
     const heading = document.createElement('div'); heading.innerHTML = '<p class="eyebrow">Active Workspace</p><h3>Calculated Dimensions</h3>';
     const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', 'Close calculated dimensions');
     header.append(heading, close);
-    const note = document.createElement('p'); note.className = 'form-note'; note.textContent = 'Rules run from top to bottom. Use: Field OP value => Result. Separate AND conditions with semicolons and alternative source names with |.';
+    const note = document.createElement('p'); note.className = 'form-note'; note.textContent = 'Rules run from top to bottom. Comparisons ignore case. Use | only for genuinely different source field names and semicolons for AND conditions.';
     const list = document.createElement('div'); list.className = 'calculated-dimensions-list';
     const add = document.createElement('button'); add.type = 'button'; add.textContent = '+ Add Calculated Dimension';
+    const managerActions = document.createElement('div'); managerActions.className = 'calculated-dimensions-manager-actions';
+    const panelClose = document.createElement('button'); panelClose.type = 'button'; panelClose.className = 'calculated-dimensions-close'; panelClose.textContent = 'Close';
+    managerActions.append(add, panelClose);
     const form = document.createElement('div'); form.className = 'calculated-dimension-editor'; form.hidden = true;
-    panel.append(header, note, list, add, form); overlay.append(panel); document.body.append(overlay);
-    const finish = () => overlay.remove(); close.addEventListener('click', finish);
+    panel.append(header, note, list, managerActions, form); overlay.append(panel); document.body.append(overlay);
+    const finish = () => overlay.remove(); close.addEventListener('click', finish); panelClose.addEventListener('click', finish);
     overlay.addEventListener('click', (event) => { if (event.target === overlay) finish(); });
+    const restoreManagerActions = () => { managerActions.hidden = false; managerActions.append(add, panelClose); };
     const edit = (index = null) => {
       const current = index === null ? {name: '', sources: ['cdr-data'], default: '', default_from: '', rules: []} : dimensions[index];
-      form.replaceChildren(); form.hidden = false;
+      form.replaceChildren(); form.hidden = false; managerActions.hidden = true;
       const inputField = (caption, value = '') => {
         const label = document.createElement('label'); label.textContent = caption;
         const input = document.createElement('input'); input.value = value; label.append(input); form.append(label); return input;
@@ -57,14 +78,14 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
         const label = document.createElement('label'); const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.value = source;
         checkbox.checked = (current.sources || []).includes(source); label.append(checkbox, document.createTextNode(source.toUpperCase())); sourceChoices.append(label);
       });
-      sourceMenu.append(sourceSummary, sourceChoices); sourceMenu.addEventListener('change', updateSourceSummary); updateSourceSummary(); sources.append(sourcesLabel, sourceMenu); form.append(sources);
+      sourceMenu.append(sourceSummary, sourceChoices); sourceMenu.addEventListener('change', updateSourceSummary); configureCalculatedDimensionSourceMenu(sourceMenu, overlay); updateSourceSummary(); sources.append(sourcesLabel, sourceMenu); form.append(sources);
       const rulesLabel = document.createElement('label'); rulesLabel.className = 'calculated-dimension-rules'; rulesLabel.textContent = 'Rules';
       const rules = document.createElement('textarea'); rules.placeholder = 'Test_Result IN (Completed, Visible Completed) => Success';
       rules.value = (current.rules || []).map((rule) => `${rule.when} => ${rule.value}`).join('\n'); rulesLabel.append(rules); form.append(rulesLabel);
       const actions = document.createElement('div'); actions.className = 'confirm-actions calculated-dimension-rules';
       const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'calculated-dimension-cancel'; cancel.textContent = 'Cancel';
-      const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Save and Materialize'; actions.append(cancel, save); form.append(actions);
-      cancel.addEventListener('click', (event) => { event.preventDefault(); form.replaceChildren(); form.hidden = true; });
+      const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Save and Materialize'; actions.append(cancel, panelClose, save); form.append(actions);
+      cancel.addEventListener('click', (event) => { event.preventDefault(); form.replaceChildren(); form.hidden = true; restoreManagerActions(); });
       save.addEventListener('click', async () => {
         try {
           const parsedRules = rules.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
@@ -695,20 +716,25 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.title = 'Close'; close.setAttribute('aria-label', 'Close calculated dimensions');
     headingWrap.append(eyebrow, title); header.append(headingWrap, close);
     const note = document.createElement('p'); note.className = 'form-note';
-    note.textContent = 'Rules are evaluated from top to bottom. Use one rule per line: Field OP value => Result. Separate AND conditions with semicolons; use | between alternative physical field names.';
+    note.textContent = 'Rules are evaluated from top to bottom. Comparisons ignore case. Use | only for genuinely different source field names and semicolons for AND conditions.';
     const list = document.createElement('div'); list.className = 'calculated-dimensions-list';
     const add = document.createElement('button'); add.type = 'button'; add.textContent = '+ Add Calculated Dimension';
+    const managerActions = document.createElement('div'); managerActions.className = 'calculated-dimensions-manager-actions';
+    const panelClose = document.createElement('button'); panelClose.type = 'button'; panelClose.className = 'calculated-dimensions-close'; panelClose.textContent = 'Close';
+    managerActions.append(add, panelClose);
     const form = document.createElement('div'); form.className = 'calculated-dimension-editor'; form.hidden = true;
-    panel.append(header, note, list, add, form); overlay.append(panel); document.body.append(overlay);
+    panel.append(header, note, list, managerActions, form); overlay.append(panel); document.body.append(overlay);
     let editingIndex = null;
     const finish = () => overlay.remove();
     close.addEventListener('click', finish);
+    panelClose.addEventListener('click', finish);
     overlay.addEventListener('click', (event) => { if (event.target === overlay) finish(); });
+    const restoreManagerActions = () => { managerActions.hidden = false; managerActions.append(add, panelClose); };
 
     const editDimension = (index = null) => {
       editingIndex = index;
       const current = index === null ? {name: '', sources: ['cdr-data'], default: '', default_from: '', rules: []} : calculatedDimensions[index];
-      form.replaceChildren(); form.hidden = false;
+      form.replaceChildren(); form.hidden = false; managerActions.hidden = true;
       const field = (labelText, value = '') => {
         const label = document.createElement('label'); label.textContent = labelText;
         const input = document.createElement('input'); input.type = 'text'; input.value = value; label.append(input); form.append(label); return input;
@@ -729,14 +755,14 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         const label = document.createElement('label'); const input = document.createElement('input'); input.type = 'checkbox'; input.value = value;
         input.checked = (current.sources || []).includes(value); label.append(input, document.createTextNode(value.toUpperCase())); sourceChoices.append(label);
       });
-      sourceMenu.append(sourceSummary, sourceChoices); sourceMenu.addEventListener('change', updateSourceSummary); updateSourceSummary(); sources.append(sourcesLabel, sourceMenu); form.append(sources);
+      sourceMenu.append(sourceSummary, sourceChoices); sourceMenu.addEventListener('change', updateSourceSummary); configureCalculatedDimensionSourceMenu(sourceMenu, overlay); updateSourceSummary(); sources.append(sourcesLabel, sourceMenu); form.append(sources);
       const rulesLabel = document.createElement('label'); rulesLabel.className = 'calculated-dimension-rules'; rulesLabel.textContent = 'Rules';
       const rules = document.createElement('textarea'); rules.placeholder = 'Test_Result IN (Completed, Visible Completed) => Success';
       rules.value = (current.rules || []).map((rule) => `${rule.when} => ${rule.value}`).join('\n'); rulesLabel.append(rules); form.append(rulesLabel);
       const actions = document.createElement('div'); actions.className = 'confirm-actions calculated-dimension-rules';
       const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'calculated-dimension-cancel'; cancel.textContent = 'Cancel';
-      const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Save Dimension'; actions.append(cancel, save); form.append(actions);
-      cancel.addEventListener('click', (event) => { event.preventDefault(); editingIndex = null; form.replaceChildren(); form.hidden = true; });
+      const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Save Dimension'; actions.append(cancel, panelClose, save); form.append(actions);
+      cancel.addEventListener('click', (event) => { event.preventDefault(); editingIndex = null; form.replaceChildren(); form.hidden = true; restoreManagerActions(); });
       save.addEventListener('click', async () => {
         const previous = calculatedDimensions;
         try {
@@ -754,7 +780,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
           };
           const next = [...calculatedDimensions];
           if (editingIndex === null) next.push(dimension); else next[editingIndex] = dimension;
-          calculatedDimensions = next; await saveCalculatedDimensions(); form.hidden = true; renderList();
+          calculatedDimensions = next; await saveCalculatedDimensions(); form.hidden = true; restoreManagerActions(); renderList();
         } catch (error) {
           calculatedDimensions = previous;
           showInfoDialog(error.message || 'Unable to save calculated dimension.', {title: 'Calculated Dimensions', tone: 'error'});
