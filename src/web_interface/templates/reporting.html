@@ -619,7 +619,7 @@
     const chartJobsBody = document.querySelector('[data-report-chart-jobs-body]');
     const chartJobsCount = document.querySelector('[data-report-chart-jobs-count]');
     const chartJobsEmpty = document.querySelector('[data-report-chart-jobs-empty]');
-    const syncCombinedJobSummary = () => {
+    const syncCombinedJobSummary = (resetMobilePage = false) => {
       if (!jobsBody) return;
       const rows = Array.from(jobsBody.querySelectorAll('tr[data-job-kind]'));
       rows.sort((left, right) => String(right.dataset.jobDate || '').localeCompare(String(left.dataset.jobDate || '')));
@@ -630,6 +630,9 @@
       const visibleRows = rows.filter((row) => !row.hidden);
       if (jobsCount) jobsCount.textContent = `${visibleRows.length} ${visibleRows.length === 1 ? 'job' : 'jobs'}`;
       if (jobsEmpty) jobsEmpty.hidden = visibleRows.length > 0;
+      jobsBody.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {
+        bubbles: true, detail: {reset: resetMobilePage},
+      }));
     };
     const refreshReportingFilterChoices = () => {
       const rows = Array.from(jobsBody?.querySelectorAll('tr[data-job-kind]') || []);
@@ -664,7 +667,7 @@
       const previousChartSet = reportChartSetSelect?.value || '';
       rebuildReportChartSetSelector(previousChartSet);
       refreshReportingFilterChoices();
-      syncCombinedJobSummary();
+      syncCombinedJobSummary(true);
       const nextChartSet = reportChartSetSelect?.value || '';
       if (loadChangedChartSet && nextChartSet && nextChartSet !== previousChartSet) reportChartSetSelect.dispatchEvent(new Event('change'));
       else if (!nextChartSet) clearSelectedReportCharts(reportChartSets.length > 0 || reportChartReportSets.length > 0);

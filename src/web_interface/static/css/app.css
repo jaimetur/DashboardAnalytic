@@ -1694,6 +1694,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
     display: grid; grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr)); overflow: visible;
     border: 1px solid rgba(16, 49, 74, 0.16); border-radius: 11px; background: #fff;
   }
+  .report-jobs-table tbody tr[hidden] { display: none !important; }
   .app-logs-table tbody tr[hidden] { display: none !important; }
   .workspace-library-table .workspace-library-row td { background: #fff; color: #10314a; }
   .workspace-library-table .workspace-library-row.active-workspace-row td { background: #e7f5f3; color: #0a534f; }
