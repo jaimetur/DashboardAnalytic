@@ -1081,6 +1081,13 @@ def materialize_calculated_dimensions(
     """Return CDR rows with every applicable workspace dimension as a physical column."""
     result = frame.copy()
     dimension_list = tuple(dimensions)
+    calculated_keys = {_normalise_catalog_name(definition.name) for definition in dimension_list}
+    stale_columns = [
+        column for column in result.columns
+        if _normalise_catalog_name(column) in calculated_keys
+    ]
+    if stale_columns:
+        result = result.drop(columns=stale_columns)
     result.attrs["catalogue_calculated_dimensions"] = dimension_list
     result.attrs["catalogue_cdr_source"] = cdr_source
     for definition in dimension_list:

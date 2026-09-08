@@ -9,7 +9,7 @@
       </div>
       <span class="pill status-pill status-{{ dataset.status }}">{{ dataset.status_label }}</span>
     </div>
-    <p class="lede">Read-only sample of the processed dataset. The preview shows the first {{ preview_rows | length }} rows and all {{ visible_column_count }} available columns. Light-grey columns are derived from CDR fields during processing.{% if preview_sheet_options %} VFUK mapping previews are limited to the 4G and 5G source sheets.{% endif %}</p>
+    <p class="lede">Read-only sample of the processed dataset. The preview shows the first {{ preview_rows | length }} rows and all {{ visible_column_count }} available columns. Pastel-red columns are derived from CDR fields during processing.{% if preview_sheet_options %} VFUK mapping previews are limited to the 4G and 5G source sheets.{% endif %}</p>
     <form class="preview-row-limit-form" action="/workspace/preview/{{ dataset.id }}" method="get" data-loading-label="Refreshing dataset preview">
       <label>Rows to preview
         <input type="number" name="row_limit" value="{{ preview_row_limit }}" min="1" max="5000" step="1" required>

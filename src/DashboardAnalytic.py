@@ -4208,8 +4208,13 @@ def preview_dataset(
     preview_sheet_options: list[str] = []
     preview_source_sheet: str | None = None
     preview_filters: dict[str, Any] = {}
+    workspace_dimensions = load_workspace_calculated_dimensions()
+    all_calculated_dimension_keys = {
+        _normalise_catalogue_dimension_name(dimension.name)
+        for dimension in workspace_dimensions
+    }
     derived_preview_columns = {
-        dimension.name for dimension in load_workspace_calculated_dimensions()
+        dimension.name for dimension in workspace_dimensions
         if f"cdr-{dataset['dataset_kind']}" in dimension.sources
         and dimension.name in available_columns
     } if dataset['dataset_kind'] in CDR_DATASET_KINDS else set()
@@ -4296,7 +4301,10 @@ def preview_dataset(
         # the calculated vendor column instead, highlighted near the start.
         preview_columns.extend(
             column for column in available_columns
-            if column not in preview_columns and column != 'report_vendor' and column not in derived_preview_columns
+            if column not in preview_columns
+            and column != 'report_vendor'
+            and column not in derived_preview_columns
+            and _normalise_catalogue_dimension_name(column) not in all_calculated_dimension_keys
         )
         preview_columns.extend(column for column in available_columns if column in derived_preview_columns)
     preview_frame = repository.load_dataset_rows(dataset_id, preview_columns, preview_filters).head(row_limit)

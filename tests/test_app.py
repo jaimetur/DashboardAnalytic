@@ -51,8 +51,12 @@ def test_calculated_dimension_rules_ignore_case_and_compact_redundant_field_alia
         'rules': [{'when': 'Test_Name|test_name CONTAINS YOUTUBE', 'value': 'YouTube'}],
     }])
     frame = materialize_calculated_dimensions(pd.DataFrame({'test_name': ['youtube']}), dimensions, 'cdr-data')
+    voice_frame = materialize_calculated_dimensions(
+        pd.DataFrame({'Session_Type': ['VoLTE'], 'Test Family': ['stale value']}), dimensions, 'cdr-voice',
+    )
 
     assert frame['Test Family'].tolist() == ['YouTube']
+    assert 'Test Family' not in voice_frame.columns
     payload = calculated_dimensions_json(dimensions)[0]
     assert payload['default_from'] == 'Test_Name'
     assert payload['rules'][0]['when'] == 'Test_Name CONTAINS YOUTUBE'

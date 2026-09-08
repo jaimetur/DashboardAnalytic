@@ -1082,7 +1082,7 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .preview-column-filter-apply { border: 1px solid rgba(7, 93, 89, 0.4); background: linear-gradient(135deg, #0b7a75, #149d94); color: #fff; box-shadow: 0 7px 16px rgba(11, 122, 117, 0.2); }
 .dataset-preview-table .gcid-column { background: #fff6bf; color: #554000; font-weight: 700; }
 .dataset-preview-table .vendor-column { background: #dff1ff; color: #12476b; font-weight: 700; }
-.dataset-preview-table .derived-cdr-column { background: linear-gradient(145deg, #fff6bf, #f4dda0); color: #654b0d; font-weight: 750; }
+.dataset-preview-table .derived-cdr-column { background: linear-gradient(145deg, #fde7e7, #f6c7c7); color: #7b3131; font-weight: 750; }
 .dataset-preview-table-wrap::-webkit-scrollbar { display: block; width: 14px; height: 14px; }
 .dataset-preview-table-wrap::-webkit-scrollbar-track { background: rgba(16, 49, 74, 0.14); border-radius: 999px; }
 .dataset-preview-table-wrap::-webkit-scrollbar-thumb { background: rgba(16, 49, 74, 0.48); border: 2px solid rgba(255,255,255,0.72); border-radius: 999px; }
