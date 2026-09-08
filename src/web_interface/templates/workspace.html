@@ -105,6 +105,39 @@
   </article>
 
   {% if active_workspace %}
+  <details id="calculated-dimensions" class="panel collapsible-panel workspace-calculated-dimensions-panel" open data-panel-state-key="workspace:calculated-dimensions" data-workspace-calculated-dimensions-panel data-calculated-dimensions='{{ calculated_dimensions | tojson }}' data-save-url="/api/workspace/calculated-dimensions">
+    <summary class="collapsible-summary">
+      <div>
+        <p class="eyebrow">Workspace</p>
+        <h2>Calculated Dimensions</h2>
+      </div>
+      <div class="summary-inline-actions">
+        <span class="pill live-pill">{{ calculated_dimensions | length }} dimensions</span>
+        <span class="collapse-chip">Collapse</span>
+      </div>
+    </summary>
+    <div class="workspace-calculated-dimensions-content">
+      <p class="lede">Calculated dimensions belong to this workspace and are materialized in every applicable individual and combined CDR table.</p>
+      <div class="workspace-calculated-dimensions-actions">
+        <button type="button" class="catalogue-calculated-dimensions-button" data-workspace-manage-calculated-dimensions>Manage Calculated Dimensions</button>
+        <a class="ghost-link" href="/workspace/calculated-dimensions/export">Export All</a>
+        <form action="/workspace/calculated-dimensions/import" method="post" enctype="multipart/form-data" data-loading-label="Importing calculated dimensions" data-loading-copy="Validating definitions and materializing all CDR tables in this workspace.">
+          <label class="file-picker-shell">
+            <span class="file-picker-button">Import JSON</span>
+            <span class="file-picker-text" data-file-picker-text>No file selected</span>
+            <input type="file" name="dimensions_file" accept=".json,application/json" required data-file-picker-input>
+          </label>
+          <button type="submit">Import</button>
+        </form>
+      </div>
+      <div class="workspace-calculated-dimensions-summary">
+        {% for dimension in calculated_dimensions %}
+        <span class="pill">{{ dimension.name }} · {{ dimension.sources | map('upper') | join(' / ') }}</span>
+        {% endfor %}
+      </div>
+    </div>
+  </details>
+
   <details class="panel collapsible-panel upload-panel" open data-panel-state-key="workspace:data-ingestion">
     <summary class="collapsible-summary">
       <div>

@@ -240,9 +240,12 @@
     {% if catalogue_editor %}
     <div class="alert alert-warning" role="alert" data-catalogue-validation-alert{% if not catalogue_editor.validation_error %} hidden{% endif %}><strong>This Slides Template contains an invalid filter.</strong> <span data-catalogue-validation-message>{{ catalogue_editor.validation_error or '' }}</span> Correct that filter definition before saving.</div>
     <p class="lede">Rows are ordered by Slide and alternate by slide block. When a slide contains several charts, its shared slide number, title, subtitle and layout are shown once and apply to the full slide block; saving writes those values back to every chart row in the CSV. Select a cell to edit it manually or use the contextual suggestions on the right.</p>
-    <div class="slides-templates-editor-grid" data-catalogue-editor data-editor-suggestions='{{ catalogue_editor.suggestions | tojson }}' data-template-technology="{{ catalogue_editor.technology }}" data-template-identifier="{{ catalogue_editor.catalogue.identifier }}" data-template-options-url="/api/admin/report-templates/copy-options" data-template-copy-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/copy-items" data-chart-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-preview" data-chart-image-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-image-preview">
+    <div class="slides-templates-editor-grid" data-catalogue-editor data-editor-suggestions='{{ catalogue_editor.suggestions | tojson }}' data-calculated-dimensions='{{ catalogue_editor.calculated_dimensions | tojson }}' data-template-technology="{{ catalogue_editor.technology }}" data-template-identifier="{{ catalogue_editor.catalogue.identifier }}" data-template-options-url="/api/admin/report-templates/copy-options" data-template-copy-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/copy-items" data-calculated-dimensions-url="/api/workspace/calculated-dimensions" data-calculated-dimension-export-url="/workspace/calculated-dimensions/export" data-chart-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-preview" data-chart-image-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-image-preview">
       <form class="slides-templates-editor-table-wrap" action="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/save" method="post" data-catalogue-editor-save>
         <input type="hidden" name="catalogue_content" value="" data-catalogue-editor-content>
+        <div class="catalogue-table-toolbar">
+          <button type="button" class="catalogue-calculated-dimensions-button" data-manage-calculated-dimensions>Manage Calculated Dimensions</button>
+        </div>
         <div class="table-wrap">
           <table class="slides-templates-editor-table" data-catalogue-editor-table>
             <thead><tr><th class="catalogue-slide-actions-heading">Slide Actions</th>{% for header in catalogue_editor.headers %}{% if header == 'Chart Tittle' %}<th class="catalogue-chart-actions-heading">Chart Actions</th>{% endif %}<th data-catalogue-field="{{ header }}">{{ header }}</th>{% endfor %}</tr></thead>
@@ -311,6 +314,7 @@
           </section>
           <div class="catalogue-chart-preview-actions">
             <button type="button" class="report-chart-viewer-data-button" data-catalogue-chart-preview-data><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 4h16v16H4zM4 9h16M4 14h16M10 4v16"/></svg><span>View filtered dataset</span></button>
+            <button type="button" class="catalogue-calculated-dimensions-button" data-catalogue-chart-preview-manage-dimensions>Manage Calculated Dimensions</button>
             <button type="button" data-catalogue-chart-preview-update>Update Template</button>
           </div>
           <div class="report-chart-viewer-data-overlay catalogue-chart-preview-data-overlay" data-catalogue-chart-preview-data-overlay hidden>

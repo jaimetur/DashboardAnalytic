@@ -1,0 +1,37 @@
+[
+  {
+    "name": "Result Group",
+    "sources": ["cdr-data", "cdr-voice", "cdr-speech"],
+    "default": "",
+    "default_from": "",
+    "rules": [
+      {"when": "Test_Result|Test Result|Call_Status|status IN (Completed, Visible Completed)", "value": "Success"},
+      {"when": "Test_Result|Test Result|Call_Status|status IN (Cutoff, Failed)", "value": "Failure"}
+    ]
+  },
+  {
+    "name": "Call Family",
+    "sources": ["cdr-voice", "cdr-speech"],
+    "default": "CALL",
+    "default_from": "",
+    "rules": [
+      {"when": "Session_Type|session_type CONTAINS MultiRAB", "value": "MultiRAB"},
+      {"when": "Session_Type|session_type CONTAINS WhatsApp", "value": "WhatsApp"},
+      {"when": "Session_Type|session_type CONTAINS VoLTE", "value": "VoLTE"},
+      {"when": "Session_Type|session_type CONTAINS VoNR", "value": "VoNR"},
+      {"when": "L1_Call_Mode_A|L1_Call_Mode_B|Call_Mode|call_mode CONTAINS VoLTE", "value": "VoLTE"},
+      {"when": "L1_Call_Mode_A|L1_Call_Mode_B|Call_Mode|call_mode CONTAINS VoNR", "value": "VoNR"}
+    ]
+  },
+  {
+    "name": "Test Family",
+    "sources": ["cdr-data"],
+    "default": "",
+    "default_from": "Type_of_Test|Test_Type|test_type",
+    "rules": [
+      {"when": "Test_Name|test_name CONTAINS YouTube", "value": "YouTube"},
+      {"when": "Test_Name|test_name CONTAINS FDFS", "value": "FDFS"},
+      {"when": "Test_Name|test_name CONTAINS FDTT", "value": "FDTT"}
+    ]
+  }
+]

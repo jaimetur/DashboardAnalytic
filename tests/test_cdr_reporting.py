@@ -14,8 +14,13 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_group_colours, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, assign_cdr_vendors, catalog_chart_hover_targets, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, assign_cdr_vendors, catalog_chart_hover_targets, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
+
+
+def with_default_calculated_dimensions(entry: CatalogEntry) -> CatalogEntry:
+    payload = json.loads((Path(__file__).parents[1] / 'assets' / 'default-calculated-dimensions.json').read_text(encoding='utf-8'))
+    return replace(entry, calculated_dimensions=parse_calculated_dimensions(payload))
 
 
 def wait_for_report_job(client, job_id: int) -> dict:
@@ -914,10 +919,17 @@ def test_catalogue_filter_contract_supports_not_in_and_not_contains() -> None:
 
 
 def test_tableau_result_group_filter_uses_the_workbook_bins() -> None:
+    dimensions = parse_calculated_dimensions([{
+        'name': 'Result Group', 'sources': ['cdr-data'],
+        'rules': [
+            {'when': 'Test_Result IN (Completed, Visible Completed)', 'value': 'Success'},
+            {'when': 'Test_Result IN (Cutoff, Failed)', 'value': 'Failure'},
+        ],
+    }])
     entry = CatalogEntry(
         1, 'Failures', '', '', 'Failures', 'CDR-Data', 'Result Group',
         '100% Stacked Vertical Bars', 'Result Group', 'Result Group NOT IN (Success)',
-        'Operator', '', 'Right',
+        'Operator', '', 'Right', dimensions,
     )
     frame = pd.DataFrame({
         'Operator': ['EE'] * 5,
@@ -966,11 +978,11 @@ def test_not_contains_filter_excludes_each_comma_separated_term() -> None:
 
 
 def test_catalogue_call_family_uses_documented_netcheck_session_values() -> None:
-    entry = parse_catalog_csv(
+    entry = with_default_calculated_dimensions(parse_catalog_csv(
         ','.join(CATALOG_HEADERS)
         + '\n8,Completed Call Ratio,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,"Call Family IN (VoLTE, MultiRAB, WhatsApp)",Call Family,Operator × Campaign,,\n',
         'nsa',
-    )[0]
+    )[0])
     frame = pd.DataFrame({
         'Session_Type': ['CALL', 'MultiRAB CALL', 'WhatsApp CALL'],
         'L1_Call_Mode_A': ['VoLTE', '', ''],
@@ -1015,6 +1027,27 @@ def test_status_chart_uses_nested_columns_without_a_row_grouping() -> None:
     assert chart.getvalue() == b'nested-columns'
     assert hierarchy_renderer.call_args.args[2] == []
     assert hierarchy_renderer.call_args.args[3] == ['__catalog_column_0', '__catalog_column_1']
+
+
+def test_status_chart_keeps_row_only_hierarchy_on_the_left() -> None:
+    entry = CatalogEntry(
+        8, 'Status', '', '', '', 'CDR-Data', 'Test_Result',
+        '100% Stacked Vertical Bars', '', '', 'City × G Level 1', '',
+    )
+    frame = pd.DataFrame({
+        'City': ['London', 'London'],
+        'G_Level_1': ['Drive', 'Connecting Roads'],
+        'Test_Result': ['Completed', 'Failed'],
+    })
+    grouped, primary, series = _apply_catalog_grouping(frame, entry, False, 'Test_Result')
+
+    with patch('src.modules.cdr_reporting._render_status_100_hierarchy') as hierarchy_renderer:
+        hierarchy_renderer.return_value = BytesIO(b'row-hierarchy')
+        chart = _render_status_100('Status', grouped, primary, series)
+
+    assert chart.getvalue() == b'row-hierarchy'
+    assert hierarchy_renderer.call_args.args[2] == ['__catalog_row_0', '__catalog_row_1']
+    assert hierarchy_renderer.call_args.args[3] == ['__catalog_single_column']
 
 
 def test_status_chart_leaves_status_row_inclusion_to_the_template_filter() -> None:
@@ -1106,6 +1139,21 @@ def test_hierarchical_grouping_keeps_campaign_bars_together_per_operator() -> No
     ]
 
 
+def test_hierarchy_spans_nest_each_level_without_compound_captions() -> None:
+    keys = [
+        ('City', 'Drive', 'EE'), ('City', 'Drive', '3'),
+        ('City', 'Connecting Roads', 'EE'), ('Rural', 'Drive', 'EE'),
+    ]
+
+    assert _hierarchy_caption_spans(keys, 0) == [(0, 3, 'City'), (3, 4, 'Rural')]
+    assert _hierarchy_caption_spans(keys, 1) == [
+        (0, 2, 'Drive'), (2, 3, 'Connecting Roads'), (3, 4, 'Drive'),
+    ]
+    assert _hierarchy_caption_spans(keys, 2) == [
+        (0, 1, 'EE'), (1, 2, '3'), (2, 3, 'EE'), (3, 4, 'EE'),
+    ]
+
+
 def test_campaign_aggregation_is_ordered_oldest_to_newest_for_every_chart_renderer() -> None:
     entry = CatalogEntry(
         5, 'Data failures', '', '', '', 'CDR-Data', 'Test_Result',
@@ -1128,7 +1176,7 @@ def test_campaign_aggregation_is_ordered_oldest_to_newest_for_every_chart_render
 
 
 def test_nsa_speech_catalogue_filters_produce_samples_and_use_latest_campaign() -> None:
-    entries = load_catalog_csv(Path(__file__).parent / 'fixtures' / 'NSA Slide Template.csv', 'nsa')
+    entries = [with_default_calculated_dimensions(entry) for entry in load_catalog_csv(Path(__file__).parent / 'fixtures' / 'NSA Slide Template.csv', 'nsa')]
     speech = pd.DataFrame({
         'sample': ['volte', 'multirab', 'whatsapp-old', 'whatsapp-latest', 'whatsapp-sa', 'o2-latest'],
         'Session_Type': ['CALL', 'MultiRAB CALL', 'WhatsApp CALL', 'WhatsApp CALL', 'WhatsApp CALL', 'WhatsApp CALL'],
@@ -1164,11 +1212,11 @@ def test_layout_chart_frames_are_always_ordered_by_visual_rows_then_columns() ->
 
 
 def test_failure_count_uses_row_and_column_hierarchies_without_flattening() -> None:
-    entry = parse_catalog_csv(
+    entry = with_default_calculated_dimensions(parse_catalog_csv(
         ','.join(CATALOG_HEADERS)
         + '\n9,Voice failures per Q/city,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,,Call Family × G Level 4,Operator × Campaign,Failed/Dropped,\n',
         'nsa',
-    )[0]
+    )[0])
     frame = pd.DataFrame({
         'Session_Type': ['VoLTE', 'VoLTE', 'MultiRAB CALL'],
         'G_Level_4': ['London', 'London', 'Belfast'],
@@ -1188,11 +1236,11 @@ def test_failure_count_uses_row_and_column_hierarchies_without_flattening() -> N
 
 
 def test_failure_count_hover_targets_cover_rendered_horizontal_segments() -> None:
-    entry = parse_catalog_csv(
+    entry = with_default_calculated_dimensions(parse_catalog_csv(
         ','.join(CATALOG_HEADERS)
         + '\n9,Voice failures per Q/city,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,,Call Family × G Level 4,Operator × Campaign,Failed/Dropped,Right\n',
         'nsa',
-    )[0]
+    )[0])
     frame = pd.DataFrame({
         'Session_Type': ['VoLTE', 'VoLTE', 'VoLTE'], 'G_Level_4': ['London', 'London', 'Belfast'],
         'Operator': ['EE', 'EE', '3'], 'Campaign': ['Q2', 'Q2', 'Q3'],
@@ -1206,11 +1254,11 @@ def test_failure_count_hover_targets_cover_rendered_horizontal_segments() -> Non
 
 
 def test_failure_count_hover_targets_use_the_renderer_width_for_field_legends() -> None:
-    entry = parse_catalog_csv(
+    entry = with_default_calculated_dimensions(parse_catalog_csv(
         ','.join(CATALOG_HEADERS)
         + '\n9,Voice failures,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,,Call Family,Operator × Campaign,Call_Status,Right\n',
         'nsa',
-    )[0]
+    )[0])
     frame = pd.DataFrame({
         'Session_Type': ['VoLTE', 'VoLTE'], 'Operator': ['EE', '3'],
         'Campaign': ['Q2', 'Q2'], 'Call_Status': ['Failed', 'Failed'],
@@ -1303,11 +1351,11 @@ def test_cdf_hover_targets_are_bounded_per_series() -> None:
 
 
 def test_failure_count_keeps_zero_count_hierarchy_categories_from_all_filtered_rows() -> None:
-    entry = parse_catalog_csv(
+    entry = with_default_calculated_dimensions(parse_catalog_csv(
         ','.join(CATALOG_HEADERS)
         + '\n9,Voice failures,,Title and 1 column + Comments,Failures,CDR-Voice,Call_Status,Count Stacked Horizontal Bars,,Call Family,Operator × Campaign,Failed/Dropped,\n',
         'nsa',
-    )[0]
+    )[0])
     frame = pd.DataFrame({
         'Session_Type': ['VoLTE', 'VoLTE'], 'Operator': ['Vodafone', '3'],
         'Campaign': ['Q2', 'Q2'], 'Call_Status': ['Completed', 'Completed'],
@@ -1396,7 +1444,7 @@ def test_failure_hierarchy_uses_dashed_child_boundaries_within_one_row_group() -
 
 
 def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> None:
-    entries = load_catalog_csv(Path(__file__).parent / 'fixtures' / 'NSA Slide Template.csv', 'nsa')
+    entries = [with_default_calculated_dimensions(entry) for entry in load_catalog_csv(Path(__file__).parent / 'fixtures' / 'NSA Slide Template.csv', 'nsa')]
     slide_ten = [entry for entry in entries if entry.slide == 10]
     slide_thirteen = [entry for entry in entries if entry.slide == 13]
 
@@ -1410,7 +1458,7 @@ def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> N
 
 
 def test_catalogue_uses_explicit_title_and_transition_slides() -> None:
-    entries = load_catalog_csv(Path(__file__).parent / 'fixtures' / 'NSA Slide Template.csv', 'nsa')
+    entries = [with_default_calculated_dimensions(entry) for entry in load_catalog_csv(Path(__file__).parent / 'fixtures' / 'NSA Slide Template.csv', 'nsa')]
     structural = [entry.chart_type for entry in entries if not entry.source_kind]
     title = next(entry for entry in entries if entry.slide == 1)
     conclusions = next(entry for entry in entries if entry.slide == 17)
@@ -1442,7 +1490,7 @@ def test_catalogue_rows_use_matching_master_image_placeholders(tmp_path) -> None
         frames,
         'nsa',
         False,
-        parse_catalog_csv(catalogue, 'nsa'),
+        [with_default_calculated_dimensions(entry) for entry in parse_catalog_csv(catalogue, 'nsa')],
         chart_output_dir=tmp_path / 'charts',
     )
 

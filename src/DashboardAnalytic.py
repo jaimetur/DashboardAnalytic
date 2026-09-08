@@ -47,7 +47,7 @@ DEFAULT_TRANSFER_PORT = 7278
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, catalog_chart_hover_targets, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report, render_unavailable_source_chart
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report, render_unavailable_source_chart
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE
@@ -152,7 +152,6 @@ LEGACY_VENDOR_MAPPING_FAILURE_MARKERS = (
     'duplicate column name: vendor_2',
 )
 DATASET_NORMALIZATION_VERSION = 6
-DERIVED_CDR_PREVIEW_COLUMNS = frozenset({'Call Family', 'Test Family'})
 MAPPING_PREVIEW_NORMALIZED_COLUMNS = frozenset({
     'dataset_kind', 'source_file', 'source_sheet', 'campaign', 'market', 'period', 'campaign_year', 'campaign_quarter',
     'operator', 'session_type', 'test_name', 'direction', 'region', 'city', 'vendor', 'status',
@@ -190,46 +189,17 @@ def format_preview_gcid(value: object) -> object:
     return str(int(numeric_value)) if numeric_value.is_integer() else str(value)
 
 
-def materialize_cdr_derived_columns(frame: pd.DataFrame) -> pd.DataFrame:
-    """Add stable, report-facing CDR dimensions as inspectable columns."""
+def materialize_cdr_derived_columns(frame: pd.DataFrame, dataset_kind: str | None = None) -> pd.DataFrame:
+    """Add the generic attempt metric and the active workspace dimensions."""
     result = frame.copy()
     # A CDR can legitimately contain only categorical attempt outcomes. Keep
     # it importable and analyzable by exposing its count when no measured KPI
     # is available, without adding this reporting-only field to generic data.
     result['attempt_count'] = pd.Series(1, index=result.index, dtype='Int64')
-    columns = {str(column).casefold(): str(column) for column in result.columns}
-
-    def column(*names: str) -> str | None:
-        return next((columns.get(name.casefold()) for name in names if columns.get(name.casefold())), None)
-
-    session_column = column('Session_Type', 'session_type')
-    call_mode_column = column('L1_Call_Mode_A', 'L1_Call_Mode_B', 'Call_Mode', 'call_mode')
-    if session_column:
-        session = result[session_column].fillna('').astype(str)
-        family = pd.Series('CALL', index=result.index, dtype='string')
-        family.loc[session.str.contains('multirab', case=False, na=False)] = 'MultiRAB'
-        family.loc[session.str.contains('whatsapp', case=False, na=False)] = 'WhatsApp'
-        family.loc[session.str.contains('volte', case=False, na=False)] = 'VoLTE'
-        family.loc[session.str.contains('vonr', case=False, na=False)] = 'VoNR'
-        if call_mode_column:
-            modes = result[call_mode_column].fillna('').astype(str)
-            family.loc[(family == 'CALL') & modes.str.contains('volte', case=False, na=False)] = 'VoLTE'
-            family.loc[(family == 'CALL') & modes.str.contains('vonr', case=False, na=False)] = 'VoNR'
-        result['Call Family'] = family
-
-    type_column = column('Type_of_Test', 'Test_Type', 'test_type')
-    name_column = column('Test_Name', 'test_name')
-    if type_column or name_column:
-        test_family = (
-            result[type_column].fillna('').astype(str)
-            if type_column else pd.Series('', index=result.index, dtype='string')
+    if dataset_kind in CDR_DATASET_KINDS:
+        result = materialize_calculated_dimensions(
+            result, load_workspace_calculated_dimensions(), f'cdr-{dataset_kind}',
         )
-        if name_column:
-            test_names = result[name_column].fillna('').astype(str)
-            test_family.loc[test_names.str.contains('youtube', case=False, na=False)] = 'YouTube'
-            test_family.loc[test_names.str.contains('fdfs', case=False, na=False)] = 'FDFS'
-            test_family.loc[test_names.str.contains('fdtt', case=False, na=False)] = 'FDTT'
-        result['Test Family'] = test_family
     return result
 HELP_HOME_DOCUMENT = '00-help.md'
 HELP_NAVIGATION_DOCUMENTS = (
@@ -310,6 +280,109 @@ def atomic_write_template(path: Path, content: bytes) -> None:
         os.replace(temporary_path, path)
     finally:
         temporary_path.unlink(missing_ok=True)
+
+
+def _normalise_catalogue_dimension_name(value: str) -> str:
+    return re.sub(r'[^a-z0-9]+', '', str(value).casefold())
+
+
+def default_calculated_dimensions() -> list[dict[str, object]]:
+    """Load editable starter definitions from configuration rather than code."""
+    path = PROJECT_ROOT / 'assets' / 'default-calculated-dimensions.json'
+    return json.loads(path.read_text(encoding='utf-8')) if path.exists() else []
+
+
+def load_workspace_calculated_dimensions(*, create: bool = True):
+    """Load the active workspace definitions, migrating the former template sidecars once."""
+    if not active_workspace:
+        return ()
+    if create and repository.get_workspace_state('calculated_dimensions_initialized') != '1':
+        migrated: dict[str, dict[str, object]] = {}
+        for path in settings.slides_templates_dir.rglob('*.dimensions.json'):
+            try:
+                for item in json.loads(path.read_text(encoding='utf-8')):
+                    migrated.setdefault(_normalise_catalogue_dimension_name(item.get('name', '')), item)
+            except (OSError, ValueError, TypeError):
+                continue
+        payload = list(migrated.values()) or default_calculated_dimensions()
+        dimensions = parse_calculated_dimensions(payload)
+        repository.replace_calculated_dimensions(calculated_dimensions_json(dimensions))
+        repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
+    for path in settings.slides_templates_dir.rglob('*.dimensions.json'):
+        path.unlink(missing_ok=True)
+    return parse_calculated_dimensions(repository.list_calculated_dimensions())
+
+
+def write_workspace_calculated_dimensions(payload: object) -> tuple:
+    dimensions = parse_calculated_dimensions(payload)
+    repository.replace_calculated_dimensions(calculated_dimensions_json(dimensions))
+    return dimensions
+
+
+def load_template_catalogue(catalogue_path: Path, technology: str, *, validate_filters: bool = True):
+    dimensions = load_workspace_calculated_dimensions()
+    return [
+        replace(entry, calculated_dimensions=dimensions)
+        for entry in load_catalog_csv(catalogue_path, technology, validate_filters=validate_filters)
+    ]
+
+
+def materialize_workspace_calculated_dimensions(
+    previous_names: Iterable[str] = (), task_repository: Repository | None = None,
+) -> int:
+    """Rebuild calculated columns in every individual and combined CDR table."""
+    task_repository = task_repository or repository
+    dimensions = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
+    removable = {_normalise_catalogue_dimension_name(name) for name in previous_names}
+    datasets = [
+        row for row in task_repository.list_datasets()
+        if row['status'] == 'ready' and str(row['dataset_kind'] or '').casefold() in CDR_DATASET_KINDS
+    ]
+    for dataset in datasets:
+        dataset_id = int(dataset['id'])
+        kind = str(dataset['dataset_kind']).casefold()
+        columns = task_repository.list_dataset_row_columns(dataset_id)
+        frame = task_repository.load_dataset_rows(dataset_id, columns, {})
+        generated_columns = [
+            column for column in frame.columns
+            if _normalise_catalogue_dimension_name(column) in removable
+        ]
+        if generated_columns:
+            frame = frame.drop(columns=generated_columns)
+        frame = materialize_calculated_dimensions(frame, dimensions, f'cdr-{kind}')
+        task_repository.replace_dataset_rows(dataset_id, frame)
+    for kind in CDR_DATASET_KINDS:
+        task_repository.drop_reporting_table(kind)
+    calculated_names = [dimension.name for dimension in dimensions]
+    for dataset in datasets:
+        task_repository.copy_dataset_rows_to_reporting(
+            int(dataset['id']), str(dataset['dataset_kind']).casefold(), calculated_names,
+        )
+    DATAFRAME_CACHE.clear()
+    ANALYSIS_CACHE.clear()
+    CHART_PREVIEW_DATA_CACHE.clear()
+    task_repository.set_workspace_state('calculated_dimensions_need_materialization', '0')
+    return len(datasets)
+
+
+def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
+    """Materialize a migrated workspace without blocking its management page."""
+    if repository.get_workspace_state('calculated_dimensions_need_materialization') != '1':
+        return
+    repository.set_workspace_state('calculated_dimensions_need_materialization', 'processing')
+
+    def run() -> None:
+        task_repository = Repository(
+            workspace.database_path,
+            global_db_path=repository.global_db_path,
+            workspace_registry_db_path=workspace_registry.registry_path,
+        )
+        try:
+            materialize_workspace_calculated_dimensions(task_repository=task_repository)
+        except Exception:
+            task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
+
+    Thread(target=run, name=f'calculated-dimensions-{workspace.id}', daemon=True).start()
 
 
 def named_catalogue_path(technology: str, identifier: str, template_name: str | None = None) -> Path:
@@ -410,13 +483,13 @@ def reporting_catalog_path(technology: str) -> Path:
 
 
 def reporting_catalog_entries(technology: str):
-    return load_catalog_csv(reporting_catalog_path(technology), technology)
+    path = reporting_catalog_path(technology)
+    return load_template_catalogue(path, technology)
 
 
-def catalogue_editor_columns(datasets: Iterable[Any] | None = None) -> dict[str, list[str]]:
+def catalogue_editor_columns(datasets: Iterable[Any] | None = None, calculated_dimensions: Iterable[Any] = ()) -> dict[str, list[str]]:
     """Offer the processed CDR fields that can be used in the template editor."""
     common = {'Operator', 'Campaign', 'source_sheet', 'vendor', 'RAT_A', 'RAT'}
-    derived = {'Call Family', 'Test Family', 'Rate Bucket', 'Threshold', 'Buckets'}
     columns: dict[str, set[str]] = {
         'cdr-data': set(common) | {'Test_Result', 'Test_Name', 'Type_of_Test', 'Direction', 'G Level 4'},
         'cdr-voice': set(common) | {'Call_Status', 'Session_Type', 'Call_Setup_Time', 'G Level 4'},
@@ -435,7 +508,11 @@ def catalogue_editor_columns(datasets: Iterable[Any] | None = None) -> dict[str,
         # only once, preferring the readable spelling, so a multi-select can
         # never build a duplicate Cartesian grouping dimension.
         unique: dict[str, str] = {}
-        for value in sorted(values | derived, key=lambda item: ("_" in item, item.casefold())):
+        calculated = {
+            dimension.name for dimension in calculated_dimensions
+            if source in dimension.sources
+        }
+        for value in sorted(values | calculated, key=lambda item: ("_" in item, item.casefold())):
             unique.setdefault(re.sub(r'[^a-z0-9]+', '', value.casefold()), value)
         result[source] = sorted(unique.values(), key=str.casefold)
     return result
@@ -481,7 +558,7 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
         return None
     validation_error = None
     try:
-        entries = load_catalog_csv(catalogue['path'], technology)
+        entries = load_template_catalogue(catalogue['path'], technology)
     except ValueError as exc:
         # A newly created template deliberately contains only the current CSV
         # headers.  It is valid to open that blank canvas in the editor, while
@@ -494,7 +571,7 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
             # generation and saving still use strict validation, but opening
             # Admin must not become impossible because of a damaged row.
             validation_error = str(exc)
-            entries = load_catalog_csv(catalogue['path'], technology, validate_filters=False)
+            entries = load_template_catalogue(catalogue['path'], technology, validate_filters=False)
         else:
             raise
     # CSVs are allowed to have been edited out of order. The editor always
@@ -521,13 +598,15 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
     ]
     if not rows:
         rows = [{header: ('1' if header == 'Slide' else '') for header in CATALOG_HEADERS}]
-    columns = catalogue_editor_columns()
+    dimensions = load_workspace_calculated_dimensions()
+    columns = catalogue_editor_columns(calculated_dimensions=dimensions)
     return {
         'technology': technology,
         'catalogue': catalogue,
         'rows': rows,
         'headers': CATALOG_HEADERS,
         'validation_error': validation_error,
+        'calculated_dimensions': calculated_dimensions_json(dimensions),
         'suggestions': {
             'layouts': catalogue_layout_names(technology),
             'chart_types': sorted(CHART_TYPES | STRUCTURAL_SLIDE_TYPES, key=str.casefold),
@@ -1276,11 +1355,15 @@ def rebuild_dataset_artifacts(
             # an otherwise valid CDR unusable in Workspace or Dashboard.
             auto_vendor_mapping_error = str(exc)
     if dataset_kind in CDR_DATASET_KINDS:
-        df = materialize_cdr_derived_columns(df)
+        df = materialize_cdr_derived_columns(df, dataset_kind)
     store_cached_dataset_frame(dataset_path, df)
     task_repository.replace_dataset_rows(dataset_id, df)
     if dataset_kind in CDR_DATASET_KINDS:
         task_repository.replace_reporting_rows(dataset_id, dataset_kind, df)
+        task_repository.copy_dataset_rows_to_reporting(
+            dataset_id, dataset_kind,
+            [dimension.name for dimension in load_workspace_calculated_dimensions() if f'cdr-{dataset_kind}' in dimension.sources],
+        )
     if progress_callback:
         progress_callback(62)
     task_repository.update_dataset_profile(dataset_id, progress=62, dataset_kind=dataset_kind)
@@ -1359,11 +1442,15 @@ def persist_mapped_cdr_frame(dataset: dict[str, Any], frame: pd.DataFrame) -> No
     """Replace a materialized CDR after vendor mapping and refresh its profile."""
     dataset_id = int(dataset['id'])
     if str(dataset.get('dataset_kind') or '').casefold() in CDR_DATASET_KINDS:
-        frame = materialize_cdr_derived_columns(frame)
+        frame = materialize_cdr_derived_columns(frame, str(dataset.get('dataset_kind') or '').casefold())
     repository.replace_dataset_rows(dataset_id, frame)
     dataset_kind = str(dataset.get('dataset_kind') or '').casefold()
     if dataset_kind in CDR_DATASET_KINDS:
         repository.replace_reporting_rows(dataset_id, dataset_kind, frame)
+        repository.copy_dataset_rows_to_reporting(
+            dataset_id, dataset_kind,
+            [dimension.name for dimension in load_workspace_calculated_dimensions() if f'cdr-{dataset_kind}' in dimension.sources],
+        )
     summary = summarise_dataset(frame)
     available_metrics = derive_available_metrics(frame)
     analysis = build_analysis(frame, {'aggregation': 'all', 'extra_filters': {}}, '')
@@ -3707,6 +3794,7 @@ def workspace(
                 'input_kind': None, 'input_kind_options': [], 'workspace_logs': [], 'error': None,
                 'has_processing': False, 'vodafone_mapping_datasets': [], 'three_mapping_datasets': [],
                 'mappable_cdr_datasets': [], 'clearable_cdr_datasets': [],
+                'calculated_dimensions': [],
                 'workspaces': workspaces, 'workspace_access': workspace_access, 'workspace_sizes': workspace_sizes, 'workspace_users': workspace_users, 'workspace_notice': request.query_params.get('workspace_notice'),
                 'workspace_warning': request.query_params.get('workspace_warning'),
                 'workspace_error': request.query_params.get('workspace_error'),
@@ -3723,6 +3811,8 @@ def workspace(
     add_workspace_vendor_capabilities(datasets)
     mappable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_map_vendors')]
     clearable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_clear_vendors')]
+    calculated_dimensions = calculated_dimensions_json(load_workspace_calculated_dimensions())
+    queue_workspace_dimension_materialization(active_workspace)
 
     return render_template(
         request,
@@ -3741,6 +3831,7 @@ def workspace(
             'three_mapping_datasets': three_mapping_datasets,
             'mappable_cdr_datasets': mappable_cdr_datasets,
             'clearable_cdr_datasets': clearable_cdr_datasets,
+            'calculated_dimensions': calculated_dimensions,
             'workspaces': workspaces,
             'workspace_access': workspace_access,
             'workspace_sizes': workspace_sizes,
@@ -4009,8 +4100,6 @@ def preview_dataset(
     cdr_rat: list[str] = Query(default=[]),
     cdr_session_type: list[str] = Query(default=[]),
     cdr_call_status: list[str] = Query(default=[]),
-    cdr_call_family: list[str] = Query(default=[]),
-    cdr_test_family: list[str] = Query(default=[]),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
     dataset_row = repository.get_dataset(dataset_id)
@@ -4021,16 +4110,6 @@ def preview_dataset(
         raise HTTPException(status_code=400, detail='Only processed datasets can be previewed.')
     dataset = ensure_mapping_gcid(dataset)
     dataset = ensure_canonical_mapped_vendor_column(dataset) or dataset
-    if dataset['dataset_kind'] in CDR_DATASET_KINDS:
-        # Backfill older CDRs only when they are actually inspected.  Running
-        # a full-table migration for every historical dataset during startup
-        # can delay the entire server by several minutes on large workspaces.
-        if repository.materialize_cdr_derived_dimensions(dataset_id):
-            repository.update_dataset_profile(dataset_id, normalization_version=DATASET_NORMALIZATION_VERSION)
-            refreshed = repository.get_dataset(dataset_id)
-            if refreshed:
-                dataset = serialize_dataset_row(refreshed)
-
     available_columns = repository.list_dataset_row_columns(dataset_id)
     vendor_preview_column = next(
         (column for column in ('Vendor', 'OP/ Vendor', 'OP_Vendor') if column in available_columns),
@@ -4041,6 +4120,11 @@ def preview_dataset(
     preview_sheet_options: list[str] = []
     preview_source_sheet: str | None = None
     preview_filters: dict[str, Any] = {}
+    derived_preview_columns = {
+        dimension.name for dimension in load_workspace_calculated_dimensions()
+        if f"cdr-{dataset['dataset_kind']}" in dimension.sources
+        and dimension.name in available_columns
+    } if dataset['dataset_kind'] in CDR_DATASET_KINDS else set()
     if dataset['dataset_kind'] == 'mapping_vodafone':
         available_sheets = {sheet.casefold(): sheet for sheet in repository.list_distinct_dataset_row_values(dataset_id, 'source_sheet')}
         preview_sheet_options = [available_sheets[name] for name in ('4g', '5g') if name in available_sheets]
@@ -4065,8 +4149,6 @@ def preview_dataset(
             ('cdr_rat', 'RAT', cdr_rat, ('RAT_A', 'RAT', 'Sample_RAT_A')),
             ('cdr_session_type', 'Session Type', cdr_session_type, ('Session_Type', 'session_type', 'Type_of_Test')),
             ('cdr_call_status', 'Call Status', cdr_call_status, ('Call_Status', 'call_status', 'status')),
-            ('cdr_call_family', 'Call Family', cdr_call_family, ('Call Family',)),
-            ('cdr_test_family', 'Test Family', cdr_test_family, ('Test Family',)),
         ]
         for parameter, label, requested_values, candidates in cdr_filter_definitions:
             column = next(
@@ -4126,12 +4208,9 @@ def preview_dataset(
         # the calculated vendor column instead, highlighted near the start.
         preview_columns.extend(
             column for column in available_columns
-            if column not in preview_columns and column != 'report_vendor'
+            if column not in preview_columns and column != 'report_vendor' and column not in derived_preview_columns
         )
-    derived_preview_columns = {
-        column for column in preview_columns
-        if str(column).casefold() in {name.casefold() for name in DERIVED_CDR_PREVIEW_COLUMNS}
-    }
+        preview_columns.extend(column for column in available_columns if column in derived_preview_columns)
     preview_frame = repository.load_dataset_rows(dataset_id, preview_columns, preview_filters).head(row_limit)
     if 'GCID' in preview_frame.columns:
         preview_frame = preview_frame.copy()
@@ -4294,6 +4373,13 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
         requested.update(parse_catalog_grouping(entry.grouping_rows).dimensions)
         requested.update(parse_catalog_grouping(entry.grouping_columns).dimensions)
         requested.update(condition.column for condition in parse_catalog_filters(entry.filters))
+        for dimension in entry.calculated_dimensions:
+            if entry.cdr_source.casefold() not in dimension.sources:
+                continue
+            requested.update(dimension.default_from)
+            for rule in dimension.rules:
+                for condition in rule.conditions:
+                    requested.update(part.strip() for part in condition.column.split('|') if part.strip())
     requested_identities = {
         re.sub(r'[^a-z0-9]', '', str(column).casefold())
         for column in requested
@@ -4307,8 +4393,6 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
         'tputabove': {'Mean_Data_Rate', 'Test_Name'},
         'tputbelow': {'Mean_Data_Rate', 'Test_Name'},
         'ttfp10sratio': {'VideoStream_Time_to_First_Picture'},
-        'resultgroup': {'Test_Result'},
-        'testresultgroup': {'Test_Result'},
         'lowratesession': {'Mean_Data_Rate', 'Test_Name'},
         'ltedlaggregatedbwmhz': {'LTE_DL_Test_Bandwidth_Avg'},
         'ltedltestbandwidthavgint': {'LTE_DL_Test_Bandwidth_Avg'},
@@ -4341,7 +4425,6 @@ def _combined_reporting_frame(
     dataset_ids = [int(dataset['id']) for dataset in datasets]
     columns = reporting_query_columns(dataset_kind, catalog_entries, multivendor)
     for dataset_id in dataset_ids:
-        task_repository.materialize_cdr_derived_dimensions(dataset_id)
         task_repository.copy_dataset_rows_to_reporting(dataset_id, dataset_kind, columns)
     combined = task_repository.load_reporting_rows(dataset_kind, dataset_ids, columns)
     if combined.empty:
@@ -4520,7 +4603,7 @@ def _temporary_chart_preview_context(source: str, identifier: str, chart_index: 
     template = next((item for item in report_catalogue_options(technology) if item['name'] == template_name), None)
     if technology not in TEMPLATE_NAMES or not template:
         raise HTTPException(status_code=404, detail='The Slides Template used by this Chart Set is no longer available.')
-    indexed_entries = list(enumerate(load_catalog_csv(template['path'], technology)))
+    indexed_entries = list(enumerate(load_template_catalogue(template['path'], technology)))
     # Standalone Chart Sets retain the CSV chart-row order. PowerPoint reports
     # render slides numerically, then retain chart order inside each slide.
     # The editor always presents every row sorted by slide. Keep the original
@@ -4579,7 +4662,10 @@ def temporary_chart_preview_context(source: str, identifier: str, chart_index: i
     selected_dataset_ids = {value for values in selected_ids.values() for value in values}
     # The controls only need the schemas backing this Chart Set. Inspecting
     # every historic dataset made opening the panel increasingly expensive.
-    columns = catalogue_editor_columns(row for row in dataset_rows if int(row['id']) in selected_dataset_ids)
+    columns = catalogue_editor_columns(
+        (row for row in dataset_rows if int(row['id']) in selected_dataset_ids),
+        entry.calculated_dimensions,
+    )
     datasets_by_source: dict[str, list[dict[str, Any]]] = {'cdr-data': [], 'cdr-voice': [], 'cdr-speech': []}
     for row in dataset_rows:
         kind = str(row['dataset_kind'] or '').casefold()
@@ -5138,6 +5224,7 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
         'report_chart_jobs': [serialize_report_chart_job(row) for row in chart_job_rows],
         'report_chart_sets': report_chart_sets,
         'report_charts': default_report_charts,
+        'calculated_dimensions': calculated_dimensions_json(load_workspace_calculated_dimensions()),
     })
 
 
@@ -5247,7 +5334,7 @@ def generate_netcheck_cdr_report(
         raise HTTPException(status_code=400, detail=f'No {technology.upper()} Slides Template is available.')
     catalog_path = selected_catalogue['path']
     try:
-        catalog_entries = load_catalog_csv(catalog_path, technology)
+        catalog_entries = load_template_catalogue(catalog_path, technology)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Unable to load the selected {technology.upper()} report template: {exc}") from exc
     generated_at = datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -5369,7 +5456,7 @@ def _run_report_chart_job(
             )
             if not template_option:
                 raise ValueError('The Slides Template used by this Chart Set is no longer available.')
-            catalog_entries = load_catalog_csv(template_option['path'], technology)
+            catalog_entries = load_template_catalogue(template_option['path'], technology)
             _ensure_report_job_active(task_repository, job_id, chart_job=True)
             task_repository.update_report_chart_job(job_id, status='processing', progress=12)
             chart_entries = [entry for entry in catalog_entries if entry.source_kind]
@@ -6003,7 +6090,7 @@ def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) 
     if not template_option:
         raise HTTPException(status_code=400, detail='The Slides Template used by this report is no longer available.')
     try:
-        catalog_entries = load_catalog_csv(template_option['path'], technology)
+        catalog_entries = load_template_catalogue(template_option['path'], technology)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f'Unable to load the selected {technology.upper()} report template: {exc}') from exc
     file_name = Path(str(previous['output_file'] or '')).name
@@ -7288,6 +7375,8 @@ async def delete_admin_database_table_row(request: Request, user: SessionUser = 
 def catalogue_filter_values(
     source: str,
     column: str,
+    technology: str = '',
+    catalogue_id: str = '',
     user: SessionUser = Depends(admin_user),
 ) -> JSONResponse:
     """Return values only for the field currently being configured in the editor."""
@@ -7296,12 +7385,28 @@ def catalogue_filter_values(
         raise HTTPException(status_code=400, detail='Unsupported CDR source or filter field.')
     kind = normalized_source.removeprefix('cdr-')
     values: set[str] = set()
+    definition = None
+    normalized_technology = technology.strip().casefold()
+    if normalized_technology in TEMPLATE_NAMES and catalogue_id.strip():
+        catalogue = _named_catalogue(normalized_technology, catalogue_id.strip())
+        if catalogue:
+            definition = next((
+                item for item in load_workspace_calculated_dimensions()
+                if _normalise_catalogue_dimension_name(item.name) == _normalise_catalogue_dimension_name(column)
+                and normalized_source in item.sources
+            ), None)
+    if definition:
+        values.update(rule.value for rule in definition.rules)
+        if definition.default:
+            values.add(definition.default)
     for dataset in repository.list_datasets():
         if str(dataset['dataset_kind'] or '').casefold() != kind or dataset['status'] != 'ready':
             continue
         if not repository.dataset_rows_table_exists(dataset['id']):
             continue
-        values.update(repository.list_distinct_dataset_row_values(dataset['id'], column, limit=200))
+        requested_columns = definition.default_from if definition else (column,)
+        for requested_column in requested_columns:
+            values.update(repository.list_distinct_dataset_row_values(dataset['id'], requested_column, limit=200))
     return JSONResponse({'values': sorted(values, key=str.casefold)[:200]})
 
 
@@ -7704,11 +7809,16 @@ async def preview_report_template_chart(
     if not active_workspace:
         raise HTTPException(status_code=400, detail='Open a workspace before previewing chart data.')
     technology = technology.strip().lower()
-    if technology not in TEMPLATE_NAMES or not _named_catalogue(technology, catalogue_id):
+    catalogue = _named_catalogue(technology, catalogue_id) if technology in TEMPLATE_NAMES else None
+    if not catalogue:
         raise HTTPException(status_code=404, detail='Slides Template not found.')
     try:
         payload = await request.json()
-        entries = parse_catalog_csv(str(payload.get('catalogue_content') or ''), technology)
+        dimensions = load_workspace_calculated_dimensions()
+        entries = [
+            replace(entry, calculated_dimensions=dimensions)
+            for entry in parse_catalog_csv(str(payload.get('catalogue_content') or ''), technology)
+        ]
         row_index = int(payload.get('row_index'))
         entry = entries[row_index]
         editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
@@ -7741,7 +7851,6 @@ async def preview_report_template_chart(
                 if str(dataset['dataset_kind'] or '').casefold() != entry.source_kind or dataset['status'] != 'ready':
                     continue
                 dataset_id = int(dataset['id'])
-                repository.materialize_cdr_derived_dimensions(dataset_id)
                 columns = repository.list_dataset_row_columns(dataset_id)
                 if columns:
                     frames.append(repository.load_dataset_rows(dataset_id, columns, {}))
@@ -7792,11 +7901,16 @@ async def preview_report_template_chart_image(
     if not active_workspace:
         raise HTTPException(status_code=400, detail='Open a workspace before previewing a chart.')
     technology = technology.strip().lower()
-    if technology not in TEMPLATE_NAMES or not _named_catalogue(technology, catalogue_id):
+    catalogue = _named_catalogue(technology, catalogue_id) if technology in TEMPLATE_NAMES else None
+    if not catalogue:
         raise HTTPException(status_code=404, detail='Slides Template not found.')
     try:
         payload = await request.json()
-        entries = parse_catalog_csv(str(payload.get('catalogue_content') or ''), technology)
+        dimensions = load_workspace_calculated_dimensions()
+        entries = [
+            replace(entry, calculated_dimensions=dimensions)
+            for entry in parse_catalog_csv(str(payload.get('catalogue_content') or ''), technology)
+        ]
         entry = entries[int(payload.get('row_index'))]
         editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
         entry = replace(entry, **_temporary_chart_definition_changes(editable))
@@ -7810,7 +7924,6 @@ async def preview_report_template_chart_image(
         if str(dataset['dataset_kind'] or '').casefold() != entry.source_kind or dataset['status'] != 'ready':
             continue
         dataset_id = int(dataset['id'])
-        repository.materialize_cdr_derived_dimensions(dataset_id)
         columns = repository.list_dataset_row_columns(dataset_id)
         if columns:
             selected_datasets.append(serialize_dataset_row(dataset))
@@ -7845,7 +7958,7 @@ def export_report_catalogue(technology: str, user: SessionUser = Depends(admin_u
         raise HTTPException(status_code=404, detail='Slides Template not found')
     # Export is a file retrieval operation. Keep legacy/manual filter captions
     # intact even when they cannot be executed as current Filter Builder rules.
-    entries = load_catalog_csv(active['path'], technology, validate_filters=False)
+    entries = load_template_catalogue(active['path'], technology, validate_filters=False)
     filename = template_download_filename(active['name']) if active else f'{technology.upper()} Slide Template.csv'
     return Response(
         content=catalogue_csv(entries),
@@ -7869,7 +7982,7 @@ def export_selected_report_catalogue(
     if not catalogue:
         raise HTTPException(status_code=404, detail='Slides Template not found')
     return Response(
-        content=catalogue_csv(load_catalog_csv(catalogue['path'], technology, validate_filters=False)),
+        content=catalogue_csv(load_template_catalogue(catalogue['path'], technology, validate_filters=False)),
         media_type='text/csv; charset=utf-8',
         headers={'Content-Disposition': f'attachment; filename="{template_download_filename(catalogue["name"])}"'},
     )
@@ -7883,7 +7996,7 @@ def export_named_report_catalogue(technology: str, catalogue_id: str, user: Sess
     catalogue = next((item for item in report_catalogue_options(technology) if item['identifier'] == catalogue_id), None)
     if not catalogue:
         raise HTTPException(status_code=404, detail='Slides Template not found')
-    entries = load_catalog_csv(catalogue['path'], technology, validate_filters=False)
+    entries = load_template_catalogue(catalogue['path'], technology, validate_filters=False)
     filename = template_download_filename(catalogue['name'])
     return Response(
         content=catalogue_csv(entries),
@@ -8091,7 +8204,7 @@ def report_catalogue_copy_options(user: SessionUser = Depends(admin_user)) -> JS
     for technology in TEMPLATE_NAMES:
         for catalogue in report_catalogue_options(technology):
             try:
-                entries = load_catalog_csv(catalogue['path'], technology, validate_filters=False)
+                entries = load_template_catalogue(catalogue['path'], technology, validate_filters=False)
             except ValueError:
                 entries = []
             slides = [
@@ -8110,6 +8223,86 @@ def report_catalogue_copy_options(user: SessionUser = Depends(admin_user)) -> JS
                 'slides': slides,
             })
     return JSONResponse({'templates': templates})
+
+
+async def _save_workspace_dimensions(request: Request, user: SessionUser) -> JSONResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace before managing calculated dimensions.')
+    try:
+        payload = await request.json()
+        previous = load_workspace_calculated_dimensions()
+        dimensions = write_workspace_calculated_dimensions(payload.get('dimensions'))
+        materialized = materialize_workspace_calculated_dimensions(dimension.name for dimension in previous)
+    except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (OSError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=503, detail=f'Unable to save calculated dimensions: {exc}') from exc
+    repository.add_log(user.username, 'save_workspace_calculated_dimensions', json.dumps({
+        'workspace': active_workspace.id, 'count': len(dimensions), 'materialized_datasets': materialized,
+    }))
+    return JSONResponse({'dimensions': calculated_dimensions_json(dimensions), 'materialized_datasets': materialized})
+
+
+@app.put('/api/workspace/calculated-dimensions')
+async def save_workspace_calculated_dimensions(
+    request: Request, user: SessionUser = Depends(current_user),
+) -> JSONResponse:
+    return await _save_workspace_dimensions(request, user)
+
+
+@app.put('/api/admin/report-templates/{technology}/{catalogue_id}/calculated-dimensions')
+async def save_report_template_calculated_dimensions(
+    request: Request, technology: str, catalogue_id: str,
+    user: SessionUser = Depends(admin_user),
+) -> JSONResponse:
+    """Backward-compatible editor endpoint backed by the active workspace."""
+    return await _save_workspace_dimensions(request, user)
+
+
+@app.get('/workspace/calculated-dimensions/export')
+def export_workspace_calculated_dimensions(
+    name: str = '', user: SessionUser = Depends(current_user),
+) -> Response:
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace before exporting calculated dimensions.')
+    dimensions = list(load_workspace_calculated_dimensions())
+    if name.strip():
+        identity = _normalise_catalogue_dimension_name(name)
+        dimensions = [item for item in dimensions if _normalise_catalogue_dimension_name(item.name) == identity]
+        if not dimensions:
+            raise HTTPException(status_code=404, detail='Calculated dimension not found.')
+    content = json.dumps(calculated_dimensions_json(dimensions), indent=2, ensure_ascii=False).encode('utf-8')
+    suffix = re.sub(r'[^A-Za-z0-9_-]+', '-', name.strip()).strip('-') if name.strip() else 'all'
+    filename = f'{active_workspace.name}-calculated-dimensions-{suffix}.json'.replace('"', '')
+    repository.add_log(user.username, 'export_workspace_calculated_dimensions', json.dumps({
+        'workspace': active_workspace.id, 'count': len(dimensions),
+    }))
+    return Response(content, media_type='application/json', headers={'Content-Disposition': f'attachment; filename="{filename}"'})
+
+
+@app.post('/workspace/calculated-dimensions/import')
+async def import_workspace_calculated_dimensions(
+    dimensions_file: UploadFile = File(...),
+    user: SessionUser = Depends(current_user),
+) -> RedirectResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace before importing calculated dimensions.')
+    try:
+        payload = json.loads((await dimensions_file.read()).decode('utf-8-sig'))
+        imported = parse_calculated_dimensions(payload)
+        previous = list(load_workspace_calculated_dimensions())
+        merged = { _normalise_catalogue_dimension_name(item.name): item for item in previous }
+        for item in imported:
+            merged[_normalise_catalogue_dimension_name(item.name)] = item
+        saved = write_workspace_calculated_dimensions(calculated_dimensions_json(merged.values()))
+        materialized = materialize_workspace_calculated_dimensions(item.name for item in previous)
+    except (UnicodeDecodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}#calculated-dimensions', status_code=303)
+    repository.add_log(user.username, 'import_workspace_calculated_dimensions', json.dumps({
+        'workspace': active_workspace.id, 'imported': len(imported), 'count': len(saved),
+    }))
+    notice = f'Imported {len(imported)} calculated dimensions and updated {materialized} CDR datasets.'
+    return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": notice})}#calculated-dimensions', status_code=303)
 
 
 @app.post('/admin/report-templates/{technology}/{catalogue_id}/copy-items')
@@ -8137,7 +8330,7 @@ async def copy_report_catalogue_items(
         if not target:
             raise FileNotFoundError('Destination Slides Template not found.')
         try:
-            target_entries = load_catalog_csv(target['path'], target_technology, validate_filters=False)
+            target_entries = load_template_catalogue(target['path'], target_technology, validate_filters=False)
         except ValueError as exc:
             if str(exc) != 'The report template does not contain any rows.':
                 raise

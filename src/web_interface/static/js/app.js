@@ -6,6 +6,108 @@ function formatAxisValue(value) {
   return numeric.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
 }
 
+document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEach((host) => {
+  const manage = host.querySelector('[data-workspace-manage-calculated-dimensions]');
+  let dimensions = [];
+  try { dimensions = JSON.parse(host.dataset.calculatedDimensions || '[]'); } catch (_error) { dimensions = []; }
+  const saveDimensions = async (next) => {
+    const response = await fetch(host.dataset.saveUrl, {
+      method: 'PUT', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({dimensions: next}),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || 'Unable to save calculated dimensions.');
+    dimensions = payload.dimensions || next;
+  };
+  manage?.addEventListener('click', () => {
+    const overlay = document.createElement('div'); overlay.className = 'confirm-overlay';
+    const panel = document.createElement('section'); panel.className = 'confirm-panel calculated-dimensions-dialog';
+    panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true');
+    const header = document.createElement('div'); header.className = 'catalogue-chart-preview-header';
+    const heading = document.createElement('div'); heading.innerHTML = '<p class="eyebrow">Active Workspace</p><h3>Calculated Dimensions</h3>';
+    const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', 'Close calculated dimensions');
+    header.append(heading, close);
+    const note = document.createElement('p'); note.className = 'form-note'; note.textContent = 'Rules run from top to bottom. Use: Field OP value => Result. Separate AND conditions with semicolons and alternative source names with |.';
+    const list = document.createElement('div'); list.className = 'calculated-dimensions-list';
+    const add = document.createElement('button'); add.type = 'button'; add.textContent = '+ Add Calculated Dimension';
+    const form = document.createElement('div'); form.className = 'calculated-dimension-editor'; form.hidden = true;
+    panel.append(header, note, list, add, form); overlay.append(panel); document.body.append(overlay);
+    const finish = () => overlay.remove(); close.addEventListener('click', finish);
+    overlay.addEventListener('click', (event) => { if (event.target === overlay) finish(); });
+    const edit = (index = null) => {
+      const current = index === null ? {name: '', sources: ['cdr-data'], default: '', default_from: '', rules: []} : dimensions[index];
+      form.replaceChildren(); form.hidden = false;
+      const inputField = (caption, value = '') => {
+        const label = document.createElement('label'); label.textContent = caption;
+        const input = document.createElement('input'); input.value = value; label.append(input); form.append(label); return input;
+      };
+      const name = inputField('Name', current.name || '');
+      const fallback = inputField('Default value (optional)', current.default || '');
+      const fallbackField = inputField('Default source fields (optional, separated by |)', current.default_from || '');
+      const sources = document.createElement('fieldset'); sources.className = 'calculated-dimension-sources';
+      sources.innerHTML = '<legend>Available for</legend>';
+      ['cdr-data', 'cdr-voice', 'cdr-speech'].forEach((source) => {
+        const label = document.createElement('label'); const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.value = source;
+        checkbox.checked = (current.sources || []).includes(source); label.append(checkbox, document.createTextNode(source.toUpperCase())); sources.append(label);
+      });
+      form.append(sources);
+      const rulesLabel = document.createElement('label'); rulesLabel.className = 'calculated-dimension-rules'; rulesLabel.textContent = 'Rules';
+      const rules = document.createElement('textarea'); rules.placeholder = 'Test_Result IN (Completed, Visible Completed) => Success';
+      rules.value = (current.rules || []).map((rule) => `${rule.when} => ${rule.value}`).join('\n'); rulesLabel.append(rules); form.append(rulesLabel);
+      const actions = document.createElement('div'); actions.className = 'confirm-actions calculated-dimension-rules';
+      const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'secondary-button'; cancel.textContent = 'Cancel';
+      const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Save and Materialize'; actions.append(cancel, save); form.append(actions);
+      cancel.addEventListener('click', () => { form.hidden = true; });
+      save.addEventListener('click', async () => {
+        try {
+          const parsedRules = rules.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+            const separator = line.lastIndexOf('=>');
+            if (separator < 1) throw new Error(`Invalid rule '${line}'. Use condition => result.`);
+            return {when: line.slice(0, separator).trim(), value: line.slice(separator + 2).trim()};
+          });
+          const dimension = {name: name.value.trim(), sources: Array.from(sources.querySelectorAll('input:checked')).map((item) => item.value), default: fallback.value, default_from: fallbackField.value.trim(), rules: parsedRules};
+          const next = [...dimensions]; if (index === null) next.push(dimension); else next[index] = dimension;
+          save.disabled = true; await saveDimensions(next); window.location.reload();
+        } catch (error) { save.disabled = false; showInfoDialog(error.message || 'Unable to save calculated dimension.', {title: 'Calculated Dimensions', tone: 'error'}); }
+      });
+      name.focus();
+    };
+    const render = () => {
+      list.replaceChildren();
+      dimensions.forEach((dimension, index) => {
+        const item = document.createElement('div'); item.className = 'calculated-dimension-item';
+        const identity = document.createElement('div'); identity.innerHTML = `<strong></strong><p></p>`; identity.querySelector('strong').textContent = dimension.name; identity.querySelector('p').textContent = (dimension.sources || []).map((source) => source.toUpperCase()).join(' · ');
+        const summary = document.createElement('div'); summary.className = 'calculated-dimension-rule-summary';
+        (dimension.rules || []).forEach((rule, ruleIndex) => {
+          const line = document.createElement('div');
+          const number = document.createElement('strong'); number.textContent = `${ruleIndex + 1}.`;
+          const condition = document.createElement('code'); condition.textContent = rule.when;
+          const arrow = document.createElement('span'); arrow.textContent = '→';
+          const result = document.createElement('b'); result.textContent = rule.value;
+          line.append(number, condition, arrow, result); summary.append(line);
+        });
+        if (dimension.default_from || dimension.default) {
+          const fallbackLine = document.createElement('div'); fallbackLine.className = 'calculated-dimension-fallback';
+          fallbackLine.textContent = `Fallback: ${dimension.default_from || dimension.default}`; summary.append(fallbackLine);
+        }
+        const actions = document.createElement('div'); actions.className = 'calculated-dimension-actions';
+        const editButton = document.createElement('button'); editButton.type = 'button'; editButton.textContent = '✎'; editButton.title = `Edit ${dimension.name}`;
+        const exportLink = document.createElement('a'); exportLink.className = 'ghost-link icon-action'; exportLink.textContent = '⇥'; exportLink.title = `Export ${dimension.name}`; exportLink.href = `/workspace/calculated-dimensions/export?${new URLSearchParams({name: dimension.name})}`;
+        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'danger-button'; remove.textContent = '−'; remove.title = `Delete ${dimension.name}`;
+        editButton.addEventListener('click', () => edit(index));
+        remove.addEventListener('click', async () => {
+          if (!await showConfirmDialog(`Delete calculated dimension '${dimension.name}' and remove its materialized columns?`, {title: 'Delete Calculated Dimension', confirmLabel: 'Delete', tone: 'danger'})) return;
+          try { remove.disabled = true; await saveDimensions(dimensions.filter((_item, itemIndex) => itemIndex !== index)); window.location.reload(); }
+          catch (error) { remove.disabled = false; showInfoDialog(error.message || 'Unable to delete calculated dimension.', {title: 'Calculated Dimensions', tone: 'error'}); }
+        });
+        actions.append(editButton, exportLink, remove); item.append(identity, summary, actions); list.append(item);
+      });
+      if (!dimensions.length) { const empty = document.createElement('p'); empty.className = 'form-note'; empty.textContent = 'This workspace has no calculated dimensions.'; list.append(empty); }
+    };
+    add.addEventListener('click', () => edit()); render(); close.focus();
+  });
+});
+
 function limitSeriesCollectionByX(seriesCollection, xMaxOverride) {
   if (!Number.isFinite(Number(xMaxOverride))) return seriesCollection;
   return seriesCollection
@@ -545,6 +647,157 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
 
   let suggestions = {};
   try { suggestions = JSON.parse(editor.dataset.editorSuggestions || '{}'); } catch (_error) { suggestions = {}; }
+  let calculatedDimensions = [];
+  try { calculatedDimensions = JSON.parse(editor.dataset.calculatedDimensions || '[]'); } catch (_error) { calculatedDimensions = []; }
+  const initialCalculatedDimensionNames = new Set(calculatedDimensions.map((item) => String(item.name || '').toLocaleLowerCase()));
+  const baseSuggestionColumns = Object.fromEntries(Object.entries(suggestions.columns || {}).map(([source, values]) => [
+    source, values.filter((value) => !initialCalculatedDimensionNames.has(String(value).toLocaleLowerCase())),
+  ]));
+  const refreshCalculatedDimensionSuggestions = () => {
+    suggestions.columns = Object.fromEntries(Object.entries(baseSuggestionColumns).map(([source, values]) => [
+      source,
+      [...new Set([
+        ...values,
+        ...calculatedDimensions.filter((item) => (item.sources || []).includes(source)).map((item) => item.name),
+      ])].sort((left, right) => left.localeCompare(right)),
+    ]));
+    editor.dataset.editorSuggestions = JSON.stringify(suggestions);
+    editor.dataset.calculatedDimensions = JSON.stringify(calculatedDimensions);
+  };
+  refreshCalculatedDimensionSuggestions();
+
+  const saveCalculatedDimensions = async () => {
+    const response = await fetch(editor.dataset.calculatedDimensionsUrl, {
+      method: 'PUT', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({dimensions: calculatedDimensions}),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || 'Unable to save calculated dimensions.');
+    calculatedDimensions = Array.isArray(payload.dimensions) ? payload.dimensions : calculatedDimensions;
+    refreshCalculatedDimensionSuggestions();
+  };
+
+  const openCalculatedDimensionsManager = () => {
+    const overlay = document.createElement('div'); overlay.className = 'confirm-overlay';
+    const panel = document.createElement('section'); panel.className = 'confirm-panel calculated-dimensions-dialog';
+    panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true');
+    const header = document.createElement('div'); header.className = 'catalogue-chart-preview-header';
+    const headingWrap = document.createElement('div');
+    const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Active Workspace';
+    const title = document.createElement('h3'); title.textContent = 'Calculated Dimensions';
+    const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.title = 'Close'; close.setAttribute('aria-label', 'Close calculated dimensions');
+    headingWrap.append(eyebrow, title); header.append(headingWrap, close);
+    const note = document.createElement('p'); note.className = 'form-note';
+    note.textContent = 'Rules are evaluated from top to bottom. Use one rule per line: Field OP value => Result. Separate AND conditions with semicolons; use | between alternative physical field names.';
+    const list = document.createElement('div'); list.className = 'calculated-dimensions-list';
+    const add = document.createElement('button'); add.type = 'button'; add.textContent = '+ Add Calculated Dimension';
+    const form = document.createElement('div'); form.className = 'calculated-dimension-editor'; form.hidden = true;
+    panel.append(header, note, list, add, form); overlay.append(panel); document.body.append(overlay);
+    let editingIndex = null;
+    const finish = () => overlay.remove();
+    close.addEventListener('click', finish);
+    overlay.addEventListener('click', (event) => { if (event.target === overlay) finish(); });
+
+    const editDimension = (index = null) => {
+      editingIndex = index;
+      const current = index === null ? {name: '', sources: ['cdr-data'], default: '', default_from: '', rules: []} : calculatedDimensions[index];
+      form.replaceChildren(); form.hidden = false;
+      const field = (labelText, value = '') => {
+        const label = document.createElement('label'); label.textContent = labelText;
+        const input = document.createElement('input'); input.type = 'text'; input.value = value; label.append(input); form.append(label); return input;
+      };
+      const name = field('Name', current.name || '');
+      const defaultValue = field('Default value (optional)', current.default || '');
+      const defaultFrom = field('Default source fields (optional, separated by |)', current.default_from || '');
+      const sources = document.createElement('fieldset'); sources.className = 'calculated-dimension-sources';
+      const sourceLegend = document.createElement('legend'); sourceLegend.textContent = 'Available for'; sources.append(sourceLegend);
+      ['cdr-data', 'cdr-voice', 'cdr-speech'].forEach((value) => {
+        const label = document.createElement('label'); const input = document.createElement('input'); input.type = 'checkbox'; input.value = value;
+        input.checked = (current.sources || []).includes(value); label.append(input, document.createTextNode(value.replace('cdr-', 'CDR-').replace(/^CDR-./, (text) => text.toUpperCase()))); sources.append(label);
+      });
+      form.append(sources);
+      const rulesLabel = document.createElement('label'); rulesLabel.className = 'calculated-dimension-rules'; rulesLabel.textContent = 'Rules';
+      const rules = document.createElement('textarea'); rules.placeholder = 'Test_Result IN (Completed, Visible Completed) => Success';
+      rules.value = (current.rules || []).map((rule) => `${rule.when} => ${rule.value}`).join('\n'); rulesLabel.append(rules); form.append(rulesLabel);
+      const actions = document.createElement('div'); actions.className = 'confirm-actions calculated-dimension-rules';
+      const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'secondary-button'; cancel.textContent = 'Cancel';
+      const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Save Dimension'; actions.append(cancel, save); form.append(actions);
+      cancel.addEventListener('click', () => { form.hidden = true; });
+      save.addEventListener('click', async () => {
+        const previous = calculatedDimensions;
+        try {
+          const parsedRules = rules.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+            const separator = line.lastIndexOf('=>');
+            if (separator < 1) throw new Error(`Invalid rule '${line}'. Use condition => result.`);
+            return {when: line.slice(0, separator).trim(), value: line.slice(separator + 2).trim()};
+          });
+          const dimension = {
+            name: name.value.trim(),
+            sources: Array.from(sources.querySelectorAll('input:checked')).map((input) => input.value),
+            default: defaultValue.value,
+            default_from: defaultFrom.value.trim(),
+            rules: parsedRules,
+          };
+          const next = [...calculatedDimensions];
+          if (editingIndex === null) next.push(dimension); else next[editingIndex] = dimension;
+          calculatedDimensions = next; await saveCalculatedDimensions(); form.hidden = true; renderList();
+        } catch (error) {
+          calculatedDimensions = previous;
+          showInfoDialog(error.message || 'Unable to save calculated dimension.', {title: 'Calculated Dimensions', tone: 'error'});
+        }
+      });
+      name.focus();
+    };
+
+    const exportDimension = (index) => {
+      const query = new URLSearchParams({name: calculatedDimensions[index].name});
+      window.location.assign(`${editor.dataset.calculatedDimensionExportUrl}?${query.toString()}`);
+    };
+
+    const renderList = () => {
+      list.replaceChildren();
+      if (!calculatedDimensions.length) { const empty = document.createElement('p'); empty.className = 'form-note'; empty.textContent = 'This template has no calculated dimensions.'; list.append(empty); }
+      calculatedDimensions.forEach((dimension, index) => {
+        const item = document.createElement('div'); item.className = 'calculated-dimension-item';
+        const identity = document.createElement('div'); const strong = document.createElement('strong'); strong.textContent = dimension.name;
+        const sourceText = document.createElement('p'); sourceText.textContent = (dimension.sources || []).map((source) => source.toUpperCase()).join(' · '); identity.append(strong, sourceText);
+        const summary = document.createElement('div'); summary.className = 'calculated-dimension-rule-summary';
+        (dimension.rules || []).forEach((rule, ruleIndex) => {
+          const line = document.createElement('div');
+          const number = document.createElement('strong'); number.textContent = `${ruleIndex + 1}.`;
+          const condition = document.createElement('code'); condition.textContent = rule.when;
+          const arrow = document.createElement('span'); arrow.textContent = '→';
+          const result = document.createElement('b'); result.textContent = rule.value;
+          line.append(number, condition, arrow, result); summary.append(line);
+        });
+        if (dimension.default_from || dimension.default) {
+          const fallbackLine = document.createElement('div'); fallbackLine.className = 'calculated-dimension-fallback';
+          fallbackLine.textContent = `Fallback: ${dimension.default_from || dimension.default}`; summary.append(fallbackLine);
+        }
+        const actions = document.createElement('div'); actions.className = 'calculated-dimension-actions';
+        const edit = createActionButton('✎', 'edit', `Edit ${dimension.name}`, 'chart'); delete edit.dataset.catalogueChartAction;
+        const copyButton = createActionButton('⇥', 'export', `Copy ${dimension.name} to a template`, 'chart'); delete copyButton.dataset.catalogueChartAction;
+        const remove = createActionButton('−', 'delete', `Delete ${dimension.name}`, 'chart', 'catalogue-row-delete'); delete remove.dataset.catalogueChartAction;
+        edit.addEventListener('click', () => editDimension(index)); copyButton.addEventListener('click', () => exportDimension(index));
+        remove.addEventListener('click', async () => {
+          if (!await showConfirmDialog(`Delete calculated dimension '${dimension.name}'?`, {title: 'Delete Calculated Dimension', confirmLabel: 'Delete', tone: 'danger'})) return;
+          const previous = calculatedDimensions;
+          try {
+            calculatedDimensions = calculatedDimensions.filter((_item, itemIndex) => itemIndex !== index);
+            await saveCalculatedDimensions(); form.hidden = true; renderList();
+          } catch (error) {
+            calculatedDimensions = previous;
+            showInfoDialog(error.message || 'Unable to delete calculated dimension.', {title: 'Calculated Dimensions', tone: 'error'});
+          }
+        });
+        actions.append(edit, copyButton, remove); item.append(identity, summary, actions); list.append(item);
+      });
+    };
+    add.addEventListener('click', () => editDimension());
+    renderList(); close.focus();
+  };
+  editor.querySelector('[data-manage-calculated-dimensions]')?.addEventListener('click', openCalculatedDimensionsManager);
+  editor.querySelector('[data-catalogue-chart-preview-manage-dimensions]')?.addEventListener('click', openCalculatedDimensionsManager);
   let activeCell = null;
   const catalogueHeaders = Array.from(table.querySelectorAll('thead th[data-catalogue-field]'))
     .map((cell) => cell.dataset.catalogueField);
@@ -723,7 +976,11 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       list.replaceChildren();
       if (!source || !selectedField) return;
       try {
-        const query = new URLSearchParams({ source, column: selectedField });
+        const query = new URLSearchParams({
+          source, column: selectedField,
+          technology: editor.dataset.templateTechnology,
+          catalogue_id: editor.dataset.templateIdentifier,
+        });
         const response = await fetch(`/admin/catalogue-filter-values?${query.toString()}`, { credentials: 'same-origin' });
         const payload = response.ok ? await response.json() : { values: [] };
         if (request !== valueRequest) return;
@@ -864,8 +1121,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const hasExistingValue = (value) => Array.from(existingValues).some(
       (existing) => normaliseOptionValue(existing) === normaliseOptionValue(value),
     );
-    if (values.length) {
-      values.forEach((value) => options.add(new Option(value, value, false, hasExistingValue(value))));
+    if (values.length || existingValues.size) {
+      const orderedValues = [
+        ...existingValues,
+        ...values.filter((value) => !hasExistingValue(value)),
+      ];
+      orderedValues.forEach((value) => options.add(new Option(value, value, false, hasExistingValue(value))));
       // Explicitly assign the matching value as well as marking its option.
       // This keeps the searchable single-select hydrated after it is rebuilt.
       if (!allowsMultiple) {
@@ -1371,7 +1632,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     panel.className = 'confirm-panel catalogue-copy-dialog';
     panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true');
     const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Copy template content';
-    const title = document.createElement('h3'); title.textContent = `Copy ${kind === 'slide' ? 'slide' : 'chart'} to template`;
+    const title = document.createElement('h3'); title.textContent = `Copy ${kind === 'slide' ? 'slide' : kind === 'chart' ? 'chart' : 'calculated dimension'} to template`;
     const form = document.createElement('div'); form.className = 'catalogue-copy-fields';
     const createField = (labelText) => {
       const field = document.createElement('label'); field.textContent = labelText;
@@ -1409,6 +1670,10 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     };
     const updateDestinationFields = () => {
       const slides = selectedSlides();
+      if (kind === 'dimension') {
+        accept.disabled = false;
+        return;
+      }
       if (kind === 'slide') {
         slidePosition.select.replaceChildren(...Array.from({length: slides.length + 1}, (_, index) => new Option(
           index < slides.length ? `Before slide ${index + 1} · ${slides[index].title}` : (slides.length ? `After slide ${slides.length}` : 'Slide 1'), String(index),
@@ -2401,9 +2666,14 @@ function setupSearchableSingleSelects() {
     const renderOptions = (query = '') => {
       const normalized = query.trim().toLocaleLowerCase();
       menu.replaceChildren();
-      Array.from(select.options).filter((option) => (
+      const visibleOptions = Array.from(select.options).filter((option) => (
         !option.disabled && (!normalized || (option.textContent || '').toLocaleLowerCase().includes(normalized))
-      )).forEach((option) => {
+      ));
+      if (select.closest('[data-catalogue-editor]')) {
+        visibleOptions.sort((left, right) => Number(right.selected) - Number(left.selected)
+          || String(left.textContent || '').localeCompare(String(right.textContent || '')));
+      }
+      visibleOptions.forEach((option) => {
         const item = document.createElement('button');
         item.type = 'button';
         item.className = 'searchable-select-option';
@@ -2654,6 +2924,18 @@ function setupCustomMultiSelects() {
       menu.appendChild(optionLabel);
     });
 
+    const orderSelectedOptionsFirst = () => {
+      if (!select.closest('[data-catalogue-editor]')) return;
+      const optionLabels = Array.from(menu.querySelectorAll('.multiselect-option'));
+      optionLabels.sort((left, right) => {
+        const leftSelected = Boolean(left.querySelector('input[type="checkbox"]')?.checked);
+        const rightSelected = Boolean(right.querySelector('input[type="checkbox"]')?.checked);
+        return Number(rightSelected) - Number(leftSelected)
+          || String(left.textContent || '').localeCompare(String(right.textContent || ''));
+      });
+      menu.append(...optionLabels);
+    };
+
     const filterMultiSelect = () => {
       const query = search.value.trim().toLocaleLowerCase();
       Array.from(menu.querySelectorAll('.multiselect-option')).forEach((optionLabel) => {
@@ -2672,6 +2954,7 @@ function setupCustomMultiSelects() {
           checkbox.checked = option.selected;
         }
       });
+      orderSelectedOptionsFirst();
       syncTrigger();
     };
 

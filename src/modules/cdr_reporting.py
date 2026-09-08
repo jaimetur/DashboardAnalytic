@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 from io import BytesIO
 from itertools import product
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Mapping
 
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
@@ -127,6 +127,21 @@ class GroupingSpec:
 
 
 @dataclass(frozen=True)
+class CalculatedDimensionRule:
+    conditions: tuple[FilterCondition, ...]
+    value: str
+
+
+@dataclass(frozen=True)
+class CalculatedDimension:
+    name: str
+    sources: tuple[str, ...]
+    rules: tuple[CalculatedDimensionRule, ...]
+    default: str = ""
+    default_from: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class CatalogEntry:
     slide: int
     slide_title: str
@@ -141,6 +156,7 @@ class CatalogEntry:
     grouping_rows: str
     grouping_columns: str
     legend_position: str = "top"
+    calculated_dimensions: tuple[CalculatedDimension, ...] = ()
 
     @property
     def source_kind(self) -> str | None:
@@ -190,6 +206,74 @@ def parse_catalog_filters(value: str) -> tuple[FilterCondition, ...]:
             raise ValueError(f"Invalid filter '{clause}': a value is required.")
         conditions.append(FilterCondition(column, operator, values))
     return tuple(conditions)
+
+
+def parse_calculated_dimensions(payload: object) -> tuple[CalculatedDimension, ...]:
+    """Validate workspace-owned calculated dimensions from their JSON representation."""
+    if payload is None:
+        return ()
+    if not isinstance(payload, list):
+        raise ValueError("Calculated dimensions must be a list.")
+    dimensions: list[CalculatedDimension] = []
+    names: set[str] = set()
+    for index, item in enumerate(payload, start=1):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"Calculated dimension {index} must be an object.")
+        name = str(item.get("name") or "").strip()
+        if not name:
+            raise ValueError(f"Calculated dimension {index} requires a name.")
+        identity = _normalise_catalog_name(name)
+        if not identity or identity in names:
+            raise ValueError(f"Calculated dimension name '{name}' is duplicated or invalid.")
+        names.add(identity)
+        raw_sources = item.get("sources")
+        if raw_sources is None:
+            raw_sources = list(CATALOG_SOURCE_KINDS)
+        if not isinstance(raw_sources, list):
+            raise ValueError(f"Calculated dimension '{name}' must define its CDR sources as a list.")
+        sources = tuple(dict.fromkeys(str(value).strip().casefold() for value in raw_sources if str(value).strip()))
+        if not sources or any(source not in CATALOG_SOURCE_KINDS for source in sources):
+            raise ValueError(f"Calculated dimension '{name}' contains an unsupported CDR source.")
+        raw_rules = item.get("rules") or []
+        if not isinstance(raw_rules, list):
+            raise ValueError(f"Calculated dimension '{name}' rules must be a list.")
+        rules: list[CalculatedDimensionRule] = []
+        for rule_index, rule in enumerate(raw_rules, start=1):
+            if not isinstance(rule, Mapping):
+                raise ValueError(f"Rule {rule_index} of calculated dimension '{name}' must be an object.")
+            when = str(rule.get("when") or "").strip()
+            value = str(rule.get("value") or "").strip()
+            if not when or not value:
+                raise ValueError(f"Rule {rule_index} of calculated dimension '{name}' requires a condition and result.")
+            rules.append(CalculatedDimensionRule(parse_catalog_filters(when), value))
+        default_from = tuple(part.strip() for part in str(item.get("default_from") or "").split("|") if part.strip())
+        default = str(item.get("default") or "")
+        if not rules and not default_from and not default:
+            raise ValueError(f"Calculated dimension '{name}' requires at least one rule, a default value or a default source field.")
+        dimensions.append(CalculatedDimension(name, sources, tuple(rules), default, default_from))
+    return tuple(dimensions)
+
+
+def calculated_dimensions_json(dimensions: Iterable[CalculatedDimension]) -> list[dict[str, object]]:
+    """Return the stable, editable JSON representation for template metadata."""
+    def condition_text(condition: FilterCondition) -> str:
+        values = ", ".join(condition.values)
+        value = f"({values})" if condition.operator in {"IN", "NOT IN"} or len(condition.values) > 1 else values
+        return f"{condition.column} {condition.operator} {value}"
+
+    return [
+        {
+            "name": dimension.name,
+            "sources": list(dimension.sources),
+            "default": dimension.default,
+            "default_from": "|".join(dimension.default_from),
+            "rules": [
+                {"when": "; ".join(condition_text(condition) for condition in rule.conditions), "value": rule.value}
+                for rule in dimension.rules
+            ],
+        }
+        for dimension in dimensions
+    ]
 
 
 def parse_catalog_grouping(value: str) -> GroupingSpec:
@@ -927,6 +1011,76 @@ def _normalise_catalog_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", value.casefold())
 
 
+def _calculated_condition_mask(frame: pd.DataFrame, condition: FilterCondition) -> pd.Series | None:
+    column = _column(frame, tuple(part.strip() for part in condition.column.split("|") if part.strip()))
+    if not column:
+        return None
+    series = frame[column]
+    if condition.operator in {">", ">=", "<", "<=", "=", "!="}:
+        target = condition.values[0]
+        numeric = pd.to_numeric(series, errors="coerce")
+        target_number = pd.to_numeric(pd.Series([target]), errors="coerce").iloc[0]
+        if pd.notna(target_number):
+            return {">": numeric > target_number, ">=": numeric >= target_number, "<": numeric < target_number,
+                    "<=": numeric <= target_number, "=": numeric == target_number, "!=": numeric != target_number}[condition.operator]
+        text = series.astype("string").str.casefold()
+        return text.eq(target.casefold()) if condition.operator == "=" else text.ne(target.casefold()) if condition.operator == "!=" else None
+    if condition.operator in {"CONTAINS", "NOT CONTAINS"}:
+        mask = pd.Series(False, index=frame.index)
+        text = series.astype("string")
+        for target in condition.values:
+            mask |= text.str.contains(target, case=False, na=False, regex=False)
+        return ~mask if condition.operator == "NOT CONTAINS" else mask
+    accepted = {value.casefold() for value in condition.values}
+    mask = series.astype("string").str.casefold().isin(accepted)
+    return ~mask if condition.operator == "NOT IN" else mask
+
+
+def _calculated_dimension_column(frame: pd.DataFrame, name: str, dimensions: Iterable[CalculatedDimension]) -> str | None:
+    definition = next((item for item in dimensions if _normalise_catalog_name(item.name) == _normalise_catalog_name(name)), None)
+    source = str(frame.attrs.get("catalogue_cdr_source") or "").casefold()
+    if not definition or (source and source not in definition.sources):
+        return None
+    target = f"__catalog_calculated_{_normalise_catalog_name(definition.name)}"
+    output = pd.Series(pd.NA, index=frame.index, dtype="string")
+    for rule in definition.rules:
+        mask = pd.Series(True, index=frame.index)
+        usable = True
+        for condition in rule.conditions:
+            condition_mask = _calculated_condition_mask(frame, condition)
+            if condition_mask is None:
+                usable = False
+                break
+            mask &= condition_mask
+        if usable:
+            output.loc[mask & output.isna()] = rule.value
+    default_column = _column(frame, definition.default_from)
+    if default_column:
+        output = output.fillna(frame[default_column].astype("string"))
+    if definition.default != "":
+        output = output.fillna(definition.default)
+    frame[target] = output
+    return target
+
+
+def materialize_calculated_dimensions(
+    frame: pd.DataFrame, dimensions: Iterable[CalculatedDimension], cdr_source: str,
+) -> pd.DataFrame:
+    """Return CDR rows with every applicable workspace dimension as a physical column."""
+    result = frame.copy()
+    dimension_list = tuple(dimensions)
+    result.attrs["catalogue_calculated_dimensions"] = dimension_list
+    result.attrs["catalogue_cdr_source"] = cdr_source
+    for definition in dimension_list:
+        if cdr_source.casefold() not in definition.sources:
+            continue
+        calculated = _calculated_dimension_column(result, definition.name, dimension_list)
+        if calculated:
+            result[definition.name] = result[calculated]
+            result.drop(columns=[calculated], inplace=True)
+    return result
+
+
 def _catalog_column(
     frame: pd.DataFrame,
     name: str,
@@ -937,6 +1091,9 @@ def _catalog_column(
 ) -> str | None:
     """Resolve a template field name against a source column or supported semantic dimension."""
     normalized = _normalise_catalog_name(name)
+    calculated = _calculated_dimension_column(frame, name, frame.attrs.get("catalogue_calculated_dimensions", ()))
+    if calculated:
+        return calculated
     if normalized == "operator":
         return _group_column(frame, multivendor) if operator_as_vendor else _column(frame, ("Operator", "operator"))
     if normalized in {"vendor", "reportvendor"}:
@@ -945,18 +1102,6 @@ def _catalog_column(
         # Tableau's Vendor_V3 calculation is materialised by ingestion as the
         # combined Operator_Vendor value in ``vendor``/``report_vendor``.
         return _column(frame, ("report_vendor", "vendor", "Vendor"))
-    if normalized in {"resultgroup", "testresultgroup"}:
-        source = _column(frame, ("Test_Result", "Test Result", "Call_Status", "status"))
-        if not source:
-            return None
-        values = frame[source].astype("string").str.strip().str.casefold()
-        frame["__catalog_result_group"] = values.map({
-            "completed": "Success",
-            "visible completed": "Success",
-            "cutoff": "Failure",
-            "failed": "Failure",
-        }).astype("string")
-        return "__catalog_result_group"
     if normalized == "lowratesession":
         rate = _column(frame, ("Mean_Data_Rate", "Mean Data Rate"))
         test = _column(frame, ("Test_Name", "Test Name"))
@@ -1085,42 +1230,6 @@ def _catalog_column(
             lambda value: pd.NA if pd.isna(value) else ("Above 10s" if value >= 10 else "Below 10s")
         ).astype("string")
         return "__catalog_ttfp_10s_ratio"
-    if normalized == "callfamily":
-        materialized = _column(frame, ("Call Family", "Call_Family", "call_family"))
-        if materialized:
-            return materialized
-        session_column = _column(frame, ("Session_Type", "session_type"))
-        if not session_column:
-            return _column(frame, ("Call_Family", "call_family"))
-        call_mode = _column(frame, ("L1_Call_Mode_A", "L1_Call_Mode_B", "Call_Mode", "call_mode"))
-        session = frame[session_column].fillna("").astype(str)
-        family = pd.Series("CALL", index=frame.index, dtype="string")
-        family.loc[session.str.contains("multirab", case=False, na=False)] = "MultiRAB"
-        family.loc[session.str.contains("whatsapp", case=False, na=False)] = "WhatsApp"
-        family.loc[session.str.contains("volte", case=False, na=False)] = "VoLTE"
-        family.loc[session.str.contains("vonr", case=False, na=False)] = "VoNR"
-        if call_mode:
-            modes = frame[call_mode].fillna("").astype(str)
-            family.loc[(family == "CALL") & modes.str.contains("volte", case=False, na=False)] = "VoLTE"
-            family.loc[(family == "CALL") & modes.str.contains("vonr", case=False, na=False)] = "VoNR"
-        frame["__catalog_call_family"] = family
-        return "__catalog_call_family"
-    if normalized == "testfamily":
-        materialized = _column(frame, ("Test Family", "Test_Family", "test_family"))
-        if materialized:
-            return materialized
-        type_column = _column(frame, ("Type_of_Test", "Test_Type", "test_type"))
-        name_column = _column(frame, ("Test_Name", "test_name"))
-        if not type_column and not name_column:
-            return None
-        test_family = frame[type_column].fillna("").astype(str) if type_column else pd.Series("", index=frame.index, dtype="string")
-        if name_column:
-            test_names = frame[name_column].fillna("").astype(str)
-            test_family.loc[test_names.str.contains("youtube", case=False, na=False)] = "YouTube"
-            test_family.loc[test_names.str.contains("fdfs", case=False, na=False)] = "FDFS"
-            test_family.loc[test_names.str.contains("fdtt", case=False, na=False)] = "FDTT"
-        frame["__catalog_test_family"] = test_family
-        return "__catalog_test_family"
     aliases = {
         "campaign": ("Campaign", "period", "Period", "Quarter"),
         "city": ("City", "city", "G_Level_1", "G_Level_2"),
@@ -1180,6 +1289,8 @@ def _campaign_display_value(value: object) -> str:
 
 def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor: bool, metric: str | None) -> pd.DataFrame:
     result = frame.copy()
+    result.attrs["catalogue_calculated_dimensions"] = entry.calculated_dimensions
+    result.attrs["catalogue_cdr_source"] = entry.cdr_source
     for condition in parse_catalog_filters(entry.filters):
         if _normalise_catalog_name(condition.column) in {"threshold", "buckets"}:
             continue
@@ -1265,6 +1376,8 @@ def _catalog_bucket_edges(entry: CatalogEntry) -> list[float] | None:
 
 
 def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendor: bool, metric: str | None) -> tuple[pd.DataFrame, str, str]:
+    frame.attrs["catalogue_calculated_dimensions"] = entry.calculated_dimensions
+    frame.attrs["catalogue_cdr_source"] = entry.cdr_source
     row_spec = parse_catalog_grouping(entry.grouping_rows)
     column_spec = parse_catalog_grouping(entry.grouping_columns)
     bucket_edges = _catalog_bucket_edges(entry)
@@ -1623,20 +1736,26 @@ def catalog_chart_hover_targets(
         state_data, states, _colours = _status_chart_categories(
             state_data, state_column, quality=spec['kind'] == 'quality_100', threshold=spec.get('threshold', 1.6),
         )
-        if column_hierarchy or len(row_hierarchy) > 1:
-            # Match _render_status_100_hierarchy: a multi-level row grouping
-            # without explicit column levels is rendered as nested columns,
-            # not as panes.  Keeping the same axes prevents strict zip()
-            # from pairing its empty pane key with the original row fields.
-            render_rows = row_hierarchy if column_hierarchy else []
-            active_columns = column_hierarchy or row_hierarchy
+        if column_hierarchy or row_hierarchy:
+            # Match the renderer: row dimensions remain on the left even when
+            # there is no configured column hierarchy.
+            render_rows = row_hierarchy
+            active_columns = column_hierarchy
+            if not active_columns:
+                single_column = "__catalog_single_column"
+                state_data[single_column] = "(all)"
+                active_columns = [single_column]
             rows = _hierarchical_unique_keys(state_data, render_rows) if render_rows else [()]
             columns = _hierarchical_unique_keys(state_data, active_columns)
             if not rows or not columns:
                 return []
             canvas, draw = _canvas('')
-            row_labels = [' · '.join(map(str, key)) for key in rows]
-            chart_left = max(205, min(540, 24 + max((_text_width(draw, label, _font(18, True)) for label in row_labels), default=0) + 92))
+            row_label_font = _font(18, True)
+            row_label_widths = [
+                max((_text_width(draw, str(key[level])[:24], row_label_font) for key in rows), default=0) + 18
+                for level in range(len(render_rows))
+            ]
+            chart_left = max(145, min(540, 24 + min(sum(row_label_widths), 420) + 68))
             row_height, column_width = 510 / len(rows), (1395 - chart_left) / len(columns)
             bar_width = max(18, min(86, column_width * 0.68))
             for row_index, row_key in enumerate(rows):
@@ -1650,7 +1769,8 @@ def catalog_chart_hover_targets(
                     x = chart_left + column_index * column_width + (column_width - bar_width) / 2; running = 0.0
                     for state in states:
                         value = float(subset['state'].eq(state).sum()) / len(subset); height = value * row_height; y = pane_bottom - running - height
-                        targets.append({'kind': 'bar', 'x': x, 'y': y, 'width': bar_width, 'height': height, 'label': ' · '.join(map(str, (*row_key, *column_key))), 'legend': _legend_caption(legend_labels, states.index(state), state), 'value': f'{value:.1%}'})
+                        label = ' · '.join(str(part) for part in (*row_key, *column_key) if str(part) != '(all)')
+                        targets.append({'kind': 'bar', 'x': x, 'y': y, 'width': bar_width, 'height': height, 'label': label, 'legend': _legend_caption(legend_labels, states.index(state), state), 'value': f'{value:.1%}'})
                         running += height
             return targets
         combos = [(str(g), str(p)) for g, p in state_data[[group, period]].drop_duplicates().itertuples(index=False)]
@@ -2259,6 +2379,38 @@ def _hierarchical_complete_keys(frame: pd.DataFrame, columns: list[str]) -> list
     return [tuple(key) for key in product(*values_by_level)]
 
 
+def _hierarchy_caption_spans(
+    keys: list[tuple[object, ...]], level: int,
+) -> list[tuple[int, int, str]]:
+    """Return adjacent hierarchy groups for one visible header level."""
+    if not keys or level < 0 or level >= len(keys[0]):
+        return []
+    spans: list[tuple[int, int, str]] = []
+    start = 0
+    while start < len(keys):
+        end = start + 1
+        prefix = keys[start][:level + 1]
+        while end < len(keys) and keys[end][:level + 1] == prefix:
+            end += 1
+        spans.append((start, end, str(keys[start][level])))
+        start = end
+    return spans
+
+
+def _fit_text(draw: ImageDraw.ImageDraw, value: str, font: ImageFont.ImageFont, width: float) -> str:
+    """Trim a caption with an ellipsis so it stays inside its hierarchy group."""
+    if _text_width(draw, value, font) <= width:
+        return value
+    suffix = "…"
+    available = max(width - _text_width(draw, suffix, font), 0)
+    fitted = ""
+    for character in value:
+        if _text_width(draw, fitted + character, font) > available:
+            break
+        fitted += character
+    return fitted.rstrip() + suffix if fitted else suffix
+
+
 def _canvas(title: str) -> tuple[Image.Image, ImageDraw.ImageDraw]:
     image = Image.new("RGB", (1600, 900), "white")
     draw = ImageDraw.Draw(image)
@@ -2444,8 +2596,15 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
     column_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_column_")]
     if column_hierarchy:
         return _render_status_100_hierarchy(title, data, row_hierarchy, column_hierarchy, states, colours, legend_labels, legend_position)
-    if len(row_hierarchy) > 1:
-        return _render_status_100_hierarchy(title, data, [], row_hierarchy, states, colours, legend_labels, legend_position)
+    if row_hierarchy:
+        # A row-only hierarchy remains on the left. A synthetic single column
+        # gives every row its own bar without moving row dimensions to the x axis.
+        single_column = "__catalog_single_column"
+        data[single_column] = "(all)"
+        return _render_status_100_hierarchy(
+            title, data, row_hierarchy, [single_column], states, colours,
+            legend_labels, legend_position,
+        )
     combos = [(str(g), str(p)) for g, p in data[[group, period]].drop_duplicates().itertuples(index=False)]
     if not combos:
         return _empty_chart(title)
@@ -2498,66 +2657,58 @@ def _render_status_100_hierarchy(
     image, draw = _canvas(title)
     # Reserve a dedicated header band below the chart title.  Rotated vendor /
     # operator captions can be tall, so they must never share the title area.
-    row_labels = [" · ".join(str(value) for value in row_key) for row_key in row_keys]
     row_label_font = _font(18, True)
-    widest_row_label = max((_text_width(draw, label, row_label_font) for label in row_labels), default=0)
+    row_label_widths = [
+        max((_text_width(draw, str(key[level])[:24], row_label_font) for key in row_keys), default=0) + 18
+        for level in range(len(row_hierarchy))
+    ]
     # Leave a measured gutter for row labels, percentage ticks and a visual
     # gap before the plot.  Fixed gutters caused long FDFS/test-family labels
     # to cross the y axis on multi-pane charts.
-    chart_left = max(205, min(540, 24 + widest_row_label + 92))
+    available_row_width = min(sum(row_label_widths), 420)
+    chart_left = max(145, min(540, 24 + available_row_width + 68))
     chart_top, chart_right, chart_height = 245, 1395, 510
     chart_width = chart_right - chart_left
     row_height = chart_height / len(row_keys)
     column_width = chart_width / len(column_keys)
     bar_width = max(18, min(86, column_width * 0.68))
 
-    # The first column level is the upper header (Operator in the template
-    # contract); lower levels, such as Campaign, are shown below every column.
-    outer_values = [str(key[0]) for key in column_keys]
-    outer_groups: list[tuple[int, int, str]] = []
-    start = 0
-    while start < len(column_keys):
-        end = start + 1
-        while end < len(column_keys) and outer_values[end] == outer_values[start]:
-            end += 1
-        outer_groups.append((start, end, outer_values[start]))
-        start = end
-    header_font = _font(16, True)
-    rotate_outer_headers = any(
-        _text_width(draw, caption[:22], header_font) + 14 > (end - start) * column_width
-        for start, end, caption in outer_groups
-    )
-    lower_captions = [" · ".join(str(value) for value in key[1:]) or str(key[0]) for key in column_keys]
-    rotate_axis_captions = rotate_outer_headers or any(
-        _text_width(draw, caption[:20], _font(14)) + 8 > column_width
-        for caption in lower_captions
-    )
-    for start, end, caption in outer_groups:
-        centre = chart_left + ((start + end) / 2) * column_width
-        caption = caption[:22]
-        if rotate_axis_captions:
-            _draw_rotated_label(image, caption, centre_x=centre, bottom_y=chart_top - 16, fill="#566A78", font=header_font)
-        else:
-            draw.text((centre - min(len(caption) * 4, 70), chart_top - 46), caption, fill="#566A78", font=header_font)
-        draw.line((chart_left + start * column_width, chart_top - 14, chart_left + end * column_width, chart_top - 14), fill="#CDD7DE", width=1)
+    # Every column dimension except the leaf gets its own nested band above the
+    # plot. Only the final dimension is repeated below individual bars.
+    upper_levels = max(len(column_hierarchy) - 1, 0)
+    header_band_height = min(32.0, 112.0 / max(upper_levels, 1))
+    header_top = chart_top - upper_levels * header_band_height - 8
+    header_font = _font(15, True)
+    for level in range(upper_levels):
+        band_top = header_top + level * header_band_height
+        for start, end, value in _hierarchy_caption_spans(column_keys, level):
+            left = chart_left + start * column_width
+            right = chart_left + end * column_width
+            caption = _fit_text(draw, value, header_font, right - left - 10)
+            caption_width = _text_width(draw, caption, header_font)
+            draw.text((left + (right - left - caption_width) / 2, band_top + 2), caption, fill="#405765", font=header_font)
+            draw.line((left, band_top + header_band_height - 3, right, band_top + header_band_height - 3), fill="#BCC8D0", width=1)
 
-    _draw_top_column_group_separators(
-        draw,
-        column_keys,
-        column_hierarchy,
-        left=chart_left,
-        width=chart_width,
-        top=chart_top,
-        bottom=chart_top + chart_height,
-    )
+    for index in range(1, len(column_keys)):
+        changed_level = next(
+            (level for level, (previous, current) in enumerate(zip(column_keys[index - 1], column_keys[index], strict=True)) if previous != current),
+            len(column_hierarchy) - 1,
+        )
+        x = chart_left + index * column_width
+        line_top = header_top + min(changed_level, upper_levels) * header_band_height
+        if changed_level == 0:
+            draw.line((x, line_top, x, chart_top + chart_height), fill="#AEBBC4", width=2)
+        else:
+            _draw_dashed_vertical_line(draw, x, line_top, chart_top + chart_height)
 
     for row_index, row_key in enumerate(row_keys):
         pane_top = chart_top + row_index * row_height
         pane_bottom = pane_top + row_height
-        row_label = row_labels[row_index]
-        if row_label:
-            draw.text((24, pane_top + row_height / 2 - 10), row_label, fill="#566A78", font=row_label_font)
-        draw.line((24, pane_bottom, chart_left + chart_width, pane_bottom), fill="#D7DEE3", width=1)
+        next_row_key = row_keys[row_index + 1] if row_index + 1 < len(row_keys) else None
+        if next_row_key is None or not row_hierarchy or row_key[0] != next_row_key[0]:
+            draw.line((24, pane_bottom, chart_left + chart_width, pane_bottom), fill="#AEBBC4", width=2)
+        else:
+            _draw_dashed_horizontal_line(draw, pane_bottom, 24, chart_left + chart_width)
         ticks = (0, 50, 100) if row_index == len(row_keys) - 1 else (50, 100)
         for tick in ticks:
             tick_y = pane_bottom - tick / 100 * row_height
@@ -2596,12 +2747,36 @@ def _render_status_100_hierarchy(
                     draw.text((x + bar_width + 3, max(pane_top, y - 7)), f"{ratio:.1%}", fill=colour, font=_font(12, True))
                 running += segment_height
 
+    if row_hierarchy:
+        total_label_width = max(sum(row_label_widths), 1)
+        usable_label_width = chart_left - 92
+        scale = min(usable_label_width / total_label_width, 1.0)
+        x = 24.0
+        for level, width in enumerate(row_label_widths):
+            visible_width = width * scale
+            for start, end, value in _hierarchy_caption_spans(row_keys, level):
+                centre_y = chart_top + ((start + end) / 2) * row_height
+                caption = _fit_text(draw, value, row_label_font, visible_width - 8)
+                draw.text((x + 4, centre_y - 10), caption, fill="#405765", font=row_label_font)
+            x += visible_width
+            draw.line((x, chart_top, x, chart_top + chart_height), fill="#D7DEE3", width=1)
+
+    hide_single_column = column_hierarchy == ["__catalog_single_column"]
+    lower_captions = ["" if hide_single_column else str(key[-1]) for key in column_keys]
+    lower_font = _font(16, True)
+    rotate_axis_captions = any(
+        _text_width(draw, caption, lower_font) + 8 > column_width
+        for caption in lower_captions
+    )
     for column_index, lower_caption in enumerate(lower_captions):
+        if not lower_caption:
+            continue
         centre = chart_left + (column_index + 0.5) * column_width
         if rotate_axis_captions:
-            _draw_rotated_label(image, lower_caption[:20], centre_x=centre, bottom_y=chart_top + chart_height + 90, fill="#4E6271", font=_font(16, True))
+            _draw_rotated_label(image, lower_caption[:24], centre_x=centre, bottom_y=chart_top + chart_height + 90, fill="#4E6271", font=lower_font)
         else:
-            draw.text((centre - min(len(lower_caption) * 4, 70), chart_top + chart_height + 10), lower_caption[:20], fill="#4E6271", font=_font(16, True))
+            caption = _fit_text(draw, lower_caption, lower_font, column_width - 8)
+            draw.text((centre - _text_width(draw, caption, lower_font) / 2, chart_top + chart_height + 10), caption, fill="#4E6271", font=lower_font)
 
     _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colour, 2) for index, (state, colour) in enumerate(zip(states, colours, strict=True))], legend_position)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0)
@@ -3294,6 +3469,8 @@ def prepare_catalog_chart_preview_frame(
     normalised = normalise_report_operator_aliases(frame)
     spec = _catalog_spec(render_entry)
     filtered, _group, _period = _source_for_spec({render_entry.source_kind: normalised}, spec, multivendor)
+    filtered.attrs["catalogue_calculated_dimensions"] = render_entry.calculated_dimensions
+    filtered.attrs["catalogue_cdr_source"] = render_entry.cdr_source
     metric = _metric_column(filtered, spec)
     return _apply_catalog_filters(filtered, render_entry, multivendor, metric), render_entry
 
@@ -3319,6 +3496,8 @@ def _chart_for_catalog_entry(
         group = period = None
     else:
         frame, group, period = _source_for_spec(frames, spec, multivendor)
+    frame.attrs["catalogue_calculated_dimensions"] = entry.calculated_dimensions
+    frame.attrs["catalogue_cdr_source"] = entry.cdr_source
     metric = _metric_column(frame, spec)
     try:
         if not prefiltered:

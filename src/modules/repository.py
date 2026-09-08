@@ -64,6 +64,18 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS workspace_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS calculated_dimensions (
+    name TEXT PRIMARY KEY COLLATE NOCASE,
+    definition_json TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS generated_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_type TEXT NOT NULL CHECK(job_type IN ('report', 'chart_set')),
@@ -1103,6 +1115,48 @@ class Repository:
                 update_source_file(self.reporting_rows_table_name(dataset_kind), scoped_to_dataset=True)
             return dataset
 
+    def get_workspace_state(self, key: str) -> str | None:
+        with self.connection() as conn:
+            row = conn.execute('SELECT value FROM workspace_state WHERE key = ?', (key,)).fetchone()
+            return str(row['value']) if row else None
+
+    def set_workspace_state(self, key: str, value: str) -> None:
+        with self.connection() as conn:
+            conn.execute(
+                'INSERT INTO workspace_state (key, value) VALUES (?, ?) '
+                'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+                (key, value),
+            )
+
+    def list_calculated_dimensions(self) -> list[dict[str, Any]]:
+        with self.connection() as conn:
+            rows = conn.execute(
+                'SELECT name, definition_json, position, updated_at FROM calculated_dimensions ORDER BY position, name COLLATE NOCASE'
+            ).fetchall()
+        return [json.loads(str(row['definition_json'])) for row in rows]
+
+    def replace_calculated_dimensions(self, definitions: list[dict[str, Any]]) -> None:
+        timestamp = local_now_iso()
+        with self.connection() as conn:
+            conn.execute('DELETE FROM calculated_dimensions')
+            conn.executemany(
+                'INSERT INTO calculated_dimensions (name, definition_json, position, updated_at) VALUES (?, ?, ?, ?)',
+                [
+                    (str(item['name']), json.dumps(item, ensure_ascii=False), position, timestamp)
+                    for position, item in enumerate(definitions)
+                ],
+            )
+            conn.execute(
+                'INSERT INTO workspace_state (key, value) VALUES (?, ?) '
+                'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+                ('calculated_dimensions_initialized', '1'),
+            )
+
+    def drop_reporting_table(self, dataset_kind: str) -> None:
+        table_name = self.reporting_rows_table_name(dataset_kind)
+        with self.connection() as conn:
+            conn.execute(f'DROP TABLE IF EXISTS {self._quote_identifier(table_name)}')
+
     def replace_dataset_rows(self, dataset_id: int, df: pd.DataFrame) -> None:
         table_name = self.dataset_rows_table_name(dataset_id)
         safe_df = self._sqlite_safe_frame(df)
@@ -1482,79 +1536,6 @@ class Repository:
     def refresh_dataset_row_technology_primary(self, dataset_id: int) -> bool:
         """Backward-compatible alias for callers before dimension backfill v5."""
         return self.refresh_dataset_row_normalized_dimensions(dataset_id)
-
-    def materialize_cdr_derived_dimensions(self, dataset_id: int) -> bool:
-        """Backfill stable report dimensions without re-reading the source file."""
-        table_name = self.dataset_rows_table_name(dataset_id)
-        existing_columns = set(self.list_dataset_row_columns(dataset_id))
-        if not existing_columns:
-            return False
-
-        session_column = self._resolve_dataset_row_column_name(existing_columns, 'Session_Type')
-        call_mode_column = next((
-            self._resolve_dataset_row_column_name(existing_columns, candidate)
-            for candidate in ('L1_Call_Mode_A', 'L1_Call_Mode_B', 'Call_Mode')
-            if self._resolve_dataset_row_column_name(existing_columns, candidate)
-        ), None)
-        type_column = next((
-            self._resolve_dataset_row_column_name(existing_columns, candidate)
-            for candidate in ('Type_of_Test', 'Test_Type')
-            if self._resolve_dataset_row_column_name(existing_columns, candidate)
-        ), None)
-        name_column = self._resolve_dataset_row_column_name(existing_columns, 'Test_Name')
-        required = {
-            'Call Family': bool(session_column),
-            'Test Family': bool(type_column or name_column),
-        }
-        missing = [name for name, needed in required.items() if needed and name not in existing_columns]
-        if not missing:
-            return False
-
-        quoted_table = self._quote_identifier(table_name)
-        with self.connection() as conn:
-            for column in missing:
-                conn.execute(f"ALTER TABLE {quoted_table} ADD COLUMN {self._quote_identifier(column)} TEXT")
-
-            if 'Call Family' in missing and session_column:
-                session = f"LOWER(COALESCE(CAST({self._quote_identifier(session_column)} AS TEXT), ''))"
-                mode = (
-                    f"LOWER(COALESCE(CAST({self._quote_identifier(call_mode_column)} AS TEXT), ''))"
-                    if call_mode_column else "''"
-                )
-                conn.execute(
-                    f"""
-                    UPDATE {quoted_table}
-                    SET {self._quote_identifier('Call Family')} = CASE
-                        WHEN {session} LIKE '%multirab%' THEN 'MultiRAB'
-                        WHEN {session} LIKE '%whatsapp%' THEN 'WhatsApp'
-                        WHEN {session} LIKE '%volte%' OR {mode} LIKE '%volte%' THEN 'VoLTE'
-                        WHEN {session} LIKE '%vonr%' OR {mode} LIKE '%vonr%' THEN 'VoNR'
-                        ELSE 'CALL'
-                    END
-                    """
-                )
-            if 'Test Family' in missing:
-                test_type = (
-                    f"COALESCE(CAST({self._quote_identifier(type_column)} AS TEXT), '')"
-                    if type_column else "''"
-                )
-                test_name = (
-                    f"LOWER(COALESCE(CAST({self._quote_identifier(name_column)} AS TEXT), ''))"
-                    if name_column else "''"
-                )
-                conn.execute(
-                    f"""
-                    UPDATE {quoted_table}
-                    SET {self._quote_identifier('Test Family')} = CASE
-                        WHEN {test_name} LIKE '%youtube%' THEN 'YouTube'
-                        WHEN {test_name} LIKE '%fdfs%' THEN 'FDFS'
-                        WHEN {test_name} LIKE '%fdtt%' THEN 'FDTT'
-                        ELSE {test_type}
-                    END
-                    """
-                )
-            self._create_dataset_row_indexes(conn, table_name, self._table_columns(conn, table_name))
-        return True
 
     def load_dataset_rows(self, dataset_id: int, columns: list[str], filters: dict[str, Any]) -> pd.DataFrame:
         table_name = self.dataset_rows_table_name(dataset_id)

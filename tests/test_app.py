@@ -20,6 +20,55 @@ def login(client) -> None:
     assert response.status_code == 303
 
 
+def test_catalogue_editor_offers_result_group_for_every_cdr_source(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    dimensions = app_module.parse_calculated_dimensions(app_module.default_calculated_dimensions())
+    columns = app_module.catalogue_editor_columns([], dimensions)
+
+    assert all('Result Group' in values for values in columns.values())
+
+
+def test_cdr_materialisation_adds_workspace_dimensions_to_dataset_rows() -> None:
+    import pandas as pd
+    import src.DashboardAnalytic as app_module
+
+    frame = app_module.materialize_cdr_derived_columns(pd.DataFrame({
+        'Session_Type': ['VoLTE'], 'Type_of_Test': ['HTTP'], 'Test_Name': ['YouTube'],
+    }), 'data')
+
+    assert 'attempt_count' in frame.columns
+    assert 'Call Family' not in frame.columns
+    assert frame['Test Family'].tolist() == ['YouTube']
+
+
+def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    page = client.get('/workspace')
+    assert page.status_code == 200
+    assert 'data-workspace-calculated-dimensions-panel' in page.text
+    assert 'Manage Calculated Dimensions' in page.text
+
+    exported = client.get('/workspace/calculated-dimensions/export')
+    assert exported.status_code == 200
+    assert exported.headers['content-type'].startswith('application/json')
+    assert exported.json()
+
+    imported = client.post(
+        '/workspace/calculated-dimensions/import',
+        files={'dimensions_file': ('dimensions.json', BytesIO(json.dumps([{
+            'name': 'Imported Group', 'sources': ['cdr-data'], 'default': 'Other',
+            'default_from': '', 'rules': [{'when': 'Test_Result = Completed', 'value': 'Success'}],
+        }]).encode()), 'application/json')},
+        follow_redirects=False,
+    )
+    assert imported.status_code == 303
+    assert any(item.name == 'Imported Group' for item in app_module.load_workspace_calculated_dimensions())
+    assert not list(app_module.settings.slides_templates_dir.rglob('*.dimensions.json'))
+
+
 def test_reporting_deletion_requires_admin(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -1665,6 +1714,10 @@ def test_queued_dataset_actions_remain_compact_icons_during_live_updates(client)
 
 
 def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    import src.DashboardAnalytic as app_module
+
     login(client)
     client.post(
         '/dashboard/upload',
@@ -1687,10 +1740,15 @@ def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> Non
     assert '<option value="3" selected>' in default_preview.text
     assert '<option value="Ericsson" selected>' in default_preview.text
     assert '<option value="Nokia" selected>' in default_preview.text
-    assert 'class="derived-cdr-column">Call Family<' in default_preview.text
+    assert '>Call Family<' not in default_preview.text
     assert 'class="derived-cdr-column">Test Family<' in default_preview.text
-    assert '>VoLTE<' in default_preview.text
-    assert '>YouTube<' in default_preview.text
+    assert 'class="derived-cdr-column">Result Group<' in default_preview.text
+    header = default_preview.text.split('<thead>', 1)[1].split('</thead>', 1)[0]
+    assert header.index('score') < header.index('Result Group') < header.index('Test Family')
+    reporting_columns = app_module.repository.list_reporting_row_columns('data')
+    assert 'Result Group' in reporting_columns
+    assert 'Test Family' in reporting_columns
+    assert {'Result Group', 'Test Family'} <= set(app_module.repository.list_reporting_row_columns('data'))
 
     preview = client.get(
         '/workspace/preview/1?cdr_operator=3&cdr_vendor=Nokia&cdr_rat=NR'
@@ -1702,8 +1760,8 @@ def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> Non
     assert 'name="cdr_rat"' in preview.text
     assert 'name="cdr_session_type"' in preview.text
     assert 'name="cdr_call_status"' in preview.text
-    assert 'name="cdr_call_family"' in preview.text
-    assert 'name="cdr_test_family"' in preview.text
+    assert 'name="cdr_call_family"' not in preview.text
+    assert 'name="cdr_test_family"' not in preview.text
     assert 'class="vendor-column">vendor<' in preview.text
     preview_rows = preview.text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
     assert '>Nokia<' in preview_rows
@@ -1714,10 +1772,6 @@ def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> Non
     assert '>Nokia<' in multi_rows
     assert '>Ericsson<' in multi_rows
 
-    derived_preview = client.get('/workspace/preview/1?cdr_call_family=VoLTE&cdr_test_family=YouTube')
-    derived_rows = derived_preview.text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
-    assert '>Ericsson<' in derived_rows
-    assert '>Nokia<' not in derived_rows
     assert 'name="cdr_operator" multiple' in multi_preview.text
 
 
@@ -2772,6 +2826,8 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'data-catalogue-slide-actions' in embedded_editor.text
     assert 'data-catalogue-chart-actions' in embedded_editor.text
     assert 'data-template-copy-url=' in embedded_editor.text
+    assert 'data-manage-calculated-dimensions' in embedded_editor.text
+    assert 'data-calculated-dimensions-url=' in embedded_editor.text
     assert 'data-catalogue-row-index="0"' in embedded_editor.text
     assert 'data-catalogue-reenumerate' in embedded_editor.text
     assert 'Title and 1 column + Comments' in embedded_editor.text
@@ -2782,6 +2838,27 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert {(item['technology'], item['identifier']) for item in copy_options.json()['templates']} >= {
         ('nsa', 'Baseline Q4'), ('nsa', 'Updated Q4'),
     }
+    dimensions = app_module.calculated_dimensions_json(app_module.load_workspace_calculated_dimensions())
+    dimensions.append({
+        'name': 'Network Result', 'sources': ['cdr-data'], 'default': 'Other', 'default_from': '',
+        'rules': [{'when': 'Test_Result IN (Completed)', 'value': 'Success'}],
+    })
+    saved_dimensions = client.put(
+        '/api/admin/report-templates/nsa/Baseline%20Q4/calculated-dimensions',
+        json={'dimensions': dimensions},
+    )
+    assert saved_dimensions.status_code == 200
+    assert any(item['name'] == 'Network Result' for item in saved_dimensions.json()['dimensions'])
+    filter_values = client.get(
+        '/admin/catalogue-filter-values',
+        params={'source': 'cdr-data', 'column': 'Network Result', 'technology': 'nsa', 'catalogue_id': 'Baseline Q4'},
+    )
+    assert filter_values.status_code == 200
+    assert filter_values.json()['values'] == ['Other', 'Success']
+    assert any(
+        item.name == 'Network Result'
+        for item in app_module.load_workspace_calculated_dimensions()
+    )
     copied_chart = client.post('/admin/report-templates/nsa/Baseline%20Q4/copy-items', json={
         'kind': 'chart', 'catalogue_content': first.decode(), 'source_row_index': 0,
         'target_technology': 'nsa', 'target_identifier': 'Updated Q4',
