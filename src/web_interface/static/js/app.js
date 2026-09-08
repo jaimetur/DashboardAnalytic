@@ -27,10 +27,10 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
   const manage = host.querySelector('[data-workspace-manage-calculated-dimensions]');
   let dimensions = [];
   try { dimensions = JSON.parse(host.dataset.calculatedDimensions || '[]'); } catch (_error) { dimensions = []; }
-  const saveDimensions = async (next) => {
+  const saveDimensions = async (next, rename = null) => {
     const response = await fetch(host.dataset.saveUrl, {
       method: 'PUT', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({dimensions: next}),
+      body: JSON.stringify({dimensions: next, renames: rename ? [rename] : []}),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.detail || 'Unable to save calculated dimensions.');
@@ -95,7 +95,12 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
           });
           const dimension = {name: name.value.trim(), sources: Array.from(sources.querySelectorAll('input:checked')).map((item) => item.value), default: fallback.value, default_from: fallbackField.value.trim(), rules: parsedRules};
           const next = [...dimensions]; if (index === null) next.push(dimension); else next[index] = dimension;
-          save.disabled = true; await saveDimensions(next); window.location.reload();
+          const rename = index === null || current.name === dimension.name ? null : {from: current.name, to: dimension.name};
+          const message = rename
+            ? `Renaming '${rename.from}' to '${rename.to}' will rebuild every applicable CDR table and update every Slides Template that uses this dimension. Continue?`
+            : 'Saving will rebuild this calculated dimension in every applicable CDR table. Continue?';
+          if (!await showConfirmDialog(message, {title: 'Save and Materialize', confirmLabel: 'Save and Materialize', tone: 'warning'})) return;
+          save.disabled = true; await saveDimensions(next, rename); window.location.reload();
         } catch (error) { save.disabled = false; showInfoDialog(error.message || 'Unable to save calculated dimension.', {title: 'Calculated Dimensions', tone: 'error'}); }
       });
       name.focus();
@@ -694,10 +699,10 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   };
   refreshCalculatedDimensionSuggestions();
 
-  const saveCalculatedDimensions = async () => {
+  const saveCalculatedDimensions = async (rename = null) => {
     const response = await fetch(editor.dataset.calculatedDimensionsUrl, {
       method: 'PUT', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({dimensions: calculatedDimensions}),
+      body: JSON.stringify({dimensions: calculatedDimensions, renames: rename ? [rename] : []}),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.detail || 'Unable to save calculated dimensions.');
@@ -780,7 +785,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
           };
           const next = [...calculatedDimensions];
           if (editingIndex === null) next.push(dimension); else next[editingIndex] = dimension;
-          calculatedDimensions = next; await saveCalculatedDimensions(); form.hidden = true; restoreManagerActions(); renderList();
+          const rename = editingIndex === null || current.name === dimension.name ? null : {from: current.name, to: dimension.name};
+          const message = rename
+            ? `Renaming '${rename.from}' to '${rename.to}' will rebuild every applicable CDR table and update every Slides Template that uses this dimension. Continue?`
+            : 'Saving will rebuild this calculated dimension in every applicable CDR table. Continue?';
+          if (!await showConfirmDialog(message, {title: 'Save and Materialize', confirmLabel: 'Save and Materialize', tone: 'warning'})) return;
+          calculatedDimensions = next; await saveCalculatedDimensions(rename); form.hidden = true; restoreManagerActions(); renderList();
         } catch (error) {
           calculatedDimensions = previous;
           showInfoDialog(error.message || 'Unable to save calculated dimension.', {title: 'Calculated Dimensions', tone: 'error'});

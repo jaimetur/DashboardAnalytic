@@ -92,6 +92,28 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     assert not list(app_module.settings.slides_templates_dir.rglob('*.dimensions.json'))
 
 
+def test_renaming_calculated_dimension_rebuilds_references_in_workspace_templates(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    dimensions = app_module.calculated_dimensions_json(app_module.load_workspace_calculated_dimensions())
+    renamed = next(item for item in dimensions if item['name'] == 'Test Family')
+    renamed['name'] = 'Test Classification'
+
+    response = client.put('/api/workspace/calculated-dimensions', json={
+        'dimensions': dimensions,
+        'renames': [{'from': 'Test Family', 'to': 'Test Classification'}],
+    })
+
+    assert response.status_code == 200
+    assert response.json()['renamed_templates'] >= 1
+    assert any(item.name == 'Test Classification' for item in app_module.load_workspace_calculated_dimensions())
+    template = next(item for item in app_module.report_catalogue_options('nsa') if item['active'])
+    template_text = template['path'].read_text(encoding='utf-8')
+    assert 'Test Classification' in template_text
+    assert 'Test Family' not in template_text
+
+
 def test_reporting_deletion_requires_admin(client) -> None:
     import src.DashboardAnalytic as app_module
 

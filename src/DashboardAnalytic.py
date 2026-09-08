@@ -319,6 +319,94 @@ def write_workspace_calculated_dimensions(payload: object) -> tuple:
     return dimensions
 
 
+def calculated_dimension_rename_map(
+    payload: object, previous: Iterable[Any], dimensions: Iterable[Any],
+) -> dict[str, str]:
+    """Resolve explicitly supplied and unambiguous calculated-dimension renames."""
+    previous_by_key = {_normalise_catalogue_dimension_name(item.name): item.name for item in previous}
+    current_by_key = {_normalise_catalogue_dimension_name(item.name): item.name for item in dimensions}
+    renames: dict[str, str] = {
+        old_name: current_by_key[key]
+        for key, old_name in previous_by_key.items()
+        if key in current_by_key and old_name != current_by_key[key]
+    }
+    removed = [name for key, name in previous_by_key.items() if key not in current_by_key]
+    added = [name for key, name in current_by_key.items() if key not in previous_by_key]
+    if len(removed) == len(added) == 1:
+        renames[removed[0]] = added[0]
+    requested = payload.get('renames', []) if isinstance(payload, dict) else []
+    if not isinstance(requested, list):
+        raise ValueError('Calculated dimension renames must be a list.')
+    for item in requested:
+        if not isinstance(item, dict):
+            raise ValueError('Each calculated dimension rename must be an object.')
+        old_name = str(item.get('from') or '').strip()
+        new_name = str(item.get('to') or '').strip()
+        old_key = _normalise_catalogue_dimension_name(old_name)
+        new_key = _normalise_catalogue_dimension_name(new_name)
+        if not old_key or not new_key or old_key not in previous_by_key or new_key not in current_by_key:
+            raise ValueError('A calculated dimension rename does not match the saved definitions.')
+        renames[previous_by_key[old_key]] = current_by_key[new_key]
+    return {old_name: new_name for old_name, new_name in renames.items() if old_name != new_name}
+
+
+def rename_calculated_dimension_template_references(renames: dict[str, str]) -> int:
+    """Rename calculated fields in every stored Slides Template of the workspace."""
+    if not renames:
+        return 0
+
+    def renamed_value(value: str, old_name: str, new_name: str) -> str:
+        return new_name if _normalise_catalogue_dimension_name(value) == _normalise_catalogue_dimension_name(old_name) else value
+
+    def renamed_grouping(value: str, old_name: str, new_name: str) -> str:
+        parts = [part.strip() for part in re.split(r'\s*(?:×|x)\s*', value) if part.strip()]
+        return ' × '.join(renamed_value(part, old_name, new_name) for part in parts) if parts else value
+
+    condition_pattern = re.compile(r'^(?P<column>.+?)\s+(?P<operator>NOT\s+CONTAINS|NOT\s+IN|CONTAINS|IN|>=|<=|!=|=|>|<)\s+(?P<value>.+)$', re.I)
+
+    def renamed_filters(value: str, old_name: str, new_name: str) -> str:
+        clauses: list[str] = []
+        for clause in str(value).split(';'):
+            match = condition_pattern.match(clause.strip())
+            if not match:
+                clauses.append(clause.strip())
+                continue
+            column = renamed_value(match.group('column').strip(), old_name, new_name)
+            clauses.append(f"{column} {match.group('operator')} {match.group('value')}")
+        return '; '.join(clause for clause in clauses if clause)
+
+    def renamed_entry(entry: CatalogEntry) -> CatalogEntry:
+        updated = entry
+        for old_name, new_name in renames.items():
+            updated = replace(
+                updated,
+                kpi=renamed_value(updated.kpi, old_name, new_name),
+                filters=renamed_filters(updated.filters, old_name, new_name),
+                grouping_rows=renamed_grouping(updated.grouping_rows, old_name, new_name),
+                grouping_columns=renamed_grouping(updated.grouping_columns, old_name, new_name),
+                legend=renamed_grouping(updated.legend, old_name, new_name),
+            )
+        return updated
+
+    pending_writes: dict[Path, bytes] = {}
+    changed_templates = 0
+    for technology in TEMPLATE_NAMES:
+        for template in report_catalogue_options(technology):
+            entries = load_catalog_csv(template['path'], technology, validate_filters=False)
+            updated_entries = [renamed_entry(entry) for entry in entries]
+            if updated_entries == entries:
+                continue
+            content = catalogue_csv(updated_entries)
+            pending_writes[Path(template['path'])] = content
+            if template['active']:
+                pending_writes[named_catalogue_path(technology, template['identifier'], template['identifier'])] = content
+            changed_templates += 1
+    with TEMPLATE_SAVE_LOCK:
+        for path, content in pending_writes.items():
+            atomic_write_template(path, content)
+    return changed_templates
+
+
 def load_template_catalogue(catalogue_path: Path, technology: str, *, validate_filters: bool = True):
     dimensions = load_workspace_calculated_dimensions()
     return [
@@ -8232,6 +8320,9 @@ async def _save_workspace_dimensions(request: Request, user: SessionUser) -> JSO
         payload = await request.json()
         previous = load_workspace_calculated_dimensions()
         dimensions = write_workspace_calculated_dimensions(payload.get('dimensions'))
+        renamed_templates = rename_calculated_dimension_template_references(
+            calculated_dimension_rename_map(payload, previous, dimensions),
+        )
         materialized = materialize_workspace_calculated_dimensions(dimension.name for dimension in previous)
     except (ValueError, TypeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -8239,8 +8330,13 @@ async def _save_workspace_dimensions(request: Request, user: SessionUser) -> JSO
         raise HTTPException(status_code=503, detail=f'Unable to save calculated dimensions: {exc}') from exc
     repository.add_log(user.username, 'save_workspace_calculated_dimensions', json.dumps({
         'workspace': active_workspace.id, 'count': len(dimensions), 'materialized_datasets': materialized,
+        'renamed_templates': renamed_templates,
     }))
-    return JSONResponse({'dimensions': calculated_dimensions_json(dimensions), 'materialized_datasets': materialized})
+    return JSONResponse({
+        'dimensions': calculated_dimensions_json(dimensions),
+        'materialized_datasets': materialized,
+        'renamed_templates': renamed_templates,
+    })
 
 
 @app.put('/api/workspace/calculated-dimensions')
