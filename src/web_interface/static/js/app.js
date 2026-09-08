@@ -990,6 +990,16 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       ] : []),
     ];
   };
+  const actionButtonRows = (kind, hasSource = false) => {
+    const buttons = actionButtons(kind, hasSource);
+    const primary = document.createElement('div');
+    primary.className = 'catalogue-action-row catalogue-action-row-primary';
+    primary.append(...buttons.slice(0, 4));
+    const secondary = document.createElement('div');
+    secondary.className = 'catalogue-action-row catalogue-action-row-secondary';
+    secondary.append(...buttons.slice(4));
+    return [primary, secondary];
+  };
   const createCatalogueRow = (sourceRow, blankChartFields = false) => {
     const source = sourceRow instanceof HTMLTableRowElement ? rowValues(sourceRow) : (sourceRow || {});
     const retained = ['Slide', 'Slide Tittle', 'Slide Subtittle', 'Layout'];
@@ -1003,7 +1013,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         const chartActions = document.createElement('td');
         chartActions.className = 'catalogue-chart-actions';
         chartActions.dataset.catalogueChartActions = '';
-        chartActions.append(...actionButtons('chart', Boolean(String(source['CDR source'] || '').trim())));
+        chartActions.append(...actionButtonRows('chart', Boolean(String(source['CDR source'] || '').trim())));
         row.append(chartActions);
       }
       const cell = document.createElement('td');
@@ -1045,7 +1055,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       block.forEach((row) => row.classList.add(tone));
       const slideActions = block[0].querySelector('[data-catalogue-slide-actions]');
       if (slideActions) {
-        slideActions.replaceChildren(...actionButtons('slide'));
+        slideActions.replaceChildren(...actionButtonRows('slide'));
         slideActions.rowSpan = block.length;
       }
       block.slice(1).forEach((row) => row.querySelector('[data-catalogue-slide-actions]')?.remove());
