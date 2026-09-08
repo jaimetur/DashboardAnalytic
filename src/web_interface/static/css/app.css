@@ -424,6 +424,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-copy-dialog { width: min(34rem, calc(100vw - 2rem)); }
 .catalogue-copy-fields { display: grid; gap: 0.75rem; }
 .catalogue-copy-dialog label { display: grid; gap: 0.45rem; color: #486475; font-size: 0.78rem; font-weight: 800; }
+.catalogue-copy-dialog label[hidden] { display: none; }
 .catalogue-insert-actions { justify-content: flex-end; }
 .catalogue-insert-cancel-button { background: #e8eef2; border-color: #b9c8d2; color: #395766; }
 .catalogue-insert-cancel-button:hover { background: #dbe6ec; border-color: #9db4c1; color: #294754; }
