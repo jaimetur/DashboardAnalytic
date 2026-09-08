@@ -2751,6 +2751,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     reporting = client.get('/reporting')
     assert 'value="nsa:Updated Q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting.text
     assert 'data-report-charts-edit-template' in reporting.text
+    assert 'data-report-chart-viewer-edit-template' in reporting.text
     assert 'data-report-template-editor-frame' in reporting.text
 
     editor = client.get('/admin?catalogue_technology=nsa&catalogue_id=Baseline%20Q4')
@@ -2766,10 +2767,36 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'Export / Import' not in embedded_editor.text
     assert 'data-catalogue-field="Layout"' in embedded_editor.text
     assert 'data-catalogue-editor-options' in embedded_editor.text
-    assert 'data-catalogue-row-action="insert"' in embedded_editor.text
+    assert '<th class="catalogue-slide-actions-heading">Slide Actions</th>' in embedded_editor.text
+    assert '<th class="catalogue-chart-actions-heading">Chart Actions</th>' in embedded_editor.text
+    assert 'data-catalogue-slide-actions' in embedded_editor.text
+    assert 'data-catalogue-chart-actions' in embedded_editor.text
+    assert 'data-template-copy-url=' in embedded_editor.text
+    assert 'data-catalogue-row-index="0"' in embedded_editor.text
     assert 'data-catalogue-reenumerate' in embedded_editor.text
     assert 'Title and 1 column + Comments' in embedded_editor.text
     assert 'catalogue-editor-catalogue-picker" aria-label="Workspace templates" hidden' in embedded_editor.text
+
+    copy_options = client.get('/api/admin/report-templates/copy-options')
+    assert copy_options.status_code == 200
+    assert {(item['technology'], item['identifier']) for item in copy_options.json()['templates']} >= {
+        ('nsa', 'Baseline Q4'), ('nsa', 'Updated Q4'),
+    }
+    copied_chart = client.post('/admin/report-templates/nsa/Baseline%20Q4/copy-items', json={
+        'kind': 'chart', 'catalogue_content': first.decode(), 'source_row_index': 0,
+        'target_technology': 'nsa', 'target_identifier': 'Updated Q4',
+        'target_slide_index': 0, 'chart_position': 1,
+    })
+    assert copied_chart.status_code == 200
+    assert len(app_module.load_catalog_csv(app_module.named_catalogue_path('nsa', 'Updated Q4'), 'nsa')) == 2
+    copied_slide = client.post('/admin/report-templates/nsa/Baseline%20Q4/copy-items', json={
+        'kind': 'slide', 'catalogue_content': first.decode(), 'source_row_index': 0,
+        'target_technology': 'nsa', 'target_identifier': 'Updated Q4', 'slide_position': 1,
+    })
+    assert copied_slide.status_code == 200
+    copied_entries = app_module.load_catalog_csv(app_module.named_catalogue_path('nsa', 'Updated Q4'), 'nsa')
+    assert len(copied_entries) == 3
+    assert sorted({entry.slide for entry in copied_entries}) == [1, 2]
 
     edited = (
         ','.join(CATALOG_HEADERS)

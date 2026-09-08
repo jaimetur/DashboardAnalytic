@@ -1544,6 +1544,13 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert 'name="slides_templates"' in page.text
     assert 'value="nsa:NSA Slide Template"' in page.text
     assert 'data-report-job-form' in page.text
+    assert 'name="data_dataset_id" multiple required' not in page.text
+    assert 'data-reporting-filter-panel="charts"' in page.text
+    assert 'data-reporting-filter-panel="jobs"' in page.text
+    assert page.text.count('data-reporting-job-filter="tech"') == 2
+    assert page.text.count('data-reporting-job-filter="type"') == 2
+    assert page.text.count('data-reporting-job-filter="template"') == 2
+    assert page.text.count('data-reporting-job-filter="scope"') == 2
     assert 'data-report-multicampaign-dialog' in page.text
     assert 'Review selected campaigns' in page.text
     assert 'latest selected CDR for each type is preselected' in page.text
@@ -1724,8 +1731,8 @@ def test_retrying_a_failed_chart_job_reuses_its_row(client) -> None:
 
     response = client.post(f'/reporting/chart-jobs/{job_id}/retry')
 
-    assert response.status_code == 202
-    assert response.json()['job_id'] == job_id
+    assert response.status_code == 400
+    assert response.json()['detail'] == 'The Chart Set job does not contain any selected CDR.'
     assert [row['id'] for row in app_module.repository.list_report_chart_jobs(limit=None)] == before_ids
 
 
@@ -1872,6 +1879,8 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     })
     assert preview_context.status_code == 200
     context_payload = preview_context.json()
+    assert isinstance(context_payload['template_row_index'], int)
+    assert context_payload['template_row_index'] >= 0
     assert context_payload['dataset_ids_by_source'] == {'cdr-data': ['1'], 'cdr-voice': ['2'], 'cdr-speech': ['3']}
     source_key = context_payload['cdr_source'].lower()
     expected_id = {'cdr-data': '1', 'cdr-voice': '2', 'cdr-speech': '3'}[source_key]
@@ -1928,6 +1937,114 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert client.get(f"/api/reporting/chart-sets/{payload['generation']}").status_code == 404
 
 
+def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    uploaded = client.post(
+        '/dashboard/upload', data={'dataset_kinds': 'data'},
+        files={'dataset_files': ('NetCheck_CDR_Data.csv', BytesIO(b'RAT,Operator,Mean_Data_Rate,Test_Result\nENDC,Vodafone UK,42,Success\n'), 'text/csv')},
+    )
+    assert uploaded.status_code == 200
+    rendered_sources: list[str] = []
+
+    def render_preview(frame, entry, *, multivendor=False):
+        rendered_sources.append(entry.cdr_source)
+        return b'PNG'
+
+    monkeypatch.setattr(app_module, 'render_catalog_chart_preview', render_preview)
+    response = client.post('/reporting/netcheck-cdr/charts', data={
+        'data_dataset_id': 1, 'technology': 'nsa', 'report_scope': 'single',
+        'slides_templates': 'nsa:NSA Slide Template',
+    })
+    assert response.status_code == 202
+    job = wait_for_report_chart_job(client, response.json()['job_id'])
+    assert job['status'] == 'ready'
+    payload = client.get(job['open_url']).json()
+    assert payload['technology'] == 'NSA'
+    assert payload['dataset_counts'] == {'data': 1, 'voice': 0, 'speech': 0}
+    assert rendered_sources and set(rendered_sources) == {'CDR-Data'}
+    unavailable_index = next(index for index, chart in enumerate(payload['charts']) if chart['source'] in {'CDR-Voice', 'CDR-Speech'})
+    unavailable_image = client.get(payload['charts'][unavailable_index]['image_url'])
+    assert unavailable_image.status_code == 200
+    assert unavailable_image.content.startswith(b'\x89PNG')
+    context = client.get('/api/reporting/chart-preview/context', params={
+        'source': 'standalone', 'identifier': payload['generation'], 'chart_index': unavailable_index,
+    })
+    assert context.status_code == 200
+    assert context.json()['source_available'] is False
+    assert context.json()['dataset_ids'] == []
+
+
+def test_chart_preview_focus_row_matches_the_editors_sorted_row(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    content = (
+        ','.join(CATALOG_HEADERS)
+        + '\n2,Second slide,,Title and 1 column + Comments,Second chart,CDR-Data,Mean_Data_Rate,Average Vertical Bars,,Operator,,,,Top'
+        + '\n1,First slide,,Title and 1 column + Comments,First chart,CDR-Data,Mean_Data_Rate,Average Vertical Bars,,Operator,,,,Top\n'
+    ).encode()
+    imported = client.post(
+        '/admin/report-templates/nsa', data={'catalogue_name': 'Out of order'},
+        files={'catalogue_file': ('out-of-order.csv', BytesIO(content), 'text/csv')},
+        follow_redirects=False,
+    )
+    assert imported.status_code == 303
+    job_id = app_module.repository.create_report_chart_job(
+        technology='nsa', scope='single', dataset_ids={'data': [], 'voice': [], 'speech': []},
+        dataset_names={}, template_name='Out of order', created_by='admin',
+    )
+    app_module.repository.update_report_chart_job(job_id, status='failed', generation='20260101-000000')
+
+    context = client.get('/api/reporting/chart-preview/context', params={
+        'source': 'standalone', 'identifier': '20260101-000000', 'chart_index': 0,
+    })
+
+    assert context.status_code == 200
+    assert context.json()['chart_title'] == 'Second chart'
+    assert context.json()['template_row_index'] == 1
+
+
+def test_reporting_requires_at_least_one_cdr_source(client) -> None:
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    form = {'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template'}
+    report = client.post('/reporting/netcheck-cdr', data=form)
+    charts = client.post('/reporting/netcheck-cdr/charts', data=form)
+    assert report.status_code == 400
+    assert charts.status_code == 400
+    assert report.json()['detail'] == 'Select at least one Data, Voice or Speech CDR.'
+
+
+def test_partial_cdr_report_worker_receives_unavailable_frames(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    uploaded = client.post(
+        '/dashboard/upload', data={'dataset_kinds': 'data'},
+        files={'dataset_files': ('NetCheck_CDR_Data.csv', BytesIO(b'RAT,Operator,Mean_Data_Rate,Test_Result\nENDC,Vodafone UK,42,Success\n'), 'text/csv')},
+    )
+    assert uploaded.status_code == 200
+    observed: dict[str, bool] = {}
+
+    def render_report(destination, _template, _frames, _technology, _multivendor, _entries, **kwargs):
+        loader = kwargs['frame_loader']
+        observed['data'] = bool(loader('data').attrs.get('report_source_unavailable'))
+        observed['voice'] = bool(loader('voice').attrs.get('report_source_unavailable'))
+        observed['speech'] = bool(loader('speech').attrs.get('report_source_unavailable'))
+        Path(destination).write_bytes(b'PK')
+
+    monkeypatch.setattr(app_module, 'render_cdr_report', render_report)
+    response = client.post('/reporting/netcheck-cdr', data={
+        'data_dataset_id': 1, 'technology': 'nsa', 'report_scope': 'single',
+        'slides_templates': 'nsa:NSA Slide Template',
+    })
+    assert response.status_code == 202
+    job = wait_for_report_job(client, response.json()['job_id'])
+    assert job['status'] == 'ready'
+    assert observed == {'data': False, 'voice': True, 'speech': True}
+
+
 def test_temporary_preview_accepts_dataset_ids_with_legacy_multiplication_separator(monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -1963,7 +2080,8 @@ def test_report_chart_generation_failures_return_json_and_are_logged(client, mon
     assert response.status_code == 202
     job = wait_for_report_chart_job(client, response.json()['job_id'])
     assert job['status'] == 'failed'
-    assert job['error'] == 'Synthetic renderer failure'
+    assert job['error'].endswith(': Synthetic renderer failure')
+    assert job['error'].startswith('Slide ')
     log = next(row for row in app_module.repository.list_logs() if row['action'] == 'chart_set_generation_failed')
     assert log['username'] == 'admin'
     assert 'Synthetic renderer failure' in log['details']
@@ -1971,9 +2089,12 @@ def test_report_chart_generation_failures_return_json_and_are_logged(client, mon
     assert app_log['log_type'] == 'Error'
     assert app_log['username'] == 'admin'
     assert app_log['executed_by'] == 'system'
-    assert app_log['summary'] == 'Chart Set job 1 failed: Synthetic renderer failure'
+    assert app_log['summary'].startswith("Chart Set job 1 failed: Slide ")
+    assert app_log['summary'].endswith(': Synthetic renderer failure')
     assert 'Synthetic renderer failure' in client.get('/reporting').text
-    assert 'Chart Set job 1 failed: Synthetic renderer failure' in client.get('/app-logs').text
+    app_logs_page = client.get('/app-logs').text
+    assert 'Chart Set job 1 failed: Slide ' in app_logs_page
+    assert 'Synthetic renderer failure' in app_logs_page
 
 
 def test_report_generation_failures_show_the_error_and_are_logged(client, monkeypatch) -> None:

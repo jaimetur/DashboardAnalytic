@@ -47,7 +47,7 @@ DEFAULT_TRANSFER_PORT = 7278
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, catalog_chart_hover_targets, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, catalog_chart_hover_targets, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report, render_unavailable_source_chart
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE
@@ -4255,6 +4255,13 @@ def _reporting_datasets(
     return [_reporting_dataset(dataset_id, expected_kind, task_repository) for dataset_id in unique_ids]
 
 
+def _optional_reporting_datasets(
+    dataset_ids: list[int], expected_kind: str, task_repository: Repository | None = None,
+) -> list[dict[str, Any]]:
+    """Validate one optional CDR-type selection while preserving non-empty validation."""
+    return _reporting_datasets(dataset_ids, expected_kind, task_repository) if dataset_ids else []
+
+
 def _reporting_frame(dataset_id: int, task_repository: Repository | None = None) -> pd.DataFrame:
     task_repository = task_repository or repository
     return task_repository.load_dataset_rows(dataset_id, task_repository.list_dataset_row_columns(dataset_id), {})
@@ -4482,14 +4489,15 @@ def _report_job_charts_payload(row: Any) -> dict[str, Any] | None:
     return {
         'report_job_id': int(row['id']),
         'report_name': str(row['output_file'] or ''),
-        'template': str(row['template_name'] or ''), 'scope': str(row['scope'] or 'single'),
+        'template': str(row['template_name'] or ''), 'technology': str(row['technology'] or '').upper(),
+        'scope': str(row['scope'] or 'single'),
         'generated_at': _local_report_date(row['created_at']),
         'dataset_counts': {kind: len(dataset_ids.get(kind, [])) for kind in ('data', 'voice', 'speech')},
         'charts': charts,
     }
 
 
-def _temporary_chart_preview_context(source: str, identifier: str, chart_index: int) -> tuple[Any, dict[str, list[int]], str, bool]:
+def _temporary_chart_preview_context(source: str, identifier: str, chart_index: int) -> tuple[Any, dict[str, list[int]], str, bool, int]:
     """Resolve one persisted chart back to its immutable template definition."""
     if source == 'report':
         row = repository.get_report_run(int(identifier))
@@ -4512,10 +4520,24 @@ def _temporary_chart_preview_context(source: str, identifier: str, chart_index: 
     template = next((item for item in report_catalogue_options(technology) if item['name'] == template_name), None)
     if technology not in TEMPLATE_NAMES or not template:
         raise HTTPException(status_code=404, detail='The Slides Template used by this Chart Set is no longer available.')
-    entries = [entry for entry in load_catalog_csv(template['path'], technology) if entry.source_kind]
-    if chart_index < 0 or chart_index >= len(entries):
+    indexed_entries = list(enumerate(load_catalog_csv(template['path'], technology)))
+    # Standalone Chart Sets retain the CSV chart-row order. PowerPoint reports
+    # render slides numerically, then retain chart order inside each slide.
+    # The editor always presents every row sorted by slide. Keep the original
+    # row identity while applying those different views so focus_row addresses
+    # the exact chart shown in the viewer, including structural rows.
+    chart_entries = [(index, entry) for index, entry in indexed_entries if entry.source_kind]
+    if source == 'report':
+        chart_entries.sort(key=lambda item: (item[1].slide, item[0]))
+    if chart_index < 0 or chart_index >= len(chart_entries):
         raise HTTPException(status_code=404, detail='The selected chart definition is no longer available.')
-    return entries[chart_index], selected_ids, technology, scope == 'multivendor'
+    original_row_index, entry = chart_entries[chart_index]
+    editor_entries = sorted(indexed_entries, key=lambda item: (item[1].slide, item[0]))
+    template_row_index = next(
+        editor_index for editor_index, (source_index, _entry) in enumerate(editor_entries)
+        if source_index == original_row_index
+    )
+    return entry, selected_ids, technology, scope == 'multivendor', template_row_index
 
 
 def _temporary_chart_definition_changes(editable: dict[str, Any]) -> dict[str, str]:
@@ -4552,7 +4574,7 @@ def _temporary_preview_dataset_ids(editable: dict[str, Any], selected_ids: dict[
 @app.get('/api/reporting/chart-preview/context')
 def temporary_chart_preview_context(source: str, identifier: str, chart_index: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Return an immutable chart definition for the interactive viewer sandbox."""
-    entry, selected_ids, _technology, _multivendor = _temporary_chart_preview_context(source, identifier, chart_index)
+    entry, selected_ids, _technology, _multivendor, template_row_index = _temporary_chart_preview_context(source, identifier, chart_index)
     dataset_rows = repository.list_datasets()
     selected_dataset_ids = {value for values in selected_ids.values() for value in values}
     # The controls only need the schemas backing this Chart Set. Inspecting
@@ -4564,7 +4586,8 @@ def temporary_chart_preview_context(source: str, identifier: str, chart_index: i
         if row['status'] == 'ready' and kind in {'data', 'voice', 'speech'}:
             datasets_by_source[f'cdr-{kind}'].append({'value': str(row['id']), 'label': str(row['file_name'])})
     return JSONResponse({
-        'slide': entry.slide, 'chart_title': entry.chart_title, 'cdr_source': entry.cdr_source,
+        'slide': entry.slide, 'chart_title': entry.chart_title, 'template_row_index': template_row_index,
+        'source_available': bool(selected_ids.get(entry.source_kind or '')), 'cdr_source': entry.cdr_source,
         'dataset_ids': [str(value) for value in selected_ids.get(entry.source_kind or '', [])],
         'dataset_ids_by_source': {f'cdr-{kind}': [str(value) for value in values] for kind, values in selected_ids.items()},
         'datasets_by_source': datasets_by_source,
@@ -4583,8 +4606,10 @@ async def temporary_chart_preview(request: Request, user: SessionUser = Depends(
         source = str(payload.get('source') or '')
         identifier = str(payload.get('identifier') or '')
         chart_index = int(payload.get('chart_index'))
-        entry, selected_ids, technology, multivendor = _temporary_chart_preview_context(source, identifier, chart_index)
+        entry, selected_ids, technology, multivendor, _template_row_index = _temporary_chart_preview_context(source, identifier, chart_index)
         editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
+        if not selected_ids.get(entry.source_kind or ''):
+            return Response(content=render_unavailable_source_chart(entry), media_type='image/png', headers={'Cache-Control': 'no-store'})
         entry = replace(entry, **_temporary_chart_definition_changes(editable))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f'Invalid chart preview request: {exc}') from exc
@@ -4617,7 +4642,7 @@ def _temporary_chart_preview_hover_targets(payload: dict[str, Any]) -> list[dict
         source = str(payload.get('source') or '')
         identifier = str(payload.get('identifier') or '')
         chart_index = int(payload.get('chart_index'))
-        entry, selected_ids, technology, multivendor = _temporary_chart_preview_context(source, identifier, chart_index)
+        entry, selected_ids, technology, multivendor, _template_row_index = _temporary_chart_preview_context(source, identifier, chart_index)
         editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
         if source == 'standalone' and not editable:
             if not _chart_set_tooltips_enabled(identifier):
@@ -4785,7 +4810,7 @@ async def temporary_chart_preview_data(request: Request, user: SessionUser = Dep
         source = str(payload.get('source') or '')
         identifier = str(payload.get('identifier') or '')
         chart_index = int(payload.get('chart_index'))
-        entry, selected_ids, technology, multivendor = _temporary_chart_preview_context(
+        entry, selected_ids, technology, multivendor, _template_row_index = _temporary_chart_preview_context(
             source, identifier, chart_index,
         )
         editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
@@ -4998,6 +5023,10 @@ def _run_netcheck_report_job_locked(
         rendered_count = 0
         def load_frame(kind: str) -> pd.DataFrame:
             _ensure_report_job_active(task_repository, report_id)
+            if not selected[kind]:
+                frame = pd.DataFrame()
+                frame.attrs['report_source_unavailable'] = True
+                return frame
             frame = _combined_reporting_frame(selected[kind], technology, catalog_entries, multivendor, task_repository)
             if multivendor:
                 frame = ensure_report_vendor_group(frame)
@@ -5071,6 +5100,15 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
         chart_set for chart_set in list_persisted_report_chart_sets()
         if str(chart_set['generation']) not in unpublished_generations
     ]
+    chart_jobs_by_generation = {
+        str(row['generation']): row for row in chart_job_rows if str(row['generation'] or '')
+    }
+    for chart_set in report_chart_sets:
+        if chart_set.get('technology'):
+            continue
+        job = chart_jobs_by_generation.get(str(chart_set['generation']))
+        if job:
+            chart_set['technology'] = str(job['technology'] or '').upper()
     report_job_rows = repository.list_report_runs(limit=None)
     report_jobs = [serialize_report_job(row) for row in report_job_rows]
     report_chart_report_sets = [job for job in report_jobs if job.get('charts_url')]
@@ -5169,9 +5207,9 @@ async def chart_builder_preview(request: Request, user: SessionUser = Depends(cu
 
 @app.post('/reporting/netcheck-cdr')
 def generate_netcheck_cdr_report(
-    data_dataset_id: list[int] = Form(...),
-    voice_dataset_id: list[int] = Form(...),
-    speech_dataset_id: list[int] = Form(...),
+    data_dataset_id: list[int] = Form([]),
+    voice_dataset_id: list[int] = Form([]),
+    speech_dataset_id: list[int] = Form([]),
     technology: str = Form(...),
     report_scope: str = Form('single'),
     slides_templates: str = Form(''),
@@ -5185,10 +5223,12 @@ def generate_netcheck_cdr_report(
         raise HTTPException(status_code=400, detail='Choose a valid report scope.')
     multivendor = report_scope == 'multivendor'
     selected = {
-        'data': _reporting_datasets(data_dataset_id, 'data'),
-        'voice': _reporting_datasets(voice_dataset_id, 'voice'),
-        'speech': _reporting_datasets(speech_dataset_id, 'speech'),
+        'data': _optional_reporting_datasets(data_dataset_id, 'data'),
+        'voice': _optional_reporting_datasets(voice_dataset_id, 'voice'),
+        'speech': _optional_reporting_datasets(speech_dataset_id, 'speech'),
     }
+    if not any(selected.values()):
+        raise HTTPException(status_code=400, detail='Select at least one Data, Voice or Speech CDR.')
     if multivendor and not all(
         dataset.get('vendor_mapping_applied')
         for datasets in selected.values()
@@ -5218,7 +5258,9 @@ def generate_netcheck_cdr_report(
     dataset_ids = {kind: [int(dataset['id']) for dataset in datasets] for kind, datasets in selected.items()}
     report_id = repository.create_report_job(
         report_type='netcheck_cdr', technology=technology, scope=report_scope,
-        data_dataset_id=selected['data'][0]['id'], voice_dataset_id=selected['voice'][0]['id'], speech_dataset_id=selected['speech'][0]['id'],
+        data_dataset_id=selected['data'][0]['id'] if selected['data'] else None,
+        voice_dataset_id=selected['voice'][0]['id'] if selected['voice'] else None,
+        speech_dataset_id=selected['speech'][0]['id'] if selected['speech'] else None,
         dataset_ids=dataset_ids, dataset_names=_report_dataset_names(selected),
         slide_count=len({entry.slide for entry in catalog_entries}), template_name=selected_catalogue['name'],
         output_file=file_name, output_path=destination, created_by=user.username,
@@ -5240,9 +5282,9 @@ def generate_netcheck_cdr_report(
 
 @app.post('/reporting/netcheck-cdr/charts')
 def generate_netcheck_cdr_charts(
-    data_dataset_id: list[int] = Form(...),
-    voice_dataset_id: list[int] = Form(...),
-    speech_dataset_id: list[int] = Form(...),
+    data_dataset_id: list[int] = Form([]),
+    voice_dataset_id: list[int] = Form([]),
+    speech_dataset_id: list[int] = Form([]),
     technology: str = Form(...),
     report_scope: str = Form('single'),
     slides_templates: str = Form(''),
@@ -5257,10 +5299,12 @@ def generate_netcheck_cdr_charts(
         raise HTTPException(status_code=400, detail='Choose a valid report scope.')
     multivendor = report_scope == 'multivendor'
     selected = {
-        'data': _reporting_datasets(data_dataset_id, 'data'),
-        'voice': _reporting_datasets(voice_dataset_id, 'voice'),
-        'speech': _reporting_datasets(speech_dataset_id, 'speech'),
+        'data': _optional_reporting_datasets(data_dataset_id, 'data'),
+        'voice': _optional_reporting_datasets(voice_dataset_id, 'voice'),
+        'speech': _optional_reporting_datasets(speech_dataset_id, 'speech'),
     }
+    if not any(selected.values()):
+        raise HTTPException(status_code=400, detail='Select at least one Data, Voice or Speech CDR.')
     if multivendor and not all(
         dataset.get('vendor_mapping_applied')
         for datasets in selected.values()
@@ -5311,9 +5355,11 @@ def _run_report_chart_job(
             _ensure_report_job_active(task_repository, job_id, chart_job=True)
             task_repository.update_report_chart_job(job_id, status='processing', progress=5, last_error='')
             selected = {
-                kind: _reporting_datasets([int(value) for value in dataset_ids.get(kind, [])], kind, task_repository)
+                kind: _optional_reporting_datasets([int(value) for value in dataset_ids.get(kind, [])], kind, task_repository)
                 for kind in ('data', 'voice', 'speech')
             }
+            if not any(selected.values()):
+                raise ValueError('Select at least one Data, Voice or Speech CDR.')
             multivendor = report_scope == 'multivendor'
             if multivendor and not all(dataset.get('vendor_mapping_applied') for datasets in selected.values() for dataset in datasets):
                 raise ValueError('Multivendor reporting requires every selected Data, Voice and Speech CDR to have a Workspace Vendor mapping.')
@@ -5343,6 +5389,24 @@ def _run_report_chart_job(
                         if not entries:
                             continue
                         _ensure_report_job_active(task_repository, job_id, chart_job=True)
+                        if not selected[kind]:
+                            for order, entry in entries:
+                                image = render_unavailable_source_chart(entry)
+                                rendered += 1
+                                chart_metrics.append({
+                                    'slide': entry.slide, 'source': entry.cdr_source, 'source_rows': 0,
+                                    'empty_placeholder': True, 'unavailable_source': True, 'rss_mb': _reporting_memory_mb(),
+                                })
+                                task_repository.update_report_chart_job(
+                                    job_id, status='processing', progress=12 + int(rendered * 83 / len(chart_entries)),
+                                )
+                                yield ({
+                                    'order': order, 'slide': entry.slide,
+                                    'title': entry.chart_title or entry.slide_title or f'Slide {entry.slide}',
+                                    'source': entry.cdr_source, 'chart_type': entry.chart_type,
+                                    'hover_targets': [],
+                                }, image)
+                            continue
                         frame = _combined_reporting_frame(selected[kind], technology, catalog_entries, multivendor, task_repository)
                         if multivendor:
                             frame = ensure_report_vendor_group(frame)
@@ -5416,6 +5480,7 @@ def _run_report_chart_job(
                     job_id, status='processing', generation=generation,
                 ),
                 generate_tooltips=generate_tooltips,
+                technology=technology,
             )
             _ensure_report_job_active(task_repository, job_id, chart_job=True)
             task_repository.update_report_chart_job(
@@ -5495,6 +5560,7 @@ def _report_chart_payload(manifest: dict[str, Any], generation: str, output_dir:
     return {
         'generation': generation,
         'template': str(manifest.get('template') or ''),
+        'technology': str(manifest.get('technology') or '').upper(),
         'scope': str(manifest.get('scope') or 'single'),
         'dataset_counts': _report_chart_dataset_counts(manifest.get('dataset_counts')),
         'generated_at': format_local_timestamp(manifest.get('generated_at')),
@@ -5568,6 +5634,7 @@ def list_persisted_report_chart_sets() -> list[dict[str, Any]]:
             sets.append({
                 'generation': child.name,
                 'template': str(payload['template']),
+                'technology': str(payload.get('technology') or ''),
                 'scope': str(payload['scope']),
                 'dataset_counts': payload['dataset_counts'],
                 'generated_at': str(payload['generated_at']),
@@ -5583,6 +5650,7 @@ def persist_report_charts(
     output_dir: Path | None = None,
     before_publish: Callable[[str], None] | None = None,
     generate_tooltips: bool = True,
+    technology: str = '',
 ) -> dict[str, Any]:
     """Persist a new timestamped Chart Set directly in its final directory."""
     _migrate_report_charts_root(output_dir)
@@ -5634,6 +5702,7 @@ def persist_report_charts(
         manifest_charts.sort(key=lambda item: item[0])
         manifest = {
             'template': template_name,
+            'technology': technology.strip().upper(),
             'scope': scope,
             'dataset_counts': _report_chart_dataset_counts(dataset_counts),
             'generation': target.name,
@@ -5755,6 +5824,8 @@ def retry_report_chart_job(job_id: int, user: SessionUser = Depends(current_user
     try:
         dataset_ids = json.loads(previous['dataset_ids_json'] or '{}')
         normalized_ids = {kind: [int(value) for value in dataset_ids.get(kind, [])] for kind in ('data', 'voice', 'speech')}
+        if not any(normalized_ids.values()):
+            raise HTTPException(status_code=400, detail='The Chart Set job does not contain any selected CDR.')
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail='The Chart Set job does not contain a valid dataset selection.') from exc
     technology = str(previous['technology'] or '').strip().lower()
@@ -5912,9 +5983,11 @@ def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) 
     try:
         dataset_ids = json.loads(previous['dataset_ids_json'] or '{}')
         selected = {
-            kind: _reporting_datasets([int(value) for value in dataset_ids.get(kind, [])], kind)
+            kind: _optional_reporting_datasets([int(value) for value in dataset_ids.get(kind, [])], kind)
             for kind in ('data', 'voice', 'speech')
         }
+        if not any(selected.values()):
+            raise HTTPException(status_code=400, detail='The report does not contain any selected CDR.')
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail='The report does not contain a valid dataset selection.') from exc
     technology = str(previous['technology'] or '').strip().lower()
@@ -8001,6 +8074,117 @@ def reset_user_password(
     if wants_json:
         return JSONResponse({'ok': True, 'user': {'id': int(target_user['id']), 'username': target_user['username']}})
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+
+
+def _catalogue_slide_blocks(entries: list[CatalogEntry]) -> list[list[CatalogEntry]]:
+    blocks: list[list[CatalogEntry]] = []
+    for entry in entries:
+        if not blocks or blocks[-1][0].slide != entry.slide:
+            blocks.append([])
+        blocks[-1].append(entry)
+    return blocks
+
+
+@app.get('/api/admin/report-templates/copy-options')
+def report_catalogue_copy_options(user: SessionUser = Depends(admin_user)) -> JSONResponse:
+    templates: list[dict[str, Any]] = []
+    for technology in TEMPLATE_NAMES:
+        for catalogue in report_catalogue_options(technology):
+            try:
+                entries = load_catalog_csv(catalogue['path'], technology, validate_filters=False)
+            except ValueError:
+                entries = []
+            slides = [
+                {
+                    'position': index + 1,
+                    'slide': block[0].slide,
+                    'title': block[0].slide_title or f'Slide {index + 1}',
+                    'charts': len(block),
+                }
+                for index, block in enumerate(_catalogue_slide_blocks(entries))
+            ]
+            templates.append({
+                'technology': technology,
+                'identifier': catalogue['identifier'],
+                'name': catalogue['name'],
+                'slides': slides,
+            })
+    return JSONResponse({'templates': templates})
+
+
+@app.post('/admin/report-templates/{technology}/{catalogue_id}/copy-items')
+async def copy_report_catalogue_items(
+    request: Request,
+    technology: str,
+    catalogue_id: str,
+    user: SessionUser = Depends(admin_user),
+) -> JSONResponse:
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=400, detail='The copy request is not valid JSON.') from exc
+    technology = technology.strip().lower()
+    kind = str(payload.get('kind') or '').strip().lower()
+    target_technology = str(payload.get('target_technology') or '').strip().lower()
+    target_identifier = str(payload.get('target_identifier') or '').strip()
+    if technology not in TEMPLATE_NAMES or target_technology not in TEMPLATE_NAMES or kind not in {'slide', 'chart'}:
+        raise HTTPException(status_code=400, detail='The template copy request is invalid.')
+    try:
+        source_entries = parse_catalog_csv(str(payload.get('catalogue_content') or ''), technology, validate_filters=False)
+        source_index = int(payload.get('source_row_index'))
+        source_entry = source_entries[source_index]
+        target = next((item for item in report_catalogue_options(target_technology) if item['identifier'] == target_identifier), None)
+        if not target:
+            raise FileNotFoundError('Destination Slides Template not found.')
+        try:
+            target_entries = load_catalog_csv(target['path'], target_technology, validate_filters=False)
+        except ValueError as exc:
+            if str(exc) != 'The report template does not contain any rows.':
+                raise
+            target_entries = []
+        target_blocks = _catalogue_slide_blocks(target_entries)
+        source_blocks = _catalogue_slide_blocks(source_entries)
+        if kind == 'slide':
+            source_block = next(block for block in source_blocks if source_entry in block)
+            position = max(0, min(int(payload.get('slide_position', len(target_blocks))), len(target_blocks)))
+            target_blocks.insert(position, [replace(entry) for entry in source_block])
+        else:
+            target_slide_index = int(payload.get('target_slide_index'))
+            if target_slide_index < 0 or target_slide_index >= len(target_blocks):
+                raise ValueError('Choose an existing destination slide.')
+            target_block = target_blocks[target_slide_index]
+            target_slide = target_block[0]
+            copied = replace(
+                source_entry,
+                slide=target_slide.slide,
+                slide_title=target_slide.slide_title,
+                slide_subtitle=target_slide.slide_subtitle,
+                layout=target_slide.layout,
+            )
+            position = max(0, min(int(payload.get('chart_position', len(target_block))), len(target_block)))
+            target_block.insert(position, copied)
+        copied_entries = [
+            replace(entry, slide=slide_index)
+            for slide_index, block in enumerate(target_blocks, start=1)
+            for entry in block
+        ]
+        content = catalogue_csv(copied_entries)
+        with TEMPLATE_SAVE_LOCK:
+            atomic_write_template(Path(target['path']), content)
+            if target['active']:
+                atomic_write_template(named_catalogue_path(target_technology, target_identifier, target_identifier), content)
+    except (IndexError, StopIteration, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or 'The selected template content is unavailable.') from exc
+    except (FileNotFoundError, OSError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=503, detail=f'Unable to copy template content: {exc}') from exc
+    repository.add_log(user.username, 'copy_report_template_content', json.dumps({
+        'kind': kind,
+        'source_technology': technology,
+        'source_template': catalogue_id,
+        'target_technology': target_technology,
+        'target_template': target_identifier,
+    }))
+    return JSONResponse({'copied': True, 'kind': kind, 'target_template': target_identifier})
 
 
 templates.env.globals['format_extra_filters'] = format_extra_filters

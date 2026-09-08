@@ -1712,7 +1712,16 @@ def catalog_chart_hover_targets(
 def is_empty_catalog_chart(image: bytes, entry: CatalogEntry) -> bool:
     """Identify the intentional no-samples placeholder emitted by the renderer."""
     title = entry.chart_title or entry.slide_title
-    return image == _empty_chart(title).getvalue()
+    return image in {_empty_chart(title).getvalue(), render_unavailable_source_chart(entry)}
+
+
+def render_unavailable_source_chart(entry: CatalogEntry) -> bytes:
+    """Render a stable placeholder when no CDR of the chart's source type was selected."""
+    title = entry.chart_title or entry.slide_title
+    image, draw = _canvas(title)
+    draw.text((50, 440), f"Unavailable source type: {entry.cdr_source}", fill="#61727D", font=_font(24))
+    output = BytesIO(); image.save(output, format="PNG")
+    return output.getvalue()
 
 
 def _matches(frame: pd.DataFrame, column: str | None, tokens: tuple[str, ...] | None) -> pd.Series:
@@ -3690,15 +3699,20 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
             # unnoticed drift in normalisation, multivendor preparation or
             # catalogue filtering between preview and export.
             source_frame = frame_for(entry.source_kind)
+            source_unavailable = bool(source_frame.attrs.get("report_source_unavailable"))
             hover_future = hover_executor.submit(
                 catalog_chart_hover_targets, source_frame, entry, multivendor=multivendor,
-            ) if hover_executor else None
-            chart_bytes = render_catalog_chart_preview(source_frame, entry, multivendor=multivendor)
+            ) if hover_executor and not source_unavailable else None
+            chart_bytes = (
+                render_unavailable_source_chart(entry)
+                if source_unavailable
+                else render_catalog_chart_preview(source_frame, entry, multivendor=multivendor)
+            )
             # Rebuild the source frame before retrying an unexpected empty
             # chart. Retrying the same already-loaded frame cannot recover a
             # worker that was under memory pressure while materialising it.
             for _attempt in range(2):
-                if not is_empty_catalog_chart(chart_bytes, entry) or frame_loader is None:
+                if source_unavailable or not is_empty_catalog_chart(chart_bytes, entry) or frame_loader is None:
                     break
                 del chart_bytes
                 cached_frames.pop(entry.source_kind, None)

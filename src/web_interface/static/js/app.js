@@ -496,6 +496,8 @@ document.querySelectorAll('[data-preview-table-filters]').forEach((filters) => {
 
 document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const table = editor.querySelector('[data-catalogue-editor-table]');
+  const requestedRowValue = new URLSearchParams(window.location.search).get('focus_row');
+  const requestedRowIndex = requestedRowValue === null ? Number.NaN : Number(requestedRowValue);
   const saveForm = editor.querySelector('[data-catalogue-editor-save]');
   const reenumerate = editor.querySelector('[data-catalogue-reenumerate]');
   const closeDialog = editor.querySelector('[data-catalogue-editor-close-dialog]');
@@ -544,9 +546,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   let suggestions = {};
   try { suggestions = JSON.parse(editor.dataset.editorSuggestions || '{}'); } catch (_error) { suggestions = {}; }
   let activeCell = null;
-  const catalogueHeaders = Array.from(table.querySelectorAll('thead th[data-catalogue-field], thead th'))
-    .map((cell) => cell.textContent.trim())
-    .filter((header) => header && header !== 'Row actions');
+  const catalogueHeaders = Array.from(table.querySelectorAll('thead th[data-catalogue-field]'))
+    .map((cell) => cell.dataset.catalogueField);
   const fieldColumns = new Set(['Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend']);
   const assistedFields = new Set(['Layout', 'CDR source', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position']);
   const groupingColumns = new Set(['Rows Aggregation', 'Column Aggregation']);
@@ -925,14 +926,25 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
 
   const updateRowActionStates = () => {
     const rows = Array.from(table.querySelectorAll('tbody tr'));
-    rows.forEach((row, index) => {
-      const action = (name) => row.querySelector(`[data-catalogue-row-action="${name}"]`);
-      const up = action('up');
-      const down = action('down');
-      const remove = action('delete');
-      if (up) up.disabled = index === 0;
-      if (down) down.disabled = index === rows.length - 1;
-      if (remove) remove.disabled = rows.length <= 1;
+    const blocks = [];
+    rows.forEach((row) => {
+      const slide = rowValue(row, 'Slide');
+      if (!blocks.length || blocks.at(-1).slide !== slide) blocks.push({slide, rows: []});
+      blocks.at(-1).rows.push(row);
+    });
+    rows.forEach((row) => {
+      const block = blocks.find((item) => item.rows.includes(row));
+      const rowIndex = block.rows.indexOf(row);
+      const chartAction = (name) => row.querySelector(`[data-catalogue-chart-action="${name}"]`);
+      if (chartAction('up')) chartAction('up').disabled = rowIndex === 0;
+      if (chartAction('down')) chartAction('down').disabled = rowIndex === block.rows.length - 1;
+      if (chartAction('delete')) chartAction('delete').disabled = rows.length <= 1;
+    });
+    blocks.forEach((block, index) => {
+      const action = (name) => block.rows[0].querySelector(`[data-catalogue-slide-action="${name}"]`);
+      if (action('up')) action('up').disabled = index === 0;
+      if (action('down')) action('down').disabled = index === blocks.length - 1;
+      if (action('delete')) action('delete').disabled = blocks.length <= 1;
     });
   };
   const sharedSlideFields = ['Slide', 'Slide Tittle', 'Slide Subtittle', 'Layout'];
@@ -953,32 +965,47 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     }));
     return values;
   };
-  const createActionButton = (label, action, title, className = '') => {
+  const createActionButton = (label, action, title, kind, className = '') => {
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = label;
-    button.dataset.catalogueRowAction = action;
+    button.dataset[kind === 'slide' ? 'catalogueSlideAction' : 'catalogueChartAction'] = action;
     button.title = title;
+    button.setAttribute('aria-label', title);
     if (className) button.className = className;
     return button;
+  };
+  const actionButtons = (kind, hasSource = false) => {
+    const subject = kind === 'slide' ? 'slide' : 'chart';
+    return [
+      createActionButton('↑', 'up', `Move ${subject} up`, kind),
+      createActionButton('↓', 'down', `Move ${subject} down`, kind),
+      createActionButton('+', 'insert', `Insert ${subject} below`, kind),
+      createActionButton('−', 'delete', `Delete ${subject}`, kind, 'catalogue-row-delete'),
+      createActionButton('⧉', 'duplicate', `Duplicate ${subject}`, kind),
+      createActionButton('⇥', 'export', `Copy ${subject} to a template`, kind),
+      ...(kind === 'chart' && hasSource ? [
+        createActionButton('▥', 'preview', 'Preview chart data', kind),
+        createActionButton('👁', 'chart-preview', 'Preview generated chart', kind),
+      ] : []),
+    ];
   };
   const createCatalogueRow = (sourceRow, blankChartFields = false) => {
     const source = sourceRow instanceof HTMLTableRowElement ? rowValues(sourceRow) : (sourceRow || {});
     const retained = ['Slide', 'Slide Tittle', 'Slide Subtittle', 'Layout'];
     const row = document.createElement('tr');
-    const actions = document.createElement('td');
-    actions.className = 'catalogue-row-actions';
-    actions.dataset.catalogueRowActions = '';
-    actions.append(
-      createActionButton('↑', 'up', 'Move row up'),
-      createActionButton('↓', 'down', 'Move row down'),
-      createActionButton('+', 'insert', 'Insert a row below'),
-      createActionButton('−', 'delete', 'Delete row', 'catalogue-row-delete'),
-      ...(String(source['CDR source'] || '').trim() ? [createActionButton('▥', 'preview', 'Preview chart data')] : []),
-      ...(String(source['CDR source'] || '').trim() ? [createActionButton('👁', 'chart-preview', 'Preview generated chart')] : []),
-    );
-    row.append(actions);
+    const slideActions = document.createElement('td');
+    slideActions.className = 'catalogue-slide-actions';
+    slideActions.dataset.catalogueSlideActions = '';
+    row.append(slideActions);
     catalogueHeaders.forEach((header) => {
+      if (header === 'Chart Tittle') {
+        const chartActions = document.createElement('td');
+        chartActions.className = 'catalogue-chart-actions';
+        chartActions.dataset.catalogueChartActions = '';
+        chartActions.append(...actionButtons('chart', Boolean(String(source['CDR source'] || '').trim())));
+        row.append(chartActions);
+      }
       const cell = document.createElement('td');
       cell.contentEditable = 'true';
       cell.spellcheck = false;
@@ -1016,6 +1043,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       const block = rows.slice(start, end);
       const tone = slideBlockIndex % 2 === 0 ? 'catalogue-slide-tone-purple' : 'catalogue-slide-tone-pink';
       block.forEach((row) => row.classList.add(tone));
+      const slideActions = block[0].querySelector('[data-catalogue-slide-actions]');
+      if (slideActions) {
+        slideActions.replaceChildren(...actionButtons('slide'));
+        slideActions.rowSpan = block.length;
+      }
+      block.slice(1).forEach((row) => row.querySelector('[data-catalogue-slide-actions]')?.remove());
       if (slide && block.length > 1) {
         sharedSlideFields.forEach((field) => {
           const master = block[0].querySelector(`[data-catalogue-field="${field}"]`);
@@ -1040,7 +1073,9 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (!body) return;
     // Do not pass createCatalogueRow directly to map: map also supplies the
     // row index, which must never be interpreted as blankChartFields.
-    body.replaceChildren(...sortCatalogueRows(rows).map((row) => createCatalogueRow(row)));
+    const renderedRows = sortCatalogueRows(rows).map((row) => createCatalogueRow(row));
+    renderedRows.forEach((row, index) => { row.dataset.catalogueRowIndex = String(index); });
+    body.replaceChildren(...renderedRows);
     mergeSlideMetadataCells();
     updateRowActionStates();
   };
@@ -1100,7 +1135,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (!endpoint) return;
     const rowIndex = Array.from(table.querySelectorAll('tbody tr')).indexOf(row);
     if (rowIndex < 0) return;
-    const button = row.querySelector('[data-catalogue-row-action="preview"]');
+    const button = row.querySelector('[data-catalogue-chart-action="preview"]');
     if (button) button.disabled = true;
     showLoadingOverlay('Generating Chart Data Preview', 'Please wait while the Chart Data Preview is generated.');
     try {
@@ -1166,7 +1201,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const catalogueContent = serialiseCatalogueContent();
     const resolvedRow = Array.from(table.querySelectorAll('tbody tr'))[rowIndex] || row;
     const rowDefinition = {...previewDefinitionFromRow(resolvedRow), ...definition};
-    const button = row.querySelector('[data-catalogue-row-action="chart-preview"]');
+    const button = row.querySelector('[data-catalogue-chart-action="chart-preview"]');
     if (button) button.disabled = true;
     const requestId = ++chartPreviewRequest;
     chartPreviewController?.abort();
@@ -1300,14 +1335,167 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       chartPreviewDatasetFilterMenu.remove(); chartPreviewDatasetFilterMenu = null;
     }
   });
+  const catalogueBlocks = () => {
+    const blocks = [];
+    Array.from(table.querySelectorAll('tbody tr')).map(rowValues).forEach((values) => {
+      if (!blocks.length || blocks.at(-1).slide !== values.Slide) blocks.push({slide: values.Slide, rows: []});
+      blocks.at(-1).rows.push(values);
+    });
+    return blocks;
+  };
+  const markCopiedRow = (values) => ({
+    ...values,
+    __editedFields: [...catalogueHeaders],
+    __originalValues: Object.fromEntries(catalogueHeaders.map((header) => [header, ''])),
+  });
+  const renumberBlocks = (blocks) => blocks.flatMap((block, index) => block.rows.map((values) => {
+    const slide = String(index + 1);
+    const edited = new Set(values.__editedFields || []);
+    if (String(values.Slide || '') !== slide) edited.add('Slide');
+    return {...values, Slide: slide, __editedFields: [...edited]};
+  }));
+  const showCatalogueExportDialog = (kind, templates, sourceBlocks) => new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'confirm-overlay catalogue-copy-overlay';
+    const panel = document.createElement('section');
+    panel.className = 'confirm-panel catalogue-copy-dialog';
+    panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true');
+    const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Copy template content';
+    const title = document.createElement('h3'); title.textContent = `Copy ${kind === 'slide' ? 'slide' : 'chart'} to template`;
+    const form = document.createElement('div'); form.className = 'catalogue-copy-fields';
+    const createField = (labelText) => {
+      const field = document.createElement('label'); field.textContent = labelText;
+      const select = document.createElement('select'); field.append(select); form.append(field);
+      return {field, select};
+    };
+    const destination = createField('Destination template');
+    templates.forEach((item) => destination.select.add(new Option(`${item.technology.toUpperCase()} · ${item.name}`, `${item.technology}:${item.identifier}`)));
+    const slidePosition = createField('Slide position');
+    const destinationSlide = createField('Destination slide');
+    const chartPosition = createField('Chart position');
+    slidePosition.field.hidden = kind !== 'slide';
+    destinationSlide.field.hidden = kind !== 'chart';
+    chartPosition.field.hidden = kind !== 'chart';
+    const actions = document.createElement('div'); actions.className = 'confirm-actions';
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'secondary-button'; cancel.textContent = 'Cancel';
+    const accept = document.createElement('button'); accept.type = 'button'; accept.textContent = 'Copy';
+    actions.append(cancel, accept); panel.append(eyebrow, title, form, actions); overlay.append(panel); document.body.append(overlay);
+    const selectedTemplate = () => {
+      const [technology, identifier] = destination.select.value.split(':', 2);
+      return {technology, identifier, sameTemplate: technology === editor.dataset.templateTechnology && identifier === editor.dataset.templateIdentifier};
+    };
+    const selectedSlides = () => {
+      const selected = selectedTemplate();
+      if (selected.sameTemplate) return sourceBlocks.map((block, index) => ({title: block.rows[0]['Slide Tittle'] || `Slide ${index + 1}`, charts: block.rows.length}));
+      return templates.find((item) => item.technology === selected.technology && item.identifier === selected.identifier)?.slides || [];
+    };
+    const updateChartPositions = () => {
+      const slides = selectedSlides();
+      const selectedIndex = Number(destinationSlide.select.value || 0);
+      const chartCount = Number(slides[selectedIndex]?.charts || 0);
+      chartPosition.select.replaceChildren(...Array.from({length: chartCount + 1}, (_, index) => new Option(
+        index < chartCount ? `Before chart ${index + 1}` : (chartCount ? `After chart ${chartCount}` : 'Chart 1'), String(index),
+      )));
+    };
+    const updateDestinationFields = () => {
+      const slides = selectedSlides();
+      if (kind === 'slide') {
+        slidePosition.select.replaceChildren(...Array.from({length: slides.length + 1}, (_, index) => new Option(
+          index < slides.length ? `Before slide ${index + 1} · ${slides[index].title}` : (slides.length ? `After slide ${slides.length}` : 'Slide 1'), String(index),
+        )));
+        accept.disabled = false;
+        return;
+      }
+      destinationSlide.select.replaceChildren(...slides.map((item, index) => new Option(`Slide ${index + 1} · ${item.title}`, String(index))));
+      accept.disabled = slides.length === 0;
+      updateChartPositions();
+    };
+    const finish = (value) => { overlay.remove(); resolve(value); };
+    destination.select.addEventListener('change', updateDestinationFields);
+    destinationSlide.select.addEventListener('change', updateChartPositions);
+    cancel.addEventListener('click', () => finish(null));
+    accept.addEventListener('click', () => {
+      const selected = selectedTemplate();
+      finish({
+        targetTechnology: selected.technology,
+        targetIdentifier: selected.identifier,
+        sameTemplate: selected.sameTemplate,
+        slidePosition: Number(slidePosition.select.value || 0),
+        targetSlideIndex: Number(destinationSlide.select.value || 0),
+        chartPosition: Number(chartPosition.select.value || 0),
+      });
+    });
+    overlay.addEventListener('click', (event) => { if (event.target === overlay) finish(null); });
+    accept.disabled = templates.length === 0;
+    if (templates.length) updateDestinationFields();
+    destination.select.focus();
+  });
+  const exportCatalogueItem = async (kind, rowIndex) => {
+    const sourceBlocks = catalogueBlocks();
+    const sourceRow = Array.from(table.querySelectorAll('tbody tr'))[rowIndex];
+    const sourceSlide = rowValue(sourceRow, 'Slide');
+    const sourceBlockIndex = sourceBlocks.findIndex((block) => block.slide === sourceSlide);
+    showLoadingOverlay('Loading Slides Templates', 'Please wait while the available destinations are loaded.');
+    try {
+      const response = await fetch(editor.dataset.templateOptionsUrl, {credentials: 'same-origin'});
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Unable to load Slides Templates.');
+      hideLoadingOverlay();
+      const templates = Array.isArray(payload.templates) ? payload.templates : [];
+      const selection = await showCatalogueExportDialog(kind, templates, sourceBlocks);
+      if (!selection) return;
+      if (kind === 'slide' && selection.sameTemplate) {
+        const copied = {slide: '', rows: sourceBlocks[sourceBlockIndex].rows.map(markCopiedRow)};
+        sourceBlocks.splice(selection.slidePosition, 0, copied);
+        renderCatalogueRows(renumberBlocks(sourceBlocks));
+        return;
+      }
+      if (kind === 'chart' && selection.sameTemplate) {
+        const flatRows = Array.from(table.querySelectorAll('tbody tr'));
+        const copied = markCopiedRow(rowValues(flatRows[rowIndex]));
+        const targetBlock = sourceBlocks[selection.targetSlideIndex];
+        sharedSlideFields.forEach((field) => { copied[field] = targetBlock.rows[0][field]; });
+        targetBlock.rows.splice(selection.chartPosition, 0, copied);
+        renderCatalogueRows(renumberBlocks(sourceBlocks));
+        return;
+      }
+      showLoadingOverlay(`Copying ${kind}`, 'Please wait while the destination template is updated.');
+      const requestPayload = {
+        kind,
+        catalogue_content: serialiseCatalogueContent(),
+        source_row_index: rowIndex,
+        target_technology: selection.targetTechnology,
+        target_identifier: selection.targetIdentifier,
+        ...(kind === 'slide' ? {slide_position: selection.slidePosition} : {target_slide_index: selection.targetSlideIndex, chart_position: selection.chartPosition}),
+      };
+      const copyResponse = await fetch(editor.dataset.templateCopyUrl, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(requestPayload)});
+      const result = await copyResponse.json().catch(() => ({}));
+      if (!copyResponse.ok) throw new Error(result.detail || `Unable to copy the ${kind}.`);
+      hideLoadingOverlay();
+      showInfoDialog(`The ${kind} was copied to the selected Slides Template.`, {title: 'Template content copied'});
+    } catch (error) {
+      hideLoadingOverlay();
+      showInfoDialog(error instanceof Error ? error.message : 'Unable to copy template content.', {title: 'Copy template content', tone: 'error'});
+    }
+  };
+  const clearActiveCellForRows = (rows) => {
+    if (!activeCell || !rows.includes(activeCell.closest('tr'))) return;
+    activeCell.classList.remove('is-selected'); activeCell = null;
+    heading.textContent = 'Select a cell';
+    copy.textContent = 'Select a table cell to see compatible layouts, chart types or processed CDR columns.';
+    optionsLabel.hidden = true; apply.hidden = true;
+    if (filterBuilder) filterBuilder.hidden = true;
+  };
   table.addEventListener('click', async (event) => {
-    const button = event.target.closest?.('[data-catalogue-row-action]');
+    const button = event.target.closest?.('[data-catalogue-chart-action], [data-catalogue-slide-action]');
     if (!button) return;
     event.preventDefault();
     const row = button.closest('tr');
-    const body = row?.parentElement;
-    if (!row || !body) return;
-    const action = button.dataset.catalogueRowAction;
+    if (!row) return;
+    const kind = button.dataset.catalogueSlideAction !== undefined ? 'slide' : 'chart';
+    const action = kind === 'slide' ? button.dataset.catalogueSlideAction : button.dataset.catalogueChartAction;
+    const flatRows = Array.from(table.querySelectorAll('tbody tr'));
+    const rowIndex = flatRows.indexOf(row);
     if (action === 'preview') {
       chartPreviewRow = row;
       chartPreviewDialog?.classList.add('is-dataset-only');
@@ -1317,56 +1505,44 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       if (chartPreviewSandbox) chartPreviewSandbox.hidden = true;
       if (chartPreviewTableWrap) chartPreviewTableWrap.hidden = true;
       showLoadingOverlay('Loading Chart Data Preview', 'Please wait while the selected chart dataset is loaded.');
-      chartPreviewData?.click();
-      return;
+      chartPreviewData?.click(); return;
     }
-    if (action === 'chart-preview') {
-      await previewGeneratedChart(row);
-      return;
+    if (action === 'chart-preview') { await previewGeneratedChart(row); return; }
+    if (action === 'export') { await exportCatalogueItem(kind, rowIndex); return; }
+    const blocks = catalogueBlocks();
+    const slide = rowValue(row, 'Slide');
+    const blockIndex = blocks.findIndex((block) => block.slide === slide);
+    const chartIndex = blocks[blockIndex].rows.findIndex((_item, index) => flatRows.filter((candidate) => rowValue(candidate, 'Slide') === slide)[index] === row);
+    if (kind === 'chart') {
+      const charts = blocks[blockIndex].rows;
+      if (action === 'up' && chartIndex > 0) [charts[chartIndex - 1], charts[chartIndex]] = [charts[chartIndex], charts[chartIndex - 1]];
+      else if (action === 'down' && chartIndex < charts.length - 1) [charts[chartIndex], charts[chartIndex + 1]] = [charts[chartIndex + 1], charts[chartIndex]];
+      else if (action === 'insert') charts.splice(chartIndex + 1, 0, {...charts[chartIndex], ...Object.fromEntries(catalogueHeaders.filter((header) => !sharedSlideFields.includes(header)).map((header) => [header, ''])), __editedFields: [...catalogueHeaders.filter((header) => !sharedSlideFields.includes(header))]});
+      else if (action === 'duplicate') charts.splice(chartIndex + 1, 0, markCopiedRow({...charts[chartIndex]}));
+      else if (action === 'delete') { clearActiveCellForRows([row]); charts.splice(chartIndex, 1); if (!charts.length) blocks.splice(blockIndex, 1); }
+    } else {
+      if (action === 'up' && blockIndex > 0) [blocks[blockIndex - 1], blocks[blockIndex]] = [blocks[blockIndex], blocks[blockIndex - 1]];
+      else if (action === 'down' && blockIndex < blocks.length - 1) [blocks[blockIndex], blocks[blockIndex + 1]] = [blocks[blockIndex + 1], blocks[blockIndex]];
+      else if (action === 'insert') blocks.splice(blockIndex + 1, 0, {slide: '', rows: [markCopiedRow(Object.fromEntries(catalogueHeaders.map((header) => [header, ''])))]});
+      else if (action === 'duplicate') blocks.splice(blockIndex + 1, 0, {slide: '', rows: blocks[blockIndex].rows.map((item) => markCopiedRow({...item}))});
+      else if (action === 'delete') { clearActiveCellForRows(flatRows.filter((candidate) => rowValue(candidate, 'Slide') === slide)); blocks.splice(blockIndex, 1); }
     }
-    if (action === 'insert') {
-      const slide = rowValue(row, 'Slide');
-      const nextRow = row.nextElementSibling;
-      const isLastChartOfSlide = !nextRow || rowValue(nextRow, 'Slide') !== slide;
-      const choice = isLastChartOfSlide ? await showCatalogueInsertChoice(slide) : 'chart';
-      if (!choice) return;
-      if (choice === 'chart') {
-        const inserted = createCatalogueRow(row, true);
-        body.insertBefore(inserted, row.nextElementSibling);
-        normaliseCatalogueRows();
-        return;
-      }
-      const currentSlide = Number(slide);
-      if (!Number.isInteger(currentSlide) || currentSlide < 1) return;
-      const rows = Array.from(body.querySelectorAll('tr')).map(rowValues);
-      const rowIndex = Array.from(body.querySelectorAll('tr')).indexOf(row);
-      rows.forEach((candidate) => {
-        const candidateSlide = Number(candidate.Slide);
-        if (Number.isInteger(candidateSlide) && candidateSlide > currentSlide) candidate.Slide = String(candidateSlide + 1);
-      });
-      rows.splice(rowIndex + 1, 0, {Slide: String(currentSlide + 1)});
-      renderCatalogueRows(rows);
-      return;
-    }
-    if (action === 'up' && row.previousElementSibling) {
-      body.insertBefore(row, row.previousElementSibling);
-    } else if (action === 'down' && row.nextElementSibling) {
-      body.insertBefore(row.nextElementSibling, row);
-    } else if (action === 'delete') {
-      if (activeCell?.closest('tr') === row) {
-        activeCell.classList.remove('is-selected');
-        activeCell = null;
-        heading.textContent = 'Select a cell';
-        copy.textContent = 'Select a table cell to see compatible layouts, chart types or processed CDR columns.';
-        optionsLabel.hidden = true;
-        apply.hidden = true;
-        if (filterBuilder) filterBuilder.hidden = true;
-      }
-      row.remove();
-    }
-    normaliseCatalogueRows();
+    if (!blocks.length) blocks.push({slide: '1', rows: [Object.fromEntries(catalogueHeaders.map((header) => [header, header === 'Slide' ? '1' : '']))]});
+    renderCatalogueRows(renumberBlocks(blocks));
   });
   normaliseCatalogueRows();
+  if (Number.isInteger(requestedRowIndex) && requestedRowIndex >= 0) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const row = table.querySelector(`tbody tr[data-catalogue-row-index="${requestedRowIndex}"]`);
+      const viewport = table.closest('.table-wrap');
+      if (!row || !viewport) return;
+      row.classList.add('catalogue-editor-focus-row');
+      viewport.scrollTop = Math.max(0, row.offsetTop - (viewport.clientHeight - row.offsetHeight) / 2);
+      const chartTitle = row.querySelector('[data-catalogue-field="Chart Tittle"]');
+      if (chartTitle) viewport.scrollLeft = Math.max(0, chartTitle.offsetLeft - viewport.clientWidth / 3);
+      (chartTitle || row.querySelector('[data-catalogue-field="Slide Tittle"]'))?.focus({preventScroll: true});
+    }));
+  }
   reenumerate?.addEventListener('click', () => {
     const body = table.querySelector('tbody');
     if (!body) return;

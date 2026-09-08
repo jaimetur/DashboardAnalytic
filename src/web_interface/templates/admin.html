@@ -240,23 +240,17 @@
     {% if catalogue_editor %}
     <div class="alert alert-warning" role="alert" data-catalogue-validation-alert{% if not catalogue_editor.validation_error %} hidden{% endif %}><strong>This Slides Template contains an invalid filter.</strong> <span data-catalogue-validation-message>{{ catalogue_editor.validation_error or '' }}</span> Correct that filter definition before saving.</div>
     <p class="lede">Rows are ordered by Slide and alternate by slide block. When a slide contains several charts, its shared slide number, title, subtitle and layout are shown once and apply to the full slide block; saving writes those values back to every chart row in the CSV. Select a cell to edit it manually or use the contextual suggestions on the right.</p>
-    <div class="slides-templates-editor-grid" data-catalogue-editor data-editor-suggestions='{{ catalogue_editor.suggestions | tojson }}' data-chart-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-preview" data-chart-image-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-image-preview">
+    <div class="slides-templates-editor-grid" data-catalogue-editor data-editor-suggestions='{{ catalogue_editor.suggestions | tojson }}' data-template-technology="{{ catalogue_editor.technology }}" data-template-identifier="{{ catalogue_editor.catalogue.identifier }}" data-template-options-url="/api/admin/report-templates/copy-options" data-template-copy-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/copy-items" data-chart-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-preview" data-chart-image-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-image-preview">
       <form class="slides-templates-editor-table-wrap" action="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/save" method="post" data-catalogue-editor-save>
         <input type="hidden" name="catalogue_content" value="" data-catalogue-editor-content>
         <div class="table-wrap">
           <table class="slides-templates-editor-table" data-catalogue-editor-table>
-            <thead><tr><th class="catalogue-row-actions-heading">Row actions</th>{% for header in catalogue_editor.headers %}<th>{{ header }}</th>{% endfor %}</tr></thead>
+            <thead><tr><th class="catalogue-slide-actions-heading">Slide Actions</th>{% for header in catalogue_editor.headers %}{% if header == 'Chart Tittle' %}<th class="catalogue-chart-actions-heading">Chart Actions</th>{% endif %}<th data-catalogue-field="{{ header }}">{{ header }}</th>{% endfor %}</tr></thead>
             <tbody>
               {% for row in catalogue_editor.rows %}
-              <tr>
-                <td class="catalogue-row-actions" data-catalogue-row-actions>
-                  <button type="button" data-catalogue-row-action="up" title="Move row up" aria-label="Move row up">↑</button>
-                  <button type="button" data-catalogue-row-action="down" title="Move row down" aria-label="Move row down">↓</button>
-                  <button type="button" data-catalogue-row-action="insert" title="Insert a row below" aria-label="Insert a row below">+</button>
-                  <button type="button" class="catalogue-row-delete" data-catalogue-row-action="delete" title="Delete row" aria-label="Delete row">−</button>
-                  {% if row.get('CDR source') %}<button type="button" data-catalogue-row-action="preview" title="Preview chart data" aria-label="Preview chart data">▥</button><button type="button" data-catalogue-row-action="chart-preview" title="Preview generated chart" aria-label="Preview generated chart">👁</button>{% endif %}
-                </td>
-                {% for header in catalogue_editor.headers %}<td contenteditable="true" spellcheck="false" data-catalogue-field="{{ header }}">{{ row.get(header, '') }}</td>{% endfor %}
+              <tr data-catalogue-row-index="{{ loop.index0 }}">
+                <td class="catalogue-slide-actions" data-catalogue-slide-actions></td>
+                {% for header in catalogue_editor.headers %}{% if header == 'Chart Tittle' %}<td class="catalogue-chart-actions" data-catalogue-chart-actions></td>{% endif %}<td contenteditable="true" spellcheck="false" data-catalogue-field="{{ header }}">{{ row.get(header, '') }}</td>{% endfor %}
               </tr>
               {% endfor %}
             </tbody>

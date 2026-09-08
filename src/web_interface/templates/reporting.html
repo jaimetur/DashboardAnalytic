@@ -25,17 +25,17 @@
     <div class="collapsible-panel-body">
       <form action="/reporting/netcheck-cdr" method="post" class="form-grid" data-report-job-form>
       <label>CDR Data <span class="form-label-hint">Select one or more</span>
-        <select name="data_dataset_id" required multiple size="4" aria-describedby="cdr-selection-help">
+        <select name="data_dataset_id" multiple size="4" aria-describedby="cdr-selection-help">
           {% for dataset in data_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}" data-uploaded-at="{{ dataset.uploaded_at }}"{% if loop.index <= 2 %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
       <label>CDR Voice <span class="form-label-hint">Select one or more</span>
-        <select name="voice_dataset_id" required multiple size="4" aria-describedby="cdr-selection-help">
+        <select name="voice_dataset_id" multiple size="4" aria-describedby="cdr-selection-help">
           {% for dataset in voice_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}" data-uploaded-at="{{ dataset.uploaded_at }}"{% if loop.index <= 2 %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
       <label>CDR Speech <span class="form-label-hint">Select one or more</span>
-        <select name="speech_dataset_id" required multiple size="4" aria-describedby="cdr-selection-help">
+        <select name="speech_dataset_id" multiple size="4" aria-describedby="cdr-selection-help">
           {% for dataset in speech_datasets %}<option value="{{ dataset.id }}" data-vendor-mapped="{{ 'true' if dataset.vendor_mapping_applied else 'false' }}" data-uploaded-at="{{ dataset.uploaded_at }}"{% if loop.index <= 2 %} selected{% endif %}>{{ dataset.file_name }} · {{ dataset.row_count }} rows</option>{% endfor %}
         </select>
       </label>
@@ -56,7 +56,7 @@
       </label>
       <div class="form-actions reporting-submit-action"><button type="submit">Generate PowerPoint Report</button><button type="button" class="report-charts-button" data-report-charts-button>Generate Report Charts</button></div>
       </form>
-      <p id="cdr-selection-help" class="form-note">Use Ctrl/Cmd-click to select several CDRs of the same type. Their processed rows are concatenated using the union of their columns, preserving Campaign values for cross-campaign comparisons. Choose Slides Templates matching the selected technology; they apply only to this report and do not change the workspace default. Map Vendors from Workspace before choosing Multivendor. The common Template_CDR_analysis.pptx supplies masters and layouts for every report: the selected template creates each slide from scratch, fills its chart placeholders from the selected CDRs and keeps commentary areas blank for the analyst.</p>
+      <p id="cdr-selection-help" class="form-note">Select at least one CDR from any supported type. Types without a selection remain in the report as charts labelled Unavailable source type. Use Ctrl/Cmd-click to select several CDRs of the same type. Their processed rows are concatenated using the union of their columns, preserving Campaign values for cross-campaign comparisons. Choose Slides Templates matching the selected technology; they apply only to this report and do not change the workspace default. Map Vendors from Workspace before choosing Multivendor. The common Template_CDR_analysis.pptx supplies masters and layouts for every report: the selected template creates each slide from scratch, fills its chart placeholders from the selected CDRs and keeps commentary areas blank for the analyst.</p>
     </div>
   </details>
 
@@ -69,6 +69,12 @@
       <div class="summary-inline-actions"><span class="pill" data-report-charts-generated-at hidden></span><span class="pill" data-report-charts-template hidden></span><span class="pill" data-report-charts-scope hidden></span><span class="pill" data-report-charts-data-count hidden></span><span class="pill" data-report-charts-voice-count hidden></span><span class="pill" data-report-charts-speech-count hidden></span><span class="collapse-chip">Collapse</span></div>
     </summary>
     <div class="collapsible-panel-body">
+      <div class="reporting-job-filters" data-reporting-filter-panel="charts">
+        <label>Tech<select data-reporting-job-filter="tech"><option value="">All</option></select></label>
+        <label>Type<select data-reporting-job-filter="type"><option value="">All</option><option value="report">Report</option><option value="charts">Charts</option></select></label>
+        <label>Template<select data-reporting-job-filter="template"><option value="">All</option></select></label>
+        <label>Scope<select data-reporting-job-filter="scope"><option value="">All</option><option value="single">Operator Comparison</option><option value="multivendor">Multivendor Comparison</option></select></label>
+      </div>
       <div class="report-chart-set-controls">
         <label>Charts Set:
           <select class="chart-set-native-select" data-report-chart-set aria-label="Chart set">
@@ -108,6 +114,12 @@
       <div class="summary-inline-actions"><span class="pill" data-report-jobs-count>{{ (report_jobs | length) + (report_chart_jobs | length) }} jobs</span><span class="collapse-chip">Collapse</span></div>
     </summary>
     <div class="collapsible-panel-body">
+      <div class="reporting-job-filters" data-reporting-filter-panel="jobs">
+        <label>Tech<select data-reporting-job-filter="tech"><option value="">All</option></select></label>
+        <label>Type<select data-reporting-job-filter="type"><option value="">All</option><option value="report">Report</option><option value="charts">Charts</option></select></label>
+        <label>Template<select data-reporting-job-filter="template"><option value="">All</option></select></label>
+        <label>Scope<select data-reporting-job-filter="scope"><option value="">All</option><option value="single">Operator Comparison</option><option value="multivendor">Multivendor Comparison</option></select></label>
+      </div>
       {% if user.role in ['admin', 'super-admin'] %}
       <div class="report-jobs-bulk-actions"><button type="button" class="danger-button report-jobs-delete-all" data-report-jobs-delete-all>Delete All Reports</button><button type="button" class="danger-button report-chart-jobs-delete-all" data-report-chart-sets-delete-all-from-jobs>Delete All Charts Sets</button></div>
       {% endif %}
@@ -117,7 +129,7 @@
         <thead><tr><th>ID</th><th>Generated by</th><th>Date</th><th>Tech</th><th>Type</th><th>Template</th><th>Scope</th><th>Slides</th><th>Charts</th><th>Datasets</th><th>Status</th><th>Progress</th><th>Actions</th></tr></thead>
         <tbody data-report-jobs-body data-report-chart-jobs-body>
           {% for job in report_jobs %}
-          <tr data-job-kind="report" data-job-date="{{ job.date }}">
+          <tr data-job-kind="report" data-job-date="{{ job.date }}" data-job-tech="{{ job.type | lower }}" data-job-template="{{ job.template | lower }}" data-job-scope="{{ job.scope | lower }}">
             <td>{{ job.id }}</td><td>{{ job.generated_by }}</td><td>{{ job.date }}</td><td>{{ job.type or '-' }}</td><td>Report</td><td>{{ job.template or '-' }}</td><td>{{ job.scope or '-' }}</td><td>{{ job.slides if job.slides is not none else '-' }}</td><td>{{ job.charts if job.charts is not none else '-' }}</td><td class="report-job-datasets">{% if job.dataset_groups %}{% for group in job.dataset_groups %}<span class="report-job-dataset-kind">{{ group.kind }}:</span>{% for name in group.names %}<span>{{ name }}</span>{% endfor %}{% endfor %}{% else %}Historical report{% endif %}</td>
             <td class="report-job-status"{% if job.error %} title="{{ job.error }}"{% endif %}><span class="queue-status-pill queue-status-{{ job.status | lower | replace('_', '-') }}">{{ job.status | title }}</span>{% if job.error and job.status | lower in ['failed', 'stopped'] %}<p class="report-job-error">{{ job.error }}</p>{% endif %}</td>
             <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%</span></div></td>
@@ -132,7 +144,7 @@
           </tr>
           {% endfor %}
           {% for job in report_chart_jobs %}
-          <tr data-job-kind="charts" data-job-date="{{ job.date }}">
+          <tr data-job-kind="charts" data-job-date="{{ job.date }}" data-job-tech="{{ job.type | lower }}" data-job-template="{{ job.template | lower }}" data-job-scope="{{ job.scope | lower }}">
             <td>{{ job.id }}</td><td>{{ job.generated_by }}</td><td>{{ job.date }}</td><td>{{ job.type or '-' }}</td><td>Charts</td><td>{{ job.template or '-' }}</td><td>{{ job.scope or '-' }}</td><td>-</td><td>{{ job.charts if job.charts is not none else '-' }}</td><td class="report-job-datasets">{% if job.dataset_groups %}{% for group in job.dataset_groups %}<span class="report-job-dataset-kind">{{ group.kind }}:</span>{% for name in group.names %}<span>{{ name }}</span>{% endfor %}{% endfor %}{% else %}Historical Chart Set{% endif %}</td>
             <td class="report-job-status"{% if job.error %} title="{{ job.error }}"{% endif %}><span class="queue-status-pill queue-status-{{ job.status | lower | replace('_', '-') }}">{{ job.status | title }}</span>{% if job.error and job.status | lower in ['failed', 'stopped'] %}<p class="report-job-error">{{ job.error }}</p>{% endif %}</td>
             <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%</span></div></td>
@@ -205,6 +217,9 @@
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 4h16v16H4zM4 9h16M4 14h16M10 4v16"/></svg>
         <span>View filtered dataset</span>
         </button>
+        {% if user.role in ['admin', 'super-admin'] %}<button type="button" class="report-chart-viewer-edit-template-button" data-report-chart-viewer-edit-template hidden>
+        <span aria-hidden="true">✎</span><span>Edit Template</span>
+        </button>{% endif %}
       </div>
     </div>
     <div class="report-chart-viewer-data-overlay" data-report-chart-viewer-data-overlay hidden>
@@ -240,10 +255,8 @@
     const multivendorOption = scope?.querySelector('option[value="multivendor"]');
     if (!scope || !multivendorOption) return;
     const updateScope = () => {
-      const allCdrsMapped = Array.from(cdrSelectors).every((select) => (
-        select.selectedOptions.length > 0
-        && Array.from(select.selectedOptions).every((option) => option.dataset.vendorMapped === 'true')
-      ));
+      const selectedOptions = Array.from(cdrSelectors).flatMap((select) => Array.from(select.selectedOptions));
+      const allCdrsMapped = selectedOptions.length > 0 && selectedOptions.every((option) => option.dataset.vendorMapped === 'true');
       multivendorOption.disabled = !allCdrsMapped;
       if (!allCdrsMapped && scope.value === 'multivendor') scope.value = 'single';
     };
@@ -315,9 +328,11 @@
     const reportChartViewerInteractive = document.querySelector('[data-report-chart-viewer-interactive]');
     const compactChartViewerViewport = window.matchMedia('(max-width: 640px), (max-height: 600px) and (orientation: landscape)');
     const reportChartViewerData = document.querySelector('[data-report-chart-viewer-data]');
+    const reportChartViewerEditTemplate = document.querySelector('[data-report-chart-viewer-edit-template]');
     const reportChartViewerDataPanel = document.querySelector('[data-report-chart-viewer-data-panel]');
     const reportChartViewerDataOverlay = document.querySelector('[data-report-chart-viewer-data-overlay]');
     let reportChartViewerDataset = null;
+    let reportChartViewerTemplateRowIndex = null;
     let reportChartViewerDatasetFilters = new Map();
     let reportChartViewerDatasetPage = 0;
     const reportChartViewerDatasetPageSize = 100;
@@ -337,6 +352,11 @@
       label: ({data_dataset_id: 'CDR Data', voice_dataset_id: 'CDR Voice', speech_dataset_id: 'CDR Speech'})[select.name] || select.name,
       options: Array.from(select.selectedOptions),
     }));
+    const validateCdrSelection = () => {
+      if (selectedCdrsByType().some(({options}) => options.length > 0)) return true;
+      showInfoDialog('Select at least one Data, Voice or Speech CDR.', {title: 'CDR selection required', tone: 'error'});
+      return false;
+    };
     const campaignPeriod = (option) => {
       const label = String(option?.textContent || '');
       const yearThenQuarter = label.match(/\b((?:19|20)\d{2})\D*Q([1-4])\b/i);
@@ -399,7 +419,7 @@
       if (!reportMulticampaignDialog || !reportMulticampaignGroups || !reportMulticampaignContinue || !reportMulticampaignCancel) {
         return Promise.resolve(window.confirm('Multivendor charts with several campaigns can be difficult to read. Continue with the currently selected CDRs?'));
       }
-      const selections = selectedCdrsByType();
+      const selections = selectedCdrsByType().filter(({options}) => options.length > 0);
       reportMulticampaignGroups.replaceChildren(...selections.map(({select, label, options}) => {
         const group = document.createElement('fieldset');
         group.className = 'report-multicampaign-group';
@@ -477,6 +497,22 @@
     const reportChartViewerContextCache = new Map();
     let reportChartSets = {{ report_chart_sets | tojson }};
     let reportChartReportSets = {{ report_chart_report_sets | tojson }};
+    const reportingFilterControls = Array.from(document.querySelectorAll('[data-reporting-job-filter]'));
+    const reportingFilterState = {tech: '', type: '', template: '', scope: ''};
+    const normaliseReportingFilter = (value) => String(value || '').trim().toLocaleLowerCase();
+    const normaliseReportingScope = (value) => {
+      const normalized = normaliseReportingFilter(value);
+      if (normalized.includes('multi')) return 'multivendor';
+      return normalized === 'single' || normalized.includes('operator') ? 'single' : '';
+    };
+    const chartSetMetadata = (kind, item) => ({
+      tech: normaliseReportingFilter(item.technology || item.type),
+      type: kind === 'report' ? 'report' : 'charts',
+      template: normaliseReportingFilter(item.template),
+      scope: normaliseReportingScope(item.scope),
+    });
+    const matchesReportingFilters = (metadata) => Object.entries(reportingFilterState)
+      .every(([field, selected]) => !selected || normaliseReportingFilter(metadata[field]) === selected);
     const reportScopeLabel = (scope) => ({single: 'Operator Comparison', multivendor: 'Multivendor Comparison'}[scope] || scope || '');
     const reportDatasetCounts = (chartSet) => {
       const counts = chartSet?.dataset_counts || {};
@@ -505,7 +541,7 @@
     const rebuildReportChartSetSelector = (selectedValue = '') => {
       if (!reportChartSetSelect) return;
       const options = [
-        ...reportChartReportSets.map((report) => {
+        ...reportChartReportSets.filter((report) => matchesReportingFilters(chartSetMetadata('report', report))).map((report) => {
           const option = document.createElement('option');
           option.className = 'chart-set-option-report';
           option.value = `report:${report.id}`;
@@ -513,7 +549,7 @@
           option.dataset.chartSetTimestamp = chartSetTimestamp(report);
           return option;
         }),
-        ...reportChartSets.map((chartSet) => {
+        ...reportChartSets.filter((chartSet) => matchesReportingFilters(chartSetMetadata('standalone', chartSet))).map((chartSet) => {
           const option = document.createElement('option');
           option.className = 'chart-set-option-standalone';
           option.value = `standalone:${chartSet.generation}`;
@@ -544,11 +580,11 @@
       if (reportChartSetDelete) reportChartSetDelete.hidden = !hasChartSets || !selectedValue;
       if (reportChartSetDeleteAll) reportChartSetDeleteAll.hidden = !reportChartSets.length;
     };
-    const clearSelectedReportCharts = () => {
+    const clearSelectedReportCharts = (keepPanelVisible = false) => {
       reportCharts = [];
       reportChartsBody?.replaceChildren();
       if (reportChartsCount) reportChartsCount.textContent = '0 charts';
-      reportChartsPanel?.removeAttribute('data-report-charts-ready');
+      if (!keepPanelVisible) reportChartsPanel?.removeAttribute('data-report-charts-ready');
       [reportChartsGeneratedAt, reportChartsTemplate, reportChartsScope, reportChartsDataCount, reportChartsVoiceCount, reportChartsSpeechCount]
         .forEach((badge) => { if (badge) badge.hidden = true; });
       updateReportingModule();
@@ -587,9 +623,42 @@
       const rows = Array.from(jobsBody.querySelectorAll('tr[data-job-kind]'));
       rows.sort((left, right) => String(right.dataset.jobDate || '').localeCompare(String(left.dataset.jobDate || '')));
       jobsBody.replaceChildren(...rows);
-      if (jobsCount) jobsCount.textContent = `${rows.length} ${rows.length === 1 ? 'job' : 'jobs'}`;
-      if (jobsEmpty) jobsEmpty.hidden = rows.length > 0;
+      rows.forEach((row) => {
+        row.hidden = !matchesReportingFilters({tech: row.dataset.jobTech, type: row.dataset.jobKind, template: row.dataset.jobTemplate, scope: normaliseReportingScope(row.dataset.jobScope)});
+      });
+      const visibleRows = rows.filter((row) => !row.hidden);
+      if (jobsCount) jobsCount.textContent = `${visibleRows.length} ${visibleRows.length === 1 ? 'job' : 'jobs'}`;
+      if (jobsEmpty) jobsEmpty.hidden = visibleRows.length > 0;
     };
+    const refreshReportingFilterChoices = () => {
+      const rows = Array.from(jobsBody?.querySelectorAll('tr[data-job-kind]') || []);
+      const metadata = [
+        ...reportChartReportSets.map((item) => chartSetMetadata('report', item)),
+        ...reportChartSets.map((item) => chartSetMetadata('standalone', item)),
+        ...rows.map((row) => ({tech: row.dataset.jobTech, type: row.dataset.jobKind, template: row.dataset.jobTemplate, scope: normaliseReportingScope(row.dataset.jobScope)})),
+      ];
+      ['tech', 'template'].forEach((field) => {
+        const values = [...new Set(metadata.map((item) => normaliseReportingFilter(item[field])).filter(Boolean))].sort();
+        reportingFilterControls.filter((control) => control.dataset.reportingJobFilter === field).forEach((control) => {
+          control.replaceChildren(new Option('All', ''), ...values.map((value) => new Option(field === 'tech' ? value.toUpperCase() : value, value)));
+          control.value = reportingFilterState[field];
+        });
+      });
+    };
+    const applyReportingFilters = (loadChangedChartSet = true) => {
+      reportingFilterControls.forEach((control) => { control.value = reportingFilterState[control.dataset.reportingJobFilter] || ''; });
+      const previousChartSet = reportChartSetSelect?.value || '';
+      rebuildReportChartSetSelector(previousChartSet);
+      refreshReportingFilterChoices();
+      syncCombinedJobSummary();
+      const nextChartSet = reportChartSetSelect?.value || '';
+      if (loadChangedChartSet && nextChartSet && nextChartSet !== previousChartSet) reportChartSetSelect.dispatchEvent(new Event('change'));
+      else if (!nextChartSet) clearSelectedReportCharts(reportChartSets.length > 0 || reportChartReportSets.length > 0);
+    };
+    reportingFilterControls.forEach((control) => control.addEventListener('change', () => {
+      reportingFilterState[control.dataset.reportingJobFilter] = normaliseReportingFilter(control.value);
+      applyReportingFilters();
+    }));
     const statusLabel = (job) => String(job.status || '').replace(/^./, (letter) => letter.toUpperCase());
     const statusBadgeCell = (job) => {
       const node = document.createElement('td');
@@ -642,7 +711,7 @@
       jobsBody.querySelectorAll('tr[data-job-kind="report"]').forEach((row) => row.remove());
       jobsBody.append(...jobs.map((job) => {
         const row = document.createElement('tr');
-        row.dataset.jobKind = 'report'; row.dataset.jobDate = job.date || '';
+        row.dataset.jobKind = 'report'; row.dataset.jobDate = job.date || ''; row.dataset.jobTech = normaliseReportingFilter(job.type); row.dataset.jobTemplate = normaliseReportingFilter(job.template); row.dataset.jobScope = normaliseReportingScope(job.scope);
         row.append(cell(job.id), cell(job.generated_by || '-'), cell(job.date || '-'), cell(job.type || '-'), cell('Report'), cell(job.template || '-'), cell(job.scope || '-'), cell(job.slides ?? '-'), cell(job.charts ?? '-'), datasetCell(job), statusBadgeCell(job));
         const progressCell = document.createElement('td');
         const progress = document.createElement('div');
@@ -726,6 +795,7 @@
         row.append(progressCell, actionsCell);
         return row;
       }));
+      refreshReportingFilterChoices();
       syncCombinedJobSummary();
     };
     let pollingReportJobs = false;
@@ -769,7 +839,7 @@
       chartJobsBody.querySelectorAll('tr[data-job-kind="charts"]').forEach((row) => row.remove());
       chartJobsBody.append(...jobs.map((job) => {
         const row = document.createElement('tr');
-        row.dataset.jobKind = 'charts'; row.dataset.jobDate = job.date || '';
+        row.dataset.jobKind = 'charts'; row.dataset.jobDate = job.date || ''; row.dataset.jobTech = normaliseReportingFilter(job.type); row.dataset.jobTemplate = normaliseReportingFilter(job.template); row.dataset.jobScope = normaliseReportingScope(job.scope);
         row.append(cell(job.id), cell(job.generated_by || '-'), cell(job.date || '-'), cell(job.type || '-'), cell('Charts'), cell(job.template || '-'), cell(job.scope || '-'), cell('-'), cell(job.charts ?? '-'), datasetCell(job), statusBadgeCell(job));
         const progressCell = document.createElement('td');
         const progress = document.createElement('div'); progress.className = 'report-job-progress';
@@ -786,6 +856,7 @@
         {% endif %}
         actionsCell.append(actions); row.append(progressCell, actionsCell); return row;
       }));
+      refreshReportingFilterChoices();
       syncCombinedJobSummary();
     };
     let pollingReportChartJobs = false;
@@ -815,7 +886,7 @@
     };
     reportForm?.addEventListener('submit', async (event) => {
       event.preventDefault();
-      if (!reportForm.reportValidity() || !(await reviewMultivendorCampaigns())) return;
+      if (!reportForm.reportValidity() || !validateCdrSelection() || !(await reviewMultivendorCampaigns())) return;
       const confirmation = await showConfirmDialog(
         'Generate the PowerPoint report with the selected CDRs and Slides Template?',
         {title: 'Generate PowerPoint Report', confirmLabel: 'Generate', optionLabel: 'Generate interactive tooltips', optionChecked: true},
@@ -843,12 +914,12 @@
       const charts = Array.isArray(payload.charts) ? payload.charts : [];
       if (!reportChartsBody) return;
       if (payload.generation && !reportChartSets.some((chartSet) => chartSet.generation === payload.generation)) {
-        reportChartSets = [{generation: payload.generation, template: payload.template || '', scope: payload.scope || 'single', dataset_counts: payload.dataset_counts || {}, generated_at: payload.generated_at || ''}, ...reportChartSets];
+        reportChartSets = [{generation: payload.generation, template: payload.template || '', technology: payload.technology || '', scope: payload.scope || 'single', dataset_counts: payload.dataset_counts || {}, generated_at: payload.generated_at || ''}, ...reportChartSets];
       }
       let selectedChartSet = payload.generation ? `standalone:${payload.generation}` : '';
       if (payload.report_job_id) {
         const reportId = Number(payload.report_job_id);
-        const reportSet = {id: reportId, report_name: payload.report_name || '', charts_url: `/api/reporting/jobs/${reportId}/charts`, charts_date: payload.generated_at || ''};
+        const reportSet = {id: reportId, report_name: payload.report_name || '', template: payload.template || '', type: payload.technology || '', charts_url: `/api/reporting/jobs/${reportId}/charts`, charts_date: payload.generated_at || ''};
         const index = reportChartReportSets.findIndex((item) => Number(item.id) === reportId);
         if (index >= 0) reportChartReportSets[index] = {...reportChartReportSets[index], ...reportSet};
         else reportChartReportSets = [reportSet, ...reportChartReportSets];
@@ -907,13 +978,20 @@
       if (reportTemplateEditor) reportTemplateEditor.hidden = true;
       if (reportTemplateEditorFrame) reportTemplateEditorFrame.removeAttribute('src');
     };
-    reportChartsEditTemplate?.addEventListener('click', () => {
+    const openTemplateEditor = (templateRowIndex = null) => {
       if (!activeChartSetTemplate || !reportTemplateEditor || !reportTemplateEditorFrame) return;
-      reportTemplateEditorFrame.src = `/admin/report-templates/${encodeURIComponent(activeChartSetTechnology || 'auto')}/${encodeURIComponent(activeChartSetTemplate)}/editor`;
+      const editorUrl = new URL(
+        `/admin/report-templates/${encodeURIComponent(activeChartSetTechnology || 'auto')}/${encodeURIComponent(activeChartSetTemplate)}/editor`,
+        window.location.origin,
+      );
+      if (Number.isInteger(templateRowIndex) && templateRowIndex >= 0) editorUrl.searchParams.set('focus_row', String(templateRowIndex));
+      reportTemplateEditorFrame.src = `${editorUrl.pathname}${editorUrl.search}`;
       if (reportTemplateEditorTitle) reportTemplateEditorTitle.textContent = `Edit Slides Template: "${activeChartSetTemplate}"`;
       reportTemplateEditor.hidden = false;
       reportTemplateEditorClose?.focus();
-    });
+    };
+    reportChartsEditTemplate?.addEventListener('click', () => openTemplateEditor());
+    reportChartViewerEditTemplate?.addEventListener('click', () => openTemplateEditor(reportChartViewerTemplateRowIndex));
     reportTemplateEditor?.addEventListener('click', (event) => {
       if (event.target === reportTemplateEditor || event.target.closest('[data-report-template-editor-close]')) closeTemplateEditor();
     });
@@ -1402,7 +1480,14 @@
       try {
         const definition = await fetchChartViewerContext(source, identifier, reportChartIndex);
         if (session !== reportChartViewerSession) return;
+        const templateRowIndex = Number(definition.template_row_index);
+        reportChartViewerTemplateRowIndex = Number.isInteger(templateRowIndex) && templateRowIndex >= 0 ? templateRowIndex : null;
+        if (reportChartViewerEditTemplate) reportChartViewerEditTemplate.hidden = !activeChartSetTemplate || reportChartViewerTemplateRowIndex === null;
         renderSharedChartViewerSandbox(definition, chart);
+        if (!definition.source_available) {
+          if (reportChartViewerData) reportChartViewerData.hidden = true;
+          if (reportChartViewerInteractive) reportChartViewerInteractive.hidden = true;
+        }
         prefetchAdjacentChartViewerContexts(source, identifier);
       } catch (error) { showInfoDialog(error.message || 'Unable to load chart definition.', {title: 'Chart preview', tone: 'error'}); }
     };
@@ -1662,6 +1747,8 @@
       reportChartHoverTargets = [];
       hideReportChartHoverTooltip();
       reportChartIndex = Math.max(0, Math.min(index, reportCharts.length - 1));
+      reportChartViewerTemplateRowIndex = null;
+      if (reportChartViewerEditTemplate) reportChartViewerEditTemplate.hidden = true;
       const chart = reportCharts[reportChartIndex];
       if (reportChartViewerTitle) reportChartViewerTitle.textContent = `Slide ${chart.slide} · ${chart.title}`;
       if (reportChartViewerCount) reportChartViewerCount.textContent = `Chart ${reportChartIndex + 1} of ${reportCharts.length}`;
@@ -1738,7 +1825,7 @@
       if (event.key === 'ArrowRight') openReportChartViewer(reportChartIndex + 1);
     });
     reportChartsButton?.addEventListener('click', async () => {
-      if (!reportForm?.reportValidity()) return;
+      if (!reportForm?.reportValidity() || !validateCdrSelection()) return;
       if (!(await reviewMultivendorCampaigns())) return;
       const confirmation = await showConfirmDialog(
         'Generate the selected report charts with the current CDRs and Slides Template?',
@@ -1771,6 +1858,8 @@
     const persistedReportCharts = {{ report_charts | tojson }};
     if (persistedReportCharts) renderReportCharts(persistedReportCharts);
     else { rebuildReportChartSetSelector(reportChartSetSelect?.value || ''); updateChartSetActions(); }
+    refreshReportingFilterChoices();
+    applyReportingFilters(false);
     jobsBody?.addEventListener('click', async (event) => {
       const charts = event.target.closest('[data-report-job-charts]');
       if (charts) {

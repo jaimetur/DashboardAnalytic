@@ -1742,7 +1742,7 @@ class Repository:
 
     def create_report_job(
         self, *, report_type: str, technology: str, scope: str,
-        data_dataset_id: int, voice_dataset_id: int, speech_dataset_id: int,
+        data_dataset_id: int | None, voice_dataset_id: int | None, speech_dataset_id: int | None,
         dataset_ids: dict[str, list[int]], dataset_names: dict[str, list[str]],
         slide_count: int, template_name: str, output_file: str, output_path: Path,
         created_by: str, generate_tooltips: bool = True,
