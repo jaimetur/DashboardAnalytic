@@ -105,39 +105,6 @@
   </article>
 
   {% if active_workspace %}
-  <details id="calculated-dimensions" class="panel collapsible-panel workspace-calculated-dimensions-panel" open data-panel-state-key="workspace:calculated-dimensions" data-workspace-calculated-dimensions-panel data-calculated-dimensions='{{ calculated_dimensions | tojson }}' data-save-url="/api/workspace/calculated-dimensions">
-    <summary class="collapsible-summary">
-      <div>
-        <p class="eyebrow">Workspace</p>
-        <h2>Calculated Dimensions</h2>
-      </div>
-      <div class="summary-inline-actions">
-        <span class="pill live-pill">{{ calculated_dimensions | length }} dimensions</span>
-        <span class="collapse-chip">Collapse</span>
-      </div>
-    </summary>
-    <div class="workspace-calculated-dimensions-content">
-      <p class="lede">Calculated dimensions belong to this workspace and are materialized in every applicable individual and combined CDR table.</p>
-      <div class="workspace-calculated-dimensions-actions">
-        <button type="button" class="catalogue-calculated-dimensions-button" data-workspace-manage-calculated-dimensions>Manage Calculated Dimensions</button>
-        <a class="ghost-link" href="/workspace/calculated-dimensions/export">Export All</a>
-        <form action="/workspace/calculated-dimensions/import" method="post" enctype="multipart/form-data" data-loading-label="Importing calculated dimensions" data-loading-copy="Validating definitions and materializing all CDR tables in this workspace.">
-          <label class="file-picker-shell">
-            <span class="file-picker-button">Import JSON</span>
-            <span class="file-picker-text" data-file-picker-text>No file selected</span>
-            <input type="file" name="dimensions_file" accept=".json,application/json" required data-file-picker-input>
-          </label>
-          <button type="submit">Import</button>
-        </form>
-      </div>
-      <div class="workspace-calculated-dimensions-summary">
-        {% for dimension in calculated_dimensions %}
-        <span class="pill">{{ dimension.name }} · {{ dimension.sources | map('upper') | join(' / ') }}</span>
-        {% endfor %}
-      </div>
-    </div>
-  </details>
-
   <details class="panel collapsible-panel upload-panel" open data-panel-state-key="workspace:data-ingestion">
     <summary class="collapsible-summary">
       <div>
@@ -306,6 +273,65 @@
           {% endfor %}
         </tbody>
       </table>
+    </div>
+  </details>
+
+  <details id="calculated-dimensions" class="panel collapsible-panel workspace-calculated-dimensions-panel" open data-panel-state-key="workspace:calculated-dimensions" data-workspace-calculated-dimensions-panel data-calculated-dimensions='{{ calculated_dimensions | tojson }}' data-save-url="/api/workspace/calculated-dimensions">
+    <summary class="collapsible-summary">
+      <div>
+        <p class="eyebrow">Workspace</p>
+        <h2>Calculated Dimensions</h2>
+      </div>
+      <div class="summary-inline-actions">
+        <span class="pill live-pill">{{ calculated_dimensions | length }} dimensions</span>
+        <span class="collapse-chip">Collapse</span>
+      </div>
+    </summary>
+    <div class="workspace-calculated-dimensions-content">
+      <p class="lede">Calculated dimensions belong to this workspace and are materialized in every applicable individual and combined CDR table.</p>
+      <div class="workspace-calculated-dimensions-layout">
+        <section class="workspace-calculated-dimensions-subpanel workspace-calculated-dimensions-import-panel">
+          <header>
+            <p class="eyebrow">Import from file</p>
+            <h3>Import Calculated Dimensions</h3>
+          </header>
+          <p class="form-note">Choose a JSON export to validate and materialize its definitions in this workspace.</p>
+          <form action="/workspace/calculated-dimensions/import" method="post" enctype="multipart/form-data" data-loading-label="Importing calculated dimensions" data-loading-copy="Validating definitions and materializing all CDR tables in this workspace.">
+            <label class="file-picker-shell">
+              <span class="file-picker-button">Choose JSON</span>
+              <span class="file-picker-text" data-file-picker-text>No file selected</span>
+              <input type="file" name="dimensions_file" accept=".json,application/json" required data-file-picker-input>
+            </label>
+            <button type="submit" class="workspace-calculated-dimensions-import-button">Import</button>
+          </form>
+        </section>
+        <section class="workspace-calculated-dimensions-subpanel workspace-calculated-dimensions-list-panel">
+          <header class="workspace-calculated-dimensions-list-header">
+            <div>
+              <p class="eyebrow">Workspace definitions</p>
+              <h3>Calculated Dimensions</h3>
+            </div>
+            <div class="workspace-calculated-dimensions-list-actions">
+              <button type="button" class="catalogue-calculated-dimensions-button" data-workspace-manage-calculated-dimensions>Manage Calculated Dimensions</button>
+              <a class="ghost-link workspace-calculated-dimensions-export-link" href="/workspace/calculated-dimensions/export">Export All Calculated Dimensions</a>
+            </div>
+          </header>
+          <div class="workspace-calculated-dimensions-list" aria-label="Calculated dimensions">
+            <div class="workspace-calculated-dimension-columns" aria-hidden="true">
+              <span>Dimension</span>
+              <span>Applied to</span>
+            </div>
+            {% for dimension in calculated_dimensions %}
+            <div class="workspace-calculated-dimension-row">
+              <strong>{{ dimension.name }}</strong>
+              <span>{{ dimension.sources | map('upper') | join(' / ') }}</span>
+            </div>
+            {% else %}
+            <p class="form-note">No calculated dimensions have been created for this workspace.</p>
+            {% endfor %}
+          </div>
+        </section>
+      </div>
     </div>
   </details>
 

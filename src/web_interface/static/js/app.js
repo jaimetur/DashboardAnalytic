@@ -44,20 +44,27 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
       const name = inputField('Name', current.name || '');
       const fallback = inputField('Default value (optional)', current.default || '');
       const fallbackField = inputField('Default source fields (optional, separated by |)', current.default_from || '');
-      const sources = document.createElement('fieldset'); sources.className = 'calculated-dimension-sources';
-      sources.innerHTML = '<legend>Available for</legend>';
+      const sources = document.createElement('div'); sources.className = 'calculated-dimension-sources';
+      const sourcesLabel = document.createElement('span'); sourcesLabel.textContent = 'Available for';
+      const sourceMenu = document.createElement('details'); sourceMenu.className = 'calculated-dimension-source-menu';
+      const sourceSummary = document.createElement('summary');
+      const sourceChoices = document.createElement('div'); sourceChoices.className = 'calculated-dimension-source-choices';
+      const updateSourceSummary = () => {
+        const selected = Array.from(sourceChoices.querySelectorAll('input:checked')).map((item) => item.value.toUpperCase());
+        sourceSummary.textContent = selected.length ? selected.join(', ') : 'Select CDR types';
+      };
       ['cdr-data', 'cdr-voice', 'cdr-speech'].forEach((source) => {
         const label = document.createElement('label'); const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.value = source;
-        checkbox.checked = (current.sources || []).includes(source); label.append(checkbox, document.createTextNode(source.toUpperCase())); sources.append(label);
+        checkbox.checked = (current.sources || []).includes(source); label.append(checkbox, document.createTextNode(source.toUpperCase())); sourceChoices.append(label);
       });
-      form.append(sources);
+      sourceMenu.append(sourceSummary, sourceChoices); sourceMenu.addEventListener('change', updateSourceSummary); updateSourceSummary(); sources.append(sourcesLabel, sourceMenu); form.append(sources);
       const rulesLabel = document.createElement('label'); rulesLabel.className = 'calculated-dimension-rules'; rulesLabel.textContent = 'Rules';
       const rules = document.createElement('textarea'); rules.placeholder = 'Test_Result IN (Completed, Visible Completed) => Success';
       rules.value = (current.rules || []).map((rule) => `${rule.when} => ${rule.value}`).join('\n'); rulesLabel.append(rules); form.append(rulesLabel);
       const actions = document.createElement('div'); actions.className = 'confirm-actions calculated-dimension-rules';
-      const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'secondary-button'; cancel.textContent = 'Cancel';
+      const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'calculated-dimension-cancel'; cancel.textContent = 'Cancel';
       const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Save and Materialize'; actions.append(cancel, save); form.append(actions);
-      cancel.addEventListener('click', () => { form.hidden = true; });
+      cancel.addEventListener('click', (event) => { event.preventDefault(); form.replaceChildren(); form.hidden = true; });
       save.addEventListener('click', async () => {
         try {
           const parsedRules = rules.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
@@ -709,20 +716,27 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       const name = field('Name', current.name || '');
       const defaultValue = field('Default value (optional)', current.default || '');
       const defaultFrom = field('Default source fields (optional, separated by |)', current.default_from || '');
-      const sources = document.createElement('fieldset'); sources.className = 'calculated-dimension-sources';
-      const sourceLegend = document.createElement('legend'); sourceLegend.textContent = 'Available for'; sources.append(sourceLegend);
+      const sources = document.createElement('div'); sources.className = 'calculated-dimension-sources';
+      const sourcesLabel = document.createElement('span'); sourcesLabel.textContent = 'Available for';
+      const sourceMenu = document.createElement('details'); sourceMenu.className = 'calculated-dimension-source-menu';
+      const sourceSummary = document.createElement('summary');
+      const sourceChoices = document.createElement('div'); sourceChoices.className = 'calculated-dimension-source-choices';
+      const updateSourceSummary = () => {
+        const selected = Array.from(sourceChoices.querySelectorAll('input:checked')).map((input) => input.value.toUpperCase());
+        sourceSummary.textContent = selected.length ? selected.join(', ') : 'Select CDR types';
+      };
       ['cdr-data', 'cdr-voice', 'cdr-speech'].forEach((value) => {
         const label = document.createElement('label'); const input = document.createElement('input'); input.type = 'checkbox'; input.value = value;
-        input.checked = (current.sources || []).includes(value); label.append(input, document.createTextNode(value.replace('cdr-', 'CDR-').replace(/^CDR-./, (text) => text.toUpperCase()))); sources.append(label);
+        input.checked = (current.sources || []).includes(value); label.append(input, document.createTextNode(value.toUpperCase())); sourceChoices.append(label);
       });
-      form.append(sources);
+      sourceMenu.append(sourceSummary, sourceChoices); sourceMenu.addEventListener('change', updateSourceSummary); updateSourceSummary(); sources.append(sourcesLabel, sourceMenu); form.append(sources);
       const rulesLabel = document.createElement('label'); rulesLabel.className = 'calculated-dimension-rules'; rulesLabel.textContent = 'Rules';
       const rules = document.createElement('textarea'); rules.placeholder = 'Test_Result IN (Completed, Visible Completed) => Success';
       rules.value = (current.rules || []).map((rule) => `${rule.when} => ${rule.value}`).join('\n'); rulesLabel.append(rules); form.append(rulesLabel);
       const actions = document.createElement('div'); actions.className = 'confirm-actions calculated-dimension-rules';
-      const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'secondary-button'; cancel.textContent = 'Cancel';
+      const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'calculated-dimension-cancel'; cancel.textContent = 'Cancel';
       const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Save Dimension'; actions.append(cancel, save); form.append(actions);
-      cancel.addEventListener('click', () => { form.hidden = true; });
+      cancel.addEventListener('click', (event) => { event.preventDefault(); editingIndex = null; form.replaceChildren(); form.hidden = true; });
       save.addEventListener('click', async () => {
         const previous = calculatedDimensions;
         try {

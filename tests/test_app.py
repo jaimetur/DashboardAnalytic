@@ -50,6 +50,13 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     assert page.status_code == 200
     assert 'data-workspace-calculated-dimensions-panel' in page.text
     assert 'Manage Calculated Dimensions' in page.text
+    assert 'workspace-calculated-dimensions-import-panel' in page.text
+    assert 'workspace-calculated-dimensions-list' in page.text
+    assert 'Export All Calculated Dimensions' in page.text
+    assert '>Dimension<' in page.text
+    assert '>Applied to<' in page.text
+    assert page.text.index('workspace-calculated-dimensions-import-panel') < page.text.index('workspace-calculated-dimensions-list-panel')
+    assert page.text.index('<h2>Datasets</h2>') < page.text.index('id="calculated-dimensions"')
 
     exported = client.get('/workspace/calculated-dimensions/export')
     assert exported.status_code == 200
@@ -2828,6 +2835,8 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'data-template-copy-url=' in embedded_editor.text
     assert 'data-manage-calculated-dimensions' in embedded_editor.text
     assert 'data-calculated-dimensions-url=' in embedded_editor.text
+    assert 'catalogue-chart-preview-header-actions' in embedded_editor.text
+    assert embedded_editor.text.index('data-catalogue-chart-preview-manage-dimensions') < embedded_editor.text.index('data-catalogue-chart-preview-close')
     assert 'data-catalogue-row-index="0"' in embedded_editor.text
     assert 'data-catalogue-reenumerate' in embedded_editor.text
     assert 'Title and 1 column + Comments' in embedded_editor.text
