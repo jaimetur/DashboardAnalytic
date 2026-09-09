@@ -33,6 +33,31 @@ const storedAutoCalculatedFieldJobs = () => {
   }
 };
 
+function updateCombinedDatasetRecreationRow(job) {
+  if (job.operation !== 'combined_recreation' || !job.combined_kind) return;
+  const row = document.querySelector(`[data-combined-dataset-row][data-dataset-kind="${job.combined_kind}"]`);
+  if (!(row instanceof HTMLElement)) return;
+  const processing = ['queued', 'processing'].includes(job.status);
+  const failed = job.status === 'failed';
+  const total = Math.max(Number(job.total) || 0, 0);
+  const completed = Math.max(Number(job.completed) || 0, 0);
+  const percent = processing
+    ? (total ? Math.min(99, Math.max(5, Math.round(completed * 100 / total))) : 5)
+    : 100;
+  const status = row.querySelector('[data-combined-dataset-status]');
+  const bar = row.querySelector('[data-combined-dataset-progress-bar]');
+  const label = row.querySelector('[data-combined-dataset-progress-percent]');
+  if (status instanceof HTMLElement) {
+    status.className = `queue-status-pill queue-status-${failed ? 'failed' : processing ? 'processing' : 'ready'}`;
+    status.textContent = failed ? 'Failed' : processing ? (job.status === 'queued' ? 'Queued' : 'Recreating') : 'Ready';
+  }
+  if (bar instanceof HTMLElement) {
+    bar.className = `progress-bar status-${failed ? 'failed' : processing ? 'processing' : 'ready'}`;
+    bar.style.width = `${percent}%`;
+  }
+  if (label instanceof HTMLElement) label.textContent = `${percent}%`;
+}
+
 function monitorAutoCalculatedFieldJob(statusUrl, notice = '') {
   if (!statusUrl) return;
   const saved = new Set(storedAutoCalculatedFieldJobs());
@@ -51,6 +76,8 @@ function monitorAutoCalculatedFieldJob(statusUrl, notice = '') {
         return;
       }
       if (!response.ok) throw new Error(job.detail || 'Unable to read materialization progress.');
+      updateCombinedDatasetRecreationRow(job);
+      window.dispatchEvent(new CustomEvent('auto-calculated-field-job-status', {detail: job}));
       if (job.status === 'ready' || job.status === 'failed') {
         const current = new Set(storedAutoCalculatedFieldJobs());
         current.delete(statusUrl);
@@ -151,6 +178,7 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
       progressTimer = window.setTimeout(refreshMaterializationProgress, 5000);
     }
   };
+  window.addEventListener('auto-calculated-field-job-status', refreshMaterializationProgress);
   let dimensions = [];
   try { dimensions = JSON.parse(host.dataset.calculatedDimensions || '[]'); } catch (_error) { dimensions = []; }
   const saveDimensions = async (next, rename = null) => {
