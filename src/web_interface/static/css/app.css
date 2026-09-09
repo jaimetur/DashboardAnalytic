@@ -88,6 +88,7 @@ label { display: grid; gap: 0.45rem; color: var(--muted); }
 .topnav-workspace-menu button.is-unavailable:disabled { background: #e4e8eb; color: #7b8790; }
 .topnav-workspace-menu button.is-unavailable:disabled span { color: #8d989f; }
 .topnav-workspace-menu button span { font-size: 0.7rem; font-weight: 600; opacity: 0.88; }
+.topnav-workspace-menu button .workspace-switcher-option-label { font-size: 0.82rem; font-weight: 700; opacity: 1; white-space: nowrap; }
 .topnav-workspace-menu button [data-header-workspace-size] { font: inherit; opacity: 1; }
 .topnav .topnav-user-badge-admin { background: linear-gradient(135deg, #c84a4a, #e06a5a); border-color: rgba(200, 74, 74, 0.28); color: rgba(255, 255, 255, 0.96); box-shadow: 0 12px 28px rgba(200, 74, 74, 0.24); }
 .topnav .topnav-user-badge-super-admin { background: linear-gradient(135deg, #9f3038, #d45555); border-color: rgba(159, 48, 56, 0.34); color: rgba(255, 255, 255, 0.98); box-shadow: 0 12px 28px rgba(159, 48, 56, 0.26); }
