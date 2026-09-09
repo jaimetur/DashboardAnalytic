@@ -152,6 +152,13 @@ INPUT_KIND_LABELS = {
 }
 UPLOAD_DATASET_KINDS = frozenset({'data', 'voice', 'speech', 'mapping_vodafone', 'mapping_three', 'smart_orchestrator_logs', 'generic'})
 CDR_DATASET_KINDS = frozenset({'data', 'voice', 'speech'})
+CDR_PREVIEW_FILTER_DEFINITIONS = (
+    ('cdr_operator', 'Operator', ('operator', 'Operator')),
+    ('cdr_vendor', 'Vendor', ('vendor', 'Vendor')),
+    ('cdr_rat', 'RAT', ('RAT_A', 'RAT', 'Sample_RAT_A')),
+    ('cdr_session_type', 'Session Type', ('Session_Type', 'session_type', 'Type_of_Test')),
+    ('cdr_call_status', 'Call Status', ('Call_Status', 'call_status', 'status')),
+)
 LEGACY_VENDOR_MAPPING_FAILURE_MARKERS = (
     'to assign vendors',
     'assign vendors',
@@ -195,7 +202,11 @@ def format_preview_gcid(value: object) -> object:
     return str(int(numeric_value)) if numeric_value.is_integer() else str(value)
 
 
-def materialize_cdr_derived_columns(frame: pd.DataFrame, dataset_kind: str | None = None) -> pd.DataFrame:
+def materialize_cdr_derived_columns(
+    frame: pd.DataFrame,
+    dataset_kind: str | None = None,
+    dimensions: Iterable[Any] | None = None,
+) -> pd.DataFrame:
     """Add the generic attempt metric and the active workspace dimensions."""
     result = frame.copy()
     # A CDR can legitimately contain only categorical attempt outcomes. Keep
@@ -204,7 +215,9 @@ def materialize_cdr_derived_columns(frame: pd.DataFrame, dataset_kind: str | Non
     result['attempt_count'] = pd.Series(1, index=result.index, dtype='Int64')
     if dataset_kind in CDR_DATASET_KINDS:
         result = materialize_calculated_dimensions(
-            result, load_workspace_calculated_dimensions(), f'cdr-{dataset_kind}',
+            result,
+            tuple(dimensions) if dimensions is not None else load_workspace_calculated_dimensions(),
+            f'cdr-{dataset_kind}',
         )
     return result
 HELP_HOME_DOCUMENT = '00-help.md'
@@ -317,6 +330,16 @@ def load_workspace_calculated_dimensions(*, create: bool = True):
     for path in settings.slides_templates_dir.rglob('*.dimensions.json'):
         path.unlink(missing_ok=True)
     return parse_calculated_dimensions(repository.list_calculated_dimensions())
+
+
+def load_repository_calculated_dimensions(task_repository: Repository) -> tuple[Any, ...]:
+    """Load definitions from a job-bound repository while preserving first-use defaults."""
+    payload = task_repository.list_calculated_dimensions()
+    if not payload and task_repository.get_workspace_state('calculated_dimensions_initialized') != '1':
+        dimensions = parse_calculated_dimensions(default_calculated_dimensions())
+        task_repository.replace_calculated_dimensions(calculated_dimensions_json(dimensions))
+        return dimensions
+    return parse_calculated_dimensions(payload)
 
 
 def write_workspace_calculated_dimensions(payload: object) -> tuple:
@@ -692,6 +715,30 @@ def _incremental_auto_field_table_update(
         return bool(updates or removable_keys or renames)
 
 
+def combined_reporting_required_columns(dimensions: Iterable[Any], kind: str) -> list[str]:
+    """Return source, preview-filter and calculated columns required by a combined CDR table."""
+    source = f'cdr-{kind}'
+    requested = [*Repository.REPORTING_CORE_COLUMNS, 'attempt_count']
+    requested.extend(
+        candidate
+        for _parameter, _label, candidates in CDR_PREVIEW_FILTER_DEFINITIONS
+        for candidate in candidates
+    )
+    for definition in dimensions:
+        if source not in definition.sources:
+            continue
+        requested.append(definition.name)
+        requested.extend(definition.default_from)
+        requested.extend(
+            alias.strip()
+            for rule in definition.rules
+            for condition in rule.conditions
+            for alias in condition.column.split('|')
+            if alias.strip()
+        )
+    return list(dict.fromkeys(column for column in requested if str(column).strip()))
+
+
 def materialize_workspace_auto_fields_incrementally(
     previous: Iterable[Any],
     current: Iterable[Any],
@@ -722,16 +769,14 @@ def materialize_workspace_auto_fields_incrementally(
         if progress_callback:
             progress_callback(completed, total, f'Updating {dataset["file_name"]}')
     for kind in reporting_kinds:
-        calculated_names = [
-            item.name for item in current if f'cdr-{kind}' in item.sources
-        ]
+        required_columns = combined_reporting_required_columns(current, kind)
         # Reconcile membership before updating calculated columns. A combined
         # table may predate a newly processed CDR of the same type, so an
         # incremental column update alone would leave that dataset out.
         for dataset in datasets:
             if str(dataset['dataset_kind']).casefold() == kind:
                 task_repository.copy_dataset_rows_to_reporting(
-                    int(dataset['id']), kind, calculated_names,
+                    int(dataset['id']), kind, required_columns,
                 )
         if task_repository.list_reporting_row_columns(kind):
             _incremental_auto_field_table_update(
@@ -875,6 +920,79 @@ def start_auto_calculated_field_job(
         ).start()
     else:
         _run_auto_calculated_field_job(job_id, workspace)
+    return job
+
+
+def _run_combined_cdr_recreation_job(job_id: str, workspace: Workspace, kind: str) -> None:
+    task_repository = Repository(
+        workspace.database_path,
+        global_db_path=repository.global_db_path,
+        workspace_registry_db_path=workspace_registry.registry_path,
+    )
+
+    def update_progress(completed: int, total: int, message: str) -> None:
+        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            job = AUTO_CALCULATED_FIELD_JOBS.get(job_id)
+            if job:
+                job.update(completed=completed, total=total, message=message)
+
+    with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        AUTO_CALCULATED_FIELD_JOBS[job_id].update(
+            status='processing', message=f'Preparing combined CDR-{kind.upper()} table',
+        )
+    try:
+        with _auto_calculated_field_workspace_lock(workspace.id):
+            task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'processing')
+            stats = recreate_combined_cdr_table(workspace, kind, update_progress)
+            task_repository.set_workspace_state('calculated_dimensions_need_materialization', '0')
+        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            total = int(AUTO_CALCULATED_FIELD_JOBS[job_id].get('total') or stats['tables'])
+            AUTO_CALCULATED_FIELD_JOBS[job_id].update(
+                status='ready', completed=total, total=total,
+                materialized_datasets=stats['datasets'], materialized_combined_tables=1,
+                message=f"Recreated combined CDR-{kind.upper()} table with {stats['rows']} rows",
+                refresh_workspace=True,
+                finished_at=datetime.now(timezone.utc).timestamp(),
+            )
+    except Exception as exc:
+        task_repository.set_workspace_state('calculated_dimensions_need_materialization', '0')
+        task_repository.set_workspace_state(f'combined_reporting_error_{kind}', str(exc))
+        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            AUTO_CALCULATED_FIELD_JOBS[job_id].update(
+                status='failed', error=str(exc), message=f'Combined CDR-{kind.upper()} recreation failed',
+                finished_at=datetime.now(timezone.utc).timestamp(),
+            )
+
+
+def start_combined_cdr_recreation_job(
+    workspace: Workspace, kind: str, username: str, *, background: bool = True,
+) -> dict[str, Any]:
+    """Queue one combined-table rebuild in the shared materialization progress UI."""
+    job_id = uuid4().hex
+    job = {
+        'id': job_id, 'workspace_id': workspace.id, 'workspace_name': workspace.name,
+        'operation': 'combined_recreation', 'combined_kind': kind,
+        'status': 'queued', 'completed': 0, 'total': 0,
+        'message': f'Waiting to recreate combined CDR-{kind.upper()} table',
+        'previous_definitions': [], 'affected_sources': [], 'renames': {}, 'username': username,
+        'created_at': datetime.now(timezone.utc).timestamp(),
+    }
+    with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        AUTO_CALCULATED_FIELD_JOBS[job_id] = job
+    task_repository = Repository(
+        workspace.database_path,
+        global_db_path=repository.global_db_path,
+        workspace_registry_db_path=workspace_registry.registry_path,
+    )
+    task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
+    if background:
+        Thread(
+            target=_run_combined_cdr_recreation_job,
+            args=(job_id, workspace, kind),
+            name=f'recreate-combined-cdr-{workspace.id}-{kind}', daemon=True,
+        ).start()
+    else:
+        _run_combined_cdr_recreation_job(job_id, workspace, kind)
     return job
 
 
@@ -1859,6 +1977,7 @@ def rebuild_dataset_artifacts(
     task_repository: Repository | None = None,
 ) -> dict[str, Any]:
     task_repository = task_repository or repository
+    workspace_dimensions = load_repository_calculated_dimensions(task_repository)
     df = load_dataset(dataset_path, progress_callback=progress_callback)
     if forced_dataset_kind in UPLOAD_DATASET_KINDS:
         df['dataset_kind'] = forced_dataset_kind
@@ -1892,14 +2011,14 @@ def rebuild_dataset_artifacts(
             # an otherwise valid CDR unusable in Workspace or Dashboard.
             auto_vendor_mapping_error = str(exc)
     if dataset_kind in CDR_DATASET_KINDS:
-        df = materialize_cdr_derived_columns(df, dataset_kind)
+        df = materialize_cdr_derived_columns(df, dataset_kind, workspace_dimensions)
     store_cached_dataset_frame(dataset_path, df)
     task_repository.replace_dataset_rows(dataset_id, df)
     if dataset_kind in CDR_DATASET_KINDS:
         task_repository.replace_reporting_rows(dataset_id, dataset_kind, df)
         task_repository.copy_dataset_rows_to_reporting(
             dataset_id, dataset_kind,
-            [dimension.name for dimension in load_workspace_calculated_dimensions() if f'cdr-{dataset_kind}' in dimension.sources],
+            combined_reporting_required_columns(workspace_dimensions, dataset_kind),
         )
     if progress_callback:
         progress_callback(62)
@@ -1983,10 +2102,11 @@ def persist_mapped_cdr_frame(dataset: dict[str, Any], frame: pd.DataFrame) -> No
     repository.replace_dataset_rows(dataset_id, frame)
     dataset_kind = str(dataset.get('dataset_kind') or '').casefold()
     if dataset_kind in CDR_DATASET_KINDS:
+        workspace_dimensions = load_workspace_calculated_dimensions()
         repository.replace_reporting_rows(dataset_id, dataset_kind, frame)
         repository.copy_dataset_rows_to_reporting(
             dataset_id, dataset_kind,
-            [dimension.name for dimension in load_workspace_calculated_dimensions() if f'cdr-{dataset_kind}' in dimension.sources],
+            combined_reporting_required_columns(workspace_dimensions, dataset_kind),
         )
     summary = summarise_dataset(frame)
     available_metrics = derive_available_metrics(frame)
@@ -2457,23 +2577,83 @@ def workspace_combined_tables(task_repository: Repository | None = None) -> list
     return combined
 
 
-def recreate_combined_cdr_table(workspace: Workspace, kind: str) -> None:
-    """Rebuild one combined CDR table from the current individual datasets."""
+def recreate_combined_cdr_table(
+    workspace: Workspace,
+    kind: str,
+    progress_callback: Callable[[int, int, str], None] | None = None,
+) -> dict[str, int]:
+    """Rebuild one combined CDR table and recover missing individual row stores."""
     task_repository = Repository(
         workspace.database_path,
         global_db_path=repository.global_db_path,
         workspace_registry_db_path=workspace_registry.registry_path,
     )
-    dimensions = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
-    applicable_names = [item.name for item in dimensions if f'cdr-{kind}' in item.sources]
+    dimensions = load_repository_calculated_dimensions(task_repository)
+    required_columns = combined_reporting_required_columns(dimensions, kind)
+    all_datasets = list(task_repository.list_datasets())
     datasets = [
-        dataset for dataset in task_repository.list_datasets()
+        dataset for dataset in all_datasets
         if dataset['status'] == 'ready' and str(dataset['dataset_kind'] or '').casefold() == kind
     ]
+    ready_mappings = {
+        mapping_kind: next(
+            (
+                int(dataset['id']) for dataset in all_datasets
+                if dataset['status'] == 'ready'
+                and str(dataset['dataset_kind'] or '').casefold() == mapping_kind
+            ),
+            None,
+        )
+        for mapping_kind in ('mapping_vodafone', 'mapping_three')
+    }
+    total = max(len(datasets) * 100 + 1, 1)
     task_repository.drop_reporting_table(kind)
-    for dataset in datasets:
-        task_repository.copy_dataset_rows_to_reporting(int(dataset['id']), kind, applicable_names)
+    for index, dataset in enumerate(datasets):
+        dataset_id = int(dataset['id'])
+        expected_rows = int(dataset['row_count'] or 0)
+        materialized_rows = task_repository.dataset_row_count(dataset_id)
+        if materialized_rows == 0 or (expected_rows and materialized_rows != expected_rows):
+            dataset_path = Path(str(dataset['stored_path'] or ''))
+            if not dataset_path.is_file():
+                raise FileNotFoundError(
+                    f"{dataset['file_name']} has {materialized_rows} materialized rows instead of "
+                    f'{expected_rows}, and its source file is unavailable.'
+                )
+            if progress_callback:
+                progress_callback(index * 100, total, f"Recovering rows for {dataset['file_name']}")
+
+            def rebuild_progress(value: int, *, offset: int = index * 100, name: str = str(dataset['file_name'])) -> None:
+                if progress_callback:
+                    progress_callback(offset + min(max(int(value), 0), 95), total, f'Recovering rows for {name}')
+
+            use_mappings = bool(dataset['vendor_mapping_applied'])
+            rebuild_dataset_artifacts(
+                dataset_id,
+                dataset_path,
+                progress_callback=rebuild_progress,
+                forced_dataset_kind=kind,
+                vodafone_mapping_dataset_id=ready_mappings['mapping_vodafone'] if use_mappings else None,
+                three_mapping_dataset_id=ready_mappings['mapping_three'] if use_mappings else None,
+                task_repository=task_repository,
+            )
+            materialized_rows = task_repository.dataset_row_count(dataset_id)
+        task_repository.copy_dataset_rows_to_reporting(dataset_id, kind, required_columns)
+        combined_rows = task_repository.reporting_row_count(kind, dataset_id)
+        if combined_rows != materialized_rows:
+            raise RuntimeError(
+                f"{dataset['file_name']} contributed {combined_rows} of {materialized_rows} rows to the combined table."
+            )
+        if progress_callback:
+            progress_callback((index + 1) * 100, total, f"Added {dataset['file_name']}")
+    total_rows = task_repository.reporting_row_count(kind)
+    expected_total = sum(task_repository.dataset_row_count(int(dataset['id'])) for dataset in datasets)
+    if total_rows != expected_total:
+        raise RuntimeError(f'The combined CDR-{kind.upper()} table contains {total_rows} of {expected_total} rows.')
     task_repository.set_workspace_state(f'combined_reporting_updated_{kind}', now_iso())
+    task_repository.set_workspace_state(f'combined_reporting_error_{kind}', '')
+    if progress_callback:
+        progress_callback(total, total, f'Combined CDR-{kind.upper()} table is ready')
+    return {'datasets': len(datasets), 'rows': total_rows, 'tables': len(datasets) + 1}
 
 
 def choose_filter_values(query_values: list[str], options: dict[str, list[str]], key: str) -> list[str]:
@@ -4583,34 +4763,22 @@ def workspace_sizes_status(user: SessionUser = Depends(current_user)) -> JSONRes
 @app.post('/workspace/combined/{kind}/recreate')
 def recreate_combined_cdr(
     kind: str, user: SessionUser = Depends(current_user),
-) -> Response:
+) -> JSONResponse:
     if not active_workspace:
-        return RedirectResponse('/workspace?workspace_error=Open+a+workspace+before+recreating+combined+tables.', status_code=303)
+        raise HTTPException(status_code=400, detail='Open a workspace before recreating combined tables.')
     normalized_kind = str(kind).casefold()
     if normalized_kind not in CDR_DATASET_KINDS:
-        return RedirectResponse('/workspace?workspace_error=Unknown+combined+CDR+table.', status_code=303)
+        raise HTTPException(status_code=404, detail='Unknown combined CDR table.')
     require_workspace_access(user, active_workspace.id)
-    workspace = active_workspace
-
-    def run_recreation() -> None:
-        try:
-            recreate_combined_cdr_table(workspace, normalized_kind)
-        except Exception as exc:
-            task_repository = Repository(
-                workspace.database_path,
-                global_db_path=repository.global_db_path,
-                workspace_registry_db_path=workspace_registry.registry_path,
-            )
-            task_repository.set_workspace_state(f'combined_reporting_error_{normalized_kind}', str(exc))
-
-    Thread(
-        target=run_recreation,
-        name=f'recreate-combined-cdr-{normalized_kind}', daemon=True,
-    ).start()
-    return RedirectResponse(
-        f'/workspace?workspace_notice=Recreating+combined+CDR-{normalized_kind.upper()}+table+in+the+background.',
-        status_code=303,
-    )
+    job = start_combined_cdr_recreation_job(active_workspace, normalized_kind, user.username)
+    repository.add_log(user.username, 'recreate_combined_cdr_table', json.dumps({
+        'workspace': active_workspace.id, 'kind': normalized_kind, 'materialization_job': job['id'],
+    }))
+    return JSONResponse({
+        'materialization_job': job['id'],
+        'materialization_status_url': f'/api/workspace/auto-calculated-fields/materialization/{job["id"]}',
+        'notice': f'The combined CDR-{normalized_kind.upper()} table is being recreated in the background.',
+    })
 
 
 @app.get('/api/workspaces/status')
@@ -4904,14 +5072,12 @@ def preview_dataset(
         preview_filters['GCID'] = selected_gcid
     cdr_preview_filters: list[dict[str, object]] = []
     if dataset['dataset_kind'] in CDR_DATASET_KINDS:
-        cdr_filter_definitions = [
-            ('cdr_operator', 'Operator', cdr_operator, ('operator', 'Operator')),
-            ('cdr_vendor', 'Vendor', cdr_vendor, ('vendor', 'Vendor')),
-            ('cdr_rat', 'RAT', cdr_rat, ('RAT_A', 'RAT', 'Sample_RAT_A')),
-            ('cdr_session_type', 'Session Type', cdr_session_type, ('Session_Type', 'session_type', 'Type_of_Test')),
-            ('cdr_call_status', 'Call Status', cdr_call_status, ('Call_Status', 'call_status', 'status')),
-        ]
-        for parameter, label, requested_values, candidates in cdr_filter_definitions:
+        requested_by_parameter = {
+            'cdr_operator': cdr_operator, 'cdr_vendor': cdr_vendor, 'cdr_rat': cdr_rat,
+            'cdr_session_type': cdr_session_type, 'cdr_call_status': cdr_call_status,
+        }
+        for parameter, label, candidates in CDR_PREVIEW_FILTER_DEFINITIONS:
+            requested_values = requested_by_parameter[parameter]
             column = next(
                 (
                     resolved for candidate in candidates
@@ -5008,49 +5174,104 @@ def preview_combined_dataset(
     kind: str,
     request: Request,
     row_limit: int = Query(default=100, ge=1, le=5000),
+    cdr_operator: list[str] = Query(default=[]),
+    cdr_vendor: list[str] = Query(default=[]),
+    cdr_rat: list[str] = Query(default=[]),
+    cdr_session_type: list[str] = Query(default=[]),
+    cdr_call_status: list[str] = Query(default=[]),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
-    """Render a read-only preview of one materialised combined CDR table."""
+    """Render a combined CDR through the same preview interface as an individual CDR."""
     normalized_kind = str(kind or '').casefold()
     if normalized_kind not in CDR_DATASET_KINDS:
         raise HTTPException(status_code=404, detail='Combined dataset not found')
-    table_name = repository.reporting_rows_table_name(normalized_kind)
-    columns = [
+    available_columns = [
         column for column in repository.list_reporting_row_columns(normalized_kind)
         if column not in {'dataset_id', 'source_row_id'}
     ]
-    if not columns:
+    if not available_columns:
         raise HTTPException(status_code=404, detail='Combined dataset not found')
-    quoted_columns = ', '.join(repository._quote_identifier(column) for column in columns)
-    with repository.connection() as connection:
-        exists = connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,),
-        ).fetchone()
-        if not exists:
-            raise HTTPException(status_code=404, detail='Combined dataset not found')
-        total_row_count = int(connection.execute(
-            f'SELECT COUNT(*) AS count FROM {repository._quote_identifier(table_name)}',
-        ).fetchone()['count'] or 0)
-        preview_frame = pd.read_sql_query(
-            f'SELECT {quoted_columns} FROM {repository._quote_identifier(table_name)} LIMIT ?',
-            connection,
-            params=(row_limit,),
+    workspace_dimensions = load_workspace_calculated_dimensions()
+    all_calculated_dimension_keys = {
+        _normalise_catalogue_dimension_name(dimension.name) for dimension in workspace_dimensions
+    }
+    derived_preview_columns = {
+        dimension.name for dimension in workspace_dimensions
+        if f'cdr-{normalized_kind}' in dimension.sources and dimension.name in available_columns
+    }
+    requested_by_parameter = {
+        'cdr_operator': cdr_operator, 'cdr_vendor': cdr_vendor, 'cdr_rat': cdr_rat,
+        'cdr_session_type': cdr_session_type, 'cdr_call_status': cdr_call_status,
+    }
+    preview_filters: dict[str, Any] = {}
+    cdr_preview_filters: list[dict[str, object]] = []
+    vendor_preview_columns: set[str] = set()
+    for parameter, label, candidates in CDR_PREVIEW_FILTER_DEFINITIONS:
+        column = next(
+            (
+                resolved for candidate in candidates
+                if (resolved := repository.resolve_reporting_row_column_name(normalized_kind, candidate))
+            ),
+            None,
         )
+        if not column:
+            continue
+        options = repository.list_distinct_reporting_row_values(normalized_kind, column)
+        requested_values = requested_by_parameter[parameter]
+        selected_values = [value for value in requested_values if value in options] if requested_values else list(options)
+        if selected_values:
+            preview_filters[column] = selected_values
+        cdr_preview_filters.append({
+            'parameter': parameter, 'label': label, 'options': options,
+            'selected_values': selected_values,
+        })
+        if parameter == 'cdr_vendor':
+            vendor_preview_columns.add(column)
+    priority_columns = [
+        'source_sheet', 'operator', 'vendor', 'market', 'period', 'region', 'city', 'technology_primary',
+        'session_type', 'test_name', 'direction', 'event_start_time', 'status',
+    ]
+    preview_columns = [column for column in priority_columns if column in available_columns]
+    preview_columns.extend(
+        column for column in available_columns
+        if column not in preview_columns
+        and column != 'report_vendor'
+        and column not in derived_preview_columns
+        and _normalise_catalogue_dimension_name(column) not in all_calculated_dimension_keys
+    )
+    preview_columns.extend(column for column in available_columns if column in derived_preview_columns)
+    preview_frame = repository.load_reporting_preview_rows(
+        normalized_kind, preview_columns, preview_filters, row_limit,
+    )
     preview_rows = preview_frame.astype(object).where(pd.notna(preview_frame), '').to_dict(orient='records')
     updated_at = repository.get_workspace_state(f'combined_reporting_updated_{normalized_kind}') or ''
+    total_row_count = repository.reporting_row_count(normalized_kind)
+    dataset = {
+        'id': f'combined-{normalized_kind}',
+        'file_name': f'CDR-{normalized_kind.title()} (combined)',
+        'dataset_kind': normalized_kind,
+        'input_kind_label': f'CDR-{normalized_kind.title()} (combined)',
+        'status': 'ready', 'status_label': 'Ready', 'row_count': total_row_count,
+        'uploaded_by': 'Workspace', 'is_combined': True,
+    }
     return render_template(
         request,
-        'combined_dataset_preview.html',
+        'dataset_preview.html',
         {
             'user': user,
-            'kind': normalized_kind,
-            'combined_name': f'Combined CDR-{normalized_kind.upper()}',
-            'preview_columns': columns,
+            'dataset': dataset,
+            'preview_columns': preview_columns,
             'preview_rows': preview_rows,
             'preview_row_limit': row_limit,
-            'total_row_count': total_row_count,
-            'visible_column_count': len(columns),
-            'updated_at_label': format_local_timestamp(updated_at) if updated_at else '—',
+            'preview_sheet_options': [], 'preview_source_sheet': None,
+            'vendor_preview_columns': vendor_preview_columns,
+            'derived_preview_columns': derived_preview_columns,
+            'vendor_filter_options': [], 'selected_mapping_vendor': '', 'selected_gcid': '',
+            'cdr_preview_filters': cdr_preview_filters,
+            'visible_column_count': len(preview_columns),
+            'preview_action': f'/workspace/combined/{normalized_kind}/preview',
+            'preview_metadata_label': 'Updated',
+            'preview_metadata_value': format_local_timestamp(updated_at) if updated_at else '—',
         },
     )
 
@@ -9154,7 +9375,8 @@ def latest_auto_calculated_field_materialization(
         ]
     if workspace_jobs:
         active_jobs = [job for job in workspace_jobs if job.get('status') in {'queued', 'processing'}]
-        job = max(active_jobs or workspace_jobs, key=lambda item: float(item.get('created_at') or 0))
+        processing_jobs = [job for job in active_jobs if job.get('status') == 'processing']
+        job = max(processing_jobs or active_jobs or workspace_jobs, key=lambda item: float(item.get('created_at') or 0))
         return JSONResponse({
             key: value for key, value in job.items()
             if key not in {'previous_definitions', 'affected_sources', 'renames', 'username'}

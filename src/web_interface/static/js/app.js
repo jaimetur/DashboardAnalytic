@@ -55,8 +55,12 @@ function monitorAutoCalculatedFieldJob(statusUrl, notice = '') {
         const current = new Set(storedAutoCalculatedFieldJobs());
         current.delete(statusUrl);
         window.localStorage.setItem(autoCalculatedFieldJobStorageKey, JSON.stringify([...current]));
+        document.querySelectorAll('[data-combined-dataset-recreate]').forEach((button) => { button.disabled = false; });
         if (job.status === 'ready') {
-          showInfoDialog(job.message || 'Auto-calculated fields are ready.', {title: 'Materialization complete'});
+          showInfoDialog(job.message || 'Auto-calculated fields are ready.', {
+            title: 'Materialization complete',
+            onClose: job.refresh_workspace ? () => window.location.reload() : undefined,
+          });
         } else {
           showInfoDialog(job.error || 'The CDR tables could not be updated.', {title: 'Materialization failed', tone: 'error'});
         }
@@ -76,6 +80,30 @@ window.addEventListener('load', () => {
   const pending = new Set(storedAutoCalculatedFieldJobs());
   if (redirectedJob) pending.add(`/api/workspace/auto-calculated-fields/materialization/${redirectedJob}`);
   pending.forEach((statusUrl) => monitorAutoCalculatedFieldJob(statusUrl));
+});
+
+document.querySelectorAll('[data-combined-dataset-recreate]').forEach((button) => {
+  button.addEventListener('click', async () => {
+    const accepted = await showConfirmDialog(
+      `Recreate ${button.dataset.combinedName || 'this combined CDR table'} from the current individual datasets?`,
+      {title: 'Recreate combined table', confirmLabel: 'Recreate table', tone: 'warning'},
+    );
+    if (!accepted) return;
+    button.disabled = true;
+    try {
+      const response = await fetch(button.dataset.recreateUrl || '', {
+        method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Unable to recreate the combined CDR table.');
+      monitorAutoCalculatedFieldJob(payload.materialization_status_url);
+    } catch (error) {
+      button.disabled = false;
+      showInfoDialog(error instanceof Error ? error.message : 'Unable to recreate the combined CDR table.', {
+        title: 'Combined CDR recreation failed', tone: 'error',
+      });
+    }
+  });
 });
 
 document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEach((host) => {

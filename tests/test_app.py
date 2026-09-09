@@ -250,6 +250,47 @@ def test_incremental_auto_fields_create_missing_combined_reporting_table(tmp_pat
     assert value == 'Video'
 
 
+def test_recreate_combined_table_recovers_empty_source_rows_and_required_columns(tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.repository import Repository
+    from src.modules.workspaces import Workspace
+
+    database_path = tmp_path / 'workspace.db'
+    source_path = tmp_path / 'voice.csv'
+    source_path.write_text(
+        'Operator,Call_Status,Raw_Status,Test_Name\nEE,Completed,ok,Voice\n3,Failed,bad,Voice\n',
+        encoding='utf-8',
+    )
+    repository = Repository(database_path)
+    repository.initialize()
+    dataset_id, _created = repository.add_dataset(source_path.name, str(source_path), 'admin')
+    repository.update_dataset_profile(
+        dataset_id, status='ready', dataset_kind='voice', row_count=2, column_count=4,
+    )
+    with repository.connection() as connection:
+        connection.execute(f'CREATE TABLE dataset_rows_{dataset_id} (Test_Name TEXT)')
+    repository.replace_calculated_dimensions([{
+        'name': 'Outcome', 'sources': ['cdr-voice'], 'default': '', 'default_from': 'Raw_Status',
+        'rules': [{'when': 'Call_Status = Completed', 'value': 'Success'}],
+    }])
+    workspace = Workspace(
+        'test', 'Test', database_path, tmp_path, tmp_path, tmp_path, tmp_path, '', '',
+    )
+    progress: list[tuple[int, int, str]] = []
+
+    stats = app_module.recreate_combined_cdr_table(
+        workspace, 'voice', lambda completed, total, message: progress.append((completed, total, message)),
+    )
+
+    assert stats == {'datasets': 1, 'rows': 2, 'tables': 2}
+    assert repository.dataset_row_count(dataset_id) == 2
+    assert repository.reporting_row_count('voice') == 2
+    columns = repository.list_reporting_row_columns('voice')
+    assert {'Operator', 'Call_Status', 'Raw_Status', 'Outcome'} <= set(columns)
+    assert len(progress) > 2
+    assert progress[-1][0] == progress[-1][1]
+
+
 def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -2023,6 +2064,28 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     assert preview_response.status_code == 200
     assert 'CDR-Data (combined)' in preview_response.text
     assert 'Vodafone UK' in preview_response.text
+    assert 'action="/workspace/combined/data/preview"' in preview_response.text
+    assert 'name="cdr_operator"' in preview_response.text
+    assert 'data-preview-column-filter' in preview_response.text
+    assert 'data-preview-row-filter' in preview_response.text
+    assert 'Show Dashboard' not in preview_response.text
+
+
+def test_combined_recreation_returns_materialization_job_for_progress(client, monkeypatch) -> None:
+    login(client)
+    import src.DashboardAnalytic as app_module
+
+    monkeypatch.setattr(
+        app_module,
+        'start_combined_cdr_recreation_job',
+        lambda workspace, kind, username: {'id': 'combined-job'},
+    )
+
+    response = client.post('/workspace/combined/voice/recreate')
+
+    assert response.status_code == 200
+    assert response.json()['materialization_job'] == 'combined-job'
+    assert response.json()['materialization_status_url'].endswith('/combined-job')
 
 
 def test_queued_dataset_actions_remain_compact_icons_during_live_updates(client) -> None:

@@ -295,9 +295,7 @@
             <td data-label="Actions">
               <div class="queue-actions">
                 <a class="ghost-link action-link-preview" href="/workspace/combined/{{ combined.kind }}/preview" title="Preview combined dataset" aria-label="Preview combined dataset">Preview dataset</a>
-                <form method="post" action="/workspace/combined/{{ combined.kind }}/recreate" data-loading-label="Recreating combined table" data-loading-copy="Rebuilding the combined CDR table in the background." data-confirm="Recreate {{ combined.name }} from the current individual datasets?" data-confirm-title="Recreate combined table" data-confirm-label="Recreate table">
-                  <button type="submit" class="combined-dataset-recreate-button" title="Recreate combined table" aria-label="Recreate combined table">↻</button>
-                </form>
+                <button type="button" class="combined-dataset-recreate-button" data-combined-dataset-recreate data-recreate-url="/workspace/combined/{{ combined.kind }}/recreate" data-combined-name="{{ combined.name }}" title="Recreate combined table" aria-label="Recreate combined table">↻</button>
               </div>
             </td>
           </tr>

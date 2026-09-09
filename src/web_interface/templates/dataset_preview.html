@@ -10,7 +10,7 @@
       <span class="pill status-pill status-{{ dataset.status }}">{{ dataset.status_label }}</span>
     </div>
     <p class="lede">Read-only sample of the processed dataset. The preview shows the first {{ preview_rows | length }} rows and all {{ visible_column_count }} available columns. Pastel-red columns are derived from CDR fields during processing.{% if preview_sheet_options %} VFUK mapping previews are limited to the 4G and 5G source sheets.{% endif %}</p>
-    <form class="preview-row-limit-form" action="/workspace/preview/{{ dataset.id }}" method="get" data-loading-label="Refreshing dataset preview">
+    <form class="preview-row-limit-form" action="{{ preview_action | default('/workspace/preview/' ~ dataset.id) }}" method="get" data-loading-label="Refreshing dataset preview">
       <label>Rows to preview
         <input type="number" name="row_limit" value="{{ preview_row_limit }}" min="1" max="5000" step="1" required>
       </label>
@@ -53,11 +53,11 @@
       <article><span>Input Type</span><strong>{{ dataset.input_kind_label }}</strong></article>
       <article><span>Processed Rows</span><strong>{{ dataset.row_count or 0 }}</strong></article>
       <article><span>Available Columns</span><strong>{{ visible_column_count }}</strong></article>
-      <article><span>Uploaded By</span><strong>{{ dataset.uploaded_by }}</strong></article>
+      <article><span>{{ preview_metadata_label | default('Uploaded By') }}</span><strong>{{ preview_metadata_value | default(dataset.uploaded_by) }}</strong></article>
     </section>
     <div class="inline-actions preview-actions">
       <a class="ghost-link" href="/workspace">Back to Workspace</a>
-      {% if dataset.dataset_kind in ['data', 'voice', 'speech'] %}
+      {% if dataset.dataset_kind in ['data', 'voice', 'speech'] and not dataset.is_combined %}
       <a class="ghost-link action-link-primary" href="/dashboard?dataset_id={{ dataset.id }}&input_kind={{ dataset.dataset_kind }}" data-dashboard-open-link data-dataset-id="{{ dataset.id }}" data-input-kind="{{ dataset.dataset_kind }}">Show Dashboard</a>
       {% endif %}
     </div>

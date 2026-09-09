@@ -1269,6 +1269,78 @@ class Repository:
             ).fetchone()
             return self._table_columns(conn, table_name) if exists else []
 
+    def dataset_row_count(self, dataset_id: int) -> int:
+        table_name = self.dataset_rows_table_name(dataset_id)
+        with self.connection() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,)
+            ).fetchone()
+            if not exists:
+                return 0
+            return int(conn.execute(
+                f"SELECT COUNT(*) AS count FROM {self._quote_identifier(table_name)}"
+            ).fetchone()['count'] or 0)
+
+    def resolve_reporting_row_column_name(self, dataset_kind: str, requested: str) -> str | None:
+        columns = set(self.list_reporting_row_columns(dataset_kind))
+        return self._resolve_dataset_row_column_name(columns, requested) if columns else None
+
+    def list_distinct_reporting_row_values(
+        self, dataset_kind: str, column: str, limit: int = 200,
+    ) -> list[str]:
+        table_name = self.reporting_rows_table_name(dataset_kind)
+        resolved = self.resolve_reporting_row_column_name(dataset_kind, column)
+        if not resolved:
+            return []
+        quoted_column = self._quote_identifier(resolved)
+        with self.connection() as conn:
+            rows = conn.execute(
+                f"SELECT DISTINCT TRIM(CAST({quoted_column} AS TEXT)) AS value "
+                f"FROM {self._quote_identifier(table_name)} "
+                f"WHERE {quoted_column} IS NOT NULL AND TRIM(CAST({quoted_column} AS TEXT)) <> '' "
+                "ORDER BY LOWER(TRIM(CAST(value AS TEXT))) LIMIT ?",
+                (int(limit),),
+            ).fetchall()
+        return [str(row['value']).strip() for row in rows if str(row['value']).strip()]
+
+    def load_reporting_preview_rows(
+        self, dataset_kind: str, columns: list[str], filters: dict[str, Any], row_limit: int,
+    ) -> pd.DataFrame:
+        table_name = self.reporting_rows_table_name(dataset_kind)
+        existing_columns = set(self.list_reporting_row_columns(dataset_kind))
+        selected_columns: list[tuple[str, str]] = []
+        for column in columns:
+            resolved = self._resolve_dataset_row_column_name(existing_columns, column)
+            if resolved:
+                selected_columns.append((column, resolved))
+        if not selected_columns:
+            return pd.DataFrame()
+        where_clauses: list[str] = []
+        params: list[Any] = []
+        for key, value in filters.items():
+            resolved = self._resolve_dataset_row_column_name(existing_columns, key)
+            values = value if isinstance(value, (list, tuple, set)) else [value]
+            normalized = [str(item).strip().lower() for item in values if str(item).strip()]
+            if not resolved or not normalized:
+                continue
+            placeholders = ', '.join('?' for _value in normalized)
+            where_clauses.append(
+                f"LOWER(TRIM(CAST({self._quote_identifier(resolved)} AS TEXT))) IN ({placeholders})"
+            )
+            params.extend(normalized)
+        select_clause = ', '.join(
+            f"{self._quote_identifier(actual)} AS {self._quote_identifier(requested)}"
+            if actual != requested else self._quote_identifier(actual)
+            for requested, actual in selected_columns
+        )
+        query = f"SELECT {select_clause} FROM {self._quote_identifier(table_name)}"
+        if where_clauses:
+            query += f" WHERE {' AND '.join(where_clauses)}"
+        query += " LIMIT ?"
+        params.append(max(1, int(row_limit)))
+        with self.connection() as conn:
+            return pd.read_sql_query(query, conn, params=params)
+
     def reporting_rows_exist_for_dataset(self, dataset_id: int, dataset_kind: str) -> bool:
         table_name = self.reporting_rows_table_name(dataset_kind)
         with self.connection() as conn:
@@ -1280,6 +1352,25 @@ class Repository:
             return conn.execute(
                 f"SELECT 1 FROM {self._quote_identifier(table_name)} WHERE dataset_id = ? LIMIT 1", (dataset_id,)
             ).fetchone() is not None
+
+    def reporting_row_count(self, dataset_kind: str, dataset_id: int | None = None) -> int:
+        table_name = self.reporting_rows_table_name(dataset_kind)
+        with self.connection() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,)
+            ).fetchone()
+            if not exists:
+                return 0
+            if dataset_id is None:
+                row = conn.execute(
+                    f"SELECT COUNT(*) AS count FROM {self._quote_identifier(table_name)}"
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    f"SELECT COUNT(*) AS count FROM {self._quote_identifier(table_name)} WHERE dataset_id = ?",
+                    (int(dataset_id),),
+                ).fetchone()
+            return int(row['count'] or 0)
 
     def copy_dataset_rows_to_reporting(self, dataset_id: int, dataset_kind: str, columns: list[str] | None = None) -> None:
         """Backfill a shared table entirely inside SQLite, without pandas RAM use."""

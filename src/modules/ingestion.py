@@ -185,7 +185,12 @@ def _operator_sheet_names(workbook) -> list[str]:
     for sheet in worksheets[definition_index + 1:]:
         key = sheet.title.strip().casefold()
         if sheet.sheet_state != 'visible' or key in CDR_IGNORED_SHEET_KEYS:
-            break
+            # Ranking/helper sheets commonly sit between KPI Definition and
+            # the first operator export. Skip that leading metadata, then stop
+            # at the first helper sheet after the operator block has started.
+            if candidates:
+                break
+            continue
         candidates.append(sheet.title)
 
     candidate_keys = {name.strip().casefold() for name in candidates}

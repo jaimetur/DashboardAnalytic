@@ -104,10 +104,12 @@ def test_load_dataset_uses_only_operator_sheets_after_kpi_definition(tmp_path) -
     })
     with pd.ExcelWriter(workbook, engine="openpyxl") as writer:
         pd.DataFrame({"KPI": ["Definition"]}).to_excel(writer, sheet_name="KPI Definition", index=False)
+        source.assign(Operator="Ranking").to_excel(writer, sheet_name="RANKING", index=False)
+        source.assign(Operator="OnDemand").to_excel(writer, sheet_name="RANKING OnDemand", index=False)
         source.to_excel(writer, sheet_name="Telekom", index=False)
         source.assign(Operator="Telekom VoNR").to_excel(writer, sheet_name="Telekom VoNR", index=False)
         source.assign(Operator="Orange").to_excel(writer, sheet_name="Orange", index=False)
-        source.assign(Operator="Ranking").to_excel(writer, sheet_name="RANKING", index=False)
+        source.assign(Operator="Lists").to_excel(writer, sheet_name="Lists", index=False)
 
     dataset = load_dataset(workbook)
 
