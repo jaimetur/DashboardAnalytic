@@ -1334,6 +1334,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .admin-stack .admin-dataset-actions .danger-button:hover:not(:disabled) { background: linear-gradient(135deg, #69131a, #ad3538); }
 .queue-status-pill { display: inline-flex; align-items: center; justify-content: center; padding: 0.38rem 0.7rem; border-radius: 999px; color: white; font-size: 0.84rem; font-weight: 700; }
 .queue-status-ready { background: linear-gradient(135deg, var(--success), #3ca56f); }
+.queue-status-warning { background: linear-gradient(135deg, #d98722, #efad4f); }
 .queue-status-processing { background: linear-gradient(135deg, var(--warning), #e5ae44); }
 .queue-status-failed { background: linear-gradient(135deg, var(--danger), #d86a56); }
 .queue-status-queued { background: linear-gradient(135deg, #8ba0af, #b1bfca); }

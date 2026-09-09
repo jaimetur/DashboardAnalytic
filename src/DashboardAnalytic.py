@@ -2551,14 +2551,41 @@ def workspace_combined_tables(task_repository: Repository | None = None) -> list
                     if str(dataset['dataset_kind'] or '').casefold() == kind
                 ]
                 updated_at = max(dataset_dates, default='')
+            source_datasets = [
+                dataset for dataset in task_repository.list_datasets()
+                if dataset['status'] == 'ready' and str(dataset['dataset_kind'] or '').casefold() == kind
+            ]
+            expected_row_count = sum(int(dataset['row_count'] or 0) for dataset in source_datasets)
             combined.append({
                 'name': f'CDR-{kind.title()} (combined)',
                 'kind': kind,
                 'table_name': table_name,
                 'row_count': int(row_count or 0),
+                'expected_row_count': expected_row_count,
+                'has_missing_rows': int(row_count or 0) != expected_row_count,
                 'updated_at_label': format_local_timestamp(updated_at) if updated_at else '—',
             })
     return combined
+
+
+def combined_cdr_integrity(kind: str, task_repository: Repository | None = None) -> dict[str, Any]:
+    """Compare a combined CDR table with its ready individual source datasets."""
+    task_repository = task_repository or repository
+    normalized_kind = str(kind or '').casefold()
+    if normalized_kind not in CDR_DATASET_KINDS:
+        raise ValueError('Unknown combined CDR table.')
+    source_datasets = [
+        dataset for dataset in task_repository.list_datasets()
+        if dataset['status'] == 'ready' and str(dataset['dataset_kind'] or '').casefold() == normalized_kind
+    ]
+    expected_row_count = sum(int(dataset['row_count'] or 0) for dataset in source_datasets)
+    row_count = task_repository.reporting_row_count(normalized_kind)
+    return {
+        'kind': normalized_kind,
+        'row_count': row_count,
+        'expected_row_count': expected_row_count,
+        'has_missing_rows': row_count != expected_row_count,
+    }
 
 
 def recreate_combined_cdr_table(
@@ -4828,6 +4855,19 @@ def recreate_combined_cdr(
     })
 
 
+@app.get('/api/workspace/combined/{kind}/integrity')
+def combined_cdr_integrity_status(
+    kind: str, user: SessionUser = Depends(current_user),
+) -> JSONResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace before checking combined tables.')
+    require_workspace_access(user, active_workspace.id)
+    try:
+        return JSONResponse(combined_cdr_integrity(kind))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.get('/api/workspaces/status')
 def workspace_status(user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Lightweight live data for the Workspace Management table."""
@@ -5221,6 +5261,7 @@ def preview_combined_dataset(
     kind: str,
     request: Request,
     row_limit: int = Query(default=100, ge=1, le=5000),
+    allow_incomplete: bool = Query(default=False),
     cdr_operator: list[str] = Query(default=[]),
     cdr_vendor: list[str] = Query(default=[]),
     cdr_rat: list[str] = Query(default=[]),
@@ -5232,6 +5273,15 @@ def preview_combined_dataset(
     normalized_kind = str(kind or '').casefold()
     if normalized_kind not in CDR_DATASET_KINDS:
         raise HTTPException(status_code=404, detail='Combined dataset not found')
+    integrity = combined_cdr_integrity(normalized_kind)
+    if integrity['has_missing_rows'] and not allow_incomplete:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"CDR-{normalized_kind.upper()} (combined) contains {integrity['row_count']} of "
+                f"{integrity['expected_row_count']} rows. Recreate it from Workspace > Datasets before using it."
+            ),
+        )
     available_columns = [
         column for column in repository.list_reporting_row_columns(normalized_kind)
         if column not in {'dataset_id', 'source_row_id'}

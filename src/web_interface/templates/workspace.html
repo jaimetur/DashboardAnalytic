@@ -283,7 +283,7 @@
             <td data-label="Input Type">CDR-{{ combined.kind|title }} (combined)</td>
             <td data-label="Rows">{{ combined.row_count }}</td>
             <td data-label="Size">—</td>
-            <td data-label="Status"><span class="queue-status-pill queue-status-ready" data-combined-dataset-status>Ready</span></td>
+            <td data-label="Status"><span class="queue-status-pill queue-status-{{ 'warning' if combined.has_missing_rows else 'ready' }}" data-combined-dataset-status>{% if combined.has_missing_rows %}Missing Rows{% else %}Ready{% endif %}</span></td>
             <td data-label="Progress">
               <div class="queue-progress-cell">
                 <div class="progress-shell visual-progress-shell"><div class="progress-bar status-ready" data-combined-dataset-progress-bar style="width: 100%"></div></div>
@@ -294,7 +294,7 @@
             <td data-label="Updated">{{ combined.updated_at_label }}</td>
             <td data-label="Actions">
               <div class="queue-actions">
-                <a class="ghost-link action-link-preview" href="/workspace/combined/{{ combined.kind }}/preview" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview" title="Preview combined dataset" aria-label="Preview combined dataset">Preview dataset</a>
+                <a class="ghost-link action-link-preview" href="/workspace/combined/{{ combined.kind }}/preview" target="_blank" rel="noopener" data-preview-open-link data-combined-dataset-preview data-integrity-url="/api/workspace/combined/{{ combined.kind }}/integrity" data-loading-label="Generating dataset preview" title="Preview combined dataset" aria-label="Preview combined dataset">Preview dataset</a>
                 <button type="button" class="combined-dataset-recreate-button" data-combined-dataset-recreate data-recreate-url="/workspace/combined/{{ combined.kind }}/recreate" data-combined-name="{{ combined.name }}" title="Recreate combined table" aria-label="Recreate combined table">↻</button>
               </div>
             </td>

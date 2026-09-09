@@ -2437,6 +2437,35 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
 document.addEventListener('click', (event) => {
   const previewLink = event.target.closest('[data-preview-open-link]');
   if (previewLink) {
+    if (previewLink.matches('[data-combined-dataset-preview]')) {
+      event.preventDefault();
+      const openPreview = async () => {
+        try {
+          const response = await fetch(previewLink.dataset.integrityUrl || '', {credentials: 'same-origin', cache: 'no-store'});
+          const integrity = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(integrity.detail || 'Unable to verify the combined dataset.');
+          let url = previewLink.href;
+          if (integrity.has_missing_rows) {
+            const accepted = await showConfirmDialog(
+              `This combined dataset contains ${integrity.row_count} of ${integrity.expected_row_count} rows from its individual CDR datasets. You can recreate it from Workspace > Datasets. Do you want to continue with the incomplete dataset?`,
+              {title: 'Combined dataset has missing rows', confirmLabel: 'Open anyway', tone: 'warning'},
+            );
+            if (!accepted) return;
+            const target = new URL(url, window.location.origin);
+            target.searchParams.set('allow_incomplete', '1');
+            url = target.toString();
+          }
+          if (previewLink.target === '_blank') window.open(url, '_blank', 'noopener');
+          else window.location.assign(url);
+        } catch (error) {
+          showInfoDialog(error instanceof Error ? error.message : 'Unable to verify the combined dataset.', {
+            title: 'Combined dataset unavailable', tone: 'error',
+          });
+        }
+      };
+      void openPreview();
+      return;
+    }
     if (previewLink.target === '_blank') return;
     showLoadingOverlay(previewLink.dataset.loadingLabel || 'Generating dataset preview');
     return;

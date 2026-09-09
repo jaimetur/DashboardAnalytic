@@ -2078,6 +2078,38 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     assert 'Show Dashboard' not in preview_response.text
 
 
+def test_combined_dataset_missing_rows_are_flagged_and_require_confirmation(client, tmp_path: Path) -> None:
+    login(client)
+    import src.DashboardAnalytic as app_module
+
+    source_path = tmp_path / 'cdr_data.csv'
+    source_path.write_text('operator,score\nVodafone UK,91\nVodafone UK,92\n', encoding='utf-8')
+    dataset_id, _created = app_module.repository.add_dataset(source_path.name, str(source_path), 'admin')
+    app_module.repository.update_dataset_profile(
+        dataset_id, status='ready', dataset_kind='data', row_count=2, column_count=2,
+    )
+    with app_module.repository.connection() as connection:
+        connection.execute(f'CREATE TABLE dataset_rows_{dataset_id} (operator TEXT, score INTEGER)')
+        connection.execute(f"INSERT INTO dataset_rows_{dataset_id} VALUES ('Vodafone UK', 91), ('Vodafone UK', 92)")
+    app_module.repository.copy_dataset_rows_to_reporting(dataset_id, 'data', ['operator', 'score'])
+    with app_module.repository.connection() as connection:
+        connection.execute('DELETE FROM reporting_rows_data WHERE dataset_id = ? AND source_row_id = 2', (dataset_id,))
+
+    integrity = client.get('/api/workspace/combined/data/integrity')
+    assert integrity.status_code == 200
+    assert integrity.json()['has_missing_rows'] is True
+    assert integrity.json()['row_count'] == 1
+    assert integrity.json()['expected_row_count'] == 2
+
+    assert client.get('/workspace/combined/data/preview').status_code == 409
+    assert client.get('/workspace/combined/data/preview?allow_incomplete=1').status_code == 200
+
+    workspace_response = client.get('/workspace')
+    assert workspace_response.status_code == 200
+    assert 'Missing Rows' in workspace_response.text
+    assert 'queue-status-warning' in workspace_response.text
+
+
 def test_combined_recreation_returns_materialization_job_for_progress(client, monkeypatch) -> None:
     login(client)
     import src.DashboardAnalytic as app_module
