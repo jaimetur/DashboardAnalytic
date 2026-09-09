@@ -722,21 +722,22 @@ def materialize_workspace_auto_fields_incrementally(
         if progress_callback:
             progress_callback(completed, total, f'Updating {dataset["file_name"]}')
     for kind in reporting_kinds:
-        reporting_table_exists = bool(task_repository.list_reporting_row_columns(kind))
-        if reporting_table_exists:
+        calculated_names = [
+            item.name for item in current if f'cdr-{kind}' in item.sources
+        ]
+        # Reconcile membership before updating calculated columns. A combined
+        # table may predate a newly processed CDR of the same type, so an
+        # incremental column update alone would leave that dataset out.
+        for dataset in datasets:
+            if str(dataset['dataset_kind']).casefold() == kind:
+                task_repository.copy_dataset_rows_to_reporting(
+                    int(dataset['id']), kind, calculated_names,
+                )
+        if task_repository.list_reporting_row_columns(kind):
             _incremental_auto_field_table_update(
                 task_repository, task_repository.reporting_rows_table_name(kind),
                 f'cdr-{kind}', previous, current, renames,
             )
-        else:
-            calculated_names = [
-                item.name for item in current if f'cdr-{kind}' in item.sources
-            ]
-            for dataset in datasets:
-                if str(dataset['dataset_kind']).casefold() == kind:
-                    task_repository.copy_dataset_rows_to_reporting(
-                        int(dataset['id']), kind, calculated_names,
-                    )
         completed += 1
         task_repository.set_workspace_state(
             f'combined_reporting_updated_{kind}', now_iso(),

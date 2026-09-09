@@ -192,6 +192,38 @@ def test_incremental_auto_fields_update_existing_combined_reporting_table(tmp_pa
     assert value == 'Video'
 
 
+def test_incremental_auto_fields_reconcile_new_dataset_into_existing_combined_table(tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.repository import Repository
+
+    repository = Repository(tmp_path / 'combined-membership.db')
+    repository.initialize()
+    first_id, _created = repository.add_dataset('first.csv', str(tmp_path / 'first.csv'), 'admin')
+    second_id, _created = repository.add_dataset('second.csv', str(tmp_path / 'second.csv'), 'admin')
+    for dataset_id in (first_id, second_id):
+        repository.update_dataset_profile(dataset_id, status='ready', dataset_kind='voice')
+        with repository.connection() as connection:
+            connection.execute(
+                f'CREATE TABLE dataset_rows_{dataset_id} (Test_Name TEXT)'
+            )
+            connection.execute(
+                f"INSERT INTO dataset_rows_{dataset_id} VALUES (?)", (f'test-{dataset_id}',)
+            )
+    repository.copy_dataset_rows_to_reporting(first_id, 'voice')
+    dimensions = app_module.parse_calculated_dimensions([{
+        'name': 'Family', 'sources': ['cdr-voice'], 'default': 'Other',
+        'rules': [{'when': 'Test_Name CONTAINS test', 'value': 'Video'}],
+    }])
+
+    app_module.materialize_workspace_auto_fields_incrementally(
+        (), dimensions, {}, repository, {'cdr-voice'},
+    )
+
+    with repository.connection() as connection:
+        count = connection.execute('SELECT COUNT(*) AS count FROM reporting_rows_voice').fetchone()['count']
+    assert count == 2
+
+
 def test_incremental_auto_fields_create_missing_combined_reporting_table(tmp_path: Path) -> None:
     import src.DashboardAnalytic as app_module
     from src.modules.repository import Repository
