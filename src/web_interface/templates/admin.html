@@ -362,7 +362,7 @@
             {% for option in export_options %}<option value="{{ option.value }}" {% if option.disabled | default(false) %}disabled{% endif %}>{{ option.label }}</option>{% endfor %}
           </select>
         </label>
-        <p class="form-note">{% if user.role == 'super-admin' %}Choose configuration, Slides Templates, the active workspace's Auto-calculated Fields, one workspace or the complete environment.{% else %}Admins can export or transfer shared Slides Templates, the active workspace's Auto-calculated Fields and accessible workspaces.{% endif %}</p>
+        <p class="form-note">{% if user.role == 'super-admin' %}Choose configuration, Slides Templates, the active workspace's Auto-calculated Fields, one workspace or the complete environment.{% else %}Admins can export or transfer the active workspace's Slides Templates, the active workspace's Auto-calculated Fields and accessible workspaces.{% endif %}</p>
         <div class="import-export-actions">
           <button type="submit" class="import-export-action">Export ZIP</button>
           <button type="button" class="server-transfer-action" data-server-transfer>Transfer to other server</button>
@@ -415,7 +415,7 @@
       <div class="confirm-icon info-icon" aria-hidden="true">⇩</div>
       <p class="eyebrow">Full Environment export</p>
       <h3 id="full-environment-workspace-title">Select workspaces</h3>
-      <p>Configuration and shared Slides Templates are always included. Choose the workspaces to add to this package.</p>
+      <p>Configuration is always included. Each selected workspace includes its own Slides Templates.</p>
       <div class="full-environment-workspace-toolbar">
         <button type="button" class="ghost-link" data-full-environment-select-all>Select all</button>
         <button type="button" class="ghost-link" data-full-environment-select-none>Select none</button>

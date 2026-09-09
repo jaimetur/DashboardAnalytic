@@ -3585,7 +3585,7 @@ function importWarningDetails(payload) {
     return payload.includes_slides_templates
       ? {
         title: 'Overwrite configuration and templates?',
-        message: 'This will overwrite the configuration files and shared Slides Templates included in the package. The local workspace registry and existing workspaces will be preserved.',
+        message: 'This will overwrite the configuration files and Slides Templates included in the package. The local workspace registry and existing workspaces will be preserved.',
       }
       : {
         title: 'Overwrite configuration?',
@@ -3595,7 +3595,7 @@ function importWarningDetails(payload) {
   if (kind === 'slides-templates') {
     return {
       title: 'Overwrite Slides Templates?',
-      message: 'This will overwrite the shared Slides Templates included in the package.',
+      message: 'Choose the destination workspaces next. Templates with matching names will be overwritten only in those workspaces. Importing templates does not rebuild CDR tables.',
     };
   }
   if (kind === 'auto-calculated-fields') {
@@ -3621,11 +3621,11 @@ function importWarningDetails(payload) {
     : ' New workspaces will be created from the package.';
   return {
     title: 'Overwrite full environment?',
-    message: `This will overwrite the configuration files and shared Slides Templates included in the package.${collisionCopy} The local workspace registry will be rebuilt from the imported workspaces.`,
+    message: `This will overwrite the configuration files and Slides Templates included in the package.${collisionCopy} The local workspace registry will be rebuilt from the imported workspaces.`,
   };
 }
 
-function selectAutoCalculatedFieldWorkspaces(workspaces) {
+function selectAutoCalculatedFieldWorkspaces(workspaces, kind = 'auto-calculated-fields', selectedIds = []) {
   if (!Array.isArray(workspaces) || !workspaces.length) {
     showInfoDialog('There are no destination workspaces available.', {title: 'Auto-calculated Fields', tone: 'error'});
     return Promise.resolve(null);
@@ -3634,14 +3634,16 @@ function selectAutoCalculatedFieldWorkspaces(workspaces) {
   const panel = document.createElement('section'); panel.className = 'confirm-panel auto-calculated-field-workspace-dialog';
   panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true');
   const title = document.createElement('h3'); title.textContent = 'Select destination workspaces';
-  const copy = document.createElement('p'); copy.textContent = 'The fields will be merged into every selected workspace. Existing fields with the same name will be replaced once.';
+  const copy = document.createElement('p'); copy.textContent = kind === 'slides-templates'
+    ? 'Templates will be imported into every selected workspace. The original workspace is preselected when it exists. Matching template names will be overwritten.'
+    : 'The original workspace is preselected when present. Fields will be merged into every selected workspace; matching field names will be replaced.';
   const toolbar = document.createElement('div'); toolbar.className = 'full-environment-workspace-toolbar';
   const selectAll = document.createElement('button'); selectAll.type = 'button'; selectAll.className = 'ghost-link'; selectAll.textContent = 'Select all';
   const selectNone = document.createElement('button'); selectNone.type = 'button'; selectNone.className = 'ghost-link'; selectNone.textContent = 'Select none'; toolbar.append(selectAll, selectNone);
   const list = document.createElement('div'); list.className = 'full-environment-workspace-list';
   workspaces.forEach((workspace) => {
     const label = document.createElement('label'); label.className = 'full-environment-workspace-choice';
-    const input = document.createElement('input'); input.type = 'checkbox'; input.value = workspace.id; input.checked = true;
+    const input = document.createElement('input'); input.type = 'checkbox'; input.value = workspace.id; input.checked = selectedIds.includes(workspace.id);
     const name = document.createElement('span'); name.textContent = workspace.name; label.append(input, name); list.append(label);
   });
   const error = document.createElement('p'); error.className = 'full-environment-workspace-error'; error.textContent = 'Select at least one workspace.'; error.hidden = true;
@@ -3742,10 +3744,10 @@ document.querySelectorAll('[data-import-export-form]').forEach((form) => {
         }).catch(() => {});
         return;
       }
-      const destinationWorkspaceIds = payload.kind === 'auto-calculated-fields'
-        ? await selectAutoCalculatedFieldWorkspaces(payload.destination_workspaces)
+      const destinationWorkspaceIds = ['auto-calculated-fields', 'slides-templates'].includes(payload.kind)
+        ? await selectAutoCalculatedFieldWorkspaces(payload.destination_workspaces, payload.kind, payload.selected_workspace_ids || [])
         : [];
-      if (payload.kind === 'auto-calculated-fields' && !destinationWorkspaceIds) {
+      if (['auto-calculated-fields', 'slides-templates'].includes(payload.kind) && !destinationWorkspaceIds) {
         await fetch(`/admin/import-export/import/uploads/${encodeURIComponent(uploadId)}`, {
           method: 'DELETE', credentials: 'same-origin',
         }).catch(() => {});
@@ -4193,6 +4195,8 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       try {
         const importEffect = offer.kind === 'auto-calculated-fields'
           ? 'Next, choose the destination workspaces. After reception, matching field names will be updated and their applicable CDR tables will be materialized in the background.'
+          : offer.kind === 'slides-templates'
+            ? 'Next, choose the destination workspaces. The original workspace will be preselected when present. Matching templates will be overwritten; CDR tables will not be rebuilt.'
           : 'After the complete package is received, it will be imported automatically and may overwrite matching configuration or workspaces.';
         accepted = await showConfirmDialog(
           `${offer.source}${sourceAddress} wants to transfer “${offer.content}” to this server.${workspaceCopy}\n\n${importEffect}`,
@@ -4202,8 +4206,11 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         confirmOverlay?.classList.remove('incoming-transfer-confirm');
       }
       let destinationWorkspaceIds = [];
-      if (accepted && offer.kind === 'auto-calculated-fields') {
-        const selection = await selectAutoCalculatedFieldWorkspaces(payload.destination_workspaces);
+      if (accepted && ['auto-calculated-fields', 'slides-templates'].includes(offer.kind)) {
+        const matchingIds = (payload.destination_workspaces || []).filter((workspace) =>
+          (offer.workspaces || []).some((name) => String(name).toLowerCase() === workspace.name.toLowerCase())
+        ).map((workspace) => workspace.id);
+        const selection = await selectAutoCalculatedFieldWorkspaces(payload.destination_workspaces, offer.kind, matchingIds);
         if (!selection) accepted = false;
         else destinationWorkspaceIds = selection;
       }

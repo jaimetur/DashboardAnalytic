@@ -1,6 +1,6 @@
 # Administration
 
-Admin centralises shared configuration and active-workspace maintenance. The available actions depend on the signed-in role.
+Admin centralises global configuration and active-workspace maintenance. The available actions depend on the signed-in role.
 
 ## Roles
 
@@ -25,7 +25,7 @@ Leave a password field empty when an edit should preserve the current password.
 
 ## Slides Templates Management
 
-Templates are shared across workspaces and stored below `config/slides-templates/`.
+Templates belong to the active workspace and are stored below `data/workspaces/<workspace>/slides-templates/`. Their metadata is stored in that workspace's `report_templates` table.
 
 Available actions:
 
@@ -39,7 +39,7 @@ Available actions:
 - Export
 - Delete
 
-One template can be default for each technology. Reporting initially selects that default but does not change it when a user chooses another template for one job.
+One template can be default for each technology within a workspace. Reporting initially selects that default but does not change it when a user chooses another template for one job. New workspaces start without templates.
 
 ## Slides Template Editor
 
@@ -77,12 +77,12 @@ One template can be default for each technology. Reporting initially selects tha
 ### Export targets
 
 - Config
-- Slides Templates
-- Config + Slides Templates
+- Slides Templates from the active workspace
+- Auto-calculated Fields from the active workspace
 - An accessible workspace
 - Full Environment with selected workspaces
 
-Admins can export/transfer Slides Templates and workspaces they can access. Super-admins can also include global configuration and Full Environment content.
+Admins can export/transfer the active workspace's Slides Templates and Auto-calculated Fields, plus workspaces they can access. Super-admins can also include global configuration and Full Environment content. Template and field packages preselect a destination workspace with the same name as their source, where available, and allow more destinations to be selected.
 
 Exports run as disk-backed jobs and show estimated progress. The ZIP download starts when package creation finishes.
 
@@ -114,11 +114,13 @@ Complete unimported packages appear in **Recovered transfer packages** with cont
 Tables are grouped by ownership:
 
 - **Config Tables**: global application configuration.
-- **Workspace Tables**: datasets, profiles, logs and unified generated jobs.
+- **Workspace Tables**: templates registry, datasets, profiles, logs and unified generated jobs.
 - **Individual dataset rows**: one materialised table per dataset.
 - **Combined CDR rows**: reporting acceleration tables by CDR type.
 
 The single **Generated jobs** table contains Report and Chart Set rows, distinguished by `job_type`.
+
+The **Slides Templates registry** is the active workspace's `report_templates` table. It records each template name, technology, default flag and timestamps; CSV content remains in the workspace template directory.
 
 Capabilities:
 

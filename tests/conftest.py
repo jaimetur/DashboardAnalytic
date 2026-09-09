@@ -45,4 +45,7 @@ def client(tmp_path: Path) -> TestClient:
     app_module.SESSIONS.clear()
 
     with TestClient(app_module.app) as test_client:
+        # Tests that need a library explicitly import it; new workspaces stay empty.
+        shutil.copytree(slides_templates_dir, app_module.active_workspace.slides_templates_dir, dirs_exist_ok=True)
+        app_module.register_workspace_template_files(app_module.active_workspace)
         yield test_client

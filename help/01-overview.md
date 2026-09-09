@@ -1,6 +1,6 @@
 # Product overview
 
-Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, reusable charts and template-driven PowerPoint reports. It is a multi-user application: data and generated output are isolated by workspace, while users and Slides Templates are shared configuration.
+Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, reusable charts and template-driven PowerPoint reports. It is a multi-user application: datasets, generated output, Auto-calculated Fields and Slides Templates are isolated by workspace, while users and access permissions are shared configuration.
 
 ## End-to-end workflow
 
@@ -52,6 +52,14 @@ Workspace is the entry point for data and storage management.
 - Stop, retry or delete work.
 - Apply, clear and reapply vendor mappings.
 
+### Auto-calculated Fields and combined CDR tables
+
+- Create, edit, duplicate, delete, import and export Auto-calculated Fields from the Workspace panel.
+- A field is applied only to the CDR types selected in **Available for**.
+- Saving, importing or rematerializing fields starts a background job. The Materialization status panel shows its percentage and completion state.
+- Existing combined `CDR-Data`, `CDR-Voice` and `CDR-Speech` tables appear at the bottom of Datasets. Preview them with the same filters as individual CDRs.
+- Use the circular **Recreate** action when a combined table needs rebuilding. It restores missing individual persisted rows from their source file when possible, then verifies contributed and total row counts.
+
 Example: upload `NetCheck_CDR_Data_2026_Q2.xlsx`, confirm **CDR-Data**, wait for **Processed**, then use **Show Dashboard** or select it from Reporting.
 
 ## E2E Dashboard
@@ -86,7 +94,7 @@ E2E Dashboard analyses one processed CDR at a time.
 
 ## E2E Reporting
 
-E2E Reporting combines processed CDRs and a shared Slides Template.
+E2E Reporting combines processed CDRs and a Slides Template from the active workspace.
 
 ### Reporting module selector
 
@@ -166,10 +174,12 @@ Admin is available to `admin` and `super-admin` roles, with permission-sensitive
 
 ### Slides Templates Management
 
-- Create, import, rename, duplicate, export and delete templates.
+- Create, import, rename, duplicate, export and delete templates in the active workspace.
 - Change NSA/SA type.
 - Set the default template for each technology.
 - Open the editor in a large dialog tied to the selected template.
+
+Templates belong to their workspace. A new workspace starts without templates. Existing shared libraries are copied once into each existing workspace during migration; the former shared directory is retained as a safety copy.
 
 ### Slides Template Editor
 
@@ -182,9 +192,10 @@ Admin is available to `admin` and `super-admin` roles, with permission-sensitive
 
 ### Export / Import
 
-- Export Config, Slides Templates, accessible workspaces or a Full Environment.
+- Export the active workspace's Slides Templates, Auto-calculated Fields, accessible workspaces or a Full Environment.
 - Select which workspaces belong to a Full Environment package.
 - Inspect an import before overwriting configuration or workspaces.
+- Template and Auto-calculated Field packages select the source workspace automatically when a workspace with the same name exists; additional accessible workspaces can also be selected.
 - Transfer authorised content directly to another server.
 - Follow package creation, transmission, reception and import progress.
 - Recover or delete complete, unimported transfer packages.

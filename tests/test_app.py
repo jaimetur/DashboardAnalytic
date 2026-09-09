@@ -258,20 +258,25 @@ def test_recreate_combined_table_recovers_empty_source_rows_and_required_columns
     database_path = tmp_path / 'workspace.db'
     source_path = tmp_path / 'voice.csv'
     source_path.write_text(
-        'Operator,Call_Status,Raw_Status,Test_Name\nEE,Completed,ok,Voice\n3,Failed,bad,Voice\n',
+        'Operator,vendor,RAT_A,Session_Type,Call_Status,Rule_Source,Fallback,Test_Name\n'
+        'EE,Ericsson,ENDC,VoLTE,Completed,matched,ok,Voice\n'
+        '3,Nokia,NR,WhatsApp,Failed,other,bad,Voice\n',
         encoding='utf-8',
     )
     repository = Repository(database_path)
     repository.initialize()
     dataset_id, _created = repository.add_dataset(source_path.name, str(source_path), 'admin')
     repository.update_dataset_profile(
-        dataset_id, status='ready', dataset_kind='voice', row_count=2, column_count=4,
+        dataset_id, status='ready', dataset_kind='voice', row_count=2, column_count=8,
     )
     with repository.connection() as connection:
         connection.execute(f'CREATE TABLE dataset_rows_{dataset_id} (Test_Name TEXT)')
     repository.replace_calculated_dimensions([{
-        'name': 'Outcome', 'sources': ['cdr-voice'], 'default': '', 'default_from': 'Raw_Status',
-        'rules': [{'when': 'Call_Status = Completed', 'value': 'Success'}],
+        'name': 'Outcome', 'sources': ['cdr-voice'], 'default': '', 'default_from': 'Fallback',
+        'rules': [{'when': 'Rule_Source CONTAINS matched', 'value': 'Success'}],
+    }, {
+        'name': 'Outcome Group', 'sources': ['cdr-voice'], 'default': 'Other',
+        'rules': [{'when': 'Outcome = Success', 'value': 'Passed'}],
     }])
     workspace = Workspace(
         'test', 'Test', database_path, tmp_path, tmp_path, tmp_path, tmp_path, '', '',
@@ -286,7 +291,9 @@ def test_recreate_combined_table_recovers_empty_source_rows_and_required_columns
     assert repository.dataset_row_count(dataset_id) == 2
     assert repository.reporting_row_count('voice') == 2
     columns = repository.list_reporting_row_columns('voice')
-    assert {'Operator', 'Call_Status', 'Raw_Status', 'Outcome'} <= set(columns)
+    assert {'Rule_Source', 'Fallback', 'Outcome', 'Outcome Group'} <= set(columns)
+    for _parameter, _label, candidates in app_module.CDR_PREVIEW_FILTER_DEFINITIONS:
+        assert any(repository.resolve_reporting_row_column_name('voice', candidate) for candidate in candidates)
     assert len(progress) > 2
     assert progress[-1][0] == progress[-1][1]
 

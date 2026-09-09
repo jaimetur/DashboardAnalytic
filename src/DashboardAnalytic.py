@@ -436,8 +436,8 @@ def rename_calculated_dimension_template_references(renames: dict[str, str]) -> 
     return changed_templates
 
 
-def load_template_catalogue(catalogue_path: Path, technology: str, *, validate_filters: bool = True):
-    dimensions = load_workspace_calculated_dimensions()
+def load_template_catalogue(catalogue_path: Path, technology: str, *, validate_filters: bool = True, task_repository: Repository | None = None):
+    dimensions = load_repository_calculated_dimensions(task_repository) if task_repository else load_workspace_calculated_dimensions()
     return [
         replace(entry, calculated_dimensions=dimensions)
         for entry in load_catalog_csv(catalogue_path, technology, validate_filters=validate_filters)
@@ -1278,8 +1278,7 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
     """Make one isolated workspace the target for all dataset operations."""
     global active_workspace
     workspace = workspace_registry.mark_opened(workspace_id)
-    # Authentication and shared Slides Template metadata belong to the
-    # application configuration database, not to the selected workspace.
+    # Authentication remains global; template files and metadata are workspace-owned.
     repository.set_global_database(application_config_dir / 'application.db')
     for path in (workspace.database_path.parent, workspace.input_dir, workspace.output_dir, workspace.export_dir):
         path.mkdir(parents=True, exist_ok=True)
@@ -1287,6 +1286,7 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
     object.__setattr__(settings, 'input_dir', workspace.input_dir)
     object.__setattr__(settings, 'output_dir', workspace.output_dir)
     object.__setattr__(settings, 'export_dir', workspace.export_dir)
+    object.__setattr__(settings, 'slides_templates_dir', workspace.slides_templates_dir)
     repository.db_path = workspace.database_path
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
@@ -1294,6 +1294,10 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
     active_workspace = workspace
     if initialize:
         repository.initialize()
+        migration_marker = workspace.slides_templates_dir / '.migrate-library'
+        if migration_marker.exists():
+            register_workspace_template_files(workspace)
+            migration_marker.unlink()
         # The workspace database is self-contained.  In particular, a
         # duplicate already includes its reporting-row store, so rebuilding
         # every ready CDR here can take minutes and make opening the copied
@@ -1374,26 +1378,6 @@ def format_workspace_size(size_bytes: int) -> str:
     return f'{formatted} {unit}'
 
 
-def migrate_uk_slides_templates_to_global_config() -> None:
-    """Move the user-designated UK library into the shared config location."""
-    source_root = PROJECT_ROOT / 'data' / 'workspaces' / 'UK' / 'slides-templates'
-    if not source_root.exists() or not any(source_root.rglob('*.csv')):
-        return
-    for technology in TEMPLATE_NAMES:
-        for area in ('library', 'default'):
-            source_dir = source_root / area / technology
-            source_files = sorted(source_dir.glob('*.csv')) if source_dir.exists() else []
-            if not source_files:
-                continue
-            target_dir = DEFAULT_SLIDES_TEMPLATES_DIR / area / technology
-            target_dir.mkdir(parents=True, exist_ok=True)
-            for existing in target_dir.glob('*.csv'):
-                existing.unlink()
-            for source_file in source_files:
-                shutil.move(str(source_file), str(target_dir / source_file.name))
-    shutil.rmtree(source_root)
-
-
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     ensure_directories([
@@ -1423,7 +1407,6 @@ async def lifespan(_: FastAPI):
     export_package_dir().mkdir(parents=True, exist_ok=True)
     _recover_unimported_transfer_packages()
     _cleanup_expired_export_packages()
-    migrate_uk_slides_templates_to_global_config()
     if (workspace_id := workspace_registry.active_id()):
         activate_workspace(workspace_id)
         interrupted_datasets, interrupted_reports = repository.fail_interrupted_background_jobs()
@@ -2791,6 +2774,7 @@ def _archive_workspace(
         archive, workspace.database_path, f'{archive_prefix}/database.sqlite', scratch_dir, progress_callback,
         exclude_tables=() if include_generated_outputs else ('generated_jobs',),
     )
+    _archive_tree(archive, workspace.slides_templates_dir, f'{archive_prefix}/slides-templates', progress_callback=progress_callback)
     _archive_tree(archive, workspace.input_dir, f'{archive_prefix}/input', progress_callback=progress_callback)
     if include_generated_outputs:
         _archive_tree(archive, workspace.output_dir, f'{archive_prefix}/output', progress_callback=progress_callback)
@@ -2845,8 +2829,8 @@ def build_export_archive_file(
     def archive_configuration(archive: zipfile.ZipFile, *, include_templates: bool) -> None:
         """Archive application configuration, with its database as a known payload.
 
-        ``application.db`` owns users, roles, workspace access and the shared
-        Slides Template registry.  Do not rely on the currently selected
+        ``application.db`` owns users, roles and workspace access.
+        Slides Template registries belong to the workspace snapshots.  Do not rely on the currently selected
         workspace when deciding which database to export.
         """
         application_database = application_config_dir / 'application.db'
@@ -2885,14 +2869,17 @@ def build_export_archive_file(
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             archive_configuration(archive, include_templates=include_templates)
         elif target == 'slides-templates':
+            source_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
+            source_workspace = workspace_registry.get(source_id) if source_id else None
+            if not source_workspace:
+                raise ValueError('Open a workspace before exporting Slides Templates.')
             manifest = {
-                'format': ARCHIVE_FORMAT,
-                'version': ARCHIVE_VERSION,
-                'kind': 'slides-templates',
-                'includes_slides_templates': True,
+                'format': ARCHIVE_FORMAT, 'version': ARCHIVE_VERSION,
+                'kind': 'slides-templates', 'includes_slides_templates': True,
+                'source_workspace': {'id': source_workspace.id, 'name': source_workspace.name},
             }
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
-            _archive_tree(archive, settings.slides_templates_dir, 'slides-templates', progress_callback=progress_callback)
+            _archive_tree(archive, source_workspace.slides_templates_dir, 'slides-templates', progress_callback=progress_callback)
         elif target == 'auto-calculated-fields':
             source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
             source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
@@ -2950,7 +2937,7 @@ def build_export_archive_file(
                 ],
             }
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
-            archive_configuration(archive, include_templates=True)
+            archive_configuration(archive, include_templates=False)
             for entry, workspace in zip(manifest['workspaces'], workspaces, strict=True):
                 _archive_workspace(
                     archive, workspace, str(entry['archive_path']), destination.parent, progress_callback,
@@ -2999,10 +2986,12 @@ def estimate_export_bytes(
         for path in application_config_dir.iterdir():
             if path.is_file() and path.name not in {'application.db', workspace_registry.registry_path.name} and not path.name.endswith(('-wal', '-shm')):
                 total += _file_size(path)
-        if target in {'config-with-templates', 'full-environment'}:
+        if target == 'config-with-templates':
             total += _tree_size(settings.slides_templates_dir)
     elif target == 'slides-templates':
-        total = _tree_size(settings.slides_templates_dir)
+        source_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
+        source_workspace = workspace_registry.get(source_id) if source_id else None
+        total = _tree_size(source_workspace.slides_templates_dir) if source_workspace else 0
     elif target == 'auto-calculated-fields':
         source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
         source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
@@ -3017,12 +3006,12 @@ def estimate_export_bytes(
     elif target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
         if workspace:
-            total = _file_size(workspace.database_path) + _tree_size(workspace.input_dir)
+            total = _file_size(workspace.database_path) + _tree_size(workspace.input_dir) + _tree_size(workspace.slides_templates_dir)
             if include_generated_outputs:
                 total += _tree_size(workspace.output_dir)
     if target == 'full-environment':
         total += sum(
-            _file_size(workspace.database_path) + _tree_size(workspace.input_dir)
+            _file_size(workspace.database_path) + _tree_size(workspace.input_dir) + _tree_size(workspace.slides_templates_dir)
             + (_tree_size(workspace.output_dir) if include_generated_outputs else 0)
             for workspace in _selected_export_workspaces(workspace_ids)
         )
@@ -3098,7 +3087,8 @@ def _recovered_transfer_details(manifest: dict[str, Any]) -> tuple[str, list[str
     if kind == 'config':
         return ('Config + Slides Templates' if manifest.get('includes_slides_templates') else 'Config', [])
     if kind == 'slides-templates':
-        return ('Slides Templates', [])
+        source = manifest.get('source_workspace') or {}
+        return ('Slides Templates', [str(source['name'])] if isinstance(source, dict) and source.get('name') else [])
     if kind == 'auto-calculated-fields':
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
@@ -3228,10 +3218,11 @@ def start_export_job(
     job_id = uuid4().hex
     destination = package_dir / f'{job_id}.zip'
     selected_workspace_ids = list(workspace_ids) if workspace_ids is not None else None
-    if target == 'auto-calculated-fields':
+    if target in {'auto-calculated-fields', 'slides-templates'}:
         if not active_workspace:
-            raise ValueError('Open a workspace before exporting auto-calculated fields.')
-        load_workspace_calculated_dimensions()
+            raise ValueError('Open a workspace before exporting workspace templates or fields.')
+        if target == 'auto-calculated-fields':
+            load_workspace_calculated_dimensions()
         selected_workspace_ids = [active_workspace.id]
     if target == 'full-environment':
         _selected_export_workspaces(selected_workspace_ids)
@@ -3381,6 +3372,7 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
         for source, destination in (
             (payload / 'input', workspace.input_dir),
             (payload / 'output', workspace.output_dir),
+            (payload / 'slides-templates', workspace.slides_templates_dir),
             # Archives created before generated Chart Sets were included used
             # this reports-only directory name.
             (payload / 'exports', workspace.export_dir),
@@ -3430,16 +3422,63 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
     return workspace
 
 
-def import_slides_templates_archive(staging_root: Path) -> None:
+def register_workspace_template_files(workspace: Workspace) -> None:
+    """Register a migrated/imported library without touching another workspace."""
+    target_repository = Repository(workspace.database_path, global_db_path=repository.global_db_path)
+    target_repository.initialize_template_registry()
+    for technology in TEMPLATE_NAMES:
+        known = {str(row['name']) for row in target_repository.list_report_templates(technology)}
+        default_files = sorted((workspace.slides_templates_dir / 'default' / technology).glob('*.csv'))
+        for area in ('library', 'default'):
+            for path in sorted((workspace.slides_templates_dir / area / technology).glob('*.csv')):
+                name = catalogue_registry_key(path.stem)
+                if name not in known:
+                    target_repository.add_report_template(technology, name, is_default=False)
+                    known.add(name)
+        if len(default_files) == 1:
+            target_repository.set_default_report_template(technology, catalogue_registry_key(default_files[0].stem))
+
+
+def matching_template_workspaces(manifest: dict[str, Any], workspaces: Iterable[Workspace]) -> list[str]:
+    """Match portable ownership by name, never by a server-local numeric id."""
+    source = manifest.get('source_workspace') or {}
+    name = str(source.get('name') or '').strip().casefold() if isinstance(source, dict) else ''
+    return [workspace.id for workspace in workspaces if name and workspace.name.casefold() == name]
+
+
+def import_slides_templates_archive(
+    staging_root: Path, destination_workspace_ids: Iterable[str] = (),
+    manifest: dict[str, Any] | None = None,
+) -> int:
     templates_payload = staging_root / 'slides-templates'
     if not templates_payload.exists():
         raise ValueError('The Slides Templates archive does not contain template files.')
-    for path in templates_payload.rglob('*'):
-        if not path.is_file():
-            continue
-        target = settings.slides_templates_dir / path.relative_to(templates_payload)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, target)
+    selected = list(dict.fromkeys(destination_workspace_ids))
+    if not selected:
+        selected = matching_template_workspaces(manifest or {}, workspace_registry.list())
+    if not selected:
+        raise ValueError('Select at least one destination workspace for the Slides Templates.')
+    destinations = [workspace_registry.get(identifier) for identifier in selected]
+    if any(workspace is None for workspace in destinations):
+        raise ValueError('A destination workspace no longer exists.')
+    for workspace in destinations:
+        for path in templates_payload.rglob('*'):
+            if not path.is_file() or path.suffix.lower() != '.csv':
+                continue
+            relative = path.relative_to(templates_payload)
+            if len(relative.parts) != 3 or relative.parts[0] not in {'library', 'default'} or relative.parts[1] not in TEMPLATE_NAMES:
+                raise ValueError('The package contains an invalid Slides Template path.')
+            # Keep one default per technology; library copies remain available.
+            target = workspace.slides_templates_dir / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if relative.parts[0] == 'default':
+                for previous in target.parent.glob('*.csv'):
+                    if previous != target:
+                        previous.unlink()
+            atomic_write_template(target, path.read_bytes())
+        register_workspace_template_files(workspace)
+    _clear_chart_preview_caches()
+    return len(destinations)
 
 
 def import_config_archive(staging_root: Path, manifest: dict[str, Any]) -> None:
@@ -3450,7 +3489,7 @@ def import_config_archive(staging_root: Path, manifest: dict[str, Any]) -> None:
     if not application_database_payload.is_file():
         raise ValueError('The configuration archive does not contain application.db.')
 
-    # Users, roles, workspace access and shared template metadata must be
+    # Users, roles and workspace access must be
     # restored as one exact application database snapshot.  In particular,
     # never infer the target from the active workspace: that can otherwise
     # leave the destination users in place while only ancillary files import.
@@ -3589,7 +3628,7 @@ def _apply_import_archive(
             _safe_extract_archive_prefix(archive, staging_root, 'slides-templates', extracted)
             if progress_callback:
                 progress_callback('importing Slides Templates', 90.0)
-            import_slides_templates_archive(staging_root)
+            import_slides_templates_archive(staging_root, destination_workspace_ids, manifest)
             if progress_callback:
                 progress_callback('finalising', 100.0)
             return 'Slides Templates imported successfully.'
@@ -3741,7 +3780,7 @@ def _transfer_workspace_names(workspace_ids: list[str] | None) -> list[str]:
 
 
 def _transfer_offer_workspace_names(target: str, workspace_ids: list[str] | None) -> list[str]:
-    if target == 'auto-calculated-fields':
+    if target in {'auto-calculated-fields', 'slides-templates'}:
         return _transfer_workspace_names(workspace_ids)
     if target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
@@ -4038,10 +4077,11 @@ def start_transfer_job(
     destination = normalize_transfer_destination(destination_url, destination_port)
     _cleanup_expired_export_packages()
     selected_workspace_ids = list(workspace_ids) if workspace_ids is not None else None
-    if target == 'auto-calculated-fields':
+    if target in {'auto-calculated-fields', 'slides-templates'}:
         if not active_workspace:
-            raise ValueError('Open a workspace before transferring auto-calculated fields.')
-        load_workspace_calculated_dimensions()
+            raise ValueError('Open a workspace before transferring workspace templates or fields.')
+        if target == 'auto-calculated-fields':
+            load_workspace_calculated_dimensions()
         selected_workspace_ids = [active_workspace.id]
     if target == 'full-environment':
         _selected_export_workspaces(selected_workspace_ids)
@@ -4078,7 +4118,7 @@ def transfer_job_payload(job_id: str, user: SessionUser) -> dict[str, Any] | Non
 
 
 def require_import_export_permission(user: SessionUser, target: str) -> None:
-    """Authorize imports; admins may only restore shared Slides Templates."""
+    """Authorize imports; admins may restore templates and fields into accessible workspaces."""
     if user.role == 'super-admin' or target in {'slides-templates', 'auto-calculated-fields'}:
         return
     raise HTTPException(
@@ -4089,9 +4129,9 @@ def require_import_export_permission(user: SessionUser, target: str) -> None:
 
 def require_export_permission(user: SessionUser, target: str) -> None:
     """Authorize exports and transfers without exposing other workspaces."""
-    if user.role == 'super-admin' or target == 'slides-templates':
+    if user.role == 'super-admin':
         return
-    if target == 'auto-calculated-fields':
+    if target in {'auto-calculated-fields', 'slides-templates'}:
         if active_workspace and repository.user_has_workspace_access(user.username, active_workspace.id):
             return
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Open a workspace you can access first.')
@@ -4184,7 +4224,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         'transfer_offers': 'Server transfer offers',
         'users': 'Users',
     }
-    global_database_tables = set(repository.list_global_database_tables()) if active_workspace else set()
+    global_database_tables = (set(repository.list_global_database_tables()) - {'report_templates'}) if active_workspace else set()
     for table_name in repository.list_database_tables() if active_workspace else []:
         dataset_match = re.fullmatch(r'dataset_rows_(\d+)', table_name)
         reporting_match = re.fullmatch(r'reporting_rows_(data|voice|speech)', table_name)
@@ -4206,9 +4246,8 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             })
     export_options = [
         {'value': 'config', 'label': 'Config'},
-        {'value': 'slides-templates', 'label': 'Slides Templates'},
+        {'value': 'slides-templates', 'label': 'Slides Templates', 'disabled': not active_workspace},
         {'value': 'auto-calculated-fields', 'label': 'Auto-calculated Fields', 'disabled': not active_workspace},
-        {'value': 'config-with-templates', 'label': 'Config + Slides Templates'},
         {'value': 'full-environment', 'label': 'Full Environment (Config + Slides Templates + Selected Workspaces)'},
         *[
             {'value': f'workspace:{workspace.id}', 'label': f'Workspace: {workspace.name}'}
@@ -6487,13 +6526,14 @@ def _run_report_chart_job(
             multivendor = report_scope == 'multivendor'
             if multivendor and not all(dataset.get('vendor_mapping_applied') for datasets in selected.values() for dataset in datasets):
                 raise ValueError('Multivendor reporting requires every selected Data, Voice and Speech CDR to have a Workspace Vendor mapping.')
-            template_option = next(
-                (option for option in report_catalogue_options(technology) if option['name'] == template_name),
-                None,
-            )
-            if not template_option:
+            template_root = task_repository.db_path.parent / 'slides-templates'
+            metadata = next((row for row in task_repository.list_report_templates(technology)
+                             if row['name'] == template_name), None)
+            area = 'default' if metadata and metadata['is_default'] else 'library'
+            template_path = template_root / area / technology / template_filename(template_name)
+            if not metadata or not template_path.is_file():
                 raise ValueError('The Slides Template used by this Chart Set is no longer available.')
-            catalog_entries = load_template_catalogue(template_option['path'], technology)
+            catalog_entries = load_template_catalogue(template_path, technology, task_repository=task_repository)
             _ensure_report_job_active(task_repository, job_id, chart_job=True)
             task_repository.update_report_chart_job(job_id, status='processing', progress=12)
             chart_entries = [entry for entry in catalog_entries if entry.source_kind]
@@ -7977,7 +8017,7 @@ async def accept_transfer_offer(
         if not offer:
             raise HTTPException(status_code=404, detail='The pending transfer offer no longer exists.')
         if offer.get('status') == 'pending':
-            if offer.get('kind') == 'auto-calculated-fields':
+            if offer.get('kind') in {'auto-calculated-fields', 'slides-templates'}:
                 available = {workspace.id for workspace in workspace_registry.list()}
                 if not destination_workspace_ids:
                     raise HTTPException(status_code=400, detail='Select at least one destination workspace.')
@@ -8185,7 +8225,8 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
         'includes_slides_templates': bool(manifest.get('includes_slides_templates')),
         'workspace_collisions': import_workspace_collisions(manifest),
     }
-    if kind == 'auto-calculated-fields':
+    if kind in {'auto-calculated-fields', 'slides-templates'}:
+        response_payload['selected_workspace_ids'] = matching_template_workspaces(manifest, accessible_workspaces(user))
         response_payload['destination_workspaces'] = [
             {'id': workspace.id, 'name': workspace.name} for workspace in accessible_workspaces(user)
         ]
@@ -8254,7 +8295,9 @@ def create_admin_import_job(
         kind = str(upload['manifest'].get('kind') or '')
     require_import_export_permission(user, kind)
     selected_workspaces = list(dict.fromkeys(workspace_ids or []))
-    if kind == 'auto-calculated-fields':
+    if kind in {'auto-calculated-fields', 'slides-templates'}:
+        if not selected_workspaces and kind == 'slides-templates':
+            selected_workspaces = matching_template_workspaces(upload['manifest'], accessible_workspaces(user))
         allowed = {workspace.id for workspace in accessible_workspaces(user)}
         if not selected_workspaces:
             raise HTTPException(status_code=400, detail='Select at least one destination workspace.')
@@ -8293,7 +8336,12 @@ async def import_admin_package(
         if not confirmed_import:
             raise ValueError('Confirm the import warning before applying this package.')
         require_import_export_permission(user, str(manifest.get('kind')))
-        notice = _apply_import_archive(package_path, manifest)
+        destinations = []
+        if manifest.get('kind') == 'slides-templates':
+            destinations = matching_template_workspaces(manifest, accessible_workspaces(user))
+            if not destinations:
+                raise ValueError('Select destination workspaces using the Export / Import panel.')
+        notice = _apply_import_archive(package_path, manifest, destination_workspace_ids=destinations)
     except (ValueError, OSError, sqlite3.Error, zipfile.BadZipFile) as exc:
         return RedirectResponse(
             f'/admin?{urlencode({"import_export_error": str(exc)})}',

@@ -10,19 +10,19 @@ Dashboard Analytic separates global configuration from workspace data.
 
 Stored below `APP_CONFIG_DIR`:
 
-- `application.db`: users, roles, workspace permissions, template registry and server-transfer offers.
-- `slides-templates/`: shared CSV Slides Templates.
+- `application.db`: users, roles, workspace permissions and server-transfer offers.
 
 ### Workspace data
 
 Stored below `APP_DATA_DIR/workspaces/<workspace>/`:
 
-- `<workspace>.db`: datasets, profiles, audit events, generated jobs and materialised reporting rows.
+- `<workspace>.db`: datasets, profiles, audit events, generated jobs, Auto-calculated Fields, Slides Template metadata and materialised reporting rows.
+- `slides-templates/`: workspace-owned CSV Slides Templates.
 - `input/`: uploaded source files.
 - `output/reports/`: generated PowerPoint reports and their PNG charts.
 - `output/charts/`: standalone Chart Sets.
 
-The workspace registry is local to the deployment. Full Environment imports rebuild it from the imported workspaces instead of retaining source-server absolute paths.
+The workspace registry is local to the deployment. Full Environment imports rebuild it from the imported workspaces instead of retaining source-server absolute paths. Migrating from the old shared template directory copies its contents to every existing workspace and retains the old directory until it is manually archived or removed after verification.
 
 ## Processed and derived columns
 
@@ -36,6 +36,14 @@ The importer preserves source fields and adds normalised fields used across modu
 - `Rate Bucket`, calculated for distribution charts from configured bucket limits.
 
 Derived preview columns are visually distinguished from source columns. They do not imply that the original workbook contained those headings.
+
+### Auto-calculated Fields and combined tables
+
+Auto-calculated Fields are workspace definitions. A field has a name, selected CDR sources, a fallback and case-insensitive rule conditions. It is materialised only in the individual and combined CDR tables for its selected sources.
+
+Combined reporting tables are intentionally compact. They always retain reporting-core fields, Preview filter fields, source fields required by applicable Auto-calculated Field rules and resulting calculated fields. Other template-requested source fields are added lazily when a chart/report first requires them. This avoids eagerly copying every source column for every template, which would make imports and template changes unnecessarily expensive.
+
+Materialization and combined-table recreation run in background jobs. Recreate rebuilds a CDR type from its ready individual datasets, reloads an inconsistent individual store from its source file when available, and verifies both per-dataset and total counts.
 
 ## Operator normalisation
 

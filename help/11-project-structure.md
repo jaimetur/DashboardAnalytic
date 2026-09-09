@@ -34,11 +34,10 @@ DashboardAnalytic/
 
 ```text
 config/
-├── application.db
-└── slides-templates/
+└── application.db
 ```
 
-`application.db` stores global state such as users, workspace permissions, template metadata and transfer offers.
+`application.db` stores global state such as users, workspace permissions and transfer offers.
 
 ## Persistent workspace data
 
@@ -47,6 +46,7 @@ data/workspaces/
 ├── workspace-registry.db
 └── <workspace>/
     ├── <workspace>.db
+    ├── slides-templates/
     ├── input/
     └── output/
         ├── reports/
@@ -60,11 +60,13 @@ The workspace database stores:
 - combined Data/Voice/Speech reporting rows;
 - audit events;
 - unified Report and Chart Set jobs.
+- Auto-calculated Field definitions;
+- Slides Template metadata in `report_templates`.
 
 ## Reporting assets
 
 - `assets/ppt-templates/Template_CDR_analysis.pptx` supplies masters and layouts.
-- CSV Slides Templates define slide order, layout, charts, filters, aggregations and legends.
+- Workspace CSV Slides Templates define slide order, layout, charts, filters, aggregations and legends.
 - Generated report charts stay beside their PPTX under `output/reports/`.
 - Standalone Chart Sets stay under `output/charts/`.
 

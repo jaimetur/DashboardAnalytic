@@ -58,8 +58,8 @@ CONTAINER_NAME=dashboardanalytic
 
 Persist both roots:
 
-- Config: users, permissions, transfer offers and Slides Templates.
-- Data: workspace registry, databases, uploads, reports, Chart Sets and transfer packages.
+- Config: users, permissions and transfer offers.
+- Data: workspace registry, databases, Slides Templates, uploads, reports, Chart Sets and transfer packages.
 
 Do not rely on the writable container layer. Recreating a container must not remove application state.
 
@@ -135,7 +135,6 @@ At minimum, back up:
 
 ```text
 config/application.db
-config/slides-templates/
 data/workspaces/workspace-registry.db
 data/workspaces/<workspace>/
 ```

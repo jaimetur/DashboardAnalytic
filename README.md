@@ -4,7 +4,7 @@
 
 # Dashboard Analytic
 
-Dashboard Analytic is a multi-user web application for processing CDR datasets, exploring KPI performance, building charts and generating template-driven PowerPoint reports. Every workspace keeps its datasets, database and generated output isolated; users and Slides Templates are shared application configuration.
+Dashboard Analytic is a multi-user web application for processing CDR datasets, exploring KPI performance, building charts and generating template-driven PowerPoint reports. Every workspace keeps its datasets, database, generated output and Slides Templates isolated; users and access permissions remain global application configuration.
 
 After login, the application opens the **Readme** tab by default.
 
@@ -17,7 +17,8 @@ After login, the application opens the **Readme** tab by default.
 - Analyse one processed CDR in E2E Dashboard.
 - Create temporary ad-hoc charts in Chart Builder.
 - Generate NSA/SA PowerPoint reports and standalone Chart Sets.
-- Edit shared Slides Templates with validation, assistance and chart previews.
+- Create workspace-owned Auto-calculated Fields and apply them asynchronously to the applicable CDR tables.
+- Edit workspace-owned Slides Templates with validation, assistance and chart previews.
 - Track meaningful user/system events in App Logs.
 - Export, import or transfer configuration, templates and workspaces.
 - Manage workspace and global SQLite tables from the Admin interface.
@@ -31,6 +32,8 @@ Workspace owns data ingestion and workspace-local storage.
 - **Workspaces Management**: create, open, close, rename, duplicate or remove workspaces; review disk usage and access.
 - **Data Ingestion**: upload one or more source files and confirm each detected type.
 - **Queue and Status**: monitor processing, preview data, open Dashboard, map/clear vendors, stop, retry or delete datasets.
+- **Auto-calculated Fields**: create, duplicate, import, export and rematerialize fields for applicable CDR types; follow background progress from Workspace.
+- **Combined CDR tables**: inspect CDR-Data, CDR-Voice and CDR-Speech combined rows, preview them and recreate a table in the background when required.
 
 ### E2E Dashboard
 
@@ -43,7 +46,7 @@ E2E Dashboard analyses one ready Data, Voice or Speech CDR.
 
 ### E2E Reporting
 
-E2E Reporting combines ready CDRs with a shared Slides Template.
+E2E Reporting combines ready CDRs with a Slides Template from the active workspace.
 
 - **Reporting module**: choose NetCheck CDR Reports or the future Smart Orchestrator Logs workflow.
 - **NetCheck CDR Reports**: select Data, Voice and Speech campaigns, NSA/SA, template and Operator/Vendor Comparison.
@@ -71,7 +74,7 @@ Chart Builder reuses the shared Interactive Preview for ad-hoc analysis.
 ### Admin
 
 - **Create user / Users**: account, role, password, status and workspace access management.
-- **Slides Templates Management**: create, import, duplicate, rename, export, delete and set defaults.
+- **Slides Templates Management**: create, import, duplicate, rename, export, delete and set defaults within the active workspace.
 - **Slides Template Editor**: validated grid editing, cell assistance, Filter Builder and shared Chart Preview.
 - **Export / Import**: portable ZIP jobs, Full Environment workspace selection, server-to-server transfer and recovered packages.
 - **Database Management**: grouped global/workspace tables, server-side filters, editing and cleanup.
@@ -129,8 +132,8 @@ Local storage roots can be set in [`storage-paths.conf`](storage-paths.conf). En
 | `APP_PORT` | Production HTTP port; the standard deployment uses `7278`. |
 | `APP_DEV_PORT` | Development service port. |
 | `APP_SECRET_KEY` | Private session-signing secret. |
-| `APP_CONFIG_DIR` | Global database and shared Slides Templates. |
-| `APP_DATA_DIR` | Workspace registry, workspaces and transfer packages. |
+| `APP_CONFIG_DIR` | Global database, users, permissions and transfer offers. |
+| `APP_DATA_DIR` | Workspace registry, workspaces, Slides Templates and transfer packages. |
 | `APP_ASSETS_DIR` | Bundled assets and PowerPoint masters. |
 | `TZ` | Container timezone, for example `Europe/Madrid`. |
 | `HOST_CONFIG_DIR` | Host path mounted as persistent configuration. |

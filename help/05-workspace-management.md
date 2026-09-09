@@ -67,6 +67,20 @@ Preview opens persisted rows in a separate view.
 - Mapping previews highlight `GCID` and vendor fields.
 - Derived columns use a light-grey visual treatment.
 
+## Auto-calculated Fields
+
+The **Auto-calculated Fields** panel follows Datasets in Workspace. Fields define a name, optional fallback and ordered rules, and select the applicable CDR types through **Available for**. Rule matching is case-insensitive.
+
+Saving an edit, deleting a field, importing JSON or pressing the green rematerialization action creates a background materialization job. Workspace remains usable while it runs. The **Materialization status** panel shows progress, affected individual/combined table totals and completion or failure.
+
+Fields are applied only to their selected CDR types. The job retains preview-filter fields, fields referenced by rules and the resulting Auto-calculated Fields in the applicable combined table. It removes stale fields from CDR types to which they no longer apply.
+
+## Combined CDR tables
+
+The Datasets panel also lists `CDR-Data (combined)`, `CDR-Voice (combined)` and `CDR-Speech (combined)` when they exist. They contain the ready datasets of that CDR type and can be filtered by the same type selector, previewed with the normal CDR preview and rebuilt with the circular **Recreate** action.
+
+Recreate runs in the background and reports progress through Materialization status. It rebuilds from every ready source dataset, recovers an empty or inconsistent individual row store from its uploaded source file when available, and verifies that each dataset's contribution and final row count match.
+
 ## Vendor mapping
 
 Vendor mapping is required only for Vendor Comparison.

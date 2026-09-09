@@ -18,8 +18,8 @@ Always replace `APP_SECRET_KEY` outside local development.
 
 | Variable | Contains |
 | --- | --- |
-| `APP_CONFIG_DIR` | `application.db` and shared Slides Templates. |
-| `APP_DATA_DIR` | Workspace registry, workspace directories and transfer packages. |
+| `APP_CONFIG_DIR` | `application.db` with users, permissions and transfer offers. |
+| `APP_DATA_DIR` | Workspace registry, workspace directories, Slides Templates and transfer packages. |
 | `APP_ASSETS_DIR` | Static bundled assets and PowerPoint masters. |
 | `HOST_CONFIG_DIR` | Host directory mounted at the container config path. |
 | `HOST_DATA_DIR` | Host directory mounted at the container data path. |
@@ -65,7 +65,7 @@ After first login:
 
 - The header shows the expected application name and timezone-adjusted timestamps.
 - A file uploaded to `Default` remains after a restart.
-- Shared Slides Templates remain available after a restart.
+- Workspace-owned Slides Templates remain available after a restart.
 - The workspace size badge and Workspace Management show matching values.
 - `config/` and `data/` are included in backups.
 

@@ -28,7 +28,7 @@ Default dataset selection:
 
 ## Slides Templates
 
-PowerPoint reports use CSV Slides Templates managed in **Admin → Slides Templates Management**. Administrators can create, duplicate, import, rename, export and classify NSA/SA templates there.
+PowerPoint reports use CSV Slides Templates from the active workspace, managed in **Admin → Slides Templates Management**. Administrators can create, duplicate, import, rename, export and classify NSA/SA templates there. A new workspace has no template until one is created or imported.
 
 The common `assets/ppt-templates/Template_CDR_analysis.pptx` supplies masters and layouts:
 
@@ -37,7 +37,7 @@ The common `assets/ppt-templates/Template_CDR_analysis.pptx` supplies masters an
 - Chart rows sharing a slide fill chart placeholders in row order.
 - Commentary placeholders remain blank for the analyst.
 
-Templates are stored under `config/slides-templates/`. The documentation is static: saving a template never rewrites this file or publishes a current template definition into it.
+Templates are stored under `data/workspaces/<workspace>/slides-templates/`, alongside a workspace `report_templates` registry. A template exported or transferred separately identifies its source workspace; the matching destination workspace is selected by default when it exists, and more destinations may be selected.
 
 ## Template columns
 

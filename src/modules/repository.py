@@ -24,7 +24,19 @@ def local_now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec='microseconds')
 
 
-SCHEMA = """
+TEMPLATE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS report_templates (
+    technology TEXT NOT NULL,
+    name TEXT NOT NULL,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (technology, name),
+    CHECK (technology IN ('nsa', 'sa'))
+);
+"""
+
+SCHEMA = TEMPLATE_SCHEMA + """
 CREATE TABLE IF NOT EXISTS datasets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     file_name TEXT NOT NULL,
@@ -68,6 +80,8 @@ CREATE TABLE IF NOT EXISTS workspace_state (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+
 
 CREATE TABLE IF NOT EXISTS calculated_dimensions (
     name TEXT PRIMARY KEY COLLATE NOCASE,
@@ -117,16 +131,6 @@ CREATE TABLE IF NOT EXISTS users (
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     workspace_ids_json TEXT NOT NULL DEFAULT '[]'
-);
-
-CREATE TABLE IF NOT EXISTS report_templates (
-    technology TEXT NOT NULL,
-    name TEXT NOT NULL,
-    is_default INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (technology, name),
-    CHECK (technology IN ('nsa', 'sa'))
 );
 
 CREATE TABLE IF NOT EXISTS application_state (
@@ -232,7 +236,7 @@ class Repository:
     def remove_legacy_global_tables(self) -> list[str]:
         """Remove global-only tables left inside an old workspace database.
 
-        Users, template registry data and workspace access are now owned only
+        Users and workspace access are owned only
         by ``config/application.db``.  Old workspace copies must never be
         available to confuse manual inspection or a future code path.
         """
@@ -240,7 +244,7 @@ class Repository:
             return []
         removed: list[str] = []
         with self.connection() as conn:
-            for table_name in ('user_workspace_access', 'report_templates', 'users'):
+            for table_name in ('user_workspace_access', 'users'):
                 exists = conn.execute(
                     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,)
                 ).fetchone()
@@ -253,6 +257,7 @@ class Repository:
         self.remove_legacy_global_tables()
         with self.connection() as conn:
             conn.executescript(SCHEMA)
+            self._ensure_report_template_columns(conn)
             self._ensure_dataset_profile_columns(conn)
             self._ensure_generated_job_columns(conn)
             self._migrate_generated_jobs(conn)
@@ -267,7 +272,6 @@ class Repository:
             )
         with self.global_connection() as conn:
             conn.executescript(GLOBAL_SCHEMA)
-            self._ensure_report_template_columns(conn)
             self._ensure_user_workspace_columns(conn)
             # Seed the three local accounts exactly once, for a brand-new
             # empty application database.  Later starts must never recreate
@@ -557,15 +561,21 @@ class Repository:
                     (technology, row['name']),
                 )
 
+    def initialize_template_registry(self) -> None:
+        """Prepare template metadata without scanning datasets or global users."""
+        with self.connection() as conn:
+            conn.executescript(TEMPLATE_SCHEMA)
+            self._ensure_report_template_columns(conn)
+
     def list_report_templates(self, technology: str) -> list[sqlite3.Row]:
-        with self.global_connection() as conn:
+        with self.connection() as conn:
             return conn.execute(
                 "SELECT technology, name, is_default, created_at, updated_at FROM report_templates WHERE technology = ? ORDER BY name COLLATE NOCASE",
                 (technology,),
             ).fetchall()
 
     def add_report_template(self, technology: str, name: str, *, is_default: bool = False) -> None:
-        with self.global_connection() as conn:
+        with self.connection() as conn:
             if is_default:
                 conn.execute("UPDATE report_templates SET is_default = 0 WHERE technology = ?", (technology,))
             now = local_now_iso()
@@ -575,7 +585,7 @@ class Repository:
             )
 
     def set_default_report_template(self, technology: str, name: str) -> None:
-        with self.global_connection() as conn:
+        with self.connection() as conn:
             template = conn.execute(
                 "SELECT is_default FROM report_templates WHERE technology = ? AND name = ?", (technology, name)
             ).fetchone()
@@ -593,28 +603,28 @@ class Repository:
             )
 
     def rename_report_template(self, technology: str, name: str, new_name: str) -> None:
-        with self.global_connection() as conn:
+        with self.connection() as conn:
             conn.execute(
                 "UPDATE report_templates SET name = ?, updated_at = ? WHERE technology = ? AND name = ?",
                 (new_name, local_now_iso(), technology, name),
             )
 
     def move_report_template(self, technology: str, name: str, target_technology: str) -> None:
-        with self.global_connection() as conn:
+        with self.connection() as conn:
             conn.execute(
                 "UPDATE report_templates SET technology = ?, updated_at = ? WHERE technology = ? AND name = ?",
                 (target_technology, local_now_iso(), technology, name),
             )
 
     def touch_report_template(self, technology: str, name: str) -> None:
-        with self.global_connection() as conn:
+        with self.connection() as conn:
             conn.execute(
                 "UPDATE report_templates SET updated_at = ? WHERE technology = ? AND name = ?",
                 (local_now_iso(), technology, name),
             )
 
     def delete_report_template(self, technology: str, name: str) -> None:
-        with self.global_connection() as conn:
+        with self.connection() as conn:
             conn.execute("DELETE FROM report_templates WHERE technology = ? AND name = ?", (technology, name))
 
     def dataset_rows_table_name(self, dataset_id: int) -> str:
@@ -625,6 +635,8 @@ class Repository:
 
     def _table_connection(self, table_name: str):
         """Select the owning database for workspace and global tables."""
+        if table_name == 'report_templates':
+            return self.connection
         if table_name == WORKSPACE_REGISTRY_TABLE:
             return self.workspace_registry_connection
         return self.global_connection if table_name in self.list_global_database_tables() else self.connection
