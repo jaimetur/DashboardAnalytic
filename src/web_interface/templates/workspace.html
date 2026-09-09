@@ -295,9 +295,13 @@
           <span class="status-pill status-ready" data-auto-calculated-field-progress-status>Up to date</span>
         </div>
         <div class="auto-calculated-field-progress-track" role="progressbar" aria-label="Auto-calculated Fields materialization" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" data-auto-calculated-field-progress-track>
-          <span data-auto-calculated-field-progress-bar style="width: 100%"></span>
+          <span class="auto-calculated-field-progress-bar" data-auto-calculated-field-progress-bar style="width: 100%"></span>
+          <span class="auto-calculated-field-progress-percent" data-auto-calculated-field-progress-percent>100%</span>
         </div>
-        <p class="form-note" data-auto-calculated-field-progress-copy>All materialized fields are up to date.</p>
+        <div class="auto-calculated-field-progress-footer">
+          <p class="form-note" data-auto-calculated-field-progress-copy>All materialized fields are up to date.</p>
+          <button type="button" class="auto-calculated-field-rematerialize-button" data-auto-calculated-field-rematerialize title="Rematerialize all auto-calculated fields" aria-label="Rematerialize all auto-calculated fields">↻</button>
+        </div>
       </section>
       <div class="workspace-calculated-dimensions-layout">
         <section class="workspace-calculated-dimensions-subpanel workspace-calculated-dimensions-import-panel">

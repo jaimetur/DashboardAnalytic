@@ -84,7 +84,9 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
   const progressStatus = host.querySelector('[data-auto-calculated-field-progress-status]');
   const progressTrack = host.querySelector('[data-auto-calculated-field-progress-track]');
   const progressBar = host.querySelector('[data-auto-calculated-field-progress-bar]');
+  const progressPercent = host.querySelector('[data-auto-calculated-field-progress-percent]');
   const progressCopy = host.querySelector('[data-auto-calculated-field-progress-copy]');
+  const rematerializeButton = host.querySelector('[data-auto-calculated-field-rematerialize]');
   let progressTimer = null;
   const refreshMaterializationProgress = async () => {
     if (!(progressPanel instanceof HTMLElement) || !progressPanel.dataset.statusUrl) return;
@@ -101,11 +103,13 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
         : failed ? 100 : 100;
       progressPanel.classList.toggle('is-processing', processing);
       progressPanel.classList.toggle('is-failed', failed);
+      if (rematerializeButton instanceof HTMLButtonElement) rematerializeButton.disabled = processing;
       if (progressStatus instanceof HTMLElement) {
         progressStatus.className = `status-pill status-${failed ? 'failed' : processing ? 'processing' : 'ready'}`;
         progressStatus.textContent = failed ? 'Failed' : processing ? 'In progress' : 'Up to date';
       }
       if (progressBar instanceof HTMLElement) progressBar.style.width = `${percent}%`;
+      if (progressPercent instanceof HTMLElement) progressPercent.textContent = `${percent}%`;
       if (progressTrack instanceof HTMLElement) progressTrack.setAttribute('aria-valuenow', String(percent));
       if (progressCopy instanceof HTMLElement) {
         const counter = processing && total ? ` (${Math.min(completed, total)} of ${total} tables)` : '';
@@ -134,6 +138,28 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
     return payload;
   };
   refreshMaterializationProgress();
+  rematerializeButton?.addEventListener('click', async () => {
+    const accepted = await showConfirmDialog(
+      'All auto-calculated fields will be rematerialized in every applicable CDR table. This can take a while and will run in the background. Continue?',
+      {title: 'Rematerialize Auto-calculated Fields', confirmLabel: 'Rematerialize All', tone: 'warning'},
+    );
+    if (!accepted || !(rematerializeButton instanceof HTMLButtonElement)) return;
+    rematerializeButton.disabled = true;
+    try {
+      const response = await fetch('/api/workspace/auto-calculated-fields/rematerialize', {
+        method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Unable to rematerialize auto-calculated fields.');
+      monitorAutoCalculatedFieldJob(payload.materialization_status_url, payload.notice);
+      await refreshMaterializationProgress();
+    } catch (error) {
+      rematerializeButton.disabled = false;
+      showInfoDialog(error instanceof Error ? error.message : 'Unable to rematerialize auto-calculated fields.', {
+        title: 'Auto-calculated Fields', tone: 'error',
+      });
+    }
+  });
   manage?.addEventListener('click', () => {
     const overlay = document.createElement('div'); overlay.className = 'confirm-overlay';
     const panel = document.createElement('section'); panel.className = 'confirm-panel calculated-dimensions-dialog';
@@ -2459,8 +2485,6 @@ const infoCopy = document.getElementById('info-copy');
 const infoClose = document.getElementById('info-close');
 const infoEyebrow = document.getElementById('info-eyebrow');
 const infoIcon = document.getElementById('info-icon');
-const filePickerInput = document.querySelector('[data-file-picker-input]');
-const filePickerText = document.querySelector('[data-file-picker-text]');
 const inputKindSelect = document.querySelector('[data-input-kind-select]');
 const datasetSelect = document.querySelector('[data-dataset-select]');
 const logTypeFilter = document.querySelector('[data-log-type-filter]');
@@ -4311,7 +4335,8 @@ function showConfirmDialog(message, options = {}) {
   }
 
   confirmTitle.textContent = options.title || 'Confirm action';
-  confirmCopy.textContent = message || options.copy || 'Are you sure you want to continue?';
+  if (options.copyHtml) confirmCopy.innerHTML = options.copyHtml;
+  else confirmCopy.textContent = message || options.copy || 'Are you sure you want to continue?';
   confirmAccept.textContent = options.confirmLabel || 'Confirm';
   confirmCancel.textContent = options.cancelLabel || 'Cancel';
   confirmCancel.hidden = options.hideCancel === true;
@@ -4360,6 +4385,57 @@ function showConfirmDialog(message, options = {}) {
     confirmAccept.focus();
   });
 }
+
+document.querySelectorAll('form[action="/workspace/calculated-dimensions/import"]').forEach((form) => {
+  form.addEventListener('submit', async (event) => {
+    if (form.dataset.confirmed === '1') {
+      delete form.dataset.confirmed;
+      return;
+    }
+    event.preventDefault();
+    const fileInput = form.querySelector('input[name="dimensions_file"]');
+    const file = fileInput instanceof HTMLInputElement ? fileInput.files?.[0] : null;
+    if (!file) return;
+
+    let imported;
+    try {
+      imported = JSON.parse(await file.text());
+      if (!Array.isArray(imported)) throw new Error('The selected JSON must contain an array of auto-calculated fields.');
+    } catch (error) {
+      showInfoDialog(error instanceof Error ? error.message : 'The selected JSON could not be read.', {
+        title: 'Auto-calculated Fields import', tone: 'error',
+      });
+      return;
+    }
+
+    const panel = form.closest('[data-workspace-calculated-dimensions-panel]');
+    let current = [];
+    try { current = JSON.parse(panel?.dataset.calculatedDimensions || '[]'); } catch (_error) { current = []; }
+    const currentNames = new Set(current.map((item) => String(item?.name || '').trim().toLocaleLowerCase()).filter(Boolean));
+    const overwritten = [...new Set(imported
+      .map((item) => String(item?.name || '').trim())
+      .filter((name) => name && currentNames.has(name.toLocaleLowerCase())))];
+    const fieldCount = imported.length;
+    const message = overwritten.length
+      ? `This file contains ${fieldCount} auto-calculated field${fieldCount === 1 ? '' : 's'}. ${overwritten.length} already exist${overwritten.length === 1 ? 's' : ''} in this workspace and will be overwritten: ${overwritten.join(', ')}. Applicable CDR tables will then be updated in the background. Continue?`
+      : `This will import ${fieldCount} auto-calculated field${fieldCount === 1 ? '' : 's'} into this workspace. Applicable CDR tables will then be updated in the background. Continue?`;
+    const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;'}[character]));
+    const copyHtml = overwritten.length
+      ? `This file contains ${fieldCount} auto-calculated field${fieldCount === 1 ? '' : 's'}.<br><strong>${overwritten.length} existing field${overwritten.length === 1 ? '' : 's'} will be overwritten:</strong><br>${overwritten.map((name) => `<strong>• ${escapeHtml(name)}</strong>`).join('<br>')}<br><br>Applicable CDR tables will then be updated in the background. Continue?`
+      : null;
+    const accepted = await showConfirmDialog(message, {
+      title: overwritten.length ? 'Overwrite Auto-calculated Fields?' : 'Import Auto-calculated Fields',
+      confirmLabel: overwritten.length ? 'Overwrite and Import' : 'Import',
+      tone: overwritten.length ? 'warning' : 'info',
+      copyHtml,
+    });
+    if (!accepted) return;
+    form.dataset.confirmed = '1';
+    const submit = form.querySelector('button[type="submit"]');
+    if (submit instanceof HTMLButtonElement) submit.disabled = true;
+    HTMLFormElement.prototype.submit.call(form);
+  });
+});
 
 function showCatalogueInsertChoice(slide) {
   if (!catalogueInsertOverlay || !catalogueInsertTitle || !catalogueInsertCopy || !catalogueInsertChart || !catalogueInsertSlide || !catalogueInsertCancel) {
@@ -4593,7 +4669,9 @@ function bindAdminDatasetRenameForm(form) {
 
 document.querySelectorAll('[data-admin-dataset-rename-form]').forEach(bindAdminDatasetRenameForm);
 
-if (filePickerInput && filePickerText) {
+document.querySelectorAll('[data-file-picker-input]').forEach((filePickerInput) => {
+  const filePickerText = filePickerInput.closest('.file-picker-shell')?.querySelector('[data-file-picker-text]');
+  if (!(filePickerInput instanceof HTMLInputElement) || !(filePickerText instanceof HTMLElement)) return;
   filePickerInput.addEventListener('change', () => {
     const files = Array.from(filePickerInput.files || []);
     if (files.length === 0) {
@@ -4606,7 +4684,7 @@ if (filePickerInput && filePickerText) {
     }
     filePickerText.textContent = `${files.length} files selected`;
   });
-}
+});
 
 if (inputKindSelect && datasetSelect) {
   const persistControlValue = (control, value) => {

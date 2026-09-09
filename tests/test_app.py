@@ -141,6 +141,29 @@ def test_incremental_auto_fields_preserve_ordered_dependencies(tmp_path: Path) -
     assert values == [('Video', 'Streaming'), ('Other', 'General')]
 
 
+def test_incremental_auto_fields_use_fallback_when_rule_columns_are_missing(tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.repository import Repository
+
+    repository = Repository(tmp_path / 'missing-source.db')
+    repository.initialize()
+    with repository.connection() as connection:
+        connection.execute('CREATE TABLE dataset_rows_1 (Existing TEXT)')
+        connection.executemany('INSERT INTO dataset_rows_1 VALUES (?)', [('one',), ('two',)])
+    dimensions = app_module.parse_calculated_dimensions([{
+        'name': 'Family', 'sources': ['cdr-data'], 'default': 'Other',
+        'rules': [{'when': 'Missing_Source = Value', 'value': 'Matched'}],
+    }])
+
+    app_module._incremental_auto_field_table_update(
+        repository, 'dataset_rows_1', 'cdr-data', (), dimensions, {},
+    )
+
+    with repository.connection() as connection:
+        values = [row['Family'] for row in connection.execute('SELECT Family FROM dataset_rows_1')]
+    assert values == ['Other', 'Other']
+
+
 def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -161,6 +184,11 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     status = client.get('/api/workspace/auto-calculated-fields/materialization')
     assert status.status_code == 200
     assert status.json()['status'] in {'idle', 'queued', 'processing', 'ready'}
+
+    rematerialized = client.post('/api/workspace/auto-calculated-fields/rematerialize')
+    assert rematerialized.status_code == 200
+    assert rematerialized.json()['materialization_job']
+    assert rematerialized.json()['materialization_status_url'].startswith('/api/workspace/auto-calculated-fields/materialization/')
 
     exported = client.get('/workspace/calculated-dimensions/export')
     assert exported.status_code == 200

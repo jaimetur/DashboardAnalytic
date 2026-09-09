@@ -544,7 +544,8 @@ def _auto_field_sql_expression(
     if definition.default != '':
         fallback = f'COALESCE({fallback}, ?)'
         parameters.append(definition.default)
-    return f"CASE {' '.join(clauses)} ELSE {fallback} END", parameters
+    expression = f"CASE {' '.join(clauses)} ELSE {fallback} END" if clauses else fallback
+    return expression, parameters
 
 
 def _incremental_auto_field_table_update(
@@ -9006,6 +9007,26 @@ def latest_auto_calculated_field_materialization(
     return JSONResponse({
         'status': 'idle', 'completed': 0, 'total': 0,
         'message': 'All materialized fields are up to date', 'workspace_id': active_workspace.id,
+    })
+
+
+@app.post('/api/workspace/auto-calculated-fields/rematerialize')
+def rematerialize_workspace_auto_calculated_fields(
+    user: SessionUser = Depends(current_user),
+) -> JSONResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace before rematerializing auto-calculated fields.')
+    current = list(load_workspace_calculated_dimensions())
+    job = start_auto_calculated_field_job(
+        active_workspace, (), current, {}, user.username,
+    )
+    repository.add_log(user.username, 'rematerialize_workspace_auto_calculated_fields', json.dumps({
+        'workspace': active_workspace.id, 'count': len(current), 'materialization_job': job['id'],
+    }))
+    return JSONResponse({
+        'materialization_job': job['id'],
+        'materialization_status_url': f'/api/workspace/auto-calculated-fields/materialization/{job["id"]}',
+        'notice': 'All applicable auto-calculated fields are being rematerialized in the background.',
     })
 
 
