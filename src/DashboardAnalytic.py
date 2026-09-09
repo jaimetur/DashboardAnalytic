@@ -1469,6 +1469,13 @@ def derive_available_metrics(df) -> list[str]:
         if not pd.api.types.is_bool_dtype(df[column])
         and pd.to_numeric(df[column], errors='coerce').notna().any()
     ]
+    # Keep known metric columns visible even when the current dataset contains
+    # only empty values. Runtime availability will mark them disabled instead
+    # of hiding them from the selector altogether.
+    numeric_columns.extend(
+        column for column in preferred
+        if column in df.columns and column not in numeric_columns and is_metric_candidate(column)
+    )
     ordered = [column for column in preferred if column in numeric_columns and is_metric_candidate(column)]
     ordered.extend(column for column in numeric_columns if column not in ordered and is_metric_candidate(column))
     return ordered[:20]
@@ -3136,20 +3143,23 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
             if getattr(exc, 'errno', None) != errno.EXDEV:
                 raise
             shutil.copy2(database_snapshot, workspace.database_path)
-            source_input_dir = workspace_info.get('source_input_dir') if workspace_info else None
-            source_output_dir = workspace_info.get('source_output_dir') if workspace_info else None
-            with sqlite3.connect(workspace.database_path) as connection:
-                connection.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
-                if source_input_dir:
-                    connection.execute('UPDATE datasets SET stored_path = REPLACE(stored_path, ?, ?)', (str(source_input_dir), str(workspace.input_dir)))
-                has_generated_jobs = connection.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'generated_jobs'"
-                ).fetchone()
-                if source_output_dir and has_generated_jobs:
-                    connection.execute(
-                        'UPDATE generated_jobs SET output_path = REPLACE(output_path, ?, ?)',
-                        (str(source_output_dir), str(workspace.output_dir)),
-                    )
+        source_input_dir = workspace_info.get('source_input_dir') if workspace_info else None
+        source_output_dir = workspace_info.get('source_output_dir') if workspace_info else None
+        with sqlite3.connect(workspace.database_path) as connection:
+            connection.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
+            if source_input_dir:
+                connection.execute(
+                    'UPDATE datasets SET stored_path = REPLACE(stored_path, ?, ?)',
+                    (str(source_input_dir), str(workspace.input_dir)),
+                )
+            has_generated_jobs = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'generated_jobs'"
+            ).fetchone()
+            if source_output_dir and has_generated_jobs:
+                connection.execute(
+                    'UPDATE generated_jobs SET output_path = REPLACE(output_path, ?, ?)',
+                    (str(source_output_dir), str(workspace.output_dir)),
+                )
     except Exception:
         workspace_registry.remove(workspace.id)
         repository.remove_workspace_access(workspace.id)

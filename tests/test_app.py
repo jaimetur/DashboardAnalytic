@@ -1385,7 +1385,16 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
 
     duplicated = client.post('/workspace/duplicate', data={'workspace_id': 'default'}, follow_redirects=False)
     assert duplicated.status_code == 303
-    copied_workspace = next(item for item in app_module.workspace_registry.list() if item.name == 'Default - Copy')
+    copied_workspace = None
+    for _attempt in range(100):
+        copied_workspace = next(
+            (item for item in app_module.workspace_registry.list() if item.name == 'Default - Copy'),
+            None,
+        )
+        if copied_workspace and copied_workspace.status == 'ready':
+            break
+        time.sleep(0.01)
+    assert copied_workspace is not None
     assert copied_workspace.database_path.name == 'Default - Copy.db'
     assert app_module.repository.user_has_workspace_access('admin', copied_workspace.id)
     with app_module.repository.connection() as conn:

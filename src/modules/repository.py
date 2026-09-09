@@ -1620,7 +1620,9 @@ class Repository:
 
         aliases = [f"metric_count_{index}" for index, _ in enumerate(selected_metrics)]
         count_expressions = ", ".join(
-            f"SUM(CASE WHEN {self._quote_identifier(metric)} IS NOT NULL THEN 1 ELSE 0 END) AS {self._quote_identifier(alias)}"
+            f"SUM(CASE WHEN {self._quote_identifier(metric)} IS NOT NULL "
+            f"AND TRIM(CAST({self._quote_identifier(metric)} AS TEXT)) != '' "
+            f"THEN 1 ELSE 0 END) AS {self._quote_identifier(alias)}"
             for metric, alias in zip(selected_metrics, aliases, strict=False)
         )
         query = f"SELECT {count_expressions} FROM {self._quote_identifier(table_name)}"
