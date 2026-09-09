@@ -164,6 +164,60 @@ def test_incremental_auto_fields_use_fallback_when_rule_columns_are_missing(tmp_
     assert values == ['Other', 'Other']
 
 
+def test_incremental_auto_fields_update_existing_combined_reporting_table(tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.repository import Repository
+
+    repository = Repository(tmp_path / 'combined.db')
+    repository.initialize()
+    dataset_id, _created = repository.add_dataset('data.csv', str(tmp_path / 'data.csv'), 'admin')
+    repository.update_dataset_profile(dataset_id, status='ready', dataset_kind='data')
+    with repository.connection() as connection:
+        connection.execute(f'CREATE TABLE dataset_rows_{dataset_id} (Test_Name TEXT)')
+        connection.execute(f"INSERT INTO dataset_rows_{dataset_id} VALUES ('youtube')")
+    repository.copy_dataset_rows_to_reporting(dataset_id, 'data')
+    dimensions = app_module.parse_calculated_dimensions([{
+        'name': 'Family', 'sources': ['cdr-data'], 'default': 'Other',
+        'rules': [{'when': 'Test_Name CONTAINS youtube', 'value': 'Video'}],
+    }])
+
+    stats = app_module.materialize_workspace_auto_fields_incrementally(
+        (), dimensions, {}, repository, {'cdr-data'},
+    )
+
+    assert stats['datasets'] == 1
+    assert stats['combined_tables'] == 1
+    with repository.connection() as connection:
+        value = connection.execute('SELECT Family FROM reporting_rows_data').fetchone()[0]
+    assert value == 'Video'
+
+
+def test_incremental_auto_fields_create_missing_combined_reporting_table(tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.repository import Repository
+
+    repository = Repository(tmp_path / 'new-combined.db')
+    repository.initialize()
+    dataset_id, _created = repository.add_dataset('data.csv', str(tmp_path / 'data.csv'), 'admin')
+    repository.update_dataset_profile(dataset_id, status='ready', dataset_kind='data')
+    with repository.connection() as connection:
+        connection.execute(f'CREATE TABLE dataset_rows_{dataset_id} (Test_Name TEXT)')
+        connection.execute(f"INSERT INTO dataset_rows_{dataset_id} VALUES ('youtube')")
+    dimensions = app_module.parse_calculated_dimensions([{
+        'name': 'Family', 'sources': ['cdr-data'], 'default': 'Other',
+        'rules': [{'when': 'Test_Name CONTAINS youtube', 'value': 'Video'}],
+    }])
+
+    stats = app_module.materialize_workspace_auto_fields_incrementally(
+        (), dimensions, {}, repository, {'cdr-data'},
+    )
+
+    assert stats['combined_tables'] == 1
+    with repository.connection() as connection:
+        value = connection.execute('SELECT Family FROM reporting_rows_data').fetchone()[0]
+    assert value == 'Video'
+
+
 def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) -> None:
     import src.DashboardAnalytic as app_module
 

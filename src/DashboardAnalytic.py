@@ -699,7 +699,7 @@ def materialize_workspace_auto_fields_incrementally(
     task_repository: Repository,
     affected_sources: Iterable[str],
     progress_callback: Callable[[int, int, str], None] | None = None,
-) -> int:
+) -> dict[str, int]:
     """Update only changed columns, scanning each affected SQLite table once."""
     selected_sources = {
         str(source).casefold().removeprefix('cdr-') for source in affected_sources if str(source).strip()
@@ -709,10 +709,7 @@ def materialize_workspace_auto_fields_incrementally(
         if row['status'] == 'ready'
         and str(row['dataset_kind'] or '').casefold() in selected_sources
     ]
-    reporting_kinds = [
-        kind for kind in selected_sources
-        if task_repository.list_reporting_row_columns(kind)
-    ]
+    reporting_kinds = sorted({str(row['dataset_kind']).casefold() for row in datasets})
     total = max(len(datasets) + len(reporting_kinds), 1)
     completed = 0
     for dataset in datasets:
@@ -725,10 +722,21 @@ def materialize_workspace_auto_fields_incrementally(
         if progress_callback:
             progress_callback(completed, total, f'Updating {dataset["file_name"]}')
     for kind in reporting_kinds:
-        _incremental_auto_field_table_update(
-            task_repository, task_repository.reporting_rows_table_name(kind),
-            f'cdr-{kind}', previous, current, renames,
-        )
+        reporting_table_exists = bool(task_repository.list_reporting_row_columns(kind))
+        if reporting_table_exists:
+            _incremental_auto_field_table_update(
+                task_repository, task_repository.reporting_rows_table_name(kind),
+                f'cdr-{kind}', previous, current, renames,
+            )
+        else:
+            calculated_names = [
+                item.name for item in current if f'cdr-{kind}' in item.sources
+            ]
+            for dataset in datasets:
+                if str(dataset['dataset_kind']).casefold() == kind:
+                    task_repository.copy_dataset_rows_to_reporting(
+                        int(dataset['id']), kind, calculated_names,
+                    )
         completed += 1
         if progress_callback:
             progress_callback(completed, total, f'Updating combined CDR-{kind.upper()} table')
@@ -736,7 +744,11 @@ def materialize_workspace_auto_fields_incrementally(
     ANALYSIS_CACHE.clear()
     CHART_PREVIEW_DATA_CACHE.clear()
     task_repository.set_workspace_state('calculated_dimensions_need_materialization', '0')
-    return len(datasets)
+    return {
+        'datasets': len(datasets),
+        'combined_tables': len(reporting_kinds),
+        'tables': completed,
+    }
 
 
 def affected_calculated_dimension_sources(previous: Iterable[Any], current: Iterable[Any]) -> set[str]:
@@ -784,16 +796,22 @@ def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
             task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'processing')
             current = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
             current_sources = affected_calculated_dimension_sources(previous, current)
-            count = materialize_workspace_auto_fields_incrementally(
+            stats = materialize_workspace_auto_fields_incrementally(
                 previous, current, renames, task_repository,
                 set(affected_sources) | current_sources, update_progress,
             )
         with AUTO_CALCULATED_FIELD_JOBS_LOCK:
-            completed_tables = int(AUTO_CALCULATED_FIELD_JOBS[job_id].get('total') or count)
+            completed_tables = int(AUTO_CALCULATED_FIELD_JOBS[job_id].get('total') or stats['tables'])
+            dataset_count = stats['datasets']
+            combined_count = stats['combined_tables']
+            updated_parts = [f'{dataset_count} CDR dataset' + ('' if dataset_count == 1 else 's')]
+            if combined_count:
+                updated_parts.append(f'{combined_count} combined CDR table' + ('' if combined_count == 1 else 's'))
             AUTO_CALCULATED_FIELD_JOBS[job_id].update(
                 status='ready', completed=completed_tables, total=completed_tables,
-                materialized_datasets=count,
-                message=f'Updated {count} CDR datasets', finished_at=datetime.now(timezone.utc).timestamp(),
+                materialized_datasets=dataset_count, materialized_combined_tables=combined_count,
+                message=f"Updated {' and '.join(updated_parts)}",
+                finished_at=datetime.now(timezone.utc).timestamp(),
             )
     except Exception as exc:
         task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
