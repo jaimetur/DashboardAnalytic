@@ -5,7 +5,7 @@
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />
     <envs>
-      <env name="PYTHONPYCACHEPREFIX" value="$USER_HOME$/Library/Caches/DashboardAnalytic/pycache" />
+      <env name="PYTHONPYCACHEPREFIX" value="$USER_HOME$/development/python_cache/DashboardAnalytic/pycache" />
       <env name="PYTHONUNBUFFERED" value="1" />
     </envs>
     <option name="SDK_HOME" value="" />
