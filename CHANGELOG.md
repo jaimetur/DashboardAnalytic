@@ -7,7 +7,7 @@
 ### Release Date: 2026-09-07
 #### ⚠️ Breaking Changes:
 - Moved status-row inclusion out of the chart renderer and into explicit template filters such as `Test_Result IN (Completed, Dropped, Failed)`; update affected templates so their status-chart denominator remains visible and editable.
-- Slides Templates now belong to individual workspaces, including the template registry and CSV files; Database Management exposes the registry as Slides Templates registry under Workspace Tables. A one-time migration copies the former shared library to every workspace that already existed, registers each copy in its own database, removes the obsolete global registry and legacy configuration library only after success, while newly created workspaces, including Default, start without templates.
+- Slides Templates now belong to individual workspaces, including the template registry and CSV files; Database Management exposes the registry as Slides Templates registry under Workspace Tables. A one-time migration corrects legacy workspace paths that still point into the project tree, copies the former shared library to every workspace that already existed, registers each copy in its own database, removes the obsolete global registry and legacy configuration library only after success, while newly created workspaces, including Default, start without templates.
 
 #### 🌟 New Features:
 - Added an Edit Slides Template action to the active Charts Panel, opening the exact generating template in a full editor modal without the template selector.
