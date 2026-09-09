@@ -86,23 +86,46 @@ class WorkspaceRegistry:
         self._migrate_workspace_templates()
 
     def _migrate_workspace_templates(self) -> None:
-        """Preserve the old shared library once for each existing workspace."""
-        for workspace in self.list():
+        """Copy the legacy shared library to the workspaces that existed at migration time."""
+        migration_key = 'workspace_templates_files_v2'
+        if self.get_state(migration_key) == '1':
+            return
+        workspaces = self.list()
+        sources = [self.legacy_slides_templates_dir, *(workspace.slides_templates_dir for workspace in workspaces)]
+        source = next(
+            (candidate for candidate in sources if candidate.is_dir() and any(candidate.rglob('*.csv'))),
+            None,
+        )
+        for workspace in workspaces:
             target = workspace.database_path.parent / 'slides-templates'
-            source = workspace.slides_templates_dir
-            if source != target:
-                if source.exists():
-                    for path in source.rglob('*'):
-                        if path.is_file():
-                            destination = target / path.relative_to(source)
-                            destination.parent.mkdir(parents=True, exist_ok=True)
-                            if not destination.exists():
-                                shutil.copy2(path, destination)
-                target.mkdir(parents=True, exist_ok=True)
-                (target / '.migrate-library').touch()
-                with self._connection() as conn:
-                    conn.execute('UPDATE workspaces SET slides_templates_dir = ? WHERE id = ?',
-                                 (str(target), workspace.id))
+            own_source = workspace.slides_templates_dir
+            for candidate in (own_source, source):
+                if candidate is None or candidate == target or not candidate.exists():
+                    continue
+                for path in candidate.rglob('*'):
+                    if not path.is_file():
+                        continue
+                    destination = target / path.relative_to(candidate)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    if not destination.exists():
+                        shutil.copy2(path, destination)
+            target.mkdir(parents=True, exist_ok=True)
+            (target / '.migrate-library').touch()
+            with self._connection() as conn:
+                conn.execute('UPDATE workspaces SET slides_templates_dir = ? WHERE id = ?',
+                             (str(target), workspace.id))
+        if source == self.legacy_slides_templates_dir and source.exists():
+            shutil.rmtree(source)
+        self.set_state(migration_key, '1')
+
+    def get_state(self, key: str) -> str | None:
+        with self._connection() as conn:
+            row = conn.execute('SELECT value FROM workspace_state WHERE key = ?', (key,)).fetchone()
+        return str(row['value']) if row and row['value'] is not None else None
+
+    def set_state(self, key: str, value: str) -> None:
+        with self._connection() as conn:
+            conn.execute('INSERT OR REPLACE INTO workspace_state (key, value) VALUES (?, ?)', (key, value))
 
     def _migrate_default_workspace_name(self) -> None:
         """Rename the bootstrap workspace while preserving existing user data."""

@@ -1400,6 +1400,7 @@ async def lifespan(_: FastAPI):
     workspace_registry.initialize()
     repository.set_global_database(settings.database_path.parent / 'application.db')
     repository.set_workspace_registry_database(workspace_registry.registry_path)
+    migrate_workspace_template_registries()
     # Workspace schema cleanup and interrupted-job recovery happen when a
     # workspace becomes active.  Scanning every workspace here opens and
     # checkpoints every SQLite database, which can leave startup blocked for
@@ -3437,6 +3438,22 @@ def register_workspace_template_files(workspace: Workspace) -> None:
                     known.add(name)
         if len(default_files) == 1:
             target_repository.set_default_report_template(technology, catalogue_registry_key(default_files[0].stem))
+
+
+def migrate_workspace_template_registries() -> None:
+    """Finish the one-time migration from the old global Slides Templates registry."""
+    migration_key = 'workspace_templates_registry_v2'
+    if workspace_registry.get_state(migration_key) == '1':
+        return
+    for workspace in workspace_registry.list():
+        register_workspace_template_files(workspace)
+    with repository.global_connection() as connection:
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'report_templates'",
+        ).fetchone()
+        if exists:
+            connection.execute('DROP TABLE report_templates')
+    workspace_registry.set_state(migration_key, '1')
 
 
 def matching_template_workspaces(manifest: dict[str, Any], workspaces: Iterable[Workspace]) -> list[str]:
