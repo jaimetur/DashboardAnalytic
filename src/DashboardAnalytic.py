@@ -4535,15 +4535,6 @@ def index(request: Request) -> HTMLResponse:
 @app.get('/login', response_class=HTMLResponse)
 def login_page(request: Request) -> HTMLResponse:
     workspaces = workspace_registry.list()
-    # Repair status for copies created by older versions: a copy whose on-disk
-    # footprint is still smaller than its source is necessarily in progress.
-    by_name = {item.name.casefold(): item for item in workspaces}
-    for item in workspaces:
-        if item.status == 'ready' and ' - copy' in item.name.casefold():
-            source_name = item.name.casefold().split(' - copy', 1)[0]
-            source = by_name.get(source_name)
-            if source and workspace_disk_usage(item) < workspace_disk_usage(source):
-                object.__setattr__(item, 'status', 'duplicating')
     selected_workspace_id = active_workspace.id if active_workspace else workspace_registry.most_recent().id
     return render_template(
         request, 'login.html',
