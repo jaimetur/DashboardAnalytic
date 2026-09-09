@@ -652,7 +652,14 @@ def _incremental_auto_field_table_update(
                 connection.execute(f'ALTER TABLE {quote(table_name)} RENAME COLUMN {quote(temporary)} TO {quote(definition.name)}')
                 columns[columns.index(physical)] = definition.name
                 physical = definition.name
-            expression, values = _auto_field_sql_expression(definition, columns, quote)
+            # Match the DataFrame implementation: a field cannot use its own
+            # previously materialized value as input. Earlier fields in the
+            # ordered definition list remain available for dependencies.
+            expression_columns = [
+                column for column in columns
+                if _normalise_catalogue_dimension_name(column) != key
+            ]
+            expression, values = _auto_field_sql_expression(definition, expression_columns, quote)
             updates.append((f'{quote(physical)} = {expression}', values, definition))
         if updates:
             changed_keys = {
@@ -662,7 +669,9 @@ def _incremental_auto_field_table_update(
             has_dependencies = any(
                 changed_keys.intersection({
                     _normalise_catalogue_dimension_name(alias)
-                    for condition in definition.rules for alias in condition.column.split('|')
+                    for rule in definition.rules
+                    for condition in rule.conditions
+                    for alias in condition.column.split('|')
                 } | {
                     _normalise_catalogue_dimension_name(alias) for alias in definition.default_from
                 })
@@ -779,8 +788,10 @@ def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
                 set(affected_sources) | current_sources, update_progress,
             )
         with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            completed_tables = int(AUTO_CALCULATED_FIELD_JOBS[job_id].get('total') or count)
             AUTO_CALCULATED_FIELD_JOBS[job_id].update(
-                status='ready', completed=count, total=count, materialized_datasets=count,
+                status='ready', completed=completed_tables, total=completed_tables,
+                materialized_datasets=count,
                 message=f'Updated {count} CDR datasets', finished_at=datetime.now(timezone.utc).timestamp(),
             )
     except Exception as exc:
@@ -794,7 +805,7 @@ def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
 
 def start_auto_calculated_field_job(
     workspace: Workspace, previous: Iterable[Any], current: Iterable[Any],
-    renames: dict[str, str], username: str,
+    renames: dict[str, str], username: str, *, background: bool = True,
 ) -> dict[str, Any]:
     """Queue materialization so the web request and UI remain responsive."""
     job_id = uuid4().hex
@@ -827,12 +838,20 @@ def start_auto_calculated_field_job(
         return job
     # Keep a recoverable pending marker until the worker actually starts. If
     # the process exits first, opening this workspace queues the rebuild again.
-    repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
-    Thread(
-        target=_run_auto_calculated_field_job,
-        args=(job_id, workspace),
-        name=f'auto-calculated-fields-{workspace.id}', daemon=True,
-    ).start()
+    pending_repository = Repository(
+        workspace.database_path,
+        global_db_path=repository.global_db_path,
+        workspace_registry_db_path=workspace_registry.registry_path,
+    )
+    pending_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
+    if background:
+        Thread(
+            target=_run_auto_calculated_field_job,
+            args=(job_id, workspace),
+            name=f'auto-calculated-fields-{workspace.id}', daemon=True,
+        ).start()
+    else:
+        _run_auto_calculated_field_job(job_id, workspace)
     return job
 
 
@@ -859,7 +878,11 @@ def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
             workspace_registry_db_path=workspace_registry.registry_path,
         )
         try:
-            materialize_workspace_calculated_dimensions(task_repository=task_repository)
+            dimensions = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
+            materialize_workspace_auto_fields_incrementally(
+                (), dimensions, {}, task_repository,
+                {'cdr-data', 'cdr-voice', 'cdr-speech'},
+            )
         except Exception:
             task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
         finally:
@@ -3242,10 +3265,11 @@ def import_auto_calculated_fields(
                 if _normalise_catalogue_dimension_name(item.name) in previous_by_key
                 and previous_by_key[_normalise_catalogue_dimension_name(item.name)].name != item.name
             }
-            with _auto_calculated_field_workspace_lock(workspace.id):
-                materialize_workspace_auto_fields_incrementally(
-                    previous, saved, imported_renames, task_repository, affected_sources,
-                )
+            job = start_auto_calculated_field_job(
+                workspace, previous, saved, imported_renames, 'system', background=False,
+            )
+            if job.get('status') == 'failed':
+                raise RuntimeError(str(job.get('error') or 'Auto-calculated field materialization failed.'))
         if progress_callback:
             progress_callback(
                 f'updating workspace {index + 1} of {len(selected_ids)}',
@@ -8942,6 +8966,36 @@ def auto_calculated_field_materialization_status(
     return JSONResponse({
         key: value for key, value in job.items()
         if key not in {'previous_definitions', 'affected_sources', 'renames', 'username'}
+    })
+
+
+@app.get('/api/workspace/auto-calculated-fields/materialization')
+def latest_auto_calculated_field_materialization(
+    user: SessionUser = Depends(current_user),
+) -> JSONResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace first.')
+    with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        workspace_jobs = [
+            dict(job) for job in AUTO_CALCULATED_FIELD_JOBS.values()
+            if job.get('workspace_id') == active_workspace.id
+        ]
+    if workspace_jobs:
+        active_jobs = [job for job in workspace_jobs if job.get('status') in {'queued', 'processing'}]
+        job = max(active_jobs or workspace_jobs, key=lambda item: float(item.get('created_at') or 0))
+        return JSONResponse({
+            key: value for key, value in job.items()
+            if key not in {'previous_definitions', 'affected_sources', 'renames', 'username'}
+        })
+    workspace_state = repository.get_workspace_state('calculated_dimensions_need_materialization')
+    if workspace_state in {'1', 'processing'}:
+        return JSONResponse({
+            'status': 'processing', 'completed': 0, 'total': 0,
+            'message': 'Updating CDR tables', 'workspace_id': active_workspace.id,
+        })
+    return JSONResponse({
+        'status': 'idle', 'completed': 0, 'total': 0,
+        'message': 'All materialized fields are up to date', 'workspace_id': active_workspace.id,
     })
 
 

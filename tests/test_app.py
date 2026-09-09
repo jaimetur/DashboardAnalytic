@@ -64,6 +64,83 @@ def test_calculated_dimension_rules_ignore_case_and_compact_redundant_field_alia
     assert payload['rules'][0]['when'] == 'Test_Name CONTAINS YOUTUBE'
 
 
+def test_incremental_auto_field_materialization_updates_columns_in_place(tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.repository import Repository
+
+    repository = Repository(tmp_path / 'incremental.db')
+    repository.initialize()
+    with repository.connection() as connection:
+        connection.execute(
+            'CREATE TABLE dataset_rows_1 ('
+            'Test_Name TEXT, Score TEXT, Fallback TEXT, "Old Group" TEXT)'
+        )
+        connection.executemany(
+            'INSERT INTO dataset_rows_1 VALUES (?, ?, ?, ?)',
+            [
+                ('YOUTUBE', '1', 'raw-a', 'stale'),
+                ('web', '12', 'raw-b', 'stale'),
+                ('web', 'bad', 'raw-c', 'stale'),
+            ],
+        )
+    previous = app_module.parse_calculated_dimensions([{
+        'name': 'Old Group', 'sources': ['cdr-data'], 'default': 'Old', 'rules': [],
+    }])
+    current = app_module.parse_calculated_dimensions([{
+        'name': 'Result Group', 'sources': ['cdr-data'], 'default': '', 'default_from': 'Fallback',
+        'rules': [
+            {'when': 'Test_Name CONTAINS youtube', 'value': 'Video'},
+            {'when': 'Score >= 10', 'value': 'High'},
+        ],
+    }])
+
+    changed = app_module._incremental_auto_field_table_update(
+        repository, 'dataset_rows_1', 'cdr-data', previous, current,
+        {'Old Group': 'Result Group'},
+    )
+
+    assert changed is True
+    with repository.connection() as connection:
+        columns = [row['name'] for row in connection.execute('PRAGMA table_info(dataset_rows_1)')]
+        values = [row['Result Group'] for row in connection.execute('SELECT "Result Group" FROM dataset_rows_1')]
+    assert 'Old Group' not in columns
+    assert columns.count('Result Group') == 1
+    assert values == ['Video', 'High', 'raw-c']
+
+
+def test_incremental_auto_fields_preserve_ordered_dependencies(tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.repository import Repository
+
+    repository = Repository(tmp_path / 'dependencies.db')
+    repository.initialize()
+    with repository.connection() as connection:
+        connection.execute('CREATE TABLE dataset_rows_1 (Test_Name TEXT)')
+        connection.executemany(
+            'INSERT INTO dataset_rows_1 VALUES (?)', [('youtube',), ('web',)],
+        )
+    dimensions = app_module.parse_calculated_dimensions([
+        {
+            'name': 'Family', 'sources': ['cdr-data'], 'default': 'Other',
+            'rules': [{'when': 'Test_Name CONTAINS youtube', 'value': 'Video'}],
+        },
+        {
+            'name': 'Category', 'sources': ['cdr-data'], 'default': 'General',
+            'rules': [{'when': 'Family = VIDEO', 'value': 'Streaming'}],
+        },
+    ])
+
+    app_module._incremental_auto_field_table_update(
+        repository, 'dataset_rows_1', 'cdr-data', (), dimensions, {},
+    )
+
+    with repository.connection() as connection:
+        values = [tuple(row) for row in connection.execute(
+            'SELECT Family, Category FROM dataset_rows_1 ORDER BY rowid',
+        )]
+    assert values == [('Video', 'Streaming'), ('Other', 'General')]
+
+
 def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -71,6 +148,7 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     page = client.get('/workspace')
     assert page.status_code == 200
     assert 'data-workspace-calculated-dimensions-panel' in page.text
+    assert 'data-auto-calculated-field-progress' in page.text
     assert 'Manage Auto-calculated Fields' in page.text
     assert 'workspace-calculated-dimensions-import-panel' in page.text
     assert 'workspace-calculated-dimensions-list' in page.text
@@ -79,6 +157,10 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     assert '>Applied to<' in page.text
     assert page.text.index('workspace-calculated-dimensions-import-panel') < page.text.index('workspace-calculated-dimensions-list-panel')
     assert page.text.index('<h2>Datasets</h2>') < page.text.index('id="calculated-dimensions"')
+
+    status = client.get('/api/workspace/auto-calculated-fields/materialization')
+    assert status.status_code == 200
+    assert status.json()['status'] in {'idle', 'queued', 'processing', 'ready'}
 
     exported = client.get('/workspace/calculated-dimensions/export')
     assert exported.status_code == 200

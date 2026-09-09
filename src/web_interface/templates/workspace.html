@@ -289,6 +289,16 @@
     </summary>
     <div class="workspace-calculated-dimensions-content">
       <p class="lede">Auto-calculated fields belong to this workspace and are materialized in every applicable individual and combined CDR table.</p>
+      <section class="auto-calculated-field-progress" data-auto-calculated-field-progress data-status-url="/api/workspace/auto-calculated-fields/materialization" aria-live="polite">
+        <div class="auto-calculated-field-progress-heading">
+          <strong data-auto-calculated-field-progress-title>Materialization status</strong>
+          <span class="status-pill status-ready" data-auto-calculated-field-progress-status>Up to date</span>
+        </div>
+        <div class="auto-calculated-field-progress-track" role="progressbar" aria-label="Auto-calculated Fields materialization" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" data-auto-calculated-field-progress-track>
+          <span data-auto-calculated-field-progress-bar style="width: 100%"></span>
+        </div>
+        <p class="form-note" data-auto-calculated-field-progress-copy>All materialized fields are up to date.</p>
+      </section>
       <div class="workspace-calculated-dimensions-layout">
         <section class="workspace-calculated-dimensions-subpanel workspace-calculated-dimensions-import-panel">
           <header>

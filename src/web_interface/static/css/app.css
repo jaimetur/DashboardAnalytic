@@ -379,6 +379,16 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-calculated-dimensions-button { background: linear-gradient(145deg, #fff2ad, #efd66e); border-color: rgba(174, 132, 28, 0.54); color: #715211; box-shadow: 0 8px 18px rgba(167, 122, 19, 0.16); }
 .catalogue-calculated-dimensions-button:hover:not(:disabled) { background: linear-gradient(145deg, #ffea84, #dfbd45); color: #533b09; }
 .workspace-calculated-dimensions-content { display: grid; gap: 1rem; padding-top: 0.8rem; }
+.auto-calculated-field-progress { display: grid; gap: 0.55rem; padding: 0.8rem 0.95rem; border: 1px solid #cfe0e8; border-radius: 12px; background: linear-gradient(135deg, #f7fbfd, #eef7f6); }
+.auto-calculated-field-progress-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
+.auto-calculated-field-progress-heading strong { color: #294b5d; font-size: 0.84rem; }
+.auto-calculated-field-progress-heading .status-pill { min-width: 6rem; padding: 0.25rem 0.6rem; text-align: center; }
+.auto-calculated-field-progress-track { height: 0.55rem; overflow: hidden; border-radius: 999px; background: #dce8ed; box-shadow: inset 0 1px 2px rgba(29, 64, 82, 0.12); }
+.auto-calculated-field-progress-track span { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #0b7a75, #36b6a9); transition: width 220ms ease; }
+.auto-calculated-field-progress.is-processing .auto-calculated-field-progress-track span { min-width: 5%; background: linear-gradient(90deg, #d49a20, #f0c44f); }
+.auto-calculated-field-progress.is-failed { border-color: #e2b8be; background: #fff5f5; }
+.auto-calculated-field-progress.is-failed .auto-calculated-field-progress-track span { background: #bd3232; }
+.auto-calculated-field-progress .form-note { margin: 0; }
 .workspace-calculated-dimensions-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: stretch; }
 .workspace-calculated-dimensions-subpanel { display: grid; align-content: start; gap: 0.8rem; padding: 1rem; border: 1px solid var(--line); border-radius: 14px; background: #fafcfd; }
 .workspace-calculated-dimensions-subpanel h3 { margin: 0.1rem 0 0; font-size: 1rem; }

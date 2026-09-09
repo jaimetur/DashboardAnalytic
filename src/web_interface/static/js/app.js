@@ -80,6 +80,45 @@ window.addEventListener('load', () => {
 
 document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEach((host) => {
   const manage = host.querySelector('[data-workspace-manage-calculated-dimensions]');
+  const progressPanel = host.querySelector('[data-auto-calculated-field-progress]');
+  const progressStatus = host.querySelector('[data-auto-calculated-field-progress-status]');
+  const progressTrack = host.querySelector('[data-auto-calculated-field-progress-track]');
+  const progressBar = host.querySelector('[data-auto-calculated-field-progress-bar]');
+  const progressCopy = host.querySelector('[data-auto-calculated-field-progress-copy]');
+  let progressTimer = null;
+  const refreshMaterializationProgress = async () => {
+    if (!(progressPanel instanceof HTMLElement) || !progressPanel.dataset.statusUrl) return;
+    try {
+      const response = await fetch(progressPanel.dataset.statusUrl, {credentials: 'same-origin', cache: 'no-store'});
+      const job = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(job.detail || 'Unable to read materialization progress.');
+      const processing = ['queued', 'processing'].includes(job.status);
+      const failed = job.status === 'failed';
+      const total = Math.max(Number(job.total) || 0, 0);
+      const completed = Math.max(Number(job.completed) || 0, 0);
+      const percent = processing
+        ? (total ? Math.min(99, Math.round(completed * 100 / total)) : 5)
+        : failed ? 100 : 100;
+      progressPanel.classList.toggle('is-processing', processing);
+      progressPanel.classList.toggle('is-failed', failed);
+      if (progressStatus instanceof HTMLElement) {
+        progressStatus.className = `status-pill status-${failed ? 'failed' : processing ? 'processing' : 'ready'}`;
+        progressStatus.textContent = failed ? 'Failed' : processing ? 'In progress' : 'Up to date';
+      }
+      if (progressBar instanceof HTMLElement) progressBar.style.width = `${percent}%`;
+      if (progressTrack instanceof HTMLElement) progressTrack.setAttribute('aria-valuenow', String(percent));
+      if (progressCopy instanceof HTMLElement) {
+        const counter = processing && total ? ` (${Math.min(completed, total)} of ${total} tables)` : '';
+        progressCopy.textContent = `${job.error || job.message || 'All materialized fields are up to date'}${counter}`;
+      }
+      if (progressTimer) window.clearTimeout(progressTimer);
+      progressTimer = window.setTimeout(refreshMaterializationProgress, processing ? 900 : 5000);
+    } catch (error) {
+      if (progressCopy instanceof HTMLElement) progressCopy.textContent = error.message || 'Materialization status is temporarily unavailable.';
+      if (progressTimer) window.clearTimeout(progressTimer);
+      progressTimer = window.setTimeout(refreshMaterializationProgress, 5000);
+    }
+  };
   let dimensions = [];
   try { dimensions = JSON.parse(host.dataset.calculatedDimensions || '[]'); } catch (_error) { dimensions = []; }
   const saveDimensions = async (next, rename = null) => {
@@ -91,8 +130,10 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
     if (!response.ok) throw new Error(payload.detail || 'Unable to save auto-calculated fields.');
     dimensions = payload.dimensions || next;
     monitorAutoCalculatedFieldJob(payload.materialization_status_url, payload.notice);
+    refreshMaterializationProgress();
     return payload;
   };
+  refreshMaterializationProgress();
   manage?.addEventListener('click', () => {
     const overlay = document.createElement('div'); overlay.className = 'confirm-overlay';
     const panel = document.createElement('section'); panel.className = 'confirm-panel calculated-dimensions-dialog';
