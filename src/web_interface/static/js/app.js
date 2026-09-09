@@ -23,6 +23,61 @@ function configureCalculatedDimensionSourceMenu(sourceMenu, overlay) {
   });
 }
 
+const autoCalculatedFieldJobStorageKey = 'dashboard-analytic:auto-calculated-field-jobs';
+const storedAutoCalculatedFieldJobs = () => {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(autoCalculatedFieldJobStorageKey) || '[]');
+    return Array.isArray(value) ? value : [];
+  } catch (_error) {
+    return [];
+  }
+};
+
+function monitorAutoCalculatedFieldJob(statusUrl, notice = '') {
+  if (!statusUrl) return;
+  const saved = new Set(storedAutoCalculatedFieldJobs());
+  saved.add(statusUrl);
+  window.localStorage.setItem(autoCalculatedFieldJobStorageKey, JSON.stringify([...saved]));
+  if (notice) showInfoDialog(notice, {title: 'Auto-calculated Fields'});
+  const poll = async () => {
+    try {
+      const response = await fetch(statusUrl, {credentials: 'same-origin'});
+      const job = await response.json().catch(() => ({}));
+      if (response.status === 404) {
+        const current = new Set(storedAutoCalculatedFieldJobs());
+        current.delete(statusUrl);
+        window.localStorage.setItem(autoCalculatedFieldJobStorageKey, JSON.stringify([...current]));
+        showInfoDialog('The background job is no longer available. Reopen the workspace to retry any interrupted materialization.', {title: 'Materialization status unavailable', tone: 'error'});
+        return;
+      }
+      if (!response.ok) throw new Error(job.detail || 'Unable to read materialization progress.');
+      if (job.status === 'ready' || job.status === 'failed') {
+        const current = new Set(storedAutoCalculatedFieldJobs());
+        current.delete(statusUrl);
+        window.localStorage.setItem(autoCalculatedFieldJobStorageKey, JSON.stringify([...current]));
+        if (job.status === 'ready') {
+          showInfoDialog(job.message || 'Auto-calculated fields are ready.', {title: 'Materialization complete'});
+        } else {
+          showInfoDialog(job.error || 'The CDR tables could not be updated.', {title: 'Materialization failed', tone: 'error'});
+        }
+        return;
+      }
+      window.setTimeout(poll, 1200);
+    } catch (_error) {
+      window.setTimeout(poll, 2500);
+    }
+  };
+  window.setTimeout(poll, 500);
+}
+
+window.addEventListener('load', () => {
+  const params = new URLSearchParams(window.location.search);
+  const redirectedJob = params.get('auto_fields_job_id');
+  const pending = new Set(storedAutoCalculatedFieldJobs());
+  if (redirectedJob) pending.add(`/api/workspace/auto-calculated-fields/materialization/${redirectedJob}`);
+  pending.forEach((statusUrl) => monitorAutoCalculatedFieldJob(statusUrl));
+});
+
 document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEach((host) => {
   const manage = host.querySelector('[data-workspace-manage-calculated-dimensions]');
   let dimensions = [];
@@ -33,20 +88,22 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
       body: JSON.stringify({dimensions: next, renames: rename ? [rename] : []}),
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.detail || 'Unable to save calculated dimensions.');
+    if (!response.ok) throw new Error(payload.detail || 'Unable to save auto-calculated fields.');
     dimensions = payload.dimensions || next;
+    monitorAutoCalculatedFieldJob(payload.materialization_status_url, payload.notice);
+    return payload;
   };
   manage?.addEventListener('click', () => {
     const overlay = document.createElement('div'); overlay.className = 'confirm-overlay';
     const panel = document.createElement('section'); panel.className = 'confirm-panel calculated-dimensions-dialog';
     panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true');
     const header = document.createElement('div'); header.className = 'catalogue-chart-preview-header';
-    const heading = document.createElement('div'); heading.innerHTML = '<p class="eyebrow">Active Workspace</p><h3>Calculated Dimensions</h3>';
-    const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', 'Close calculated dimensions');
+    const heading = document.createElement('div'); heading.innerHTML = '<p class="eyebrow">Active Workspace</p><h3>Auto-calculated Fields</h3>';
+    const close = document.createElement('button'); close.type = 'button'; close.className = 'calculated-dimensions-close'; close.textContent = '×'; close.setAttribute('aria-label', 'Close auto-calculated fields');
     header.append(heading, close);
     const note = document.createElement('p'); note.className = 'form-note'; note.textContent = 'Rules run from top to bottom. Comparisons ignore case. Use | only for genuinely different source field names and semicolons for AND conditions.';
     const list = document.createElement('div'); list.className = 'calculated-dimensions-list';
-    const add = document.createElement('button'); add.type = 'button'; add.textContent = '+ Add Calculated Dimension';
+    const add = document.createElement('button'); add.type = 'button'; add.textContent = '+ Add Auto-calculated Field';
     const managerActions = document.createElement('div'); managerActions.className = 'calculated-dimensions-manager-actions';
     const panelClose = document.createElement('button'); panelClose.type = 'button'; panelClose.className = 'calculated-dimensions-close'; panelClose.textContent = 'Close';
     managerActions.append(add, panelClose);
@@ -83,9 +140,7 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
       const rules = document.createElement('textarea'); rules.placeholder = 'Test_Result IN (Completed, Visible Completed) => Success';
       rules.value = (current.rules || []).map((rule) => `${rule.when} => ${rule.value}`).join('\n'); rulesLabel.append(rules); form.append(rulesLabel);
       const actions = document.createElement('div'); actions.className = 'confirm-actions calculated-dimension-rules';
-      const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'calculated-dimension-cancel'; cancel.textContent = 'Cancel';
-      const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Save and Materialize'; actions.append(cancel, panelClose, save); form.append(actions);
-      cancel.addEventListener('click', (event) => { event.preventDefault(); form.replaceChildren(); form.hidden = true; restoreManagerActions(); });
+      const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Save and Materialize'; actions.append(panelClose, save); form.append(actions);
       save.addEventListener('click', async () => {
         try {
           const parsedRules = rules.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
@@ -97,11 +152,11 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
           const next = [...dimensions]; if (index === null) next.push(dimension); else next[index] = dimension;
           const rename = index === null || current.name === dimension.name ? null : {from: current.name, to: dimension.name};
           const message = rename
-            ? `Renaming '${rename.from}' to '${rename.to}' will rebuild every applicable CDR table and update every Slides Template that uses this dimension. Continue?`
-            : 'Saving will rebuild this calculated dimension in every applicable CDR table. Continue?';
+            ? `Renaming '${rename.from}' to '${rename.to}' will rebuild every applicable CDR table and update every Slides Template that uses this field. Continue?`
+            : 'Saving will rebuild this auto-calculated field in every applicable CDR table. Continue?';
           if (!await showConfirmDialog(message, {title: 'Save and Materialize', confirmLabel: 'Save and Materialize', tone: 'warning'})) return;
-          save.disabled = true; await saveDimensions(next, rename); window.location.reload();
-        } catch (error) { save.disabled = false; showInfoDialog(error.message || 'Unable to save calculated dimension.', {title: 'Calculated Dimensions', tone: 'error'}); }
+          save.disabled = true; await saveDimensions(next, rename); form.hidden = true; restoreManagerActions(); render();
+        } catch (error) { save.disabled = false; showInfoDialog(error.message || 'Unable to save auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'}); }
       });
       name.focus();
     };
@@ -125,17 +180,30 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
         }
         const actions = document.createElement('div'); actions.className = 'calculated-dimension-actions';
         const editButton = document.createElement('button'); editButton.type = 'button'; editButton.textContent = '✎'; editButton.title = `Edit ${dimension.name}`;
-        const exportLink = document.createElement('a'); exportLink.className = 'ghost-link icon-action'; exportLink.textContent = '⇥'; exportLink.title = `Export ${dimension.name}`; exportLink.href = `/workspace/calculated-dimensions/export?${new URLSearchParams({name: dimension.name})}`;
-        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'danger-button'; remove.textContent = '−'; remove.title = `Delete ${dimension.name}`;
+        const duplicate = document.createElement('button'); duplicate.type = 'button'; duplicate.className = 'auto-calculated-field-duplicate'; duplicate.textContent = '⧉'; duplicate.title = `Duplicate ${dimension.name}`;
+        const exportLink = document.createElement('a'); exportLink.className = 'ghost-link icon-action auto-calculated-field-export'; exportLink.textContent = '↓'; exportLink.title = `Export ${dimension.name}`; exportLink.href = `/workspace/calculated-dimensions/export?${new URLSearchParams({name: dimension.name})}`;
+        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'danger-button'; remove.textContent = '×'; remove.title = `Delete ${dimension.name}`;
         editButton.addEventListener('click', () => edit(index));
-        remove.addEventListener('click', async () => {
-          if (!await showConfirmDialog(`Delete calculated dimension '${dimension.name}' and remove its materialized columns?`, {title: 'Delete Calculated Dimension', confirmLabel: 'Delete', tone: 'danger'})) return;
-          try { remove.disabled = true; await saveDimensions(dimensions.filter((_item, itemIndex) => itemIndex !== index)); window.location.reload(); }
-          catch (error) { remove.disabled = false; showInfoDialog(error.message || 'Unable to delete calculated dimension.', {title: 'Calculated Dimensions', tone: 'error'}); }
+        duplicate.addEventListener('click', async () => {
+          if (!await showConfirmDialog(
+            `Duplicate auto-calculated field '${dimension.name}' and materialize the copy in every applicable CDR table?`,
+            {title: 'Duplicate Auto-calculated Field', confirmLabel: 'Duplicate and Materialize', tone: 'warning'},
+          )) return;
+          const names = new Set(dimensions.map((item) => String(item.name || '').toLocaleLowerCase()));
+          let copyName = `${dimension.name} Copy`; let suffix = 2;
+          while (names.has(copyName.toLocaleLowerCase())) copyName = `${dimension.name} Copy ${suffix++}`;
+          const copy = JSON.parse(JSON.stringify({...dimension, name: copyName}));
+          try { duplicate.disabled = true; await saveDimensions([...dimensions.slice(0, index + 1), copy, ...dimensions.slice(index + 1)]); render(); }
+          catch (error) { duplicate.disabled = false; showInfoDialog(error.message || 'Unable to duplicate auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'}); }
         });
-        actions.append(editButton, exportLink, remove); item.append(identity, summary, actions); list.append(item);
+        remove.addEventListener('click', async () => {
+          if (!await showConfirmDialog(`Delete auto-calculated field '${dimension.name}' and remove its materialized columns?`, {title: 'Delete Auto-calculated Field', confirmLabel: 'Delete', tone: 'danger'})) return;
+          try { remove.disabled = true; await saveDimensions(dimensions.filter((_item, itemIndex) => itemIndex !== index)); window.location.reload(); }
+          catch (error) { remove.disabled = false; showInfoDialog(error.message || 'Unable to delete auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'}); }
+        });
+        actions.append(editButton, duplicate, exportLink, remove); item.append(identity, summary, actions); list.append(item);
       });
-      if (!dimensions.length) { const empty = document.createElement('p'); empty.className = 'form-note'; empty.textContent = 'This workspace has no calculated dimensions.'; list.append(empty); }
+      if (!dimensions.length) { const empty = document.createElement('p'); empty.className = 'form-note'; empty.textContent = 'This workspace has no auto-calculated fields.'; list.append(empty); }
     };
     add.addEventListener('click', () => edit()); render(); close.focus();
   });
@@ -705,9 +773,11 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       body: JSON.stringify({dimensions: calculatedDimensions, renames: rename ? [rename] : []}),
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.detail || 'Unable to save calculated dimensions.');
+    if (!response.ok) throw new Error(payload.detail || 'Unable to save auto-calculated fields.');
     calculatedDimensions = Array.isArray(payload.dimensions) ? payload.dimensions : calculatedDimensions;
     refreshCalculatedDimensionSuggestions();
+    monitorAutoCalculatedFieldJob(payload.materialization_status_url, payload.notice);
+    return payload;
   };
 
   const openCalculatedDimensionsManager = () => {
@@ -717,13 +787,13 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const header = document.createElement('div'); header.className = 'catalogue-chart-preview-header';
     const headingWrap = document.createElement('div');
     const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Active Workspace';
-    const title = document.createElement('h3'); title.textContent = 'Calculated Dimensions';
-    const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.title = 'Close'; close.setAttribute('aria-label', 'Close calculated dimensions');
+    const title = document.createElement('h3'); title.textContent = 'Auto-calculated Fields';
+    const close = document.createElement('button'); close.type = 'button'; close.className = 'calculated-dimensions-close'; close.textContent = '×'; close.title = 'Close'; close.setAttribute('aria-label', 'Close auto-calculated fields');
     headingWrap.append(eyebrow, title); header.append(headingWrap, close);
     const note = document.createElement('p'); note.className = 'form-note';
     note.textContent = 'Rules are evaluated from top to bottom. Comparisons ignore case. Use | only for genuinely different source field names and semicolons for AND conditions.';
     const list = document.createElement('div'); list.className = 'calculated-dimensions-list';
-    const add = document.createElement('button'); add.type = 'button'; add.textContent = '+ Add Calculated Dimension';
+    const add = document.createElement('button'); add.type = 'button'; add.textContent = '+ Add Auto-calculated Field';
     const managerActions = document.createElement('div'); managerActions.className = 'calculated-dimensions-manager-actions';
     const panelClose = document.createElement('button'); panelClose.type = 'button'; panelClose.className = 'calculated-dimensions-close'; panelClose.textContent = 'Close';
     managerActions.append(add, panelClose);
@@ -765,9 +835,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       const rules = document.createElement('textarea'); rules.placeholder = 'Test_Result IN (Completed, Visible Completed) => Success';
       rules.value = (current.rules || []).map((rule) => `${rule.when} => ${rule.value}`).join('\n'); rulesLabel.append(rules); form.append(rulesLabel);
       const actions = document.createElement('div'); actions.className = 'confirm-actions calculated-dimension-rules';
-      const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'calculated-dimension-cancel'; cancel.textContent = 'Cancel';
-      const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Save Dimension'; actions.append(cancel, panelClose, save); form.append(actions);
-      cancel.addEventListener('click', (event) => { event.preventDefault(); editingIndex = null; form.replaceChildren(); form.hidden = true; restoreManagerActions(); });
+      const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Save and Materialize'; actions.append(panelClose, save); form.append(actions);
       save.addEventListener('click', async () => {
         const previous = calculatedDimensions;
         try {
@@ -787,13 +855,13 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
           if (editingIndex === null) next.push(dimension); else next[editingIndex] = dimension;
           const rename = editingIndex === null || current.name === dimension.name ? null : {from: current.name, to: dimension.name};
           const message = rename
-            ? `Renaming '${rename.from}' to '${rename.to}' will rebuild every applicable CDR table and update every Slides Template that uses this dimension. Continue?`
-            : 'Saving will rebuild this calculated dimension in every applicable CDR table. Continue?';
+            ? `Renaming '${rename.from}' to '${rename.to}' will rebuild every applicable CDR table and update every Slides Template that uses this field. Continue?`
+            : 'Saving will rebuild this auto-calculated field in every applicable CDR table. Continue?';
           if (!await showConfirmDialog(message, {title: 'Save and Materialize', confirmLabel: 'Save and Materialize', tone: 'warning'})) return;
           calculatedDimensions = next; await saveCalculatedDimensions(rename); form.hidden = true; restoreManagerActions(); renderList();
         } catch (error) {
           calculatedDimensions = previous;
-          showInfoDialog(error.message || 'Unable to save calculated dimension.', {title: 'Calculated Dimensions', tone: 'error'});
+          showInfoDialog(error.message || 'Unable to save auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'});
         }
       });
       name.focus();
@@ -806,7 +874,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
 
     const renderList = () => {
       list.replaceChildren();
-      if (!calculatedDimensions.length) { const empty = document.createElement('p'); empty.className = 'form-note'; empty.textContent = 'This template has no calculated dimensions.'; list.append(empty); }
+      if (!calculatedDimensions.length) { const empty = document.createElement('p'); empty.className = 'form-note'; empty.textContent = 'This workspace has no auto-calculated fields.'; list.append(empty); }
       calculatedDimensions.forEach((dimension, index) => {
         const item = document.createElement('div'); item.className = 'calculated-dimension-item';
         const identity = document.createElement('div'); const strong = document.createElement('strong'); strong.textContent = dimension.name;
@@ -826,21 +894,41 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         }
         const actions = document.createElement('div'); actions.className = 'calculated-dimension-actions';
         const edit = createActionButton('✎', 'edit', `Edit ${dimension.name}`, 'chart'); delete edit.dataset.catalogueChartAction;
-        const copyButton = createActionButton('⇥', 'export', `Copy ${dimension.name} to a template`, 'chart'); delete copyButton.dataset.catalogueChartAction;
-        const remove = createActionButton('−', 'delete', `Delete ${dimension.name}`, 'chart', 'catalogue-row-delete'); delete remove.dataset.catalogueChartAction;
-        edit.addEventListener('click', () => editDimension(index)); copyButton.addEventListener('click', () => exportDimension(index));
+        const duplicate = createActionButton('⧉', 'duplicate', `Duplicate ${dimension.name}`, 'chart', 'auto-calculated-field-duplicate'); delete duplicate.dataset.catalogueChartAction;
+        const exportButton = createActionButton('↓', 'export', `Export ${dimension.name}`, 'chart', 'auto-calculated-field-export'); delete exportButton.dataset.catalogueChartAction;
+        const remove = createActionButton('×', 'delete', `Delete ${dimension.name}`, 'chart', 'catalogue-row-delete'); delete remove.dataset.catalogueChartAction;
+        edit.addEventListener('click', () => editDimension(index));
+        duplicate.addEventListener('click', async () => {
+          if (!await showConfirmDialog(
+            `Duplicate auto-calculated field '${dimension.name}' and materialize the copy in every applicable CDR table?`,
+            {title: 'Duplicate Auto-calculated Field', confirmLabel: 'Duplicate and Materialize', tone: 'warning'},
+          )) return;
+          const previous = calculatedDimensions;
+          const names = new Set(calculatedDimensions.map((item) => String(item.name || '').toLocaleLowerCase()));
+          let copyName = `${dimension.name} Copy`; let suffix = 2;
+          while (names.has(copyName.toLocaleLowerCase())) copyName = `${dimension.name} Copy ${suffix++}`;
+          const copy = JSON.parse(JSON.stringify({...dimension, name: copyName}));
+          try {
+            calculatedDimensions = [...calculatedDimensions.slice(0, index + 1), copy, ...calculatedDimensions.slice(index + 1)];
+            await saveCalculatedDimensions(); renderList();
+          } catch (error) {
+            calculatedDimensions = previous;
+            showInfoDialog(error.message || 'Unable to duplicate auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'});
+          }
+        });
+        exportButton.addEventListener('click', () => exportDimension(index));
         remove.addEventListener('click', async () => {
-          if (!await showConfirmDialog(`Delete calculated dimension '${dimension.name}'?`, {title: 'Delete Calculated Dimension', confirmLabel: 'Delete', tone: 'danger'})) return;
+          if (!await showConfirmDialog(`Delete auto-calculated field '${dimension.name}'?`, {title: 'Delete Auto-calculated Field', confirmLabel: 'Delete', tone: 'danger'})) return;
           const previous = calculatedDimensions;
           try {
             calculatedDimensions = calculatedDimensions.filter((_item, itemIndex) => itemIndex !== index);
             await saveCalculatedDimensions(); form.hidden = true; renderList();
           } catch (error) {
             calculatedDimensions = previous;
-            showInfoDialog(error.message || 'Unable to delete calculated dimension.', {title: 'Calculated Dimensions', tone: 'error'});
+            showInfoDialog(error.message || 'Unable to delete auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'});
           }
         });
-        actions.append(edit, copyButton, remove); item.append(identity, summary, actions); list.append(item);
+        actions.append(edit, duplicate, exportButton, remove); item.append(identity, summary, actions); list.append(item);
       });
     };
     add.addEventListener('click', () => editDimension());
@@ -1682,7 +1770,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     panel.className = 'confirm-panel catalogue-copy-dialog';
     panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true');
     const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Copy template content';
-    const title = document.createElement('h3'); title.textContent = `Copy ${kind === 'slide' ? 'slide' : kind === 'chart' ? 'chart' : 'calculated dimension'} to template`;
+    const title = document.createElement('h3'); title.textContent = `Copy ${kind === 'slide' ? 'slide' : kind === 'chart' ? 'chart' : 'auto-calculated field'} to template`;
     const form = document.createElement('div'); form.className = 'catalogue-copy-fields';
     const createField = (labelText) => {
       const field = document.createElement('label'); field.textContent = labelText;
@@ -3417,6 +3505,12 @@ function importWarningDetails(payload) {
       message: 'This will overwrite the shared Slides Templates included in the package.',
     };
   }
+  if (kind === 'auto-calculated-fields') {
+    return {
+      title: 'Import Auto-calculated Fields?',
+      message: 'Choose the destination workspaces next. Existing fields with the same name will be updated, new fields will be added, and applicable CDR tables will be materialized in the background without creating duplicate columns.',
+    };
+  }
   if (kind === 'workspace') {
     const name = collisions[0];
     return name
@@ -3436,6 +3530,46 @@ function importWarningDetails(payload) {
     title: 'Overwrite full environment?',
     message: `This will overwrite the configuration files and shared Slides Templates included in the package.${collisionCopy} The local workspace registry will be rebuilt from the imported workspaces.`,
   };
+}
+
+function selectAutoCalculatedFieldWorkspaces(workspaces) {
+  if (!Array.isArray(workspaces) || !workspaces.length) {
+    showInfoDialog('There are no destination workspaces available.', {title: 'Auto-calculated Fields', tone: 'error'});
+    return Promise.resolve(null);
+  }
+  const overlay = document.createElement('div'); overlay.className = 'confirm-overlay incoming-transfer-confirm';
+  const panel = document.createElement('section'); panel.className = 'confirm-panel auto-calculated-field-workspace-dialog';
+  panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true');
+  const title = document.createElement('h3'); title.textContent = 'Select destination workspaces';
+  const copy = document.createElement('p'); copy.textContent = 'The fields will be merged into every selected workspace. Existing fields with the same name will be replaced once.';
+  const toolbar = document.createElement('div'); toolbar.className = 'full-environment-workspace-toolbar';
+  const selectAll = document.createElement('button'); selectAll.type = 'button'; selectAll.className = 'ghost-link'; selectAll.textContent = 'Select all';
+  const selectNone = document.createElement('button'); selectNone.type = 'button'; selectNone.className = 'ghost-link'; selectNone.textContent = 'Select none'; toolbar.append(selectAll, selectNone);
+  const list = document.createElement('div'); list.className = 'full-environment-workspace-list';
+  workspaces.forEach((workspace) => {
+    const label = document.createElement('label'); label.className = 'full-environment-workspace-choice';
+    const input = document.createElement('input'); input.type = 'checkbox'; input.value = workspace.id; input.checked = true;
+    const name = document.createElement('span'); name.textContent = workspace.name; label.append(input, name); list.append(label);
+  });
+  const error = document.createElement('p'); error.className = 'full-environment-workspace-error'; error.textContent = 'Select at least one workspace.'; error.hidden = true;
+  const actions = document.createElement('div'); actions.className = 'confirm-actions';
+  const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'ghost-link confirm-cancel'; cancel.textContent = 'Cancel';
+  const accept = document.createElement('button'); accept.type = 'button'; accept.textContent = 'Use selected workspaces'; actions.append(cancel, accept);
+  panel.append(title, copy, toolbar, list, error, actions); overlay.append(panel); document.body.append(overlay);
+  document.body.classList.add('loading-active');
+  return new Promise((resolve) => {
+    const close = (value) => { overlay.remove(); document.body.classList.remove('loading-active'); resolve(value); };
+    selectAll.addEventListener('click', () => { list.querySelectorAll('input').forEach((input) => { input.checked = true; }); error.hidden = true; });
+    selectNone.addEventListener('click', () => { list.querySelectorAll('input').forEach((input) => { input.checked = false; }); });
+    cancel.addEventListener('click', () => close(null));
+    accept.addEventListener('click', () => {
+      const selected = [...list.querySelectorAll('input:checked')].map((input) => input.value);
+      if (!selected.length) { error.hidden = false; return; }
+      close(selected);
+    });
+    overlay.addEventListener('click', (event) => { if (event.target === overlay) close(null); });
+    accept.focus();
+  });
 }
 
 function formatImportUploadBytes(bytes) {
@@ -3515,11 +3649,21 @@ document.querySelectorAll('[data-import-export-form]').forEach((form) => {
         }).catch(() => {});
         return;
       }
+      const destinationWorkspaceIds = payload.kind === 'auto-calculated-fields'
+        ? await selectAutoCalculatedFieldWorkspaces(payload.destination_workspaces)
+        : [];
+      if (payload.kind === 'auto-calculated-fields' && !destinationWorkspaceIds) {
+        await fetch(`/admin/import-export/import/uploads/${encodeURIComponent(uploadId)}`, {
+          method: 'DELETE', credentials: 'same-origin',
+        }).catch(() => {});
+        return;
+      }
       confirmed.value = '1';
       showLoadingOverlay('Importing package', 'Please wait while Dashboard Analytic imports the selected package.');
       const importData = new FormData();
       importData.set('upload_id', uploadId);
       importData.set('confirmed_import', 'true');
+      destinationWorkspaceIds.forEach((workspaceId) => importData.append('workspace_ids', workspaceId));
       const importResponse = await fetch('/admin/import-export/import/jobs', {
         method: 'POST',
         body: importData,
@@ -3530,16 +3674,28 @@ document.querySelectorAll('[data-import-export-form]').forEach((form) => {
       if (!importResponse.ok || !importPayload.status_url) {
         throw new Error(importPayload.detail || 'The import could not be started.');
       }
+      const isBackgroundFieldImport = payload.kind === 'auto-calculated-fields';
+      if (isBackgroundFieldImport) {
+        hideLoadingOverlay();
+        showInfoDialog(
+          'The fields are being imported and materialized in the selected workspaces in the background. You can continue working; a notification will appear when the process finishes.',
+          {title: 'Auto-calculated Fields import started'},
+        );
+      }
       const pollImport = async () => {
         const statusResponse = await fetch(importPayload.status_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}});
         const status = await statusResponse.json().catch(() => ({}));
         if (!statusResponse.ok) throw new Error(status.detail || 'The import status could not be read.');
         if (status.status === 'ready') {
-          window.location.assign(`/admin?${new URLSearchParams({import_export_notice: status.notice || 'Package imported successfully.'})}`);
+          if (isBackgroundFieldImport) {
+            showInfoDialog(status.notice || 'Auto-calculated Fields imported successfully.', {title: 'Import complete'});
+          } else {
+            window.location.assign(`/admin?${new URLSearchParams({import_export_notice: status.notice || 'Package imported successfully.'})}`);
+          }
           return;
         }
         if (status.status === 'failed') throw new Error(status.error || 'The package could not be imported.');
-        if (loadingCopy) loadingCopy.textContent = 'Importing directly from the uploaded package on disk. Large workspaces can take several minutes; no second upload is required.';
+        if (!isBackgroundFieldImport && loadingCopy) loadingCopy.textContent = 'Importing directly from the uploaded package on disk. Large workspaces can take several minutes; no second upload is required.';
         window.setTimeout(() => { pollImport().catch(handleImportError); }, 1200);
       };
       const handleImportError = (error) => {
@@ -3942,24 +4098,42 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       confirmOverlay?.classList.add('incoming-transfer-confirm');
       let accepted = false;
       try {
+        const importEffect = offer.kind === 'auto-calculated-fields'
+          ? 'Next, choose the destination workspaces. After reception, matching field names will be updated and their applicable CDR tables will be materialized in the background.'
+          : 'After the complete package is received, it will be imported automatically and may overwrite matching configuration or workspaces.';
         accepted = await showConfirmDialog(
-          `${offer.source}${sourceAddress} wants to transfer “${offer.content}” to this server.${workspaceCopy}\n\nAfter the complete package is received, it will be imported automatically and may overwrite matching configuration or workspaces.`,
+          `${offer.source}${sourceAddress} wants to transfer “${offer.content}” to this server.${workspaceCopy}\n\n${importEffect}`,
           {title: 'Incoming server transfer', confirmLabel: 'Accept transfer', cancelLabel: 'Reject'},
         );
       } finally {
         confirmOverlay?.classList.remove('incoming-transfer-confirm');
       }
+      let destinationWorkspaceIds = [];
+      if (accepted && offer.kind === 'auto-calculated-fields') {
+        const selection = await selectAutoCalculatedFieldWorkspaces(payload.destination_workspaces);
+        if (!selection) accepted = false;
+        else destinationWorkspaceIds = selection;
+      }
       const action = accepted ? 'accept' : 'reject';
       const decision = await fetch(`/admin/import-export/transfers/offers/${encodeURIComponent(offer.id)}/${action}`, {
         method: 'POST',
         credentials: 'same-origin',
-        headers: {Accept: 'application/json'},
+        headers: {Accept: 'application/json', 'Content-Type': 'application/json'},
+        body: JSON.stringify({workspace_ids: destinationWorkspaceIds}),
       });
       if (!decision.ok) {
         const error = await decision.json().catch(() => ({}));
         showInfoDialog(error.detail || 'The transfer decision could not be saved.', {title: 'Incoming Transfer Error'});
       } else if (accepted) {
-        showLoadingOverlay('Incoming server transfer', 'Waiting for the source server to start sending the package.');
+        if (offer.kind === 'auto-calculated-fields') {
+          hideLoadingOverlay();
+          showInfoDialog(
+            'The transfer was accepted. Reception, import and materialization will continue in the background for the selected workspaces.',
+            {title: 'Auto-calculated Fields transfer accepted'},
+          );
+        } else {
+          showLoadingOverlay('Incoming server transfer', 'Waiting for the source server to start sending the package.');
+        }
         pollAcceptedTransfer(offer.id).catch((error) => {
           hideLoadingOverlay();
           showInfoDialog(error instanceof Error ? error.message : 'The incoming transfer could not be completed.', {title: 'Incoming Transfer Error', tone: 'error'});

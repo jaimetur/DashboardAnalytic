@@ -36,10 +36,12 @@ def test_cdr_materialisation_adds_workspace_dimensions_to_dataset_rows() -> None
     dimensions = app_module.parse_calculated_dimensions(app_module.default_calculated_dimensions())
     frame = app_module.materialize_calculated_dimensions(pd.DataFrame({
         'Session_Type': ['VoLTE'], 'Type_of_Test': ['HTTP'], 'Test_Name': ['YouTube'],
+        'Test Family': ['stale duplicate candidate'],
     }), dimensions, 'cdr-data')
 
     assert 'Call Family' not in frame.columns
     assert frame['Test Family'].tolist() == ['YouTube']
+    assert frame.columns.tolist().count('Test Family') == 1
 
 
 def test_calculated_dimension_rules_ignore_case_and_compact_redundant_field_aliases() -> None:
@@ -69,11 +71,11 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     page = client.get('/workspace')
     assert page.status_code == 200
     assert 'data-workspace-calculated-dimensions-panel' in page.text
-    assert 'Manage Calculated Dimensions' in page.text
+    assert 'Manage Auto-calculated Fields' in page.text
     assert 'workspace-calculated-dimensions-import-panel' in page.text
     assert 'workspace-calculated-dimensions-list' in page.text
-    assert 'Export All Calculated Dimensions' in page.text
-    assert '>Dimension<' in page.text
+    assert 'Export All Auto-calculated Fields' in page.text
+    assert '>Field<' in page.text
     assert '>Applied to<' in page.text
     assert page.text.index('workspace-calculated-dimensions-import-panel') < page.text.index('workspace-calculated-dimensions-list-panel')
     assert page.text.index('<h2>Datasets</h2>') < page.text.index('id="calculated-dimensions"')
@@ -110,6 +112,8 @@ def test_renaming_calculated_dimension_rebuilds_references_in_workspace_template
     })
 
     assert response.status_code == 200
+    assert response.json()['materialization_job']
+    assert response.json()['materialization_status_url'].startswith('/api/workspace/auto-calculated-fields/materialization/')
     assert response.json()['renamed_templates'] >= 1
     assert any(item.name == 'Test Classification' for item in app_module.load_workspace_calculated_dimensions())
     template = next(item for item in app_module.report_catalogue_options('nsa') if item['active'])
@@ -337,6 +341,41 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
         'kind': 'config',
         'version': 1,
     }
+
+    fields_response = client.get('/admin/import-export/export?export_target=auto-calculated-fields')
+    assert fields_response.status_code == 200
+    with zipfile.ZipFile(BytesIO(fields_response.content)) as archive:
+        fields_manifest = json.loads(archive.read('manifest.json'))
+        exported_fields = json.loads(archive.read('auto-calculated-fields.json'))
+    assert fields_manifest['kind'] == 'auto-calculated-fields'
+    assert fields_manifest['source_workspace']['name'] == 'Default'
+    assert exported_fields
+    fields_inspection = client.post(
+        '/admin/import-export/inspect',
+        files={'package': ('auto-fields.zip', BytesIO(fields_response.content), 'application/zip')},
+    )
+    assert fields_inspection.status_code == 200
+    assert fields_inspection.json()['destination_workspaces'] == [{'id': 'default', 'name': 'Default'}]
+    fields_import = client.post(
+        '/admin/import-export/import/jobs',
+        data={
+            'upload_id': fields_inspection.headers['X-Import-Upload-Id'],
+            'confirmed_import': 'true',
+            'workspace_ids': 'default',
+        },
+    )
+    assert fields_import.status_code == 200
+    for _attempt in range(100):
+        fields_status = client.get(fields_import.json()['status_url']).json()
+        if fields_status['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.01)
+    assert fields_status['status'] == 'ready'
+    saved_field_names = [
+        app_module._normalise_catalogue_dimension_name(item.name)
+        for item in app_module.load_workspace_calculated_dimensions()
+    ]
+    assert len(saved_field_names) == len(set(saved_field_names))
 
     workspace_response = client.get('/admin/import-export/export?export_target=workspace:default')
     assert workspace_response.status_code == 200
@@ -640,6 +679,30 @@ def test_recover_complete_transfer_packages_and_remove_incomplete_ones(client, m
     finally:
         for offer_id in set(app_module.TRANSFER_OFFERS) - existing_offer_ids:
             app_module.TRANSFER_OFFERS.pop(offer_id, None)
+
+
+def test_auto_calculated_field_transfer_requires_destination_workspaces(client) -> None:
+    secret = 'auto-field-transfer-secret-that-is-long-enough'
+    headers = {'X-Dashboard-Transfer-Secret': secret}
+    offered = client.post(
+        '/api/import-export/transfers/offers',
+        headers=headers,
+        json={
+            'source': 'Test source', 'archive_version': 1, 'kind': 'auto-calculated-fields',
+            'content': 'Auto-calculated Fields', 'workspaces': ['Source'],
+        },
+    )
+    assert offered.status_code == 200
+    offer_id = offered.json()['offer_id']
+    login_super(client)
+    assert client.post(f'/admin/import-export/transfers/offers/{offer_id}/accept', json={}).status_code == 400
+    accepted = client.post(
+        f'/admin/import-export/transfers/offers/{offer_id}/accept',
+        json={'workspace_ids': ['default']},
+    )
+    assert accepted.status_code == 200
+    cancelled = client.delete(f'/api/import-export/transfers/offers/{offer_id}', headers=headers)
+    assert cancelled.status_code == 200
 
 
 def test_incoming_server_transfer_requires_acceptance_and_imports_after_upload(client) -> None:

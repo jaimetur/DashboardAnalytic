@@ -209,47 +209,47 @@ def parse_catalog_filters(value: str) -> tuple[FilterCondition, ...]:
 
 
 def parse_calculated_dimensions(payload: object) -> tuple[CalculatedDimension, ...]:
-    """Validate workspace-owned calculated dimensions from their JSON representation."""
+    """Validate workspace-owned auto-calculated fields from their JSON representation."""
     if payload is None:
         return ()
     if not isinstance(payload, list):
-        raise ValueError("Calculated dimensions must be a list.")
+        raise ValueError("Auto-calculated fields must be a list.")
     dimensions: list[CalculatedDimension] = []
     names: set[str] = set()
     for index, item in enumerate(payload, start=1):
         if not isinstance(item, Mapping):
-            raise ValueError(f"Calculated dimension {index} must be an object.")
+            raise ValueError(f"Auto-calculated field {index} must be an object.")
         name = str(item.get("name") or "").strip()
         if not name:
-            raise ValueError(f"Calculated dimension {index} requires a name.")
+            raise ValueError(f"Auto-calculated field {index} requires a name.")
         identity = _normalise_catalog_name(name)
         if not identity or identity in names:
-            raise ValueError(f"Calculated dimension name '{name}' is duplicated or invalid.")
+            raise ValueError(f"Auto-calculated field name '{name}' is duplicated or invalid.")
         names.add(identity)
         raw_sources = item.get("sources")
         if raw_sources is None:
             raw_sources = list(CATALOG_SOURCE_KINDS)
         if not isinstance(raw_sources, list):
-            raise ValueError(f"Calculated dimension '{name}' must define its CDR sources as a list.")
+            raise ValueError(f"Auto-calculated field '{name}' must define its CDR sources as a list.")
         sources = tuple(dict.fromkeys(str(value).strip().casefold() for value in raw_sources if str(value).strip()))
         if not sources or any(source not in CATALOG_SOURCE_KINDS for source in sources):
-            raise ValueError(f"Calculated dimension '{name}' contains an unsupported CDR source.")
+            raise ValueError(f"Auto-calculated field '{name}' contains an unsupported CDR source.")
         raw_rules = item.get("rules") or []
         if not isinstance(raw_rules, list):
-            raise ValueError(f"Calculated dimension '{name}' rules must be a list.")
+            raise ValueError(f"Auto-calculated field '{name}' rules must be a list.")
         rules: list[CalculatedDimensionRule] = []
         for rule_index, rule in enumerate(raw_rules, start=1):
             if not isinstance(rule, Mapping):
-                raise ValueError(f"Rule {rule_index} of calculated dimension '{name}' must be an object.")
+                raise ValueError(f"Rule {rule_index} of auto-calculated field '{name}' must be an object.")
             when = str(rule.get("when") or "").strip()
             value = str(rule.get("value") or "").strip()
             if not when or not value:
-                raise ValueError(f"Rule {rule_index} of calculated dimension '{name}' requires a condition and result.")
+                raise ValueError(f"Rule {rule_index} of auto-calculated field '{name}' requires a condition and result.")
             rules.append(CalculatedDimensionRule(parse_catalog_filters(when), value))
         default_from = tuple(part.strip() for part in str(item.get("default_from") or "").split("|") if part.strip())
         default = str(item.get("default") or "")
         if not rules and not default_from and not default:
-            raise ValueError(f"Calculated dimension '{name}' requires at least one rule, a default value or a default source field.")
+            raise ValueError(f"Auto-calculated field '{name}' requires at least one rule, a default value or a default source field.")
         dimensions.append(CalculatedDimension(name, sources, tuple(rules), default, default_from))
     return tuple(dimensions)
 
@@ -1078,7 +1078,7 @@ def _calculated_dimension_column(frame: pd.DataFrame, name: str, dimensions: Ite
 def materialize_calculated_dimensions(
     frame: pd.DataFrame, dimensions: Iterable[CalculatedDimension], cdr_source: str,
 ) -> pd.DataFrame:
-    """Return CDR rows with every applicable workspace dimension as a physical column."""
+    """Return CDR rows with every applicable workspace field as a physical column."""
     result = frame.copy()
     dimension_list = tuple(dimensions)
     calculated_keys = {_normalise_catalog_name(definition.name) for definition in dimension_list}

@@ -244,7 +244,7 @@
       <form class="slides-templates-editor-table-wrap" action="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/save" method="post" data-catalogue-editor-save>
         <input type="hidden" name="catalogue_content" value="" data-catalogue-editor-content>
         <div class="catalogue-table-toolbar">
-          <button type="button" class="catalogue-calculated-dimensions-button" data-manage-calculated-dimensions>Manage Calculated Dimensions</button>
+          <button type="button" class="catalogue-calculated-dimensions-button" data-manage-calculated-dimensions>Manage Auto-calculated Fields</button>
         </div>
         <div class="table-wrap">
           <table class="slides-templates-editor-table" data-catalogue-editor-table>
@@ -301,7 +301,7 @@
               <h3 id="catalogue-chart-preview-title" data-catalogue-chart-preview-title>Selected chart</h3>
             </div>
             <div class="catalogue-chart-preview-header-actions">
-              <button type="button" class="catalogue-calculated-dimensions-button" data-catalogue-chart-preview-manage-dimensions>Manage Calculated Dimensions</button>
+              <button type="button" class="catalogue-calculated-dimensions-button" data-catalogue-chart-preview-manage-dimensions>Manage Auto-calculated Fields</button>
               <button type="button" class="catalogue-chart-preview-close" data-catalogue-chart-preview-close aria-label="Close chart data preview" title="Close">×</button>
             </div>
           </div>
@@ -362,7 +362,7 @@
             {% for option in export_options %}<option value="{{ option.value }}" {% if option.disabled | default(false) %}disabled{% endif %}>{{ option.label }}</option>{% endfor %}
           </select>
         </label>
-        <p class="form-note">{% if user.role == 'super-admin' %}Choose configuration, Slides Templates, one workspace or the complete environment.{% else %}Admins can export or transfer shared Slides Templates and the workspaces they can access.{% endif %}</p>
+        <p class="form-note">{% if user.role == 'super-admin' %}Choose configuration, Slides Templates, the active workspace's Auto-calculated Fields, one workspace or the complete environment.{% else %}Admins can export or transfer shared Slides Templates, the active workspace's Auto-calculated Fields and accessible workspaces.{% endif %}</p>
         <div class="import-export-actions">
           <button type="submit" class="import-export-action">Export ZIP</button>
           <button type="button" class="server-transfer-action" data-server-transfer>Transfer to other server</button>
@@ -374,7 +374,7 @@
           <input type="file" name="package" accept=".zip,application/zip" required>
         </label>
         <input type="hidden" name="confirmed_import" value="0" data-import-export-confirmed>
-        <p class="form-note">{% if user.role == 'super-admin' %}The package manifest identifies templates, configuration, workspaces and full environments automatically. A warning explains what will be overwritten before import proceeds.{% else %}Only Slides Templates packages can be imported by an admin account.{% endif %}</p>
+        <p class="form-note">The package manifest identifies its content automatically. Auto-calculated Fields packages ask which destination workspaces should receive the fields before the background import starts.</p>
         <button type="submit" class="import-export-action">Import ZIP</button>
       </form>
     </div>

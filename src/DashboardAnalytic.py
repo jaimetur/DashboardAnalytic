@@ -76,6 +76,12 @@ EXPORT_JOBS_LOCK = Lock()
 IMPORT_UPLOADS: dict[str, dict[str, Any]] = {}
 IMPORT_JOBS: dict[str, dict[str, Any]] = {}
 IMPORT_JOBS_LOCK = Lock()
+AUTO_CALCULATED_FIELD_JOBS: dict[str, dict[str, Any]] = {}
+AUTO_CALCULATED_FIELD_JOBS_LOCK = Lock()
+AUTO_CALCULATED_FIELD_WORKSPACE_LOCKS: dict[str, Lock] = {}
+AUTO_CALCULATED_FIELD_WORKSPACE_LOCKS_LOCK = Lock()
+WORKSPACE_DIMENSION_MATERIALIZATION_THREADS: set[str] = set()
+WORKSPACE_DIMENSION_MATERIALIZATION_THREADS_LOCK = Lock()
 TRANSFER_JOBS: dict[str, dict[str, Any]] = {}
 TRANSFER_OFFERS: dict[str, dict[str, Any]] = {}
 TRANSFER_LOCK = Lock()
@@ -336,16 +342,16 @@ def calculated_dimension_rename_map(
         renames[removed[0]] = added[0]
     requested = payload.get('renames', []) if isinstance(payload, dict) else []
     if not isinstance(requested, list):
-        raise ValueError('Calculated dimension renames must be a list.')
+        raise ValueError('Auto-calculated field renames must be a list.')
     for item in requested:
         if not isinstance(item, dict):
-            raise ValueError('Each calculated dimension rename must be an object.')
+            raise ValueError('Each auto-calculated field rename must be an object.')
         old_name = str(item.get('from') or '').strip()
         new_name = str(item.get('to') or '').strip()
         old_key = _normalise_catalogue_dimension_name(old_name)
         new_key = _normalise_catalogue_dimension_name(new_name)
         if not old_key or not new_key or old_key not in previous_by_key or new_key not in current_by_key:
-            raise ValueError('A calculated dimension rename does not match the saved definitions.')
+            raise ValueError('An auto-calculated field rename does not match the saved definitions.')
         renames[previous_by_key[old_key]] = current_by_key[new_key]
     return {old_name: new_name for old_name, new_name in renames.items() if old_name != new_name}
 
@@ -417,15 +423,26 @@ def load_template_catalogue(catalogue_path: Path, technology: str, *, validate_f
 
 def materialize_workspace_calculated_dimensions(
     previous_names: Iterable[str] = (), task_repository: Repository | None = None,
+    affected_sources: Iterable[str] = (),
+    progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> int:
-    """Rebuild calculated columns in every individual and combined CDR table."""
+    """Rebuild auto-calculated columns for the affected CDR types."""
     task_repository = task_repository or repository
     dimensions = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
     removable = {_normalise_catalogue_dimension_name(name) for name in previous_names}
-    datasets = [
+    selected_sources = {
+        str(source).casefold().removeprefix('cdr-') for source in affected_sources if str(source).strip()
+    }
+    all_datasets = [
         row for row in task_repository.list_datasets()
         if row['status'] == 'ready' and str(row['dataset_kind'] or '').casefold() in CDR_DATASET_KINDS
     ]
+    datasets = [
+        row for row in all_datasets
+        if not selected_sources or str(row['dataset_kind'] or '').casefold() in selected_sources
+    ]
+    total_steps = max(len(datasets) * 2, 1)
+    completed_steps = 0
     for dataset in datasets:
         dataset_id = int(dataset['id'])
         kind = str(dataset['dataset_kind']).casefold()
@@ -439,13 +456,23 @@ def materialize_workspace_calculated_dimensions(
             frame = frame.drop(columns=generated_columns)
         frame = materialize_calculated_dimensions(frame, dimensions, f'cdr-{kind}')
         task_repository.replace_dataset_rows(dataset_id, frame)
-    for kind in CDR_DATASET_KINDS:
+        completed_steps += 1
+        if progress_callback:
+            progress_callback(completed_steps, total_steps, f'Updating {dataset["file_name"]}')
+    affected_kinds = selected_sources or set(CDR_DATASET_KINDS)
+    for kind in affected_kinds:
         task_repository.drop_reporting_table(kind)
     calculated_names = [dimension.name for dimension in dimensions]
-    for dataset in datasets:
+    reporting_datasets = [
+        row for row in all_datasets if str(row['dataset_kind'] or '').casefold() in affected_kinds
+    ]
+    for dataset in reporting_datasets:
         task_repository.copy_dataset_rows_to_reporting(
             int(dataset['id']), str(dataset['dataset_kind']).casefold(), calculated_names,
         )
+        completed_steps += 1
+        if progress_callback:
+            progress_callback(min(completed_steps, total_steps), total_steps, f'Rebuilding {dataset["dataset_kind"]} reporting table')
     DATAFRAME_CACHE.clear()
     ANALYSIS_CACHE.clear()
     CHART_PREVIEW_DATA_CACHE.clear()
@@ -453,10 +480,376 @@ def materialize_workspace_calculated_dimensions(
     return len(datasets)
 
 
+def _auto_field_sql_expression(
+    definition: Any, columns: Iterable[str], quote: Callable[[str], str],
+) -> tuple[str, list[Any]]:
+    """Compile one field to a parameterized SQLite CASE expression."""
+    column_lookup = {_normalise_catalogue_dimension_name(column): str(column) for column in columns}
+
+    def resolve(value: str | Iterable[str]) -> str | None:
+        candidates = value.split('|') if isinstance(value, str) else value
+        return next((column_lookup.get(_normalise_catalogue_dimension_name(item)) for item in candidates if column_lookup.get(_normalise_catalogue_dimension_name(item))), None)
+
+    def numeric_value(value: str) -> float | None:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if pd.notna(parsed) else None
+
+    def condition_sql(condition: Any) -> tuple[str, list[Any]] | None:
+        column = resolve(condition.column)
+        if not column:
+            return None
+        selected = quote(column)
+        operator = str(condition.operator)
+        if operator in {'>', '>=', '<', '<=', '=', '!='}:
+            target = str(condition.values[0])
+            number = numeric_value(target)
+            if number is not None:
+                comparison = f'da_try_number({selected}) {operator} ?'
+                if operator == '!=':
+                    comparison = f'(da_try_number({selected}) IS NULL OR {comparison})'
+                return comparison, [number]
+            if operator not in {'=', '!='}:
+                return None
+            return f'da_casefold({selected}) {operator} ?', [target.casefold()]
+        if operator in {'CONTAINS', 'NOT CONTAINS'}:
+            checks = [f'instr(da_casefold({selected}), ?) > 0' for _value in condition.values]
+            expression = f"({' OR '.join(checks)})"
+            if operator == 'NOT CONTAINS':
+                expression = f'NOT COALESCE({expression}, 0)'
+            return expression, [str(value).casefold() for value in condition.values]
+        if operator in {'IN', 'NOT IN'}:
+            placeholders = ', '.join('?' for _value in condition.values)
+            expression = f'da_casefold({selected}) IN ({placeholders})'
+            if operator == 'NOT IN':
+                expression = f'NOT COALESCE({expression}, 0)'
+            return expression, [str(value).casefold() for value in condition.values]
+        return None
+
+    clauses: list[str] = []
+    parameters: list[Any] = []
+    for rule in definition.rules:
+        compiled = [condition_sql(condition) for condition in rule.conditions]
+        if any(item is None for item in compiled):
+            continue
+        conditions = [item for item in compiled if item is not None]
+        clauses.append(f"WHEN {' AND '.join(item[0] for item in conditions)} THEN ?")
+        for _sql, values in conditions:
+            parameters.extend(values)
+        parameters.append(rule.value)
+    default_column = resolve(definition.default_from)
+    fallback = f'CAST({quote(default_column)} AS TEXT)' if default_column else 'NULL'
+    if definition.default != '':
+        fallback = f'COALESCE({fallback}, ?)'
+        parameters.append(definition.default)
+    return f"CASE {' '.join(clauses)} ELSE {fallback} END", parameters
+
+
+def _incremental_auto_field_table_update(
+    task_repository: Repository,
+    table_name: str,
+    cdr_source: str,
+    previous: Iterable[Any],
+    current: Iterable[Any],
+    renames: dict[str, str],
+) -> bool:
+    """Apply changed fields in one SQL scan without replacing the source table."""
+    quote = task_repository._quote_identifier
+    previous_items = tuple(previous)
+    current_items = tuple(current)
+    previous_by_key = {_normalise_catalogue_dimension_name(item.name): item for item in previous_items}
+    rename_sources = {
+        _normalise_catalogue_dimension_name(new_name): previous_by_key.get(_normalise_catalogue_dimension_name(old_name))
+        for old_name, new_name in renames.items()
+    }
+    with task_repository.connection() as connection:
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,),
+        ).fetchone()
+        if not exists:
+            return False
+        connection.create_function(
+            'da_casefold', 1,
+            lambda value: str(value).casefold() if value is not None else None,
+            deterministic=True,
+        )
+
+        def try_number(value: Any) -> float | None:
+            if value is None:
+                return None
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError):
+                return None
+            return parsed if pd.notna(parsed) else None
+
+        connection.create_function('da_try_number', 1, try_number, deterministic=True)
+        columns = task_repository._table_columns(connection, table_name)
+        column_lookup = {_normalise_catalogue_dimension_name(column): column for column in columns}
+        source = cdr_source.casefold()
+        applicable_current = {
+            _normalise_catalogue_dimension_name(item.name): item
+            for item in current_items if source in item.sources
+        }
+        applicable_previous = {
+            _normalise_catalogue_dimension_name(item.name): item
+            for item in previous_items if source in item.sources
+        }
+
+        # Rename in place whenever possible, including case-only display-name
+        # changes via a temporary name because SQLite identifiers ignore case.
+        for old_name, new_name in renames.items():
+            old_key = _normalise_catalogue_dimension_name(old_name)
+            new_key = _normalise_catalogue_dimension_name(new_name)
+            physical_old = column_lookup.get(old_key)
+            if not physical_old or new_key not in applicable_current:
+                continue
+            physical_new = column_lookup.get(new_key)
+            if physical_new and physical_new != physical_old:
+                connection.execute(f'ALTER TABLE {quote(table_name)} DROP COLUMN {quote(physical_old)}')
+                columns.remove(physical_old)
+            elif physical_old != new_name:
+                temporary = f'__auto_field_rename_{uuid4().hex}'
+                connection.execute(f'ALTER TABLE {quote(table_name)} RENAME COLUMN {quote(physical_old)} TO {quote(temporary)}')
+                connection.execute(f'ALTER TABLE {quote(table_name)} RENAME COLUMN {quote(temporary)} TO {quote(new_name)}')
+                columns[columns.index(physical_old)] = new_name
+            column_lookup.pop(old_key, None)
+            column_lookup[new_key] = new_name
+
+        removable_keys = set(applicable_previous) - set(applicable_current)
+        # Also clean known stale columns whose current definition does not
+        # apply to this CDR type.
+        removable_keys.update(
+            key for key, item in {
+                _normalise_catalogue_dimension_name(item.name): item for item in current_items
+            }.items() if source not in item.sources and key in column_lookup
+        )
+        for key in removable_keys:
+            physical = column_lookup.get(key)
+            if not physical:
+                continue
+            connection.execute(f'ALTER TABLE {quote(table_name)} DROP COLUMN {quote(physical)}')
+            columns.remove(physical)
+            column_lookup.pop(key, None)
+
+        updates: list[tuple[str, list[Any], Any]] = []
+        for key, definition in applicable_current.items():
+            old_definition = previous_by_key.get(key) or rename_sources.get(key)
+            physical = column_lookup.get(key)
+            changed = old_definition != definition or physical is None or physical != definition.name
+            if not changed:
+                continue
+            if physical is None:
+                connection.execute(f'ALTER TABLE {quote(table_name)} ADD COLUMN {quote(definition.name)} TEXT')
+                columns.append(definition.name)
+                column_lookup[key] = definition.name
+                physical = definition.name
+            elif physical != definition.name:
+                temporary = f'__auto_field_case_{uuid4().hex}'
+                connection.execute(f'ALTER TABLE {quote(table_name)} RENAME COLUMN {quote(physical)} TO {quote(temporary)}')
+                connection.execute(f'ALTER TABLE {quote(table_name)} RENAME COLUMN {quote(temporary)} TO {quote(definition.name)}')
+                columns[columns.index(physical)] = definition.name
+                physical = definition.name
+            expression, values = _auto_field_sql_expression(definition, columns, quote)
+            updates.append((f'{quote(physical)} = {expression}', values, definition))
+        if updates:
+            changed_keys = {
+                _normalise_catalogue_dimension_name(definition.name)
+                for _assignment, _values, definition in updates
+            }
+            has_dependencies = any(
+                changed_keys.intersection({
+                    _normalise_catalogue_dimension_name(alias)
+                    for condition in definition.rules for alias in condition.column.split('|')
+                } | {
+                    _normalise_catalogue_dimension_name(alias) for alias in definition.default_from
+                })
+                for _assignment, _values, definition in updates
+            )
+            if has_dependencies:
+                # SQLite evaluates all SET expressions against the old row.
+                # Preserve ordered field dependencies with one scan per field
+                # only when a changed field references another changed field.
+                for assignment, values, _definition in updates:
+                    connection.execute(f'UPDATE {quote(table_name)} SET {assignment}', values)
+            else:
+                connection.execute(
+                    f'UPDATE {quote(table_name)} SET {", ".join(item[0] for item in updates)}',
+                    [value for _assignment, values, _definition in updates for value in values],
+                )
+        return bool(updates or removable_keys or renames)
+
+
+def materialize_workspace_auto_fields_incrementally(
+    previous: Iterable[Any],
+    current: Iterable[Any],
+    renames: dict[str, str],
+    task_repository: Repository,
+    affected_sources: Iterable[str],
+    progress_callback: Callable[[int, int, str], None] | None = None,
+) -> int:
+    """Update only changed columns, scanning each affected SQLite table once."""
+    selected_sources = {
+        str(source).casefold().removeprefix('cdr-') for source in affected_sources if str(source).strip()
+    }
+    datasets = [
+        row for row in task_repository.list_datasets()
+        if row['status'] == 'ready'
+        and str(row['dataset_kind'] or '').casefold() in selected_sources
+    ]
+    reporting_kinds = [
+        kind for kind in selected_sources
+        if task_repository.list_reporting_row_columns(kind)
+    ]
+    total = max(len(datasets) + len(reporting_kinds), 1)
+    completed = 0
+    for dataset in datasets:
+        kind = str(dataset['dataset_kind']).casefold()
+        _incremental_auto_field_table_update(
+            task_repository, task_repository.dataset_rows_table_name(int(dataset['id'])),
+            f'cdr-{kind}', previous, current, renames,
+        )
+        completed += 1
+        if progress_callback:
+            progress_callback(completed, total, f'Updating {dataset["file_name"]}')
+    for kind in reporting_kinds:
+        _incremental_auto_field_table_update(
+            task_repository, task_repository.reporting_rows_table_name(kind),
+            f'cdr-{kind}', previous, current, renames,
+        )
+        completed += 1
+        if progress_callback:
+            progress_callback(completed, total, f'Updating combined CDR-{kind.upper()} table')
+    DATAFRAME_CACHE.clear()
+    ANALYSIS_CACHE.clear()
+    CHART_PREVIEW_DATA_CACHE.clear()
+    task_repository.set_workspace_state('calculated_dimensions_need_materialization', '0')
+    return len(datasets)
+
+
+def affected_calculated_dimension_sources(previous: Iterable[Any], current: Iterable[Any]) -> set[str]:
+    """Return only the CDR types touched by an auto-calculated field change."""
+    previous_by_name = {_normalise_catalogue_dimension_name(item.name): item for item in previous}
+    current_by_name = {_normalise_catalogue_dimension_name(item.name): item for item in current}
+    affected: set[str] = set()
+    for key in previous_by_name.keys() | current_by_name.keys():
+        old = previous_by_name.get(key)
+        new = current_by_name.get(key)
+        if old == new:
+            continue
+        for definition in (old, new):
+            if definition:
+                affected.update(str(source).casefold() for source in definition.sources)
+    return affected
+
+
+def _auto_calculated_field_workspace_lock(workspace_id: str) -> Lock:
+    with AUTO_CALCULATED_FIELD_WORKSPACE_LOCKS_LOCK:
+        return AUTO_CALCULATED_FIELD_WORKSPACE_LOCKS.setdefault(workspace_id, Lock())
+
+
+def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
+    with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        job = AUTO_CALCULATED_FIELD_JOBS[job_id]
+        job.update(status='processing', message='Preparing CDR tables')
+        previous = parse_calculated_dimensions(job['previous_definitions'])
+        affected_sources = tuple(job['affected_sources'])
+        renames = dict(job['renames'])
+    task_repository = Repository(
+        workspace.database_path,
+        global_db_path=repository.global_db_path,
+        workspace_registry_db_path=workspace_registry.registry_path,
+    )
+
+    def update_progress(completed: int, total: int, message: str) -> None:
+        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            job = AUTO_CALCULATED_FIELD_JOBS.get(job_id)
+            if job:
+                job.update(completed=completed, total=total, message=message)
+
+    try:
+        with _auto_calculated_field_workspace_lock(workspace.id):
+            task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'processing')
+            current = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
+            current_sources = affected_calculated_dimension_sources(previous, current)
+            count = materialize_workspace_auto_fields_incrementally(
+                previous, current, renames, task_repository,
+                set(affected_sources) | current_sources, update_progress,
+            )
+        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            AUTO_CALCULATED_FIELD_JOBS[job_id].update(
+                status='ready', completed=count, total=count, materialized_datasets=count,
+                message=f'Updated {count} CDR datasets', finished_at=datetime.now(timezone.utc).timestamp(),
+            )
+    except Exception as exc:
+        task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
+        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            AUTO_CALCULATED_FIELD_JOBS[job_id].update(
+                status='failed', error=str(exc), message='Materialization failed',
+                finished_at=datetime.now(timezone.utc).timestamp(),
+            )
+
+
+def start_auto_calculated_field_job(
+    workspace: Workspace, previous: Iterable[Any], current: Iterable[Any],
+    renames: dict[str, str], username: str,
+) -> dict[str, Any]:
+    """Queue materialization so the web request and UI remain responsive."""
+    job_id = uuid4().hex
+    previous_items = tuple(previous)
+    current_items = tuple(current)
+    affected_sources = affected_calculated_dimension_sources(previous_items, current_items)
+    job = {
+        'id': job_id, 'workspace_id': workspace.id, 'workspace_name': workspace.name,
+        'status': 'queued', 'completed': 0, 'total': 0,
+        'message': 'Waiting to update CDR tables',
+        'previous_definitions': calculated_dimensions_json(previous_items),
+        'affected_sources': sorted(set(affected_sources)), 'username': username,
+        'renames': dict(renames),
+        'created_at': datetime.now(timezone.utc).timestamp(),
+    }
+    with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        cutoff = datetime.now(timezone.utc).timestamp() - EXPORT_PACKAGE_TTL.total_seconds()
+        for stale_id in [
+            existing_id for existing_id, existing in AUTO_CALCULATED_FIELD_JOBS.items()
+            if existing.get('status') in {'ready', 'failed'}
+            and float(existing.get('finished_at') or 0) < cutoff
+        ]:
+            AUTO_CALCULATED_FIELD_JOBS.pop(stale_id, None)
+        AUTO_CALCULATED_FIELD_JOBS[job_id] = job
+    if not job['affected_sources']:
+        job.update(
+            status='ready', message='No CDR tables required changes',
+            finished_at=datetime.now(timezone.utc).timestamp(),
+        )
+        return job
+    # Keep a recoverable pending marker until the worker actually starts. If
+    # the process exits first, opening this workspace queues the rebuild again.
+    repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
+    Thread(
+        target=_run_auto_calculated_field_job,
+        args=(job_id, workspace),
+        name=f'auto-calculated-fields-{workspace.id}', daemon=True,
+    ).start()
+    return job
+
+
 def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
     """Materialize a migrated workspace without blocking its management page."""
-    if repository.get_workspace_state('calculated_dimensions_need_materialization') != '1':
+    if repository.get_workspace_state('calculated_dimensions_need_materialization') not in {'1', 'processing'}:
         return
+    with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        if any(
+            job.get('workspace_id') == workspace.id and job.get('status') in {'queued', 'processing'}
+            for job in AUTO_CALCULATED_FIELD_JOBS.values()
+        ):
+            return
+    with WORKSPACE_DIMENSION_MATERIALIZATION_THREADS_LOCK:
+        if workspace.id in WORKSPACE_DIMENSION_MATERIALIZATION_THREADS:
+            return
+        WORKSPACE_DIMENSION_MATERIALIZATION_THREADS.add(workspace.id)
     repository.set_workspace_state('calculated_dimensions_need_materialization', 'processing')
 
     def run() -> None:
@@ -469,6 +862,9 @@ def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
             materialize_workspace_calculated_dimensions(task_repository=task_repository)
         except Exception:
             task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
+        finally:
+            with WORKSPACE_DIMENSION_MATERIALIZATION_THREADS_LOCK:
+                WORKSPACE_DIMENSION_MATERIALIZATION_THREADS.discard(workspace.id)
 
     Thread(target=run, name=f'calculated-dimensions-{workspace.id}', daemon=True).start()
 
@@ -2124,6 +2520,9 @@ def export_archive_filename(target: str) -> str:
         return f'dashboard-analytic-config_{generated_at}.zip'
     if target == 'slides-templates':
         return f'dashboard-analytic-slides-templates_{generated_at}.zip'
+    if target == 'auto-calculated-fields':
+        workspace_name = active_workspace.name if active_workspace else 'workspace'
+        return f'{workspace_name}_auto-calculated-fields_{generated_at}.zip'
     if target == 'config-with-templates':
         return f'dashboard-analytic-config-with-slides-templates_{generated_at}.zip'
     if target == 'full-environment':
@@ -2209,6 +2608,33 @@ def build_export_archive_file(
             }
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             _archive_tree(archive, settings.slides_templates_dir, 'slides-templates', progress_callback=progress_callback)
+        elif target == 'auto-calculated-fields':
+            source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
+            source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
+            if not source_workspace:
+                raise ValueError('Open a workspace before exporting auto-calculated fields.')
+            source_repository = Repository(
+                source_workspace.database_path,
+                global_db_path=repository.global_db_path,
+                workspace_registry_db_path=workspace_registry.registry_path,
+            )
+            definitions = calculated_dimensions_json(
+                load_workspace_calculated_dimensions()
+                if active_workspace and source_workspace.id == active_workspace.id
+                else parse_calculated_dimensions(source_repository.list_calculated_dimensions())
+            )
+            payload = json.dumps(definitions, indent=2, ensure_ascii=False).encode('utf-8')
+            manifest = {
+                'format': ARCHIVE_FORMAT,
+                'version': ARCHIVE_VERSION,
+                'kind': 'auto-calculated-fields',
+                'source_workspace': {'id': source_workspace.id, 'name': source_workspace.name},
+                'field_count': len(definitions),
+            }
+            archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
+            archive.writestr('auto-calculated-fields.json', payload)
+            if progress_callback:
+                progress_callback(len(payload))
         elif target.startswith('workspace:'):
             workspace = workspace_registry.get(target.removeprefix('workspace:'))
             if not workspace:
@@ -2292,6 +2718,17 @@ def estimate_export_bytes(
             total += _tree_size(settings.slides_templates_dir)
     elif target == 'slides-templates':
         total = _tree_size(settings.slides_templates_dir)
+    elif target == 'auto-calculated-fields':
+        source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
+        source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
+        if source_workspace:
+            source_repository = Repository(
+                source_workspace.database_path,
+                global_db_path=repository.global_db_path,
+                workspace_registry_db_path=workspace_registry.registry_path,
+            )
+            definitions = parse_calculated_dimensions(source_repository.list_calculated_dimensions())
+            total = len(json.dumps(calculated_dimensions_json(definitions)).encode('utf-8'))
     elif target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
         if workspace:
@@ -2377,6 +2814,10 @@ def _recovered_transfer_details(manifest: dict[str, Any]) -> tuple[str, list[str
         return ('Config + Slides Templates' if manifest.get('includes_slides_templates') else 'Config', [])
     if kind == 'slides-templates':
         return ('Slides Templates', [])
+    if kind == 'auto-calculated-fields':
+        source = manifest.get('source_workspace')
+        name = str(source.get('name') or '') if isinstance(source, dict) else ''
+        return ('Auto-calculated Fields', [name] if name else [])
     if kind == 'workspace':
         workspace = manifest.get('workspace')
         name = str(workspace.get('name') or '') if isinstance(workspace, dict) else ''
@@ -2412,7 +2853,7 @@ def _recover_unimported_transfer_packages() -> None:
         try:
             manifest = read_import_manifest(package_path)
             kind = str(manifest.get('kind') or '')
-            if kind not in {'config', 'workspace', 'full-environment', 'slides-templates'}:
+            if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields'}:
                 raise ValueError('Unsupported transfer package.')
         except (OSError, ValueError, zipfile.BadZipFile):
             package_path.unlink(missing_ok=True)
@@ -2502,6 +2943,11 @@ def start_export_job(
     job_id = uuid4().hex
     destination = package_dir / f'{job_id}.zip'
     selected_workspace_ids = list(workspace_ids) if workspace_ids is not None else None
+    if target == 'auto-calculated-fields':
+        if not active_workspace:
+            raise ValueError('Open a workspace before exporting auto-calculated fields.')
+        load_workspace_calculated_dimensions()
+        selected_workspace_ids = [active_workspace.id]
     if target == 'full-environment':
         _selected_export_workspaces(selected_workspace_ids)
     job = {
@@ -2761,10 +3207,58 @@ def import_workspace_collisions(manifest: dict[str, Any]) -> list[str]:
     return [existing_names[str(entry.get('name')).casefold()] for entry in entries if isinstance(entry, dict) and str(entry.get('name') or '').casefold() in existing_names]
 
 
+def import_auto_calculated_fields(
+    payload: object,
+    destination_workspace_ids: Iterable[str],
+    progress_callback: Callable[[str, float], None] | None = None,
+) -> tuple[int, int]:
+    """Merge fields by normalized name and materialize each selected workspace once."""
+    imported = parse_calculated_dimensions(payload)
+    available = {workspace.id: workspace for workspace in workspace_registry.list()}
+    selected_ids = list(dict.fromkeys(str(workspace_id) for workspace_id in destination_workspace_ids))
+    if not selected_ids:
+        raise ValueError('Select at least one destination workspace for the auto-calculated fields.')
+    if any(workspace_id not in available for workspace_id in selected_ids):
+        raise ValueError('One or more selected destination workspaces no longer exist.')
+    for index, workspace_id in enumerate(selected_ids):
+        workspace = available[workspace_id]
+        task_repository = Repository(
+            workspace.database_path,
+            global_db_path=repository.global_db_path,
+            workspace_registry_db_path=workspace_registry.registry_path,
+        )
+        previous = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
+        merged = {_normalise_catalogue_dimension_name(item.name): item for item in previous}
+        for item in imported:
+            merged[_normalise_catalogue_dimension_name(item.name)] = item
+        saved = parse_calculated_dimensions(calculated_dimensions_json(merged.values()))
+        affected_sources = affected_calculated_dimension_sources(previous, saved)
+        task_repository.replace_calculated_dimensions(calculated_dimensions_json(saved))
+        if affected_sources:
+            previous_by_key = {_normalise_catalogue_dimension_name(item.name): item for item in previous}
+            imported_renames = {
+                previous_by_key[_normalise_catalogue_dimension_name(item.name)].name: item.name
+                for item in saved
+                if _normalise_catalogue_dimension_name(item.name) in previous_by_key
+                and previous_by_key[_normalise_catalogue_dimension_name(item.name)].name != item.name
+            }
+            with _auto_calculated_field_workspace_lock(workspace.id):
+                materialize_workspace_auto_fields_incrementally(
+                    previous, saved, imported_renames, task_repository, affected_sources,
+                )
+        if progress_callback:
+            progress_callback(
+                f'updating workspace {index + 1} of {len(selected_ids)}',
+                88.0 + ((index + 1) * 12.0 / len(selected_ids)),
+            )
+    return len(imported), len(selected_ids)
+
+
 def _apply_import_archive(
     package_path: Path,
     manifest: dict[str, Any],
     progress_callback: Callable[[str, float], None] | None = None,
+    destination_workspace_ids: Iterable[str] = (),
 ) -> str:
     """Apply a disk-backed package and return its user-facing completion message."""
     with zipfile.ZipFile(package_path) as archive, tempfile.TemporaryDirectory(prefix='dashboard-analytic-import-') as temporary_dir:
@@ -2810,6 +3304,15 @@ def _apply_import_archive(
             if progress_callback:
                 progress_callback('finalising', 100.0)
             return 'Slides Templates imported successfully.'
+        if kind == 'auto-calculated-fields':
+            try:
+                definitions = json.loads(archive.read('auto-calculated-fields.json').decode('utf-8'))
+            except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ValueError('The package does not contain valid auto-calculated fields.') from exc
+            imported_count, workspace_count = import_auto_calculated_fields(
+                definitions, destination_workspace_ids, progress_callback,
+            )
+            return f'Imported {imported_count} auto-calculated fields into {workspace_count} workspaces.'
         if kind == 'full-environment':
             _safe_extract_archive_prefix(archive, staging_root, 'config', extracted)
             if progress_callback:
@@ -2854,7 +3357,9 @@ def _run_import_job(job_id: str) -> None:
         package_path = Path(str(job['path']))
         manifest = dict(job['manifest'])
     try:
-        notice = _apply_import_archive(package_path, manifest)
+        notice = _apply_import_archive(
+            package_path, manifest, destination_workspace_ids=job.get('destination_workspace_ids') or (),
+        )
         with IMPORT_JOBS_LOCK:
             job.update({'status': 'ready', 'notice': notice, 'finished_at': datetime.now(timezone.utc).timestamp()})
     except Exception as exc:
@@ -2866,7 +3371,9 @@ def _run_import_job(job_id: str) -> None:
             IMPORT_UPLOADS.pop(str(job.get('upload_id')), None)
 
 
-def start_import_job(upload_id: str, user: SessionUser) -> dict[str, Any]:
+def start_import_job(
+    upload_id: str, user: SessionUser, destination_workspace_ids: Iterable[str] = (),
+) -> dict[str, Any]:
     with IMPORT_JOBS_LOCK:
         upload = IMPORT_UPLOADS.get(upload_id)
         if not upload or upload.get('owner') != user.username:
@@ -2882,6 +3389,7 @@ def start_import_job(upload_id: str, user: SessionUser) -> dict[str, Any]:
             'path': upload['path'],
             'manifest': upload['manifest'],
             'status': 'queued',
+            'destination_workspace_ids': list(destination_workspace_ids),
             'created_at': datetime.now(timezone.utc).timestamp(),
         }
         IMPORT_JOBS[job_id] = job
@@ -2944,6 +3452,8 @@ def _transfer_workspace_names(workspace_ids: list[str] | None) -> list[str]:
 
 
 def _transfer_offer_workspace_names(target: str, workspace_ids: list[str] | None) -> list[str]:
+    if target == 'auto-calculated-fields':
+        return _transfer_workspace_names(workspace_ids)
     if target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
         return [workspace.name] if workspace else []
@@ -2956,6 +3466,7 @@ def _transfer_content_label(target: str) -> str:
         'slides-templates': 'Slides Templates',
         'config-with-templates': 'Config + Slides Templates',
         'full-environment': 'Full Environment',
+        'auto-calculated-fields': 'Auto-calculated Fields',
     }
     if target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
@@ -3016,7 +3527,10 @@ def _run_received_transfer(offer_id: str) -> None:
             if current_offer:
                 current_offer.update({'phase': phase, 'progress': round(min(100.0, max(0.0, progress)), 1)})
     try:
-        notice = _apply_import_archive(package_path, manifest, update_progress)
+        notice = _apply_import_archive(
+            package_path, manifest, update_progress,
+            offer.get('destination_workspace_ids') or (),
+        )
         with TRANSFER_LOCK:
             offer.update({'status': 'ready', 'phase': 'complete', 'progress': 100.0, 'notice': notice, 'finished_at': datetime.now(timezone.utc).timestamp()})
             _save_transfer_offer(offer)
@@ -3055,7 +3569,7 @@ def _run_transfer_job(job_id: str) -> None:
             offer_payload = {
                 'source': __app_name__,
                 'archive_version': ARCHIVE_VERSION,
-                'kind': 'full-environment' if target == 'full-environment' else 'workspace' if target.startswith('workspace:') else 'config' if target in {'config', 'config-with-templates'} else 'slides-templates',
+                'kind': 'full-environment' if target == 'full-environment' else 'workspace' if target.startswith('workspace:') else 'config' if target in {'config', 'config-with-templates'} else target,
                 'content': _transfer_content_label(target),
                 'workspaces': _transfer_offer_workspace_names(target, workspace_ids),
             }
@@ -3235,6 +3749,11 @@ def start_transfer_job(
     destination = normalize_transfer_destination(destination_url, destination_port)
     _cleanup_expired_export_packages()
     selected_workspace_ids = list(workspace_ids) if workspace_ids is not None else None
+    if target == 'auto-calculated-fields':
+        if not active_workspace:
+            raise ValueError('Open a workspace before transferring auto-calculated fields.')
+        load_workspace_calculated_dimensions()
+        selected_workspace_ids = [active_workspace.id]
     if target == 'full-environment':
         _selected_export_workspaces(selected_workspace_ids)
     else:
@@ -3271,7 +3790,7 @@ def transfer_job_payload(job_id: str, user: SessionUser) -> dict[str, Any] | Non
 
 def require_import_export_permission(user: SessionUser, target: str) -> None:
     """Authorize imports; admins may only restore shared Slides Templates."""
-    if user.role == 'super-admin' or target == 'slides-templates':
+    if user.role == 'super-admin' or target in {'slides-templates', 'auto-calculated-fields'}:
         return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -3283,6 +3802,10 @@ def require_export_permission(user: SessionUser, target: str) -> None:
     """Authorize exports and transfers without exposing other workspaces."""
     if user.role == 'super-admin' or target == 'slides-templates':
         return
+    if target == 'auto-calculated-fields':
+        if active_workspace and repository.user_has_workspace_access(user.username, active_workspace.id):
+            return
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Open a workspace you can access first.')
     if target.startswith('workspace:'):
         workspace_id = target.removeprefix('workspace:')
         if workspace_registry.get(workspace_id) and repository.user_has_workspace_access(user.username, workspace_id):
@@ -3395,6 +3918,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
     export_options = [
         {'value': 'config', 'label': 'Config'},
         {'value': 'slides-templates', 'label': 'Slides Templates'},
+        {'value': 'auto-calculated-fields', 'label': 'Auto-calculated Fields', 'disabled': not active_workspace},
         {'value': 'config-with-templates', 'label': 'Config + Slides Templates'},
         {'value': 'full-environment', 'label': 'Full Environment (Config + Slides Templates + Selected Workspaces)'},
         *[
@@ -3408,7 +3932,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         # admin's first export/transfer request had no export_target at all.
         export_options = [
             option for option in export_options
-            if option['value'] == 'slides-templates' or option['value'].startswith('workspace:')
+            if option['value'] in {'slides-templates', 'auto-calculated-fields'} or option['value'].startswith('workspace:')
         ]
     admin_users = [
         {**dict(row), 'created_at': format_local_timestamp(row['created_at']), 'workspace_ids': repository.list_user_workspace_ids(int(row['id']))}
@@ -6794,7 +7318,7 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='The transfer offer is invalid.')
     kind = str(payload.get('kind') or '')
-    if kind not in {'config', 'workspace', 'full-environment', 'slides-templates'}:
+    if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields'}:
         raise HTTPException(status_code=400, detail='The offered export type is not supported.')
     if payload.get('archive_version') != ARCHIVE_VERSION:
         raise HTTPException(status_code=409, detail='The source server uses an incompatible export package version.')
@@ -6956,7 +7480,12 @@ def list_pending_transfer_offers(user: SessionUser = Depends(super_admin_user)) 
             for offer in TRANSFER_OFFERS.values()
             if offer.get('status') == 'pending'
         ]
-    return JSONResponse({'offers': sorted(offers, key=lambda offer: float(offer.get('created_at') or 0))})
+    return JSONResponse({
+        'offers': sorted(offers, key=lambda offer: float(offer.get('created_at') or 0)),
+        'destination_workspaces': [
+            {'id': workspace.id, 'name': workspace.name} for workspace in workspace_registry.list()
+        ],
+    })
 
 
 @app.get('/admin/import-export/transfers/offers/{offer_id}')
@@ -7013,8 +7542,17 @@ def delete_recovered_transfer_package(offer_id: str, user: SessionUser = Depends
 
 
 @app.post('/admin/import-export/transfers/offers/{offer_id}/accept')
-def accept_transfer_offer(offer_id: str, user: SessionUser = Depends(super_admin_user)) -> JSONResponse:
+async def accept_transfer_offer(
+    offer_id: str, request: Request, user: SessionUser = Depends(super_admin_user),
+) -> JSONResponse:
     _cleanup_expired_export_packages()
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        payload = {}
+    destination_workspace_ids = list(dict.fromkeys(
+        str(value) for value in payload.get('workspace_ids', [])
+    )) if isinstance(payload, dict) and isinstance(payload.get('workspace_ids'), list) else []
     accepted_now = False
     with TRANSFER_LOCK:
         _refresh_persisted_transfer_offers()
@@ -7022,7 +7560,17 @@ def accept_transfer_offer(offer_id: str, user: SessionUser = Depends(super_admin
         if not offer:
             raise HTTPException(status_code=404, detail='The pending transfer offer no longer exists.')
         if offer.get('status') == 'pending':
-            offer.update({'status': 'accepted', 'phase': 'waiting for source package', 'accepted_by': user.username, 'accepted_at': datetime.now(timezone.utc).timestamp()})
+            if offer.get('kind') == 'auto-calculated-fields':
+                available = {workspace.id for workspace in workspace_registry.list()}
+                if not destination_workspace_ids:
+                    raise HTTPException(status_code=400, detail='Select at least one destination workspace.')
+                if any(workspace_id not in available for workspace_id in destination_workspace_ids):
+                    raise HTTPException(status_code=400, detail='One or more destination workspaces no longer exist.')
+            offer.update({
+                'status': 'accepted', 'phase': 'waiting for source package',
+                'accepted_by': user.username, 'accepted_at': datetime.now(timezone.utc).timestamp(),
+                'destination_workspace_ids': destination_workspace_ids,
+            })
             accepted_now = True
         elif offer.get('status') not in {'accepted', 'receiving', 'received', 'importing', 'ready'}:
             raise HTTPException(status_code=409, detail='This transfer offer can no longer be accepted.')
@@ -7204,7 +7752,7 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
     """Validate and retain an already disk-backed import upload."""
     manifest = read_import_manifest(package_path)
     kind = str(manifest.get('kind') or '')
-    if kind not in {'config', 'workspace', 'full-environment', 'slides-templates'}:
+    if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields'}:
         raise ValueError('The export package type is not supported.')
     require_import_export_permission(user, kind)
     with IMPORT_JOBS_LOCK:
@@ -7215,11 +7763,16 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
             'created_at': datetime.now(timezone.utc).timestamp(),
             'claimed': False,
         }
-    return JSONResponse({
+    response_payload = {
         'kind': kind,
         'includes_slides_templates': bool(manifest.get('includes_slides_templates')),
         'workspace_collisions': import_workspace_collisions(manifest),
-    }, headers={'X-Import-Upload-Id': upload_id})
+    }
+    if kind == 'auto-calculated-fields':
+        response_payload['destination_workspaces'] = [
+            {'id': workspace.id, 'name': workspace.name} for workspace in accessible_workspaces(user)
+        ]
+    return JSONResponse(response_payload, headers={'X-Import-Upload-Id': upload_id})
 
 
 @app.post('/admin/import-export/inspect/upload')
@@ -7272,6 +7825,7 @@ def discard_admin_import_upload(upload_id: str, user: SessionUser = Depends(admi
 def create_admin_import_job(
     upload_id: str = Form(...),
     confirmed_import: bool = Form(False),
+    workspace_ids: list[str] | None = Form(None),
     user: SessionUser = Depends(admin_user),
 ) -> JSONResponse:
     if not confirmed_import:
@@ -7282,8 +7836,15 @@ def create_admin_import_job(
             raise HTTPException(status_code=404, detail='The uploaded package is no longer available. Select it again.')
         kind = str(upload['manifest'].get('kind') or '')
     require_import_export_permission(user, kind)
+    selected_workspaces = list(dict.fromkeys(workspace_ids or []))
+    if kind == 'auto-calculated-fields':
+        allowed = {workspace.id for workspace in accessible_workspaces(user)}
+        if not selected_workspaces:
+            raise HTTPException(status_code=400, detail='Select at least one destination workspace.')
+        if any(workspace_id not in allowed for workspace_id in selected_workspaces):
+            raise HTTPException(status_code=403, detail='You do not have access to one or more destination workspaces.')
     try:
-        job = start_import_job(upload_id, user)
+        job = start_import_job(upload_id, user, selected_workspaces)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse({
@@ -8323,27 +8884,34 @@ def report_catalogue_copy_options(user: SessionUser = Depends(admin_user)) -> JS
 
 async def _save_workspace_dimensions(request: Request, user: SessionUser) -> JSONResponse:
     if not active_workspace:
-        raise HTTPException(status_code=400, detail='Open a workspace before managing calculated dimensions.')
+        raise HTTPException(status_code=400, detail='Open a workspace before managing auto-calculated fields.')
     try:
         payload = await request.json()
         previous = load_workspace_calculated_dimensions()
         dimensions = write_workspace_calculated_dimensions(payload.get('dimensions'))
-        renamed_templates = rename_calculated_dimension_template_references(
-            calculated_dimension_rename_map(payload, previous, dimensions),
+        affected_sources = affected_calculated_dimension_sources(previous, dimensions)
+        renames = calculated_dimension_rename_map(payload, previous, dimensions)
+        renamed_templates = rename_calculated_dimension_template_references(renames)
+        job = start_auto_calculated_field_job(
+            active_workspace, previous, dimensions, renames, user.username,
         )
-        materialized = materialize_workspace_calculated_dimensions(dimension.name for dimension in previous)
     except (ValueError, TypeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (OSError, sqlite3.Error) as exc:
-        raise HTTPException(status_code=503, detail=f'Unable to save calculated dimensions: {exc}') from exc
+        raise HTTPException(status_code=503, detail=f'Unable to save auto-calculated fields: {exc}') from exc
     repository.add_log(user.username, 'save_workspace_calculated_dimensions', json.dumps({
-        'workspace': active_workspace.id, 'count': len(dimensions), 'materialized_datasets': materialized,
-        'renamed_templates': renamed_templates,
+        'workspace': active_workspace.id, 'count': len(dimensions), 'materialization_job': job['id'],
+        'renamed_templates': renamed_templates, 'affected_sources': sorted(affected_sources),
     }))
     return JSONResponse({
         'dimensions': calculated_dimensions_json(dimensions),
-        'materialized_datasets': materialized,
+        'materialization_job': job['id'],
+        'materialization_status_url': f'/api/workspace/auto-calculated-fields/materialization/{job["id"]}',
         'renamed_templates': renamed_templates,
+        'notice': (
+            'The fields were saved. Updating applicable CDR tables can take a while and is running in the background.'
+            if affected_sources else 'The fields were already up to date; no CDR tables required changes.'
+        ),
     })
 
 
@@ -8363,21 +8931,35 @@ async def save_report_template_calculated_dimensions(
     return await _save_workspace_dimensions(request, user)
 
 
+@app.get('/api/workspace/auto-calculated-fields/materialization/{job_id}')
+def auto_calculated_field_materialization_status(
+    job_id: str, user: SessionUser = Depends(current_user),
+) -> JSONResponse:
+    with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        job = dict(AUTO_CALCULATED_FIELD_JOBS.get(job_id) or {})
+    if not job or not repository.user_has_workspace_access(user.username, str(job['workspace_id'])):
+        raise HTTPException(status_code=404, detail='Materialization job not found.')
+    return JSONResponse({
+        key: value for key, value in job.items()
+        if key not in {'previous_definitions', 'affected_sources', 'renames', 'username'}
+    })
+
+
 @app.get('/workspace/calculated-dimensions/export')
 def export_workspace_calculated_dimensions(
     name: str = '', user: SessionUser = Depends(current_user),
 ) -> Response:
     if not active_workspace:
-        raise HTTPException(status_code=400, detail='Open a workspace before exporting calculated dimensions.')
+        raise HTTPException(status_code=400, detail='Open a workspace before exporting auto-calculated fields.')
     dimensions = list(load_workspace_calculated_dimensions())
     if name.strip():
         identity = _normalise_catalogue_dimension_name(name)
         dimensions = [item for item in dimensions if _normalise_catalogue_dimension_name(item.name) == identity]
         if not dimensions:
-            raise HTTPException(status_code=404, detail='Calculated dimension not found.')
+            raise HTTPException(status_code=404, detail='Auto-calculated field not found.')
     content = json.dumps(calculated_dimensions_json(dimensions), indent=2, ensure_ascii=False).encode('utf-8')
     suffix = re.sub(r'[^A-Za-z0-9_-]+', '-', name.strip()).strip('-') if name.strip() else 'all'
-    filename = f'{active_workspace.name}-calculated-dimensions-{suffix}.json'.replace('"', '')
+    filename = f'{active_workspace.name}-auto-calculated-fields-{suffix}.json'.replace('"', '')
     repository.add_log(user.username, 'export_workspace_calculated_dimensions', json.dumps({
         'workspace': active_workspace.id, 'count': len(dimensions),
     }))
@@ -8390,7 +8972,7 @@ async def import_workspace_calculated_dimensions(
     user: SessionUser = Depends(current_user),
 ) -> RedirectResponse:
     if not active_workspace:
-        raise HTTPException(status_code=400, detail='Open a workspace before importing calculated dimensions.')
+        raise HTTPException(status_code=400, detail='Open a workspace before importing auto-calculated fields.')
     try:
         payload = json.loads((await dimensions_file.read()).decode('utf-8-sig'))
         imported = parse_calculated_dimensions(payload)
@@ -8399,14 +8981,23 @@ async def import_workspace_calculated_dimensions(
         for item in imported:
             merged[_normalise_catalogue_dimension_name(item.name)] = item
         saved = write_workspace_calculated_dimensions(calculated_dimensions_json(merged.values()))
-        materialized = materialize_workspace_calculated_dimensions(item.name for item in previous)
+        affected_sources = affected_calculated_dimension_sources(previous, saved)
+        job = start_auto_calculated_field_job(
+            active_workspace, previous, saved, {}, user.username,
+        )
     except (UnicodeDecodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
         return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}#calculated-dimensions', status_code=303)
     repository.add_log(user.username, 'import_workspace_calculated_dimensions', json.dumps({
         'workspace': active_workspace.id, 'imported': len(imported), 'count': len(saved),
     }))
-    notice = f'Imported {len(imported)} calculated dimensions and updated {materialized} CDR datasets.'
-    return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": notice})}#calculated-dimensions', status_code=303)
+    notice = (
+        f'Imported {len(imported)} auto-calculated fields. Applicable CDR tables are being updated '
+        'in the background; you can continue working.'
+        if affected_sources else
+        f'Imported {len(imported)} auto-calculated fields; matching definitions were already up to date.'
+    )
+    query = urlencode({'workspace_notice': notice, 'auto_fields_job_id': job['id']})
+    return RedirectResponse(f'/workspace?{query}#calculated-dimensions', status_code=303)
 
 
 @app.post('/admin/report-templates/{technology}/{catalogue_id}/copy-items')
