@@ -229,6 +229,7 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     assert 'Manage Auto-calculated Fields' in page.text
     assert 'workspace-calculated-dimensions-import-panel' in page.text
     assert 'workspace-calculated-dimensions-list' in page.text
+    assert 'combined-dataset-row' not in page.text
     assert 'Export All Auto-calculated Fields' in page.text
     assert '>Field<' in page.text
     assert '>Applied to<' in page.text

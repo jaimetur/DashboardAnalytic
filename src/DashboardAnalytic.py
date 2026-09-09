@@ -2420,6 +2420,30 @@ def build_dataset_view_state(
     return datasets, ready_datasets, input_kind_options, selected_dataset
 
 
+def workspace_combined_tables(task_repository: Repository | None = None) -> list[dict[str, Any]]:
+    """Return existing combined CDR tables for the Workspace dataset panel."""
+    task_repository = task_repository or repository
+    combined: list[dict[str, Any]] = []
+    with task_repository.connection() as connection:
+        for kind in ('data', 'voice', 'speech'):
+            table_name = task_repository.reporting_rows_table_name(kind)
+            exists = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,),
+            ).fetchone()
+            if not exists:
+                continue
+            row_count = connection.execute(
+                f'SELECT COUNT(*) AS count FROM {task_repository._quote_identifier(table_name)}',
+            ).fetchone()['count']
+            combined.append({
+                'name': f'Combined CDR-{kind.upper()}',
+                'kind': kind,
+                'table_name': table_name,
+                'row_count': int(row_count or 0),
+            })
+    return combined
+
+
 def choose_filter_values(query_values: list[str], options: dict[str, list[str]], key: str) -> list[str]:
     values = options.get(key, [])
     selected = [value for value in query_values if value in values]
@@ -4459,7 +4483,7 @@ def workspace(
                 'input_kind': None, 'input_kind_options': [], 'workspace_logs': [], 'error': None,
                 'has_processing': False, 'vodafone_mapping_datasets': [], 'three_mapping_datasets': [],
                 'mappable_cdr_datasets': [], 'clearable_cdr_datasets': [],
-                'calculated_dimensions': [],
+                'calculated_dimensions': [], 'combined_tables': [],
                 'workspaces': workspaces, 'workspace_access': workspace_access, 'workspace_sizes': workspace_sizes, 'workspace_users': workspace_users, 'workspace_notice': request.query_params.get('workspace_notice'),
                 'workspace_warning': request.query_params.get('workspace_warning'),
                 'workspace_error': request.query_params.get('workspace_error'),
@@ -4477,6 +4501,7 @@ def workspace(
     mappable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_map_vendors')]
     clearable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_clear_vendors')]
     calculated_dimensions = calculated_dimensions_json(load_workspace_calculated_dimensions())
+    combined_tables = workspace_combined_tables()
     queue_workspace_dimension_materialization(active_workspace)
 
     return render_template(
@@ -4497,6 +4522,7 @@ def workspace(
             'mappable_cdr_datasets': mappable_cdr_datasets,
             'clearable_cdr_datasets': clearable_cdr_datasets,
             'calculated_dimensions': calculated_dimensions,
+            'combined_tables': combined_tables,
             'workspaces': workspaces,
             'workspace_access': workspace_access,
             'workspace_sizes': workspace_sizes,
