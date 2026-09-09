@@ -738,6 +738,9 @@ def materialize_workspace_auto_fields_incrementally(
                         int(dataset['id']), kind, calculated_names,
                     )
         completed += 1
+        task_repository.set_workspace_state(
+            f'combined_reporting_updated_{kind}', now_iso(),
+        )
         if progress_callback:
             progress_callback(completed, total, f'Updating combined CDR-{kind.upper()} table')
     DATAFRAME_CACHE.clear()
@@ -2435,13 +2438,41 @@ def workspace_combined_tables(task_repository: Repository | None = None) -> list
             row_count = connection.execute(
                 f'SELECT COUNT(*) AS count FROM {task_repository._quote_identifier(table_name)}',
             ).fetchone()['count']
+            updated_at = task_repository.get_workspace_state(f'combined_reporting_updated_{kind}')
+            if not updated_at:
+                dataset_dates = [
+                    str(dataset['updated_at'] or dataset['uploaded_at'] or '')
+                    for dataset in task_repository.list_datasets()
+                    if str(dataset['dataset_kind'] or '').casefold() == kind
+                ]
+                updated_at = max(dataset_dates, default='')
             combined.append({
-                'name': f'Combined CDR-{kind.upper()}',
+                'name': f'CDR-{kind.title()} (combined)',
                 'kind': kind,
                 'table_name': table_name,
                 'row_count': int(row_count or 0),
+                'updated_at_label': format_local_timestamp(updated_at) if updated_at else '—',
             })
     return combined
+
+
+def recreate_combined_cdr_table(workspace: Workspace, kind: str) -> None:
+    """Rebuild one combined CDR table from the current individual datasets."""
+    task_repository = Repository(
+        workspace.database_path,
+        global_db_path=repository.global_db_path,
+        workspace_registry_db_path=workspace_registry.registry_path,
+    )
+    dimensions = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
+    applicable_names = [item.name for item in dimensions if f'cdr-{kind}' in item.sources]
+    datasets = [
+        dataset for dataset in task_repository.list_datasets()
+        if dataset['status'] == 'ready' and str(dataset['dataset_kind'] or '').casefold() == kind
+    ]
+    task_repository.drop_reporting_table(kind)
+    for dataset in datasets:
+        task_repository.copy_dataset_rows_to_reporting(int(dataset['id']), kind, applicable_names)
+    task_repository.set_workspace_state(f'combined_reporting_updated_{kind}', now_iso())
 
 
 def choose_filter_values(query_values: list[str], options: dict[str, list[str]], key: str) -> list[str]:
@@ -4548,6 +4579,39 @@ def workspace_sizes_status(user: SessionUser = Depends(current_user)) -> JSONRes
     })
 
 
+@app.post('/workspace/combined/{kind}/recreate')
+def recreate_combined_cdr(
+    kind: str, user: SessionUser = Depends(current_user),
+) -> Response:
+    if not active_workspace:
+        return RedirectResponse('/workspace?workspace_error=Open+a+workspace+before+recreating+combined+tables.', status_code=303)
+    normalized_kind = str(kind).casefold()
+    if normalized_kind not in CDR_DATASET_KINDS:
+        return RedirectResponse('/workspace?workspace_error=Unknown+combined+CDR+table.', status_code=303)
+    require_workspace_access(user, active_workspace.id)
+    workspace = active_workspace
+
+    def run_recreation() -> None:
+        try:
+            recreate_combined_cdr_table(workspace, normalized_kind)
+        except Exception as exc:
+            task_repository = Repository(
+                workspace.database_path,
+                global_db_path=repository.global_db_path,
+                workspace_registry_db_path=workspace_registry.registry_path,
+            )
+            task_repository.set_workspace_state(f'combined_reporting_error_{normalized_kind}', str(exc))
+
+    Thread(
+        target=run_recreation,
+        name=f'recreate-combined-cdr-{normalized_kind}', daemon=True,
+    ).start()
+    return RedirectResponse(
+        f'/workspace?workspace_notice=Recreating+combined+CDR-{normalized_kind.upper()}+table+in+the+background.',
+        status_code=303,
+    )
+
+
 @app.get('/api/workspaces/status')
 def workspace_status(user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Lightweight live data for the Workspace Management table."""
@@ -4934,6 +4998,58 @@ def preview_dataset(
             'selected_gcid': selected_gcid,
             'cdr_preview_filters': cdr_preview_filters,
             'visible_column_count': len(preview_columns),
+        },
+    )
+
+
+@app.get('/workspace/combined/{kind}/preview', response_class=HTMLResponse)
+def preview_combined_dataset(
+    kind: str,
+    request: Request,
+    row_limit: int = Query(default=100, ge=1, le=5000),
+    user: SessionUser = Depends(current_user),
+) -> HTMLResponse:
+    """Render a read-only preview of one materialised combined CDR table."""
+    normalized_kind = str(kind or '').casefold()
+    if normalized_kind not in CDR_DATASET_KINDS:
+        raise HTTPException(status_code=404, detail='Combined dataset not found')
+    table_name = repository.reporting_rows_table_name(normalized_kind)
+    columns = [
+        column for column in repository.list_reporting_row_columns(normalized_kind)
+        if column not in {'dataset_id', 'source_row_id'}
+    ]
+    if not columns:
+        raise HTTPException(status_code=404, detail='Combined dataset not found')
+    quoted_columns = ', '.join(repository._quote_identifier(column) for column in columns)
+    with repository.connection() as connection:
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,),
+        ).fetchone()
+        if not exists:
+            raise HTTPException(status_code=404, detail='Combined dataset not found')
+        total_row_count = int(connection.execute(
+            f'SELECT COUNT(*) AS count FROM {repository._quote_identifier(table_name)}',
+        ).fetchone()['count'] or 0)
+        preview_frame = pd.read_sql_query(
+            f'SELECT {quoted_columns} FROM {repository._quote_identifier(table_name)} LIMIT ?',
+            connection,
+            params=(row_limit,),
+        )
+    preview_rows = preview_frame.astype(object).where(pd.notna(preview_frame), '').to_dict(orient='records')
+    updated_at = repository.get_workspace_state(f'combined_reporting_updated_{normalized_kind}') or ''
+    return render_template(
+        request,
+        'combined_dataset_preview.html',
+        {
+            'user': user,
+            'kind': normalized_kind,
+            'combined_name': f'Combined CDR-{normalized_kind.upper()}',
+            'preview_columns': columns,
+            'preview_rows': preview_rows,
+            'preview_row_limit': row_limit,
+            'total_row_count': total_row_count,
+            'visible_column_count': len(columns),
+            'updated_at_label': format_local_timestamp(updated_at) if updated_at else '—',
         },
     )
 

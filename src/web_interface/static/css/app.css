@@ -423,6 +423,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .queue-table tr.combined-dataset-row td { border-top: 1px solid #d5b86a; background: #fff8dc; color: #5f4b1b; }
 .queue-table tr.combined-dataset-row + tr.combined-dataset-row td { border-top-color: #eadca8; }
 .combined-dataset-label { color: #8b6b18; font-size: 0.76rem; font-weight: 700; }
+.combined-dataset-recreate-button { display: inline-flex; align-items: center; justify-content: center; width: 2rem; min-width: 2rem; height: 2rem; min-height: 2rem; padding: 0; border: 1px solid #b58a25; border-radius: 50%; background: linear-gradient(135deg, #fff0a8, #e8ca62); color: #674d0e; font-size: 1.15rem; font-weight: 800; line-height: 1; }
+.combined-dataset-recreate-button:hover:not(:disabled) { background: linear-gradient(135deg, #ffe78a, #d9b743); color: #4f3908; }
 .slides-templates-editor-table-wrap > .table-wrap { max-height: min(1100px, calc(100vh - 2.5rem)); overflow: auto; overscroll-behavior: contain; }
 .slides-templates-editor-table { --catalogue-actions-width: 190px; --catalogue-slide-width: 48px; min-width: 1900px; border-collapse: separate; border-spacing: 0; border: 1px solid rgba(75, 32, 138, 0.28); }
 .slides-templates-editor-table thead th { position: sticky; top: 0; z-index: 2; background: #eee7f8; }

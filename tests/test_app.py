@@ -1968,6 +1968,31 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     assert 'href="/workspace/preview/1" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview Dataset</a>' in dashboard_response.text
 
 
+def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(client) -> None:
+    login(client)
+    import src.DashboardAnalytic as app_module
+
+    client.post(
+        "/dashboard/upload",
+        data={"dataset_kinds": "data"},
+        files={"dataset_files": ("cdr_data.csv", BytesIO(b"operator,score\nVodafone UK,91\n"), "text/csv")},
+        follow_redirects=False,
+    )
+    app_module.repository.copy_dataset_rows_to_reporting(1, 'data', ['score'])
+
+    workspace_response = client.get('/workspace')
+    assert workspace_response.status_code == 200
+    assert 'CDR-Data (combined)' in workspace_response.text
+    assert 'data-dataset-row data-dataset-kind="data"' in workspace_response.text
+    assert 'href="/workspace/combined/data/preview"' in workspace_response.text
+    assert 'aria-label="Recreate combined table">↻</button>' in workspace_response.text
+
+    preview_response = client.get('/workspace/combined/data/preview')
+    assert preview_response.status_code == 200
+    assert 'CDR-Data (combined)' in preview_response.text
+    assert 'Vodafone UK' in preview_response.text
+
+
 def test_queued_dataset_actions_remain_compact_icons_during_live_updates(client) -> None:
     login(client)
     import src.DashboardAnalytic as app_module
