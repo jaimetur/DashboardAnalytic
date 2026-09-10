@@ -1248,6 +1248,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .workspace-management-forms { margin-top: 0.8rem; }
 .workspace-management-forms form { padding-right: 0.7rem; border-right: 1px solid rgba(255,255,255,0.22); }
 .workspace-management-forms input { min-width: 210px; }
+.workspace-management-forms .workspace-create-name { width: min(100%, 360px); min-width: 320px; }
 .workspace-library { margin-top: 0.9rem; border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; }
 .workspace-library-table { width: 100%; min-width: 690px; border-collapse: separate; border-spacing: 0; table-layout: auto; }
 .workspace-library-table th { position: static; padding: 0.62rem 0.7rem; background: rgba(0,0,0,0.18); color: rgba(255,255,255,0.86); font-size: 0.76rem; letter-spacing: 0.04em; text-transform: uppercase; }

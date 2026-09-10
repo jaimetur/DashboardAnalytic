@@ -35,7 +35,7 @@
         <div class="workspace-management-forms">
           <form method="post" action="/workspace/create">
             <label>New workspace
-              <input name="name" required maxlength="100" placeholder="e.g. 2026 Q3 benchmark">
+              <input class="workspace-create-name" name="name" required maxlength="100" placeholder="e.g. 2026 Q3 benchmark">
             </label>
             {% if user.role == 'super-admin' %}<details class="workspace-user-picker" data-workspace-user-picker>
               <summary><span>Users with access</span><span class="workspace-user-picker-chevron" aria-hidden="true"></span></summary>
