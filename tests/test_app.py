@@ -574,7 +574,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     login_super(client)
     admin_response = client.get('/admin')
     assert admin_response.status_code == 200
-    assert 'Export / Import' in admin_response.text
+    assert 'Import / Export / Transfer' in admin_response.text
     assert 'Transfer to other server' in admin_response.text
     assert 'Config</option>' in admin_response.text
     assert 'Config + Slides Templates' in admin_response.text
@@ -3585,7 +3585,7 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'data-embedded-template-editor' in embedded_editor.text
     assert 'data-catalogue-editor-table' in embedded_editor.text
     assert 'Slides Templates Management' not in embedded_editor.text
-    assert 'Export / Import' not in embedded_editor.text
+    assert 'Import / Export / Transfer' not in embedded_editor.text
     assert 'data-catalogue-field="Layout"' in embedded_editor.text
     assert 'data-catalogue-editor-options' in embedded_editor.text
     assert '<th class="catalogue-slide-actions-heading">Slide Actions</th>' in embedded_editor.text

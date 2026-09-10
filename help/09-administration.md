@@ -72,7 +72,7 @@ One template can be default for each technology within a workspace. Reporting in
 - Chart Preview reuses the shared Interactive Preview.
 - **Update Template** applies preview values to the in-memory row; it does not save to disk.
 
-## Export / Import
+## Import / Export / Transfer
 
 ### Export targets
 

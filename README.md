@@ -77,7 +77,7 @@ Chart Builder reuses the shared Interactive Preview for ad-hoc analysis.
 - **Create user / Users**: account, role, password, status and workspace access management.
 - **Slides Templates Management**: create, import, duplicate, rename, export, delete and set defaults within the active workspace.
 - **Slides Template Editor**: validated grid editing, cell assistance, Filter Builder and shared Chart Preview.
-- **Export / Import**: portable ZIP jobs, Full Environment workspace selection, server-to-server transfer and recovered packages.
+- **Import / Export / Transfer**: portable ZIP jobs, Full Environment workspace selection, server-to-server transfer and recovered packages.
 - **Database Management**: scoped on-demand and scheduled backups, overwrite-confirmed restore, grouped global/workspace tables, server-side filters, editing and cleanup.
 - **Datasets Management**: inspect and rename workspace datasets.
 

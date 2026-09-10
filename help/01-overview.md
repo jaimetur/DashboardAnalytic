@@ -190,7 +190,7 @@ Templates belong to their workspace. A new workspace starts without templates. E
 - Apply temporary preview values back to the in-memory row with **Update Template**.
 - Save atomically; saved cells then clear their change highlighting.
 
-### Export / Import
+### Import / Export / Transfer
 
 - Export the active workspace's Slides Templates, Auto-calculated Fields, accessible workspaces or a Full Environment.
 - Select which workspaces belong to a Full Environment package.

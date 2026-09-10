@@ -9628,7 +9628,7 @@ async def import_admin_package(
         if manifest.get('kind') == 'slides-templates':
             destinations = matching_template_workspaces(manifest, accessible_workspaces(user))
             if not destinations:
-                raise ValueError('Select destination workspaces using the Export / Import panel.')
+                raise ValueError('Select destination workspaces using the Import / Export / Transfer panel.')
         notice = _apply_import_archive(package_path, manifest, destination_workspace_ids=destinations)
     except (ValueError, OSError, sqlite3.Error, zipfile.BadZipFile) as exc:
         return RedirectResponse(
