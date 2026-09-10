@@ -3670,6 +3670,7 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     assert readme_view.status_code == 200
     assert "Loading document..." in readme_view.text
     assert "/api/documents/readme" in readme_view.text
+    assert '>Readme<' in readme_view.text
 
     changelog_api = client.get("/api/documents/changelog")
     assert changelog_api.status_code == 200
@@ -3680,6 +3681,7 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     help_view = client.get("/documents/view/help")
     assert help_view.status_code == 200
     assert "/api/documents/help" in help_view.text
+    assert '>Documentation<' in help_view.text
 
     help_api = client.get("/api/documents/help")
     assert help_api.status_code == 200

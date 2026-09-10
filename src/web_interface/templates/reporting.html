@@ -7,6 +7,10 @@
         <p class="eyebrow">E2E Reporting</p>
         <h2>Choose a reporting module</h2>
       </div>
+      <div class="reporting-total-badges" aria-label="Workspace totals">
+        <span class="pill reporting-total-badge" data-total-reports-badge>Total Reports: {{ total_reports }}</span>
+        <span class="pill reporting-total-badge" data-total-chart-sets-badge>Total Chart Sets: {{ total_chart_sets }}</span>
+      </div>
     </div>
     <p class="lede">Choose the reporting workflow to display. NetCheck CDR Reports combine processed Data, Voice and Speech workbooks so campaigns can be benchmarked together; Smart Orchestrator Logs Reports is reserved for its dedicated workflow.</p>
     <label class="reporting-module-selector">Reporting module
@@ -111,7 +115,7 @@
   <details class="panel collapsible-panel reporting-panel reporting-jobs-panel" open data-panel-state-key="reporting:generated-jobs" data-reporting-module-panel="cdr" data-report-jobs-panel data-report-chart-jobs-panel>
     <summary class="collapsible-summary">
       <div><p class="eyebrow">Background generation</p><h2>Reports and Charts Jobs</h2></div>
-      <div class="summary-inline-actions"><span class="pill" data-report-jobs-count>{{ (report_jobs | length) + (report_chart_jobs | length) }} jobs</span><span class="collapse-chip">Collapse</span></div>
+      <div class="summary-inline-actions"><span class="pill reporting-total-badge" data-report-jobs-count data-total-jobs-badge>Total Jobs: {{ (report_jobs | length) + (report_chart_jobs | length) }}</span><span class="pill reporting-total-badge" data-total-reports-badge>Total Reports: {{ total_reports }}</span><span class="pill reporting-total-badge" data-total-chart-sets-badge>Total Chart Sets: {{ total_chart_sets }}</span><span class="collapse-chip">Collapse</span></div>
     </summary>
     <div class="collapsible-panel-body">
       <div class="reporting-job-filters" data-reporting-filter-panel="jobs">
@@ -617,6 +621,9 @@
     };
     const jobsBody = document.querySelector('[data-report-jobs-body]');
     const jobsCount = document.querySelector('[data-report-jobs-count]');
+    const totalReportsBadges = document.querySelectorAll('[data-total-reports-badge]');
+    const totalChartSetsBadges = document.querySelectorAll('[data-total-chart-sets-badge]');
+    const totalJobsBadges = document.querySelectorAll('[data-total-jobs-badge]');
     const jobsEmpty = document.querySelector('[data-report-jobs-empty]');
     const reportJobsDeleteAll = document.querySelector('[data-report-jobs-delete-all]');
     const chartJobsBody = document.querySelector('[data-report-chart-jobs-body]');
@@ -631,7 +638,12 @@
         row.hidden = !matchesReportingFilters({tech: row.dataset.jobTech, type: row.dataset.jobKind, template: row.dataset.jobTemplate, scope: normaliseReportingScope(row.dataset.jobScope)});
       });
       const visibleRows = rows.filter((row) => !row.hidden);
-      if (jobsCount) jobsCount.textContent = `${visibleRows.length} ${visibleRows.length === 1 ? 'job' : 'jobs'}`;
+      if (jobsCount) jobsCount.textContent = `Total Jobs: ${visibleRows.length}`;
+      const totalReports = rows.filter((row) => row.dataset.jobKind === 'report').length;
+      const totalChartSets = rows.filter((row) => row.dataset.jobKind === 'charts').length;
+      totalReportsBadges.forEach((badge) => { badge.textContent = `Total Reports: ${totalReports}`; });
+      totalChartSetsBadges.forEach((badge) => { badge.textContent = `Total Chart Sets: ${totalChartSets}`; });
+      totalJobsBadges.forEach((badge) => { badge.textContent = `Total Jobs: ${rows.length}`; });
       if (jobsEmpty) jobsEmpty.hidden = visibleRows.length > 0;
       jobsBody.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {
         bubbles: true, detail: {reset: resetMobilePage},

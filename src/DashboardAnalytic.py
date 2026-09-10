@@ -4728,12 +4728,14 @@ def documents_view(request: Request, doc_name: str, user: SessionUser = Depends(
     if normalized not in {'readme', 'changelog', 'help'}:
         raise HTTPException(status_code=404, detail='Document not found')
     pretty_title = {'readme': 'README.md', 'changelog': 'CHANGELOG.md', 'help': 'Help'}[normalized]
+    back_label = {'readme': 'Readme', 'changelog': 'Changelog', 'help': 'Documentation'}[normalized]
     return render_template(
         request,
         'doc_view.html',
         {
             'user': user,
             'doc_name': pretty_title,
+            'back_label': back_label,
             'doc_api_url': f'/api/documents/{normalized}',
             'help_navigation': normalized == 'help',
         },
@@ -4752,6 +4754,7 @@ def help_document_view(request: Request, doc_file: str, user: SessionUser = Depe
                 doc_file,
                 help_document_label(doc_file),
             ),
+            'back_label': 'Documentation',
             'doc_api_url': f'/api/documents/help/{doc_file}',
             'help_navigation': True,
         },
@@ -6699,6 +6702,7 @@ def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HT
         'report_catalogues': {technology: report_catalogue_options(technology) for technology in TEMPLATE_NAMES},
         'report_jobs': report_jobs, 'report_chart_report_sets': report_chart_report_sets,
         'report_chart_jobs': [serialize_report_chart_job(row) for row in chart_job_rows],
+        'total_reports': len(report_job_rows), 'total_chart_sets': len(chart_job_rows),
         'report_chart_sets': report_chart_sets,
         'report_charts': default_report_charts,
         'calculated_dimensions': calculated_dimensions_json(load_workspace_calculated_dimensions()),

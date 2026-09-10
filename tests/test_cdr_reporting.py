@@ -1581,6 +1581,8 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
 
     assert page.status_code == 200
     assert 'NetCheck CDR Reports' in page.text
+    assert 'Total Reports: 0' in page.text
+    assert 'Total Chart Sets: 0' in page.text
     assert 'Smart Orchestrator Logs Reports' in page.text
     assert 'data-reporting-module' in page.text
     assert 'data-reporting-module-panel="cdr"' in page.text
