@@ -84,7 +84,12 @@
                 </td>{% endif %}
                 <td data-label="Actions">
                   <div class="workspace-row-actions">
-                    <button type="submit" form="workspace-save-{{ item.id }}" class="workspace-action-save icon-action" aria-label="Save workspace" title="Save workspace" {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>✓</button>
+                    <button type="submit" form="workspace-save-{{ item.id }}" class="workspace-action-save icon-action" aria-label="Save workspace changes" title="Save workspace changes" {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>✓</button>
+                    <form method="post" action="/workspace/select">
+                      <input type="hidden" name="workspace_id" value="{{ item.id }}">
+                      <input type="hidden" name="return_to" value="/workspace">
+                      <button type="submit" class="workspace-action-open icon-action" data-workspace-row-open aria-label="Open workspace" title="Open workspace" {% if not workspace_access.get(item.id, false) or (active_workspace and item.id == active_workspace.id) %}disabled{% endif %}>↗</button>
+                    </form>
                     <form method="post" action="/workspace/duplicate" data-workspace-duplicate-form data-workspace-name="{{ item.name }}">
                       <input type="hidden" name="workspace_id" value="{{ item.id }}">
                       <button type="submit" class="workspace-action-duplicate icon-action" aria-label="Duplicate workspace" title="Duplicate workspace" {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>⧉</button>

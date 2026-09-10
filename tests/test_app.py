@@ -1489,6 +1489,8 @@ def test_workspace_management_save_updates_name_and_user_access(client) -> None:
     assert '<th>Size</th>' in workspace_page.text
     assert 'Save access' not in workspace_page.text
     assert 'class="workspace-action-save icon-action"' in workspace_page.text
+    assert 'title="Save workspace changes"' in workspace_page.text
+    assert 'data-workspace-row-open' in workspace_page.text
     users_page = client.get('/admin')
     demo_row = users_page.text.split(f'aria-label="Filter workspaces for {demo["username"]}"', 1)[1].split('</details>', 1)[0]
     assert f'value="{germany.id}"' in demo_row
