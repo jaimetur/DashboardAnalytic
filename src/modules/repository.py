@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS workspace_state (
 
 
 
-CREATE TABLE IF NOT EXISTS calculated_dimensions (
+CREATE TABLE IF NOT EXISTS autocalculated_fields (
     name TEXT PRIMARY KEY COLLATE NOCASE,
     definition_json TEXT NOT NULL,
     position INTEGER NOT NULL DEFAULT 0,
@@ -253,9 +253,29 @@ class Repository:
                     removed.append(table_name)
         return removed
 
+    @staticmethod
+    def _migrate_calculated_dimensions_table(conn: sqlite3.Connection) -> None:
+        """Rename the former table without losing existing field definitions."""
+        tables = {
+            str(row[0]) for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('calculated_dimensions', 'autocalculated_fields')"
+            )
+        }
+        if 'calculated_dimensions' not in tables:
+            return
+        if 'autocalculated_fields' not in tables:
+            conn.execute('ALTER TABLE calculated_dimensions RENAME TO autocalculated_fields')
+            return
+        conn.execute(
+            """INSERT OR REPLACE INTO autocalculated_fields (name, definition_json, position, updated_at)
+               SELECT name, definition_json, position, updated_at FROM calculated_dimensions"""
+        )
+        conn.execute('DROP TABLE calculated_dimensions')
+
     def initialize(self) -> None:
         self.remove_legacy_global_tables()
         with self.connection() as conn:
+            self._migrate_calculated_dimensions_table(conn)
             conn.executescript(SCHEMA)
             self._ensure_report_template_columns(conn)
             self._ensure_dataset_profile_columns(conn)
@@ -1156,16 +1176,16 @@ class Repository:
     def list_calculated_dimensions(self) -> list[dict[str, Any]]:
         with self.connection() as conn:
             rows = conn.execute(
-                'SELECT name, definition_json, position, updated_at FROM calculated_dimensions ORDER BY position, name COLLATE NOCASE'
+                'SELECT name, definition_json, position, updated_at FROM autocalculated_fields ORDER BY position, name COLLATE NOCASE'
             ).fetchall()
         return [json.loads(str(row['definition_json'])) for row in rows]
 
     def replace_calculated_dimensions(self, definitions: list[dict[str, Any]]) -> None:
         timestamp = local_now_iso()
         with self.connection() as conn:
-            conn.execute('DELETE FROM calculated_dimensions')
+            conn.execute('DELETE FROM autocalculated_fields')
             conn.executemany(
-                'INSERT INTO calculated_dimensions (name, definition_json, position, updated_at) VALUES (?, ?, ?, ?)',
+                'INSERT INTO autocalculated_fields (name, definition_json, position, updated_at) VALUES (?, ?, ?, ?)',
                 [
                     (str(item['name']), json.dumps(item, ensure_ascii=False), position, timestamp)
                     for position, item in enumerate(definitions)

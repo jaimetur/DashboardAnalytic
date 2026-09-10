@@ -2941,8 +2941,16 @@ def create_recurring_database_backup(config: dict[str, Any]) -> Path:
         and (allowed_workspace_ids is None or workspace.id in allowed_workspace_ids)
     ]
     with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
-        manifest = {'created_at': datetime.now().astimezone().isoformat(timespec='seconds'), 'workspaces': []}
         components = set(config['components'])
+        full_workspace_components = sorted({
+            str(item) for item in config.get('full_workspace_components', []) if str(item) in {'input', 'output'}
+        })
+        manifest = {
+            'format': 'database-backup', 'version': 1,
+            'created_at': datetime.now().astimezone().isoformat(timespec='seconds'),
+            'components': sorted(components), 'full_workspace_components': full_workspace_components,
+            'workspaces': [],
+        }
         if 'database' in components:
             _archive_database(archive, repository.global_db_path, 'application/application.db', backup_root)
         for workspace in workspaces:
@@ -2966,7 +2974,6 @@ def create_recurring_database_backup(config: dict[str, Any]) -> Path:
                     f'{archive_workspace_root}/auto-calculated-fields.json',
                     json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
                 )
-                full_workspace_components = set(config.get('full_workspace_components') or [])
                 _archive_workspace(
                     archive, workspace, f'{archive_workspace_root}/full-workspace', backup_root,
                     include_input_files='input' in full_workspace_components,
@@ -3088,11 +3095,22 @@ def _backup_archive_components(archive_path: Path) -> list[str]:
     try:
         with zipfile.ZipFile(archive_path) as archive:
             names = [member.filename for member in archive.infolist() if not member.is_dir()]
+            try:
+                manifest = json.loads(archive.read('manifest.json').decode('utf-8'))
+            except (KeyError, UnicodeDecodeError, json.JSONDecodeError):
+                manifest = {}
     except zipfile.BadZipFile as exc:
         raise ValueError('The selected backup is not a valid ZIP archive.') from exc
+    supported = ('database', 'full_workspaces', 'slides_templates', 'auto_calculated_fields')
+    if isinstance(manifest, dict) and manifest.get('format') == 'database-backup':
+        declared = [str(item) for item in manifest.get('components', []) if str(item) in supported]
+        if declared:
+            return declared
     components: list[str] = []
     if 'application/application.db' in names:
         components.append('database')
+    if any(name.startswith('workspaces/') and '/full-workspace/database.sqlite' in name for name in names):
+        components.append('full_workspaces')
     if any(name.startswith('workspaces/') and '/slides-templates/' in name for name in names):
         components.append('slides_templates')
     if any(name.startswith('workspaces/') and name.endswith('/auto-calculated-fields.json') for name in names):
@@ -3138,6 +3156,18 @@ def restore_database_backup(archive_path: Path, components: Iterable[str]) -> No
                 shutil.copyfileobj(source, target)
             repository.replace_global_database_snapshot(payload)
             repository.initialize()
+        if 'full_workspaces' in selected:
+            available_by_name = {workspace.name: workspace for workspace in workspace_registry.list()}
+            for workspace_name in _backup_archive_workspaces(archive_path):
+                if workspace_name not in available_by_name:
+                    continue
+                archive_prefix = f'workspaces/{workspace_name}/full-workspace'
+                _safe_extract_archive_prefix(archive, staging, archive_prefix)
+                import_workspace_archive(
+                    staging / archive_prefix,
+                    {'name': workspace_name},
+                    replace_existing=True,
+                )
         workspaces_by_name = {workspace.name: workspace for workspace in workspace_registry.list()}
         for workspace_name, workspace in workspaces_by_name.items():
             prefix = f'workspaces/{workspace_name}/'
@@ -4732,6 +4762,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
     friendly_tables = {
         WORKSPACE_REGISTRY_TABLE: 'Workspace registry',
         'application_state': 'Application state',
+        'autocalculated_fields': 'Auto-calculated Fields',
         'audit_logs': 'Audit log',
         'dataset_profiles': 'Dataset profiles',
         'datasets': 'Datasets',
@@ -8828,6 +8859,8 @@ def save_recurring_backup_settings(
     if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', execution_time):
         raise HTTPException(status_code=400, detail='Choose a valid backup execution time.')
     selected_components = [item for item in components if item in {'database', 'slides_templates', 'auto_calculated_fields', 'full_workspaces'}]
+    if 'full_workspaces' in selected_components:
+        selected_components = [item for item in selected_components if item not in {'slides_templates', 'auto_calculated_fields'}]
     allowed_workspace_ids = {workspace.id for workspace in accessible_workspaces(user)}
     selected_workspace_ids = list(dict.fromkeys(item for item in workspace_ids if item in allowed_workspace_ids))
     selected_full_workspace_components = [item for item in full_workspace_components if item in {'input', 'output'}]
@@ -8871,6 +8904,8 @@ def run_manual_database_backup(
 ) -> Response:
     """Queue an immediate backup using the current form selection and path."""
     selected_components = [item for item in components if item in {'database', 'slides_templates', 'auto_calculated_fields', 'full_workspaces'}]
+    if 'full_workspaces' in selected_components:
+        selected_components = [item for item in selected_components if item not in {'slides_templates', 'auto_calculated_fields'}]
     allowed_workspace_ids = {workspace.id for workspace in accessible_workspaces(user)}
     selected_workspace_ids = list(dict.fromkeys(item for item in workspace_ids if item in allowed_workspace_ids))
     selected_full_workspace_components = [item for item in full_workspace_components if item in {'input', 'output'}]
@@ -8935,7 +8970,9 @@ def run_manual_database_restore(
     user: SessionUser = Depends(admin_user),
 ) -> Response:
     archive_path = _backup_archive_file(backup_path, backup_file)
-    selected = [item for item in components if item in {'database', 'slides_templates', 'auto_calculated_fields'}]
+    selected = [item for item in components if item in {'database', 'full_workspaces', 'slides_templates', 'auto_calculated_fields'}]
+    if 'full_workspaces' in selected:
+        selected = [item for item in selected if item not in {'slides_templates', 'auto_calculated_fields'}]
     present = _backup_archive_components(archive_path)
     if not selected or not set(selected) <= set(present):
         raise HTTPException(status_code=400, detail='Select only components contained in the backup.')

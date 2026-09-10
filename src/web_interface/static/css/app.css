@@ -292,6 +292,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .database-backup-restore-workspaces > div { display: flex; flex-wrap: wrap; gap: 0.45rem; }
 .database-backup-restore-selection .restore-component-options { display: grid; gap: 0.45rem; }
 .database-backup-restore-selection .confirm-option { padding: 0.55rem 0.65rem; border: 1px solid rgba(139, 29, 36, 0.16); border-radius: 9px; background: #fff; }
+.database-backup-restore-selection .confirm-option.is-disabled { opacity: 0.52; cursor: not-allowed; }
 .database-backup-restore-dialog [data-backup-restore-cancel] { background: #e7ecef; border-color: #b7c2c9; color: #3e5562; box-shadow: none; }
 @media (max-width: 760px) { .database-backup-immediate-grid { grid-template-columns: 1fr; } }
 .database-editor-subpanel h3 { margin: 0.1rem 0 0; color: #7d2731; }
@@ -313,6 +314,13 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .database-backup-workspaces .multiselect-trigger-label { color: #7d2731; }
 .database-backup-workspaces .multiselect-trigger:hover:not(:disabled), .database-backup-workspaces .multiselect-trigger:focus-visible { border-color: rgba(110, 24, 36, 0.66); background: linear-gradient(135deg, #f9dfdf, #f2cccc); color: #5c1721; box-shadow: 0 0 0 3px rgba(139, 29, 36, 0.13); }
 .database-backup-workspaces .multiselect-trigger:hover .multiselect-trigger-label, .database-backup-workspaces .multiselect-trigger:focus-visible .multiselect-trigger-label { color: #5c1721; }
+.database-backup-full-content { display: grid; gap: 0.35rem; width: min(100%, 620px); color: #8b2429; font-size: 0.85rem; font-weight: 700; }
+.database-backup-full-content[hidden] { display: none !important; }
+.database-backup-full-content .multiselect-shell { width: min(100%, 620px); }
+.database-backup-full-content .multiselect-trigger { border-color: rgba(139, 29, 36, 0.30); background: linear-gradient(135deg, #fffafa, #fff0ef); color: #7d2731; box-shadow: none; }
+.database-backup-full-content .multiselect-trigger-label { color: #7d2731; }
+.database-backup-full-content .multiselect-trigger:hover:not(:disabled), .database-backup-full-content .multiselect-trigger:focus-visible { border-color: rgba(110, 24, 36, 0.66); background: linear-gradient(135deg, #f9dfdf, #f2cccc); color: #5c1721; box-shadow: 0 0 0 3px rgba(139, 29, 36, 0.13); }
+.database-backup-full-content .multiselect-trigger:hover .multiselect-trigger-label, .database-backup-full-content .multiselect-trigger:focus-visible .multiselect-trigger-label { color: #5c1721; }
 .database-backup-schedule { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; }
 .database-backup-schedule label { display: grid; gap: 0.3rem; color: #8b2429; font-size: 0.85rem; font-weight: 700; }
 .database-backup-schedule label[hidden] { display: none !important; }
