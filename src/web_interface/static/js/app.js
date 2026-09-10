@@ -247,7 +247,7 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
     const restoreManagerActions = () => { managerActions.hidden = false; managerActions.append(add, panelClose); };
     const edit = (index = null) => {
       const current = index === null ? {name: '', sources: ['cdr-data'], default: '', default_from: '', rules: []} : dimensions[index];
-      form.replaceChildren(); form.hidden = false; managerActions.hidden = true;
+      form.replaceChildren(); form.hidden = false; list.hidden = true; managerActions.hidden = true;
       const inputField = (caption, value = '') => {
         const label = document.createElement('label'); label.textContent = caption;
         const input = document.createElement('input'); input.value = value; label.append(input); form.append(label); return input;
@@ -288,7 +288,7 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
             ? `Renaming '${rename.from}' to '${rename.to}' will rebuild every applicable CDR table and update every Slides Template that uses this field. Continue?`
             : 'Saving will rebuild this auto-calculated field in every applicable CDR table. Continue?';
           if (!await showConfirmDialog(message, {title: 'Save and Materialize', confirmLabel: 'Save and Materialize', tone: 'warning'})) return;
-          save.disabled = true; await saveDimensions(next, rename); form.hidden = true; restoreManagerActions(); render();
+          save.disabled = true; await saveDimensions(next, rename); form.hidden = true; list.hidden = false; restoreManagerActions(); render();
         } catch (error) { save.disabled = false; showInfoDialog(error.message || 'Unable to save auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'}); }
       });
       name.focus();
@@ -326,13 +326,34 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
           let copyName = `${dimension.name} Copy`; let suffix = 2;
           while (names.has(copyName.toLocaleLowerCase())) copyName = `${dimension.name} Copy ${suffix++}`;
           const copy = JSON.parse(JSON.stringify({...dimension, name: copyName}));
-          try { duplicate.disabled = true; await saveDimensions([...dimensions.slice(0, index + 1), copy, ...dimensions.slice(index + 1)]); render(); }
-          catch (error) { duplicate.disabled = false; showInfoDialog(error.message || 'Unable to duplicate auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'}); }
+          const previous = dimensions;
+          dimensions = [...dimensions.slice(0, index + 1), copy, ...dimensions.slice(index + 1)];
+          render();
+          try { await saveDimensions(dimensions); render(); }
+          catch (error) {
+            dimensions = previous;
+            render();
+            showInfoDialog(error.message || 'Unable to duplicate auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'});
+          }
         });
         remove.addEventListener('click', async () => {
           if (!await showConfirmDialog(`Delete auto-calculated field '${dimension.name}' and remove its materialized columns?`, {title: 'Delete Auto-calculated Field', confirmLabel: 'Delete', tone: 'danger'})) return;
-          try { remove.disabled = true; await saveDimensions(dimensions.filter((_item, itemIndex) => itemIndex !== index)); window.location.reload(); }
-          catch (error) { remove.disabled = false; showInfoDialog(error.message || 'Unable to delete auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'}); }
+          const previous = dimensions;
+          const deletedName = String(dimension.name || '').toLocaleLowerCase();
+          dimensions = dimensions.filter((_item, itemIndex) => itemIndex !== index);
+          render();
+          try {
+            await saveDimensions(dimensions);
+            // Keep this manager consistent with the deletion just accepted,
+            // even if a delayed response contains an older list snapshot.
+            dimensions = dimensions.filter((item) => String(item.name || '').toLocaleLowerCase() !== deletedName);
+            render();
+          }
+          catch (error) {
+            dimensions = previous;
+            render();
+            showInfoDialog(error.message || 'Unable to delete auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'});
+          }
         });
         actions.append(editButton, duplicate, exportLink, remove); item.append(identity, summary, actions); list.append(item);
       });
@@ -863,6 +884,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const chartPreviewDataOverlay = editor.querySelector('[data-catalogue-chart-preview-data-overlay]');
   const chartPreviewDataPanel = editor.querySelector('[data-catalogue-chart-preview-data-panel]');
   const chartPreviewUpdate = editor.querySelector('[data-catalogue-chart-preview-update]');
+  const chartPreviewActionClose = editor.querySelector('[data-catalogue-chart-preview-action-close]');
   let chartPreviewImageUrl = '';
   let chartPreviewRow = null;
   let chartPreviewTimer = null;
@@ -951,7 +973,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const editDimension = (index = null) => {
       editingIndex = index;
       const current = index === null ? {name: '', sources: ['cdr-data'], default: '', default_from: '', rules: []} : calculatedDimensions[index];
-      form.replaceChildren(); form.hidden = false; managerActions.hidden = true;
+      form.replaceChildren(); form.hidden = false; list.hidden = true; managerActions.hidden = true;
       const field = (labelText, value = '') => {
         const label = document.createElement('label'); label.textContent = labelText;
         const input = document.createElement('input'); input.type = 'text'; input.value = value; label.append(input); form.append(label); return input;
@@ -1000,7 +1022,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
             ? `Renaming '${rename.from}' to '${rename.to}' will rebuild every applicable CDR table and update every Slides Template that uses this field. Continue?`
             : 'Saving will rebuild this auto-calculated field in every applicable CDR table. Continue?';
           if (!await showConfirmDialog(message, {title: 'Save and Materialize', confirmLabel: 'Save and Materialize', tone: 'warning'})) return;
-          calculatedDimensions = next; await saveCalculatedDimensions(rename); form.hidden = true; restoreManagerActions(); renderList();
+          calculatedDimensions = next; await saveCalculatedDimensions(rename); form.hidden = true; list.hidden = false; restoreManagerActions(); renderList();
         } catch (error) {
           calculatedDimensions = previous;
           showInfoDialog(error.message || 'Unable to save auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'});
@@ -1052,9 +1074,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
           const copy = JSON.parse(JSON.stringify({...dimension, name: copyName}));
           try {
             calculatedDimensions = [...calculatedDimensions.slice(0, index + 1), copy, ...calculatedDimensions.slice(index + 1)];
-            await saveCalculatedDimensions(); renderList();
+            renderList();
+            await saveCalculatedDimensions();
+            renderList();
           } catch (error) {
             calculatedDimensions = previous;
+            renderList();
             showInfoDialog(error.message || 'Unable to duplicate auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'});
           }
         });
@@ -1062,11 +1087,20 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         remove.addEventListener('click', async () => {
           if (!await showConfirmDialog(`Delete auto-calculated field '${dimension.name}'?`, {title: 'Delete Auto-calculated Field', confirmLabel: 'Delete', tone: 'danger'})) return;
           const previous = calculatedDimensions;
+          const deletedName = String(dimension.name || '').toLocaleLowerCase();
           try {
             calculatedDimensions = calculatedDimensions.filter((_item, itemIndex) => itemIndex !== index);
-            await saveCalculatedDimensions(); form.hidden = true; renderList();
+            form.hidden = true;
+            renderList();
+            await saveCalculatedDimensions();
+            // The save endpoint is asynchronous with materialization. Retain
+            // the confirmed deletion when its response was built from a stale
+            // manager snapshot.
+            calculatedDimensions = calculatedDimensions.filter((item) => String(item.name || '').toLocaleLowerCase() !== deletedName);
+            renderList();
           } catch (error) {
             calculatedDimensions = previous;
+            renderList();
             showInfoDialog(error.message || 'Unable to delete auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'});
           }
         });
@@ -1680,6 +1714,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   };
   const closeChartPreview = () => { if (chartPreview) chartPreview.hidden = true; };
   chartPreviewClose?.addEventListener('click', closeChartPreview);
+  chartPreviewActionClose?.addEventListener('click', closeChartPreview);
   chartPreview?.addEventListener('click', (event) => { if (event.target === chartPreview) closeChartPreview(); });
   const previewChartData = async (row, definition = {}) => {
     const endpoint = editor.dataset.chartPreviewUrl;
@@ -1786,8 +1821,14 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       if (button) button.disabled = false;
     }
   };
-  chartPreviewUpdate?.addEventListener('click', () => {
+  chartPreviewUpdate?.addEventListener('click', async () => {
     if (!chartPreviewRow) return;
+    const chartName = rowValue(chartPreviewRow, 'Chart Tittle') || rowValue(chartPreviewRow, 'Slide Tittle') || 'the displayed chart';
+    const accepted = await showConfirmDialog(
+      `Warning: the template row for '${chartName}' will be updated with the values configured in the Interactive Preview panel. Continue?`,
+      {title: 'Update Template?', confirmLabel: 'Update Template', tone: 'warning'},
+    );
+    if (!accepted) return;
     const mapping = {chart_title: 'Chart Tittle', chart_type: 'Chart type', cdr_source: 'CDR source', kpi: 'KPI', filters: 'Filters', grouping_rows: 'Rows Aggregation', grouping_columns: 'Column Aggregation', legend: 'Legend', legend_position: 'Legend Position'};
     Object.entries(previewDefinition()).forEach(([key, value]) => {
       const cell = Array.from(chartPreviewRow.querySelectorAll('[data-catalogue-field]')).find((item) => item.dataset.catalogueField === mapping[key]);
@@ -3434,14 +3475,23 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
         const selectedColumn = matchingPreviewValue(condition.column, filterColumns);
         filterColumns.forEach((value) => column.add(new Option(value, value, false, value === selectedColumn)));
         const operator = document.createElement('select'); operator.dataset.reportChartFilterSelect = ''; operator.setAttribute('aria-label', 'Filter operator'); ['=', '!=', 'CONTAINS', 'NOT CONTAINS', 'IN', 'NOT IN', '>=', '<=', '>', '<'].forEach((value) => operator.add(new Option(value, value, false, value === condition.operator)));
-        const value = document.createElement('input'); value.type = 'text'; value.dataset.reportChartFilterValue = ''; value.placeholder = 'Value'; value.value = condition.value || '';
+        const value = document.createElement('input'); value.type = 'text'; value.dataset.reportChartFilterValue = ''; value.placeholder = 'Value';
+        // Preserve both the attribute and live property. Some browsers reset
+        // the live value while the nearby custom select controls are mounted.
+        const filterValue = String(condition.value ?? '');
+        value.defaultValue = filterValue; value.value = filterValue; value.setAttribute('value', filterValue);
         const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '−'; remove.title = 'Remove condition'; remove.addEventListener('click', () => { row.remove(); sync(); });
         [column, operator, value].forEach((input) => { input.addEventListener('input', sync); input.addEventListener('change', sync); }); row.append(column, operator, value, remove); conditions.append(row); setupSelects(row);
+        value.value = filterValue;
       };
       const parsed = String(definition.filters || '').split(';').map((item) => item.trim()).filter(Boolean).map((item) => { const match = item.match(/^(.+?)\s+(NOT\s+CONTAINS|NOT\s+IN|CONTAINS|IN|>=|<=|!=|=|>|<)\s+(.+)$/i); return match ? {column: match[1].trim(), operator: match[2].toUpperCase(), value: match[3].trim()} : {}; });
       (parsed.length ? parsed : [{}]).forEach(addCondition);
       const add = document.createElement('button'); add.type = 'button'; add.className = 'report-chart-filter-add'; add.textContent = '+ Add condition'; add.addEventListener('click', () => addCondition());
-      builder.append(conditions, add); field.append(hidden, builder, parsedField); sync(); return field;
+      builder.append(conditions, add); field.append(hidden, builder, parsedField);
+      // The initial definition is authoritative. Do not derive it from the
+      // just-created controls before their custom select widgets have settled.
+      hidden.value = String(definition.filters || ''); parsedField.value = hidden.value;
+      return field;
     }
     const control = document.createElement('select');
     if (key === 'chart_type') (options.chartTypes || []).forEach((value) => control.add(new Option(value, value, false, normalisePreviewValue(value) === normalisePreviewValue(definition[key]))));

@@ -15,6 +15,9 @@
 - Fixed the Reporting Chart Preview header so Manage Auto-calculated Fields appears beside its red Close control; Escape now leaves active Auto-calculated Fields and filtered-dataset child dialogs open, closing the preview only when no child dialog is active.
 - Matched the Auto-calculated Fields dialog's circular close control to the Chart Preview close button and styled its text Close control in red with white text; each field deletion control uses a thick white minus on muted burgundy.
 - Made Slides Templates Editor chart image and data previews load the chosen CDR type from its materialized combined reporting table instead of concatenating every individual CDR table.
+- Fixed Slides Templates Editor Chart Preview so every template filter value is displayed and retained in its Filter builder.
+- Added a non-applying Close action beside the red Update Template button in Slides Templates Editor Chart Preview; updating now requires confirmation that the displayed chart's template row will receive the Interactive Preview values.
+- Fixed Auto-calculated Fields managers so deleted and duplicated fields update the displayed list immediately, before background materialization; their compact dialog keeps its header, close control and bottom actions fixed while only long field-card lists scroll.
 
 #### 📚 Documentation:
 
