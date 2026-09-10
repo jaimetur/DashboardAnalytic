@@ -1851,6 +1851,7 @@ def process_dataset(
     vodafone_mapping_dataset_id: int | None = None,
     three_mapping_dataset_id: int | None = None,
     task_repository: Repository | None = None,
+    workspace: Workspace | None = None,
 ) -> None:
     task_repository = task_repository or repository
     # FastAPI background tasks can be submitted from separate requests at the
@@ -1889,6 +1890,7 @@ def process_dataset(
                 vodafone_mapping_dataset_id=vodafone_mapping_dataset_id,
                 three_mapping_dataset_id=three_mapping_dataset_id,
                 task_repository=task_repository,
+                update_combined_reporting=False,
             )
             task_repository.add_log(username, 'process_dataset', json.dumps({
                 'dataset_id': dataset_id,
@@ -1902,6 +1904,12 @@ def process_dataset(
                     'dataset_id': dataset_id,
                     'error': rebuild_result['vendor_mapping_error'],
                 }))
+            dataset_kind = str(rebuild_result.get('dataset_kind') or '').casefold()
+            if workspace and dataset_kind in CDR_DATASET_KINDS:
+                # The dataset has already reached Ready/100% at this point.
+                # Rebuild its shared combined CDR afterwards as its own
+                # visible job instead of extending the ingestion progress.
+                start_combined_cdr_recreation_job(workspace, dataset_kind, username, background=True)
         except ProcessingStopped as exc:
             progress = int((task_repository.get_dataset(dataset_id) or {}).get('progress') or 0)
             task_repository.update_dataset_profile(
@@ -1942,6 +1950,10 @@ def enqueue_dataset_processing(
     # BackgroundTasks runs after the response is sent. Capture the workspace
     # database now, rather than resolving the mutable active workspace later.
     task_repository = Repository(Path(repository.db_path))
+    task_workspace = next(
+        (workspace for workspace in workspace_registry.list() if workspace.database_path == task_repository.db_path),
+        None,
+    )
     background_tasks.add_task(
         process_dataset,
         dataset_id,
@@ -1950,6 +1962,7 @@ def enqueue_dataset_processing(
         vodafone_mapping_dataset_id,
         three_mapping_dataset_id,
         task_repository,
+        task_workspace,
     )
 
 
@@ -1961,6 +1974,7 @@ def rebuild_dataset_artifacts(
     vodafone_mapping_dataset_id: int | None = None,
     three_mapping_dataset_id: int | None = None,
     task_repository: Repository | None = None,
+    update_combined_reporting: bool = True,
 ) -> dict[str, Any]:
     task_repository = task_repository or repository
     workspace_dimensions = load_repository_calculated_dimensions(task_repository)
@@ -2000,7 +2014,7 @@ def rebuild_dataset_artifacts(
         df = materialize_cdr_derived_columns(df, dataset_kind, workspace_dimensions)
     store_cached_dataset_frame(dataset_path, df)
     task_repository.replace_dataset_rows(dataset_id, df)
-    if dataset_kind in CDR_DATASET_KINDS:
+    if dataset_kind in CDR_DATASET_KINDS and update_combined_reporting:
         task_repository.replace_reporting_rows(dataset_id, dataset_kind, df)
         task_repository.copy_dataset_rows_to_reporting(
             dataset_id, dataset_kind,
@@ -2057,6 +2071,7 @@ def rebuild_dataset_artifacts(
         'analysis': analysis,
         'filter_options': filter_options,
         'vendor_mapping_error': auto_vendor_mapping_error,
+        'dataset_kind': dataset_kind,
     }
 
 

@@ -16,6 +16,7 @@
 - Added a blue Open workspace action with the 📂 folder icon immediately after Save in Manage Workspaces, and clarified the Save tooltip as `Save workspace changes`.
 - Workspace duplication completion now updates its row in place without reloading the page, preserving the open state of Manage Workspaces.
 - Workspace deletion now runs in the background, appears in the lower-left task panel and removes only its table row on completion without reloading or collapsing Manage Workspaces.
+- Split CDR ingestion from combined-table regeneration: a dataset now reaches `Ready` at 100% and refreshes the Datasets table before its combined CDR is rebuilt as a separately tracked background task with its own progress in the global task panel.
 
 #### 🐛 Bug fixes:
 - Fixed the Reporting Chart Preview header so Manage Auto-calculated Fields appears beside its red Close control; Escape now leaves active Auto-calculated Fields and filtered-dataset child dialogs open, closing the preview only when no child dialog is active.

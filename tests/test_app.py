@@ -1779,6 +1779,32 @@ def test_queued_import_continues_after_its_workspace_is_closed(client) -> None:
     assert completed['status'] == 'ready'
 
 
+def test_cdr_import_finishes_before_its_combined_table_recreation(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    source_path = app_module.settings.input_dir / 'separate-combined-recreation.csv'
+    source_path.write_bytes(b'market,period,score\nES,2026-Q1,91\n')
+    dataset_id, _ = app_module.repository.add_dataset(source_path.name, str(source_path), 'admin')
+    app_module.repository.update_dataset_profile(dataset_id, dataset_kind='data')
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    calls = []
+
+    def capture_combined_recreation(job_workspace, kind, username, *, background=True):
+        dataset = app_module.Repository(job_workspace.database_path).get_dataset(dataset_id)
+        calls.append((kind, username, background, dataset['status'], dataset['progress']))
+        return {}
+
+    monkeypatch.setattr(app_module, 'start_combined_cdr_recreation_job', capture_combined_recreation)
+
+    app_module.process_dataset(
+        dataset_id, source_path, 'admin', task_repository=app_module.repository, workspace=workspace,
+    )
+
+    assert calls == [('data', 'admin', True, 'ready', 100)]
+
+
 def test_workspace_import_replaces_an_open_workspace_and_removes_old_files(client, tmp_path: Path) -> None:
     import src.DashboardAnalytic as app_module
 
