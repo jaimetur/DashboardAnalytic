@@ -853,7 +853,8 @@
           const row = status.closest('.workspace-library-row');
           row?.classList.remove('workspace-no-access-row');
           row?.querySelectorAll('input:not([type="hidden"]), button').forEach((control) => {
-            control.disabled = false;
+            const isActiveWorkspace = row?.classList.contains('active-workspace-row');
+            control.disabled = isActiveWorkspace && control.matches('[data-workspace-row-open], .workspace-action-remove');
           });
         }
       });

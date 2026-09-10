@@ -21,6 +21,8 @@
 - Increased the contrast of Collapse and Expand badges on white panels with a neutral grey background, border and text.
 - Added confirmed `Stop Job` controls to the global background-task cards for accessible-workspace duplication, dataset processing, Report and Chart Set generation, Auto-calculated Field materialization, combined CDR recreation and single-workspace exports/imports. Stopped duplications clean partial files and registry/access rows, stopped materializations retain a red status, stopped exports remove temporary files, and an import cannot be stopped once it has started.
 - Replaced the stop glyph with a centered 0.56rem white square inside the circular `Stop Job` control, preserving the button dimensions and making its size consistent across browsers.
+- Moved bulk deletion of all Reports and all Chart Sets into workspace background tasks with live progress in the global task panels; Reporting remains available and refreshes its job tables when each deletion completes.
+- Kept the Open and Remove workspace actions disabled for the active workspace after its row is refreshed following background duplication.
 
 #### 🐛 Bug fixes:
 - Fixed the Reporting Chart Preview header so Manage Auto-calculated Fields appears beside its red Close control; Escape now leaves active Auto-calculated Fields and filtered-dataset child dialogs open, closing the preview only when no child dialog is active.

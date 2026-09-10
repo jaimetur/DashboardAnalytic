@@ -1978,9 +1978,17 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     orphaned_directory.mkdir(parents=True)
     (orphaned_directory / 'partial.png').write_bytes(b'partial')
     cleared = client.post('/reporting/chart-sets/delete-all')
-    assert cleared.status_code == 200
-    assert cleared.json()['chart_sets'] == []
-    assert cleared.json()['deleted_jobs'] == 2
+    assert cleared.status_code == 202
+    deletion_id = cleared.json()['job_id']
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        deletion = client.get(f'/api/reporting/bulk-deletions/{deletion_id}')
+        assert deletion.status_code == 200
+        if deletion.json()['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.01)
+    assert deletion.json()['status'] == 'ready'
+    assert deletion.json()['total'] == 2
     assert app_module.repository.get_report_chart_job(orphaned_job) is None
     assert app_module.repository.list_report_chart_jobs(limit=None) == []
     assert list(app_module.report_charts_directory().iterdir()) == []

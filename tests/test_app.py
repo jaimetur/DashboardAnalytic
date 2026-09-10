@@ -398,8 +398,12 @@ def test_reporting_deletion_requires_admin(client) -> None:
         marker.write_text('Preserve for normal users', encoding='utf-8')
         for endpoint in endpoints:
             result = client.post(endpoint)
-            expected = (200 if endpoint.endswith('delete-all') else 404) if allowed else 403
+            expected = (202 if endpoint.endswith('delete-all') else 404) if allowed else 403
             assert result.status_code == expected
+        if allowed:
+            deadline = time.monotonic() + 5
+            while marker.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
         assert marker.exists() == (not allowed)
 
 
@@ -1535,6 +1539,11 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
     assert 'Campaign benchmark' in page.text
     assert 'Manage workspaces' in page.text
     assert 'data-workspace-open disabled>Open</button>' in page.text
+    active_row = page.text.split('active-workspace-row', 1)[1].split('</tr>', 1)[0]
+    assert 'workspace-action-remove icon-action' in active_row
+    assert 'title="Remove workspace" disabled>×</button>' in active_row
+    assert "const isActiveWorkspace = row?.classList.contains('active-workspace-row');" in page.text
+    assert "control.disabled = isActiveWorkspace && control.matches('[data-workspace-row-open], .workspace-action-remove');" in page.text
     assert page.text.index('>Campaign benchmark (') < page.text.index('>Default (')
     workspace_id = app_module.active_workspace.id
     renamed = client.post('/workspace/rename', data={'workspace_id': workspace_id, 'name': 'Campaign benchmark Q3'})
@@ -1940,7 +1949,16 @@ def test_delete_all_reports_removes_orphaned_output_directories(client) -> None:
 
     response = client.post('/reporting/jobs/delete-all')
 
-    assert response.status_code == 200
+    assert response.status_code == 202
+    job_id = response.json()['job_id']
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        status_response = client.get(f'/api/reporting/bulk-deletions/{job_id}')
+        assert status_response.status_code == 200
+        if status_response.json()['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.01)
+    assert status_response.json()['status'] == 'ready'
     assert reports_root.is_dir()
     assert list(reports_root.iterdir()) == []
 

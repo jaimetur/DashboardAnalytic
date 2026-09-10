@@ -89,6 +89,8 @@ WORKSPACE_LIFECYCLE_JOBS: dict[str, dict[str, Any]] = {}
 WORKSPACE_LIFECYCLE_JOBS_LOCK = Lock()
 WORKSPACE_DUPLICATION_STOP_REQUESTS: set[str] = set()
 WORKSPACE_DUPLICATION_STOP_REQUESTS_LOCK = Lock()
+BULK_REPORT_DELETION_JOBS: dict[str, dict[str, Any]] = {}
+BULK_REPORT_DELETION_JOBS_LOCK = Lock()
 EXPORT_PACKAGE_TTL = timedelta(hours=24)
 TRANSFER_OFFER_TTL = timedelta(minutes=15)
 DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
@@ -5214,6 +5216,32 @@ def background_tasks_status(user: SessionUser = Depends(current_user)) -> JSONRe
             'stop_url': f'/api/background-tasks/{workspace_id}/stop',
         })
 
+    with BULK_REPORT_DELETION_JOBS_LOCK:
+        deletion_jobs = [dict(job) for job in BULK_REPORT_DELETION_JOBS.values()]
+    for job in deletion_jobs:
+        workspace_id = str(job.get('workspace_id') or '')
+        if (
+            workspace_id not in accessible_ids
+            or job.get('owner') != user.username
+            or job.get('status') not in {'queued', 'processing'}
+        ):
+            continue
+        total = max(0, int(job.get('total') or 0))
+        completed = max(0, int(job.get('completed') or 0))
+        progress = min(99, round(completed * 100 / total, 1)) if total else None
+        group = grouped.setdefault(workspace_id, {
+            'workspace_id': workspace_id,
+            'workspace_name': str(job.get('workspace_name') or workspace_names.get(workspace_id) or 'Workspace'),
+            'is_active': bool(active_workspace and active_workspace.id == workspace_id),
+            'tasks': [],
+        })
+        group['tasks'].append({
+            'id': f'bulk-delete:{job.get("id")}',
+            'label': 'Deleting all Reports' if job.get('kind') == 'reports' else 'Deleting all Chart Sets',
+            'detail': str(job.get('message') or 'Deleting generated outputs'),
+            'progress': progress,
+        })
+
     global_tasks = _global_background_tasks(user, accessible_ids)
     for task in global_tasks:
         workspace_id = str(task.pop('workspace_id'))
@@ -6156,19 +6184,19 @@ def _report_job_directory(file_name: str, output_dir: Path | None = None) -> Pat
     return safe_join(reports_dir, stem)
 
 
-def _delete_report_job_artifacts(row: Any) -> None:
+def _delete_report_job_artifacts(row: Any, output_dir: Path | None = None) -> None:
     """Remove a report file and its sibling rendered PNG charts."""
     file_name = Path(str(row['output_file'] or '')).name
     if file_name:
         # The job directory may still contain rendered charts or partial
         # output even when the PowerPoint itself is already missing.
-        report_dir = _report_job_directory(file_name)
+        report_dir = _report_job_directory(file_name, output_dir)
         if report_dir.is_dir():
             shutil.rmtree(report_dir)
     path = _report_job_output_path(row)
     if path is None:
         return
-    if path.parent != _report_job_directory(path.name):
+    if path.parent != _report_job_directory(path.name, output_dir):
         path.unlink(missing_ok=True)
 
 
@@ -7476,20 +7504,90 @@ def report_chart_set(generation: str, user: SessionUser = Depends(current_user))
     return JSONResponse(payload)
 
 
+def start_bulk_report_deletion(workspace: Workspace, kind: str, username: str) -> dict[str, Any]:
+    """Delete all reports or Chart Sets in a tracked workspace background job."""
+    if kind not in {'reports', 'chart_sets'}:
+        raise ValueError('Unknown bulk deletion type.')
+    job_id = uuid4().hex
+    job = {
+        'id': job_id, 'workspace_id': workspace.id, 'workspace_name': workspace.name,
+        'kind': kind, 'owner': username, 'status': 'queued', 'completed': 0, 'total': 0,
+        'message': 'Waiting to delete generated outputs', 'created_at': datetime.now(timezone.utc).timestamp(),
+    }
+    with BULK_REPORT_DELETION_JOBS_LOCK:
+        BULK_REPORT_DELETION_JOBS[job_id] = job
+
+    def run() -> None:
+        task_repository = Repository(
+            workspace.database_path, global_db_path=repository.global_db_path,
+            workspace_registry_db_path=workspace_registry.registry_path,
+        )
+        try:
+            with BULK_REPORT_DELETION_JOBS_LOCK:
+                job.update(status='processing', message='Preparing generated outputs for deletion')
+            if kind == 'reports':
+                rows = task_repository.list_report_runs(limit=None)
+                total = len(rows)
+                with BULK_REPORT_DELETION_JOBS_LOCK:
+                    job.update(total=total, message='Deleting PowerPoint reports')
+                for index, row in enumerate(rows, start=1):
+                    deleted = task_repository.delete_report_run(int(row['id']))
+                    if deleted:
+                        _delete_report_job_artifacts(deleted, workspace.output_dir)
+                    with BULK_REPORT_DELETION_JOBS_LOCK:
+                        job.update(completed=index)
+                reports_root = workspace.output_dir / 'reports'
+                if reports_root.is_dir():
+                    shutil.rmtree(reports_root)
+                reports_root.mkdir(parents=True, exist_ok=True)
+                task_repository.add_log(username, 'delete_all_report_jobs', json.dumps({'count': total}))
+            else:
+                charts_root = report_charts_directory(workspace.output_dir)
+                rows = task_repository.list_report_chart_jobs(limit=None)
+                chart_directories = list(charts_root.iterdir()) if charts_root.is_dir() else []
+                total = max(len(rows), len(chart_directories))
+                with BULK_REPORT_DELETION_JOBS_LOCK:
+                    job.update(total=total, message='Deleting Chart Sets')
+                if charts_root.is_dir():
+                    shutil.rmtree(charts_root)
+                charts_root.mkdir(parents=True, exist_ok=True)
+                for index, row in enumerate(rows, start=1):
+                    task_repository.delete_report_chart_job(int(row['id']))
+                    with BULK_REPORT_DELETION_JOBS_LOCK:
+                        job.update(completed=index)
+                task_repository.add_log(username, 'delete_all_report_chart_sets', json.dumps({'count': len(chart_directories), 'jobs': len(rows)}))
+            invalidate_workspace_size_cache(workspace.database_path.parent)
+            with BULK_REPORT_DELETION_JOBS_LOCK:
+                job.update(status='ready', completed=max(int(job['completed']), int(job['total'])), message='Generated outputs deleted', finished_at=datetime.now(timezone.utc).timestamp())
+        except Exception as exc:
+            with BULK_REPORT_DELETION_JOBS_LOCK:
+                job.update(status='failed', error=str(exc), message='Bulk deletion failed', finished_at=datetime.now(timezone.utc).timestamp())
+
+    Thread(target=run, name=f'bulk-delete-{kind}-{workspace.id}', daemon=True).start()
+    return job
+
+
 @app.post('/reporting/chart-sets/delete-all')
 def delete_all_report_chart_sets(user: SessionUser = Depends(admin_user)) -> JSONResponse:
     """Remove every standalone Chart Set and every Charts Job row."""
-    chart_sets = list_persisted_report_chart_sets()
-    charts_root = report_charts_directory()
-    if charts_root.is_dir():
-        # Clear valid, incomplete and legacy/unregistered set directories.
-        shutil.rmtree(charts_root)
-    charts_root.mkdir(parents=True, exist_ok=True)
-    jobs = repository.list_report_chart_jobs(limit=None)
-    removed_jobs = sum(repository.delete_report_chart_job(int(job['id'])) is not None for job in jobs)
-    invalidate_workspace_size_cache()
-    repository.add_log(user.username, 'delete_all_report_chart_sets', json.dumps({'count': len(chart_sets), 'jobs': removed_jobs}))
-    return JSONResponse({'chart_sets': [], 'deleted_jobs': removed_jobs})
+    if not active_workspace:
+        raise HTTPException(status_code=409, detail='Open a workspace before deleting Chart Sets.')
+    job = start_bulk_report_deletion(active_workspace, 'chart_sets', user.username)
+    return JSONResponse({'job_id': job['id'], 'status': job['status']}, status_code=status.HTTP_202_ACCEPTED)
+
+
+@app.get('/api/reporting/bulk-deletions/{job_id}')
+def bulk_report_deletion_status(job_id: str, user: SessionUser = Depends(current_user)) -> JSONResponse:
+    """Return the state of one bulk Reports or Chart Sets deletion job."""
+    with BULK_REPORT_DELETION_JOBS_LOCK:
+        job = dict(BULK_REPORT_DELETION_JOBS.get(job_id) or {})
+    if not job or job.get('owner') != user.username:
+        raise HTTPException(status_code=404, detail='Bulk deletion job not found.')
+    require_workspace_access(user, str(job['workspace_id']))
+    return JSONResponse({
+        key: value for key, value in job.items()
+        if key not in {'owner'}
+    })
 
 
 @app.post('/reporting/chart-sets/{generation}/delete')
@@ -7681,20 +7779,10 @@ def stop_report_job(report_id: int, user: SessionUser = Depends(current_user)) -
 @app.post('/reporting/jobs/delete-all')
 def delete_all_report_jobs(user: SessionUser = Depends(admin_user)) -> JSONResponse:
     """Delete every persisted PowerPoint report job and its generated file."""
-    reports = repository.list_report_runs(limit=None)
-    for report in reports:
-        deleted = repository.delete_report_run(int(report['id']))
-        if deleted:
-            _delete_report_job_artifacts(deleted)
-    # Also remove incomplete and orphaned report directories which no longer
-    # have a usable database row or PowerPoint file.
-    reports_root = Path(settings.output_dir) / 'reports'
-    if reports_root.is_dir():
-        shutil.rmtree(reports_root)
-    reports_root.mkdir(parents=True, exist_ok=True)
-    invalidate_workspace_size_cache()
-    repository.add_log(user.username, 'delete_all_report_jobs', json.dumps({'count': len(reports)}))
-    return JSONResponse({'deleted': len(reports)})
+    if not active_workspace:
+        raise HTTPException(status_code=409, detail='Open a workspace before deleting reports.')
+    job = start_bulk_report_deletion(active_workspace, 'reports', user.username)
+    return JSONResponse({'job_id': job['id'], 'status': job['status']}, status_code=status.HTTP_202_ACCEPTED)
 
 
 @app.post('/reporting/jobs/{report_id}/retry')

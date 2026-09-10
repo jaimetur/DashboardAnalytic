@@ -1114,21 +1114,43 @@
         showInfoDialog(error.message || 'Unable to delete the selected chart set.', {title: 'Delete Selected Charts Set', tone: 'error'});
       }
     });
+    const monitorBulkDeletion = async (jobId, kind) => {
+      const title = kind === 'reports' ? 'Delete All Reports' : 'Delete All Charts Sets';
+      const checkStatus = async () => {
+        try {
+          const response = await fetch(`/api/reporting/bulk-deletions/${encodeURIComponent(jobId)}`, {credentials: 'same-origin'});
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload.detail || 'Unable to read the bulk deletion status.');
+          if (['queued', 'processing'].includes(payload.status)) {
+            window.setTimeout(checkStatus, 750);
+            return;
+          }
+          if (payload.status !== 'ready') throw new Error(payload.error || 'Bulk deletion failed.');
+          closeReportChartViewer();
+          if (kind === 'reports') {
+            syncChartSetSelectorAfterBulkDeletion('report');
+            pollReportJobs();
+          } else {
+            reportChartSets = [];
+            syncChartSetSelectorAfterBulkDeletion('standalone');
+            pollReportChartJobs();
+          }
+          showInfoDialog('The background deletion has finished.', {title});
+        } catch (error) {
+          showInfoDialog(error.message || 'Unable to delete the generated outputs.', {title, tone: 'error'});
+        }
+      };
+      checkStatus();
+    };
     const deleteAllChartSets = async () => {
       const accepted = await showConfirmDialog('Delete all generated Chart Sets and every row in Charts Jobs? All associated chart files will also be removed.', {title: 'Delete All Charts Sets', confirmLabel: 'Delete all'});
       if (!accepted) return;
-      showLoadingOverlay('Deleting all chart sets', 'Please wait while every Chart Set, chart file and Charts Job is removed.');
       try {
         const response = await fetch('/reporting/chart-sets/delete-all', {method: 'POST', credentials: 'same-origin'});
-        const payload = await response.json();
+        const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.detail || 'Unable to delete all chart sets.');
-        reportChartSets = Array.isArray(payload.chart_sets) ? payload.chart_sets : [];
-        closeReportChartViewer();
-        syncChartSetSelectorAfterBulkDeletion('standalone');
-        pollReportChartJobs();
-        hideLoadingOverlay();
+        monitorBulkDeletion(payload.job_id, 'chart_sets');
       } catch (error) {
-        hideLoadingOverlay();
         showInfoDialog(error.message || 'Unable to delete all chart sets.', {title: 'Delete All Charts Sets', tone: 'error'});
       }
     };
@@ -1978,17 +2000,12 @@
     reportJobsDeleteAll?.addEventListener('click', async () => {
       const accepted = await showConfirmDialog('Delete all generated reports? Every report job and its generated PowerPoint file will be removed.', {title: 'Delete All Reports', confirmLabel: 'Delete all'});
       if (!accepted) return;
-      showLoadingOverlay('Deleting all reports', 'Please wait while all generated reports are removed.');
       try {
         const response = await fetch('/reporting/jobs/delete-all', {method: 'POST', credentials: 'same-origin'});
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : 'Unable to delete all reports. Check App Logs or the server logs for details.');
-        closeReportChartViewer();
-        syncChartSetSelectorAfterBulkDeletion('report');
-        hideLoadingOverlay();
-        pollReportJobs();
+        monitorBulkDeletion(payload.job_id, 'reports');
       } catch (error) {
-        hideLoadingOverlay();
         showInfoDialog(error.message || 'Unable to delete all reports.', {title: 'Delete All Reports', tone: 'error'});
       }
     });
