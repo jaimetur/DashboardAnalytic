@@ -467,8 +467,8 @@
   <details class="panel collapsible-panel database-management-panel" open data-panel-state-key="admin:database-management">
     <summary class="collapsible-summary">
       <div>
-        <p class="eyebrow">Active workspace database</p>
-        <h2>Database Management</h2>
+        <p class="eyebrow">Database Management</p>
+        <h2>App and active workspace database</h2>
       </div>
       <div class="summary-inline-actions">
         {% if active_workspace %}<span class="pill database-workspace-pill">Workspace: {{ active_workspace.name }}</span>{% endif %}
@@ -484,19 +484,24 @@
         </div>
         <form class="database-backup-form" action="/admin/database/backups" method="post">
           <label class="confirm-option"><input type="checkbox" name="enabled" value="true" {% if recurring_backup.enabled %}checked{% endif %}><span>Enable recurring backups</span></label>
-          <div class="database-backup-options">
-            <label><input type="checkbox" name="include_database" value="true" {% if recurring_backup.include_database %}checked{% endif %}> Application database</label>
-            <label><input type="checkbox" name="include_slides_templates" value="true" {% if recurring_backup.include_slides_templates %}checked{% endif %}> Slides Templates for all workspaces</label>
-            <label><input type="checkbox" name="include_auto_calculated_fields" value="true" {% if recurring_backup.include_auto_calculated_fields %}checked{% endif %}> Auto-calculated Fields for all workspaces</label>
-          </div>
+          <div class="database-backup-settings" {% if not recurring_backup.enabled %}hidden{% endif %} data-backup-settings>
+          <details class="database-backup-components" data-backup-components>
+            <summary>Backup content</summary>
+            <div>{% for value, label in [('database', 'Application database'), ('slides_templates', 'Slides Templates for all workspaces'), ('auto_calculated_fields', 'Auto-calculated Fields for all workspaces')] %}<label><input type="checkbox" name="components" value="{{ value }}" {% if value in recurring_backup.components %}checked{% endif %}> {{ label }}</label>{% endfor %}</div>
+          </details>
           <div class="database-backup-schedule">
             <label>Recurrence<select name="recurrence"><option value="hourly" {% if recurring_backup.recurrence == 'hourly' %}selected{% endif %}>Hourly</option><option value="daily" {% if recurring_backup.recurrence == 'daily' %}selected{% endif %}>Daily</option><option value="weekly" {% if recurring_backup.recurrence == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if recurring_backup.recurrence == 'monthly' %}selected{% endif %}>Monthly</option></select></label>
             <label>Execution time<input type="time" name="execution_time" value="{{ recurring_backup.execution_time }}" required></label>
+            <label>Maximum backups<input type="number" name="max_backups" min="1" max="1000" value="{{ recurring_backup.max_backups }}" required></label>
+            <label class="database-backup-path">Backup path<input type="text" name="backup_path" value="{{ recurring_backup.backup_path }}" required></label>
             <button type="submit">Save backup settings</button>
           </div>
+          </div>
+          <p class="database-backup-status">Stored backups: <strong>{{ recurring_backup_status.count }}</strong> · Total size: <strong>{{ recurring_backup_status.size }}</strong> · Last successful backup: <strong>{{ recurring_backup_status.last_success }}</strong> · Next backup: <strong>{{ recurring_backup_status.next_run }}</strong></p>
         </form>
       </section>
       <section class="database-editor-subpanel">
+      <div><p class="eyebrow">App and active workspace database</p><h3>Database View</h3></div>
       {% if active_workspace %}
       <p class="lede">Browse, edit or remove individual records in any table of <strong>{{ active_workspace.name }}</strong>. Primary-key values are protected so row identity remains stable.</p>
       {% if database_notice %}<div class="alert database-cleanup-notice">{{ database_notice }}</div>{% endif %}
@@ -657,6 +662,16 @@
 </section>
 {% endblock %}
 {% block extra_scripts %}
+<script>
+(() => {
+  const enabled = document.querySelector('.database-backup-form input[name="enabled"]');
+  const settings = document.querySelector('[data-backup-settings]');
+  if (!enabled || !settings) return;
+  const refresh = () => { settings.hidden = !enabled.checked; };
+  enabled.addEventListener('change', refresh);
+  refresh();
+})();
+</script>
 <script>
 (() => {
   const panel = document.querySelector('[data-database-management]');

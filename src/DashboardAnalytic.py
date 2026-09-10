@@ -2839,9 +2839,9 @@ def _archive_tree(archive: zipfile.ZipFile, source: Path, archive_prefix: str, *
 def recurring_backup_settings() -> dict[str, Any]:
     """Load the persistent recurring-backup configuration with safe defaults."""
     defaults = {
-        'enabled': False, 'include_database': True, 'include_slides_templates': True,
-        'include_auto_calculated_fields': True, 'recurrence': 'daily', 'execution_time': '02:00',
-        'last_run_period': '',
+        'enabled': False, 'components': ['database', 'slides_templates', 'auto_calculated_fields'],
+        'recurrence': 'daily', 'execution_time': '02:00', 'max_backups': 20,
+        'backup_path': str(application_config_dir / 'backups'), 'last_run_period': '',
     }
     raw = repository.get_application_state(RECURRING_BACKUP_STATE_KEY)
     try:
@@ -2850,25 +2850,67 @@ def recurring_backup_settings() -> dict[str, Any]:
         saved = {}
     if not isinstance(saved, dict):
         saved = {}
-    return defaults | {key: saved[key] for key in defaults if key in saved}
+    config = defaults | {key: saved[key] for key in defaults if key in saved}
+    if 'components' not in saved:
+        config['components'] = [name for name, legacy_key in (
+            ('database', 'include_database'), ('slides_templates', 'include_slides_templates'),
+            ('auto_calculated_fields', 'include_auto_calculated_fields'),
+        ) if saved.get(legacy_key, True)]
+    return config
+
+
+def recurring_backup_path(config: dict[str, Any]) -> Path:
+    path = Path(str(config.get('backup_path') or application_config_dir / 'backups')).expanduser()
+    return path if path.is_absolute() else application_config_dir / path
+
+
+def recurring_backup_status(config: dict[str, Any]) -> dict[str, str | int]:
+    root = recurring_backup_path(config)
+    files = sorted(root.glob('dashboard-analytic-backup-*.zip'), key=lambda item: item.stat().st_mtime) if root.is_dir() else []
+    total = sum(item.stat().st_size for item in files)
+    last = datetime.fromtimestamp(files[-1].stat().st_mtime).astimezone().strftime('%Y-%m-%d %H:%M') if files else 'No successful backup yet'
+    return {'count': len(files), 'size': format_workspace_size(total), 'last_success': last, 'next_run': recurring_backup_next_run(config)}
+
+
+def recurring_backup_next_run(config: dict[str, Any]) -> str:
+    if not config.get('enabled'):
+        return 'Disabled'
+    now = datetime.now().astimezone().replace(second=0, microsecond=0)
+    hour, minute = (int(value) for value in str(config['execution_time']).split(':', 1))
+    recurrence = config['recurrence']
+    if recurrence == 'hourly':
+        candidate = now.replace(minute=minute)
+        if candidate <= now: candidate += timedelta(hours=1)
+    elif recurrence == 'daily':
+        candidate = now.replace(hour=hour, minute=minute)
+        if candidate <= now: candidate += timedelta(days=1)
+    elif recurrence == 'weekly':
+        candidate = now.replace(hour=hour, minute=minute) + timedelta(days=(7 - now.weekday()) % 7)
+        if candidate <= now: candidate += timedelta(days=7)
+    else:
+        candidate = now.replace(day=1, hour=hour, minute=minute)
+        if candidate <= now:
+            candidate = (candidate.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return candidate.strftime('%Y-%m-%d %H:%M')
 
 
 def create_recurring_database_backup(config: dict[str, Any]) -> Path:
     """Write one consistent ZIP backup for the enabled recurring-backup parts."""
     timestamp = datetime.now().astimezone().strftime('%Y%m%d-%H%M%S')
-    backup_root = application_config_dir / 'backups'
+    backup_root = recurring_backup_path(config)
     backup_root.mkdir(parents=True, exist_ok=True)
     destination = backup_root / f'dashboard-analytic-backup-{timestamp}.zip'
     workspaces = workspace_registry.list()
     with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
         manifest = {'created_at': datetime.now().astimezone().isoformat(timespec='seconds'), 'workspaces': []}
-        if config['include_database']:
+        components = set(config['components'])
+        if 'database' in components:
             _archive_database(archive, repository.global_db_path, 'application/application.db', backup_root)
         for workspace in workspaces:
             item = {'id': workspace.id, 'name': workspace.name}
-            if config['include_slides_templates']:
+            if 'slides_templates' in components:
                 _archive_tree(archive, workspace.slides_templates_dir, f'workspaces/{workspace.id}/slides-templates')
-            if config['include_auto_calculated_fields']:
+            if 'auto_calculated_fields' in components:
                 task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
                 archive.writestr(
                     f'workspaces/{workspace.id}/auto-calculated-fields.json',
@@ -2876,6 +2918,9 @@ def create_recurring_database_backup(config: dict[str, Any]) -> Path:
                 )
             manifest['workspaces'].append(item)
         archive.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
+    backups = sorted(backup_root.glob('dashboard-analytic-backup-*.zip'), key=lambda item: item.stat().st_mtime, reverse=True)
+    for stale in backups[max(1, int(config['max_backups'])):]:
+        stale.unlink(missing_ok=True)
     return destination
 
 
@@ -4534,6 +4579,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             'workspace_catalogues': workspace_catalogues,
             'database_table_groups': database_table_groups,
             'recurring_backup': recurring_backup_settings(),
+            'recurring_backup_status': recurring_backup_status(recurring_backup_settings()),
             'database_notice': request.query_params.get('database_notice') or None,
             'catalogue_editor': catalogue_editor_payload(selected_technology, selected_catalogue) if active_workspace else None,
             'catalogue_notice': request.query_params.get('catalogue_notice') or None,
@@ -8496,11 +8542,11 @@ def admin_panel(request: Request, user: SessionUser = Depends(admin_user)) -> HT
 @app.post('/admin/database/backups')
 def save_recurring_backup_settings(
     enabled: bool = Form(False),
-    include_database: bool = Form(False),
-    include_slides_templates: bool = Form(False),
-    include_auto_calculated_fields: bool = Form(False),
+    components: list[str] = Form(default=[]),
     recurrence: str = Form('daily'),
     execution_time: str = Form('02:00'),
+    max_backups: int = Form(20),
+    backup_path: str = Form(''),
     user: SessionUser = Depends(admin_user),
 ) -> Response:
     recurrence = recurrence.strip().lower()
@@ -8508,11 +8554,20 @@ def save_recurring_backup_settings(
         raise HTTPException(status_code=400, detail='Choose a valid backup recurrence.')
     if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', execution_time):
         raise HTTPException(status_code=400, detail='Choose a valid backup execution time.')
+    selected_components = [item for item in components if item in {'database', 'slides_templates', 'auto_calculated_fields'}]
+    if enabled and not selected_components:
+        raise HTTPException(status_code=400, detail='Select at least one backup component.')
+    if not 1 <= max_backups <= 1000:
+        raise HTTPException(status_code=400, detail='Choose a maximum between 1 and 1000 backups.')
+    storage_path = recurring_backup_path({'backup_path': backup_path.strip() or str(application_config_dir / 'backups')})
+    try:
+        storage_path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f'Unable to use the backup path: {exc}') from exc
     config = recurring_backup_settings() | {
-        'enabled': enabled, 'include_database': include_database,
-        'include_slides_templates': include_slides_templates,
-        'include_auto_calculated_fields': include_auto_calculated_fields,
-        'recurrence': recurrence, 'execution_time': execution_time, 'last_run_period': '',
+        'enabled': enabled, 'components': selected_components, 'recurrence': recurrence,
+        'execution_time': execution_time, 'max_backups': max_backups,
+        'backup_path': str(storage_path), 'last_run_period': '',
     }
     repository.set_application_state(RECURRING_BACKUP_STATE_KEY, json.dumps(config))
     return RedirectResponse('/admin?database_notice=Recurring+backup+settings+saved.', status_code=status.HTTP_303_SEE_OTHER)

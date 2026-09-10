@@ -2007,21 +2007,24 @@ def test_admin_recurring_backup_settings_are_persisted(client) -> None:
 
     login(client)
     saved = client.post('/admin/database/backups', data={
-        'enabled': 'true', 'include_database': 'true', 'include_slides_templates': 'true',
-        'recurrence': 'weekly', 'execution_time': '03:15',
+        'enabled': 'true', 'components': ['database', 'slides_templates'],
+        'recurrence': 'weekly', 'execution_time': '03:15', 'max_backups': '12',
+        'backup_path': 'scheduled-backups',
     }, follow_redirects=False)
 
     assert saved.status_code == 303
     config = app_module.recurring_backup_settings()
     assert config['enabled'] is True
-    assert config['include_database'] is True
-    assert config['include_slides_templates'] is True
-    assert config['include_auto_calculated_fields'] is False
+    assert config['components'] == ['database', 'slides_templates']
     assert config['recurrence'] == 'weekly'
     assert config['execution_time'] == '03:15'
+    assert config['max_backups'] == 12
+    assert config['backup_path'].endswith('scheduled-backups')
     page = client.get('/admin')
     assert 'Database Backups' in page.text
     assert 'database-editor-subpanel' in page.text
+    assert 'Maximum backups' in page.text
+    assert 'Stored backups:' in page.text
 
 
 def test_login_and_admin_remain_available_after_closing_the_active_workspace(client) -> None:

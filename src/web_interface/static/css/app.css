@@ -275,12 +275,18 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .database-backups-subpanel, .database-editor-subpanel { display: grid; gap: 0.9rem; padding: 1rem; border: 1px solid rgba(139, 29, 36, 0.18); border-radius: 0.9rem; background: rgba(255, 255, 255, 0.72); }
 .database-backups-subpanel h3 { margin: 0.1rem 0 0; color: #7d2731; }
 .database-backup-form { display: grid; gap: 0.8rem; }
-.database-backup-options { display: grid; gap: 0.45rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.database-backup-options label { display: flex; gap: 0.45rem; align-items: center; color: #4a3033; font-weight: 650; }
+.database-editor-subpanel h3 { margin: 0.1rem 0 0; color: #7d2731; }
+.database-backup-settings { display: grid; gap: 0.8rem; }
+.database-backup-components { position: relative; width: min(100%, 420px); }
+.database-backup-components summary { cursor: pointer; padding: 0.65rem 0.8rem; border: 1px solid rgba(125, 39, 49, 0.28); border-radius: 0.55rem; background: #fff; color: #64252b; font-weight: 700; }
+.database-backup-components > div { display: grid; gap: 0.5rem; margin-top: 0.35rem; padding: 0.75rem; border: 1px solid rgba(125, 39, 49, 0.18); border-radius: 0.55rem; background: #fff; }
+.database-backup-components label { display: flex; gap: 0.45rem; align-items: center; color: #4a3033; font-weight: 650; }
 .database-backup-schedule { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; }
 .database-backup-schedule label { display: grid; gap: 0.3rem; color: #8b2429; font-size: 0.85rem; font-weight: 700; }
 .database-backup-schedule button { background: linear-gradient(135deg, #8f2932, #c24a4d); color: #fff; }
-@media (max-width: 760px) { .database-backup-options { grid-template-columns: 1fr; } }
+.database-backup-path { flex: 1 1 300px; }
+.database-backup-path input { width: 100%; box-sizing: border-box; }
+.database-backup-status { margin: 0; padding-top: 0.75rem; border-top: 1px solid rgba(125, 39, 49, 0.14); color: #50363a; font-size: 0.9rem; }
 .database-management-toolbar { display: flex; align-items: end; gap: 0.75rem; flex-wrap: wrap; }
 .database-management-toolbar label { display: grid; gap: 0.35rem; min-width: min(100%, 280px); color: #8b2429; font-size: 0.85rem; font-weight: 700; }
 .database-management-toolbar select { min-width: 260px; }
