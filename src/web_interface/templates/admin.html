@@ -485,10 +485,9 @@
         <form class="database-backup-form" action="/admin/database/backups" method="post">
           <label class="confirm-option"><input type="checkbox" name="enabled" value="true" {% if recurring_backup.enabled %}checked{% endif %}><span>Enable recurring backups</span></label>
           <div class="database-backup-settings" {% if not recurring_backup.enabled %}hidden{% endif %} data-backup-settings>
-          <details class="database-backup-components" data-backup-components>
-            <summary>Backup content</summary>
-            <div>{% for value, label in [('database', 'Application database'), ('slides_templates', 'Slides Templates for all workspaces'), ('auto_calculated_fields', 'Auto-calculated Fields for all workspaces')] %}<label><input type="checkbox" name="components" value="{{ value }}" {% if value in recurring_backup.components %}checked{% endif %}> {{ label }}</label>{% endfor %}</div>
-          </details>
+          <label class="database-backup-components">Backup content
+            <select name="components" multiple>{% for value, label in [('database', 'Application database'), ('slides_templates', 'Slides Templates for all workspaces'), ('auto_calculated_fields', 'Auto-calculated Fields for all workspaces')] %}<option value="{{ value }}" {% if value in recurring_backup.components %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+          </label>
           <div class="database-backup-schedule">
             <label>Recurrence<select name="recurrence"><option value="hourly" {% if recurring_backup.recurrence == 'hourly' %}selected{% endif %}>Hourly</option><option value="daily" {% if recurring_backup.recurrence == 'daily' %}selected{% endif %}>Daily</option><option value="weekly" {% if recurring_backup.recurrence == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if recurring_backup.recurrence == 'monthly' %}selected{% endif %}>Monthly</option></select></label>
             <label>Execution time<input type="time" name="execution_time" value="{{ recurring_backup.execution_time }}" required></label>
@@ -496,8 +495,8 @@
             <label class="database-backup-path">Backup path<input type="text" name="backup_path" value="{{ recurring_backup.backup_path }}" required></label>
             <button type="submit">Save backup settings</button>
           </div>
-          </div>
           <p class="database-backup-status">Stored backups: <strong>{{ recurring_backup_status.count }}</strong> · Total size: <strong>{{ recurring_backup_status.size }}</strong> · Last successful backup: <strong>{{ recurring_backup_status.last_success }}</strong> · Next backup: <strong>{{ recurring_backup_status.next_run }}</strong></p>
+          </div>
         </form>
       </section>
       <section class="database-editor-subpanel">

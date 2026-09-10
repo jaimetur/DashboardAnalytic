@@ -23,7 +23,7 @@
 - Replaced the stop glyph with a centered 0.56rem white square inside the circular `Stop Job` control, preserving the button dimensions and making its size consistent across browsers.
 - Moved bulk deletion of all Reports and all Chart Sets into workspace background tasks with live progress in the global task panels; Reporting remains available and refreshes its job tables when each deletion completes.
 - Kept the Open and Remove workspace actions disabled for the active workspace after its row is refreshed following background duplication.
-- Added a Database Backups subpanel in Admin > Database Management with persistent recurring backup controls for selected application data, Slides Templates and Auto-calculated Fields across every workspace. It supports a conditional multi-select content picker, hourly/daily/weekly/monthly schedules and execution time, retention limits that remove oldest ZIPs, a configurable storage path, and live stored-backup count, total size, last-success and next-run status.
+- Added a Database Backups subpanel in Admin > Database Management with persistent recurring backup controls for selected application data, Slides Templates and Auto-calculated Fields across every workspace. Its schedule, retention, path and status stay hidden until enabled; the wide, styled multi-select picker keeps each content option on one line with left-aligned checkboxes, while status reports stored count, total size, last success and next run.
 - Reordered Manage Workspaces actions so Duplicate precedes Open, widened the New workspace name field to match the workspace table inputs, and remove cancelled workspace duplications from the live table once their partial copy is cleaned up.
 
 #### 🐛 Bug fixes:
