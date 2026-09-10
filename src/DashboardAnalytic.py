@@ -2808,9 +2808,14 @@ def _archive_compression(path: Path) -> int:
 
 
 def _archive_file(archive: zipfile.ZipFile, source: Path, archive_name: str, progress_callback: Callable[[int], None] | None = None) -> None:
-    archive.write(source, archive_name, compress_type=_archive_compression(source))
-    if progress_callback:
-        progress_callback(source.stat().st_size)
+    """Archive one file in chunks so long ZIP writes report real progress."""
+    info = zipfile.ZipInfo.from_file(source, archive_name)
+    info.compress_type = _archive_compression(source)
+    with source.open('rb') as input_file, archive.open(info, 'w', force_zip64=True) as output_file:
+        while chunk := input_file.read(1024 * 1024):
+            output_file.write(chunk)
+            if progress_callback:
+                progress_callback(len(chunk))
 
 
 def _archive_database(
@@ -2934,7 +2939,9 @@ def recurring_backup_next_run(config: dict[str, Any]) -> str:
     return candidate.strftime('%Y-%m-%d %H:%M')
 
 
-def create_recurring_database_backup(config: dict[str, Any]) -> Path:
+def create_recurring_database_backup(
+    config: dict[str, Any], progress_callback: Callable[[float], None] | None = None,
+) -> Path:
     """Write one consistent ZIP backup for the enabled recurring-backup parts."""
     timestamp = datetime.now().astimezone().strftime('%Y%m%d-%H%M%S')
     backup_root = recurring_backup_path(config)
@@ -2955,11 +2962,39 @@ def create_recurring_database_backup(config: dict[str, Any]) -> Path:
         and workspace.database_path.is_file()
         and (allowed_workspace_ids is None or workspace.id in allowed_workspace_ids)
     ]
+    components = set(config['components'])
+    full_workspace_components = sorted({
+        str(item) for item in config.get('full_workspace_components', []) if str(item) in {'input', 'output'}
+    })
+    # Materialise database-backed templates before sizing the legacy CSV
+    # compatibility tree, then report every archive byte against that total.
+    for workspace in workspaces:
+        materialize_workspace_report_templates(workspace)
+    def source_tree_size(source: Path) -> int:
+        return sum(
+            path.stat().st_size for path in source.rglob('*')
+            if path.is_file() and not path.name.endswith(('-wal', '-shm'))
+        ) if source.exists() else 0
+    total_bytes = (repository.global_db_path.stat().st_size if 'database' in components and repository.global_db_path.exists() else 0)
+    for workspace in workspaces:
+        if 'full_workspaces' in components:
+            total_bytes += workspace.database_path.stat().st_size
+            total_bytes += source_tree_size(workspace.slides_templates_dir)
+            if 'input' in full_workspace_components:
+                total_bytes += source_tree_size(workspace.input_dir)
+            if 'output' in full_workspace_components:
+                total_bytes += source_tree_size(workspace.output_dir)
+        elif 'slides_templates' in components:
+            total_bytes += source_tree_size(workspace.slides_templates_dir)
+    completed_bytes = 0
+    def archived_bytes(size: int) -> None:
+        nonlocal completed_bytes
+        completed_bytes += size
+        if progress_callback:
+            progress_callback(min(96.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+    if progress_callback:
+        progress_callback(1.0)
     with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
-        components = set(config['components'])
-        full_workspace_components = sorted({
-            str(item) for item in config.get('full_workspace_components', []) if str(item) in {'input', 'output'}
-        })
         manifest = {
             'format': ARCHIVE_FORMAT, 'version': ARCHIVE_VERSION, 'kind': 'database-backup',
             'created_at': datetime.now().astimezone().isoformat(timespec='seconds'),
@@ -2967,7 +3002,7 @@ def create_recurring_database_backup(config: dict[str, Any]) -> Path:
             'workspaces': [],
         }
         if 'database' in components:
-            _archive_database(archive, repository.global_db_path, 'application/application.db', backup_root)
+            _archive_database(archive, repository.global_db_path, 'application/application.db', backup_root, archived_bytes)
         for workspace in workspaces:
             item = {'id': workspace.id, 'name': workspace.name}
             # Workspace IDs are implementation details (for example,
@@ -2975,9 +3010,8 @@ def create_recurring_database_backup(config: dict[str, Any]) -> Path:
             # name for the archive tree so a backup can be inspected by the
             # same workspace names shown throughout the application.
             archive_workspace_root = f'workspaces/{workspace.name}'
-            materialize_workspace_report_templates(workspace)
             if 'slides_templates' in components:
-                _archive_tree(archive, workspace.slides_templates_dir, f'{archive_workspace_root}/slides-templates')
+                _archive_tree(archive, workspace.slides_templates_dir, f'{archive_workspace_root}/slides-templates', progress_callback=archived_bytes)
             if 'auto_calculated_fields' in components and 'full_workspaces' not in components:
                 task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
                 archive.writestr(
@@ -2987,11 +3021,14 @@ def create_recurring_database_backup(config: dict[str, Any]) -> Path:
             if 'full_workspaces' in components:
                 _archive_workspace(
                     archive, workspace, archive_workspace_root, backup_root,
+                    progress_callback=archived_bytes,
                     include_input_files='input' in full_workspace_components,
                     include_generated_outputs='output' in full_workspace_components,
                 )
             manifest['workspaces'].append(item)
         archive.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
+    if progress_callback:
+        progress_callback(98.0)
     backups = sorted(backup_root.glob('dashboard-analytic-backup-*.zip'), key=lambda item: item.stat().st_mtime, reverse=True)
     for stale in backups[max(1, int(config['max_backups'])):]:
         stale.unlink(missing_ok=True)
@@ -3073,7 +3110,16 @@ def start_manual_database_backup(config: dict[str, Any], username: str) -> dict[
                     job.update(status='cancelled', message='Backup stopped before ZIP creation', progress=100,
                                finished_at=datetime.now(timezone.utc).timestamp())
                     return
-            destination = create_recurring_database_backup(config)
+            def update_progress(progress: float) -> None:
+                with MANUAL_BACKUP_JOBS_LOCK:
+                    current = MANUAL_BACKUP_JOBS.get(job_id)
+                    if current and current.get('status') == 'processing':
+                        current.update(
+                            progress=max(10, min(98, round(progress))),
+                            message=f'Creating ZIP backup ({max(1, min(98, round(progress)))}%)',
+                        )
+
+            destination = create_recurring_database_backup(config, update_progress)
             with MANUAL_BACKUP_JOBS_LOCK:
                 if job.get('cancel_requested'):
                     destination.unlink(missing_ok=True)

@@ -356,12 +356,12 @@
     {% if import_export_notice %}<div class="alert import-export-notice">{{ import_export_notice }}</div>{% endif %}
     {% if import_export_error %}<div class="alert import-export-error">{{ import_export_error }}</div>{% endif %}
     <div class="import-export-grid">
-      <form class="form-stack" action="/admin/import-export/import" method="post" enctype="multipart/form-data" data-import-export-form>
+      <form class="form-stack" action="/admin/import-export/import" method="post" enctype="multipart/form-data" data-import-package-form>
         <h3>Import</h3>
         <label>Import package
           <input type="file" name="package" accept=".zip,application/zip" required>
         </label>
-        <input type="hidden" name="confirmed_import" value="0" data-import-export-confirmed>
+        <input type="hidden" name="confirmed_import" value="0" data-import-package-confirmed>
         <p class="form-note">The package manifest identifies its content automatically. Auto-calculated Fields packages ask which destination workspaces should receive the fields before the background import starts.</p>
         <button type="submit" class="import-export-action">Import ZIP</button>
       </form>
@@ -475,7 +475,7 @@
         <span class="collapse-chip">Collapse</span>
       </div>
     </summary>
-    <div class="database-management-content" data-database-management>
+    <div class="database-management-content">
       <section class="database-backups-subpanel">
         <div>
           <p class="eyebrow">Backup protection</p>
@@ -526,12 +526,12 @@
         <dialog class="database-backup-path-dialog" data-backup-path-dialog><div><p class="eyebrow">Application config directory</p><h3>Select backup directory</h3><div class="database-backup-path-navigation"><button type="button" data-backup-path-home title="Go to config" aria-label="Go to config"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1Z"/></svg><span>Home</span></button><button type="button" data-backup-path-parent title="Go up one folder" aria-label="Go up one folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h5l2 2h7a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><path d="m12 16 0-6m0 0-3 3m3-3 3 3"/></svg><span>Up</span></button></div><p data-backup-path-current></p><div class="database-backup-new-directory"><input type="text" placeholder="New folder name" data-backup-path-new-name><button type="button" data-backup-path-new>Create folder</button></div><div class="database-backup-directory-list" data-backup-path-list></div><div class="confirm-actions"><button type="button" class="ghost-link" data-backup-path-cancel>Cancel</button><button type="button" data-backup-path-select>Select this directory</button></div></div></dialog>
         <dialog class="confirm-dialog database-backup-restore-dialog" data-backup-restore-dialog><div><div class="database-backup-restore-dialog-head"><p class="eyebrow">Overwrite confirmation</p><h3>Restore backup</h3><p>The selected data will overwrite existing data. Select the parts to restore.</p></div><section class="database-backup-restore-workspaces"><strong>Affected workspaces</strong><div data-backup-restore-workspaces></div></section><section class="database-backup-restore-selection"><strong>Backup content</strong><div class="restore-component-options" data-backup-restore-components></div></section><div class="confirm-actions"><button type="button" class="ghost-link" data-backup-restore-cancel>Cancel</button><button type="button" class="danger-button" data-backup-restore-confirm>Restore selected data</button></div></div></dialog>
       </section>
-      <section class="database-editor-subpanel">
-      <div><p class="eyebrow">Database Management</p><h3>Database View</h3></div>
+      <section class="database-view-subpanel" data-database-view>
+      <div><p class="eyebrow">Active workspace database</p><h3>Database View</h3></div>
       {% if active_workspace %}
       <p class="lede">Browse, edit or remove individual records in any table of <strong>{{ active_workspace.name }}</strong>. Primary-key values are protected so row identity remains stable.</p>
       {% if database_notice %}<div class="alert database-cleanup-notice">{{ database_notice }}</div>{% endif %}
-      <div class="database-management-toolbar">
+      <div class="database-view-toolbar">
         <label>Table
           <select data-database-table-select>
             <option value="">Select a table</option>
@@ -571,7 +571,7 @@
         <button type="button" class="database-pagination-button" data-database-last>Last</button>
       </div>
       <p class="form-note">Tables are shown 100 rows at a time. Saving or deleting a row clears cached analysis so subsequent Dashboard and Reporting requests use the changed values.</p>
-      <div class="database-management-actions">
+      <div class="database-view-actions">
         <button type="button" class="database-clear-filters-button" data-database-clear-filters disabled>Clear filters</button>
         <form action="/admin/database/cleanup" method="post" data-loading-label="Cleaning database" data-loading-copy="Please wait while orphaned dataset and combined CDR rows are removed."><button type="submit" class="database-cleanup-button">Clean orphaned rows</button></form>
       </div>
@@ -872,7 +872,7 @@
 </script>
 <script>
 (() => {
-  const panel = document.querySelector('[data-database-management]');
+  const panel = document.querySelector('[data-database-view]');
   const select = document.querySelector('[data-database-table-select]');
   const refresh = document.querySelector('[data-database-refresh]');
   const clearFilters = document.querySelector('[data-database-clear-filters]');

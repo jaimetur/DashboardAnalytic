@@ -272,7 +272,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .admin-stack [data-panel-state-key="admin:audit"] { order: 3; }
 .database-management-content { display: grid; gap: 1rem; }
 .database-management-content .lede { margin: 0; }
-.database-backups-subpanel, .database-editor-subpanel { display: grid; gap: 0.9rem; padding: 1rem; border: 1px solid rgba(139, 29, 36, 0.18); border-radius: 0.9rem; background: rgba(255, 255, 255, 0.72); }
+.database-backups-subpanel, .database-view-subpanel { display: grid; gap: 0.9rem; padding: 1rem; border: 1px solid rgba(139, 29, 36, 0.18); border-radius: 0.9rem; background: rgba(255, 255, 255, 0.72); }
 .database-backups-subpanel h3 { margin: 0.1rem 0 0; color: #7d2731; }
 .database-backup-form { display: grid; gap: 0.8rem; }
 .database-backup-mode-panel { display: grid; gap: 0.8rem; padding: 0.9rem; border: 1px solid rgba(139, 29, 36, 0.16); border-radius: 0.72rem; background: rgba(255, 250, 250, 0.72); }
@@ -295,7 +295,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .database-backup-restore-selection .confirm-option.is-disabled { opacity: 0.52; cursor: not-allowed; }
 .database-backup-restore-dialog [data-backup-restore-cancel] { background: #e7ecef; border-color: #b7c2c9; color: #3e5562; box-shadow: none; }
 @media (max-width: 760px) { .database-backup-immediate-grid { grid-template-columns: 1fr; } }
-.database-editor-subpanel h3 { margin: 0.1rem 0 0; color: #7d2731; }
+.database-view-subpanel h3 { margin: 0.1rem 0 0; color: #7d2731; }
 .database-backup-settings { display: grid; gap: 0.8rem; }
 .database-backup-settings[hidden] { display: none !important; }
 .database-backup-components { display: grid; gap: 0.35rem; width: min(100%, 620px); color: #8b2429; font-size: 0.85rem; font-weight: 700; }
@@ -354,13 +354,13 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .database-backup-path-dialog [data-backup-path-select] { background: #1d7b70; border-color: #146158; color: #fff; }
 .database-backup-status { margin: 0; padding-top: 0.75rem; border-top: 1px solid rgba(125, 39, 49, 0.14); color: #50363a; font-size: 0.9rem; }
 @media (max-width: 680px) { .database-backup-components, .database-backup-components .multiselect-shell { width: 100%; } .database-backup-components .multiselect-menu { min-width: 0; } .database-backup-components .multiselect-option { white-space: normal; } }
-.database-management-toolbar { display: flex; align-items: end; gap: 0.75rem; flex-wrap: wrap; }
-.database-management-toolbar label { display: grid; gap: 0.35rem; min-width: min(100%, 280px); color: #8b2429; font-size: 0.85rem; font-weight: 700; }
-.database-management-toolbar select { min-width: 260px; }
-.database-management-toolbar .pill { margin-bottom: 0.1rem; }
+.database-view-toolbar { display: flex; align-items: end; gap: 0.75rem; flex-wrap: wrap; }
+.database-view-toolbar label { display: grid; gap: 0.35rem; min-width: min(100%, 280px); color: #8b2429; font-size: 0.85rem; font-weight: 700; }
+.database-view-toolbar select { min-width: 260px; }
+.database-view-toolbar .pill { margin-bottom: 0.1rem; }
 .database-workspace-pill { background: linear-gradient(135deg, #e5f0ff, #c7ddf3); border-color: rgba(36, 90, 150, 0.32); color: #174f88; }
-.database-management-actions { display: flex; justify-content: flex-start; gap: 0.7rem; flex-wrap: wrap; }
-.database-management-actions form { margin: 0; }
+.database-view-actions { display: flex; justify-content: flex-start; gap: 0.7rem; flex-wrap: wrap; }
+.database-view-actions form { margin: 0; }
 .admin-stack .database-refresh-button { background: linear-gradient(135deg, #8f2932, #c24a4d); border-color: rgba(125, 39, 49, 0.72); color: #fff; }
 .admin-stack .database-refresh-button:hover:not(:disabled) { background: linear-gradient(135deg, #74212a, #a53a40); }
 .admin-stack .database-refresh-button:disabled { background: linear-gradient(135deg, #d7aeb1, #e7c7c9); border-color: rgba(125, 39, 49, 0.20); color: rgba(255,255,255,0.84); box-shadow: none; }
@@ -1731,19 +1731,19 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
   .inline-actions, .sidebar-actions, .form-actions, .reporting-submit-action,
   .report-chart-set-controls, .report-jobs-bulk-actions,
   .charts-jobs-bulk-actions, .import-export-actions,
-  .catalogue-management-actions, .database-management-toolbar,
-  .database-management-actions, .full-environment-workspace-toolbar,
+  .catalogue-management-actions, .database-view-toolbar,
+  .database-view-actions, .full-environment-workspace-toolbar,
   .report-charts-footer-actions, .preview-actions, .doc-toolbar {
     display: flex; width: 100%; flex-direction: column; align-items: stretch; gap: 0.5rem;
   }
   .form-actions > button, .reporting-submit-action > button,
   .report-chart-set-controls > button, .report-jobs-bulk-actions > button,
   .charts-jobs-bulk-actions > button, .import-export-actions > button,
-  .database-management-actions > button, .database-management-actions > form,
-  .database-management-actions > form > button, .report-charts-footer-actions > button,
+  .database-view-actions > button, .database-view-actions > form,
+  .database-view-actions > form > button, .report-charts-footer-actions > button,
   .preview-actions > * { width: 100%; max-width: 100%; }
-  .report-chart-set-controls label, .database-management-toolbar label,
-  .database-management-toolbar select { width: 100%; min-width: 0; max-width: 100%; }
+  .report-chart-set-controls label, .database-view-toolbar label,
+  .database-view-toolbar select { width: 100%; min-width: 0; max-width: 100%; }
   .report-chart-set-controls { margin-bottom: 0.35rem; }
   .report-chart-set-controls label { flex: 0 0 auto; }
   .report-chart-set-controls .chart-set-picker { margin-bottom: 0; }

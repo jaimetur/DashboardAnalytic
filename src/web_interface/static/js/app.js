@@ -3849,8 +3849,8 @@ function uploadImportPackage(file) {
   });
 }
 
-document.querySelectorAll('[data-import-export-form]').forEach((form) => {
-  const confirmed = form.querySelector('[data-import-export-confirmed]');
+document.querySelectorAll('[data-import-package-form]').forEach((form) => {
+  const confirmed = form.querySelector('[data-import-package-confirmed]');
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!(form instanceof HTMLFormElement) || !(confirmed instanceof HTMLInputElement)) return;
