@@ -222,7 +222,7 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
     panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true');
     const header = document.createElement('div'); header.className = 'catalogue-chart-preview-header';
     const heading = document.createElement('div'); heading.innerHTML = '<p class="eyebrow">Active Workspace</p><h3>Auto-calculated Fields</h3>';
-    const close = document.createElement('button'); close.type = 'button'; close.className = 'calculated-dimensions-close'; close.textContent = '×'; close.setAttribute('aria-label', 'Close auto-calculated fields');
+    const close = document.createElement('button'); close.type = 'button'; close.className = 'calculated-dimensions-close calculated-dimensions-icon-close report-chart-viewer-close'; close.textContent = '×'; close.setAttribute('aria-label', 'Close auto-calculated fields');
     header.append(heading, close);
     const note = document.createElement('p'); note.className = 'form-note'; note.textContent = 'Rules run from top to bottom. Comparisons ignore case. Use | only for genuinely different source field names and semicolons for AND conditions.';
     const list = document.createElement('div'); list.className = 'calculated-dimensions-list';
@@ -232,8 +232,18 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
     managerActions.append(add, panelClose);
     const form = document.createElement('div'); form.className = 'calculated-dimension-editor'; form.hidden = true;
     panel.append(header, note, list, managerActions, form); overlay.append(panel); document.body.append(overlay);
-    const finish = () => overlay.remove(); close.addEventListener('click', finish); panelClose.addEventListener('click', finish);
+    const finish = () => {
+      window.removeEventListener('keydown', handleEscape, true);
+      overlay.remove();
+    };
+    const handleEscape = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    close.addEventListener('click', finish); panelClose.addEventListener('click', finish);
     overlay.addEventListener('click', (event) => { if (event.target === overlay) finish(); });
+    window.addEventListener('keydown', handleEscape, true);
     const restoreManagerActions = () => { managerActions.hidden = false; managerActions.append(add, panelClose); };
     const edit = (index = null) => {
       const current = index === null ? {name: '', sources: ['cdr-data'], default: '', default_from: '', rules: []} : dimensions[index];
@@ -305,7 +315,7 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
         const editButton = document.createElement('button'); editButton.type = 'button'; editButton.textContent = '✎'; editButton.title = `Edit ${dimension.name}`;
         const duplicate = document.createElement('button'); duplicate.type = 'button'; duplicate.className = 'auto-calculated-field-duplicate'; duplicate.textContent = '⧉'; duplicate.title = `Duplicate ${dimension.name}`;
         const exportLink = document.createElement('a'); exportLink.className = 'ghost-link icon-action auto-calculated-field-export'; exportLink.textContent = '↓'; exportLink.title = `Export ${dimension.name}`; exportLink.href = `/workspace/calculated-dimensions/export?${new URLSearchParams({name: dimension.name})}`;
-        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'danger-button'; remove.textContent = '×'; remove.title = `Delete ${dimension.name}`;
+        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'danger-button auto-calculated-field-remove'; remove.textContent = '−'; remove.title = `Delete ${dimension.name}`;
         editButton.addEventListener('click', () => edit(index));
         duplicate.addEventListener('click', async () => {
           if (!await showConfirmDialog(
@@ -911,7 +921,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const headingWrap = document.createElement('div');
     const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Active Workspace';
     const title = document.createElement('h3'); title.textContent = 'Auto-calculated Fields';
-    const close = document.createElement('button'); close.type = 'button'; close.className = 'calculated-dimensions-close'; close.textContent = '×'; close.title = 'Close'; close.setAttribute('aria-label', 'Close auto-calculated fields');
+    const close = document.createElement('button'); close.type = 'button'; close.className = 'calculated-dimensions-close calculated-dimensions-icon-close report-chart-viewer-close'; close.textContent = '×'; close.title = 'Close'; close.setAttribute('aria-label', 'Close auto-calculated fields');
     headingWrap.append(eyebrow, title); header.append(headingWrap, close);
     const note = document.createElement('p'); note.className = 'form-note';
     note.textContent = 'Rules are evaluated from top to bottom. Comparisons ignore case. Use | only for genuinely different source field names and semicolons for AND conditions.';
@@ -923,10 +933,19 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const form = document.createElement('div'); form.className = 'calculated-dimension-editor'; form.hidden = true;
     panel.append(header, note, list, managerActions, form); overlay.append(panel); document.body.append(overlay);
     let editingIndex = null;
-    const finish = () => overlay.remove();
+    const finish = () => {
+      window.removeEventListener('keydown', handleEscape, true);
+      overlay.remove();
+    };
+    const handleEscape = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
     close.addEventListener('click', finish);
     panelClose.addEventListener('click', finish);
     overlay.addEventListener('click', (event) => { if (event.target === overlay) finish(); });
+    window.addEventListener('keydown', handleEscape, true);
     const restoreManagerActions = () => { managerActions.hidden = false; managerActions.append(add, panelClose); };
 
     const editDimension = (index = null) => {
@@ -1019,7 +1038,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         const edit = createActionButton('✎', 'edit', `Edit ${dimension.name}`, 'chart'); delete edit.dataset.catalogueChartAction;
         const duplicate = createActionButton('⧉', 'duplicate', `Duplicate ${dimension.name}`, 'chart', 'auto-calculated-field-duplicate'); delete duplicate.dataset.catalogueChartAction;
         const exportButton = createActionButton('↓', 'export', `Export ${dimension.name}`, 'chart', 'auto-calculated-field-export'); delete exportButton.dataset.catalogueChartAction;
-        const remove = createActionButton('×', 'delete', `Delete ${dimension.name}`, 'chart', 'catalogue-row-delete'); delete remove.dataset.catalogueChartAction;
+        const remove = createActionButton('−', 'delete', `Delete ${dimension.name}`, 'chart', 'catalogue-row-delete auto-calculated-field-remove'); delete remove.dataset.catalogueChartAction;
         edit.addEventListener('click', () => editDimension(index));
         duplicate.addEventListener('click', async () => {
           if (!await showConfirmDialog(
@@ -1852,16 +1871,23 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     } catch (error) { showInfoDialog(error instanceof Error ? error.message : 'Unable to load filtered dataset.', {title: 'Filtered dataset', tone: 'error'}); }
     finally { hideLoadingOverlay(); chartPreviewData.disabled = false; }
   });
+  const closeChartPreviewData = () => {
+    if (!chartPreviewDataOverlay) return;
+    chartPreviewDataOverlay.hidden = true;
+    chartPreviewDatasetFilterMenu?.remove(); chartPreviewDatasetFilterMenu = null;
+    if (chartPreviewDialog?.classList.contains('is-dataset-only')) {
+      chartPreviewDialog.classList.remove('is-dataset-only');
+      if (chartPreview) chartPreview.hidden = true;
+    } else if (chartPreviewSandbox) chartPreviewSandbox.hidden = false;
+  };
   chartPreviewDataOverlay?.addEventListener('click', (event) => {
-    if (event.target === chartPreviewDataOverlay || event.target.closest('[data-catalogue-chart-preview-data-close]')) {
-      chartPreviewDataOverlay.hidden = true;
-      chartPreviewDatasetFilterMenu?.remove(); chartPreviewDatasetFilterMenu = null;
-      if (chartPreviewDialog?.classList.contains('is-dataset-only')) {
-        chartPreviewDialog.classList.remove('is-dataset-only');
-        if (chartPreview) chartPreview.hidden = true;
-      } else if (chartPreviewSandbox) chartPreviewSandbox.hidden = false;
-    }
+    if (event.target === chartPreviewDataOverlay || event.target.closest('[data-catalogue-chart-preview-data-close]')) closeChartPreviewData();
   });
+  window.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !chartPreviewDataOverlay || chartPreviewDataOverlay.hidden) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
   document.addEventListener('click', (event) => {
     if (chartPreviewDatasetFilterMenu && !chartPreviewDatasetFilterMenu.contains(event.target) && !event.target.closest('.report-chart-viewer-column-filter')) {
       chartPreviewDatasetFilterMenu.remove(); chartPreviewDatasetFilterMenu = null;

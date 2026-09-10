@@ -182,7 +182,10 @@
         <h3 id="report-chart-viewer-title" data-report-chart-viewer-title>Report chart</h3>
         <p data-report-chart-viewer-meta></p>
       </div>
-      <button type="button" class="report-chart-viewer-close" data-report-chart-viewer-close aria-label="Close chart preview" title="Close">×</button>
+      <div class="report-chart-viewer-header-actions">
+        <button type="button" class="catalogue-calculated-dimensions-button" data-workspace-manage-calculated-dimensions><span>Manage Auto-calculated Fields</span></button>
+        <button type="button" class="report-chart-viewer-close" data-report-chart-viewer-close aria-label="Close chart preview" title="Close">×</button>
+      </div>
     </div>
     <div class="report-chart-viewer-image" data-report-chart-viewer-image>
       <canvas data-report-chart-viewer-canvas aria-label="Selected report chart. Drag to select an area to zoom."></canvas>
@@ -217,7 +220,6 @@
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 4h16v16H4zM4 9h16M4 14h16M10 4v16"/></svg>
         <span>View filtered dataset</span>
         </button>
-        <button type="button" class="catalogue-calculated-dimensions-button" data-workspace-manage-calculated-dimensions><span>Manage Auto-calculated Fields</span></button>
         {% if user.role in ['admin', 'super-admin'] %}<button type="button" class="report-chart-viewer-edit-template-button" data-report-chart-viewer-edit-template hidden>
         <span aria-hidden="true">✎</span><span>Edit Template</span>
         </button>{% endif %}
@@ -1826,7 +1828,8 @@
       if (reportChartViewer?.hidden) return;
       if (event.key === 'Escape') {
         if (!reportChartViewerDataOverlay?.hidden) {
-          closeReportChartViewerData();
+          event.preventDefault();
+          event.stopImmediatePropagation();
           return;
         }
         if (compactChartViewerViewport.matches && !reportChartViewerSandbox?.hidden) {
@@ -1842,6 +1845,11 @@
       if (event.key === 'ArrowLeft') openReportChartViewer(reportChartIndex - 1);
       if (event.key === 'ArrowRight') openReportChartViewer(reportChartIndex + 1);
     });
+    window.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || reportChartViewer?.hidden || reportChartViewerDataOverlay?.hidden) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
     reportChartsButton?.addEventListener('click', async () => {
       if (!reportForm?.reportValidity() || !validateCdrSelection()) return;
       if (!(await reviewMultivendorCampaigns())) return;

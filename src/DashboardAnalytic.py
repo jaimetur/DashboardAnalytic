@@ -9018,26 +9018,30 @@ async def preview_report_template_chart(
         }
         cache_material = json.dumps({
             'workspace': str(active_workspace.database_path), 'catalogue': str(payload.get('catalogue_content') or ''),
-            'row': row_index, 'definition': editable,
+            'row': row_index, 'definition': editable, 'technology': technology,
         }, sort_keys=True, default=str)
-        cache_key = hashlib.sha256(cache_material.encode('utf-8')).hexdigest()
+        selected_datasets = [
+            serialize_dataset_row(dataset)
+            for dataset in repository.list_datasets()
+            if str(dataset['dataset_kind'] or '').casefold() == entry.source_kind and dataset['status'] == 'ready'
+        ]
+        if not selected_datasets:
+            raise HTTPException(status_code=400, detail=f'No processed {entry.cdr_source} datasets are available in the active workspace.')
+        cache_key = hashlib.sha256(json.dumps({
+            'preview': cache_material,
+            'dataset_versions': [
+                (item['id'], item.get('updated_at'), item.get('processed_at'), item.get('normalization_version'))
+                for item in selected_datasets
+            ],
+        }, sort_keys=True, default=str).encode('utf-8')).hexdigest()
         cached = CHART_PREVIEW_DATA_CACHE.get(cache_key)
         if cached is None:
             # The chart definition and source data do not change while the user
-            # moves between pages.  Materialising the CDRs is the expensive part,
-            # so do it only for the first page and page the temporary result below.
-            frames: list[pd.DataFrame] = []
-            for dataset in repository.list_datasets():
-                if str(dataset['dataset_kind'] or '').casefold() != entry.source_kind or dataset['status'] != 'ready':
-                    continue
-                dataset_id = int(dataset['id'])
-                columns = repository.list_dataset_row_columns(dataset_id)
-                if columns:
-                    frames.append(repository.load_dataset_rows(dataset_id, columns, {}))
-            if not frames:
-                raise HTTPException(status_code=400, detail=f'No processed {entry.cdr_source} datasets are available in the active workspace.')
+            # moves between pages. The shared reporting table already contains
+            # the materialized CDR rows, so use it rather than rebuilding a
+            # pandas frame from every individual CDR table.
             full_preview, base_summary = preview_catalog_chart_data(
-                pd.concat(frames, ignore_index=True, sort=False), entry, limit=100_000,
+                _combined_reporting_frame(selected_datasets, technology, [entry], False), entry, limit=100_000,
             )
             cached = (full_preview, base_summary)
             CHART_PREVIEW_DATA_CACHE[cache_key] = cached
@@ -9099,26 +9103,20 @@ async def preview_report_template_chart_image(
     if not entry.source_kind:
         raise HTTPException(status_code=400, detail='Only chart rows with a CDR source can be previewed.')
     selected_datasets: list[dict[str, Any]] = []
-    dataset_columns: dict[int, list[str]] = {}
     for dataset in repository.list_datasets():
         if str(dataset['dataset_kind'] or '').casefold() != entry.source_kind or dataset['status'] != 'ready':
             continue
-        dataset_id = int(dataset['id'])
-        columns = repository.list_dataset_row_columns(dataset_id)
-        if columns:
-            selected_datasets.append(serialize_dataset_row(dataset))
-            dataset_columns[dataset_id] = columns
+        selected_datasets.append(serialize_dataset_row(dataset))
     if not selected_datasets:
         raise HTTPException(status_code=400, detail=f'No processed {entry.cdr_source} datasets are available in the active workspace.')
+    query_columns = reporting_query_columns(entry.source_kind, [entry], False)
     frame_key = _chart_preview_cache_key('template-editor-source-frame', {
         'dataset_versions': [(item['id'], item.get('updated_at'), item.get('processed_at'), item.get('normalization_version')) for item in selected_datasets],
-        'columns': dataset_columns,
+        'technology': technology,
+        'columns': query_columns,
     })
     def load_frame() -> pd.DataFrame:
-        return pd.concat([
-            repository.load_dataset_rows(dataset_id, columns, {})
-            for dataset_id, columns in dataset_columns.items()
-        ], ignore_index=True, sort=False)
+        return _combined_reporting_frame(selected_datasets, technology, [entry], False)
     frame = _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4)
     filtered = _cached_filtered_chart_frame(frame_key, frame, entry, False)
     try:

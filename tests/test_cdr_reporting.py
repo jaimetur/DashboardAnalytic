@@ -2054,6 +2054,63 @@ def test_chart_preview_focus_row_matches_the_editors_sorted_row(client) -> None:
     assert context.json()['template_row_index'] == 1
 
 
+def test_template_chart_image_preview_uses_combined_reporting_rows(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
+    catalogue_content = (
+        ','.join(CATALOG_HEADERS)
+        + '\n1,Preview slide,,Title and 1 column + Comments,Preview chart,CDR-Data,Mean_Data_Rate,Average Vertical Bars,,Operator,Campaign,,Top\n'
+    )
+    created = client.post(
+        '/admin/report-templates/nsa', data={'catalogue_name': 'Combined Preview'},
+        files={'catalogue_file': ('combined-preview.csv', BytesIO(catalogue_content.encode()), 'text/csv')},
+        follow_redirects=False,
+    )
+    assert created.status_code == 303
+
+    observed: dict[str, object] = {}
+    monkeypatch.setattr(app_module.repository, 'list_datasets', lambda: [
+        {'id': 7, 'status': 'ready', 'dataset_kind': 'data', 'updated_at': '', 'processed_at': '', 'normalization_version': ''},
+    ])
+    monkeypatch.setattr(app_module.repository, 'load_dataset_rows', lambda *_args: pytest.fail('Individual CDR tables must not be loaded.'))
+    monkeypatch.setattr(
+        app_module,
+        '_combined_reporting_frame',
+        lambda datasets, technology, entries, multivendor: observed.update({
+            'dataset_ids': [dataset['id'] for dataset in datasets],
+            'technology': technology,
+            'entries': entries,
+            'multivendor': multivendor,
+        }) or pd.DataFrame(),
+    )
+    monkeypatch.setattr(app_module, '_cached_filtered_chart_frame', lambda _key, frame, *_args: frame)
+    monkeypatch.setattr(app_module, 'render_catalog_chart_preview', lambda *_args, **_kwargs: b'PNG')
+    monkeypatch.setattr(
+        app_module,
+        'preview_catalog_chart_data',
+        lambda *_args, **_kwargs: (pd.DataFrame([{'Operator': 'EE'}]), {'filter_values': {}}),
+    )
+
+    data_preview = client.post(
+        '/admin/report-templates/nsa/Combined%20Preview/chart-preview',
+        json={'catalogue_content': catalogue_content, 'row_index': 0},
+    )
+
+    preview = client.post(
+        '/admin/report-templates/nsa/Combined%20Preview/chart-image-preview',
+        json={'catalogue_content': catalogue_content, 'row_index': 0},
+    )
+
+    assert data_preview.status_code == 200
+    assert data_preview.json()['rows'] == [{'Operator': 'EE'}]
+    assert preview.status_code == 200
+    assert preview.content == b'PNG'
+    assert observed['dataset_ids'] == [7]
+    assert observed['technology'] == 'nsa'
+    assert observed['multivendor'] is False
+
+
 def test_reporting_requires_at_least_one_cdr_source(client) -> None:
     client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
     form = {'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template'}
