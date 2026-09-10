@@ -9,7 +9,7 @@ Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, r
 3. Confirm the detected input type and wait for processing to finish.
 4. Optionally map Vodafone and Three vendor information.
 5. Explore one dataset in **E2E Dashboard**, build an ad-hoc chart in **Chart Builder**, or combine campaigns in **E2E Reporting**.
-6. Review background work in **Reports and Charts Jobs**.
+6. Follow background work in the floating task cards and **Reports and Charts Jobs**.
 7. Use **App Logs** for traceability and **Admin** for shared configuration.
 
 ## Header and navigation
@@ -204,6 +204,7 @@ Templates belong to their workspace. A new workspace starts without templates. E
 
 - Browse global configuration and active-workspace tables by group.
 - Filter complete tables with Excel-style column menus.
+- Create or schedule ZIP backups in **Database Backups**, choose configuration or accessible workspace content, and restore detected backup components after an overwrite confirmation.
 - Edit or delete individual rows.
 - Clean orphaned materialised dataset rows.
 - Inspect the unified **Generated jobs** table for Reports and Chart Sets.

@@ -2008,7 +2008,8 @@ def test_admin_recurring_backup_settings_are_persisted(client) -> None:
     login(client)
     saved = client.post('/admin/database/backups', data={
         'enabled': 'true', 'components': ['database', 'slides_templates'],
-        'recurrence': 'weekly', 'execution_time': '03:15', 'max_backups': '12',
+        'workspace_ids': ['default'],
+        'recurrence': 'weekly', 'execution_time': '03:15', 'weekly_day': '4', 'monthly_day': '14', 'max_backups': '12',
         'backup_path': 'scheduled-backups',
     }, follow_redirects=False)
 
@@ -2018,13 +2019,100 @@ def test_admin_recurring_backup_settings_are_persisted(client) -> None:
     assert config['components'] == ['database', 'slides_templates']
     assert config['recurrence'] == 'weekly'
     assert config['execution_time'] == '03:15'
+    assert config['weekly_day'] == 4
+    assert config['monthly_day'] == 14
     assert config['max_backups'] == 12
     assert config['backup_path'].endswith('scheduled-backups')
     page = client.get('/admin')
     assert 'Database Backups' in page.text
     assert 'database-editor-subpanel' in page.text
-    assert 'Maximum backups' in page.text
+    assert 'Retention backups' in page.text
     assert 'Stored backups:' in page.text
+    assert 'Retention backups' in page.text
+    directories = client.get('/api/admin/backup-directories')
+    assert directories.status_code == 200
+    assert directories.json()['path']
+    created_directory = client.post('/api/admin/backup-directories', data={
+        'parent_path': directories.json()['path'], 'name': 'created-from-picker',
+    })
+    assert created_directory.status_code == 200
+    assert created_directory.json()['path'].endswith('created-from-picker')
+
+
+def test_manual_database_backup_uses_current_form_selection_without_enabling_schedule(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    captured: dict[str, object] = {}
+    schedule_enabled_before = app_module.recurring_backup_settings()['enabled']
+
+    def capture_backup(config, username):
+        captured['config'] = config
+        captured['username'] = username
+        return {'id': 'manual-backup'}
+
+    monkeypatch.setattr(app_module, 'start_manual_database_backup', capture_backup)
+    response = client.post('/admin/database/backups/run', data={
+        'components': ['database', 'auto_calculated_fields'],
+        'workspace_ids': ['default'],
+        'max_backups': '7',
+        'backup_path': 'scheduled-backups/manual',
+    }, headers={'X-Requested-With': 'XMLHttpRequest'}, follow_redirects=False)
+
+    assert response.status_code == 200
+    assert response.json()['job_id'] == 'manual-backup'
+    config = captured['config']
+    assert config['components'] == ['database', 'auto_calculated_fields']
+    assert config['max_backups'] == 7
+    assert config['backup_path'].endswith('scheduled-backups/manual')
+    assert config['workspace_ids'] == ['default']
+    assert app_module.recurring_backup_settings()['enabled'] is schedule_enabled_before
+
+
+def test_backup_notices_render_in_backup_protection_not_database_view(client) -> None:
+    login(client)
+
+    page = client.get('/admin?database_notice=Manual+backup+started.')
+
+    assert 'class="alert backup-notice">Manual backup started.' in page.text
+    assert 'class="alert database-cleanup-notice">Manual backup started.' not in page.text
+
+
+def test_backup_skips_stale_workspace_registry_entries(monkeypatch, tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    def workspace(identifier: str, *, database_exists: bool):
+        root = tmp_path / identifier
+        database_path = root / f'{identifier}.db'
+        if database_exists:
+            database_path.parent.mkdir(parents=True)
+            database_path.touch()
+        templates = root / 'slides-templates'
+        templates.mkdir(parents=True)
+        (templates / f'{identifier}.csv').write_text('template', encoding='utf-8')
+        return app_module.Workspace(
+            id=identifier, name=identifier.title(), database_path=database_path,
+            input_dir=root / 'input', output_dir=root / 'output', export_dir=root / 'output' / 'reports',
+            slides_templates_dir=templates, created_at='', last_opened_at='',
+        )
+
+    valid = workspace('current-workspace', database_exists=True)
+    stale = workspace('default', database_exists=False)
+    inaccessible = workspace('workspace-3', database_exists=True)
+    monkeypatch.setattr(app_module.workspace_registry, 'list', lambda: [valid, stale, inaccessible])
+
+    archive_path = app_module.create_recurring_database_backup({
+        'components': ['slides_templates'], 'backup_path': str(tmp_path / 'backups'), 'max_backups': 30,
+        'workspace_ids': [valid.id],
+    })
+
+    with zipfile.ZipFile(archive_path) as archive:
+        names = archive.namelist()
+        manifest = json.loads(archive.read('manifest.json'))
+    assert 'workspaces/Current-Workspace/slides-templates/current-workspace.csv' in names
+    assert not any(name.startswith('workspaces/Default/') for name in names)
+    assert not any(name.startswith('workspaces/Workspace-3/') for name in names)
+    assert manifest['workspaces'] == [{'id': 'current-workspace', 'name': 'Current-Workspace'}]
 
 
 def test_login_and_admin_remain_available_after_closing_the_active_workspace(client) -> None:

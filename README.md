@@ -20,8 +20,9 @@ After login, the application opens the **Readme** tab by default.
 - Create workspace-owned Auto-calculated Fields and apply them asynchronously to the applicable CDR tables.
 - Edit workspace-owned Slides Templates with validation, assistance and chart previews.
 - Track meaningful user/system events in App Logs.
+- Follow workspace-scoped background work from floating task cards and stop eligible jobs safely.
 - Export, import or transfer configuration, templates and workspaces.
-- Manage workspace and global SQLite tables from the Admin interface.
+- Manage workspace and global SQLite tables, create or schedule scoped ZIP backups, and restore detected backup content from the Admin interface.
 
 ## Modules and sections
 
@@ -77,7 +78,7 @@ Chart Builder reuses the shared Interactive Preview for ad-hoc analysis.
 - **Slides Templates Management**: create, import, duplicate, rename, export, delete and set defaults within the active workspace.
 - **Slides Template Editor**: validated grid editing, cell assistance, Filter Builder and shared Chart Preview.
 - **Export / Import**: portable ZIP jobs, Full Environment workspace selection, server-to-server transfer and recovered packages.
-- **Database Management**: grouped global/workspace tables, server-side filters, editing and cleanup.
+- **Database Management**: scoped on-demand and scheduled backups, overwrite-confirmed restore, grouped global/workspace tables, server-side filters, editing and cleanup.
 - **Datasets Management**: inspect and rename workspace datasets.
 
 ### Documentation tabs
@@ -95,7 +96,7 @@ See [Product overview](help/01-overview.md) for a detailed tour of every module 
 3. Confirm their types and wait for **Processed**.
 4. Optionally map VFUK/3UK vendor data.
 5. Use Dashboard, Chart Builder or Reporting.
-6. Review long-running work in **Reports and Charts Jobs**.
+6. Review long-running work in the floating task cards and **Reports and Charts Jobs**.
 7. Check App Logs if an operation fails.
 
 ## Requirements

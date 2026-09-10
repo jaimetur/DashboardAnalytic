@@ -73,6 +73,12 @@ Long operations use progress dialogs for stages such as:
 
 Blocking destination-transfer dialogs are restored after a browser reload while the accepted operation remains active.
 
+## Floating background-task cards
+
+Every authenticated page polls active background work and shows compact floating cards until it finishes. Work for the open workspace appears at the lower right. Work for one or more other accessible workspaces appears in differently coloured lower-left cards, grouped by workspace name; changing the active workspace moves each running task to the appropriate side.
+
+Each card shows the task, its current stage and progress when the job reports one. The red circular **Stop Job** control is available only for work in a workspace the user can access and asks for confirmation before requesting a stop. Dataset, Report, Chart Set, Auto-calculated Field and combined-CDR work stop at safe checkpoints. A stopped duplication removes its partial workspace; stopped exports remove temporary output; imports cannot be stopped after importing has begun.
+
 ## Small screens
 
 The interface targets compact screens around the iPhone 13 base viewport (`390 × 844`).

@@ -132,6 +132,27 @@ Capabilities:
 
 Database edits affect the active workspace immediately. Use Export first when changing production data manually.
 
+## Database Backups
+
+**Admin → Database Management → Database Backups** separates **On demand backup** from **Scheduled backups**. On demand backup contains side-by-side **Backup** and **Restore** panels.
+
+In **Backup**, select one or more content types:
+
+- **Configuration Content: Application database** stores the shared application configuration.
+- **Workspace Content: Full workspaces** stores every selected workspace database, input files, generated output and Slides Templates. It includes templates and Auto-calculated Fields, so those two redundant choices are disabled while it is selected.
+- **Workspace Content: Slides Templates** stores template files for the selected workspaces.
+- **Workspace Content: Auto-calculated Fields** stores definitions for the selected workspaces.
+
+Selecting workspace content reveals a workspace multi-select containing only workspaces you can access. Use **Backup Now** to create a ZIP in the background from the current path, content and workspace selection. It does not enable or change the recurring schedule, appears in the floating background-task card and keeps the Admin panel in place.
+
+In **Restore**, choose a server-visible backup directory and one of its ZIP files. The application detects the backup content and its affected workspace names, then shows a structured overwrite confirmation. Choose the parts to restore only after reviewing that existing data will be replaced. Restore work also runs in the floating background-task card. The ZIP selector refreshes after an immediate backup and periodically while Admin remains open, so completed scheduled backups appear without a page reload.
+
+Enable the schedule to select hourly, daily, weekly or monthly execution. Weekly schedules expose a weekday selector and monthly schedules expose a day-of-month selector.
+
+Set **Retention backups** to keep a maximum number of ZIPs; the scheduler removes the oldest successful backups after creating a newer one. The default storage directory is `config/scheduled-backups`. **Browse** opens a server-side directory picker limited to the application `config` tree, so it reflects directories visible to the host or Docker container rather than the browser's computer. It can create a folder before selecting it.
+
+The status line reports the stored backup count and size, the most recent successful backup and the next scheduled run. Scheduled backups use the same chosen content and workspace selection as the Backup panel. Use **Full workspaces** when datasets, reports and Chart Sets must be included; otherwise those items are not part of a template- or field-only backup. Scheduled backups complement infrastructure backups and portable Export packages.
+
 ## Datasets Management
 
 - Review dataset ID, filename, kind, status and ownership.

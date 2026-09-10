@@ -141,4 +141,6 @@ data/workspaces/<workspace>/
 
 Admin Export / Import provides portable backups, but infrastructure-level backups are still recommended.
 
+On-demand and scheduled backups configured in Admin are written below the mounted `config/` directory by default, at `config/scheduled-backups`. The directory picker and Restore ZIP list expose only paths visible inside the container and restricted to that `config/` tree. Ensure the configuration volume has enough free space for the selected retention count and the selected workspace content; **Full workspaces** includes workspace databases, input files, generated output and templates.
+
 See [Configuration](03-configuration.md) for the complete variable reference.

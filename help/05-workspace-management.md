@@ -48,6 +48,8 @@ Classification is proposed from filenames but remains reviewable. Examples:
 - Re-uploading the same stored dataset preserves its original upload date.
 - Updated time records the latest processing operation.
 
+The global floating task cards remain visible while workspace work continues. The open workspace is shown at the lower right; other accessible workspaces are shown at the lower left. Use **Stop Job** only when it is available and after reviewing the confirmation: a stopped duplication removes the incomplete copy, while a stopped import is rejected once file import has started.
+
 ## Workbook handling
 
 - Readable worksheets are inspected.

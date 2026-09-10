@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import calendar
 import io
 import os
 import errno
@@ -94,6 +95,10 @@ BULK_REPORT_DELETION_JOBS_LOCK = Lock()
 RECURRING_BACKUP_STATE_KEY = 'recurring_database_backup'
 RECURRING_BACKUP_LOCK = Lock()
 RECURRING_BACKUP_RUNNING = False
+MANUAL_BACKUP_JOBS: dict[str, dict[str, Any]] = {}
+MANUAL_BACKUP_JOBS_LOCK = Lock()
+MANUAL_RESTORE_JOBS: dict[str, dict[str, Any]] = {}
+MANUAL_RESTORE_JOBS_LOCK = Lock()
 EXPORT_PACKAGE_TTL = timedelta(hours=24)
 TRANSFER_OFFER_TTL = timedelta(minutes=15)
 DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
@@ -2839,9 +2844,10 @@ def _archive_tree(archive: zipfile.ZipFile, source: Path, archive_prefix: str, *
 def recurring_backup_settings() -> dict[str, Any]:
     """Load the persistent recurring-backup configuration with safe defaults."""
     defaults = {
-        'enabled': False, 'components': ['database', 'slides_templates', 'auto_calculated_fields'],
-        'recurrence': 'daily', 'execution_time': '02:00', 'max_backups': 20,
-        'backup_path': str(application_config_dir / 'backups'), 'last_run_period': '',
+        'enabled': False, 'components': ['database', 'slides_templates', 'auto_calculated_fields'], 'workspace_ids': [],
+        'full_workspace_components': ['input', 'output'],
+        'recurrence': 'daily', 'execution_time': '02:00', 'weekly_day': 0, 'monthly_day': 1, 'max_backups': 30,
+        'backup_path': str(application_config_dir / 'scheduled-backups'), 'last_run_period': '',
     }
     raw = repository.get_application_state(RECURRING_BACKUP_STATE_KEY)
     try:
@@ -2856,12 +2862,28 @@ def recurring_backup_settings() -> dict[str, Any]:
             ('database', 'include_database'), ('slides_templates', 'include_slides_templates'),
             ('auto_calculated_fields', 'include_auto_calculated_fields'),
         ) if saved.get(legacy_key, True)]
+    try:
+        config['backup_path'] = str(ensure_backup_path_is_within_config(recurring_backup_path(config)))
+    except ValueError:
+        config['backup_path'] = defaults['backup_path']
     return config
 
 
 def recurring_backup_path(config: dict[str, Any]) -> Path:
-    path = Path(str(config.get('backup_path') or application_config_dir / 'backups')).expanduser()
+    path = Path(str(config.get('backup_path') or application_config_dir / 'scheduled-backups')).expanduser()
     return path if path.is_absolute() else application_config_dir / path
+
+
+def backup_config_root() -> Path:
+    return application_config_dir.resolve()
+
+
+def ensure_backup_path_is_within_config(path: Path) -> Path:
+    resolved = path.resolve()
+    root = backup_config_root()
+    if resolved != root and root not in resolved.parents:
+        raise ValueError('Backup directories must be inside the application config directory.')
+    return resolved
 
 
 def recurring_backup_status(config: dict[str, Any]) -> dict[str, str | int]:
@@ -2885,12 +2907,15 @@ def recurring_backup_next_run(config: dict[str, Any]) -> str:
         candidate = now.replace(hour=hour, minute=minute)
         if candidate <= now: candidate += timedelta(days=1)
     elif recurrence == 'weekly':
-        candidate = now.replace(hour=hour, minute=minute) + timedelta(days=(7 - now.weekday()) % 7)
+        weekday = int(config.get('weekly_day') or 0)
+        candidate = now.replace(hour=hour, minute=minute) + timedelta(days=(weekday - now.weekday()) % 7)
         if candidate <= now: candidate += timedelta(days=7)
     else:
-        candidate = now.replace(day=1, hour=hour, minute=minute)
+        requested_day = max(1, min(31, int(config.get('monthly_day') or 1)))
+        candidate = now.replace(day=min(requested_day, calendar.monthrange(now.year, now.month)[1]), hour=hour, minute=minute)
         if candidate <= now:
-            candidate = (candidate.replace(day=28) + timedelta(days=4)).replace(day=1)
+            next_month = (candidate.replace(day=28) + timedelta(days=4)).replace(day=1)
+            candidate = next_month.replace(day=min(requested_day, calendar.monthrange(next_month.year, next_month.month)[1]))
     return candidate.strftime('%Y-%m-%d %H:%M')
 
 
@@ -2900,7 +2925,21 @@ def create_recurring_database_backup(config: dict[str, Any]) -> Path:
     backup_root = recurring_backup_path(config)
     backup_root.mkdir(parents=True, exist_ok=True)
     destination = backup_root / f'dashboard-analytic-backup-{timestamp}.zip'
-    workspaces = workspace_registry.list()
+    # Registry records can outlive interrupted migrations or deleted workspace
+    # folders. Never create backup entries for a workspace without its own
+    # database, because that would turn stale registry rows into phantom ZIP
+    # directories and empty Auto-calculated Fields files.
+    selected_workspace_ids = config.get('workspace_ids')
+    allowed_workspace_ids = (
+        {str(workspace_id) for workspace_id in selected_workspace_ids}
+        if isinstance(selected_workspace_ids, (list, tuple, set)) else None
+    )
+    workspaces = [
+        workspace for workspace in workspace_registry.list()
+        if workspace.status == 'ready'
+        and workspace.database_path.is_file()
+        and (allowed_workspace_ids is None or workspace.id in allowed_workspace_ids)
+    ]
     with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
         manifest = {'created_at': datetime.now().astimezone().isoformat(timespec='seconds'), 'workspaces': []}
         components = set(config['components'])
@@ -2908,13 +2947,30 @@ def create_recurring_database_backup(config: dict[str, Any]) -> Path:
             _archive_database(archive, repository.global_db_path, 'application/application.db', backup_root)
         for workspace in workspaces:
             item = {'id': workspace.id, 'name': workspace.name}
+            # Workspace IDs are implementation details (for example,
+            # ``default`` or ``workspace-3``). Use the validated visible
+            # name for the archive tree so a backup can be inspected by the
+            # same workspace names shown throughout the application.
+            archive_workspace_root = f'workspaces/{workspace.name}'
             if 'slides_templates' in components:
-                _archive_tree(archive, workspace.slides_templates_dir, f'workspaces/{workspace.id}/slides-templates')
+                _archive_tree(archive, workspace.slides_templates_dir, f'{archive_workspace_root}/slides-templates')
             if 'auto_calculated_fields' in components:
                 task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
                 archive.writestr(
-                    f'workspaces/{workspace.id}/auto-calculated-fields.json',
+                    f'{archive_workspace_root}/auto-calculated-fields.json',
                     json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
+                )
+            if 'full_workspaces' in components:
+                task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
+                archive.writestr(
+                    f'{archive_workspace_root}/auto-calculated-fields.json',
+                    json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
+                )
+                full_workspace_components = set(config.get('full_workspace_components') or [])
+                _archive_workspace(
+                    archive, workspace, f'{archive_workspace_root}/full-workspace', backup_root,
+                    include_input_files='input' in full_workspace_components,
+                    include_generated_outputs='output' in full_workspace_components,
                 )
             manifest['workspaces'].append(item)
         archive.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
@@ -2940,9 +2996,9 @@ def _recurring_backup_period(config: dict[str, Any], now: datetime) -> str | Non
         return None
     if recurrence == 'daily':
         return now.strftime('%Y%m%d')
-    if recurrence == 'weekly' and now.weekday() == 0:
+    if recurrence == 'weekly' and now.weekday() == int(config.get('weekly_day') or 0):
         return now.strftime('%G-W%V')
-    if recurrence == 'monthly' and now.day == 1:
+    if recurrence == 'monthly' and now.day == min(max(1, min(31, int(config.get('monthly_day') or 1))), calendar.monthrange(now.year, now.month)[1]):
         return now.strftime('%Y%m')
     return None
 
@@ -2968,6 +3024,167 @@ def run_recurring_backup_scheduler() -> None:
             with RECURRING_BACKUP_LOCK:
                 RECURRING_BACKUP_RUNNING = False
     Thread(target=run, name='recurring-database-backup', daemon=True).start()
+
+
+def start_manual_database_backup(config: dict[str, Any], username: str) -> dict[str, Any]:
+    """Create a tracked on-demand backup without changing the schedule."""
+    job_id = uuid4().hex
+    job = {
+        'id': job_id,
+        'owner': username,
+        'status': 'queued',
+        'message': 'Waiting to create backup',
+        'progress': 0,
+        'created_at': datetime.now(timezone.utc).timestamp(),
+    }
+    with MANUAL_BACKUP_JOBS_LOCK:
+        MANUAL_BACKUP_JOBS[job_id] = job
+
+    def run() -> None:
+        global RECURRING_BACKUP_RUNNING
+        acquired_backup_slot = False
+        try:
+            with RECURRING_BACKUP_LOCK:
+                if RECURRING_BACKUP_RUNNING:
+                    raise RuntimeError('Another database backup is already running.')
+                RECURRING_BACKUP_RUNNING = True
+                acquired_backup_slot = True
+            with MANUAL_BACKUP_JOBS_LOCK:
+                job.update(status='processing', message='Creating ZIP backup', progress=10)
+                if job.get('cancel_requested'):
+                    job.update(status='cancelled', message='Backup stopped before ZIP creation', progress=100,
+                               finished_at=datetime.now(timezone.utc).timestamp())
+                    return
+            destination = create_recurring_database_backup(config)
+            with MANUAL_BACKUP_JOBS_LOCK:
+                if job.get('cancel_requested'):
+                    destination.unlink(missing_ok=True)
+                    job.update(
+                        status='cancelled', message='Backup stopped and incomplete ZIP removed', progress=100,
+                        finished_at=datetime.now(timezone.utc).timestamp(),
+                    )
+                    return
+                job.update(
+                    status='ready', message=f'Backup created: {destination.name}', progress=100,
+                    finished_at=datetime.now(timezone.utc).timestamp(),
+                )
+        except Exception as exc:
+            with MANUAL_BACKUP_JOBS_LOCK:
+                job.update(
+                    status='failed', message='Manual backup failed', error=str(exc), progress=100,
+                    finished_at=datetime.now(timezone.utc).timestamp(),
+                )
+        finally:
+            if acquired_backup_slot:
+                with RECURRING_BACKUP_LOCK:
+                    RECURRING_BACKUP_RUNNING = False
+
+    Thread(target=run, name=f'manual-database-backup-{job_id[:8]}', daemon=True).start()
+    return job
+
+
+def _backup_archive_components(archive_path: Path) -> list[str]:
+    """Return the restoreable components present in an application backup."""
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            names = [member.filename for member in archive.infolist() if not member.is_dir()]
+    except zipfile.BadZipFile as exc:
+        raise ValueError('The selected backup is not a valid ZIP archive.') from exc
+    components: list[str] = []
+    if 'application/application.db' in names:
+        components.append('database')
+    if any(name.startswith('workspaces/') and '/slides-templates/' in name for name in names):
+        components.append('slides_templates')
+    if any(name.startswith('workspaces/') and name.endswith('/auto-calculated-fields.json') for name in names):
+        components.append('auto_calculated_fields')
+    if not components:
+        raise ValueError('The selected ZIP does not contain a compatible Dashboard Analytic backup.')
+    return components
+
+
+def _backup_archive_workspaces(archive_path: Path) -> list[str]:
+    """Return visible workspace names represented by workspace backup members."""
+    with zipfile.ZipFile(archive_path) as archive:
+        names = {
+            PurePosixPath(member.filename).parts[1]
+            for member in archive.infolist()
+            if not member.is_dir()
+            and len(PurePosixPath(member.filename).parts) > 2
+            and PurePosixPath(member.filename).parts[0] == 'workspaces'
+        }
+    return sorted(names, key=str.casefold)
+
+
+def _backup_archive_file(backup_path: str, filename: str) -> Path:
+    root = ensure_backup_path_is_within_config(recurring_backup_path({'backup_path': backup_path}))
+    candidate = root / Path(filename).name
+    if candidate.suffix.casefold() != '.zip' or not candidate.is_file() or candidate.parent != root:
+        raise ValueError('Select a backup ZIP from the selected backup path.')
+    return candidate
+
+
+def restore_database_backup(archive_path: Path, components: Iterable[str]) -> None:
+    """Restore selected backup parts after the UI has confirmed overwriting data."""
+    selected = set(components)
+    present = set(_backup_archive_components(archive_path))
+    if not selected or not selected <= present:
+        raise ValueError('Select only components contained in the backup.')
+    with zipfile.ZipFile(archive_path) as archive, tempfile.TemporaryDirectory(prefix='dashboard-analytic-restore-') as temporary_dir:
+        staging = Path(temporary_dir)
+        names = [member.filename for member in archive.infolist() if not member.is_dir()]
+        if 'database' in selected:
+            payload = staging / 'application.db'
+            with archive.open('application/application.db') as source, payload.open('wb') as target:
+                shutil.copyfileobj(source, target)
+            repository.replace_global_database_snapshot(payload)
+            repository.initialize()
+        workspaces_by_name = {workspace.name: workspace for workspace in workspace_registry.list()}
+        for workspace_name, workspace in workspaces_by_name.items():
+            prefix = f'workspaces/{workspace_name}/'
+            if 'slides_templates' in selected:
+                template_members = [name for name in names if name.startswith(f'{prefix}slides-templates/')]
+                if template_members:
+                    shutil.rmtree(workspace.slides_templates_dir, ignore_errors=True)
+                    for name in template_members:
+                        relative = PurePosixPath(name).relative_to(PurePosixPath(f'{prefix}slides-templates'))
+                        target = workspace.slides_templates_dir.joinpath(*relative.parts)
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        with archive.open(name) as source, target.open('wb') as output:
+                            shutil.copyfileobj(source, output)
+                    register_workspace_template_files(workspace)
+            if 'auto_calculated_fields' in selected:
+                member = f'{prefix}auto-calculated-fields.json'
+                if member in names:
+                    try:
+                        definitions = json.loads(archive.read(member).decode('utf-8'))
+                        parsed = parse_calculated_dimensions(definitions)
+                    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                        raise ValueError(f'Backup fields for "{workspace_name}" are invalid.') from exc
+                    task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
+                    task_repository.replace_calculated_dimensions(calculated_dimensions_json(parsed))
+                    task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
+        _clear_chart_preview_caches()
+
+
+def start_manual_database_restore(archive_path: Path, components: Iterable[str], username: str) -> dict[str, Any]:
+    """Start a tracked restore so Admin remains responsive while files are replaced."""
+    job_id = uuid4().hex
+    job = {'id': job_id, 'owner': username, 'status': 'queued', 'message': 'Waiting to restore backup', 'progress': 0,
+           'created_at': datetime.now(timezone.utc).timestamp()}
+    with MANUAL_RESTORE_JOBS_LOCK:
+        MANUAL_RESTORE_JOBS[job_id] = job
+    def run() -> None:
+        try:
+            with MANUAL_RESTORE_JOBS_LOCK:
+                job.update(status='processing', message='Restoring selected backup data', progress=15)
+            restore_database_backup(archive_path, components)
+            with MANUAL_RESTORE_JOBS_LOCK:
+                job.update(status='ready', message='Backup restored', progress=100, finished_at=datetime.now(timezone.utc).timestamp())
+        except Exception as exc:
+            with MANUAL_RESTORE_JOBS_LOCK:
+                job.update(status='failed', message='Backup restore failed', error=str(exc), progress=100, finished_at=datetime.now(timezone.utc).timestamp())
+    Thread(target=run, name=f'manual-database-restore-{job_id[:8]}', daemon=True).start()
+    return job
 
 
 def recurring_backup_scheduler_loop() -> None:
@@ -2999,13 +3216,15 @@ def _workspace_archive_metadata(workspace: Workspace) -> dict[str, Any]:
 def _archive_workspace(
     archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str, scratch_dir: Path | None = None,
     progress_callback: Callable[[int], None] | None = None, include_generated_outputs: bool = True,
+    include_input_files: bool = True,
 ) -> None:
     _archive_database(
         archive, workspace.database_path, f'{archive_prefix}/database.sqlite', scratch_dir, progress_callback,
         exclude_tables=() if include_generated_outputs else ('generated_jobs',),
     )
     _archive_tree(archive, workspace.slides_templates_dir, f'{archive_prefix}/slides-templates', progress_callback=progress_callback)
-    _archive_tree(archive, workspace.input_dir, f'{archive_prefix}/input', progress_callback=progress_callback)
+    if include_input_files:
+        _archive_tree(archive, workspace.input_dir, f'{archive_prefix}/input', progress_callback=progress_callback)
     if include_generated_outputs:
         _archive_tree(archive, workspace.output_dir, f'{archive_prefix}/output', progress_callback=progress_callback)
 
@@ -4563,6 +4782,11 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         {**dict(row), 'created_at': format_local_timestamp(row['created_at']), 'workspace_ids': repository.list_user_workspace_ids(int(row['id']))}
         for row in repository.list_users()
     ]
+    database_notice = request.query_params.get('database_notice') or None
+    backup_notice = request.query_params.get('backup_notice') or None
+    if database_notice in {'Recurring backup settings saved.', 'Manual backup started.'}:
+        backup_notice = backup_notice or database_notice
+        database_notice = None
     return render_template(
         request,
         'admin.html',
@@ -4571,6 +4795,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             'embedded_template_editor': embedded_template_editor,
             'users': admin_users,
             'workspaces': workspace_registry.list(),
+            'backup_workspaces': accessible_workspaces(user),
             'datasets': admin_datasets,
             'vodafone_mapping_datasets': [dataset for dataset in ready_admin_datasets if dataset.get('dataset_kind') == 'mapping_vodafone'],
             'three_mapping_datasets': [dataset for dataset in ready_admin_datasets if dataset.get('dataset_kind') == 'mapping_three'],
@@ -4580,7 +4805,8 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             'database_table_groups': database_table_groups,
             'recurring_backup': recurring_backup_settings(),
             'recurring_backup_status': recurring_backup_status(recurring_backup_settings()),
-            'database_notice': request.query_params.get('database_notice') or None,
+            'database_notice': database_notice,
+            'backup_notice': backup_notice,
             'catalogue_editor': catalogue_editor_payload(selected_technology, selected_catalogue) if active_workspace else None,
             'catalogue_notice': request.query_params.get('catalogue_notice') or None,
             'catalogue_error': request.query_params.get('catalogue_error') or None,
@@ -5271,6 +5497,34 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
             continue
         append_job(job | {'workspace_ids': job.get('destination_workspace_ids')}, 'import', 'Importing package')
 
+    with MANUAL_BACKUP_JOBS_LOCK:
+        manual_backup_jobs = [dict(job) for job in MANUAL_BACKUP_JOBS.values()]
+    for job in manual_backup_jobs:
+        if job.get('status') not in {'queued', 'processing'} or job.get('owner') != user.username:
+            continue
+        tasks.append({
+            'id': f'manual-backup:{job.get("id")}',
+            'workspace_id': '__server__',
+            'label': 'Creating database backup',
+            'detail': str(job.get('message') or 'Creating ZIP backup'),
+            'progress': max(0, min(100, int(job.get('progress') or 0))),
+            'stop_task_id': f'manual-backup:{job.get("id")}',
+            'stop_url': '/api/background-tasks/server/stop',
+        })
+
+    with MANUAL_RESTORE_JOBS_LOCK:
+        manual_restore_jobs = [dict(job) for job in MANUAL_RESTORE_JOBS.values()]
+    for job in manual_restore_jobs:
+        if job.get('status') not in {'queued', 'processing'} or job.get('owner') != user.username:
+            continue
+        tasks.append({
+            'id': f'manual-restore:{job.get("id")}',
+            'workspace_id': '__server__',
+            'label': 'Restoring database backup',
+            'detail': str(job.get('message') or 'Restoring selected backup data'),
+            'progress': max(0, min(100, int(job.get('progress') or 0))),
+        })
+
     with TRANSFER_LOCK:
         transfer_jobs = [dict(job) for job in TRANSFER_JOBS.values()]
         incoming_transfers = [dict(offer) for offer in TRANSFER_OFFERS.values()]
@@ -5493,6 +5747,20 @@ def stop_background_task(
             WORKSPACE_DUPLICATION_STOP_REQUESTS.add(workspace_id)
     else:
         raise HTTPException(status_code=400, detail='This background task cannot be stopped.')
+    return JSONResponse({'stopping': task_id})
+
+
+@app.post('/api/background-tasks/server/stop')
+def stop_server_background_task(task_id: str = Form(...), user: SessionUser = Depends(current_user)) -> JSONResponse:
+    """Stop an owner-visible server task that does not belong to one workspace."""
+    prefix, _, job_id = str(task_id).partition(':')
+    if prefix != 'manual-backup' or not job_id:
+        raise HTTPException(status_code=400, detail='This background task cannot be stopped.')
+    with MANUAL_BACKUP_JOBS_LOCK:
+        job = MANUAL_BACKUP_JOBS.get(job_id)
+        if not job or job.get('owner') != user.username or job.get('status') not in {'queued', 'processing'}:
+            raise HTTPException(status_code=409, detail='This database backup can no longer be stopped.')
+        job.update(cancel_requested=True, message='Stopping database backup')
     return JSONResponse({'stopping': task_id})
 
 
@@ -8541,11 +8809,16 @@ def admin_panel(request: Request, user: SessionUser = Depends(admin_user)) -> HT
 
 @app.post('/admin/database/backups')
 def save_recurring_backup_settings(
+    request: Request,
     enabled: bool = Form(False),
     components: list[str] = Form(default=[]),
+    workspace_ids: list[str] = Form(default=[]),
+    full_workspace_components: list[str] = Form(default=[]),
     recurrence: str = Form('daily'),
     execution_time: str = Form('02:00'),
-    max_backups: int = Form(20),
+    weekly_day: int = Form(0),
+    monthly_day: int = Form(1),
+    max_backups: int = Form(30),
     backup_path: str = Form(''),
     user: SessionUser = Depends(admin_user),
 ) -> Response:
@@ -8554,23 +8827,161 @@ def save_recurring_backup_settings(
         raise HTTPException(status_code=400, detail='Choose a valid backup recurrence.')
     if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', execution_time):
         raise HTTPException(status_code=400, detail='Choose a valid backup execution time.')
-    selected_components = [item for item in components if item in {'database', 'slides_templates', 'auto_calculated_fields'}]
+    selected_components = [item for item in components if item in {'database', 'slides_templates', 'auto_calculated_fields', 'full_workspaces'}]
+    allowed_workspace_ids = {workspace.id for workspace in accessible_workspaces(user)}
+    selected_workspace_ids = list(dict.fromkeys(item for item in workspace_ids if item in allowed_workspace_ids))
+    selected_full_workspace_components = [item for item in full_workspace_components if item in {'input', 'output'}]
+    if any(item in selected_components for item in {'slides_templates', 'auto_calculated_fields', 'full_workspaces'}) and not selected_workspace_ids:
+        raise HTTPException(status_code=400, detail='Select at least one accessible workspace for the selected backup content.')
     if enabled and not selected_components:
         raise HTTPException(status_code=400, detail='Select at least one backup component.')
     if not 1 <= max_backups <= 1000:
         raise HTTPException(status_code=400, detail='Choose a maximum between 1 and 1000 backups.')
-    storage_path = recurring_backup_path({'backup_path': backup_path.strip() or str(application_config_dir / 'backups')})
+    if not 0 <= weekly_day <= 6 or not 1 <= monthly_day <= 31:
+        raise HTTPException(status_code=400, detail='Choose a valid scheduled day.')
+    storage_path = recurring_backup_path({'backup_path': backup_path.strip() or str(application_config_dir / 'scheduled-backups')})
     try:
+        storage_path = ensure_backup_path_is_within_config(storage_path)
         storage_path.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f'Unable to use the backup path: {exc}') from exc
     config = recurring_backup_settings() | {
         'enabled': enabled, 'components': selected_components, 'recurrence': recurrence,
-        'execution_time': execution_time, 'max_backups': max_backups,
+        'execution_time': execution_time, 'weekly_day': weekly_day, 'monthly_day': monthly_day,
+        'max_backups': max_backups,
+        'workspace_ids': selected_workspace_ids,
+        'full_workspace_components': selected_full_workspace_components,
         'backup_path': str(storage_path), 'last_run_period': '',
     }
     repository.set_application_state(RECURRING_BACKUP_STATE_KEY, json.dumps(config))
-    return RedirectResponse('/admin?database_notice=Recurring+backup+settings+saved.', status_code=status.HTTP_303_SEE_OTHER)
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JSONResponse({'message': 'Scheduler settings saved.'})
+    return RedirectResponse('/admin?backup_notice=Scheduler+settings+saved.', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/admin/database/backups/run')
+def run_manual_database_backup(
+    request: Request,
+    components: list[str] = Form(default=[]),
+    workspace_ids: list[str] = Form(default=[]),
+    full_workspace_components: list[str] = Form(default=[]),
+    max_backups: int = Form(30),
+    backup_path: str = Form(''),
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    """Queue an immediate backup using the current form selection and path."""
+    selected_components = [item for item in components if item in {'database', 'slides_templates', 'auto_calculated_fields', 'full_workspaces'}]
+    allowed_workspace_ids = {workspace.id for workspace in accessible_workspaces(user)}
+    selected_workspace_ids = list(dict.fromkeys(item for item in workspace_ids if item in allowed_workspace_ids))
+    selected_full_workspace_components = [item for item in full_workspace_components if item in {'input', 'output'}]
+    if any(item in selected_components for item in {'slides_templates', 'auto_calculated_fields', 'full_workspaces'}) and not selected_workspace_ids:
+        raise HTTPException(status_code=400, detail='Select at least one accessible workspace for the selected backup content.')
+    if not selected_components:
+        raise HTTPException(status_code=400, detail='Select at least one backup component.')
+    if not 1 <= max_backups <= 1000:
+        raise HTTPException(status_code=400, detail='Choose a maximum between 1 and 1000 backups.')
+    storage_path = recurring_backup_path({'backup_path': backup_path.strip() or str(application_config_dir / 'scheduled-backups')})
+    try:
+        storage_path = ensure_backup_path_is_within_config(storage_path)
+        storage_path.mkdir(parents=True, exist_ok=True)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f'Unable to use the backup path: {exc}') from exc
+    config = recurring_backup_settings() | {
+        'components': selected_components,
+        'max_backups': max_backups,
+        'backup_path': str(storage_path),
+        'workspace_ids': selected_workspace_ids,
+        'full_workspace_components': selected_full_workspace_components,
+    }
+    job = start_manual_database_backup(config, user.username)
+    repository.add_log(user.username, 'start_manual_database_backup', json.dumps({
+        'job_id': job['id'], 'components': selected_components, 'backup_path': str(storage_path),
+    }))
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JSONResponse({
+            'job_id': job['id'],
+            'message': 'The backup is running in the background and appears in the floating background-task card.',
+        })
+    return RedirectResponse('/admin?backup_notice=Manual+backup+started.', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get('/api/admin/backup-files')
+def backup_files(backup_path: str = Query(default=''), user: SessionUser = Depends(admin_user)) -> JSONResponse:
+    """List restoreable ZIP files in one server-visible backup directory."""
+    root = ensure_backup_path_is_within_config(recurring_backup_path({'backup_path': backup_path}))
+    files = []
+    if root.is_dir():
+        for item in sorted(root.glob('*.zip'), key=lambda value: value.stat().st_mtime, reverse=True):
+            try:
+                files.append({'name': item.name, 'size': format_workspace_size(item.stat().st_size),
+                              'modified': datetime.fromtimestamp(item.stat().st_mtime).astimezone().strftime('%Y-%m-%d %H:%M')})
+            except OSError:
+                continue
+    return JSONResponse({'files': files})
+
+
+@app.post('/api/admin/backup-files/inspect')
+def inspect_backup_file(backup_path: str = Form(''), backup_file: str = Form(''), user: SessionUser = Depends(admin_user)) -> JSONResponse:
+    archive_path = _backup_archive_file(backup_path, backup_file)
+    return JSONResponse({'components': _backup_archive_components(archive_path), 'workspaces': _backup_archive_workspaces(archive_path)})
+
+
+@app.post('/admin/database/backups/restore')
+def run_manual_database_restore(
+    request: Request,
+    backup_path: str = Form(''),
+    backup_file: str = Form(''),
+    components: list[str] = Form(default=[]),
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    archive_path = _backup_archive_file(backup_path, backup_file)
+    selected = [item for item in components if item in {'database', 'slides_templates', 'auto_calculated_fields'}]
+    present = _backup_archive_components(archive_path)
+    if not selected or not set(selected) <= set(present):
+        raise HTTPException(status_code=400, detail='Select only components contained in the backup.')
+    job = start_manual_database_restore(archive_path, selected, user.username)
+    repository.add_log(user.username, 'start_manual_database_restore', json.dumps({'job_id': job['id'], 'backup_file': archive_path.name, 'components': selected}))
+    return JSONResponse({'job_id': job['id'], 'message': 'The restore is running in the background and appears in the floating background-task card.'})
+
+
+@app.get('/api/admin/backup-directories')
+def backup_directories(path: str | None = Query(default=None), user: SessionUser = Depends(admin_user)) -> JSONResponse:
+    """List server-visible directories for the recurring-backup path picker."""
+    candidate = recurring_backup_path({'backup_path': path}) if path else backup_config_root()
+    try:
+        candidate = ensure_backup_path_is_within_config(candidate)
+        candidate.mkdir(parents=True, exist_ok=True)
+        directory = candidate.resolve(strict=True)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f'Unable to open this directory: {exc}') from exc
+    if not directory.is_dir():
+        raise HTTPException(status_code=400, detail='Choose a directory.')
+    try:
+        children = sorted((item for item in directory.iterdir() if item.is_dir() and not item.name.startswith('.')), key=lambda item: item.name.casefold())[:500]
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f'Unable to list this directory: {exc}') from exc
+    root = backup_config_root()
+    return JSONResponse({'path': str(directory), 'parent': str(directory.parent) if directory != root else None,
+                         'directories': [{'name': item.name, 'path': str(item)} for item in children]})
+
+
+@app.post('/api/admin/backup-directories')
+def create_backup_directory(
+    parent_path: str = Form(...), name: str = Form(...), user: SessionUser = Depends(admin_user),
+) -> JSONResponse:
+    """Create one folder in the server-visible backup path picker."""
+    normalized_name = name.strip()
+    if not normalized_name or normalized_name in {'.', '..'} or '/' in normalized_name or '\\' in normalized_name:
+        raise HTTPException(status_code=400, detail='Enter a valid folder name.')
+    try:
+        parent = ensure_backup_path_is_within_config(recurring_backup_path({'backup_path': parent_path}).resolve(strict=True))
+        if not parent.is_dir():
+            raise ValueError('Choose an existing parent directory.')
+        created = parent / normalized_name
+        created.mkdir(parents=False, exist_ok=True)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f'Unable to create the directory: {exc}') from exc
+    return JSONResponse({'path': str(created.resolve())})
 
 
 @app.get('/admin/report-templates/{technology}/{catalogue_id}/editor', response_class=HTMLResponse)
