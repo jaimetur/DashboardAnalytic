@@ -819,54 +819,6 @@
     document.querySelector('.workspace-management')?.setAttribute('open', '');
     sessionStorage.removeItem('workspace-management-open');
   }
-  const message = document.querySelector('[data-workspace-result]')?.textContent.trim() || '';
-  const started = message.startsWith('Workspace duplication started.');
-  if (started) {
-    sessionStorage.setItem('workspace-duplication-pending', String(document.querySelectorAll('.workspace-library-row').length));
-  }
-  const pending = sessionStorage.getItem('workspace-duplication-pending');
-  const current = Object.fromEntries([...document.querySelectorAll('.workspace-library-row')].map((row) => [
-    row.querySelector('[data-workspace-name-input]')?.value || '',
-    row.querySelector('.workspace-status-ready') ? 'ready' : 'duplicating',
-  ]));
-  let previous = {};
-  try { previous = JSON.parse(localStorage.getItem('workspace-statuses') || '{}'); } catch (_) {}
-  localStorage.setItem('workspace-statuses', JSON.stringify(current));
-  const completed = Object.keys(current).some((name) => name.toLowerCase().includes(' - copy') && previous[name] === 'duplicating' && current[name] === 'ready');
-  if (pending !== null && completed) {
-    sessionStorage.removeItem('workspace-duplication-pending');
-    showInfoDialog('The workspace duplication has completed successfully.', {title: 'Duplication completed'});
-  }
-  return;
-  const baseline = Number(pending);
-  const timer = window.setInterval(async () => {
-    try {
-      const response = await fetch('/workspace', {credentials: 'same-origin', headers: {'X-Requested-With': 'XMLHttpRequest'}});
-      if (!response.ok) return;
-      const html = await response.text();
-      const count = (html.match(/class="workspace-library-row/g) || []).length;
-      const parsed = new DOMParser().parseFromString(html, 'text/html');
-      const rows = [...parsed.querySelectorAll('.workspace-library-row')];
-      const entries = rows.map((row) => ({
-        name: row.querySelector('[data-workspace-name-input]')?.value || '',
-        size: Number.parseFloat(row.querySelector('[data-workspace-size]')?.textContent || '') || 0,
-      }));
-      const ready = rows.some((row) => {
-        const entry = entries[rows.indexOf(row)];
-        if (!entry.name.toLowerCase().includes(' - copy')) return false;
-        if (!row.querySelector('.workspace-status-ready')) return false;
-        const source = entries.find((candidate) => candidate.name.toLowerCase() === entry.name.toLowerCase().split(' - copy', 1)[0]);
-        return Boolean(source);
-      });
-      if (ready) {
-        window.clearInterval(timer);
-        sessionStorage.removeItem('workspace-duplication-pending');
-        sessionStorage.setItem('workspace-management-open', '1');
-        window.location.reload();
-      }
-    } catch (_error) { /* keep polling while the copy runs */ }
-  }, 3000);
-  window.setTimeout(() => { window.clearInterval(timer); }, 10 * 60 * 1000);
 })();
 </script>
 <script>
@@ -878,6 +830,15 @@
       if (!response.ok) return;
       const payload = await response.json();
       let completed = false;
+      let deleted = false;
+      (payload.removed_workspace_ids || []).forEach((workspaceId) => {
+        const status = document.querySelector(`[data-workspace-status][data-workspace-id="${CSS.escape(String(workspaceId))}"]`);
+        const row = status?.closest('.workspace-library-row');
+        if (row) {
+          row.remove();
+          deleted = true;
+        }
+      });
       payload.workspaces.forEach((workspace) => {
         const size = document.querySelector(`[data-workspace-size][data-workspace-id="${workspace.id}"]`);
         const status = document.querySelector(`[data-workspace-status][data-workspace-id="${workspace.id}"]`);
@@ -888,17 +849,18 @@
         status.textContent = label;
         status.classList.toggle('workspace-status-ready', label === 'Ready');
         status.classList.toggle('workspace-status-duplicating', label === 'Duplicating');
+        if (label === 'Ready' && workspace.accessible) {
+          const row = status.closest('.workspace-library-row');
+          row?.classList.remove('workspace-no-access-row');
+          row?.querySelectorAll('input:not([type="hidden"]), button').forEach((control) => {
+            control.disabled = false;
+          });
+        }
       });
       if (completed) {
-        const page = await fetch('/workspace', {credentials: 'same-origin', cache: 'no-store'});
-        if (page.ok) {
-          const document = new DOMParser().parseFromString(await page.text(), 'text/html');
-          const replacement = document.querySelector('.workspace-library-table');
-          const table = window.document.querySelector('.workspace-library-table');
-          if (table && replacement) table.replaceWith(replacement);
-        }
         showInfoDialog('The workspace duplication has completed successfully.', {title: 'Duplication completed'});
       }
+      if (deleted) showInfoDialog('The workspace has been deleted successfully.', {title: 'Workspace deleted'});
     } catch (_) { /* keep the next interval tick alive */ }
   };
   if (document.querySelector('.workspace-status-duplicating')) {

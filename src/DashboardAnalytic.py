@@ -85,6 +85,8 @@ WORKSPACE_DIMENSION_MATERIALIZATION_THREADS_LOCK = Lock()
 TRANSFER_JOBS: dict[str, dict[str, Any]] = {}
 TRANSFER_OFFERS: dict[str, dict[str, Any]] = {}
 TRANSFER_LOCK = Lock()
+WORKSPACE_LIFECYCLE_JOBS: dict[str, dict[str, Any]] = {}
+WORKSPACE_LIFECYCLE_JOBS_LOCK = Lock()
 EXPORT_PACKAGE_TTL = timedelta(hours=24)
 TRANSFER_OFFER_TTL = timedelta(minutes=15)
 DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
@@ -4915,11 +4917,24 @@ def workspace_status(user: SessionUser = Depends(current_user)) -> JSONResponse:
     for item in workspaces:
         if item.status == 'duplicating':
             invalidate_workspace_size_cache(item.database_path.parent)
+    now = datetime.now(timezone.utc).timestamp()
+    with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+        removed_workspace_ids = [
+            str(job['workspace_id']) for job in WORKSPACE_LIFECYCLE_JOBS.values()
+            if job.get('operation') == 'delete' and job.get('status') == 'ready'
+            and float(job.get('finished_at') or 0) > now - 30
+        ]
+        for job_id in [
+            job_id for job_id, job in WORKSPACE_LIFECYCLE_JOBS.items()
+            if job.get('status') in {'ready', 'failed'} and float(job.get('finished_at') or 0) <= now - 30
+        ]:
+            WORKSPACE_LIFECYCLE_JOBS.pop(job_id, None)
     return JSONResponse({'workspaces': [
-        {'id': item.id, 'status': item.status, 'size': format_workspace_size(workspace_disk_usage(item))}
+        {'id': item.id, 'status': item.status, 'size': format_workspace_size(workspace_disk_usage(item)),
+         'accessible': bool(access.get(item.id, False))}
         for item in workspaces
         if access.get(item.id, False) or (user.role in {'admin', 'super-admin'} and item.status == 'duplicating')
-    ]}, headers={'Cache-Control': 'no-store'})
+    ], 'removed_workspace_ids': removed_workspace_ids}, headers={'Cache-Control': 'no-store'})
 
 
 def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
@@ -5068,6 +5083,29 @@ def background_tasks_status(user: SessionUser = Depends(current_user)) -> JSONRe
                 'is_active': bool(active_workspace and active_workspace.id == workspace.id),
                 'tasks': workspace_tasks,
             }
+
+    with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+        lifecycle_jobs = [dict(job) for job in WORKSPACE_LIFECYCLE_JOBS.values()]
+    now = datetime.now(timezone.utc).timestamp()
+    for job in lifecycle_jobs:
+        if job.get('operation') != 'delete' or job.get('owner') != user.username:
+            continue
+        if job.get('status') == 'ready' and float(job.get('finished_at') or 0) < now - 2:
+            continue
+        if job.get('status') not in {'queued', 'processing', 'ready'}:
+            continue
+        workspace_id = str(job.get('workspace_id') or '')
+        grouped[workspace_id] = {
+            'workspace_id': workspace_id,
+            'workspace_name': str(job.get('workspace_name') or 'Workspace'),
+            'is_active': False,
+            'tasks': [{
+                'id': f'workspace-delete:{job.get("id")}',
+                'label': 'Deleting workspace',
+                'detail': 'Removing workspace database and files' if job.get('delete_files') else 'Removing workspace database',
+                'progress': 100 if job.get('status') == 'ready' else None,
+            }],
+        }
 
     with AUTO_CALCULATED_FIELD_JOBS_LOCK:
         auto_jobs = [dict(job) for job in AUTO_CALCULATED_FIELD_JOBS.values()]
@@ -5314,12 +5352,60 @@ def delete_workspace(
     if active_workspace and active_workspace.id == workspace_id:
         return RedirectResponse('/workspace?workspace_warning=Close+the+workspace+before+removing+it.', status_code=status.HTTP_303_SEE_OTHER)
     try:
-        workspace_registry.delete(workspace_id, delete_files=delete_workspace_files)
+        workspace_root = workspace_registry._managed_workspace_root(registered_workspace)
+        workspace_registry.remove(workspace_id, delete_files=False)
         repository.remove_workspace_access(workspace_id)
     except ValueError as exc:
         return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
-    notice = 'Workspace and all of its files deleted.' if delete_workspace_files else 'Workspace deleted. Its input and output files were preserved.'
-    return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": notice})}', status_code=status.HTTP_303_SEE_OTHER)
+    # Tiny workspaces can be removed before the redirect returns; larger
+    # directories still use the worker below and keep the task visible while
+    # their files are being removed.
+    if delete_workspace_files and workspace_disk_usage(registered_workspace) <= 8 * 1024 * 1024:
+        shutil.rmtree(workspace_root, ignore_errors=True)
+    elif not delete_workspace_files:
+        for database_file in (
+            registered_workspace.database_path,
+            *(Path(f'{registered_workspace.database_path}{suffix}') for suffix in ('-wal', '-shm')),
+        ):
+            database_file.unlink(missing_ok=True)
+    job_id = uuid4().hex
+    with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+        WORKSPACE_LIFECYCLE_JOBS[job_id] = {
+            'id': job_id, 'operation': 'delete', 'workspace_id': workspace_id,
+            'workspace_name': registered_workspace.name, 'owner': user.username,
+            'delete_files': delete_workspace_files, 'status': 'queued',
+            'created_at': datetime.now(timezone.utc).timestamp(),
+        }
+
+    def run_deletion() -> None:
+        with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+            job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
+            if job:
+                job['status'] = 'processing'
+        try:
+            if delete_workspace_files:
+                shutil.rmtree(workspace_root, ignore_errors=True)
+            else:
+                for database_file in (
+                    registered_workspace.database_path,
+                    *(Path(f'{registered_workspace.database_path}{suffix}') for suffix in ('-wal', '-shm')),
+                ):
+                    database_file.unlink(missing_ok=True)
+            with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+                job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
+                if job:
+                    job.update(status='ready', finished_at=datetime.now(timezone.utc).timestamp())
+        except Exception as exc:
+            with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+                job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
+                if job:
+                    job.update(status='failed', error=str(exc), finished_at=datetime.now(timezone.utc).timestamp())
+
+    Thread(target=run_deletion, name=f'workspace-delete-{workspace_id}', daemon=True).start()
+    return RedirectResponse(
+        '/workspace?workspace_notice=Workspace+deletion+started.+The+workspace+will+disappear+when+the+operation+finishes.',
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.post('/workspace/access')
