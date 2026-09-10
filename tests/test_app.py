@@ -1635,6 +1635,25 @@ def test_workspace_remove_preserves_files_unless_explicitly_requested(client) ->
     assert not second_root.exists()
 
 
+def test_workspace_status_reports_cancelled_duplicate_for_live_row_removal(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    with app_module.WORKSPACE_LIFECYCLE_JOBS_LOCK:
+        app_module.WORKSPACE_LIFECYCLE_JOBS['cancelled-duplicate-test'] = {
+            'operation': 'duplicate-cancel', 'workspace_id': 'cancelled-copy',
+            'workspace_name': 'Cancelled Copy', 'owner': 'admin', 'status': 'ready',
+            'finished_at': time.time(),
+        }
+    try:
+        response = client.get('/api/workspaces/status')
+        assert response.status_code == 200
+        assert 'cancelled-copy' in response.json()['removed_workspace_ids']
+    finally:
+        with app_module.WORKSPACE_LIFECYCLE_JOBS_LOCK:
+            app_module.WORKSPACE_LIFECYCLE_JOBS.pop('cancelled-duplicate-test', None)
+
+
 def test_interrupted_background_jobs_become_retryable_failures(client) -> None:
     import src.DashboardAnalytic as app_module
 

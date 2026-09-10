@@ -5094,7 +5094,7 @@ def workspace_status(user: SessionUser = Depends(current_user)) -> JSONResponse:
     with WORKSPACE_LIFECYCLE_JOBS_LOCK:
         removed_workspace_ids = [
             str(job['workspace_id']) for job in WORKSPACE_LIFECYCLE_JOBS.values()
-            if job.get('operation') == 'delete' and job.get('status') == 'ready'
+            if job.get('operation') in {'delete', 'duplicate-cancel'} and job.get('status') == 'ready'
             and float(job.get('finished_at') or 0) > now - 30
         ]
         for job_id in [
@@ -5621,6 +5621,12 @@ def duplicate_workspace(
             except Exception:
                 pass
             repository.remove_workspace_access(failed_workspace.id)
+            with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+                WORKSPACE_LIFECYCLE_JOBS[uuid4().hex] = {
+                    'operation': 'duplicate-cancel', 'workspace_id': failed_workspace.id,
+                    'workspace_name': failed_workspace.name, 'owner': user.username,
+                    'status': 'ready', 'finished_at': datetime.now(timezone.utc).timestamp(),
+                }
       finally:
         if created_workspace is not None:
             with WORKSPACE_DUPLICATION_STOP_REQUESTS_LOCK:
