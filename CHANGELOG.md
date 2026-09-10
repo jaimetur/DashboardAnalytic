@@ -23,6 +23,7 @@
 - Replaced the stop glyph with a centered 0.56rem white square inside the circular `Stop Job` control, preserving the button dimensions and making its size consistent across browsers.
 - Moved bulk deletion of all Reports and all Chart Sets into workspace background tasks with live progress in the global task panels; Reporting remains available and refreshes its job tables when each deletion completes.
 - Kept the Open and Remove workspace actions disabled for the active workspace after its row is refreshed following background duplication.
+- Added a Database Backups subpanel in Admin > Database Management with persistent recurring backup controls for the application database, Slides Templates and Auto-calculated Fields across every workspace, including hourly, daily, weekly and monthly schedules with an execution time.
 
 #### 🐛 Bug fixes:
 - Fixed the Reporting Chart Preview header so Manage Auto-calculated Fields appears beside its red Close control; Escape now leaves active Auto-calculated Fields and filtered-dataset child dialogs open, closing the preview only when no child dialog is active.

@@ -91,6 +91,9 @@ WORKSPACE_DUPLICATION_STOP_REQUESTS: set[str] = set()
 WORKSPACE_DUPLICATION_STOP_REQUESTS_LOCK = Lock()
 BULK_REPORT_DELETION_JOBS: dict[str, dict[str, Any]] = {}
 BULK_REPORT_DELETION_JOBS_LOCK = Lock()
+RECURRING_BACKUP_STATE_KEY = 'recurring_database_backup'
+RECURRING_BACKUP_LOCK = Lock()
+RECURRING_BACKUP_RUNNING = False
 EXPORT_PACKAGE_TTL = timedelta(hours=24)
 TRANSFER_OFFER_TTL = timedelta(minutes=15)
 DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
@@ -1439,6 +1442,7 @@ async def lifespan(_: FastAPI):
     # checkpoints every SQLite database, which can leave startup blocked for
     # minutes on installations with large reporting-row stores.
     export_package_dir().mkdir(parents=True, exist_ok=True)
+    Thread(target=recurring_backup_scheduler_loop, name='recurring-backup-scheduler', daemon=True).start()
     _recover_unimported_transfer_packages()
     _cleanup_expired_export_packages()
     if (workspace_id := workspace_registry.active_id()):
@@ -2830,6 +2834,104 @@ def _archive_tree(archive: zipfile.ZipFile, source: Path, archive_prefix: str, *
         if exclude_slides_templates and relative_path.parts and relative_path.parts[0] == 'slides-templates':
             continue
         _archive_file(archive, path, f'{archive_prefix}/{relative_path.as_posix()}', progress_callback)
+
+
+def recurring_backup_settings() -> dict[str, Any]:
+    """Load the persistent recurring-backup configuration with safe defaults."""
+    defaults = {
+        'enabled': False, 'include_database': True, 'include_slides_templates': True,
+        'include_auto_calculated_fields': True, 'recurrence': 'daily', 'execution_time': '02:00',
+        'last_run_period': '',
+    }
+    raw = repository.get_application_state(RECURRING_BACKUP_STATE_KEY)
+    try:
+        saved = json.loads(raw) if raw else {}
+    except (TypeError, json.JSONDecodeError):
+        saved = {}
+    if not isinstance(saved, dict):
+        saved = {}
+    return defaults | {key: saved[key] for key in defaults if key in saved}
+
+
+def create_recurring_database_backup(config: dict[str, Any]) -> Path:
+    """Write one consistent ZIP backup for the enabled recurring-backup parts."""
+    timestamp = datetime.now().astimezone().strftime('%Y%m%d-%H%M%S')
+    backup_root = application_config_dir / 'backups'
+    backup_root.mkdir(parents=True, exist_ok=True)
+    destination = backup_root / f'dashboard-analytic-backup-{timestamp}.zip'
+    workspaces = workspace_registry.list()
+    with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        manifest = {'created_at': datetime.now().astimezone().isoformat(timespec='seconds'), 'workspaces': []}
+        if config['include_database']:
+            _archive_database(archive, repository.global_db_path, 'application/application.db', backup_root)
+        for workspace in workspaces:
+            item = {'id': workspace.id, 'name': workspace.name}
+            if config['include_slides_templates']:
+                _archive_tree(archive, workspace.slides_templates_dir, f'workspaces/{workspace.id}/slides-templates')
+            if config['include_auto_calculated_fields']:
+                task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
+                archive.writestr(
+                    f'workspaces/{workspace.id}/auto-calculated-fields.json',
+                    json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
+                )
+            manifest['workspaces'].append(item)
+        archive.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
+    return destination
+
+
+def _recurring_backup_period(config: dict[str, Any], now: datetime) -> str | None:
+    if not config.get('enabled'):
+        return None
+    try:
+        hour, minute = (int(value) for value in str(config.get('execution_time') or '').split(':', 1))
+    except ValueError:
+        return None
+    if not (0 <= hour <= 23 and 0 <= minute <= 59) or now.minute != minute:
+        return None
+    recurrence = str(config.get('recurrence') or 'daily')
+    if recurrence == 'hourly':
+        return now.strftime('%Y%m%d%H')
+    if now.hour != hour:
+        return None
+    if recurrence == 'daily':
+        return now.strftime('%Y%m%d')
+    if recurrence == 'weekly' and now.weekday() == 0:
+        return now.strftime('%G-W%V')
+    if recurrence == 'monthly' and now.day == 1:
+        return now.strftime('%Y%m')
+    return None
+
+
+def run_recurring_backup_scheduler() -> None:
+    """Start an eligible backup once per configured period."""
+    global RECURRING_BACKUP_RUNNING
+    config = recurring_backup_settings()
+    period = _recurring_backup_period(config, datetime.now().astimezone())
+    if not period or config.get('last_run_period') == period:
+        return
+    with RECURRING_BACKUP_LOCK:
+        if RECURRING_BACKUP_RUNNING:
+            return
+        RECURRING_BACKUP_RUNNING = True
+    config['last_run_period'] = period
+    repository.set_application_state(RECURRING_BACKUP_STATE_KEY, json.dumps(config))
+    def run() -> None:
+        global RECURRING_BACKUP_RUNNING
+        try:
+            create_recurring_database_backup(config)
+        finally:
+            with RECURRING_BACKUP_LOCK:
+                RECURRING_BACKUP_RUNNING = False
+    Thread(target=run, name='recurring-database-backup', daemon=True).start()
+
+
+def recurring_backup_scheduler_loop() -> None:
+    while True:
+        try:
+            run_recurring_backup_scheduler()
+        except Exception:
+            pass
+        sleep(20)
 
 
 def _workspace_archive_metadata(workspace: Workspace) -> dict[str, Any]:
@@ -4431,6 +4533,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             'template_names_by_technology': template_names_by_technology,
             'workspace_catalogues': workspace_catalogues,
             'database_table_groups': database_table_groups,
+            'recurring_backup': recurring_backup_settings(),
             'database_notice': request.query_params.get('database_notice') or None,
             'catalogue_editor': catalogue_editor_payload(selected_technology, selected_catalogue) if active_workspace else None,
             'catalogue_notice': request.query_params.get('catalogue_notice') or None,
@@ -8382,6 +8485,31 @@ def export_report(
 @app.get('/admin', response_class=HTMLResponse)
 def admin_panel(request: Request, user: SessionUser = Depends(admin_user)) -> HTMLResponse:
     return render_admin_template(request, user)
+
+
+@app.post('/admin/database/backups')
+def save_recurring_backup_settings(
+    enabled: bool = Form(False),
+    include_database: bool = Form(False),
+    include_slides_templates: bool = Form(False),
+    include_auto_calculated_fields: bool = Form(False),
+    recurrence: str = Form('daily'),
+    execution_time: str = Form('02:00'),
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    recurrence = recurrence.strip().lower()
+    if recurrence not in {'hourly', 'daily', 'weekly', 'monthly'}:
+        raise HTTPException(status_code=400, detail='Choose a valid backup recurrence.')
+    if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', execution_time):
+        raise HTTPException(status_code=400, detail='Choose a valid backup execution time.')
+    config = recurring_backup_settings() | {
+        'enabled': enabled, 'include_database': include_database,
+        'include_slides_templates': include_slides_templates,
+        'include_auto_calculated_fields': include_auto_calculated_fields,
+        'recurrence': recurrence, 'execution_time': execution_time, 'last_run_period': '',
+    }
+    repository.set_application_state(RECURRING_BACKUP_STATE_KEY, json.dumps(config))
+    return RedirectResponse('/admin?database_notice=Recurring+backup+settings+saved.', status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get('/admin/report-templates/{technology}/{catalogue_id}/editor', response_class=HTMLResponse)

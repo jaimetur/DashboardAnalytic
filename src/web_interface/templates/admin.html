@@ -476,6 +476,27 @@
       </div>
     </summary>
     <div class="database-management-content" data-database-management>
+      <section class="database-backups-subpanel">
+        <div>
+          <p class="eyebrow">Scheduled protection</p>
+          <h3>Database Backups</h3>
+          <p class="form-note">Create recurring ZIP backups of the selected application data. Weekly backups run on Monday and monthly backups run on the first day of the month.</p>
+        </div>
+        <form class="database-backup-form" action="/admin/database/backups" method="post">
+          <label class="confirm-option"><input type="checkbox" name="enabled" value="true" {% if recurring_backup.enabled %}checked{% endif %}><span>Enable recurring backups</span></label>
+          <div class="database-backup-options">
+            <label><input type="checkbox" name="include_database" value="true" {% if recurring_backup.include_database %}checked{% endif %}> Application database</label>
+            <label><input type="checkbox" name="include_slides_templates" value="true" {% if recurring_backup.include_slides_templates %}checked{% endif %}> Slides Templates for all workspaces</label>
+            <label><input type="checkbox" name="include_auto_calculated_fields" value="true" {% if recurring_backup.include_auto_calculated_fields %}checked{% endif %}> Auto-calculated Fields for all workspaces</label>
+          </div>
+          <div class="database-backup-schedule">
+            <label>Recurrence<select name="recurrence"><option value="hourly" {% if recurring_backup.recurrence == 'hourly' %}selected{% endif %}>Hourly</option><option value="daily" {% if recurring_backup.recurrence == 'daily' %}selected{% endif %}>Daily</option><option value="weekly" {% if recurring_backup.recurrence == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if recurring_backup.recurrence == 'monthly' %}selected{% endif %}>Monthly</option></select></label>
+            <label>Execution time<input type="time" name="execution_time" value="{{ recurring_backup.execution_time }}" required></label>
+            <button type="submit">Save backup settings</button>
+          </div>
+        </form>
+      </section>
+      <section class="database-editor-subpanel">
       {% if active_workspace %}
       <p class="lede">Browse, edit or remove individual records in any table of <strong>{{ active_workspace.name }}</strong>. Primary-key values are protected so row identity remains stable.</p>
       {% if database_notice %}<div class="alert database-cleanup-notice">{{ database_notice }}</div>{% endif %}
@@ -526,6 +547,7 @@
       {% else %}
       <p class="lede">Open a workspace from Workspace Management before viewing or editing its database.</p>
       {% endif %}
+      </section>
     </div>
   </details>
 

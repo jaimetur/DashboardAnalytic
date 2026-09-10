@@ -1140,6 +1140,19 @@ class Repository:
                 (key, value),
             )
 
+    def get_application_state(self, key: str) -> str | None:
+        with self.global_connection() as conn:
+            row = conn.execute('SELECT value FROM application_state WHERE key = ?', (key,)).fetchone()
+            return str(row['value']) if row else None
+
+    def set_application_state(self, key: str, value: str) -> None:
+        with self.global_connection() as conn:
+            conn.execute(
+                'INSERT INTO application_state (key, value) VALUES (?, ?) '
+                'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+                (key, value),
+            )
+
     def list_calculated_dimensions(self) -> list[dict[str, Any]]:
         with self.connection() as conn:
             rows = conn.execute(

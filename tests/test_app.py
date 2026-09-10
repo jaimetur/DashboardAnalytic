@@ -1983,6 +1983,28 @@ def test_admin_panel_is_available_for_admin(client) -> None:
     assert 'form="user-update-1" disabled title="Only super-admins can modify super-admin accounts">Save</button>' not in response.text
 
 
+def test_admin_recurring_backup_settings_are_persisted(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    saved = client.post('/admin/database/backups', data={
+        'enabled': 'true', 'include_database': 'true', 'include_slides_templates': 'true',
+        'recurrence': 'weekly', 'execution_time': '03:15',
+    }, follow_redirects=False)
+
+    assert saved.status_code == 303
+    config = app_module.recurring_backup_settings()
+    assert config['enabled'] is True
+    assert config['include_database'] is True
+    assert config['include_slides_templates'] is True
+    assert config['include_auto_calculated_fields'] is False
+    assert config['recurrence'] == 'weekly'
+    assert config['execution_time'] == '03:15'
+    page = client.get('/admin')
+    assert 'Database Backups' in page.text
+    assert 'database-editor-subpanel' in page.text
+
+
 def test_login_and_admin_remain_available_after_closing_the_active_workspace(client) -> None:
     import src.DashboardAnalytic as app_module
 
