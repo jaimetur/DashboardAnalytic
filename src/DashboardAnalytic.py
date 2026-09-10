@@ -3237,6 +3237,7 @@ def _run_export_job(job_id: str, target: str, workspace_ids: list[str] | None, i
 
 def start_export_job(
     target: str, workspace_ids: Iterable[str] | None = None, include_generated_outputs: bool = True,
+    owner: str = '',
 ) -> dict[str, Any]:
     """Start a disk-backed ZIP build that continues independently of the page."""
     filename = export_archive_filename(target)
@@ -3252,10 +3253,13 @@ def start_export_job(
         if target == 'auto-calculated-fields':
             load_workspace_calculated_dimensions()
         selected_workspace_ids = [active_workspace.id]
+    elif target.startswith('workspace:'):
+        selected_workspace_ids = [target.removeprefix('workspace:')]
     if target == 'full-environment':
         _selected_export_workspaces(selected_workspace_ids)
     job = {
         'id': job_id,
+        'owner': owner,
         'target': target,
         'status': 'queued',
         'filename': filename,
@@ -3278,7 +3282,7 @@ def export_job_payload(job_id: str) -> dict[str, Any] | None:
         job = EXPORT_JOBS.get(job_id)
         if not job:
             return None
-        payload = {key: value for key, value in job.items() if key not in {'path'}}
+        payload = {key: value for key, value in job.items() if key not in {'path', 'owner'}}
     if payload['status'] == 'ready':
         payload['download_url'] = f'/admin/import-export/export/jobs/{job_id}/download'
     return payload
@@ -3363,6 +3367,14 @@ def _replace_workspace_from_staging(existing: Workspace, staging: Workspace) -> 
                         'UPDATE datasets SET stored_path = REPLACE(stored_path, ?, ?)',
                         (str(staging.input_dir), str(existing.input_dir)),
                     )
+                has_generated_jobs = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'generated_jobs'"
+                ).fetchone()
+                if has_generated_jobs:
+                    connection.execute(
+                        'UPDATE generated_jobs SET output_path = REPLACE(output_path, ?, ?)',
+                        (str(staging.output_dir), str(existing.output_dir)),
+                    )
 
         # The original registry row and workspace id are deliberately kept so
         # user access grants and references continue to work unchanged.
@@ -3435,6 +3447,21 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
                     'UPDATE generated_jobs SET output_path = REPLACE(output_path, ?, ?)',
                     (str(source_output_dir), str(workspace.output_dir)),
                 )
+            if has_generated_jobs:
+                # Older archives did not always retain source output metadata.
+                # Resolve copied report files inside the destination workspace
+                # so Reporting can expose their chart thumbnails immediately.
+                report_rows = connection.execute(
+                    "SELECT id, output_file FROM generated_jobs WHERE job_type = 'report'"
+                ).fetchall()
+                for report_id, output_file in report_rows:
+                    file_name = Path(str(output_file or '')).name
+                    target = workspace.export_dir / file_name
+                    if file_name and target.is_file():
+                        connection.execute(
+                            'UPDATE generated_jobs SET output_path = ? WHERE id = ?',
+                            (str(target), report_id),
+                        )
     except Exception:
         workspace_registry.remove(workspace.id)
         repository.remove_workspace_access(workspace.id)
@@ -3728,9 +3755,17 @@ def _run_import_job(job_id: str) -> None:
         job['status'] = 'processing'
         package_path = Path(str(job['path']))
         manifest = dict(job['manifest'])
+
+    def update_progress(phase: str, progress: float) -> None:
+        with IMPORT_JOBS_LOCK:
+            current = IMPORT_JOBS.get(job_id)
+            if current:
+                current.update({'phase': phase, 'progress': round(min(100.0, max(0.0, progress)), 1)})
+
     try:
         notice = _apply_import_archive(
-            package_path, manifest, destination_workspace_ids=job.get('destination_workspace_ids') or (),
+            package_path, manifest, update_progress,
+            destination_workspace_ids=job.get('destination_workspace_ids') or (),
         )
         with IMPORT_JOBS_LOCK:
             job.update({'status': 'ready', 'notice': notice, 'finished_at': datetime.now(timezone.utc).timestamp()})
@@ -4127,6 +4162,8 @@ def start_transfer_job(
         if target == 'auto-calculated-fields':
             load_workspace_calculated_dimensions()
         selected_workspace_ids = [active_workspace.id]
+    elif target.startswith('workspace:'):
+        selected_workspace_ids = [target.removeprefix('workspace:')]
     if target == 'full-environment':
         _selected_export_workspaces(selected_workspace_ids)
     else:
@@ -4885,6 +4922,204 @@ def workspace_status(user: SessionUser = Depends(current_user)) -> JSONResponse:
     ]}, headers={'Cache-Control': 'no-store'})
 
 
+def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
+    """Read lightweight job progress without activating the workspace."""
+    tasks: list[dict[str, Any]] = []
+    if workspace.status == 'duplicating':
+        tasks.append({
+            'id': f'workspace-duplicate:{workspace.id}',
+            'label': 'Duplicating workspace',
+            'detail': 'Copying the workspace database and files',
+            'progress': None,
+        })
+    if not workspace.database_path.is_file():
+        return tasks
+    try:
+        with sqlite3.connect(workspace.database_path, timeout=0.15) as connection:
+            connection.row_factory = sqlite3.Row
+            tables = {
+                str(row['name'])
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+            }
+            if {'datasets', 'dataset_profiles'} <= tables:
+                rows = connection.execute(
+                    """SELECT d.id, d.file_name, p.status, p.progress
+                       FROM datasets d
+                       JOIN dataset_profiles p ON p.dataset_id = d.id
+                       WHERE p.status IN ('queued', 'processing')
+                       ORDER BY d.uploaded_at, d.id"""
+                ).fetchall()
+                for row in rows:
+                    task_status = str(row['status'] or 'queued').title()
+                    tasks.append({
+                        'id': f'dataset:{workspace.id}:{row["id"]}',
+                        'label': f'Processing dataset: {row["file_name"]}',
+                        'detail': task_status,
+                        'progress': max(0, min(100, int(row['progress'] or 0))),
+                    })
+            if 'generated_jobs' in tables:
+                rows = connection.execute(
+                    """SELECT id, job_type, template_name, output_file, status, progress
+                       FROM generated_jobs
+                       WHERE status IN ('queued', 'processing')
+                       ORDER BY created_at, id"""
+                ).fetchall()
+                for row in rows:
+                    job_type = str(row['job_type'] or '')
+                    template_name = str(row['template_name'] or '').strip()
+                    output_file = Path(str(row['output_file'] or '')).name
+                    if job_type == 'report':
+                        label = f'Generating PowerPoint Report: {template_name or output_file or row["id"]}'
+                    else:
+                        label = f'Generating Chart Set: {template_name or row["id"]}'
+                    tasks.append({
+                        'id': f'generated:{workspace.id}:{row["id"]}',
+                        'label': label,
+                        'detail': str(row['status'] or 'queued').title(),
+                        'progress': max(0, min(100, int(row['progress'] or 0))),
+                    })
+            if 'workspace_state' in tables:
+                materialization = connection.execute(
+                    "SELECT value FROM workspace_state WHERE key = 'calculated_dimensions_need_materialization'"
+                ).fetchone()
+                if materialization and str(materialization['value']) == 'processing':
+                    tasks.append({
+                        'id': f'auto-fields-state:{workspace.id}',
+                        'label': 'Materializing Auto-calculated Fields',
+                        'detail': 'Updating CDR tables',
+                        'progress': None,
+                    })
+    except sqlite3.Error:
+        # A worker may briefly hold the database while publishing a progress
+        # update. The next browser poll will retry without disrupting the page.
+        pass
+    return tasks
+
+
+def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> list[dict[str, Any]]:
+    """Return current process jobs that are not persisted in workspace databases."""
+    tasks: list[dict[str, Any]] = []
+
+    def append_job(job: dict[str, Any], prefix: str, label: str) -> None:
+        workspace_ids = [str(value) for value in (job.get('workspace_ids') or []) if str(value)]
+        workspace_id = workspace_ids[0] if len(workspace_ids) == 1 and workspace_ids[0] in accessible_ids else '__server__'
+        progress_value = job.get('progress')
+        progress = max(0, min(100, round(float(progress_value), 1))) if progress_value is not None else None
+        tasks.append({
+            'id': f'{prefix}:{job.get("id")}',
+            'workspace_id': workspace_id,
+            'label': label,
+            'detail': str(job.get('phase') or job.get('status') or 'processing').replace('_', ' ').title(),
+            'progress': progress,
+        })
+
+    with EXPORT_JOBS_LOCK:
+        export_jobs = [dict(job) for job in EXPORT_JOBS.values()]
+    for job in export_jobs:
+        if job.get('status') not in {'queued', 'processing'} or (job.get('owner') and job.get('owner') != user.username):
+            continue
+        append_job(job, 'export', f'Exporting {str(job.get("target") or "package").replace("-", " ").title()}')
+
+    with IMPORT_JOBS_LOCK:
+        import_jobs = [dict(job) for job in IMPORT_JOBS.values()]
+    for job in import_jobs:
+        if job.get('status') not in {'queued', 'processing'} or job.get('owner') != user.username:
+            continue
+        append_job(job | {'workspace_ids': job.get('destination_workspace_ids')}, 'import', 'Importing package')
+
+    with TRANSFER_LOCK:
+        transfer_jobs = [dict(job) for job in TRANSFER_JOBS.values()]
+        incoming_transfers = [dict(offer) for offer in TRANSFER_OFFERS.values()]
+    for job in transfer_jobs:
+        if job.get('status') in {'ready', 'failed', 'cancelled'} or job.get('owner') != user.username:
+            continue
+        append_job(job, 'transfer', f'Transferring {str(job.get("target") or "package").replace("-", " ").title()}')
+    if user.role == 'super-admin':
+        for offer in incoming_transfers:
+            if offer.get('status') not in {'receiving', 'received', 'importing'}:
+                continue
+            label = 'Importing transferred package' if offer.get('status') == 'importing' else 'Receiving server transfer'
+            append_job(
+                offer | {'workspace_ids': offer.get('destination_workspace_ids')},
+                'incoming-transfer',
+                f'{label}: {offer.get("content") or "package"}',
+            )
+    return tasks
+
+
+@app.get('/api/background-tasks')
+def background_tasks_status(user: SessionUser = Depends(current_user)) -> JSONResponse:
+    """Aggregate running work across accessible workspaces for the global UI."""
+    workspaces = accessible_workspaces(user)
+    if user.role in {'admin', 'super-admin'}:
+        known_ids = {workspace.id for workspace in workspaces}
+        workspaces.extend(
+            workspace for workspace in workspace_registry.list()
+            if workspace.status == 'duplicating' and workspace.id not in known_ids
+        )
+    accessible_ids = {workspace.id for workspace in workspaces}
+    grouped: dict[str, dict[str, Any]] = {}
+    for workspace in workspaces:
+        workspace_tasks = _workspace_background_tasks(workspace)
+        if workspace_tasks:
+            grouped[workspace.id] = {
+                'workspace_id': workspace.id,
+                'workspace_name': workspace.name,
+                'is_active': bool(active_workspace and active_workspace.id == workspace.id),
+                'tasks': workspace_tasks,
+            }
+
+    with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        auto_jobs = [dict(job) for job in AUTO_CALCULATED_FIELD_JOBS.values()]
+    workspace_names = {workspace.id: workspace.name for workspace in workspaces}
+    for job in auto_jobs:
+        workspace_id = str(job.get('workspace_id') or '')
+        if workspace_id not in accessible_ids or job.get('status') not in {'queued', 'processing'}:
+            continue
+        total = max(0, int(job.get('total') or 0))
+        completed = max(0, int(job.get('completed') or 0))
+        progress = min(99, round(completed * 100 / total, 1)) if total else None
+        group = grouped.setdefault(workspace_id, {
+            'workspace_id': workspace_id,
+            'workspace_name': str(job.get('workspace_name') or workspace_names.get(workspace_id) or 'Workspace'),
+            'is_active': bool(active_workspace and active_workspace.id == workspace_id),
+            'tasks': [],
+        })
+        group['tasks'] = [
+            task for task in group['tasks']
+            if not str(task.get('id') or '').startswith('auto-fields-state:')
+        ]
+        group['tasks'].append({
+            'id': f'auto-fields:{job.get("id")}',
+            'label': 'Recreating combined CDR table' if job.get('operation') == 'combined_recreation' else 'Materializing Auto-calculated Fields',
+            'detail': str(job.get('message') or 'Processing'),
+            'progress': progress,
+        })
+
+    global_tasks = _global_background_tasks(user, accessible_ids)
+    for task in global_tasks:
+        workspace_id = str(task.pop('workspace_id'))
+        if workspace_id == '__server__':
+            group = grouped.setdefault('__server__', {
+                'workspace_id': '__server__', 'workspace_name': 'Server tasks',
+                'is_active': True, 'tasks': [],
+            })
+        else:
+            group = grouped.setdefault(workspace_id, {
+                'workspace_id': workspace_id,
+                'workspace_name': workspace_names.get(workspace_id, 'Workspace'),
+                'is_active': bool(active_workspace and active_workspace.id == workspace_id),
+                'tasks': [],
+            })
+        group['tasks'].append(task)
+
+    groups = sorted(grouped.values(), key=lambda group: (not group['is_active'], str(group['workspace_name']).casefold()))
+    return JSONResponse({
+        'active_workspace_id': active_workspace.id if active_workspace else None,
+        'groups': groups,
+    }, headers={'Cache-Control': 'no-store'})
+
+
 def require_workspace_admin(user: SessionUser) -> None:
     if user.role not in {'admin', 'super-admin'}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Only administrators can manage workspaces.')
@@ -5009,7 +5244,11 @@ def save_workspace(
 
 
 @app.post('/workspace/duplicate')
-def duplicate_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
+def duplicate_workspace(
+    workspace_id: str = Form(...),
+    include_generated_outputs: bool = Form(False),
+    user: SessionUser = Depends(current_user),
+) -> Response:
     require_workspace_admin(user)
     require_workspace_access(user, workspace_id)
     source = workspace_registry.get(workspace_id)
@@ -5019,7 +5258,10 @@ def duplicate_workspace(workspace_id: str = Form(...), user: SessionUser = Depen
     def run_duplication() -> None:
       workspace: Workspace | None = None
       try:
-        workspace = workspace_registry.duplicate(workspace_id)
+        workspace = workspace_registry.duplicate(
+            workspace_id,
+            include_generated_outputs=include_generated_outputs,
+        )
         # A duplicate must retain the origin workspace membership.  Otherwise
         # an administrator who is allowed to duplicate a workspace could not
         # open the new copy afterwards.
@@ -8200,6 +8442,7 @@ def create_admin_export_job(
         job = start_export_job(
             export_target, workspace_ids if export_target == 'full-environment' else None,
             include_generated_outputs=include_generated_outputs,
+            owner=user.username,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

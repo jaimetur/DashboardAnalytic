@@ -76,6 +76,12 @@
       {% block content %}{% endblock %}
     </main>
   </div>
+  {% if user %}
+  <div id="background-task-panels" class="background-task-panels" aria-live="polite" aria-label="Background tasks" hidden>
+    <div class="background-task-dock background-task-dock-other" data-background-task-dock="other"></div>
+    <div class="background-task-dock background-task-dock-active" data-background-task-dock="active"></div>
+  </div>
+  {% endif %}
   <div id="loading-overlay" class="loading-overlay" hidden>
     <div class="loading-panel">
       <div class="loading-spinner" aria-hidden="true"></div>

@@ -389,7 +389,7 @@ function limitSeriesCollectionByX(seriesCollection, xMaxOverride) {
     'table.queue-table', 'table.users-table', 'table.catalogue-workspace-table',
     'table.report-jobs-table', 'table.workspace-library-table', 'table.recovered-transfer-table',
     'table.app-logs-table', 'table.admin-datasets-table', 'table.database-editor-table',
-    '.report-charts-grid',
+    '.report-charts-grid', '.workspace-calculated-dimensions-list',
   ].join(', ');
   const compactViewport = window.matchMedia('(max-width: 480px)');
   const pageSize = 1;
@@ -400,6 +400,10 @@ function limitSeriesCollectionByX(seriesCollection, xMaxOverride) {
     if (collection.matches('.report-charts-grid')) {
       return Array.from(collection.querySelectorAll(':scope > .report-chart-card'))
         .filter((card) => !card.hidden && !card.hasAttribute('data-mobile-card-pagination-ignore'));
+    }
+    if (collection.matches('.workspace-calculated-dimensions-list')) {
+      return Array.from(collection.querySelectorAll(':scope > .workspace-calculated-dimension-row'))
+        .filter((row) => !row.hidden);
     }
     return Array.from(collection.tBodies)
       .flatMap((body) => Array.from(body.rows))
@@ -415,7 +419,7 @@ function limitSeriesCollectionByX(seriesCollection, xMaxOverride) {
       const pager = document.createElement('nav');
       pager.className = 'mobile-card-pagination';
       pager.hidden = true;
-      pager.setAttribute('aria-label', table.matches('.report-charts-grid') ? 'Chart pages' : 'Card pages');
+      pager.setAttribute('aria-label', table.matches('.report-charts-grid') ? 'Chart pages' : (table.matches('.workspace-calculated-dimensions-list') ? 'Auto-calculated Fields pages' : 'Card pages'));
       pager.innerHTML = '<button type="button" data-mobile-card-first aria-label="First page" title="First page">⏮</button><button type="button" data-mobile-card-previous aria-label="Previous page" title="Previous page">⬅</button><span data-mobile-card-page-label>Page 1 of 1</span><button type="button" data-mobile-card-next aria-label="Next page" title="Next page">➡</button><button type="button" data-mobile-card-last aria-label="Last page" title="Last page">⏭</button>';
       const placeAfter = table.closest('.table-wrap, .data-table-wrap, .queue-table-wrap, .database-editor-wrap, .catalogue-workspace-table-wrap') || table;
       placeAfter.insertAdjacentElement('afterend', pager);
@@ -4511,6 +4515,7 @@ function showConfirmDialog(message, options = {}) {
   const hasOption = Boolean(options.optionLabel && confirmOption && confirmOptionInput && confirmOptionLabel);
   if (hasOption) {
     confirmOptionLabel.textContent = options.optionLabel;
+    confirmOptionLabel.title = options.optionTitle || '';
     confirmOptionInput.checked = Boolean(options.optionChecked);
     confirmOption.hidden = false;
   }
@@ -4530,6 +4535,7 @@ function showConfirmDialog(message, options = {}) {
       const optionChecked = hasOption && Boolean(confirmOptionInput?.checked);
       if (confirmOption) confirmOption.hidden = true;
       if (confirmOptionInput) confirmOptionInput.checked = false;
+      if (confirmOptionLabel) confirmOptionLabel.title = '';
       resolve(hasOption ? {accepted, optionChecked} : accepted);
     };
 
@@ -5380,3 +5386,102 @@ if (queueNode) {
     window.setTimeout(pollQueue, delay);
   }
 }
+
+(() => {
+  const root = document.getElementById('background-task-panels');
+  if (!(root instanceof HTMLElement)) return;
+  const activeDock = root.querySelector('[data-background-task-dock="active"]');
+  const otherDock = root.querySelector('[data-background-task-dock="other"]');
+  if (!(activeDock instanceof HTMLElement) || !(otherDock instanceof HTMLElement)) return;
+  let polling = false;
+  let renderedSignature = '';
+
+  const createTaskPanel = (group) => {
+    const panel = document.createElement('section');
+    panel.className = `background-task-panel background-task-panel-${group.is_active ? 'active' : 'other'}`;
+    panel.setAttribute('aria-label', `Background tasks for ${group.workspace_name || 'workspace'}`);
+
+    const heading = document.createElement('h3');
+    heading.className = 'background-task-workspace';
+    heading.textContent = group.is_active && group.workspace_id !== '__server__'
+      ? `Active workspace · ${group.workspace_name}`
+      : String(group.workspace_name || 'Workspace');
+    panel.append(heading);
+
+    const list = document.createElement('div');
+    list.className = 'background-task-list';
+    (Array.isArray(group.tasks) ? group.tasks : []).forEach((task) => {
+      const item = document.createElement('div');
+      item.className = 'background-task-item';
+
+      const label = document.createElement('span');
+      label.className = 'background-task-label';
+      label.textContent = String(task.label || 'Background task');
+      item.append(label);
+
+      const detail = document.createElement('span');
+      detail.className = 'background-task-detail';
+      const numericProgress = Number(task.progress);
+      const hasProgress = task.progress !== null && task.progress !== undefined && Number.isFinite(numericProgress);
+      detail.textContent = `${String(task.detail || 'Processing')}${hasProgress ? ` · ${Math.round(Math.max(0, Math.min(100, numericProgress)))}%` : ''}`;
+      item.append(detail);
+
+      const progress = document.createElement('div');
+      progress.className = 'background-task-progress';
+      progress.setAttribute('role', 'progressbar');
+      progress.setAttribute('aria-label', String(task.label || 'Background task'));
+      const bar = document.createElement('div');
+      bar.className = 'background-task-progress-bar';
+      if (!hasProgress) {
+        progress.classList.add('is-indeterminate');
+        progress.setAttribute('aria-valuetext', 'In progress');
+      } else {
+        const boundedProgress = Math.max(0, Math.min(100, numericProgress));
+        progress.setAttribute('aria-valuemin', '0');
+        progress.setAttribute('aria-valuemax', '100');
+        progress.setAttribute('aria-valuenow', String(Math.round(boundedProgress)));
+        bar.style.width = `${boundedProgress}%`;
+      }
+      progress.append(bar);
+      item.append(progress);
+      list.append(item);
+    });
+    panel.append(list);
+    return panel;
+  };
+
+  const render = (groups) => {
+    const normalized = Array.isArray(groups) ? groups.filter((group) => Array.isArray(group.tasks) && group.tasks.length) : [];
+    const signature = JSON.stringify(normalized);
+    if (signature === renderedSignature) return;
+    renderedSignature = signature;
+    const activeGroups = normalized.filter((group) => Boolean(group.is_active));
+    const otherGroups = normalized.filter((group) => !group.is_active);
+    activeDock.replaceChildren(...activeGroups.map(createTaskPanel));
+    otherDock.replaceChildren(...otherGroups.map(createTaskPanel));
+    root.classList.toggle('has-both-sides', activeGroups.length > 0 && otherGroups.length > 0);
+    root.hidden = normalized.length === 0;
+  };
+
+  const poll = async () => {
+    if (polling) return;
+    polling = true;
+    try {
+      const response = await fetch('/api/background-tasks', {
+        credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'},
+      });
+      if (!response.ok) return;
+      const payload = await response.json();
+      render(payload.groups);
+    } catch (_error) {
+      // A transient polling failure must not interfere with the current page.
+    } finally {
+      polling = false;
+    }
+  };
+
+  poll();
+  window.setInterval(poll, 2000);
+  window.addEventListener('focus', poll);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+})();

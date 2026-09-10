@@ -337,7 +337,7 @@ class WorkspaceRegistry:
         data_root.mkdir(parents=True, exist_ok=True)
         return self.get(workspace_id)  # type: ignore[return-value]
 
-    def duplicate(self, workspace_id: str) -> Workspace:
+    def duplicate(self, workspace_id: str, *, include_generated_outputs: bool = False) -> Workspace:
         source = self.get(workspace_id)
         if not source:
             raise ValueError('Workspace not found.')
@@ -354,17 +354,22 @@ class WorkspaceRegistry:
         target_root = duplicate.database_path.parent
         try:
             # ``create`` has prepared the target root. Replace it with an
-            # exact data copy, including its Slides Templates.
+            # exact data copy, including its Slides Templates. Generated
+            # reports and Chart Sets are optional because they can account for
+            # most of a workspace's size.
             shutil.rmtree(target_root)
             for source_path, target_path in (
                 (source.input_dir, duplicate.input_dir),
-                (source.export_dir, duplicate.export_dir),
                 (source.slides_templates_dir, duplicate.slides_templates_dir),
             ):
                 if source_path.exists():
                     shutil.copytree(source_path, target_path)
                 else:
                     target_path.mkdir(parents=True, exist_ok=True)
+            if include_generated_outputs and source.output_dir.exists():
+                shutil.copytree(source.output_dir, duplicate.output_dir)
+            else:
+                duplicate.output_dir.mkdir(parents=True, exist_ok=True)
             duplicate.database_path.parent.mkdir(parents=True, exist_ok=True)
             with sqlite3.connect(source.database_path) as source_conn, sqlite3.connect(duplicate.database_path) as duplicate_conn:
                 source_conn.backup(duplicate_conn)
@@ -372,6 +377,17 @@ class WorkspaceRegistry:
                     'UPDATE datasets SET stored_path = REPLACE(stored_path, ?, ?)',
                     (str(source.input_dir), str(duplicate.input_dir)),
                 )
+                has_generated_jobs = duplicate_conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'generated_jobs'"
+                ).fetchone()
+                if has_generated_jobs:
+                    if include_generated_outputs:
+                        duplicate_conn.execute(
+                            'UPDATE generated_jobs SET output_path = REPLACE(output_path, ?, ?)',
+                            (str(source.output_dir), str(duplicate.output_dir)),
+                        )
+                    else:
+                        duplicate_conn.execute('DELETE FROM generated_jobs')
         except Exception:
             with self._connection() as conn:
                 conn.execute('DELETE FROM workspaces WHERE id = ?', (duplicate.id,))

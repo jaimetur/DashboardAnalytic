@@ -8,8 +8,11 @@
 #### ⚠️ Breaking Changes:
 
 #### 🌟 New Features:
+- Workspace duplication now asks whether to include generated Reports and Chart Sets, leaving that option unchecked by default; selected outputs copy the whole `output` tree and rebase their stored report paths, while imported workspaces likewise rebase copied report artifacts so Reporting can show their chart thumbnails immediately.
+- Added global floating background-task panels on every authenticated page: active-workspace and server tasks appear at the lower right, while tasks belonging to other workspaces appear in a differently coloured lower-left panel headed by the workspace name; concurrent groups remain visible together with live progress until all work finishes.
 
 #### 🚀 Enhancements:
+- Added hover help to the interactive-tooltips option in Report and Chart Set generation confirmations, explaining that it enables chart-value context on pointer hover and adds a small generation-time cost.
 
 #### 🐛 Bug fixes:
 - Fixed the Reporting Chart Preview header so Manage Auto-calculated Fields appears beside its red Close control; Escape now leaves active Auto-calculated Fields and filtered-dataset child dialogs open, closing the preview only when no child dialog is active.
@@ -18,6 +21,7 @@
 - Fixed Slides Templates Editor Chart Preview so every template filter value is displayed and retained in its Filter builder.
 - Added a non-applying Close action beside the red Update Template button in Slides Templates Editor Chart Preview; updating now requires confirmation that the displayed chart's template row will receive the Interactive Preview values.
 - Fixed Auto-calculated Fields managers so deleted and duplicated fields update the displayed list immediately, before background materialization; their compact dialog keeps its header, close control and bottom actions fixed while only long field-card lists scroll.
+- Added compact-screen pagination to the Workspace Auto-calculated Fields definitions list.
 
 #### 📚 Documentation:
 

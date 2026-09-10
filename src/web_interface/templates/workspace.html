@@ -85,7 +85,7 @@
                 <td data-label="Actions">
                   <div class="workspace-row-actions">
                     <button type="submit" form="workspace-save-{{ item.id }}" class="workspace-action-save icon-action" aria-label="Save workspace" title="Save workspace" {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>✓</button>
-                    <form method="post" action="/workspace/duplicate" data-loading-label="Duplicating workspace" data-loading-copy="Please wait while the workspace database, datasets and associated files are copied.">
+                    <form method="post" action="/workspace/duplicate" data-workspace-duplicate-form data-workspace-name="{{ item.name }}">
                       <input type="hidden" name="workspace_id" value="{{ item.id }}">
                       <button type="submit" class="workspace-action-duplicate icon-action" aria-label="Duplicate workspace" title="Duplicate workspace" {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>⧉</button>
                     </form>
@@ -723,6 +723,39 @@
         form.append(purge);
       }
       form.submit();
+    });
+  });
+  document.querySelectorAll('[data-workspace-duplicate-form]').forEach((form) => {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const workspaceName = form.dataset.workspaceName || 'this workspace';
+      const result = await showConfirmDialog(
+        `Duplicate workspace '${workspaceName}'? You can also include its generated reports and Chart Sets.`,
+        {
+          title: 'Duplicate workspace',
+          confirmLabel: 'Duplicate workspace',
+          optionLabel: 'Also duplicate generated reports and Chart Sets.',
+          optionChecked: false,
+        },
+      );
+      if (!result?.accepted) return;
+      let includeGenerated = form.querySelector('input[name="include_generated_outputs"]');
+      if (!(includeGenerated instanceof HTMLInputElement)) {
+        includeGenerated = document.createElement('input');
+        includeGenerated.type = 'hidden';
+        includeGenerated.name = 'include_generated_outputs';
+        form.append(includeGenerated);
+      }
+      includeGenerated.value = result.optionChecked ? 'true' : 'false';
+      const submit = form.querySelector('button[type="submit"]');
+      if (submit instanceof HTMLButtonElement) submit.disabled = true;
+      showLoadingOverlay(
+        'Duplicating workspace',
+        result.optionChecked
+          ? 'Please wait while the workspace database, datasets, reports and Chart Sets are copied.'
+          : 'Please wait while the workspace database, datasets and associated files are copied.',
+      );
+      HTMLFormElement.prototype.submit.call(form);
     });
   });
 })();

@@ -136,6 +136,40 @@ def test_workspace_archive_and_duplicate_include_templates(client, tmp_path):
     assert repo.list_report_templates('nsa')
 
 
+def test_workspace_duplicate_optionally_copies_generated_reports_and_chart_sets(tmp_path):
+    registry = WorkspaceRegistry(tmp_path / 'data/workspaces/registry.db', tmp_path / 'data', tmp_path / 'shared')
+    registry.initialize()
+    source = registry.get('default')
+    assert source is not None
+    source_repository = Repository(source.database_path, tmp_path / 'application.db')
+    source_repository.initialize()
+    report = source.export_dir / 'generated.pptx'
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_bytes(b'report')
+    chart = source.output_dir / 'charts' / '20260910-120000' / 'chart-1.png'
+    chart.parent.mkdir(parents=True, exist_ok=True)
+    chart.write_bytes(b'chart')
+    with sqlite3.connect(source.database_path) as connection:
+        connection.execute(
+            """INSERT INTO generated_jobs (job_type, technology, scope, template_name, output_file, created_by, output_path)
+               VALUES ('report', 'nsa', 'single', 'Template', 'generated.pptx', 'admin', ?)""",
+            (str(report),),
+        )
+
+    copied = registry.duplicate(source.id, include_generated_outputs=True)
+    assert (copied.export_dir / 'generated.pptx').read_bytes() == b'report'
+    assert (copied.output_dir / 'charts' / '20260910-120000' / 'chart-1.png').read_bytes() == b'chart'
+    with sqlite3.connect(copied.database_path) as connection:
+        copied_path = connection.execute('SELECT output_path FROM generated_jobs').fetchone()[0]
+    assert copied_path == str(copied.export_dir / 'generated.pptx')
+
+    without_outputs = registry.duplicate(source.id)
+    assert not (without_outputs.export_dir / 'generated.pptx').exists()
+    assert not (without_outputs.output_dir / 'charts').exists()
+    with sqlite3.connect(without_outputs.database_path) as connection:
+        assert connection.execute('SELECT COUNT(*) FROM generated_jobs').fetchone()[0] == 0
+
+
 def test_template_transfer_requires_and_retains_multiple_destinations(client):
     source = app_module.active_workspace
     other = app_module.workspace_registry.create('Second destination')

@@ -909,7 +909,13 @@
       if (!reportForm.reportValidity() || !validateCdrSelection() || !(await reviewMultivendorCampaigns())) return;
       const confirmation = await showConfirmDialog(
         'Generate the PowerPoint report with the selected CDRs and Slides Template?',
-        {title: 'Generate PowerPoint Report', confirmLabel: 'Generate', optionLabel: 'Generate interactive tooltips', optionChecked: true},
+        {
+          title: 'Generate PowerPoint Report',
+          confirmLabel: 'Generate',
+          optionLabel: 'Generate interactive tooltips',
+          optionTitle: 'Interactive tooltips show chart values and context when you hover over generated charts. Creating them makes chart generation slightly slower.',
+          optionChecked: true,
+        },
       );
       if (!confirmation.accepted) return;
       const formData = new FormData(reportForm);
@@ -1855,7 +1861,13 @@
       if (!(await reviewMultivendorCampaigns())) return;
       const confirmation = await showConfirmDialog(
         'Generate the selected report charts with the current CDRs and Slides Template?',
-        {title: 'Generate Report Charts', confirmLabel: 'Generate', optionLabel: 'Generate interactive tooltips', optionChecked: true},
+        {
+          title: 'Generate Report Charts',
+          confirmLabel: 'Generate',
+          optionLabel: 'Generate interactive tooltips',
+          optionTitle: 'Interactive tooltips show chart values and context when you hover over generated charts. Creating them makes chart generation slightly slower.',
+          optionChecked: true,
+        },
       );
       if (!confirmation.accepted) return;
       const formData = new FormData(reportForm);

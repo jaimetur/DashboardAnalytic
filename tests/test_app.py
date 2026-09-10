@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import time
 from io import BytesIO
@@ -1697,6 +1698,61 @@ def test_workspace_management_lists_restricted_workspaces_without_enabling_actio
     assert client.post('/workspace/delete', data={'workspace_id': restricted.id}, follow_redirects=False).status_code == 403
 
 
+def test_global_background_tasks_groups_active_and_other_workspaces(client) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.repository import Repository
+
+    login_super(client)
+    active = app_module.active_workspace
+    assert active is not None
+    other = app_module.workspace_registry.create('Background workspace')
+    other_repository = Repository(
+        other.database_path,
+        global_db_path=app_module.repository.global_db_path,
+        workspace_registry_db_path=app_module.workspace_registry.registry_path,
+    )
+    other_repository.initialize()
+    with app_module.repository.connection() as connection:
+        connection.execute(
+            """INSERT INTO generated_jobs
+               (job_type, technology, scope, template_name, created_by, status, progress)
+               VALUES ('report', 'nsa', 'single', 'Active Template', 'admin', 'processing', 42)"""
+        )
+    with other_repository.connection() as connection:
+        connection.execute(
+            """INSERT INTO generated_jobs
+               (job_type, technology, scope, template_name, created_by, status, progress)
+               VALUES ('chart_set', 'nsa', 'single', 'Other Template', 'admin', 'processing', 67)"""
+        )
+
+    response = client.get('/api/background-tasks')
+
+    assert response.status_code == 200
+    groups = {group['workspace_id']: group for group in response.json()['groups']}
+    assert groups[active.id]['is_active'] is True
+    assert groups[active.id]['tasks'][0]['progress'] == 42
+    assert 'Active Template' in groups[active.id]['tasks'][0]['label']
+    assert groups[other.id]['workspace_name'] == 'Background workspace'
+    assert groups[other.id]['is_active'] is False
+    assert groups[other.id]['tasks'][0]['progress'] == 67
+    assert 'Other Template' in groups[other.id]['tasks'][0]['label']
+
+    page = client.get('/workspace')
+    assert 'id="background-task-panels"' in page.text
+    assert 'data-background-task-dock="active"' in page.text
+    assert 'data-background-task-dock="other"' in page.text
+
+    with app_module.repository.connection() as connection:
+        connection.execute("UPDATE generated_jobs SET status = 'ready', progress = 100")
+    with other_repository.connection() as connection:
+        connection.execute("UPDATE generated_jobs SET status = 'ready', progress = 100")
+    completed_groups = {
+        group['workspace_id']: group for group in client.get('/api/background-tasks').json()['groups']
+    }
+    assert active.id not in completed_groups
+    assert other.id not in completed_groups
+
+
 def test_queued_import_continues_after_its_workspace_is_closed(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -1734,14 +1790,23 @@ def test_workspace_import_replaces_an_open_workspace_and_removes_old_files(clien
     payload = tmp_path / 'workspace-import'
     (payload / 'input').mkdir(parents=True)
     (payload / 'input' / 'new-data.csv').write_text('value\n1\n', encoding='utf-8')
+    imported_report = payload / 'output' / 'reports' / 'imported.pptx'
+    imported_report.parent.mkdir(parents=True)
+    imported_report.write_bytes(b'imported report')
     source_input = '/exported/workspace/input'
+    source_output = '/exported/workspace/output'
     with sqlite3.connect(payload / 'database.sqlite') as connection:
         connection.execute('CREATE TABLE datasets (stored_path TEXT)')
         connection.execute('INSERT INTO datasets (stored_path) VALUES (?)', (f'{source_input}/new-data.csv',))
+        connection.execute('CREATE TABLE generated_jobs (id INTEGER PRIMARY KEY, job_type TEXT, output_file TEXT, output_path TEXT)')
+        connection.execute(
+            "INSERT INTO generated_jobs (job_type, output_file, output_path) VALUES ('report', 'imported.pptx', ?)",
+            (f'{source_output}/reports/imported.pptx',),
+        )
 
     imported = app_module.import_workspace_archive(
         payload,
-        {'name': original.name, 'source_input_dir': source_input},
+        {'name': original.name, 'source_input_dir': source_input, 'source_output_dir': source_output},
         replace_existing=True,
     )
 
@@ -1752,9 +1817,43 @@ def test_workspace_import_replaces_an_open_workspace_and_removes_old_files(clien
     assert (imported.input_dir / 'new-data.csv').read_text(encoding='utf-8') == 'value\n1\n'
     with sqlite3.connect(imported.database_path) as connection:
         stored_path = connection.execute('SELECT stored_path FROM datasets').fetchone()[0]
+        report_path = connection.execute('SELECT output_path FROM generated_jobs').fetchone()[0]
     assert stored_path == str(imported.input_dir / 'new-data.csv')
+    assert report_path == str(imported.export_dir / 'imported.pptx')
     assert app_module.repository.user_has_workspace_access('admin', imported.id)
     assert all(' - Importing ' not in workspace.name for workspace in app_module.workspace_registry.list())
+
+
+def test_workspace_import_keeps_chart_sets_visible_in_reporting(client, tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    source = app_module.active_workspace
+    assert source is not None
+    payload = tmp_path / 'workspace-import-chart-set'
+    payload.mkdir()
+    shutil.copy2(source.database_path, payload / 'database.sqlite')
+    generation = '20260910-120000'
+    chart_directory = payload / 'output' / 'charts' / generation
+    chart_directory.mkdir(parents=True)
+    (chart_directory / 'chart-1.png').write_bytes(b'chart')
+    (chart_directory / 'manifest.json').write_text(json.dumps({
+        'generation': generation,
+        'template': 'Imported template',
+        'technology': 'NSA',
+        'scope': 'single',
+        'dataset_counts': {'data': 1, 'voice': 0, 'speech': 0},
+        'generated_at': '2026-09-10T12:00:00+00:00',
+        'charts': [{'file': 'chart-1.png', 'slide': 1, 'title': 'Imported chart', 'source': 'Data', 'chart_type': 'Bar'}],
+    }), encoding='utf-8')
+
+    imported = app_module.import_workspace_archive(payload, {'name': 'Imported chart workspace'})
+    app_module.activate_workspace(imported.id)
+
+    reporting = client.get('/reporting')
+    assert reporting.status_code == 200
+    assert 'Imported template' in reporting.text
+    assert generation in reporting.text
 
 
 def test_delete_all_reports_removes_orphaned_output_directories(client) -> None:
