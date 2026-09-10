@@ -1755,6 +1755,51 @@ def test_global_background_tasks_groups_active_and_other_workspaces(client) -> N
     assert other.id not in completed_groups
 
 
+def test_background_task_stop_endpoint_stops_accessible_workspace_work(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    source_path = app_module.settings.input_dir / 'stoppable-background-dataset.csv'
+    source_path.write_bytes(b'market,period,score\nES,2026-Q1,91\n')
+    dataset_id, _ = app_module.repository.add_dataset(source_path.name, str(source_path), 'admin')
+    app_module.repository.update_dataset_profile(dataset_id, status='queued', progress=42)
+
+    response = client.post(
+        f'/api/background-tasks/{workspace.id}/stop', data={'task_id': f'dataset:{dataset_id}'},
+    )
+
+    assert response.status_code == 200
+    assert app_module.repository.get_dataset(dataset_id)['status'] == 'stopped'
+    app_module.process_dataset(
+        dataset_id, source_path, 'admin', task_repository=app_module.repository, workspace=workspace,
+    )
+    assert app_module.repository.get_dataset(dataset_id)['status'] == 'stopped'
+
+    chart_job_id = app_module.repository.create_report_chart_job(
+        technology='nsa', scope='single', dataset_ids={}, dataset_names={},
+        template_name='Stop task test', created_by='admin', generate_tooltips=True,
+    )
+    generated_response = client.post(
+        f'/api/background-tasks/{workspace.id}/stop', data={'task_id': f'generated:{chart_job_id}'},
+    )
+    assert generated_response.status_code == 200
+    assert app_module.repository.get_report_chart_job(chart_job_id)['status'] == 'stopped'
+
+    with app_module.AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        app_module.AUTO_CALCULATED_FIELD_JOBS['stoppable-auto-fields'] = {
+            'id': 'stoppable-auto-fields', 'workspace_id': workspace.id, 'status': 'processing',
+        }
+    auto_response = client.post(
+        f'/api/background-tasks/{workspace.id}/stop', data={'task_id': 'auto-fields:stoppable-auto-fields'},
+    )
+    assert auto_response.status_code == 200
+    with app_module.AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        assert app_module.AUTO_CALCULATED_FIELD_JOBS['stoppable-auto-fields']['cancel_requested'] is True
+        app_module.AUTO_CALCULATED_FIELD_JOBS.pop('stoppable-auto-fields')
+
+
 def test_queued_import_continues_after_its_workspace_is_closed(client) -> None:
     import src.DashboardAnalytic as app_module
 

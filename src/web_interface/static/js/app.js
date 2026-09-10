@@ -38,7 +38,7 @@ function updateCombinedDatasetRecreationRow(job) {
   const row = document.querySelector(`[data-combined-dataset-row][data-dataset-kind="${job.combined_kind}"]`);
   if (!(row instanceof HTMLElement)) return;
   const processing = ['queued', 'processing'].includes(job.status);
-  const failed = job.status === 'failed';
+  const failed = ['failed', 'stopped'].includes(job.status);
   const total = Math.max(Number(job.total) || 0, 0);
   const completed = Math.max(Number(job.completed) || 0, 0);
   const percent = processing
@@ -49,7 +49,7 @@ function updateCombinedDatasetRecreationRow(job) {
   const label = row.querySelector('[data-combined-dataset-progress-percent]');
   if (status instanceof HTMLElement) {
     status.className = `queue-status-pill queue-status-${failed ? 'failed' : processing ? 'processing' : 'ready'}`;
-    status.textContent = failed ? 'Failed' : processing ? (job.status === 'queued' ? 'Queued' : 'Recreating') : 'Ready';
+    status.textContent = job.status === 'stopped' ? 'Stopped' : failed ? 'Failed' : processing ? (job.status === 'queued' ? 'Queued' : 'Recreating') : 'Ready';
   }
   if (bar instanceof HTMLElement) {
     bar.className = `progress-bar status-${failed ? 'failed' : processing ? 'processing' : 'ready'}`;
@@ -78,7 +78,7 @@ function monitorAutoCalculatedFieldJob(statusUrl, notice = '') {
       if (!response.ok) throw new Error(job.detail || 'Unable to read materialization progress.');
       updateCombinedDatasetRecreationRow(job);
       window.dispatchEvent(new CustomEvent('auto-calculated-field-job-status', {detail: job}));
-      if (job.status === 'ready' || job.status === 'failed') {
+      if (job.status === 'ready' || job.status === 'failed' || job.status === 'stopped') {
         const current = new Set(storedAutoCalculatedFieldJobs());
         current.delete(statusUrl);
         window.localStorage.setItem(autoCalculatedFieldJobStorageKey, JSON.stringify([...current]));
@@ -89,7 +89,7 @@ function monitorAutoCalculatedFieldJob(statusUrl, notice = '') {
             onClose: job.refresh_workspace ? () => window.location.reload() : undefined,
           });
         } else {
-          showInfoDialog(job.error || 'The CDR tables could not be updated.', {title: 'Materialization failed', tone: 'error'});
+          showInfoDialog(job.error || job.message || 'The CDR tables could not be updated.', {title: job.status === 'stopped' ? 'Materialization stopped' : 'Materialization failed', tone: 'error'});
         }
         return;
       }
@@ -150,7 +150,8 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
       const job = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(job.detail || 'Unable to read materialization progress.');
       const processing = ['queued', 'processing'].includes(job.status);
-      const failed = job.status === 'failed';
+      const failed = ['failed', 'stopped'].includes(job.status);
+      const stopped = job.status === 'stopped';
       const total = Math.max(Number(job.total) || 0, 0);
       const completed = Math.max(Number(job.completed) || 0, 0);
       const percent = processing
@@ -158,10 +159,11 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
         : failed ? 100 : 100;
       progressPanel.classList.toggle('is-processing', processing);
       progressPanel.classList.toggle('is-failed', failed);
+      progressPanel.classList.toggle('is-stopped', stopped);
       if (rematerializeButton instanceof HTMLButtonElement) rematerializeButton.disabled = processing;
       if (progressStatus instanceof HTMLElement) {
         progressStatus.className = `status-pill status-${failed ? 'failed' : processing ? 'processing' : 'ready'}`;
-        progressStatus.textContent = failed ? 'Failed' : processing ? 'In progress' : 'Up to date';
+        progressStatus.textContent = stopped ? 'Stopped' : failed ? 'Failed' : processing ? 'In progress' : 'Up to date';
       }
       if (progressBar instanceof HTMLElement) progressBar.style.width = `${percent}%`;
       if (progressPercent instanceof HTMLElement) progressPercent.textContent = `${percent}%`;
@@ -5414,10 +5416,45 @@ if (queueNode) {
       const item = document.createElement('div');
       item.className = 'background-task-item';
 
+      const taskHead = document.createElement('div');
+      taskHead.className = 'background-task-head';
       const label = document.createElement('span');
       label.className = 'background-task-label';
       label.textContent = String(task.label || 'Background task');
-      item.append(label);
+      taskHead.append(label);
+      if (task.stop_url && task.stop_task_id) {
+        const stop = document.createElement('button');
+        stop.type = 'button';
+        stop.className = 'background-task-stop-button';
+        stop.textContent = '■';
+        stop.title = 'Stop Job';
+        stop.setAttribute('aria-label', 'Stop Job');
+        stop.addEventListener('click', async () => {
+          const accepted = await showConfirmDialog(
+            `Stop “${String(task.label || 'this background job')}”?`,
+            {title: 'Stop background job', confirmLabel: 'Stop Job'},
+          );
+          if (!accepted) return;
+          stop.disabled = true;
+          try {
+            const body = new URLSearchParams({task_id: String(task.stop_task_id)});
+            const response = await fetch(String(task.stop_url), {
+              method: 'POST', credentials: 'same-origin',
+              headers: {'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json'}, body,
+            });
+            if (!response.ok) {
+              const payload = await response.json().catch(() => ({}));
+              throw new Error(String(payload.detail || 'The background job could not be stopped.'));
+            }
+            await poll();
+          } catch (error) {
+            stop.disabled = false;
+            showInfoDialog(error instanceof Error ? error.message : 'The background job could not be stopped.', {title: 'Stop Job', tone: 'error'});
+          }
+        });
+        taskHead.append(stop);
+      }
+      item.append(taskHead);
 
       const detail = document.createElement('span');
       detail.className = 'background-task-detail';

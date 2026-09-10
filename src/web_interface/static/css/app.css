@@ -393,6 +393,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .auto-calculated-field-progress.is-processing .auto-calculated-field-progress-bar { min-width: 5%; background: linear-gradient(90deg, #d49a20, #f0c44f); }
 .auto-calculated-field-progress.is-failed { border-color: #e2b8be; background: #fff5f5; }
 .auto-calculated-field-progress.is-failed .auto-calculated-field-progress-bar { background: #bd3232; }
+.auto-calculated-field-progress.is-stopped { border-color: #bd3232; background: #ffe8e8; }
+.auto-calculated-field-progress.is-stopped .auto-calculated-field-progress-bar { background: #9e2028; }
 .auto-calculated-field-progress-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 0.8rem; }
 .auto-calculated-field-progress-footer .form-note { min-width: 0; margin: 0; }
 .auto-calculated-field-rematerialize-button { display: inline-flex; flex: 0 0 1.85rem; align-items: center; justify-content: center; width: 1.85rem; min-width: 1.85rem; height: 1.85rem; min-height: 1.85rem; padding: 0; border: 1px solid rgba(7, 93, 89, 0.45); border-radius: 50%; background: linear-gradient(135deg, #08736d, #149d94); color: #fff; font-size: 1.15rem; line-height: 1; box-shadow: 0 6px 14px rgba(8, 115, 109, 0.18); }
@@ -1449,7 +1451,13 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .background-task-panel-other .background-task-workspace { color: #126773; }
 .background-task-list { display: grid; gap: 0.7rem; }
 .background-task-item { min-width: 0; }
+.background-task-head { display: flex; align-items: flex-start; gap: 0.45rem; }
 .background-task-label { display: block; margin-bottom: 0.13rem; font-size: 0.84rem; font-weight: 760; line-height: 1.25; overflow-wrap: anywhere; }
+.background-task-head .background-task-label { flex: 1 1 auto; min-width: 0; }
+.background-task-stop-button { position: relative; pointer-events: auto; flex: 0 0 auto; display: inline-grid; place-items: center; width: 1.45rem; height: 1.45rem; min-width: 1.45rem; min-height: 1.45rem; padding: 0; border: 1px solid rgba(111, 22, 34, 0.78); border-radius: 50%; background: linear-gradient(135deg, #9e2731, #cf4d57); color: transparent; font-size: 0; line-height: 1; box-shadow: 0 4px 10px rgba(111, 22, 34, 0.22); cursor: pointer; }
+.background-task-stop-button::before { content: ''; position: absolute; top: 50%; left: 50%; width: 0.56rem; height: 0.56rem; border-radius: 1px; background: #fff; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2); transform: translate(-50%, -50%); }
+.background-task-stop-button:hover:not(:disabled) { background: linear-gradient(135deg, #7d1b25, #ae3743); }
+.background-task-stop-button:disabled { opacity: 0.58; cursor: wait; }
 .background-task-detail { display: block; min-height: 1em; margin-bottom: 0.38rem; color: rgba(73, 33, 39, 0.72); font-size: 0.71rem; line-height: 1.22; overflow-wrap: anywhere; }
 .background-task-panel-other .background-task-detail { color: rgba(18, 77, 85, 0.74); }
 .background-task-progress { position: relative; height: 0.46rem; overflow: hidden; border-radius: 999px; background: rgba(139, 29, 36, 0.14); }

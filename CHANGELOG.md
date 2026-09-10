@@ -19,6 +19,8 @@
 - Split CDR ingestion from combined-table regeneration: a dataset now reaches `Ready` at 100% and refreshes the Datasets table before its combined CDR is rebuilt as a separately tracked background task with its own progress in the global task panel.
 - Updated the Readme, Changelog and Help navigation badges to use clear page-specific labels and stronger contrast, and added matching active-workspace totals for Reports, Chart Sets and all Jobs to the E2E Reporting header and Reports and Charts Jobs cards.
 - Increased the contrast of Collapse and Expand badges on white panels with a neutral grey background, border and text.
+- Added confirmed `Stop Job` controls to the global background-task cards for accessible-workspace duplication, dataset processing, Report and Chart Set generation, Auto-calculated Field materialization, combined CDR recreation and single-workspace exports/imports. Stopped duplications clean partial files and registry/access rows, stopped materializations retain a red status, stopped exports remove temporary files, and an import cannot be stopped once it has started.
+- Replaced the stop glyph with a centered 0.56rem white square inside the circular `Stop Job` control, preserving the button dimensions and making its size consistent across browsers.
 
 #### 🐛 Bug fixes:
 - Fixed the Reporting Chart Preview header so Manage Auto-calculated Fields appears beside its red Close control; Escape now leaves active Auto-calculated Fields and filtered-dataset child dialogs open, closing the preview only when no child dialog is active.

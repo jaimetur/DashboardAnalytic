@@ -64,7 +64,7 @@ CHART_PREVIEW_DATA_CACHE: dict[str, tuple[pd.DataFrame, dict[str, Any]]] = {}
 CHART_PREVIEW_FRAME_CACHE: dict[str, pd.DataFrame] = {}
 CHART_PREVIEW_FILTER_CACHE: dict[str, pd.DataFrame] = {}
 CHART_PREVIEW_CACHE_LOCK = Lock()
-STOP_REQUESTS: set[int] = set()
+STOP_REQUESTS: set[tuple[str, int]] = set()
 STOP_REQUESTS_LOCK = Lock()
 DATASET_PROCESSING_LOCKS: dict[str, Lock] = {}
 DATASET_PROCESSING_LOCKS_LOCK = Lock()
@@ -87,6 +87,8 @@ TRANSFER_OFFERS: dict[str, dict[str, Any]] = {}
 TRANSFER_LOCK = Lock()
 WORKSPACE_LIFECYCLE_JOBS: dict[str, dict[str, Any]] = {}
 WORKSPACE_LIFECYCLE_JOBS_LOCK = Lock()
+WORKSPACE_DUPLICATION_STOP_REQUESTS: set[str] = set()
+WORKSPACE_DUPLICATION_STOP_REQUESTS_LOCK = Lock()
 EXPORT_PACKAGE_TTL = timedelta(hours=24)
 TRANSFER_OFFER_TTL = timedelta(minutes=15)
 DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
@@ -823,6 +825,13 @@ def _auto_calculated_field_workspace_lock(workspace_id: str) -> Lock:
         return AUTO_CALCULATED_FIELD_WORKSPACE_LOCKS.setdefault(workspace_id, Lock())
 
 
+def ensure_auto_calculated_field_job_not_stopped(job_id: str) -> None:
+    with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        job = AUTO_CALCULATED_FIELD_JOBS.get(job_id)
+        if not job or job.get('cancel_requested'):
+            raise ProcessingStopped('Background job stopped by user.')
+
+
 def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
     with AUTO_CALCULATED_FIELD_JOBS_LOCK:
         job = AUTO_CALCULATED_FIELD_JOBS[job_id]
@@ -837,6 +846,7 @@ def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
     )
 
     def update_progress(completed: int, total: int, message: str) -> None:
+        ensure_auto_calculated_field_job_not_stopped(job_id)
         with AUTO_CALCULATED_FIELD_JOBS_LOCK:
             job = AUTO_CALCULATED_FIELD_JOBS.get(job_id)
             if job:
@@ -844,6 +854,7 @@ def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
 
     try:
         with _auto_calculated_field_workspace_lock(workspace.id):
+            ensure_auto_calculated_field_job_not_stopped(job_id)
             task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'processing')
             current = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
             current_sources = affected_calculated_dimension_sources(previous, current)
@@ -851,6 +862,7 @@ def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
                 previous, current, renames, task_repository,
                 set(affected_sources) | current_sources, update_progress,
             )
+        ensure_auto_calculated_field_job_not_stopped(job_id)
         with AUTO_CALCULATED_FIELD_JOBS_LOCK:
             completed_tables = int(AUTO_CALCULATED_FIELD_JOBS[job_id].get('total') or stats['tables'])
             dataset_count = stats['datasets']
@@ -862,6 +874,13 @@ def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
                 status='ready', completed=completed_tables, total=completed_tables,
                 materialized_datasets=dataset_count, materialized_combined_tables=combined_count,
                 message=f"Updated {' and '.join(updated_parts)}",
+                finished_at=datetime.now(timezone.utc).timestamp(),
+            )
+    except ProcessingStopped as exc:
+        task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'stopped')
+        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            AUTO_CALCULATED_FIELD_JOBS[job_id].update(
+                status='stopped', error=str(exc), message='Materialization stopped by user.',
                 finished_at=datetime.now(timezone.utc).timestamp(),
             )
     except Exception as exc:
@@ -933,6 +952,7 @@ def _run_combined_cdr_recreation_job(job_id: str, workspace: Workspace, kind: st
     )
 
     def update_progress(completed: int, total: int, message: str) -> None:
+        ensure_auto_calculated_field_job_not_stopped(job_id)
         with AUTO_CALCULATED_FIELD_JOBS_LOCK:
             job = AUTO_CALCULATED_FIELD_JOBS.get(job_id)
             if job:
@@ -944,9 +964,11 @@ def _run_combined_cdr_recreation_job(job_id: str, workspace: Workspace, kind: st
         )
     try:
         with _auto_calculated_field_workspace_lock(workspace.id):
+            ensure_auto_calculated_field_job_not_stopped(job_id)
             task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'processing')
             stats = recreate_combined_cdr_table(workspace, kind, update_progress)
             task_repository.set_workspace_state('calculated_dimensions_need_materialization', '0')
+        ensure_auto_calculated_field_job_not_stopped(job_id)
         with AUTO_CALCULATED_FIELD_JOBS_LOCK:
             total = int(AUTO_CALCULATED_FIELD_JOBS[job_id].get('total') or stats['tables'])
             AUTO_CALCULATED_FIELD_JOBS[job_id].update(
@@ -954,6 +976,13 @@ def _run_combined_cdr_recreation_job(job_id: str, workspace: Workspace, kind: st
                 materialized_datasets=stats['datasets'], materialized_combined_tables=1,
                 message=f"Recreated combined CDR-{kind.upper()} table with {stats['rows']} rows",
                 refresh_workspace=True,
+                finished_at=datetime.now(timezone.utc).timestamp(),
+            )
+    except ProcessingStopped as exc:
+        task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'stopped')
+        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            AUTO_CALCULATED_FIELD_JOBS[job_id].update(
+                status='stopped', error=str(exc), message=f'Combined CDR-{kind.upper()} recreation stopped by user.',
                 finished_at=datetime.now(timezone.utc).timestamp(),
             )
     except Exception as exc:
@@ -1708,23 +1737,27 @@ class ProcessingStopped(Exception):
     pass
 
 
-def request_stop(dataset_id: int) -> None:
+def _dataset_stop_key(dataset_id: int, task_repository: Repository | None = None) -> tuple[str, int]:
+    return (str((task_repository or repository).db_path.resolve()), dataset_id)
+
+
+def request_stop(dataset_id: int, task_repository: Repository | None = None) -> None:
     with STOP_REQUESTS_LOCK:
-        STOP_REQUESTS.add(dataset_id)
+        STOP_REQUESTS.add(_dataset_stop_key(dataset_id, task_repository))
 
 
-def clear_stop_request(dataset_id: int) -> None:
+def clear_stop_request(dataset_id: int, task_repository: Repository | None = None) -> None:
     with STOP_REQUESTS_LOCK:
-        STOP_REQUESTS.discard(dataset_id)
+        STOP_REQUESTS.discard(_dataset_stop_key(dataset_id, task_repository))
 
 
-def stop_requested(dataset_id: int) -> bool:
+def stop_requested(dataset_id: int, task_repository: Repository | None = None) -> bool:
     with STOP_REQUESTS_LOCK:
-        return dataset_id in STOP_REQUESTS
+        return _dataset_stop_key(dataset_id, task_repository) in STOP_REQUESTS
 
 
-def ensure_not_stopped(dataset_id: int) -> None:
-    if stop_requested(dataset_id):
+def ensure_not_stopped(dataset_id: int, task_repository: Repository | None = None) -> None:
+    if stop_requested(dataset_id, task_repository):
         raise ProcessingStopped('Processing stopped by user.')
 
 
@@ -1871,13 +1904,16 @@ def process_dataset(
                     last_error='The source file is missing. Reupload the dataset before retrying.',
                     processed_at=now_iso(),
                 )
-            clear_stop_request(dataset_id)
+            clear_stop_request(dataset_id, task_repository)
             return
-        clear_stop_request(dataset_id)
+        if str(dataset['status'] or '').casefold() == 'stopped':
+            clear_stop_request(dataset_id, task_repository)
+            return
+        clear_stop_request(dataset_id, task_repository)
         task_repository.update_dataset_profile(dataset_id, status='processing', progress=10, last_error=None)
         try:
             def progress_update(value: int) -> None:
-                ensure_not_stopped(dataset_id)
+                ensure_not_stopped(dataset_id, task_repository)
                 task_repository.update_dataset_profile(dataset_id, progress=max(10, min(95, int(value))))
 
             selected_kind = str(dataset['dataset_kind'] or '').strip().lower()
@@ -1924,7 +1960,7 @@ def process_dataset(
             task_repository.update_dataset_profile(dataset_id, status='failed', progress=100, last_error=str(exc), processed_at=now_iso())
             task_repository.add_log(username, 'process_dataset_failed', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name, 'error': str(exc)}))
         finally:
-            clear_stop_request(dataset_id)
+            clear_stop_request(dataset_id, task_repository)
             # Materialising dataset rows can substantially change the
             # workspace database even though the uploaded file itself was
             # already counted when it was saved.
@@ -3221,30 +3257,44 @@ def recovered_transfer_packages() -> list[dict[str, Any]]:
 def _run_export_job(job_id: str, target: str, workspace_ids: list[str] | None, include_generated_outputs: bool) -> None:
     with EXPORT_JOBS_LOCK:
         job = EXPORT_JOBS.get(job_id)
-        if not job:
+        if not job or job.get('status') != 'queued':
             return
         job['status'] = 'processing'
     destination = Path(str(job['path']))
     partial_path = destination.with_suffix('.part')
     bytes_total = estimate_export_bytes(target, workspace_ids, include_generated_outputs)
     bytes_done = 0
+
+    def stop_if_cancelled() -> None:
+        with EXPORT_JOBS_LOCK:
+            if bool(job.get('cancel_requested')):
+                raise InterruptedError('Export stopped by user.')
+
     with EXPORT_JOBS_LOCK:
         job.update({'bytes_total': bytes_total, 'bytes_done': 0, 'progress': 0})
 
     def progress_callback(amount: int) -> None:
         nonlocal bytes_done
+        stop_if_cancelled()
         bytes_done += max(0, amount)
         with EXPORT_JOBS_LOCK:
             job.update({'bytes_done': bytes_done, 'progress': min(99, round(bytes_done * 100 / bytes_total, 1))})
 
     try:
+        stop_if_cancelled()
         filename = build_export_archive_file(
             target, partial_path, workspace_ids, progress_callback,
             include_generated_outputs=include_generated_outputs,
         )
+        stop_if_cancelled()
         partial_path.replace(destination)
         with EXPORT_JOBS_LOCK:
             job.update({'status': 'ready', 'filename': filename, 'size': destination.stat().st_size, 'bytes_done': bytes_total, 'progress': 100, 'finished_at': datetime.now(timezone.utc).timestamp()})
+    except InterruptedError as exc:
+        partial_path.unlink(missing_ok=True)
+        destination.unlink(missing_ok=True)
+        with EXPORT_JOBS_LOCK:
+            job.update({'status': 'cancelled', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
     except Exception as exc:
         partial_path.unlink(missing_ok=True)
         destination.unlink(missing_ok=True)
@@ -3767,7 +3817,7 @@ def _apply_import_archive(
 def _run_import_job(job_id: str) -> None:
     with IMPORT_JOBS_LOCK:
         job = IMPORT_JOBS.get(job_id)
-        if not job:
+        if not job or job.get('status') != 'queued':
             return
         job['status'] = 'processing'
         package_path = Path(str(job['path']))
@@ -4964,6 +5014,8 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
             'label': 'Duplicating workspace',
             'detail': 'Copying the workspace database and files',
             'progress': None,
+            'stop_task_id': f'workspace-duplicate:{workspace.id}',
+            'stop_url': f'/api/background-tasks/{workspace.id}/stop',
         })
     if not workspace.database_path.is_file():
         return tasks
@@ -4989,6 +5041,8 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
                         'label': f'Processing dataset: {row["file_name"]}',
                         'detail': task_status,
                         'progress': max(0, min(100, int(row['progress'] or 0))),
+                        'stop_task_id': f'dataset:{row["id"]}',
+                        'stop_url': f'/api/background-tasks/{workspace.id}/stop',
                     })
             if 'generated_jobs' in tables:
                 rows = connection.execute(
@@ -5010,6 +5064,8 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
                         'label': label,
                         'detail': str(row['status'] or 'queued').title(),
                         'progress': max(0, min(100, int(row['progress'] or 0))),
+                        'stop_task_id': f'generated:{row["id"]}',
+                        'stop_url': f'/api/background-tasks/{workspace.id}/stop',
                     })
             if 'workspace_state' in tables:
                 materialization = connection.execute(
@@ -5038,13 +5094,17 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
         workspace_id = workspace_ids[0] if len(workspace_ids) == 1 and workspace_ids[0] in accessible_ids else '__server__'
         progress_value = job.get('progress')
         progress = max(0, min(100, round(float(progress_value), 1))) if progress_value is not None else None
-        tasks.append({
+        task = {
             'id': f'{prefix}:{job.get("id")}',
             'workspace_id': workspace_id,
             'label': label,
             'detail': str(job.get('phase') or job.get('status') or 'processing').replace('_', ' ').title(),
             'progress': progress,
-        })
+        }
+        if workspace_id != '__server__' and prefix in {'export', 'import'}:
+            task['stop_task_id'] = f'{prefix}:{job.get("id")}'
+            task['stop_url'] = f'/api/background-tasks/{workspace_id}/stop'
+        tasks.append(task)
 
     with EXPORT_JOBS_LOCK:
         export_jobs = [dict(job) for job in EXPORT_JOBS.values()]
@@ -5150,6 +5210,8 @@ def background_tasks_status(user: SessionUser = Depends(current_user)) -> JSONRe
             'label': 'Recreating combined CDR table' if job.get('operation') == 'combined_recreation' else 'Materializing Auto-calculated Fields',
             'detail': str(job.get('message') or 'Processing'),
             'progress': progress,
+            'stop_task_id': f'auto-fields:{job.get("id")}',
+            'stop_url': f'/api/background-tasks/{workspace_id}/stop',
         })
 
     global_tasks = _global_background_tasks(user, accessible_ids)
@@ -5174,6 +5236,87 @@ def background_tasks_status(user: SessionUser = Depends(current_user)) -> JSONRe
         'active_workspace_id': active_workspace.id if active_workspace else None,
         'groups': groups,
     }, headers={'Cache-Control': 'no-store'})
+
+
+@app.post('/api/background-tasks/{workspace_id}/stop')
+def stop_background_task(
+    workspace_id: str,
+    task_id: str = Form(...),
+    user: SessionUser = Depends(current_user),
+) -> JSONResponse:
+    """Request cooperative cancellation for a task in an accessible workspace."""
+    workspace = workspace_registry.get(workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail='Workspace not found.')
+    require_workspace_access(user, workspace_id)
+    task_repository = Repository(
+        workspace.database_path,
+        global_db_path=repository.global_db_path,
+        workspace_registry_db_path=workspace_registry.registry_path,
+    )
+    prefix, _, raw_identifier = str(task_id).partition(':')
+    if not raw_identifier:
+        raise HTTPException(status_code=400, detail='Invalid background task.')
+    if prefix == 'dataset':
+        try:
+            dataset_id = int(raw_identifier)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail='Invalid dataset task.') from exc
+        dataset = task_repository.get_dataset(dataset_id)
+        if not dataset or str(dataset['status'] or '') not in {'queued', 'processing'}:
+            raise HTTPException(status_code=409, detail='This dataset task can no longer be stopped.')
+        request_stop(dataset_id, task_repository)
+        task_repository.update_dataset_profile(
+            dataset_id, status='stopped', last_error='Processing stopped by user.', processed_at=now_iso(),
+        )
+        task_repository.add_log(user.username, 'stop_dataset_requested', json.dumps({'dataset_id': dataset_id}))
+    elif prefix == 'generated':
+        try:
+            job_id = int(raw_identifier)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail='Invalid generated job.') from exc
+        job = task_repository.get_report_run(job_id) or task_repository.get_report_chart_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail='Generated job not found.')
+        stopped = (
+            task_repository.stop_report_job(job_id)
+            if str(job['job_type'] or '') == 'report'
+            else task_repository.stop_report_chart_job(job_id)
+        )
+        if not stopped:
+            raise HTTPException(status_code=409, detail='This generated job can no longer be stopped.')
+        task_repository.add_log(user.username, 'stop_generated_job', json.dumps({'job_id': job_id, 'job_type': job['job_type']}))
+    elif prefix == 'auto-fields':
+        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            job = AUTO_CALCULATED_FIELD_JOBS.get(raw_identifier)
+            if not job or str(job.get('workspace_id') or '') != workspace_id or job.get('status') not in {'queued', 'processing'}:
+                raise HTTPException(status_code=409, detail='This materialization task can no longer be stopped.')
+            job.update(cancel_requested=True, message='Stopping background job')
+    elif prefix == 'export':
+        with EXPORT_JOBS_LOCK:
+            job = EXPORT_JOBS.get(raw_identifier)
+            if not job or workspace_id not in {str(item) for item in (job.get('workspace_ids') or [])} or job.get('status') not in {'queued', 'processing'}:
+                raise HTTPException(status_code=409, detail='This export task can no longer be stopped.')
+            job.update(cancel_requested=True, status='processing', phase='stopping export')
+    elif prefix == 'import':
+        with IMPORT_JOBS_LOCK:
+            job = IMPORT_JOBS.get(raw_identifier)
+            if not job or workspace_id not in {str(item) for item in (job.get('destination_workspace_ids') or [])}:
+                raise HTTPException(status_code=404, detail='Import task not found.')
+            if job.get('status') == 'processing':
+                raise HTTPException(status_code=409, detail='The import has already started and cannot be stopped.')
+            if job.get('status') != 'queued':
+                raise HTTPException(status_code=409, detail='This import task can no longer be stopped.')
+            Path(str(job.get('path') or '')).unlink(missing_ok=True)
+            job.update(status='cancelled', error='Import stopped by user.', finished_at=datetime.now(timezone.utc).timestamp())
+    elif prefix == 'workspace-duplicate':
+        if raw_identifier != workspace_id or workspace.status != 'duplicating':
+            raise HTTPException(status_code=409, detail='This workspace duplication can no longer be stopped.')
+        with WORKSPACE_DUPLICATION_STOP_REQUESTS_LOCK:
+            WORKSPACE_DUPLICATION_STOP_REQUESTS.add(workspace_id)
+    else:
+        raise HTTPException(status_code=400, detail='This background task cannot be stopped.')
+    return JSONResponse({'stopping': task_id})
 
 
 def require_workspace_admin(user: SessionUser) -> None:
@@ -5310,33 +5453,47 @@ def duplicate_workspace(
     source = workspace_registry.get(workspace_id)
     if source is None:
         return RedirectResponse('/workspace?workspace_error=Workspace+not+found.', status_code=status.HTTP_303_SEE_OTHER)
+    source_members = [
+        str(account['username'])
+        for account in repository.list_users()
+        if workspace_id in repository.list_user_workspace_ids(int(account['id']))
+    ]
 
     def run_duplication() -> None:
       workspace: Workspace | None = None
+      created_workspace: Workspace | None = None
+
+      def register_duplicate(candidate: Workspace) -> None:
+        nonlocal created_workspace
+        created_workspace = candidate
+        repository.set_workspace_user_access(candidate.id, source_members)
+
+      def duplication_stopped(candidate: Workspace) -> bool:
+        with WORKSPACE_DUPLICATION_STOP_REQUESTS_LOCK:
+            return candidate.id in WORKSPACE_DUPLICATION_STOP_REQUESTS
+
       try:
         workspace = workspace_registry.duplicate(
             workspace_id,
             include_generated_outputs=include_generated_outputs,
+            on_created=register_duplicate,
+            should_stop=duplication_stopped,
         )
-        # A duplicate must retain the origin workspace membership.  Otherwise
-        # an administrator who is allowed to duplicate a workspace could not
-        # open the new copy afterwards.
-        source_members = [
-            str(account['username'])
-            for account in repository.list_users()
-            if workspace_id in repository.list_user_workspace_ids(int(account['id']))
-        ]
-        repository.set_workspace_user_access(workspace.id, source_members)
         invalidate_workspace_size_cache(workspace.database_path.parent)
       except Exception:
         # Do not leave a registered but inaccessible/partially configured
         # workspace behind when the filesystem copy or permission copy fails.
-        if workspace is not None:
+        failed_workspace = workspace or created_workspace
+        if failed_workspace is not None:
             try:
-                workspace_registry.delete(workspace.id, delete_files=True)
-                repository.remove_workspace_access(workspace.id)
+                workspace_registry.delete(failed_workspace.id, delete_files=True)
             except Exception:
                 pass
+            repository.remove_workspace_access(failed_workspace.id)
+      finally:
+        if created_workspace is not None:
+            with WORKSPACE_DUPLICATION_STOP_REQUESTS_LOCK:
+                WORKSPACE_DUPLICATION_STOP_REQUESTS.discard(created_workspace.id)
     Thread(target=run_duplication, name=f'workspace-duplicate-{workspace_id}', daemon=True).start()
     return RedirectResponse('/workspace?workspace_notice=Workspace+duplication+started.+The+copy+will+appear+when+ready.', status_code=status.HTTP_303_SEE_OTHER)
 
@@ -9838,6 +9995,11 @@ def latest_auto_calculated_field_materialization(
         return JSONResponse({
             'status': 'processing', 'completed': 0, 'total': 0,
             'message': 'Updating CDR tables', 'workspace_id': active_workspace.id,
+        })
+    if workspace_state == 'stopped':
+        return JSONResponse({
+            'status': 'stopped', 'completed': 0, 'total': 0,
+            'message': 'Materialization stopped by user.', 'workspace_id': active_workspace.id,
         })
     return JSONResponse({
         'status': 'idle', 'completed': 0, 'total': 0,

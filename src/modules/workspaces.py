@@ -5,6 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 
 @dataclass(frozen=True, slots=True)
@@ -337,7 +338,11 @@ class WorkspaceRegistry:
         data_root.mkdir(parents=True, exist_ok=True)
         return self.get(workspace_id)  # type: ignore[return-value]
 
-    def duplicate(self, workspace_id: str, *, include_generated_outputs: bool = False) -> Workspace:
+    def duplicate(
+        self, workspace_id: str, *, include_generated_outputs: bool = False,
+        on_created: Callable[[Workspace], None] | None = None,
+        should_stop: Callable[[Workspace], bool] | None = None,
+    ) -> Workspace:
         source = self.get(workspace_id)
         if not source:
             raise ValueError('Workspace not found.')
@@ -353,6 +358,10 @@ class WorkspaceRegistry:
         self.set_status(duplicate.id, 'duplicating')
         target_root = duplicate.database_path.parent
         try:
+            if on_created:
+                on_created(duplicate)
+            if should_stop and should_stop(duplicate):
+                raise InterruptedError('Workspace duplication stopped by user.')
             # ``create`` has prepared the target root. Replace it with an
             # exact data copy, including its Slides Templates. Generated
             # reports and Chart Sets are optional because they can account for
@@ -362,6 +371,8 @@ class WorkspaceRegistry:
                 (source.input_dir, duplicate.input_dir),
                 (source.slides_templates_dir, duplicate.slides_templates_dir),
             ):
+                if should_stop and should_stop(duplicate):
+                    raise InterruptedError('Workspace duplication stopped by user.')
                 if source_path.exists():
                     shutil.copytree(source_path, target_path)
                 else:
@@ -372,7 +383,11 @@ class WorkspaceRegistry:
                 duplicate.output_dir.mkdir(parents=True, exist_ok=True)
             duplicate.database_path.parent.mkdir(parents=True, exist_ok=True)
             with sqlite3.connect(source.database_path) as source_conn, sqlite3.connect(duplicate.database_path) as duplicate_conn:
+                if should_stop and should_stop(duplicate):
+                    raise InterruptedError('Workspace duplication stopped by user.')
                 source_conn.backup(duplicate_conn)
+                if should_stop and should_stop(duplicate):
+                    raise InterruptedError('Workspace duplication stopped by user.')
                 duplicate_conn.execute(
                     'UPDATE datasets SET stored_path = REPLACE(stored_path, ?, ?)',
                     (str(source.input_dir), str(duplicate.input_dir)),
