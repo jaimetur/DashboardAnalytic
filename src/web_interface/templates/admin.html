@@ -136,27 +136,27 @@
     <summary class="collapsible-summary">
       <div>
         <p class="eyebrow">PowerPoint reporting</p>
-        <h2>Slides Templates Management</h2>
+        <h2>Report Templates Management</h2>
       </div>
       <span class="collapse-chip">Collapse</span>
     </summary>
     <div class="collapsible-panel-body">
-    <h3 class="templates-library-heading">Import Slides Template</h3>
-    <p class="lede">Import a Slides Template CSV, select whether it is for NSA or SA, and manage the stored workspace templates below.</p>
+    <h3 class="templates-library-heading">Import Report Template</h3>
+    <p class="lede">Import a Report Template CSV, select whether it is for NSA or SA, and manage the stored workspace templates below.</p>
     {% if catalogue_error %}<span hidden data-catalogue-import-error>{{ catalogue_error }}</span>{% endif %}
     {% if catalogue_notice %}<span hidden data-catalogue-import-notice>{{ catalogue_notice }}</span>{% endif %}
     <form class="catalogue-import-row" action="/admin/slides-templates/import" method="post" enctype="multipart/form-data" autocomplete="off" data-catalogue-import-form data-catalogue-template-library='{{ template_names_by_technology | tojson }}' novalidate>
-      <select name="template_type" aria-label="Slides Template type" title="Slides Template type">
+      <select name="template_type" aria-label="Report Template type" title="Report Template type">
         <option value="nsa" selected>NSA</option>
         <option value="sa">SA</option>
       </select>
       <input type="text" name="catalogue_name" aria-label="Template name" placeholder="Template name (optional)" maxlength="80" autocomplete="off" data-no-persist data-catalogue-import-name>
-      <input type="file" name="catalogue_file" aria-label="Slides Template CSV" accept=".csv,text/csv" data-catalogue-import-file>
+      <input type="file" name="catalogue_file" aria-label="Report Template CSV" accept=".csv,text/csv" data-catalogue-import-file>
       <input type="hidden" name="convert_catalogue" value="0" data-catalogue-convert>
       <input type="hidden" name="overwrite_existing" value="0" data-catalogue-overwrite>
       <button type="submit">Import</button>
     </form>
-    <h3 class="templates-library-heading">Slides Templates Library</h3>
+    <h3 class="templates-library-heading">Report Templates Library</h3>
     <div class="table-wrap catalogue-workspace-table-wrap">
       <table class="catalogue-workspace-table">
         <thead><tr><th>Template name</th><th>Type</th><th>Created</th><th>Last Updated</th><th>Default</th><th>Actions</th></tr></thead>
@@ -214,7 +214,7 @@
     <summary class="collapsible-summary">
       <div>
         <p class="eyebrow">PowerPoint reporting</p>
-        <h2>Slides Templates Editor</h2>
+        <h2>Report Templates Editor</h2>
       </div>
       <div class="summary-inline-actions">{% if catalogue_editor %}<span class="pill">{{ catalogue_editor.technology | upper }} · {{ catalogue_editor.catalogue.name }}</span>{% endif %}<span class="collapse-chip">Collapse</span></div>
     </summary>
@@ -238,7 +238,7 @@
       </form>
     </section>
     {% if catalogue_editor %}
-    <div class="alert alert-warning" role="alert" data-catalogue-validation-alert{% if not catalogue_editor.validation_error %} hidden{% endif %}><strong>This Slides Template contains an invalid filter.</strong> <span data-catalogue-validation-message>{{ catalogue_editor.validation_error or '' }}</span> Correct that filter definition before saving.</div>
+    <div class="alert alert-warning" role="alert" data-catalogue-validation-alert{% if not catalogue_editor.validation_error %} hidden{% endif %}><strong>This Report Template contains an invalid filter.</strong> <span data-catalogue-validation-message>{{ catalogue_editor.validation_error or '' }}</span> Correct that filter definition before saving.</div>
     <p class="lede">Rows are ordered by Slide and alternate by slide block. When a slide contains several charts, its shared slide number, title, subtitle and layout are shown once and apply to the full slide block; saving writes those values back to every chart row in the CSV. Select a cell to edit it manually or use the contextual suggestions on the right.</p>
     <div class="slides-templates-editor-grid" data-catalogue-editor data-editor-suggestions='{{ catalogue_editor.suggestions | tojson }}' data-calculated-dimensions='{{ catalogue_editor.calculated_dimensions | tojson }}' data-template-technology="{{ catalogue_editor.technology }}" data-template-identifier="{{ catalogue_editor.catalogue.identifier }}" data-template-options-url="/api/admin/report-templates/copy-options" data-template-copy-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/copy-items" data-calculated-dimensions-url="/api/workspace/calculated-dimensions" data-calculated-dimension-export-url="/workspace/calculated-dimensions/export" data-chart-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-preview" data-chart-image-preview-url="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/chart-image-preview">
       <form class="slides-templates-editor-table-wrap" action="/admin/report-templates/{{ catalogue_editor.technology }}/{{ catalogue_editor.catalogue.identifier }}/save" method="post" data-catalogue-editor-save>
@@ -337,8 +337,8 @@
   {% else %}
   <div class="confirm-overlay report-template-editor-overlay" data-admin-template-editor hidden>
     <section class="confirm-panel report-template-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-template-editor-title">
-      <header class="report-chart-viewer-header"><div><p class="eyebrow">PowerPoint reporting</p><h3 id="admin-template-editor-title" data-admin-template-editor-title>Edit Slides Template</h3></div><button type="button" class="report-chart-viewer-close" data-admin-template-editor-close aria-label="Close template editor">×</button></header>
-      <iframe class="report-template-editor-frame" data-admin-template-editor-frame title="Slides Templates Editor"></iframe>
+      <header class="report-chart-viewer-header"><div><p class="eyebrow">PowerPoint reporting</p><h3 id="admin-template-editor-title" data-admin-template-editor-title>Edit Report Template</h3></div><button type="button" class="report-chart-viewer-close" data-admin-template-editor-close aria-label="Close template editor">×</button></header>
+      <iframe class="report-template-editor-frame" data-admin-template-editor-frame title="Report Templates Editor"></iframe>
     </section>
   </div>
   {% endif %}
@@ -356,19 +356,6 @@
     {% if import_export_notice %}<div class="alert import-export-notice">{{ import_export_notice }}</div>{% endif %}
     {% if import_export_error %}<div class="alert import-export-error">{{ import_export_error }}</div>{% endif %}
     <div class="import-export-grid">
-      <form class="form-stack" action="/admin/import-export/export/jobs" method="post" data-export-package-form data-loading-label="Preparing export package" data-loading-copy="Please wait while Dashboard Analytic creates the selected export package. You can keep this page open while it runs.">
-        <h3>Export</h3>
-        <label>Content to export/transfer
-          <select name="export_target" aria-label="Content to export or transfer">
-            {% for option in export_options %}<option value="{{ option.value }}" {% if option.disabled | default(false) %}disabled{% endif %}>{{ option.label }}</option>{% endfor %}
-          </select>
-        </label>
-        <p class="form-note">{% if user.role == 'super-admin' %}Choose configuration, Slides Templates, the active workspace's Auto-calculated Fields, one workspace or the complete environment.{% else %}Admins can export or transfer the active workspace's Slides Templates, the active workspace's Auto-calculated Fields and accessible workspaces.{% endif %}</p>
-        <div class="import-export-actions">
-          <button type="submit" class="import-export-action">Export ZIP</button>
-          <button type="button" class="server-transfer-action" data-server-transfer>Transfer to other server</button>
-        </div>
-      </form>
       <form class="form-stack" action="/admin/import-export/import" method="post" enctype="multipart/form-data" data-import-export-form>
         <h3>Import</h3>
         <label>Import package
@@ -377,6 +364,19 @@
         <input type="hidden" name="confirmed_import" value="0" data-import-export-confirmed>
         <p class="form-note">The package manifest identifies its content automatically. Auto-calculated Fields packages ask which destination workspaces should receive the fields before the background import starts.</p>
         <button type="submit" class="import-export-action">Import ZIP</button>
+      </form>
+      <form class="form-stack" action="/admin/import-export/export/jobs" method="post" data-export-package-form data-loading-label="Preparing export package" data-loading-copy="Please wait while Dashboard Analytic creates the selected export package. You can keep this page open while it runs.">
+        <h3>Export</h3>
+        <label>Content to export/transfer
+          <select name="export_target" aria-label="Content to export or transfer">
+            {% for option in export_options %}<option value="{{ option.value }}" {% if option.disabled | default(false) %}disabled{% endif %}>{{ option.label }}</option>{% endfor %}
+          </select>
+        </label>
+        <p class="form-note">{% if user.role == 'super-admin' %}Choose configuration, Report Templates, the active workspace's Auto-calculated Fields, one workspace or the complete environment.{% else %}Admins can export or transfer the active workspace's Report Templates, the active workspace's Auto-calculated Fields and accessible workspaces.{% endif %}</p>
+        <div class="import-export-actions">
+          <button type="submit" class="import-export-action">Export ZIP</button>
+          <button type="button" class="server-transfer-action" data-server-transfer>Transfer to other server</button>
+        </div>
       </form>
     </div>
     {% if user.role == 'super-admin' and recovered_transfer_packages %}
@@ -416,7 +416,7 @@
       <div class="confirm-icon info-icon" aria-hidden="true">⇩</div>
       <p class="eyebrow">Full Environment export</p>
       <h3 id="full-environment-workspace-title">Select workspaces</h3>
-      <p>Configuration is always included. Each selected workspace includes its own Slides Templates.</p>
+      <p>Configuration is always included. Each selected workspace includes its own Report Templates.</p>
       <div class="full-environment-workspace-toolbar">
         <button type="button" class="ghost-link" data-full-environment-select-all>Select all</button>
         <button type="button" class="ghost-link" data-full-environment-select-none>Select none</button>
@@ -468,7 +468,7 @@
     <summary class="collapsible-summary">
       <div>
         <p class="eyebrow">Database Management</p>
-        <h2>Config / Active Workspace Databases</h2>
+        <h2>Database Management</h2>
       </div>
       <div class="summary-inline-actions">
         {% if active_workspace %}<span class="pill database-workspace-pill">Workspace: {{ active_workspace.name }}</span>{% endif %}
@@ -489,7 +489,7 @@
             <div class="database-backup-immediate-grid">
               <section class="database-backup-operation-panel"><h5>Backup</h5>
                 <label class="database-backup-components">Backup content
-                  <select name="components" multiple data-backup-components>{% for value, label in [('database', 'Configuration Content: Application database'), ('full_workspaces', 'Workspace Content: Full workspaces'), ('slides_templates', 'Workspace Content: Slides Templates'), ('auto_calculated_fields', 'Workspace Content: Auto-calculated Fields')] %}<option value="{{ value }}" {% if value in recurring_backup.components %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+                  <select name="components" multiple data-backup-components>{% for value, label in [('database', 'Configuration Content: Application database'), ('full_workspaces', 'Workspace Content: Full workspaces'), ('slides_templates', 'Workspace Content: Report Templates'), ('auto_calculated_fields', 'Workspace Content: Auto-calculated Fields')] %}<option value="{{ value }}" {% if value in recurring_backup.components %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
                 </label>
                 <label class="database-backup-workspaces" data-backup-workspaces hidden>Workspaces
                   <select name="workspace_ids" multiple>{% for workspace in backup_workspaces %}<option value="{{ workspace.id }}" {% if not recurring_backup.workspace_ids or workspace.id in recurring_backup.workspace_ids %}selected{% endif %}>{{ workspace.name }}</option>{% endfor %}</select>
@@ -527,7 +527,7 @@
         <dialog class="confirm-dialog database-backup-restore-dialog" data-backup-restore-dialog><div><div class="database-backup-restore-dialog-head"><p class="eyebrow">Overwrite confirmation</p><h3>Restore backup</h3><p>The selected data will overwrite existing data. Select the parts to restore.</p></div><section class="database-backup-restore-workspaces"><strong>Affected workspaces</strong><div data-backup-restore-workspaces></div></section><section class="database-backup-restore-selection"><strong>Backup content</strong><div class="restore-component-options" data-backup-restore-components></div></section><div class="confirm-actions"><button type="button" class="ghost-link" data-backup-restore-cancel>Cancel</button><button type="button" class="danger-button" data-backup-restore-confirm>Restore selected data</button></div></div></dialog>
       </section>
       <section class="database-editor-subpanel">
-      <div><p class="eyebrow">Config / Active Workspace Databases</p><h3>Database View</h3></div>
+      <div><p class="eyebrow">Database Management</p><h3>Database View</h3></div>
       {% if active_workspace %}
       <p class="lede">Browse, edit or remove individual records in any table of <strong>{{ active_workspace.name }}</strong>. Primary-key values are protected so row identity remains stable.</p>
       {% if database_notice %}<div class="alert database-cleanup-notice">{{ database_notice }}</div>{% endif %}
@@ -801,7 +801,7 @@
       const response = await fetch('/api/admin/backup-files/inspect', {method: 'POST', credentials: 'same-origin', body: new URLSearchParams({backup_path: restorePath.value, backup_file: restoreFile.value})});
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || 'Unable to inspect the backup.');
-      const labels = {database: 'Application database', full_workspaces: 'Full workspaces', slides_templates: 'Slides Templates', auto_calculated_fields: 'Auto-calculated Fields'};
+      const labels = {database: 'Application database', full_workspaces: 'Full workspaces', slides_templates: 'Report Templates', auto_calculated_fields: 'Auto-calculated Fields'};
       restoreComponents.innerHTML = payload.components.map((value) => `<label class="confirm-option"><input type="checkbox" value="${value}" checked><span>${labels[value]}</span></label>`).join('');
       const syncRestoreFullWorkspaces = () => {
         const full = restoreComponents.querySelector('input[value="full_workspaces"]');

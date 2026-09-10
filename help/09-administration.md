@@ -23,7 +23,7 @@ Administrators can:
 
 Leave a password field empty when an edit should preserve the current password.
 
-## Slides Templates Management
+## Report Templates Management
 
 Templates belong to the active workspace and are stored below `data/workspaces/<workspace>/slides-templates/`. Their metadata is stored in that workspace's `report_templates` table.
 
@@ -41,7 +41,7 @@ Available actions:
 
 One template can be default for each technology within a workspace. Reporting initially selects that default but does not change it when a user chooses another template for one job. New workspaces start without templates.
 
-## Slides Template Editor
+## Report Template Editor
 
 **Edit** opens the selected template in a large dialog. The template selector and duplicate Admin heading are intentionally omitted from the embedded editor.
 
@@ -109,6 +109,12 @@ The dialog remembers the last destination. Active state is restored after page r
 
 Complete unimported packages appear in **Recovered transfer packages** with content, workspaces, creation time, size, Import and Delete actions. Incomplete remnants are removed automatically.
 
+## Datasets Management
+
+- Review dataset ID, filename, kind, status and ownership.
+- Rename datasets.
+- Use Workspace for processing, preview and deletion actions.
+
 ## Database Management
 
 Tables are grouped by ownership:
@@ -120,7 +126,7 @@ Tables are grouped by ownership:
 
 The single **Generated jobs** table contains Report and Chart Set rows, distinguished by `job_type`.
 
-The **Slides Templates registry** is the active workspace's `report_templates` table. It records each template name, technology, default flag and timestamps; CSV content remains in the workspace template directory.
+The **Report Templates** table is the active workspace's `report_templates` table. It stores each template name, technology, default flag, timestamps and CSV content. Existing CSV templates are migrated automatically when their workspace is opened; compatibility CSV copies are generated only for portable packages.
 
 Capabilities:
 
@@ -152,12 +158,6 @@ Enable the schedule to select hourly, daily, weekly or monthly execution. Weekly
 Set **Retention backups** to keep a maximum number of ZIPs; the scheduler removes the oldest successful backups after creating a newer one. The default storage directory is `config/scheduled-backups`. **Browse** opens a server-side directory picker limited to the application `config` tree, so it reflects directories visible to the host or Docker container rather than the browser's computer. It can create a folder before selecting it.
 
 The status line reports the stored backup count and size, the most recent successful backup and the next scheduled run. Scheduled backups use the same chosen content and workspace selection as the Backup panel. Use **Full workspaces** when datasets, reports and Chart Sets must be included; otherwise those items are not part of a template- or field-only backup. Scheduled backups complement infrastructure backups and portable Export packages.
-
-## Datasets Management
-
-- Review dataset ID, filename, kind, status and ownership.
-- Rename datasets.
-- Use Workspace for processing, preview and deletion actions.
 
 ## App Logs
 

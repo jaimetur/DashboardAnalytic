@@ -46,8 +46,8 @@
       <label>Technology
         <select name="technology" required data-report-technology><option value="nsa">NSA (Non-Standalone)</option><option value="sa">SA (Standalone)</option></select>
       </label>
-      <label>Slides Templates
-        <select name="slides_templates" required data-report-catalogue aria-label="Slides Templates">
+      <label>Report Templates
+        <select name="slides_templates" required data-report-catalogue aria-label="Report Templates">
           {% for technology, catalogues in report_catalogues.items() %}
           {% for catalogue in catalogues %}
           <option value="{{ technology }}:{{ catalogue.identifier }}" data-catalogue-technology="{{ technology }}" data-catalogue-active="{{ 'true' if catalogue.active else 'false' }}"{% if technology == 'nsa' and catalogue.active %} selected{% endif %}>{{ technology | upper }} · {{ catalogue.name }}{% if catalogue.active %} · Default{% endif %}</option>
@@ -60,7 +60,7 @@
       </label>
       <div class="form-actions reporting-submit-action"><button type="submit">Generate PowerPoint Report</button><button type="button" class="report-charts-button" data-report-charts-button>Generate Report Charts</button></div>
       </form>
-      <p id="cdr-selection-help" class="form-note">Select at least one CDR from any supported type. Types without a selection remain in the report as charts labelled Unavailable source type. Use Ctrl/Cmd-click to select several CDRs of the same type. Their processed rows are concatenated using the union of their columns, preserving Campaign values for cross-campaign comparisons. Choose Slides Templates matching the selected technology; they apply only to this report and do not change the workspace default. Map Vendors from Workspace before choosing Multivendor. The common Template_CDR_analysis.pptx supplies masters and layouts for every report: the selected template creates each slide from scratch, fills its chart placeholders from the selected CDRs and keeps commentary areas blank for the analyst.</p>
+      <p id="cdr-selection-help" class="form-note">Select at least one CDR from any supported type. Types without a selection remain in the report as charts labelled Unavailable source type. Use Ctrl/Cmd-click to select several CDRs of the same type. Their processed rows are concatenated using the union of their columns, preserving Campaign values for cross-campaign comparisons. Choose Report Templates matching the selected technology; they apply only to this report and do not change the workspace default. Map Vendors from Workspace before choosing Multivendor. The common Template_CDR_analysis.pptx supplies masters and layouts for every report: the selected template creates each slide from scratch, fills its chart placeholders from the selected CDRs and keeps commentary areas blank for the analyst.</p>
     </div>
   </details>
 
@@ -96,9 +96,9 @@
         <button type="button" class="danger-button report-chart-set-delete-all" data-report-charts-delete-all-reports>Delete All Reports</button>
         {% endif %}
       </div>
-      <p class="lede" data-report-charts-copy>Each chart uses the selected CDRs, technology, scope and Slides Template. Click any chart to enlarge it.</p>
+      <p class="lede" data-report-charts-copy>Each chart uses the selected CDRs, technology, scope and Report Template. Click any chart to enlarge it.</p>
       <div class="report-charts-grid" data-report-charts-body></div>
-      {% if user.role in ['admin', 'super-admin'] %}<div class="report-charts-footer-actions"><button type="button" class="report-charts-edit-template" data-report-charts-edit-template hidden>Edit Slides Template</button></div>{% endif %}
+      {% if user.role in ['admin', 'super-admin'] %}<div class="report-charts-footer-actions"><button type="button" class="report-charts-edit-template" data-report-charts-edit-template hidden>Edit Report Template</button></div>{% endif %}
     </div>
   </details>
 
@@ -246,8 +246,8 @@
 {% if user.role in ['admin', 'super-admin'] %}
 <div class="confirm-overlay report-template-editor-overlay" data-report-template-editor hidden>
   <section class="confirm-panel report-template-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="report-template-editor-title">
-    <header class="report-chart-viewer-header"><div><p class="eyebrow">PowerPoint reporting</p><h3 id="report-template-editor-title" data-report-template-editor-title>Edit Slides Template</h3></div><button type="button" class="report-chart-viewer-close" data-report-template-editor-close aria-label="Close template editor">×</button></header>
-    <iframe class="report-template-editor-frame" data-report-template-editor-frame title="Slides Templates Editor"></iframe>
+    <header class="report-chart-viewer-header"><div><p class="eyebrow">PowerPoint reporting</p><h3 id="report-template-editor-title" data-report-template-editor-title>Edit Report Template</h3></div><button type="button" class="report-chart-viewer-close" data-report-template-editor-close aria-label="Close template editor">×</button></header>
+    <iframe class="report-template-editor-frame" data-report-template-editor-frame title="Report Templates Editor"></iframe>
   </section>
 </div>
 {% endif %}
@@ -920,7 +920,7 @@
       event.preventDefault();
       if (!reportForm.reportValidity() || !validateCdrSelection() || !(await reviewMultivendorCampaigns())) return;
       const confirmation = await showConfirmDialog(
-        'Generate the PowerPoint report with the selected CDRs and Slides Template?',
+        'Generate the PowerPoint report with the selected CDRs and Report Template?',
         {
           title: 'Generate PowerPoint Report',
           confirmLabel: 'Generate',
@@ -1008,7 +1008,7 @@
       if (reportChartsDataCount) { reportChartsDataCount.textContent = `# CDR Data: ${datasetCounts.data}`; reportChartsDataCount.hidden = false; }
       if (reportChartsVoiceCount) { reportChartsVoiceCount.textContent = `# CDR Voice: ${datasetCounts.voice}`; reportChartsVoiceCount.hidden = false; }
       if (reportChartsSpeechCount) { reportChartsSpeechCount.textContent = `# CDR Speech: ${datasetCounts.speech}`; reportChartsSpeechCount.hidden = false; }
-      if (reportChartsCopy) reportChartsCopy.textContent = `Rendered from ${payload.template || 'the selected Slides Template'} using the selected CDRs, technology and scope. Click any chart to enlarge it.`;
+      if (reportChartsCopy) reportChartsCopy.textContent = `Rendered from ${payload.template || 'the selected Report Template'} using the selected CDRs, technology and scope. Click any chart to enlarge it.`;
       if (reportChartsPanel) reportChartsPanel.dataset.reportChartsReady = 'true';
       updateReportingModule();
     };
@@ -1024,7 +1024,7 @@
       );
       if (Number.isInteger(templateRowIndex) && templateRowIndex >= 0) editorUrl.searchParams.set('focus_row', String(templateRowIndex));
       reportTemplateEditorFrame.src = `${editorUrl.pathname}${editorUrl.search}`;
-      if (reportTemplateEditorTitle) reportTemplateEditorTitle.textContent = `Edit Slides Template: "${activeChartSetTemplate}"`;
+      if (reportTemplateEditorTitle) reportTemplateEditorTitle.textContent = `Edit Report Template: "${activeChartSetTemplate}"`;
       reportTemplateEditor.hidden = false;
       reportTemplateEditorClose?.focus();
     };
@@ -1451,7 +1451,7 @@
       reportChartViewerFields.querySelectorAll('[name]').forEach((control) => control.addEventListener('input', regenerate));
       reportChartViewerFields.querySelectorAll('select[name]').forEach((control) => control.addEventListener('change', regenerate));
     };
-    // Shared with the Slides Template Editor.  The previous local renderer is
+    // Shared with the Report Template Editor.  The previous local renderer is
     // retained only as compatibility context while this page is open; all new
     // viewer instances are created by the common control component below.
     const renderSharedChartViewerSandbox = (definition, chart) => {
@@ -1894,7 +1894,7 @@
       if (!reportForm?.reportValidity() || !validateCdrSelection()) return;
       if (!(await reviewMultivendorCampaigns())) return;
       const confirmation = await showConfirmDialog(
-        'Generate the selected report charts with the current CDRs and Slides Template?',
+        'Generate the selected report charts with the current CDRs and Report Template?',
         {
           title: 'Generate Report Charts',
           confirmLabel: 'Generate',

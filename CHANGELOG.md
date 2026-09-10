@@ -27,6 +27,7 @@
 - Reordered Manage Workspaces actions so Duplicate precedes Open, expanded the New workspace and Open workspace fields to 800px in desktop layouts with their actions kept alongside, and remove cancelled workspace duplications from the live table once their partial copy is cleaned up.
 - Moved Database View Actions to the first sticky column so row actions remain visible while horizontally scrolling, and styled the row Save action in green.
 - Renamed the Auto-calculated Fields workspace table from `calculated_dimensions` to `autocalculated_fields`, with an automatic data-preserving migration for existing workspace databases.
+- Renamed Slides Templates throughout the interface and documentation to Report Templates. Template CSV content is now stored in each workspace's `report_templates` table and legacy workspace CSVs are migrated automatically on opening; compatibility copies are generated for portable packages. Database backups now use the same versioned package manifest as Import / Export, so either Restore or Import package can consume the corresponding supported ZIP.
 
 #### 🐛 Bug fixes:
 - Fixed the Reporting Chart Preview header so Manage Auto-calculated Fields appears beside its red Close control; Escape now leaves active Auto-calculated Fields and filtered-dataset child dialogs open, closing the preview only when no child dialog is active.

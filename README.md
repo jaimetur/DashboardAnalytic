@@ -4,7 +4,7 @@
 
 # Dashboard Analytic
 
-Dashboard Analytic is a multi-user web application for processing CDR datasets, exploring KPI performance, building charts and generating template-driven PowerPoint reports. Every workspace keeps its datasets, database, generated output and Slides Templates isolated; users and access permissions remain global application configuration.
+Dashboard Analytic is a multi-user web application for processing CDR datasets, exploring KPI performance, building charts and generating template-driven PowerPoint reports. Every workspace keeps its datasets, database, generated output and Report Templates isolated; users and access permissions remain global application configuration.
 
 After login, the application opens the **Readme** tab by default.
 
@@ -18,7 +18,7 @@ After login, the application opens the **Readme** tab by default.
 - Create temporary ad-hoc charts in Chart Builder.
 - Generate NSA/SA PowerPoint reports and standalone Chart Sets.
 - Create workspace-owned Auto-calculated Fields and apply them asynchronously to the applicable CDR tables.
-- Edit workspace-owned Slides Templates with validation, assistance and chart previews.
+- Edit workspace-owned Report Templates with validation, assistance and chart previews.
 - Track meaningful user/system events in App Logs.
 - Follow workspace-scoped background work from floating task cards and stop eligible jobs safely.
 - Export, import or transfer configuration, templates and workspaces.
@@ -75,8 +75,8 @@ Chart Builder reuses the shared Interactive Preview for ad-hoc analysis.
 ### Admin
 
 - **Create user / Users**: account, role, password, status and workspace access management.
-- **Slides Templates Management**: create, import, duplicate, rename, export, delete and set defaults within the active workspace.
-- **Slides Template Editor**: validated grid editing, cell assistance, Filter Builder and shared Chart Preview.
+- **Report Templates Management**: create, import, duplicate, rename, export, delete and set defaults within the active workspace.
+- **Report Template Editor**: validated grid editing, cell assistance, Filter Builder and shared Chart Preview.
 - **Import / Export / Transfer**: portable ZIP jobs, Full Environment workspace selection, server-to-server transfer and recovered packages.
 - **Database Management**: scoped on-demand and scheduled backups, overwrite-confirmed restore, grouped global/workspace tables, server-side filters, editing and cleanup.
 - **Datasets Management**: inspect and rename workspace datasets.

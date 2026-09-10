@@ -394,7 +394,7 @@ def calculated_dimension_rename_map(
 
 
 def rename_calculated_dimension_template_references(renames: dict[str, str]) -> int:
-    """Rename calculated fields in every stored Slides Template of the workspace."""
+    """Rename calculated fields in every stored Report Template of the workspace."""
     if not renames:
         return 0
 
@@ -431,7 +431,7 @@ def rename_calculated_dimension_template_references(renames: dict[str, str]) -> 
             )
         return updated
 
-    pending_writes: dict[Path, bytes] = {}
+    pending_writes: dict[tuple[str, str, bool], bytes] = {}
     changed_templates = 0
     for technology in TEMPLATE_NAMES:
         for template in report_catalogue_options(technology):
@@ -440,13 +440,11 @@ def rename_calculated_dimension_template_references(renames: dict[str, str]) -> 
             if updated_entries == entries:
                 continue
             content = catalogue_csv(updated_entries)
-            pending_writes[Path(template['path'])] = content
-            if template['active']:
-                pending_writes[named_catalogue_path(technology, template['identifier'], template['identifier'])] = content
+            pending_writes[(technology, str(template['identifier']), bool(template['active']))] = content
             changed_templates += 1
     with TEMPLATE_SAVE_LOCK:
-        for path, content in pending_writes.items():
-            atomic_write_template(path, content)
+        for (technology, name, is_default), content in pending_writes.items():
+            persist_report_template(technology, name, content, is_default=is_default)
     return changed_templates
 
 
@@ -1080,42 +1078,56 @@ def named_catalogue_path(technology: str, identifier: str, template_name: str | 
     return settings.slides_templates_dir / 'library' / technology / filename
 
 
+def _template_row_content(row: Any) -> bytes:
+    """Return CSV payload stored in the workspace database."""
+    return bytes(row['content'] or b'')
+
+
+def _write_template_compatibility_files(technology: str, name: str, content: bytes, *, is_default: bool) -> None:
+    """Materialise database-backed templates only for legacy package compatibility."""
+    library_path = named_catalogue_path(technology, name, name)
+    atomic_write_template(library_path, content)
+    if is_default:
+        default_dir = settings.slides_templates_dir / 'default' / technology
+        default_path = default_dir / template_filename(name)
+        for previous in default_dir.glob('*.csv'):
+            if previous != default_path:
+                previous.unlink()
+        atomic_write_template(default_path, content)
+
+
+def persist_report_template(technology: str, name: str, content: bytes, *, is_default: bool | None = None) -> None:
+    """Persist CSV content in SQLite and refresh its compatibility export copy."""
+    repository.set_report_template_content(technology, name, content)
+    if is_default is None:
+        is_default = bool(next(row for row in repository.list_report_templates(technology) if str(row['name']) == name)['is_default'])
+    _write_template_compatibility_files(technology, name, content, is_default=is_default)
+
+
 def synchronize_template_file_names(technology: str) -> None:
-    """Reconcile registered templates without treating arbitrary CSVs as templates."""
+    """Migrate old CSVs once, then materialise DB templates for package compatibility."""
     library_dir = settings.slides_templates_dir / 'library' / technology
     library_dir.mkdir(parents=True, exist_ok=True)
     default_dir = settings.slides_templates_dir / 'default' / technology
     default_dir.mkdir(parents=True, exist_ok=True)
-    existing = {str(row['name']): bool(row['is_default']) for row in repository.list_report_templates(technology)}
+    existing = {str(row['name']): row for row in repository.list_report_templates(technology)}
     default_files = sorted(default_dir.glob('*.csv'))
-    physical_names = {catalogue_registry_key(path.stem) for path in [*library_dir.glob('*.csv'), *default_files]}
-    missing_names = set(existing) - physical_names
-    unregistered_names = physical_names - set(existing)
-    # Preserve the one unambiguous manual CSV rename supported by the library,
-    # but never promote arbitrary CSVs into the registry on a later page
-    # render. This prevents phantom templates from stale/incidental files.
-    if len(missing_names) == len(unregistered_names) == 1:
-        previous_name = next(iter(missing_names))
-        replacement_name = next(iter(unregistered_names))
-        repository.rename_report_template(technology, previous_name, replacement_name)
-        existing[replacement_name] = existing.pop(previous_name)
-        missing_names.clear()
-    for name in missing_names:
-        repository.delete_report_template(technology, name)
-        existing.pop(name, None)
-    # The application-managed default is the only safe bootstrap source when
-    # an otherwise empty configuration database is restored.
-    if len(default_files) == 1:
-        default_name = catalogue_registry_key(default_files[0].stem)
-        if default_name not in existing:
-            repository.add_report_template(technology, default_name, is_default=False)
-            existing[default_name] = False
+    physical_files = [*library_dir.glob('*.csv'), *default_files]
+    for path in physical_files:
+        name = catalogue_registry_key(path.stem)
+        if name not in existing:
+            repository.add_report_template(technology, name, path.read_bytes(), is_default=False)
+            existing[name] = next(row for row in repository.list_report_templates(technology) if str(row['name']) == name)
+        elif not _template_row_content(existing[name]):
+            repository.set_report_template_content(technology, name, path.read_bytes())
+            existing[name] = next(row for row in repository.list_report_templates(technology) if str(row['name']) == name)
     if len(default_files) == 1:
         default_name = catalogue_registry_key(default_files[0].stem)
         repository.set_default_report_template(technology, default_name)
-        library_path = named_catalogue_path(technology, default_name, default_name)
-        if not library_path.exists():
-            shutil.copy2(default_files[0], library_path)
+    for row in repository.list_report_templates(technology):
+        content = _template_row_content(row)
+        if content:
+            _write_template_compatibility_files(technology, str(row['name']), content, is_default=bool(row['is_default']))
 
 
 def promote_report_template_to_default(
@@ -1126,14 +1138,14 @@ def promote_report_template_to_default(
     available = {str(row['name']): row for row in repository.list_report_templates(technology)}
     if identifier not in available:
         raise ValueError('Named template metadata was not found.')
-    source_path = named_catalogue_path(technology, identifier, identifier)
-    if not source_path.exists():
-        raise ValueError('The named template CSV could not be found.')
+    source_content = _template_row_content(available[identifier])
+    if not source_content:
+        raise ValueError('The Report Template has no CSV content.')
     default_dir = settings.slides_templates_dir / 'default' / technology
-    promoted_path = default_dir / source_path.name
+    promoted_path = default_dir / template_filename(identifier)
     promoted_name = identifier
     promoted_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source_path, promoted_path)
+    atomic_write_template(promoted_path, source_content)
     for active_copy in promoted_path.parent.glob('*.csv'):
         if active_copy != promoted_path:
             active_copy.unlink()
@@ -1147,15 +1159,18 @@ def report_catalogue_options(technology: str) -> list[dict[str, Any]]:
     for row in templates:
         identifier = str(row['name'])
         is_default = bool(row['is_default'])
+        content = _template_row_content(row)
+        if not content:
+            continue
         path = named_catalogue_path(technology, identifier, identifier)
+        _write_template_compatibility_files(technology, identifier, content, is_default=is_default)
         if is_default:
             path = active_catalog_path(settings.slides_templates_dir, default_report_slides_template_path(technology, identifier), technology)
-        if not path.exists():
-            continue
         options.append({
             'identifier': identifier,
             'name': identifier,
             'path': path,
+            'content': content,
             'source': 'Default source' if is_default else 'Named workspace template',
             'active': is_default,
             'created_at': row['created_at'],
@@ -1167,7 +1182,7 @@ def report_catalogue_options(technology: str) -> list[dict[str, Any]]:
 def reporting_catalog_path(technology: str) -> Path:
     active = next((option for option in report_catalogue_options(technology) if option['active']), None)
     if not active:
-        raise FileNotFoundError(f'No default {technology.upper()} Slides Template is configured.')
+        raise FileNotFoundError(f'No default {technology.upper()} Report Template is configured.')
     return active['path']
 
 
@@ -2946,7 +2961,7 @@ def create_recurring_database_backup(config: dict[str, Any]) -> Path:
             str(item) for item in config.get('full_workspace_components', []) if str(item) in {'input', 'output'}
         })
         manifest = {
-            'format': 'database-backup', 'version': 1,
+            'format': ARCHIVE_FORMAT, 'version': ARCHIVE_VERSION, 'kind': 'database-backup',
             'created_at': datetime.now().astimezone().isoformat(timespec='seconds'),
             'components': sorted(components), 'full_workspace_components': full_workspace_components,
             'workspaces': [],
@@ -2960,22 +2975,18 @@ def create_recurring_database_backup(config: dict[str, Any]) -> Path:
             # name for the archive tree so a backup can be inspected by the
             # same workspace names shown throughout the application.
             archive_workspace_root = f'workspaces/{workspace.name}'
+            materialize_workspace_report_templates(workspace)
             if 'slides_templates' in components:
                 _archive_tree(archive, workspace.slides_templates_dir, f'{archive_workspace_root}/slides-templates')
-            if 'auto_calculated_fields' in components:
+            if 'auto_calculated_fields' in components and 'full_workspaces' not in components:
                 task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
                 archive.writestr(
-                    f'{archive_workspace_root}/auto-calculated-fields.json',
+                    f'{archive_workspace_root}/auto-calculated-fields/auto-calculated-fields.json',
                     json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
                 )
             if 'full_workspaces' in components:
-                task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
-                archive.writestr(
-                    f'{archive_workspace_root}/auto-calculated-fields.json',
-                    json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
-                )
                 _archive_workspace(
-                    archive, workspace, f'{archive_workspace_root}/full-workspace', backup_root,
+                    archive, workspace, archive_workspace_root, backup_root,
                     include_input_files='input' in full_workspace_components,
                     include_generated_outputs='output' in full_workspace_components,
                 )
@@ -3102,18 +3113,31 @@ def _backup_archive_components(archive_path: Path) -> list[str]:
     except zipfile.BadZipFile as exc:
         raise ValueError('The selected backup is not a valid ZIP archive.') from exc
     supported = ('database', 'full_workspaces', 'slides_templates', 'auto_calculated_fields')
-    if isinstance(manifest, dict) and manifest.get('format') == 'database-backup':
+    if isinstance(manifest, dict) and manifest.get('format') == ARCHIVE_FORMAT:
+        portable_components = {
+            'config': ['database'],
+            'workspace': ['full_workspaces'],
+            'full-environment': ['database', 'full_workspaces'],
+            'slides-templates': ['slides_templates'],
+            'auto-calculated-fields': ['auto_calculated_fields'],
+        }
+        if manifest.get('kind') in portable_components:
+            return portable_components[str(manifest['kind'])]
+    if isinstance(manifest, dict) and (
+        (manifest.get('format') == ARCHIVE_FORMAT and manifest.get('kind') == 'database-backup')
+        or manifest.get('format') == 'database-backup'
+    ):
         declared = [str(item) for item in manifest.get('components', []) if str(item) in supported]
         if declared:
             return declared
     components: list[str] = []
     if 'application/application.db' in names:
         components.append('database')
-    if any(name.startswith('workspaces/') and '/full-workspace/database.sqlite' in name for name in names):
+    if any(name.startswith('workspaces/') and name.endswith('/database.sqlite') for name in names):
         components.append('full_workspaces')
     if any(name.startswith('workspaces/') and '/slides-templates/' in name for name in names):
         components.append('slides_templates')
-    if any(name.startswith('workspaces/') and name.endswith('/auto-calculated-fields.json') for name in names):
+    if any(name.startswith('workspaces/') and '/auto-calculated-fields/' in name and name.endswith('.json') for name in names):
         components.append('auto_calculated_fields')
     if not components:
         raise ValueError('The selected ZIP does not contain a compatible Dashboard Analytic backup.')
@@ -3143,6 +3167,14 @@ def _backup_archive_file(backup_path: str, filename: str) -> Path:
 
 def restore_database_backup(archive_path: Path, components: Iterable[str]) -> None:
     """Restore selected backup parts after the UI has confirmed overwriting data."""
+    manifest = read_import_manifest(archive_path)
+    is_database_backup = manifest.get('kind') == 'database-backup' or manifest.get('format') == 'database-backup'
+    if not is_database_backup:
+        # Portable Import/Export packages share the same Restore picker.  The
+        # import implementation already validates their manifest and applies
+        # their own safe workspace/configuration semantics.
+        _apply_import_archive(archive_path, manifest)
+        return
     selected = set(components)
     present = set(_backup_archive_components(archive_path))
     if not selected or not selected <= present:
@@ -3161,7 +3193,11 @@ def restore_database_backup(archive_path: Path, components: Iterable[str]) -> No
             for workspace_name in _backup_archive_workspaces(archive_path):
                 if workspace_name not in available_by_name:
                     continue
-                archive_prefix = f'workspaces/{workspace_name}/full-workspace'
+                archive_prefix = f'workspaces/{workspace_name}'
+                # Backward compatibility with ZIPs generated before the
+                # workspace archive layout was unified with Export.
+                if not any(name.startswith(f'{archive_prefix}/database.sqlite') for name in names):
+                    archive_prefix = f'{archive_prefix}/full-workspace'
                 _safe_extract_archive_prefix(archive, staging, archive_prefix)
                 import_workspace_archive(
                     staging / archive_prefix,
@@ -3183,7 +3219,11 @@ def restore_database_backup(archive_path: Path, components: Iterable[str]) -> No
                             shutil.copyfileobj(source, output)
                     register_workspace_template_files(workspace)
             if 'auto_calculated_fields' in selected:
-                member = f'{prefix}auto-calculated-fields.json'
+                member = next((candidate for candidate in (
+                    f'{prefix}auto-calculated-fields/auto-calculated-fields.json',
+                    f'{prefix}auto-calculated-fields/definitions.json',
+                    f'{prefix}auto-calculated-fields.json',
+                ) if candidate in names), None)
                 if member in names:
                     try:
                         definitions = json.loads(archive.read(member).decode('utf-8'))
@@ -3248,11 +3288,21 @@ def _archive_workspace(
     progress_callback: Callable[[int], None] | None = None, include_generated_outputs: bool = True,
     include_input_files: bool = True,
 ) -> None:
+    materialize_workspace_report_templates(workspace)
+    task_repository = Repository(
+        workspace.database_path,
+        global_db_path=repository.global_db_path,
+        workspace_registry_db_path=workspace_registry.registry_path,
+    )
     _archive_database(
         archive, workspace.database_path, f'{archive_prefix}/database.sqlite', scratch_dir, progress_callback,
         exclude_tables=() if include_generated_outputs else ('generated_jobs',),
     )
     _archive_tree(archive, workspace.slides_templates_dir, f'{archive_prefix}/slides-templates', progress_callback=progress_callback)
+    archive.writestr(
+        f'{archive_prefix}/auto-calculated-fields/auto-calculated-fields.json',
+        json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
+    )
     if include_input_files:
         _archive_tree(archive, workspace.input_dir, f'{archive_prefix}/input', progress_callback=progress_callback)
     if include_generated_outputs:
@@ -3351,14 +3401,17 @@ def build_export_archive_file(
             source_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
             source_workspace = workspace_registry.get(source_id) if source_id else None
             if not source_workspace:
-                raise ValueError('Open a workspace before exporting Slides Templates.')
+                raise ValueError('Open a workspace before exporting Report Templates.')
+            archive_path = f'workspaces/{source_workspace.name}/slides-templates'
             manifest = {
                 'format': ARCHIVE_FORMAT, 'version': ARCHIVE_VERSION,
                 'kind': 'slides-templates', 'includes_slides_templates': True,
                 'source_workspace': {'id': source_workspace.id, 'name': source_workspace.name},
+                'archive_path': archive_path,
             }
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
-            _archive_tree(archive, source_workspace.slides_templates_dir, 'slides-templates', progress_callback=progress_callback)
+            materialize_workspace_report_templates(source_workspace)
+            _archive_tree(archive, source_workspace.slides_templates_dir, archive_path, progress_callback=progress_callback)
         elif target == 'auto-calculated-fields':
             source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
             source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
@@ -3381,25 +3434,28 @@ def build_export_archive_file(
                 'kind': 'auto-calculated-fields',
                 'source_workspace': {'id': source_workspace.id, 'name': source_workspace.name},
                 'field_count': len(definitions),
+                'archive_path': f'workspaces/{source_workspace.name}/auto-calculated-fields/auto-calculated-fields.json',
             }
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
-            archive.writestr('auto-calculated-fields.json', payload)
+            archive.writestr(str(manifest['archive_path']), payload)
             if progress_callback:
                 progress_callback(len(payload))
         elif target.startswith('workspace:'):
             workspace = workspace_registry.get(target.removeprefix('workspace:'))
             if not workspace:
                 raise ValueError('Workspace not found.')
+            archive_path = f'workspaces/{workspace.name}'
             manifest = {
                 'format': ARCHIVE_FORMAT,
                 'version': ARCHIVE_VERSION,
                 'kind': 'workspace',
                 'workspace': _workspace_archive_metadata(workspace),
+                'archive_path': archive_path,
                 'includes_generated_outputs': include_generated_outputs,
             }
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             _archive_workspace(
-                archive, workspace, 'workspace', destination.parent, progress_callback,
+                archive, workspace, archive_path, destination.parent, progress_callback,
                 include_generated_outputs=include_generated_outputs,
             )
         elif target == 'full-environment':
@@ -3411,8 +3467,8 @@ def build_export_archive_file(
                 'includes_slides_templates': True,
                 'includes_generated_outputs': include_generated_outputs,
                 'workspaces': [
-                    {**_workspace_archive_metadata(workspace), 'archive_path': f'workspaces/{index}'}
-                    for index, workspace in enumerate(workspaces, start=1)
+                    {**_workspace_archive_metadata(workspace), 'archive_path': f'workspaces/{workspace.name}'}
+                    for workspace in workspaces
                 ],
             }
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
@@ -3564,10 +3620,10 @@ def _cleanup_expired_export_packages() -> None:
 def _recovered_transfer_details(manifest: dict[str, Any]) -> tuple[str, list[str]]:
     kind = str(manifest.get('kind') or '')
     if kind == 'config':
-        return ('Config + Slides Templates' if manifest.get('includes_slides_templates') else 'Config', [])
+        return ('Config + Report Templates' if manifest.get('includes_slides_templates') else 'Config', [])
     if kind == 'slides-templates':
         source = manifest.get('source_workspace') or {}
-        return ('Slides Templates', [str(source['name'])] if isinstance(source, dict) and source.get('name') else [])
+        return ('Report Templates', [str(source['name'])] if isinstance(source, dict) and source.get('name') else [])
     if kind == 'auto-calculated-fields':
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
@@ -3607,7 +3663,7 @@ def _recover_unimported_transfer_packages() -> None:
         try:
             manifest = read_import_manifest(package_path)
             kind = str(manifest.get('kind') or '')
-            if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields'}:
+            if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields', 'database-backup'}:
                 raise ValueError('Unsupported transfer package.')
         except (OSError, ValueError, zipfile.BadZipFile):
             package_path.unlink(missing_ok=True)
@@ -3943,20 +3999,42 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
 
 
 def register_workspace_template_files(workspace: Workspace) -> None:
-    """Register a migrated/imported library without touching another workspace."""
+    """Migrate legacy workspace CSVs into the workspace template table."""
     target_repository = Repository(workspace.database_path, global_db_path=repository.global_db_path)
     target_repository.initialize_template_registry()
     for technology in TEMPLATE_NAMES:
-        known = {str(row['name']) for row in target_repository.list_report_templates(technology)}
+        known = {str(row['name']): row for row in target_repository.list_report_templates(technology)}
         default_files = sorted((workspace.slides_templates_dir / 'default' / technology).glob('*.csv'))
         for area in ('library', 'default'):
             for path in sorted((workspace.slides_templates_dir / area / technology).glob('*.csv')):
                 name = catalogue_registry_key(path.stem)
                 if name not in known:
-                    target_repository.add_report_template(technology, name, is_default=False)
-                    known.add(name)
+                    target_repository.add_report_template(technology, name, path.read_bytes(), is_default=False)
+                    known[name] = next(row for row in target_repository.list_report_templates(technology) if str(row['name']) == name)
+                elif not _template_row_content(known[name]):
+                    target_repository.set_report_template_content(technology, name, path.read_bytes())
         if len(default_files) == 1:
             target_repository.set_default_report_template(technology, catalogue_registry_key(default_files[0].stem))
+
+
+def materialize_workspace_report_templates(workspace: Workspace) -> None:
+    """Create legacy CSV copies from database-backed Report Templates for an archive."""
+    target_repository = Repository(workspace.database_path, global_db_path=repository.global_db_path)
+    target_repository.initialize_template_registry()
+    for technology in TEMPLATE_NAMES:
+        for row in target_repository.list_report_templates(technology):
+            content = _template_row_content(row)
+            if not content:
+                continue
+            library_path = workspace.slides_templates_dir / 'library' / technology / template_filename(str(row['name']))
+            atomic_write_template(library_path, content)
+            if bool(row['is_default']):
+                default_dir = workspace.slides_templates_dir / 'default' / technology
+                default_path = default_dir / template_filename(str(row['name']))
+                for previous in default_dir.glob('*.csv'):
+                    if previous != default_path:
+                        previous.unlink()
+                atomic_write_template(default_path, content)
 
 
 def migrate_workspace_template_registries() -> None:
@@ -3988,12 +4066,12 @@ def import_slides_templates_archive(
 ) -> int:
     templates_payload = staging_root / 'slides-templates'
     if not templates_payload.exists():
-        raise ValueError('The Slides Templates archive does not contain template files.')
+        raise ValueError('The Report Templates archive does not contain template files.')
     selected = list(dict.fromkeys(destination_workspace_ids))
     if not selected:
         selected = matching_template_workspaces(manifest or {}, workspace_registry.list())
     if not selected:
-        raise ValueError('Select at least one destination workspace for the Slides Templates.')
+        raise ValueError('Select at least one destination workspace for the Report Templates.')
     destinations = [workspace_registry.get(identifier) for identifier in selected]
     if any(workspace is None for workspace in destinations):
         raise ValueError('A destination workspace no longer exists.')
@@ -4003,7 +4081,7 @@ def import_slides_templates_archive(
                 continue
             relative = path.relative_to(templates_payload)
             if len(relative.parts) != 3 or relative.parts[0] not in {'library', 'default'} or relative.parts[1] not in TEMPLATE_NAMES:
-                raise ValueError('The package contains an invalid Slides Template path.')
+                raise ValueError('The package contains an invalid Report Template path.')
             # Keep one default per technology; library copies remain available.
             target = workspace.slides_templates_dir / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -4056,7 +4134,10 @@ def read_import_manifest(source: bytes | Path) -> dict[str, Any]:
             manifest = json.loads(archive.read('manifest.json').decode('utf-8'))
     except (KeyError, UnicodeDecodeError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
         raise ValueError('The selected file is not a valid Dashboard Analytic export package.') from exc
-    if not isinstance(manifest, dict) or manifest.get('format') != ARCHIVE_FORMAT or manifest.get('version') != ARCHIVE_VERSION:
+    legacy_database_backup = isinstance(manifest, dict) and manifest.get('format') == 'database-backup' and manifest.get('version') == 1
+    if not isinstance(manifest, dict) or (
+        not legacy_database_backup and (manifest.get('format') != ARCHIVE_FORMAT or manifest.get('version') != ARCHIVE_VERSION)
+    ):
         raise ValueError('The selected file is not a compatible Dashboard Analytic export package.')
     return manifest
 
@@ -4139,13 +4220,24 @@ def _apply_import_archive(
 
         if progress_callback:
             progress_callback('validating', 0.0)
+        if kind == 'database-backup':
+            components = _backup_archive_components(package_path)
+            if progress_callback:
+                progress_callback('restoring backup', 15.0)
+            restore_database_backup(package_path, components)
+            if progress_callback:
+                progress_callback('finalising', 100.0)
+            return 'Database backup restored successfully.'
         if kind == 'workspace':
-            _safe_extract_archive_prefix(archive, staging_root, 'workspace', extracted)
+            archive_path = str(manifest.get('archive_path') or 'workspace')
+            if archive_path != 'workspace' and not re.fullmatch(r'workspaces/[^/]+', archive_path):
+                raise ValueError('The workspace package contains an invalid workspace path.')
+            _safe_extract_archive_prefix(archive, staging_root, archive_path, extracted)
             workspace_info = manifest.get('workspace')
             if progress_callback:
                 progress_callback('importing workspace', 90.0)
             workspace = import_workspace_archive(
-                staging_root / 'workspace',
+                staging_root / archive_path,
                 workspace_info if isinstance(workspace_info, dict) else None,
                 replace_existing=True,
             )
@@ -4161,16 +4253,27 @@ def _apply_import_archive(
                 progress_callback('finalising', 100.0)
             return 'Configuration imported successfully. Local workspaces were preserved.'
         if kind == 'slides-templates':
-            _safe_extract_archive_prefix(archive, staging_root, 'slides-templates', extracted)
+            archive_path = str(manifest.get('archive_path') or 'slides-templates')
+            if archive_path != 'slides-templates' and not re.fullmatch(r'workspaces/[^/]+/slides-templates', archive_path):
+                raise ValueError('The Report Templates package contains an invalid template path.')
+            _safe_extract_archive_prefix(archive, staging_root, archive_path, extracted)
             if progress_callback:
-                progress_callback('importing Slides Templates', 90.0)
-            import_slides_templates_archive(staging_root, destination_workspace_ids, manifest)
+                progress_callback('importing Report Templates', 90.0)
+            import_slides_templates_archive(staging_root if archive_path == 'slides-templates' else staging_root / Path(archive_path).parent, destination_workspace_ids, manifest)
             if progress_callback:
                 progress_callback('finalising', 100.0)
-            return 'Slides Templates imported successfully.'
+            return 'Report Templates imported successfully.'
         if kind == 'auto-calculated-fields':
             try:
-                definitions = json.loads(archive.read('auto-calculated-fields.json').decode('utf-8'))
+                member = next((candidate for candidate in (
+                    str(manifest.get('archive_path') or ''),
+                    'auto-calculated-fields/auto-calculated-fields.json',
+                    'auto-calculated-fields/definitions.json',
+                    'auto-calculated-fields.json',
+                ) if candidate in archive.namelist()), None)
+                if not member:
+                    raise KeyError('auto-calculated fields payload')
+                definitions = json.loads(archive.read(member).decode('utf-8'))
             except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise ValueError('The package does not contain valid auto-calculated fields.') from exc
             imported_count, workspace_count = import_auto_calculated_fields(
@@ -4188,7 +4291,7 @@ def _apply_import_archive(
             imported_workspaces: list[Workspace] = []
             workspace_id_map: dict[str, str] = {}
             for entry in entries:
-                if not isinstance(entry, dict) or not re.fullmatch(r'workspaces/\d+', str(entry.get('archive_path') or '')):
+                if not isinstance(entry, dict) or not re.fullmatch(r'workspaces/[^/]+', str(entry.get('archive_path') or '')):
                     raise ValueError('The full-environment package contains an invalid workspace entry.')
                 _safe_extract_archive_prefix(archive, staging_root, str(entry['archive_path']), extracted)
                 if progress_callback:
@@ -4335,8 +4438,8 @@ def _transfer_offer_workspace_names(target: str, workspace_ids: list[str] | None
 def _transfer_content_label(target: str) -> str:
     labels = {
         'config': 'Config',
-        'slides-templates': 'Slides Templates',
-        'config-with-templates': 'Config + Slides Templates',
+        'slides-templates': 'Report Templates',
+        'config-with-templates': 'Config + Report Templates',
         'full-environment': 'Full Environment',
         'auto-calculated-fields': 'Auto-calculated Fields',
     }
@@ -4767,7 +4870,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         'dataset_profiles': 'Dataset profiles',
         'datasets': 'Datasets',
         'generated_jobs': 'Generated jobs',
-        'report_templates': 'Slides Templates registry',
+        'report_templates': 'Report Templates',
         'transfer_offers': 'Server transfer offers',
         'users': 'Users',
     }
@@ -4793,11 +4896,11 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             })
     export_options = [
         {'value': 'config', 'label': 'Config'},
-        {'value': 'slides-templates', 'label': 'Slides Templates', 'disabled': not active_workspace},
-        {'value': 'auto-calculated-fields', 'label': 'Auto-calculated Fields', 'disabled': not active_workspace},
-        {'value': 'full-environment', 'label': 'Full Environment (Config + Slides Templates + Selected Workspaces)'},
+        {'value': 'slides-templates', 'label': 'Report Templates (from active workspace)', 'disabled': not active_workspace},
+        {'value': 'auto-calculated-fields', 'label': 'Auto-calculated Fields (from active workspace)', 'disabled': not active_workspace},
+        {'value': 'full-environment', 'label': 'Full Environment (Config + Report Templates + Selected Workspaces)'},
         *[
-            {'value': f'workspace:{workspace.id}', 'label': f'Workspace: {workspace.name}'}
+            {'value': f'workspace:{workspace.id}', 'label': f'Full Workspace: {workspace.name}'}
             for workspace in accessible_workspaces(user)
         ],
     ]
@@ -6721,7 +6824,7 @@ def _temporary_chart_preview_context(source: str, identifier: str, chart_index: 
     template_name = str(row['template_name'] or '')
     template = next((item for item in report_catalogue_options(technology) if item['name'] == template_name), None)
     if technology not in TEMPLATE_NAMES or not template:
-        raise HTTPException(status_code=404, detail='The Slides Template used by this Chart Set is no longer available.')
+        raise HTTPException(status_code=404, detail='The Report Template used by this Chart Set is no longer available.')
     indexed_entries = list(enumerate(load_template_catalogue(template['path'], technology)))
     # Standalone Chart Sets retain the CSV chart-row order. PowerPoint reports
     # render slides numerically, then retain chart order inside each slide.
@@ -7448,10 +7551,10 @@ def generate_netcheck_cdr_report(
     if slides_templates:
         catalogue_technology, separator, catalogue_identifier = slides_templates.partition(':')
         if separator != ':' or catalogue_technology != technology or catalogue_identifier not in available_catalogues:
-            raise HTTPException(status_code=400, detail='Choose a Slides Template compatible with the selected technology.')
+            raise HTTPException(status_code=400, detail='Choose a Report Template compatible with the selected technology.')
         selected_catalogue = available_catalogues[catalogue_identifier]
     if selected_catalogue is None:
-        raise HTTPException(status_code=400, detail=f'No {technology.upper()} Slides Template is available.')
+        raise HTTPException(status_code=400, detail=f'No {technology.upper()} Report Template is available.')
     catalog_path = selected_catalogue['path']
     try:
         catalog_entries = load_template_catalogue(catalog_path, technology)
@@ -7498,7 +7601,7 @@ def generate_netcheck_cdr_charts(
     generate_tooltips: bool = Form(True),
     user: SessionUser = Depends(current_user),
 ) -> JSONResponse:
-    """Queue every automated chart in the selected Slides Template."""
+    """Queue every automated chart in the selected Report Template."""
     technology = technology.strip().lower()
     if technology not in TEMPLATE_NAMES:
         raise HTTPException(status_code=400, detail='Choose NSA or SA for the CDR report.')
@@ -7523,10 +7626,10 @@ def generate_netcheck_cdr_charts(
     if slides_templates:
         catalogue_technology, separator, catalogue_identifier = slides_templates.partition(':')
         if separator != ':' or catalogue_technology != technology or catalogue_identifier not in available_catalogues:
-            raise HTTPException(status_code=400, detail='Choose a Slides Template compatible with the selected technology.')
+            raise HTTPException(status_code=400, detail='Choose a Report Template compatible with the selected technology.')
         selected_catalogue = available_catalogues[catalogue_identifier]
     if selected_catalogue is None:
-        raise HTTPException(status_code=400, detail=f'No {technology.upper()} Slides Template is available.')
+        raise HTTPException(status_code=400, detail=f'No {technology.upper()} Report Template is available.')
     dataset_ids = {kind: [int(dataset['id']) for dataset in datasets] for kind, datasets in selected.items()}
     job_id = repository.create_report_chart_job(
         technology=technology, scope=report_scope, dataset_ids=dataset_ids,
@@ -7576,13 +7679,13 @@ def _run_report_chart_job(
             area = 'default' if metadata and metadata['is_default'] else 'library'
             template_path = template_root / area / technology / template_filename(template_name)
             if not metadata or not template_path.is_file():
-                raise ValueError('The Slides Template used by this Chart Set is no longer available.')
+                raise ValueError('The Report Template used by this Chart Set is no longer available.')
             catalog_entries = load_template_catalogue(template_path, technology, task_repository=task_repository)
             _ensure_report_job_active(task_repository, job_id, chart_job=True)
             task_repository.update_report_chart_job(job_id, status='processing', progress=12)
             chart_entries = [entry for entry in catalog_entries if entry.source_kind]
             if not chart_entries:
-                raise ValueError('The selected Slides Template does not contain automated CDR charts.')
+                raise ValueError('The selected Report Template does not contain automated CDR charts.')
             def rendered_charts() -> Iterable[tuple[dict[str, Any], bytes]]:
                 rendered = 0
                 empty_charts: list[dict[str, Any]] = []
@@ -8269,7 +8372,7 @@ def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) 
         None,
     )
     if not template_option:
-        raise HTTPException(status_code=400, detail='The Slides Template used by this report is no longer available.')
+        raise HTTPException(status_code=400, detail='The Report Template used by this report is no longer available.')
     try:
         catalog_entries = load_template_catalogue(template_option['path'], technology)
     except ValueError as exc:
@@ -9062,7 +9165,7 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='The transfer offer is invalid.')
     kind = str(payload.get('kind') or '')
-    if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields'}:
+    if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields', 'database-backup'}:
         raise HTTPException(status_code=400, detail='The offered export type is not supported.')
     if payload.get('archive_version') != ARCHIVE_VERSION:
         raise HTTPException(status_code=409, detail='The source server uses an incompatible export package version.')
@@ -9497,7 +9600,7 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
     """Validate and retain an already disk-backed import upload."""
     manifest = read_import_manifest(package_path)
     kind = str(manifest.get('kind') or '')
-    if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields'}:
+    if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields', 'database-backup'}:
         raise ValueError('The export package type is not supported.')
     require_import_export_permission(user, kind)
     with IMPORT_JOBS_LOCK:
@@ -9833,7 +9936,7 @@ def _import_report_catalogue(
     if technology not in TEMPLATE_NAMES:
         raise HTTPException(status_code=404, detail='Report technology not found')
     if not catalogue_file or not catalogue_file.filename or Path(catalogue_file.filename).suffix.lower() != '.csv':
-        query = urlencode({'catalogue_error': 'Select a CSV Slides Template.'})
+        query = urlencode({'catalogue_error': 'Select a CSV Report Template.'})
         return RedirectResponse(f'/admin?{query}', status_code=status.HTTP_303_SEE_OTHER)
     try:
         # Preserve meaningful hyphens in the uploaded filename; only turn
@@ -9861,15 +9964,12 @@ def _import_report_catalogue(
         # second entry on case-insensitive filesystems.
         identifier = existing_template or identifier
         catalogue_name = identifier
-        destination = named_catalogue_path(technology, identifier, identifier)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(content)
         if existing_template:
-            repository.touch_report_template(technology, identifier)
+            persist_report_template(technology, identifier, content)
             if next(row for row in repository.list_report_templates(technology) if str(row['name']) == identifier)['is_default']:
                 promote_report_template_to_default(technology, identifier)
         else:
-            repository.add_report_template(technology, identifier)
+            repository.add_report_template(technology, identifier, content)
             promote_report_template_to_default(technology, identifier)
         # Keep the registry aligned with the files promoted by this import.
         # This is intentionally limited to the template library; it no longer
@@ -9934,7 +10034,7 @@ def activate_report_catalogue(
         raise HTTPException(status_code=404, detail='Report technology not found')
     available = {option['identifier']: option for option in report_catalogue_options(technology)}
     if catalogue_id not in available:
-        return render_admin_template(request, user, error='Slides Template not found.', status_code=404)
+        return render_admin_template(request, user, error='Report Template not found.', status_code=404)
     promote_report_template_to_default(technology, catalogue_id)
     repository.add_log(user.username, 'activate_report_template', json.dumps({
         'technology': technology,
@@ -9977,15 +10077,14 @@ def change_report_catalogue_type(
             raise ValueError('Named template metadata was not found.')
         name = catalogue_id
         identifier = catalogue_registry_key(name)
-        source_path = named_catalogue_path(technology, catalogue_id, name)
-        destination_path = named_catalogue_path(target_technology, identifier, name)
-        if identifier in target_names or destination_path.exists():
+        if identifier in target_names:
             raise ValueError(f"A {target_technology.upper()} template named '{name}' already exists.")
-        if not source_path.exists():
-            raise ValueError('The named template CSV could not be found.')
-        destination_path.parent.mkdir(parents=True, exist_ok=True)
-        source_path.rename(destination_path)
+        content = bytes(catalogue['content'])
+        if not content:
+            raise ValueError('The Report Template has no CSV content.')
         repository.move_report_template(technology, catalogue_id, target_technology)
+        repository.set_report_template_content(target_technology, catalogue_id, content)
+        _write_template_compatibility_files(target_technology, catalogue_id, content, is_default=False)
     except ValueError as exc:
         return render_admin_template(request, user, error=str(exc), status_code=400)
     repository.add_log(user.username, 'change_report_template_type', json.dumps({
@@ -10020,23 +10119,12 @@ def rename_report_catalogue(
             raise ValueError('Slides Template was not found.')
         if new_identifier != catalogue_id and new_identifier in names:
             raise ValueError(f"A {technology.upper()} template named '{new_identifier}' already exists.")
-        library_source_path = named_catalogue_path(technology, catalogue_id, catalogue_id)
-        library_destination_path = named_catalogue_path(technology, new_identifier, name)
-        if not library_source_path.exists():
-            raise ValueError('The named template CSV could not be found.')
-        if library_destination_path.exists() and library_destination_path != library_source_path:
-            raise ValueError(f"The template file '{library_destination_path.name}' already exists.")
-        if catalogue['active']:
-            source_path = default_report_slides_template_path(technology, catalogue_id)
-            destination_path = source_path.parent / template_filename(name)
-            if destination_path.exists() and destination_path != source_path:
-                raise ValueError(f"The template file '{destination_path.name}' already exists.")
-            if destination_path != source_path:
-                source_path.rename(destination_path)
-        if library_destination_path != library_source_path:
-            library_source_path.rename(library_destination_path)
         if new_identifier != catalogue_id:
             repository.rename_report_template(technology, catalogue_id, new_identifier)
+            content = bytes(catalogue['content'])
+            _write_template_compatibility_files(technology, new_identifier, content, is_default=bool(catalogue['active']))
+            named_catalogue_path(technology, catalogue_id, catalogue_id).unlink(missing_ok=True)
+            (settings.slides_templates_dir / 'default' / technology / template_filename(catalogue_id)).unlink(missing_ok=True)
             catalogue_id = new_identifier
     except ValueError as exc:
         if 'application/json' in request.headers.get('accept', ''):
@@ -10065,19 +10153,17 @@ def duplicate_report_catalogue(
     # The physical CSV name is the canonical template name.  Deriving the
     # duplicate label from it prevents a stale/default registry label from
     # turning every duplicate into the generic NSA/SA starter name.
-    source_name = catalogue['path'].stem.strip() or str(catalogue['name']).strip()
+    source_name = str(catalogue['name']).strip()
     base_name = f"{source_name} - Copy"
     suffix = 2
     name = base_name
     identifier = catalogue_registry_key(name)
-    while identifier in names or named_catalogue_path(technology, identifier, name).exists():
+    while identifier in names:
         name = f"{base_name} {suffix}"
         identifier = catalogue_registry_key(name)
         suffix += 1
-    destination = named_catalogue_path(technology, identifier, name)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_bytes(catalogue['path'].read_bytes())
-    repository.add_report_template(technology, identifier)
+    repository.add_report_template(technology, identifier, bytes(catalogue['content']))
+    _write_template_compatibility_files(technology, identifier, bytes(catalogue['content']), is_default=False)
     repository.add_log(user.username, 'duplicate_report_template', json.dumps({'technology': technology, 'source': catalogue_id, 'template': name}))
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
@@ -10092,13 +10178,12 @@ def create_empty_report_catalogue(
     base_name = 'New Template'
     name = base_name
     suffix = 2
-    while name in names or named_catalogue_path(technology, name, name).exists():
+    while name in names:
         name = f'{base_name} {suffix}'
         suffix += 1
-    destination = named_catalogue_path(technology, name, name)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_bytes(catalogue_csv([]))
-    repository.add_report_template(technology, name)
+    content = catalogue_csv([])
+    repository.add_report_template(technology, name, content)
+    _write_template_compatibility_files(technology, name, content, is_default=False)
     repository.add_log(user.username, 'create_report_template', json.dumps({
         'technology': technology,
         'template': name,
@@ -10122,7 +10207,7 @@ def delete_report_catalogue(
         return render_admin_template(request, user, error='Slides Template not found.', status_code=404)
     if catalogue['active']:
         return render_admin_template(request, user, error='The default template cannot be deleted.', status_code=400)
-    catalogue['path'].unlink(missing_ok=True)
+    named_catalogue_path(technology, catalogue_id, catalogue_id).unlink(missing_ok=True)
     repository.delete_report_template(technology, catalogue_id)
     repository.add_log(user.username, 'delete_report_template', json.dumps({'technology': technology, 'template': catalogue['name']}))
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
@@ -10174,18 +10259,12 @@ def save_report_catalogue(
             raise FileNotFoundError('Slides Template not found.')
         template_name = str(metadata['name'])
         is_default = bool(metadata['is_default'])
-        destination = (
-            default_report_slides_template_path(technology, template_name)
-            if is_default else named_catalogue_path(technology, template_name, template_name)
-        )
         entries = [entry for _index, entry in sorted(enumerate(parse_catalog_csv(catalogue_content, technology)), key=lambda item: (item[1].slide, item[0]))]
         content = catalogue_csv(entries)
         # The lock only covers the short atomic replacements. Expensive
         # metadata and audit writes run after the response is sent.
         with TEMPLATE_SAVE_LOCK:
-            if is_default:
-                atomic_write_template(named_catalogue_path(technology, template_name, template_name), content)
-            atomic_write_template(destination, content)
+            persist_report_template(technology, template_name, content, is_default=is_default)
     except ValueError as exc:
         if wants_json:
             return JSONResponse({'detail': str(exc)}, status_code=400)

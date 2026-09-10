@@ -28,6 +28,7 @@ TEMPLATE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS report_templates (
     technology TEXT NOT NULL,
     name TEXT NOT NULL,
+    content BLOB NOT NULL DEFAULT X'',
     is_default INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -561,8 +562,10 @@ class Repository:
                 conn.execute(f"ALTER TABLE report_chart_jobs ADD COLUMN {column} {definition}")
 
     def _ensure_report_template_columns(self, conn: sqlite3.Connection) -> None:
-        """Keep template metadata complete and one promoted template per technology."""
+        """Keep template storage complete and one promoted template per technology."""
         columns = {row['name'] for row in conn.execute("PRAGMA table_info(report_templates)").fetchall()}
+        if 'content' not in columns:
+            conn.execute("ALTER TABLE report_templates ADD COLUMN content BLOB NOT NULL DEFAULT X''")
         if 'created_at' not in columns:
             conn.execute("ALTER TABLE report_templates ADD COLUMN created_at TEXT")
         if 'updated_at' not in columns:
@@ -590,19 +593,37 @@ class Repository:
     def list_report_templates(self, technology: str) -> list[sqlite3.Row]:
         with self.connection() as conn:
             return conn.execute(
-                "SELECT technology, name, is_default, created_at, updated_at FROM report_templates WHERE technology = ? ORDER BY name COLLATE NOCASE",
+                "SELECT technology, name, content, is_default, created_at, updated_at FROM report_templates WHERE technology = ? ORDER BY name COLLATE NOCASE",
                 (technology,),
             ).fetchall()
 
-    def add_report_template(self, technology: str, name: str, *, is_default: bool = False) -> None:
+    def add_report_template(self, technology: str, name: str, content: bytes = b'', *, is_default: bool = False) -> None:
         with self.connection() as conn:
             if is_default:
                 conn.execute("UPDATE report_templates SET is_default = 0 WHERE technology = ?", (technology,))
             now = local_now_iso()
             conn.execute(
-                "INSERT INTO report_templates (technology, name, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                (technology, name, int(is_default), now, now),
+                "INSERT INTO report_templates (technology, name, content, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (technology, name, sqlite3.Binary(content), int(is_default), now, now),
             )
+
+    def set_report_template_content(self, technology: str, name: str, content: bytes) -> None:
+        with self.connection() as conn:
+            result = conn.execute(
+                "UPDATE report_templates SET content = ?, updated_at = ? WHERE technology = ? AND name = ?",
+                (sqlite3.Binary(content), local_now_iso(), technology, name),
+            )
+            if not result.rowcount:
+                raise ValueError('Report Template was not found.')
+
+    def report_template_content(self, technology: str, name: str) -> bytes:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT content FROM report_templates WHERE technology = ? AND name = ?", (technology, name),
+            ).fetchone()
+        if not row:
+            raise ValueError('Report Template was not found.')
+        return bytes(row['content'] or b'')
 
     def set_default_report_template(self, technology: str, name: str) -> None:
         with self.connection() as conn:
@@ -610,7 +631,7 @@ class Repository:
                 "SELECT is_default FROM report_templates WHERE technology = ? AND name = ?", (technology, name)
             ).fetchone()
             if not template:
-                raise ValueError('Slides Template was not found.')
+                raise ValueError('Report Template was not found.')
             defaults = conn.execute(
                 "SELECT name FROM report_templates WHERE technology = ? AND is_default = 1", (technology,)
             ).fetchall()
