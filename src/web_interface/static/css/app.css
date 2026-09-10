@@ -1243,7 +1243,8 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .workspace-library-table th:last-child, .workspace-library-table td:last-child { width: 7.5rem; }
 .workspace-row-actions .icon-action { width: 2rem; min-width: 2rem; height: 2rem; min-height: 2rem; padding: 0.15rem !important; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; }
 .workspace-library-table button { padding: 0.55rem 0.7rem; font-size: 0.82rem; }
-.workspace-action-open { background: linear-gradient(135deg, var(--brand), #149d94); border-color: rgba(255,255,255,0.32); color: #fff; }
+.workspace-action-open { background: linear-gradient(135deg, #155d83, #248caf); border-color: rgba(255,255,255,0.32); color: #fff; }
+.workspace-action-open:hover:not(:disabled) { background: linear-gradient(135deg, #104966, #1c7190); }
 .workspace-action-save { background: linear-gradient(135deg, #4b208a, #bd90ff); border-color: rgba(255,255,255,0.42); color: #fff; box-shadow: 0 8px 18px rgba(75,32,138,0.32); }
 .workspace-action-save:hover { background: linear-gradient(135deg, #3c196f, #a76fe5); }
 .workspace-action-duplicate { background: linear-gradient(135deg, #08736d, #20a797); border-color: rgba(255,255,255,0.30); color: #fff; }

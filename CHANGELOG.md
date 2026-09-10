@@ -13,7 +13,7 @@
 
 #### 🚀 Enhancements:
 - Added hover help to the interactive-tooltips option in Report and Chart Set generation confirmations, explaining that it enables chart-value context on pointer hover and adds a small generation-time cost.
-- Added an Open workspace action immediately after Save in Manage Workspaces and clarified the Save tooltip as `Save workspace changes`.
+- Added a blue Open workspace action with the 📂 folder icon immediately after Save in Manage Workspaces, and clarified the Save tooltip as `Save workspace changes`.
 
 #### 🐛 Bug fixes:
 - Fixed the Reporting Chart Preview header so Manage Auto-calculated Fields appears beside its red Close control; Escape now leaves active Auto-calculated Fields and filtered-dataset child dialogs open, closing the preview only when no child dialog is active.
