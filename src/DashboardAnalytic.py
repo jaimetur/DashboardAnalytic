@@ -2792,10 +2792,97 @@ def build_default_access_accounts() -> list[dict[str, str]]:
 
 ARCHIVE_FORMAT = 'dashboard-analytic-export'
 ARCHIVE_VERSION = 1
+ARCHIVE_COMPONENTS = frozenset({
+    'app_database', 'workspace_components',
+})
+WORKSPACE_ARCHIVE_COMPONENTS = frozenset({
+    'workspace_database', 'input', 'output', 'report_templates', 'auto_calculated_fields',
+})
+ARCHIVE_KIND_COMPONENTS = {
+    'config': ('app_database',),
+    'workspace': ('workspace_components',),
+    'full-environment': ('app_database', 'workspace_components'),
+    'slides-templates': ('workspace_components',),
+    'auto-calculated-fields': ('workspace_components',),
+}
 UNCOMPRESSED_ARCHIVE_SUFFIXES = frozenset({
     '.7z', '.avi', '.docx', '.gif', '.gz', '.jpeg', '.jpg', '.mp3', '.mp4', '.pdf', '.png', '.pptx', '.rar',
     '.tar', '.tgz', '.webp', '.xlsx', '.xlsm', '.zip',
 })
+
+
+def archive_manifest(
+    kind: str, *, components: Iterable[str] | None = None,
+    workspace_components: Iterable[str] = (), **payload: Any,
+) -> dict[str, Any]:
+    """Build the shared manifest used by Backup, Import/Export and Transfer."""
+    selected = components if components is not None else ARCHIVE_KIND_COMPONENTS.get(kind, ())
+    normalized_components = list(dict.fromkeys(component for component in selected if component in ARCHIVE_COMPONENTS))
+    manifest = {
+        'format': ARCHIVE_FORMAT,
+        'version': ARCHIVE_VERSION,
+        'kind': kind,
+        'components': normalized_components,
+        **payload,
+    }
+    if 'workspace_components' in normalized_components:
+        manifest['workspace_components'] = list(dict.fromkeys(
+            component for component in workspace_components if component in WORKSPACE_ARCHIVE_COMPONENTS
+        ))
+    return manifest
+
+
+def archive_manifest_components(manifest: dict[str, Any]) -> list[str]:
+    """Read the canonical component list, deriving it for older package kinds."""
+    declared = manifest.get('components')
+    if isinstance(declared, list):
+        return [str(component) for component in declared if str(component) in ARCHIVE_COMPONENTS]
+    return list(ARCHIVE_KIND_COMPONENTS.get(str(manifest.get('kind') or ''), ()))
+
+
+def archive_workspace_components(manifest: dict[str, Any]) -> list[str]:
+    """Read workspace-level content declared by the shared archive manifest."""
+    declared = manifest.get('workspace_components')
+    if isinstance(declared, list):
+        return [str(component) for component in declared if str(component) in WORKSPACE_ARCHIVE_COMPONENTS]
+    # Existing packages made this distinction through their package kind.
+    fallback = {
+        'workspace': ('workspace_database', 'input', 'output', 'report_templates', 'auto_calculated_fields'),
+        'full-environment': ('workspace_database', 'input', 'output', 'report_templates', 'auto_calculated_fields'),
+        'slides-templates': ('report_templates',),
+        'auto-calculated-fields': ('auto_calculated_fields',),
+    }
+    return list(fallback.get(str(manifest.get('kind') or ''), ()))
+
+
+def archive_restore_components(manifest: dict[str, Any]) -> list[str]:
+    """Return the manifest components that can be selected during Restore."""
+    selected = [
+        component for component in archive_manifest_components(manifest)
+        if component == 'app_database'
+    ]
+    return [*selected, *archive_workspace_components(manifest)]
+
+
+def full_workspace_archive_components(*, include_input_files: bool = True, include_generated_outputs: bool = True) -> list[str]:
+    """Return the canonical contents written for a complete workspace."""
+    components = ['workspace_database']
+    if include_input_files:
+        components.append('input')
+    if include_generated_outputs:
+        components.append('output')
+    return [*components, 'report_templates', 'auto_calculated_fields']
+
+
+def archive_workspace_components_for_target(target: str, *, include_generated_outputs: bool = True) -> list[str]:
+    """Describe workspace-level content for an Export or Transfer target."""
+    if target == 'slides-templates':
+        return ['report_templates']
+    if target == 'auto-calculated-fields':
+        return ['auto_calculated_fields']
+    if target.startswith('workspace:') or target in {'workspace', 'full-environment'}:
+        return full_workspace_archive_components(include_generated_outputs=include_generated_outputs)
+    return []
 
 
 def export_package_dir() -> Path:
@@ -2864,8 +2951,9 @@ def _archive_tree(archive: zipfile.ZipFile, source: Path, archive_prefix: str, *
 def recurring_backup_settings() -> dict[str, Any]:
     """Load the persistent recurring-backup configuration with safe defaults."""
     defaults = {
-        'enabled': False, 'components': ['database', 'slides_templates', 'auto_calculated_fields'], 'workspace_ids': [],
-        'full_workspace_components': ['input', 'output'],
+        'enabled': False,
+        'components': ['app_database', 'workspace_database', 'report_templates', 'auto_calculated_fields'],
+        'workspace_ids': [],
         'recurrence': 'daily', 'execution_time': '02:00', 'weekly_day': 0, 'monthly_day': 1, 'max_backups': 30,
         'backup_path': str(application_config_dir / 'scheduled-backups'), 'last_run_period': '',
     }
@@ -2879,9 +2967,27 @@ def recurring_backup_settings() -> dict[str, Any]:
     config = defaults | {key: saved[key] for key in defaults if key in saved}
     if 'components' not in saved:
         config['components'] = [name for name, legacy_key in (
-            ('database', 'include_database'), ('slides_templates', 'include_slides_templates'),
+            ('app_database', 'include_database'), ('slides_templates', 'include_slides_templates'),
             ('auto_calculated_fields', 'include_auto_calculated_fields'),
         ) if saved.get(legacy_key, True)]
+    legacy_components = {
+        'full_workspaces': ('workspace_database', 'report_templates', 'auto_calculated_fields'),
+        'slides_templates': ('report_templates',),
+    }
+    migrated_components: list[str] = []
+    for component in config['components']:
+        migrated_components.extend(legacy_components.get(str(component), (str(component),)))
+    # Older schedules had no separate workspace-database option.  Treat their
+    # existing workspace-content selection as the new default selection.
+    if any(item in config['components'] for item in legacy_components):
+        migrated_components.append('workspace_database')
+    if 'full_workspaces' in config['components']:
+        migrated_components.extend(
+            item for item in saved.get('full_workspace_components', []) if item in {'input', 'output'}
+        )
+    config['components'] = list(dict.fromkeys(
+        item for item in migrated_components if item in {'app_database', *WORKSPACE_ARCHIVE_COMPONENTS}
+    ))
     try:
         config['backup_path'] = str(ensure_backup_path_is_within_config(recurring_backup_path(config)))
     except ValueError:
@@ -2940,7 +3046,7 @@ def recurring_backup_next_run(config: dict[str, Any]) -> str:
 
 
 def create_recurring_database_backup(
-    config: dict[str, Any], progress_callback: Callable[[float], None] | None = None,
+    config: dict[str, Any], progress_callback: Callable[[str, float], None] | None = None,
 ) -> Path:
     """Write one consistent ZIP backup for the enabled recurring-backup parts."""
     timestamp = datetime.now().astimezone().strftime('%Y%m%d-%H%M%S')
@@ -2963,45 +3069,53 @@ def create_recurring_database_backup(
         and (allowed_workspace_ids is None or workspace.id in allowed_workspace_ids)
     ]
     components = set(config['components'])
-    full_workspace_components = sorted({
-        str(item) for item in config.get('full_workspace_components', []) if str(item) in {'input', 'output'}
-    })
+    workspace_manifest_components = [
+        component for component in ('workspace_database', 'input', 'output', 'report_templates', 'auto_calculated_fields')
+        if component in components
+    ]
+    def report_progress(message: str, progress: float) -> None:
+        if progress_callback:
+            progress_callback(message, max(1.0, min(98.0, progress)))
+
     # Materialise database-backed templates before sizing the legacy CSV
     # compatibility tree, then report every archive byte against that total.
-    for workspace in workspaces:
-        materialize_workspace_report_templates(workspace)
+    if 'report_templates' in components:
+        for workspace in workspaces:
+            report_progress(f'Preparing Report Templates for {workspace.name}', 1.0)
+            materialize_workspace_report_templates(workspace)
+    report_progress('Inspecting backup sources', 3.0)
     def source_tree_size(source: Path) -> int:
         return sum(
             path.stat().st_size for path in source.rglob('*')
             if path.is_file() and not path.name.endswith(('-wal', '-shm'))
         ) if source.exists() else 0
-    total_bytes = (repository.global_db_path.stat().st_size if 'database' in components and repository.global_db_path.exists() else 0)
+    total_bytes = (repository.global_db_path.stat().st_size if 'app_database' in components and repository.global_db_path.exists() else 0)
     for workspace in workspaces:
-        if 'full_workspaces' in components:
+        if 'workspace_database' in components:
             total_bytes += workspace.database_path.stat().st_size
+        if 'report_templates' in components:
             total_bytes += source_tree_size(workspace.slides_templates_dir)
-            if 'input' in full_workspace_components:
-                total_bytes += source_tree_size(workspace.input_dir)
-            if 'output' in full_workspace_components:
-                total_bytes += source_tree_size(workspace.output_dir)
-        elif 'slides_templates' in components:
-            total_bytes += source_tree_size(workspace.slides_templates_dir)
+        if 'input' in components:
+            total_bytes += source_tree_size(workspace.input_dir)
+        if 'output' in components:
+            total_bytes += source_tree_size(workspace.output_dir)
     completed_bytes = 0
     def archived_bytes(size: int) -> None:
         nonlocal completed_bytes
         completed_bytes += size
-        if progress_callback:
-            progress_callback(min(96.0, completed_bytes * 96.0 / max(total_bytes, 1)))
-    if progress_callback:
-        progress_callback(1.0)
+        report_progress('Writing ZIP contents', min(96.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+    manifest_components = ['app_database'] if 'app_database' in components else []
+    if workspace_manifest_components:
+        manifest_components.append('workspace_components')
     with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
-        manifest = {
-            'format': ARCHIVE_FORMAT, 'version': ARCHIVE_VERSION, 'kind': 'database-backup',
-            'created_at': datetime.now().astimezone().isoformat(timespec='seconds'),
-            'components': sorted(components), 'full_workspace_components': full_workspace_components,
-            'workspaces': [],
-        }
-        if 'database' in components:
+        manifest = archive_manifest(
+            'database-backup', components=manifest_components,
+            workspace_components=workspace_manifest_components,
+            created_at=datetime.now().astimezone().isoformat(timespec='seconds'),
+            workspaces=[],
+        )
+        if 'app_database' in components:
+            report_progress('Creating application database snapshot', 5.0)
             _archive_database(archive, repository.global_db_path, 'application/application.db', backup_root, archived_bytes)
         for workspace in workspaces:
             item = {'id': workspace.id, 'name': workspace.name}
@@ -3010,25 +3124,29 @@ def create_recurring_database_backup(
             # name for the archive tree so a backup can be inspected by the
             # same workspace names shown throughout the application.
             archive_workspace_root = f'workspaces/{workspace.name}'
-            if 'slides_templates' in components:
+            if 'workspace_database' in components:
+                report_progress(f'Creating workspace database snapshot for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                _archive_database(archive, workspace.database_path, f'{archive_workspace_root}/database.sqlite', backup_root, archived_bytes)
+            if 'report_templates' in components:
+                report_progress(f'Archiving Report Templates for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                 _archive_tree(archive, workspace.slides_templates_dir, f'{archive_workspace_root}/slides-templates', progress_callback=archived_bytes)
-            if 'auto_calculated_fields' in components and 'full_workspaces' not in components:
+            if 'auto_calculated_fields' in components:
+                report_progress(f'Exporting Auto-calculated Fields for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                 task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
                 archive.writestr(
                     f'{archive_workspace_root}/auto-calculated-fields/auto-calculated-fields.json',
                     json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
                 )
-            if 'full_workspaces' in components:
-                _archive_workspace(
-                    archive, workspace, archive_workspace_root, backup_root,
-                    progress_callback=archived_bytes,
-                    include_input_files='input' in full_workspace_components,
-                    include_generated_outputs='output' in full_workspace_components,
-                )
-            manifest['workspaces'].append(item)
+            if 'input' in components:
+                report_progress(f'Archiving input files for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                _archive_tree(archive, workspace.input_dir, f'{archive_workspace_root}/input', progress_callback=archived_bytes)
+            if 'output' in components:
+                report_progress(f'Archiving output files for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                _archive_tree(archive, workspace.output_dir, f'{archive_workspace_root}/output', progress_callback=archived_bytes)
+            if workspace_manifest_components:
+                manifest['workspaces'].append(item)
         archive.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
-    if progress_callback:
-        progress_callback(98.0)
+    report_progress('Finalising backup ZIP', 98.0)
     backups = sorted(backup_root.glob('dashboard-analytic-backup-*.zip'), key=lambda item: item.stat().st_mtime, reverse=True)
     for stale in backups[max(1, int(config['max_backups'])):]:
         stale.unlink(missing_ok=True)
@@ -3105,18 +3223,18 @@ def start_manual_database_backup(config: dict[str, Any], username: str) -> dict[
                 RECURRING_BACKUP_RUNNING = True
                 acquired_backup_slot = True
             with MANUAL_BACKUP_JOBS_LOCK:
-                job.update(status='processing', message='Creating ZIP backup', progress=10)
+                job.update(status='processing', message='Preparing backup', progress=1)
                 if job.get('cancel_requested'):
                     job.update(status='cancelled', message='Backup stopped before ZIP creation', progress=100,
                                finished_at=datetime.now(timezone.utc).timestamp())
                     return
-            def update_progress(progress: float) -> None:
+            def update_progress(message: str, progress: float) -> None:
                 with MANUAL_BACKUP_JOBS_LOCK:
                     current = MANUAL_BACKUP_JOBS.get(job_id)
                     if current and current.get('status') == 'processing':
                         current.update(
-                            progress=max(10, min(98, round(progress))),
-                            message=f'Creating ZIP backup ({max(1, min(98, round(progress)))}%)',
+                            progress=max(1, min(98, round(progress))),
+                            message=message,
                         )
 
             destination = create_recurring_database_backup(config, update_progress)
@@ -3158,33 +3276,30 @@ def _backup_archive_components(archive_path: Path) -> list[str]:
                 manifest = {}
     except zipfile.BadZipFile as exc:
         raise ValueError('The selected backup is not a valid ZIP archive.') from exc
-    supported = ('database', 'full_workspaces', 'slides_templates', 'auto_calculated_fields')
     if isinstance(manifest, dict) and manifest.get('format') == ARCHIVE_FORMAT:
-        portable_components = {
-            'config': ['database'],
-            'workspace': ['full_workspaces'],
-            'full-environment': ['database', 'full_workspaces'],
-            'slides-templates': ['slides_templates'],
-            'auto-calculated-fields': ['auto_calculated_fields'],
-        }
-        if manifest.get('kind') in portable_components:
-            return portable_components[str(manifest['kind'])]
+        declared = archive_restore_components(manifest)
+        if declared:
+            return declared
     if isinstance(manifest, dict) and (
         (manifest.get('format') == ARCHIVE_FORMAT and manifest.get('kind') == 'database-backup')
         or manifest.get('format') == 'database-backup'
     ):
-        declared = [str(item) for item in manifest.get('components', []) if str(item) in supported]
+        declared = archive_restore_components(manifest)
         if declared:
             return declared
     components: list[str] = []
     if 'application/application.db' in names:
-        components.append('database')
+        components.append('app_database')
     if any(name.startswith('workspaces/') and name.endswith('/database.sqlite') for name in names):
-        components.append('full_workspaces')
+        components.append('workspace_database')
     if any(name.startswith('workspaces/') and '/slides-templates/' in name for name in names):
-        components.append('slides_templates')
+        components.append('report_templates')
     if any(name.startswith('workspaces/') and '/auto-calculated-fields/' in name and name.endswith('.json') for name in names):
         components.append('auto_calculated_fields')
+    if any(name.startswith('workspaces/') and '/input/' in name for name in names):
+        components.append('input')
+    if any(name.startswith('workspaces/') and '/output/' in name for name in names):
+        components.append('output')
     if not components:
         raise ValueError('The selected ZIP does not contain a compatible Dashboard Analytic backup.')
     return components
@@ -3228,32 +3343,25 @@ def restore_database_backup(archive_path: Path, components: Iterable[str]) -> No
     with zipfile.ZipFile(archive_path) as archive, tempfile.TemporaryDirectory(prefix='dashboard-analytic-restore-') as temporary_dir:
         staging = Path(temporary_dir)
         names = [member.filename for member in archive.infolist() if not member.is_dir()]
-        if 'database' in selected:
+        if 'app_database' in selected:
             payload = staging / 'application.db'
             with archive.open('application/application.db') as source, payload.open('wb') as target:
                 shutil.copyfileobj(source, target)
             repository.replace_global_database_snapshot(payload)
             repository.initialize()
-        if 'full_workspaces' in selected:
-            available_by_name = {workspace.name: workspace for workspace in workspace_registry.list()}
-            for workspace_name in _backup_archive_workspaces(archive_path):
-                if workspace_name not in available_by_name:
-                    continue
-                archive_prefix = f'workspaces/{workspace_name}'
-                # Backward compatibility with ZIPs generated before the
-                # workspace archive layout was unified with Export.
-                if not any(name.startswith(f'{archive_prefix}/database.sqlite') for name in names):
-                    archive_prefix = f'{archive_prefix}/full-workspace'
-                _safe_extract_archive_prefix(archive, staging, archive_prefix)
-                import_workspace_archive(
-                    staging / archive_prefix,
-                    {'name': workspace_name},
-                    replace_existing=True,
-                )
         workspaces_by_name = {workspace.name: workspace for workspace in workspace_registry.list()}
         for workspace_name, workspace in workspaces_by_name.items():
             prefix = f'workspaces/{workspace_name}/'
-            if 'slides_templates' in selected:
+            if 'workspace_database' in selected:
+                database_member = f'{prefix}database.sqlite'
+                if database_member in names:
+                    payload = staging / f'{workspace.id}-database.sqlite'
+                    with archive.open(database_member) as source, payload.open('wb') as target:
+                        shutil.copyfileobj(source, target)
+                    for sidecar in (workspace.database_path, workspace.database_path.with_name(f'{workspace.database_path.name}-wal'), workspace.database_path.with_name(f'{workspace.database_path.name}-shm')):
+                        sidecar.unlink(missing_ok=True)
+                    shutil.copy2(payload, workspace.database_path)
+            if 'report_templates' in selected:
                 template_members = [name for name in names if name.startswith(f'{prefix}slides-templates/')]
                 if template_members:
                     shutil.rmtree(workspace.slides_templates_dir, ignore_errors=True)
@@ -3279,6 +3387,19 @@ def restore_database_backup(archive_path: Path, components: Iterable[str]) -> No
                     task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
                     task_repository.replace_calculated_dimensions(calculated_dimensions_json(parsed))
                     task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
+            for component, destination in (('input', workspace.input_dir), ('output', workspace.output_dir)):
+                if component not in selected:
+                    continue
+                members = [name for name in names if name.startswith(f'{prefix}{component}/')]
+                if not members:
+                    continue
+                shutil.rmtree(destination, ignore_errors=True)
+                for name in members:
+                    relative = PurePosixPath(name).relative_to(PurePosixPath(f'{prefix}{component}'))
+                    target = destination.joinpath(*relative.parts)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.open(name) as source, target.open('wb') as output:
+                        shutil.copyfileobj(source, output)
         _clear_chart_preview_caches()
 
 
@@ -3435,12 +3556,7 @@ def build_export_archive_file(
     with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=1, allowZip64=True) as archive:
         if target in {'config', 'config-with-templates'}:
             include_templates = target == 'config-with-templates'
-            manifest = {
-                'format': ARCHIVE_FORMAT,
-                'version': ARCHIVE_VERSION,
-                'kind': 'config',
-                'includes_slides_templates': include_templates,
-            }
+            manifest = archive_manifest('config', includes_slides_templates=include_templates)
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             archive_configuration(archive, include_templates=include_templates)
         elif target == 'slides-templates':
@@ -3449,12 +3565,11 @@ def build_export_archive_file(
             if not source_workspace:
                 raise ValueError('Open a workspace before exporting Report Templates.')
             archive_path = f'workspaces/{source_workspace.name}/slides-templates'
-            manifest = {
-                'format': ARCHIVE_FORMAT, 'version': ARCHIVE_VERSION,
-                'kind': 'slides-templates', 'includes_slides_templates': True,
-                'source_workspace': {'id': source_workspace.id, 'name': source_workspace.name},
-                'archive_path': archive_path,
-            }
+            manifest = archive_manifest(
+                'slides-templates', includes_slides_templates=True,
+                workspace_components=archive_workspace_components_for_target(target),
+                source_workspace={'id': source_workspace.id, 'name': source_workspace.name}, archive_path=archive_path,
+            )
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             materialize_workspace_report_templates(source_workspace)
             _archive_tree(archive, source_workspace.slides_templates_dir, archive_path, progress_callback=progress_callback)
@@ -3474,14 +3589,12 @@ def build_export_archive_file(
                 else parse_calculated_dimensions(source_repository.list_calculated_dimensions())
             )
             payload = json.dumps(definitions, indent=2, ensure_ascii=False).encode('utf-8')
-            manifest = {
-                'format': ARCHIVE_FORMAT,
-                'version': ARCHIVE_VERSION,
-                'kind': 'auto-calculated-fields',
-                'source_workspace': {'id': source_workspace.id, 'name': source_workspace.name},
-                'field_count': len(definitions),
-                'archive_path': f'workspaces/{source_workspace.name}/auto-calculated-fields/auto-calculated-fields.json',
-            }
+            manifest = archive_manifest(
+                'auto-calculated-fields', source_workspace={'id': source_workspace.id, 'name': source_workspace.name},
+                workspace_components=archive_workspace_components_for_target(target),
+                field_count=len(definitions),
+                archive_path=f'workspaces/{source_workspace.name}/auto-calculated-fields/auto-calculated-fields.json',
+            )
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             archive.writestr(str(manifest['archive_path']), payload)
             if progress_callback:
@@ -3491,14 +3604,13 @@ def build_export_archive_file(
             if not workspace:
                 raise ValueError('Workspace not found.')
             archive_path = f'workspaces/{workspace.name}'
-            manifest = {
-                'format': ARCHIVE_FORMAT,
-                'version': ARCHIVE_VERSION,
-                'kind': 'workspace',
-                'workspace': _workspace_archive_metadata(workspace),
-                'archive_path': archive_path,
-                'includes_generated_outputs': include_generated_outputs,
-            }
+            manifest = archive_manifest(
+                'workspace', workspace=_workspace_archive_metadata(workspace), archive_path=archive_path,
+                workspace_components=archive_workspace_components_for_target(
+                    target, include_generated_outputs=include_generated_outputs,
+                ),
+                includes_generated_outputs=include_generated_outputs,
+            )
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             _archive_workspace(
                 archive, workspace, archive_path, destination.parent, progress_callback,
@@ -3506,17 +3618,17 @@ def build_export_archive_file(
             )
         elif target == 'full-environment':
             workspaces = _selected_export_workspaces(workspace_ids)
-            manifest = {
-                'format': ARCHIVE_FORMAT,
-                'version': ARCHIVE_VERSION,
-                'kind': 'full-environment',
-                'includes_slides_templates': True,
-                'includes_generated_outputs': include_generated_outputs,
-                'workspaces': [
+            manifest = archive_manifest(
+                'full-environment', includes_slides_templates=True,
+                workspace_components=archive_workspace_components_for_target(
+                    target, include_generated_outputs=include_generated_outputs,
+                ),
+                includes_generated_outputs=include_generated_outputs,
+                workspaces=[
                     {**_workspace_archive_metadata(workspace), 'archive_path': f'workspaces/{workspace.name}'}
                     for workspace in workspaces
                 ],
-            }
+            )
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             archive_configuration(archive, include_templates=False)
             for entry, workspace in zip(manifest['workspaces'], workspaces, strict=True):
@@ -4587,10 +4699,19 @@ def _run_transfer_job(job_id: str) -> None:
 
     try:
         with httpx.Client(timeout=httpx.Timeout(65.0, connect=5.0), follow_redirects=False) as client:
+            archive_kind = 'full-environment' if target == 'full-environment' else 'workspace' if target.startswith('workspace:') else 'config' if target in {'config', 'config-with-templates'} else target
+            offered_workspace_components = archive_workspace_components_for_target(
+                target, include_generated_outputs=include_generated_outputs,
+            )
+            offer_manifest = archive_manifest(
+                archive_kind, workspace_components=offered_workspace_components,
+            )
             offer_payload = {
                 'source': __app_name__,
                 'archive_version': ARCHIVE_VERSION,
-                'kind': 'full-environment' if target == 'full-environment' else 'workspace' if target.startswith('workspace:') else 'config' if target in {'config', 'config-with-templates'} else target,
+                'kind': archive_kind,
+                'components': archive_manifest_components(offer_manifest),
+                'workspace_components': archive_workspace_components(offer_manifest),
                 'content': _transfer_content_label(target),
                 'workspaces': _transfer_offer_workspace_names(target, workspace_ids),
             }
@@ -8993,7 +9114,6 @@ def save_recurring_backup_settings(
     enabled: bool = Form(False),
     components: list[str] = Form(default=[]),
     workspace_ids: list[str] = Form(default=[]),
-    full_workspace_components: list[str] = Form(default=[]),
     recurrence: str = Form('daily'),
     execution_time: str = Form('02:00'),
     weekly_day: int = Form(0),
@@ -9007,13 +9127,10 @@ def save_recurring_backup_settings(
         raise HTTPException(status_code=400, detail='Choose a valid backup recurrence.')
     if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', execution_time):
         raise HTTPException(status_code=400, detail='Choose a valid backup execution time.')
-    selected_components = [item for item in components if item in {'database', 'slides_templates', 'auto_calculated_fields', 'full_workspaces'}]
-    if 'full_workspaces' in selected_components:
-        selected_components = [item for item in selected_components if item not in {'slides_templates', 'auto_calculated_fields'}]
+    selected_components = [item for item in components if item in {'app_database', *WORKSPACE_ARCHIVE_COMPONENTS}]
     allowed_workspace_ids = {workspace.id for workspace in accessible_workspaces(user)}
     selected_workspace_ids = list(dict.fromkeys(item for item in workspace_ids if item in allowed_workspace_ids))
-    selected_full_workspace_components = [item for item in full_workspace_components if item in {'input', 'output'}]
-    if any(item in selected_components for item in {'slides_templates', 'auto_calculated_fields', 'full_workspaces'}) and not selected_workspace_ids:
+    if any(item in selected_components for item in WORKSPACE_ARCHIVE_COMPONENTS) and not selected_workspace_ids:
         raise HTTPException(status_code=400, detail='Select at least one accessible workspace for the selected backup content.')
     if enabled and not selected_components:
         raise HTTPException(status_code=400, detail='Select at least one backup component.')
@@ -9032,7 +9149,6 @@ def save_recurring_backup_settings(
         'execution_time': execution_time, 'weekly_day': weekly_day, 'monthly_day': monthly_day,
         'max_backups': max_backups,
         'workspace_ids': selected_workspace_ids,
-        'full_workspace_components': selected_full_workspace_components,
         'backup_path': str(storage_path), 'last_run_period': '',
     }
     repository.set_application_state(RECURRING_BACKUP_STATE_KEY, json.dumps(config))
@@ -9046,19 +9162,15 @@ def run_manual_database_backup(
     request: Request,
     components: list[str] = Form(default=[]),
     workspace_ids: list[str] = Form(default=[]),
-    full_workspace_components: list[str] = Form(default=[]),
     max_backups: int = Form(30),
     backup_path: str = Form(''),
     user: SessionUser = Depends(admin_user),
 ) -> Response:
     """Queue an immediate backup using the current form selection and path."""
-    selected_components = [item for item in components if item in {'database', 'slides_templates', 'auto_calculated_fields', 'full_workspaces'}]
-    if 'full_workspaces' in selected_components:
-        selected_components = [item for item in selected_components if item not in {'slides_templates', 'auto_calculated_fields'}]
+    selected_components = [item for item in components if item in {'app_database', *WORKSPACE_ARCHIVE_COMPONENTS}]
     allowed_workspace_ids = {workspace.id for workspace in accessible_workspaces(user)}
     selected_workspace_ids = list(dict.fromkeys(item for item in workspace_ids if item in allowed_workspace_ids))
-    selected_full_workspace_components = [item for item in full_workspace_components if item in {'input', 'output'}]
-    if any(item in selected_components for item in {'slides_templates', 'auto_calculated_fields', 'full_workspaces'}) and not selected_workspace_ids:
+    if any(item in selected_components for item in WORKSPACE_ARCHIVE_COMPONENTS) and not selected_workspace_ids:
         raise HTTPException(status_code=400, detail='Select at least one accessible workspace for the selected backup content.')
     if not selected_components:
         raise HTTPException(status_code=400, detail='Select at least one backup component.')
@@ -9075,7 +9187,6 @@ def run_manual_database_backup(
         'max_backups': max_backups,
         'backup_path': str(storage_path),
         'workspace_ids': selected_workspace_ids,
-        'full_workspace_components': selected_full_workspace_components,
     }
     job = start_manual_database_backup(config, user.username)
     repository.add_log(user.username, 'start_manual_database_backup', json.dumps({
@@ -9119,9 +9230,7 @@ def run_manual_database_restore(
     user: SessionUser = Depends(admin_user),
 ) -> Response:
     archive_path = _backup_archive_file(backup_path, backup_file)
-    selected = [item for item in components if item in {'database', 'full_workspaces', 'slides_templates', 'auto_calculated_fields'}]
-    if 'full_workspaces' in selected:
-        selected = [item for item in selected if item not in {'slides_templates', 'auto_calculated_fields'}]
+    selected = [item for item in components if item in {'app_database', *WORKSPACE_ARCHIVE_COMPONENTS}]
     present = _backup_archive_components(archive_path)
     if not selected or not set(selected) <= set(present):
         raise HTTPException(status_code=400, detail='Select only components contained in the backup.')
@@ -9215,6 +9324,27 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
         raise HTTPException(status_code=400, detail='The offered export type is not supported.')
     if payload.get('archive_version') != ARCHIVE_VERSION:
         raise HTTPException(status_code=409, detail='The source server uses an incompatible export package version.')
+    components = archive_manifest_components(payload)
+    workspace_components = archive_workspace_components(payload)
+    expected_manifest = archive_manifest(
+        kind,
+        workspace_components=archive_workspace_components_for_target(kind),
+    )
+    expected_components = archive_manifest_components(expected_manifest)
+    expected_workspace_components = archive_workspace_components(expected_manifest)
+    valid_workspace_components = set(WORKSPACE_ARCHIVE_COMPONENTS)
+    if kind in {'workspace', 'full-environment'}:
+        required_workspace_components = {'workspace_database', 'input', 'report_templates', 'auto_calculated_fields'}
+        workspace_components_valid = (
+            required_workspace_components <= set(workspace_components)
+            and set(workspace_components) <= valid_workspace_components
+        )
+    else:
+        workspace_components_valid = workspace_components == expected_workspace_components
+    if kind != 'database-backup' and (
+        components != expected_components or not workspace_components_valid
+    ):
+        raise HTTPException(status_code=400, detail='The transfer offer has incompatible content components.')
     source_address = request.client.host if request.client else 'unknown'
     source = str(payload.get('source') or 'Dashboard Analytic server')[:160]
     content = str(payload.get('content') or kind)[:160]
@@ -9262,6 +9392,8 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
         'source': source,
         'source_address': source_address,
         'kind': kind,
+        'components': components,
+        'workspace_components': workspace_components,
         'content': content,
         'workspaces': workspaces,
         'secret_hash': secret_hash,

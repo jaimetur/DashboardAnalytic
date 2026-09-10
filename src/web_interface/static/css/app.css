@@ -304,8 +304,11 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .database-backup-components .multiselect-trigger-label { color: #7d2731; }
 .database-backup-components .multiselect-trigger:hover:not(:disabled), .database-backup-components .multiselect-trigger:focus-visible { border-color: rgba(110, 24, 36, 0.66); background: linear-gradient(135deg, #f9dfdf, #f2cccc); color: #5c1721; box-shadow: 0 0 0 3px rgba(139, 29, 36, 0.13); }
 .database-backup-components .multiselect-trigger:hover .multiselect-trigger-label, .database-backup-components .multiselect-trigger:focus-visible .multiselect-trigger-label { color: #5c1721; }
-.database-backup-components .multiselect-menu { min-width: 620px; border-color: rgba(139, 29, 36, 0.40); background: #fffafa; }
+.database-backup-components .multiselect-menu { min-width: 620px; max-height: min(500px, calc(100vh - 4rem)); border-color: rgba(139, 29, 36, 0.40); background: #fffafa; }
 .database-backup-components .multiselect-option { justify-content: flex-start; white-space: nowrap; color: #7d2731; }
+.database-backup-components .multiselect-group-label { margin: 0.45rem 0 0.08rem; padding: 0.34rem 0.55rem; border-bottom: 1px solid rgba(139, 29, 36, 0.18); color: #6d222b; font-size: 0.76rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.database-backup-components .multiselect-group-label:first-of-type { margin-top: 0; }
+.database-backup-components .multiselect-option[data-multiselect-group] { padding-left: 1.35rem; }
 .database-backup-components .multiselect-option input { flex: 0 0 auto; order: -1; accent-color: #9d2b35; }
 .database-backup-workspaces { display: grid; gap: 0.35rem; width: min(100%, 620px); color: #8b2429; font-size: 0.85rem; font-weight: 700; }
 .database-backup-workspaces[hidden] { display: none !important; }

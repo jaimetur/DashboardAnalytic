@@ -489,13 +489,10 @@
             <div class="database-backup-immediate-grid">
               <section class="database-backup-operation-panel"><h5>Backup</h5>
                 <label class="database-backup-components">Backup content
-                  <select name="components" multiple data-backup-components>{% for value, label in [('database', 'Configuration Content: Application database'), ('full_workspaces', 'Workspace Content: Full workspaces'), ('slides_templates', 'Workspace Content: Report Templates'), ('auto_calculated_fields', 'Workspace Content: Auto-calculated Fields')] %}<option value="{{ value }}" {% if value in recurring_backup.components %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+                  <select name="components" multiple data-backup-components data-multiselect-groups="true" data-multiselect-auto-close="1000"><optgroup label="Configuration Content"><option value="app_database" {% if 'app_database' in recurring_backup.components %}selected{% endif %}>Application database</option></optgroup><optgroup label="Workspace Content">{% for value, label in [('workspace_database', 'Workspace Database'), ('report_templates', 'Report Templates (one CSV file per Report Template)'), ('auto_calculated_fields', 'Auto-calculated Fields (one JSON file with all definitions)'), ('input', 'Input (includes all raw datasets files)'), ('output', 'Output (includes all reports and chart sets generated)')] %}<option value="{{ value }}" {% if value in recurring_backup.components %}selected{% endif %}>{{ label }}</option>{% endfor %}</optgroup></select>
                 </label>
                 <label class="database-backup-workspaces" data-backup-workspaces hidden>Workspaces
                   <select name="workspace_ids" multiple>{% for workspace in backup_workspaces %}<option value="{{ workspace.id }}" {% if not recurring_backup.workspace_ids or workspace.id in recurring_backup.workspace_ids %}selected{% endif %}>{{ workspace.name }}</option>{% endfor %}</select>
-                </label>
-                <label class="database-backup-full-content" data-backup-full-content hidden>Full workspace content
-                  <select name="full_workspace_components" multiple>{% for value, label in [('input', 'Input (includes all raw datasets files)'), ('output', 'Output (includes all reports and chart sets generated)')] %}<option value="{{ value }}" {% if value in recurring_backup.full_workspace_components %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
                 </label>
                 <label class="database-backup-path">Backup path<div class="database-backup-path-picker"><input type="text" name="backup_path" value="{{ recurring_backup.backup_path }}" readonly required data-backup-path-input><button type="button" data-backup-path-browse>Browse</button></div></label>
                 <button type="submit" class="database-backup-now" formaction="/admin/database/backups/run">Backup Now</button>
@@ -714,29 +711,12 @@
   const restoreWorkspaces = document.querySelector('[data-backup-restore-workspaces]');
   const backupComponents = document.querySelector('[data-backup-components]');
   const backupWorkspaces = document.querySelector('[data-backup-workspaces]');
-  const backupFullContent = document.querySelector('[data-backup-full-content]');
   if (!form || !enabled || !settings) return;
   const refresh = () => { settings.hidden = !enabled.checked; };
   const refreshBackupWorkspaces = () => {
     if (!backupComponents || !backupWorkspaces) return;
-    const fullWorkspaces = [...backupComponents.options].find((option) => option.value === 'full_workspaces');
-    const fullSelected = Boolean(fullWorkspaces?.selected);
-    if (backupFullContent) backupFullContent.hidden = !fullSelected;
-    let selectionChanged = false;
-    [...backupComponents.options].forEach((option) => {
-      if (!['slides_templates', 'auto_calculated_fields'].includes(option.value)) return;
-      option.disabled = fullSelected;
-      if (fullSelected && option.selected) { option.selected = false; selectionChanged = true; }
-      const checkbox = backupComponents.parentElement?.querySelector(`[data-option-value="${option.value}"]`);
-      if (checkbox instanceof HTMLInputElement) {
-        checkbox.disabled = fullSelected;
-        checkbox.checked = option.selected;
-        checkbox.closest('.multiselect-option')?.classList.toggle('is-disabled', fullSelected);
-      }
-    });
-    const needsWorkspaces = [...backupComponents.selectedOptions].some((option) => ['full_workspaces', 'slides_templates', 'auto_calculated_fields'].includes(option.value));
+    const needsWorkspaces = [...backupComponents.selectedOptions].some((option) => ['workspace_database', 'report_templates', 'auto_calculated_fields', 'input', 'output'].includes(option.value));
     backupWorkspaces.hidden = !needsWorkspaces;
-    if (selectionChanged) backupComponents.dispatchEvent(new Event('change', {bubbles: true}));
   };
   const refreshRecurrence = () => {
     if (!recurrence) return;
@@ -801,19 +781,8 @@
       const response = await fetch('/api/admin/backup-files/inspect', {method: 'POST', credentials: 'same-origin', body: new URLSearchParams({backup_path: restorePath.value, backup_file: restoreFile.value})});
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || 'Unable to inspect the backup.');
-      const labels = {database: 'Application database', full_workspaces: 'Full workspaces', slides_templates: 'Report Templates', auto_calculated_fields: 'Auto-calculated Fields'};
+      const labels = {app_database: 'Application database', workspace_database: 'Workspace Database', report_templates: 'Report Templates', auto_calculated_fields: 'Auto-calculated Fields', input: 'Input', output: 'Output'};
       restoreComponents.innerHTML = payload.components.map((value) => `<label class="confirm-option"><input type="checkbox" value="${value}" checked><span>${labels[value]}</span></label>`).join('');
-      const syncRestoreFullWorkspaces = () => {
-        const full = restoreComponents.querySelector('input[value="full_workspaces"]');
-        const fullSelected = full instanceof HTMLInputElement && full.checked;
-        restoreComponents.querySelectorAll('input[value="slides_templates"], input[value="auto_calculated_fields"]').forEach((input) => {
-          input.disabled = fullSelected;
-          if (fullSelected) input.checked = false;
-          input.closest('.confirm-option')?.classList.toggle('is-disabled', fullSelected);
-        });
-      };
-      restoreComponents.querySelector('input[value="full_workspaces"]')?.addEventListener('change', syncRestoreFullWorkspaces);
-      syncRestoreFullWorkspaces();
       restoreWorkspaces.innerHTML = (payload.workspaces || []).length
         ? payload.workspaces.map((workspace) => `<span class="pill database-workspace-pill">${workspace}</span>`).join('')
         : '<span class="table-help">This backup does not contain workspace content.</span>';

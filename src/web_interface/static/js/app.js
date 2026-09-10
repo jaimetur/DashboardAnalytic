@@ -3192,6 +3192,23 @@ function setupCustomMultiSelects() {
     const menu = document.createElement('div');
     menu.className = 'multiselect-menu';
     menu.hidden = true;
+    const autoCloseDelay = Number.parseInt(select.dataset.multiselectAutoClose || '', 10);
+    let autoCloseTimer = null;
+    const cancelAutoClose = () => {
+      if (autoCloseTimer !== null) {
+        window.clearTimeout(autoCloseTimer);
+        autoCloseTimer = null;
+      }
+    };
+    const scheduleAutoClose = () => {
+      if (!Number.isFinite(autoCloseDelay) || autoCloseDelay <= 0 || menu.hidden) return;
+      cancelAutoClose();
+      autoCloseTimer = window.setTimeout(() => {
+        menu.hidden = true;
+        syncTrigger();
+        autoCloseTimer = null;
+      }, autoCloseDelay);
+    };
 
     const search = document.createElement('input');
     search.type = 'search';
@@ -3256,9 +3273,22 @@ function setupCustomMultiSelects() {
 
     actionButton.addEventListener('click', selectAllOrNone);
 
+    const groupedOptions = select.dataset.multiselectGroups === 'true';
+    let previousGroup = '';
     Array.from(select.options).forEach((option) => {
+      const group = groupedOptions && option.parentElement instanceof HTMLOptGroupElement
+        ? String(option.parentElement.label || '').trim() : '';
+      if (group && group !== previousGroup) {
+        const heading = document.createElement('div');
+        heading.className = 'multiselect-group-label';
+        heading.dataset.multiselectGroup = group;
+        heading.textContent = group;
+        menu.appendChild(heading);
+        previousGroup = group;
+      }
       const optionLabel = document.createElement('label');
       optionLabel.className = 'multiselect-option';
+      if (group) optionLabel.dataset.multiselectGroup = group;
 
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
@@ -3303,6 +3333,13 @@ function setupCustomMultiSelects() {
         const text = optionLabel.textContent?.toLocaleLowerCase() || '';
         optionLabel.hidden = Boolean(query) && !text.includes(query);
       });
+      if (groupedOptions) {
+        Array.from(menu.querySelectorAll('.multiselect-group-label')).forEach((heading) => {
+          const group = heading.dataset.multiselectGroup;
+          heading.hidden = Array.from(menu.querySelectorAll(`.multiselect-option[data-multiselect-group="${CSS.escape(group || '')}"]`))
+            .every((optionLabel) => optionLabel.hidden);
+        });
+      }
     };
     search.addEventListener('input', filterMultiSelect);
     search.addEventListener('keyup', filterMultiSelect);
@@ -3320,13 +3357,20 @@ function setupCustomMultiSelects() {
     };
 
     trigger.addEventListener('click', () => {
+      cancelAutoClose();
       menu.hidden = !menu.hidden;
       syncTrigger();
       if (!menu.hidden) search.focus();
     });
 
+    if (Number.isFinite(autoCloseDelay) && autoCloseDelay > 0) {
+      shell.addEventListener('pointerenter', cancelAutoClose);
+      shell.addEventListener('pointerleave', scheduleAutoClose);
+    }
+
     document.addEventListener('click', (event) => {
       if (!shell.contains(event.target)) {
+        cancelAutoClose();
         menu.hidden = true;
         syncTrigger();
       }

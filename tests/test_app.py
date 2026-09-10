@@ -2007,7 +2007,7 @@ def test_admin_recurring_backup_settings_are_persisted(client) -> None:
 
     login(client)
     saved = client.post('/admin/database/backups', data={
-        'enabled': 'true', 'components': ['database', 'slides_templates'],
+        'enabled': 'true', 'components': ['app_database', 'report_templates'],
         'workspace_ids': ['default'],
         'recurrence': 'weekly', 'execution_time': '03:15', 'weekly_day': '4', 'monthly_day': '14', 'max_backups': '12',
         'backup_path': 'scheduled-backups',
@@ -2016,7 +2016,7 @@ def test_admin_recurring_backup_settings_are_persisted(client) -> None:
     assert saved.status_code == 303
     config = app_module.recurring_backup_settings()
     assert config['enabled'] is True
-    assert config['components'] == ['database', 'slides_templates']
+    assert config['components'] == ['app_database', 'report_templates']
     assert config['recurrence'] == 'weekly'
     assert config['execution_time'] == '03:15'
     assert config['weekly_day'] == 4
@@ -2053,7 +2053,7 @@ def test_manual_database_backup_uses_current_form_selection_without_enabling_sch
 
     monkeypatch.setattr(app_module, 'start_manual_database_backup', capture_backup)
     response = client.post('/admin/database/backups/run', data={
-        'components': ['database', 'auto_calculated_fields'],
+        'components': ['app_database', 'auto_calculated_fields'],
         'workspace_ids': ['default'],
         'max_backups': '7',
         'backup_path': 'scheduled-backups/manual',
@@ -2062,7 +2062,7 @@ def test_manual_database_backup_uses_current_form_selection_without_enabling_sch
     assert response.status_code == 200
     assert response.json()['job_id'] == 'manual-backup'
     config = captured['config']
-    assert config['components'] == ['database', 'auto_calculated_fields']
+    assert config['components'] == ['app_database', 'auto_calculated_fields']
     assert config['max_backups'] == 7
     assert config['backup_path'].endswith('scheduled-backups/manual')
     assert config['workspace_ids'] == ['default']
@@ -2102,7 +2102,7 @@ def test_backup_skips_stale_workspace_registry_entries(monkeypatch, tmp_path: Pa
     monkeypatch.setattr(app_module.workspace_registry, 'list', lambda: [valid, stale, inaccessible])
 
     archive_path = app_module.create_recurring_database_backup({
-        'components': ['slides_templates'], 'backup_path': str(tmp_path / 'backups'), 'max_backups': 30,
+        'components': ['report_templates'], 'backup_path': str(tmp_path / 'backups'), 'max_backups': 30,
         'workspace_ids': [valid.id],
     })
 
@@ -2112,6 +2112,8 @@ def test_backup_skips_stale_workspace_registry_entries(monkeypatch, tmp_path: Pa
     assert 'workspaces/Current-Workspace/slides-templates/current-workspace.csv' in names
     assert not any(name.startswith('workspaces/Default/') for name in names)
     assert not any(name.startswith('workspaces/Workspace-3/') for name in names)
+    assert manifest['components'] == ['workspace_components']
+    assert manifest['workspace_components'] == ['report_templates']
     assert manifest['workspaces'] == [{'id': 'current-workspace', 'name': 'Current-Workspace'}]
 
 
