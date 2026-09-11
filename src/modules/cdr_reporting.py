@@ -7,8 +7,11 @@ import gc
 import io
 import json
 import math
+import os
 import re
 import unicodedata
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
@@ -27,6 +30,7 @@ from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 from pptx.util import Inches, Pt
 
 from src.utils.fonts import load_image_font
+from src.config import settings
 
 
 TEMPLATE_NAMES = {
@@ -56,6 +60,9 @@ FILTER_OPERATORS = ("CONTAINS", "NOT CONTAINS", "IN", "NOT IN", ">=", "<=", "!="
 MAX_CDF_HOVER_TARGETS_PER_SERIES = 120
 # Increment when renderer coordinates or semantic hit-area geometry changes.
 HOVER_TARGETS_VERSION = 3
+OSM_TILE_SIZE = 256
+OSM_TILE_MAX_COUNT = 24
+OSM_TILE_CACHE_DIR = settings.data_dir / 'map-tiles-cache' / 'openstreetmap'
 
 
 def _catalogue_header_key(value: str) -> str:
@@ -3257,6 +3264,84 @@ def _render_cdf_line(
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
+def _osm_world_coordinates(latitude: float, longitude: float, zoom: int) -> tuple[float, float]:
+    """Convert WGS84 coordinates to global Web-Mercator pixels."""
+    latitude = max(-85.05112878, min(85.05112878, latitude))
+    scale = OSM_TILE_SIZE * (2 ** zoom)
+    x = (longitude + 180.0) / 360.0 * scale
+    latitude_radians = math.radians(latitude)
+    y = (1.0 - math.asinh(math.tan(latitude_radians)) / math.pi) / 2.0 * scale
+    return x, y
+
+
+def _osm_tile_path(zoom: int, x: int, y: int) -> Path:
+    return OSM_TILE_CACHE_DIR / str(zoom) / str(x) / f'{y}.png'
+
+
+def _load_osm_tile(zoom: int, x: int, y: int) -> Image.Image | None:
+    """Read one cached OSM tile or retrieve it once for a Map chart."""
+    tile_path = _osm_tile_path(zoom, x, y)
+    try:
+        if tile_path.is_file():
+            with Image.open(tile_path) as cached:
+                return cached.convert('RGB')
+        request = Request(
+            f'https://tile.openstreetmap.org/{zoom}/{x}/{y}.png',
+            headers={'User-Agent': 'DashboardAnalytic/0.2.3 (cached Map chart renderer)'},
+        )
+        with urlopen(request, timeout=2.5) as response:
+            payload = response.read()
+        with Image.open(BytesIO(payload)) as downloaded:
+            image = downloaded.convert('RGB')
+        tile_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = tile_path.with_suffix('.tmp')
+        image.save(temporary_path, format='PNG')
+        os.replace(temporary_path, tile_path)
+        return image
+    except (OSError, URLError, ValueError):
+        return None
+
+
+def _osm_map_background(lon_low: float, lon_high: float, lat_low: float, lat_high: float, width: int, height: int) -> tuple[Image.Image | None, Callable[[float, float], tuple[float, float]]]:
+    """Create a cached OSM base layer and coordinate transform for one chart."""
+    for zoom in range(14, 1, -1):
+        top_left = _osm_world_coordinates(lat_high, lon_low, zoom)
+        bottom_right = _osm_world_coordinates(lat_low, lon_high, zoom)
+        tile_left, tile_top = int(top_left[0] // OSM_TILE_SIZE), int(top_left[1] // OSM_TILE_SIZE)
+        tile_right, tile_bottom = int(bottom_right[0] // OSM_TILE_SIZE), int(bottom_right[1] // OSM_TILE_SIZE)
+        tile_count = (tile_right - tile_left + 1) * (tile_bottom - tile_top + 1)
+        if tile_count <= OSM_TILE_MAX_COUNT:
+            break
+    else:
+        zoom, tile_left, tile_top, tile_right, tile_bottom = 2, 0, 0, 3, 3
+        top_left = _osm_world_coordinates(lat_high, lon_low, zoom)
+        bottom_right = _osm_world_coordinates(lat_low, lon_high, zoom)
+    tile_columns, tile_rows = tile_right - tile_left + 1, tile_bottom - tile_top + 1
+    mosaic = Image.new('RGB', (tile_columns * OSM_TILE_SIZE, tile_rows * OSM_TILE_SIZE), '#EDF4F0')
+    coordinates = [(x, y) for y in range(tile_top, tile_bottom + 1) for x in range(tile_left, tile_right + 1)]
+    def fetch(coordinate: tuple[int, int]) -> tuple[tuple[int, int], Image.Image | None]:
+        x, y = coordinate
+        return coordinate, _load_osm_tile(zoom, x, y)
+    with ThreadPoolExecutor(max_workers=min(6, len(coordinates))) as executor:
+        for (x, y), tile in executor.map(fetch, coordinates):
+            if tile is not None:
+                mosaic.paste(tile, ((x - tile_left) * OSM_TILE_SIZE, (y - tile_top) * OSM_TILE_SIZE))
+    crop = (
+        int(max(0, top_left[0] - tile_left * OSM_TILE_SIZE)),
+        int(max(0, top_left[1] - tile_top * OSM_TILE_SIZE)),
+        int(min(mosaic.width, math.ceil(bottom_right[0] - tile_left * OSM_TILE_SIZE))),
+        int(min(mosaic.height, math.ceil(bottom_right[1] - tile_top * OSM_TILE_SIZE))),
+    )
+    if crop[2] <= crop[0] or crop[3] <= crop[1]:
+        return None, lambda latitude, longitude: (0.0, 0.0)
+    background = mosaic.crop(crop).resize((width, height), Image.Resampling.LANCZOS)
+    source_width, source_height = bottom_right[0] - top_left[0], bottom_right[1] - top_left[1]
+    def project(latitude: float, longitude: float) -> tuple[float, float]:
+        x, y = _osm_world_coordinates(latitude, longitude, zoom)
+        return ((x - top_left[0]) / source_width * width, (y - top_left[1]) / source_height * height)
+    return background, project
+
+
 def _render_map(title: str, frame: pd.DataFrame, group: str | None, series: str | None, latitude: str | None, longitude: str | None, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
     """Render a self-contained latitude/longitude point map for report output."""
     if frame.empty or not latitude or not longitude:
@@ -3271,10 +3356,15 @@ def _render_map(title: str, frame: pd.DataFrame, group: str | None, series: str 
     lon_low, lon_high = float(data[longitude].min()), float(data[longitude].max()); lat_low, lat_high = float(data[latitude].min()), float(data[latitude].max())
     lon_padding = max((lon_high - lon_low) * .06, .004); lat_padding = max((lat_high - lat_low) * .06, .004)
     lon_low -= lon_padding; lon_high += lon_padding; lat_low -= lat_padding; lat_high += lat_padding
-    draw.rectangle((left, top, left + width, top + height), fill="#EDF4F0", outline="#B9CDC4", width=2)
-    for fraction in (.2, .4, .6, .8):
-        draw.line((left + width * fraction, top, left + width * fraction, top + height), fill="#D8E5DF", width=1)
-        draw.line((left, top + height * fraction, left + width, top + height * fraction), fill="#D8E5DF", width=1)
+    background, project = _osm_map_background(lon_low, lon_high, lat_low, lat_high, width, height)
+    if background is not None:
+        image.paste(background, (left, top))
+    else:
+        draw.rectangle((left, top, left + width, top + height), fill="#EDF4F0", outline="#B9CDC4", width=2)
+        for fraction in (.2, .4, .6, .8):
+            draw.line((left + width * fraction, top, left + width * fraction, top + height), fill="#D8E5DF", width=1)
+            draw.line((left, top + height * fraction, left + width, top + height * fraction), fill="#D8E5DF", width=1)
+    draw.rectangle((left, top, left + width, top + height), outline="#B9CDC4", width=2)
     key_columns = [group, series] if series and group and series != group else [group] if group else []
     # Keep each point's colour key in an indexable array.  Building the keys
     # and drawing rows with a strict ``zip`` made a Chart Set fail whenever a
@@ -3289,12 +3379,19 @@ def _render_map(title: str, frame: pd.DataFrame, group: str | None, series: str 
     legend_items: list[tuple[str, str, int]] = []
     for index, row in enumerate(data.itertuples(index=False)):
         key = keys[index]
-        lat = float(getattr(row, latitude)); lon = float(getattr(row, longitude)); x = left + (lon - lon_low) / (lon_high - lon_low) * width; y = top + height - (lat - lat_low) / (lat_high - lat_low) * height
+        lat = float(getattr(row, latitude)); lon = float(getattr(row, longitude))
+        if background is not None:
+            point_x, point_y = project(lat, lon); x, y = left + point_x, top + point_y
+        else:
+            x = left + (lon - lon_low) / (lon_high - lon_low) * width; y = top + height - (lat - lat_low) / (lat_high - lat_low) * height
         colour = colours.get(key, _colour(key, index)); draw.ellipse((x - 4, y - 4, x + 4, y + 4), fill=colour, outline="#FFFFFF", width=1)
     for index, key in enumerate(unique_keys):
         label = _legend_key_caption(key, key_columns, data, legend_labels) or ' · '.join(key)
         legend_items.append((label, colours.get(key, _colour(key, index)), 2))
     _draw_chart_legend(draw, legend_items[:10], legend_position, font_size=13)
+    if background is not None:
+        draw.rectangle((left + width - 210, top + height - 25, left + width - 4, top + height - 4), fill="#FFFFFF")
+        draw.text((left + width - 204, top + height - 22), '© OpenStreetMap contributors', fill="#405765", font=_font(11, False))
     draw.text((left, top + height + 16), longitude.replace('_', ' '), fill="#405765", font=_font(17, True)); draw.text((26, top - 25), latitude.replace('_', ' '), fill="#405765", font=_font(17, True))
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
