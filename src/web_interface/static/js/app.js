@@ -3198,6 +3198,7 @@ function setupCustomMultiSelects() {
     const menu = document.createElement('div');
     menu.className = 'multiselect-menu';
     menu.hidden = true;
+    const singleChoice = select.dataset.multiselectSingle === 'true';
     const autoCloseDelay = Number.parseInt(select.dataset.multiselectAutoClose || '', 10);
     let autoCloseTimer = null;
     const cancelAutoClose = () => {
@@ -3232,7 +3233,7 @@ function setupCustomMultiSelects() {
       actionButton.classList.add('reporting-multiselect-action');
     }
     actionButton.textContent = 'Select All / None';
-    menu.appendChild(actionButton);
+    if (!singleChoice) menu.appendChild(actionButton);
 
     const syncTrigger = () => {
       const enabledOptions = Array.from(select.options).filter((option) => !option.disabled);
@@ -3277,7 +3278,7 @@ function setupCustomMultiSelects() {
       trigger.focus();
     };
 
-    actionButton.addEventListener('click', selectAllOrNone);
+    if (!singleChoice) actionButton.addEventListener('click', selectAllOrNone);
 
     const groupedOptions = select.dataset.multiselectGroups === 'true';
     let previousGroup = '';
@@ -3297,7 +3298,8 @@ function setupCustomMultiSelects() {
       if (group) optionLabel.dataset.multiselectGroup = group;
 
       const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
+      checkbox.type = singleChoice ? 'radio' : 'checkbox';
+      if (singleChoice) checkbox.name = `multiselect-single-${select.id || Math.random().toString(36).slice(2)}`;
       checkbox.checked = option.selected;
       checkbox.setAttribute('data-option-value', option.value);
       checkbox.disabled = option.disabled;
@@ -3307,8 +3309,14 @@ function setupCustomMultiSelects() {
 
       checkbox.addEventListener('change', () => {
         if (option.disabled) return;
-        option.selected = checkbox.checked;
+        if (singleChoice) {
+          Array.from(select.options).forEach((item) => { item.selected = false; });
+          option.selected = true;
+        } else {
+          option.selected = checkbox.checked;
+        }
         dispatchNativeChange();
+        if (singleChoice) menu.hidden = true;
       });
 
       if (option.disabled) {

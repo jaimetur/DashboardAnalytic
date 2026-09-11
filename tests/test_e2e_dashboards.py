@@ -1,5 +1,6 @@
 import json
 from io import BytesIO
+from pathlib import Path
 
 import pandas as pd
 
@@ -52,9 +53,16 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '>Import Dashboard<' in page.text
     assert 'Total Dashboards: 0' in page.text
     assert '>Dashboard Data<' in page.text
+    assert '>Default Filters<' in page.text
+    assert '>Additional Filters<' in page.text
+    assert 'id="ds-default-facets"' in page.text
+    assert 'id="ds-additional-facets"' in page.text
     assert 'Select field to add new filter' in page.text
+    assert 'id="ds-custom-field" multiple size="1" data-multiselect-single="true"' in page.text
     assert 'hidden_filters' in DashboardDefinition.model_fields
     assert 'id="ds-view" disabled' in page.text
+    assert 'id="ds-preparing"' in page.text
+    assert 'id="ds-preparing-title"' in page.text
     assert client.put('/api/e2e-dashboards/test', json=payload).status_code == 200
     assert client.get('/api/e2e-dashboards').json()['test']['name'] == 'Comparison'
     result = client.post('/api/e2e-dashboards/prepare', json=payload)
@@ -70,6 +78,7 @@ def test_dashboards_lifecycle_and_layout(client):
     image = client.get(f'/api/e2e-dashboards/preview/{token}/0.png')
     assert image.status_code == 200, image.text if image.status_code != 200 else ''
     assert image.content.startswith(b'\x89PNG')
+    assert list((Path(core.repository.db_path).parent / '.dashboard-chart-cache').glob('*.png'))
     entry = core.load_template_catalogue(next(row['content'] for row in core.repository.list_report_templates('nsa') if row['name'] == 'Dashboard test'), 'nsa')[0]
     assert not core.is_empty_catalog_chart(image.content, entry)
     data = client.get(f'/api/e2e-dashboards/data/{token}/0').json()
@@ -127,6 +136,30 @@ def test_dashboard_validates_template_dates_and_sources(client):
     assert client.get('/api/e2e-dashboards/data/missing/0').status_code == 410
 
 
+def test_dashboard_sql_selection_preserves_voice_nr_mode_semantics(client):
+    client.post('/login', data={'username': 'super', 'password': 'super123'})
+    response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'voice'}, files={
+        'dataset_files': ('voice.csv', BytesIO(
+            b'Operator,Mean_Call_Setup_Time,RAT_A,Session_Type,L1_Call_Mode_A\n'
+            b'A,1.0,EN-DC,WhatsApp Voice,\n'
+            b'A,2.0,NR,WhatsApp Voice,\n'
+            b'A,3.0,LTE,Native Voice,VoLTE\n'
+            b'A,4.0,NR,Native Voice,VoNR\n'
+        ), 'text/csv'),
+    })
+    assert response.status_code == 200
+    core.repository.add_report_template('nsa', 'Voice Dashboard', (
+        'Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position\n'
+        '1,Voice,,Title and 1 column + Comments,Calls,CDR-Voice,Mean_Call_Setup_Time,CDF Line,,Operator,,,Top\n'
+    ).encode(), is_default=False)
+    payload = DashboardDefinition(
+        name='Voice', template='Voice Dashboard', datasets={'voice': [1]}, technology='nsa',
+    ).model_dump(mode='json')
+    assert client.post('/api/e2e-dashboards/prepare', json=payload).json()['rows']['voice'] == 2
+    payload['technology'] = 'sa'
+    assert client.post('/api/e2e-dashboards/prepare', json=payload).json()['rows']['voice'] == 2
+
+
 def test_dashboard_snapshot_access_and_legacy_redirect(client):
     payload = setup_dashboard(client)
     response = client.get('/dashboard?dataset_id=1', follow_redirects=False)
@@ -140,25 +173,54 @@ def test_dashboard_snapshot_access_and_legacy_redirect(client):
     assert client.get(f"/api/e2e-dashboards/preview/{preview['token']}/0.png").status_code == 403
 
 
-def test_dashboard_reuses_sources_and_invalidates_database_edits(client, monkeypatch):
+def test_dashboard_reuses_persistent_sql_selection_and_invalidates_dataset_versions(client):
     payload = setup_dashboard(client)
-    from src.modules.repository import Repository
-    loads = []
-    original = Repository.load_reporting_rows
-
-    def tracked(self, *args, **kwargs):
-        loads.append(args)
-        return original(self, *args, **kwargs)
-
-    monkeypatch.setattr(Repository, 'load_reporting_rows', tracked)
     first = client.post('/api/e2e-dashboards/prepare', json=payload)
     assert first.status_code == 200
+    with core.repository.connection() as connection:
+        assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 1
+    repeated = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert repeated.status_code == 200
+    assert repeated.json()['token'] != first.json()['token']
+    with core.repository.connection() as connection:
+        assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 1
+    payload['name'] = 'Renamed comparison'
+    assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 200
+    with core.repository.connection() as connection:
+        assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 1
     payload['filters'] = {'City': ['London']}
     assert client.post('/api/e2e-dashboards/prepare', json=payload).json()['rows']['data'] == 2
-    assert len(loads) == 1
+    with core.repository.connection() as connection:
+        assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 2
     core.repository.set_workspace_state('dashboard_cache_test', 'updated')
     assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 200
-    assert len(loads) == 2
+    with core.repository.connection() as connection:
+        assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 2
+    core.repository.update_dataset_profile(1, progress=100)
+    assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 200
+    with core.repository.connection() as connection:
+        assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 3
+
+
+def test_dashboard_large_selection_uses_direct_sql_predicate(client, monkeypatch):
+    payload = setup_dashboard(client)
+    import src.modules.e2e_dashboards as dashboards_module
+
+    monkeypatch.setattr(dashboards_module, 'DASHBOARD_SELECTION_ROW_LIMIT', 1)
+    preview = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert preview.status_code == 200
+    with core.repository.connection() as connection:
+        selection = connection.execute(
+            'SELECT id, materialized FROM dashboard_filter_selections ORDER BY id DESC LIMIT 1'
+        ).fetchone()
+        assert selection['materialized'] == 0
+        assert connection.execute(
+            'SELECT COUNT(*) AS count FROM dashboard_filter_selection_rows WHERE selection_id = ?',
+            (selection['id'],),
+        ).fetchone()['count'] == 0
+    data = client.get(f"/api/e2e-dashboards/data/{preview.json()['token']}/0")
+    assert data.status_code == 200
+    assert data.json()['total'] == 3
 
 
 def test_dashboard_reuses_normalized_snapshot_for_every_chart(client, monkeypatch):
@@ -176,7 +238,9 @@ def test_dashboard_reuses_normalized_snapshot_for_every_chart(client, monkeypatc
     preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
     for index in (0, 1, 2):
         assert client.get(f"/api/e2e-dashboards/preview/{preview['token']}/{index}.png").status_code == 200
-    assert calls == [3]
+    assert calls == [3, 3, 3]
+    assert client.get(f"/api/e2e-dashboards/preview/{preview['token']}/0.png").status_code == 200
+    assert calls == [3, 3, 3]
 
 
 def test_dashboard_is_restricted_to_super_admins_and_ejaitur(client):

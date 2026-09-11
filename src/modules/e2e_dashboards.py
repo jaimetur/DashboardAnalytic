@@ -4,8 +4,9 @@ from __future__ import annotations
 import json
 import re
 from collections import OrderedDict
-from dataclasses import dataclass
-from datetime import date
+from dataclasses import dataclass, field
+from datetime import date, timedelta
+from hashlib import sha256
 from pathlib import Path
 from threading import RLock
 from typing import Literal
@@ -55,6 +56,8 @@ FILTER_COLUMNS = {
     'RAT': ('RAT', 'RAT_A', 'Sample_RAT_A'),
 }
 ADAPTATIVE_FILTER_FIELDS = tuple(FILTER_COLUMNS)
+DASHBOARD_RENDER_CACHE_VERSION = 1
+DASHBOARD_SELECTION_ROW_LIMIT = 25_000
 
 
 def resolve_filter_column(frame, field):
@@ -83,7 +86,7 @@ def filter_mask(frame, definition, exclude=None):
         if definition.date_from:
             mask &= times >= pd.Timestamp(definition.date_from, tz='UTC')
         if definition.date_to:
-            mask &= times < pd.Timestamp(definition.date_to, tz='UTC') + pd.Timedelta(days=1)
+            mask &= times < pd.Timestamp(definition.date_to + timedelta(days=1), tz='UTC')
     return mask
 
 
@@ -101,6 +104,12 @@ class Snapshot:
     entries: list
     frames: dict
     multivendor: bool
+    definition: DashboardDefinition
+    dimensions: tuple
+    selection_id: int
+    selection_key: str
+    selection_materialized: bool
+    chart_frames: dict[int, pd.DataFrame] = field(default_factory=dict)
 
 
 def install_dashboard_routes(core):
@@ -108,7 +117,6 @@ def install_dashboard_routes(core):
     lock = RLock()
     snapshots = OrderedDict()
     images = OrderedDict()
-    source_frames = OrderedDict()
 
     def workspace_key():
         if not core.active_workspace:
@@ -196,97 +204,238 @@ def install_dashboard_routes(core):
             task_repository.add_log(user.username, 'delete_dashboard', json.dumps({'id': dashboard_id}))
         return {'deleted': True}
 
-    def data_stamp(path):
-        return tuple((item.stat().st_mtime_ns, item.stat().st_size) if item.exists() else None
-                     for item in (Path(path), Path(str(path) + '-wal')))
-
-    def load_frames(definition, task_repository, dimensions, workspace, entries):
-        template_columns = set()
-        for kind in KINDS:
-            template_columns.update(core.reporting_query_columns(kind, entries, definition.scope == 'multivendor'))
-        requested_dimension_keys = {identity(column) for column in template_columns} | {identity(name) for name in definition.custom_fields}
-        active_dimensions = tuple(item for item in dimensions if identity(item.name) in requested_dimension_keys)
-        selection_key = json.dumps([workspace, definition.datasets, definition.technology, definition.scope, definition.custom_fields], sort_keys=True)
-        cache_key = (selection_key, data_stamp(workspace))
-        with lock:
-            cached = source_frames.get(cache_key)
-        if cached is not None:
-            return cached
-        frames = {}
+    def selected_sources(definition, task_repository):
+        selected_by_kind = {}
         for kind in KINDS:
             selected = core._optional_reporting_datasets(definition.datasets.get(kind, []), kind, task_repository)
-            if not selected:
-                continue
             if definition.scope == 'multivendor' and any(not row.get('vendor_mapping_applied') for row in selected):
                 raise HTTPException(400, 'Map Vendors for every selected CDR before using Multivendor Comparison.')
-            # Loading every source column for several campaigns can transfer
-            # millions of cells before a single filter is shown. Reuse the
-            # compact Reporting projection, extending it only with adaptive
-            # filter and workspace-field dependencies.
-            requested = set(core.reporting_query_columns(kind, entries, definition.scope == 'multivendor'))
-            requested.update(core.combined_reporting_required_columns(active_dimensions, kind))
+            if selected:
+                selected_by_kind[kind] = selected
+        if not selected_by_kind:
+            raise HTTPException(400, 'Select at least one CDR dataset.')
+        return selected_by_kind
+
+    def resolve_sql_column(columns, field):
+        lookup = {identity(column): column for column in columns}
+        aliases = next((values for label, values in FILTER_COLUMNS.items() if identity(label) == identity(field)), (field,))
+        return next((lookup[identity(alias)] for alias in aliases if identity(alias) in lookup), None)
+
+    def nr_mode_sql(columns, technology):
+        rat = resolve_sql_column(columns, 'RAT')
+        call_modes = [resolve_sql_column(columns, name) for name in ('L1_Call_Mode_A', 'L2_Call_Mode_A')]
+        call_modes = list(dict.fromkeys(column for column in call_modes if column))
+        if not rat and not call_modes:
+            raise ValueError('The selected CDR does not contain RAT or Call Mode fields required to separate NSA and SA sessions.')
+        quote = lambda column: '"' + str(column).replace('"', '""') + '"'
+        rat_text = f"UPPER(COALESCE(CAST({quote(rat)} AS TEXT), ''))" if rat else "''"
+        mode_text = " || ' ' || ".join(f"UPPER(COALESCE(CAST({quote(column)} AS TEXT), ''))" for column in call_modes) or "''"
+        session = resolve_sql_column(columns, 'Session Type')
+        session_text = f"UPPER(COALESCE(CAST({quote(session)} AS TEXT), ''))" if session else "''"
+        whatsapp = f"({session_text} LIKE '%WHATSAPP%')"
+        recognised = f"({mode_text} LIKE '%VOLTE%' OR {mode_text} LIKE '%EPSFB%' OR {mode_text} LIKE '%VONR%')"
+        rat_nsa = f"(REPLACE(REPLACE({rat_text}, '-', ''), ' ', '') LIKE '%ENDC%')"
+        rat_sa = f"({rat_text} LIKE '%NR%' AND NOT {rat_nsa})"
+        mode_nsa = f"(({mode_text} LIKE '%VOLTE%' OR {mode_text} LIKE '%EPSFB%') AND NOT {mode_text} LIKE '%VONR%')"
+        mode_sa = f"({mode_text} LIKE '%VONR%' AND NOT ({mode_text} LIKE '%VOLTE%' OR {mode_text} LIKE '%EPSFB%'))"
+        lte_fallback = f"({session_text} LIKE '%MULTIRAB%' AND ('/' || REPLACE({rat_text}, ' ', '') || '/') LIKE '%/LTE/%')"
+        if technology == 'nsa':
+            return f"(({whatsapp} AND {rat_nsa}) OR (NOT {whatsapp} AND ({mode_nsa} OR (NOT {recognised} AND ({rat_nsa} OR {lte_fallback})))))"
+        return f"(({whatsapp} AND {rat_sa}) OR (NOT {whatsapp} AND ({mode_sa} OR (NOT {recognised} AND {rat_sa}))))"
+
+    def selection_where(task_repository, kind, dataset_ids, definition, exclude=None):
+        columns = task_repository.list_reporting_row_columns(kind)
+        quote = task_repository._quote_identifier
+        placeholders = ', '.join('?' for _ in dataset_ids)
+        clauses = [f"dataset_id IN ({placeholders})"]
+        params = [int(dataset_id) for dataset_id in dataset_ids]
+        excluded = identity(exclude) if exclude else ''
+        for field_name, values in definition.filters.items():
+            if identity(field_name) == excluded:
+                continue
+            column = resolve_sql_column(columns, field_name)
+            if column is None or not values:
+                clauses.append('0')
+                continue
+            value_placeholders = ', '.join('?' for _ in values)
+            clauses.append(f"COALESCE(CAST({quote(column)} AS TEXT), '') IN ({value_placeholders})")
+            params.extend(str(value) for value in values)
+        if definition.date_from or definition.date_to:
+            date_column = next((resolve_sql_column(columns, candidate) for candidate in ('event_start_time', 'Test_Start_Time', 'Timestamp', 'Date') if resolve_sql_column(columns, candidate)), None)
+            if date_column is None:
+                clauses.append('0')
+            else:
+                if definition.date_from:
+                    clauses.append(f"datetime({quote(date_column)}) >= datetime(?)")
+                    params.append(definition.date_from.isoformat())
+                if definition.date_to:
+                    clauses.append(f"datetime({quote(date_column)}) < datetime(?, '+1 day')")
+                    params.append(definition.date_to.isoformat())
+        source_sheet = resolve_sql_column(columns, 'source_sheet')
+        if source_sheet and core.CDR_IGNORED_SHEET_KEYS:
+            ignored = sorted(core.CDR_IGNORED_SHEET_KEYS)
+            clauses.append(f"({quote(source_sheet)} IS NULL OR LOWER(TRIM(CAST({quote(source_sheet)} AS TEXT))) NOT IN ({', '.join('?' for _ in ignored)}))")
+            params.extend(ignored)
+        if kind != 'data':
+            clauses.append(nr_mode_sql(columns, definition.technology))
+        return ' AND '.join(f'({clause})' for clause in clauses), params
+
+    def ensure_filter_projection(definition, task_repository, dimensions, selected_by_kind):
+        selected_dimension_keys = {identity(name) for name in definition.custom_fields}
+        active_dimensions = tuple(dimension for dimension in dimensions if identity(dimension.name) in selected_dimension_keys)
+        for kind, selected in selected_by_kind.items():
+            requested = set(core.combined_reporting_required_columns(active_dimensions, kind))
             requested.update(definition.custom_fields)
             requested.update(alias for aliases in FILTER_COLUMNS.values() for alias in aliases)
             requested.update(('event_start_time', 'Test_Start_Time', 'Timestamp', 'Date'))
-            columns = sorted(requested, key=str.casefold)
+            existing = {identity(column) for column in task_repository.list_reporting_row_columns(kind)}
+            source_columns = {
+                identity(column)
+                for row in selected
+                for column in task_repository.list_dataset_row_columns(row['id'])
+            }
+            required = {identity(column) for column in requested if identity(column) in source_columns}
+            repair = not required.issubset(existing)
+            changed = False
             for row in selected:
-                task_repository.copy_dataset_rows_to_reporting(row['id'], kind, columns)
-            frame = task_repository.load_reporting_rows(kind, [row['id'] for row in selected], columns)
-            if 'source_sheet' in frame:
-                frame = frame.loc[~frame.source_sheet.fillna('').astype(str).str.strip().str.casefold().isin(core.CDR_IGNORED_SHEET_KEYS)]
-            if kind != 'data':
-                frame = classify_sessions(frame, definition.technology)
-            frame = materialize_calculated_dimensions(frame, active_dimensions, f'CDR-{kind.title()}')
-            frames[kind] = ensure_report_vendor_group(frame) if definition.scope == 'multivendor' else frame
-        with lock:
-            source_frames[(selection_key, data_stamp(workspace))] = frames
-            while len(source_frames) > 2:
-                source_frames.popitem(last=False)
-        return frames
+                if repair or not task_repository.reporting_rows_exist_for_dataset(row['id'], kind):
+                    task_repository.copy_dataset_rows_to_reporting(row['id'], kind, sorted(requested, key=str.casefold))
+                    changed = True
+            current = {identity(column) for column in task_repository.list_reporting_row_columns(kind)}
+            missing_dimensions = tuple(dimension for dimension in active_dimensions if identity(dimension.name) not in current)
+            if missing_dimensions:
+                core._incremental_auto_field_table_update(
+                    task_repository, task_repository.reporting_rows_table_name(kind),
+                    f'cdr-{kind}', (), missing_dimensions, {},
+                )
+                changed = True
+            if changed:
+                task_repository.set_workspace_state(f'combined_reporting_updated_{kind}', core.now_iso())
+
+    def persistent_selection_key(definition, task_repository, dimensions, selected_by_kind):
+        versions = {
+            kind: [
+                (row['id'], row.get('updated_at'), row.get('processed_at'), row.get('normalization_version'), row.get('row_count'))
+                for row in selected
+            ]
+            for kind, selected in selected_by_kind.items()
+        }
+        revisions = {kind: task_repository.get_workspace_state(f'combined_reporting_updated_{kind}') for kind in selected_by_kind}
+        selection_definition = {
+            'technology': definition.technology,
+            'scope': definition.scope,
+            'datasets': definition.datasets,
+            'filters': definition.filters,
+            'custom_fields': definition.custom_fields,
+            'hidden_filters': definition.hidden_filters,
+            'date_from': definition.date_from,
+            'date_to': definition.date_to,
+        }
+        payload = {
+            'schema': 1,
+            'definition': selection_definition,
+            'versions': versions,
+            'combined_revisions': revisions,
+            'dimensions': core.calculated_dimensions_json(dimensions),
+        }
+        return sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+
+    def materialize_selection(definition, task_repository, dimensions, selected_by_kind, fields):
+        cache_key = persistent_selection_key(definition, task_repository, dimensions, selected_by_kind)
+        with lock, task_repository.connection() as connection:
+            cached = connection.execute(
+                'SELECT id, options_json, row_counts_json, materialized FROM dashboard_filter_selections WHERE cache_key = ?',
+                (cache_key,),
+            ).fetchone()
+            if cached:
+                connection.execute('UPDATE dashboard_filter_selections SET last_accessed_at = CURRENT_TIMESTAMP WHERE id = ?', (cached['id'],))
+                return int(cached['id']), cache_key, bool(cached['materialized']), json.loads(cached['options_json']), json.loads(cached['row_counts_json'])
+            cursor = connection.execute('INSERT INTO dashboard_filter_selections (cache_key) VALUES (?)', (cache_key,))
+            selection_id = int(cursor.lastrowid)
+            predicates = {}
+            row_counts = {}
+            for kind, selected in selected_by_kind.items():
+                dataset_ids = [int(row['id']) for row in selected]
+                where, params = selection_where(task_repository, kind, dataset_ids, definition)
+                table = task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))
+                predicates[kind] = (where, params, table)
+                row_counts[kind] = int(connection.execute(
+                    f'SELECT COUNT(*) AS count FROM {table} WHERE {where}', params,
+                ).fetchone()['count'])
+            materialized = sum(row_counts.values()) <= DASHBOARD_SELECTION_ROW_LIMIT
+            if materialized:
+                for kind, (where, params, table) in predicates.items():
+                    connection.execute(
+                        'INSERT INTO dashboard_filter_selection_rows (selection_id, dataset_kind, dataset_id, source_row_id) '
+                        f'SELECT ?, ?, dataset_id, source_row_id FROM {table} WHERE {where}',
+                        (selection_id, kind, *params),
+                    )
+            # Most Dashboard openings have no active categorical filter.  The
+            # former implementation scanned a combined CDR table once per
+            # facet in that case.  Aggregate all facets sharing a predicate in
+            # one pass, keeping individual passes only for selected facets
+            # whose own filter must be excluded from their available values.
+            options = {field_name: set() for field_name in fields}
+            active_filter_keys = {identity(field_name) for field_name in definition.filters}
+            facet_groups: dict[str | None, list[str]] = {None: []}
+            for field_name in fields:
+                excluded = field_name if identity(field_name) in active_filter_keys else None
+                facet_groups.setdefault(excluded, []).append(field_name)
+            for kind, selected in selected_by_kind.items():
+                columns = task_repository.list_reporting_row_columns(kind)
+                table = task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))
+                for excluded, group_fields in facet_groups.items():
+                    available = [(field_name, resolve_sql_column(columns, field_name)) for field_name in group_fields]
+                    available = [(field_name, column) for field_name, column in available if column is not None]
+                    if not available:
+                        continue
+                    where, params = selection_where(
+                        task_repository, kind, [int(row['id']) for row in selected], definition, exclude=excluded,
+                    )
+                    select_clause = ', '.join(
+                        f"json_group_array(DISTINCT COALESCE(CAST({task_repository._quote_identifier(column)} AS TEXT), '')) AS facet_{index}"
+                        for index, (_field_name, column) in enumerate(available)
+                    )
+                    row = connection.execute(f'SELECT {select_clause} FROM {table} WHERE {where}', params).fetchone()
+                    for index, (field_name, _column) in enumerate(available):
+                        encoded_values = row[f'facet_{index}'] if row else '[]'
+                        options[field_name].update(str(value) for value in json.loads(encoded_values or '[]'))
+            options = {field_name: sorted(values, key=str.casefold) for field_name, values in options.items()}
+            connection.execute(
+                'UPDATE dashboard_filter_selections SET options_json = ?, row_counts_json = ?, materialized = ? WHERE id = ?',
+                (json.dumps(options), json.dumps(row_counts), int(materialized), selection_id),
+            )
+            stale = connection.execute(
+                'SELECT id FROM dashboard_filter_selections ORDER BY last_accessed_at DESC, id DESC LIMIT -1 OFFSET 8'
+            ).fetchall()
+            for row in stale:
+                connection.execute('DELETE FROM dashboard_filter_selection_rows WHERE selection_id = ?', (row['id'],))
+                connection.execute('DELETE FROM dashboard_filter_selections WHERE id = ?', (row['id'],))
+            return selection_id, cache_key, materialized, options, row_counts
 
     def build_preview(definition, user):
         workspace = workspace_key()
         task_repository = Repository(Path(workspace), core.repository.global_db_path)
         entries = validate(definition, task_repository)
         dimensions = core.load_repository_calculated_dimensions(task_repository)
-        frames = load_frames(definition, task_repository, dimensions, workspace, entries)
-        if not frames:
-            raise HTTPException(400, 'Select at least one CDR dataset.')
+        selected_by_kind = selected_sources(definition, task_repository)
+        ensure_filter_projection(definition, task_repository, dimensions, selected_by_kind)
         selected_dataset_ids = {dataset_id for ids in definition.datasets.values() for dataset_id in ids}
         available_fields = {column for dataset_id in selected_dataset_ids for column in task_repository.list_dataset_row_columns(dataset_id)}
         available_fields.update(dimension.name for dimension in dimensions)
         hidden_filter_keys = {identity(field) for field in definition.hidden_filters}
         fields = {field for field in ADAPTATIVE_FILTER_FIELDS if identity(field) not in hidden_filter_keys}
         fields.update(definition.custom_fields)
-        for frame in frames.values():
-            for label in FILTER_COLUMNS:
-                column = resolve_filter_column(frame, label)
-                if column is not None and frame[column].fillna('').astype(str).str.strip().ne('').any():
-                    fields.add(label)
         fields = sorted(fields, key=str.casefold)
-        options = {}
-        for field in fields:
-            values = set()
-            for frame in frames.values():
-                column = resolve_filter_column(frame, field)
-                if column is not None:
-                    mask = filter_mask(frame, definition, exclude=field)
-                    values.update(frame.loc[mask, column].fillna('').astype(str).unique())
-            options[field] = sorted(values, key=str.casefold)
-        filtered_frames = {}
-        for kind, frame in frames.items():
-            # Adaptive facets keep their original CDR values. Once filtered,
-            # normalise the snapshot only once so every chart on every slide
-            # reuses it instead of copying millions of rows per render.
-            filtered = normalise_report_operator_aliases(filter_frame(frame, definition))
-            filtered.attrs['report_operator_aliases_normalized'] = True
-            filtered_frames[kind] = filtered
+        selection_id, selection_key, selection_materialized, options, row_counts = materialize_selection(
+            definition, task_repository, dimensions, selected_by_kind, fields,
+        )
         slides = OrderedDict()
         deck = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
         for editor_index, (index, entry) in enumerate(sorted(enumerate(entries), key=lambda item: (item[1].slide, item[0]))):
             slide = slides.setdefault(entry.slide, {'number': entry.slide, 'title': entry.slide_title, 'subtitle': entry.slide_subtitle, 'layout': entry.layout, 'charts': [], 'focus_row': editor_index})
             if not entry.structural_type:
-                slide['charts'].append({'index': index, 'title': entry.chart_title, 'source': entry.source_kind, 'available': entry.source_kind in frames})
+                slide['charts'].append({'index': index, 'title': entry.chart_title, 'source': entry.source_kind, 'available': entry.source_kind in selected_by_kind})
         for slide in slides.values():
             bounds = _layout_chart_frames(_named_slide_layout(deck, slide['layout']))
             if bounds and len(bounds) >= len(slide['charts']):
@@ -296,11 +445,20 @@ def install_dashboard_routes(core):
                 for chart, (x, y, w, h) in zip(slide['charts'], bounds):
                     chart['position'] = [(x-left)/width*100, (y-top)/height*100, w/width*100, h/height*100]
         token = uuid4().hex
+        payload = {
+            'slides': list(slides.values()), 'options': options,
+            'filter_fields': list(ADAPTATIVE_FILTER_FIELDS),
+            'available_fields': sorted(available_fields, key=str.casefold),
+            'rows': row_counts,
+        }
         with lock:
-            snapshots[token] = Snapshot(workspace, user.username, entries, filtered_frames, definition.scope == 'multivendor')
+            snapshots[token] = Snapshot(
+                workspace, user.username, entries, {}, definition.scope == 'multivendor',
+                definition.model_copy(deep=True), tuple(dimensions), selection_id, selection_key, selection_materialized,
+            )
             while len(snapshots) > 6:
                 snapshots.popitem(last=False)
-        return {'token': token, 'slides': list(slides.values()), 'options': options, 'filter_fields': list(ADAPTATIVE_FILTER_FIELDS), 'available_fields': sorted(available_fields, key=str.casefold), 'rows': {kind: len(frame) for kind, frame in filtered_frames.items()}}
+        return {**payload, 'token': token}
 
     @app.post('/api/e2e-dashboards/prepare')
     def prepare(definition: DashboardDefinition, user=Depends(dashboard_user)):
@@ -319,9 +477,39 @@ def install_dashboard_routes(core):
         entry = snapshot.entries[index]
         if not include_frame:
             return snapshot, entry, None
-        frame = snapshot.frames.get(entry.source_kind)
+        with lock:
+            frame = snapshot.chart_frames.get(index)
         if frame is None:
-            raise HTTPException(400, 'Unavailable source type: select a matching CDR dataset.')
+            task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
+            selected = core._optional_reporting_datasets(
+                snapshot.definition.datasets.get(entry.source_kind, []), entry.source_kind, task_repository,
+            )
+            if not selected:
+                raise HTTPException(400, 'Unavailable source type: select a matching CDR dataset.')
+            columns = core.reporting_query_columns(entry.source_kind, [entry], snapshot.multivendor)
+            columns = list(dict.fromkeys([*columns, 'dataset_id', 'source_row_id']))
+            for row in selected:
+                task_repository.copy_dataset_rows_to_reporting(row['id'], entry.source_kind, columns)
+            if snapshot.selection_materialized:
+                frame = task_repository.load_dashboard_selection_rows(snapshot.selection_id, entry.source_kind, columns)
+            else:
+                where, parameters = selection_where(
+                    task_repository, entry.source_kind, [int(row['id']) for row in selected], snapshot.definition,
+                )
+                frame = task_repository.load_filtered_reporting_rows(
+                    entry.source_kind, columns, where, parameters,
+                )
+            requested_keys = {identity(column) for column in columns}
+            active_dimensions = tuple(
+                dimension for dimension in snapshot.dimensions if identity(dimension.name) in requested_keys
+            )
+            frame = materialize_calculated_dimensions(frame, active_dimensions, f'CDR-{entry.source_kind.title()}')
+            if snapshot.multivendor:
+                frame = ensure_report_vendor_group(frame)
+            frame = normalise_report_operator_aliases(frame)
+            frame.attrs['report_operator_aliases_normalized'] = True
+            with lock:
+                frame = snapshot.chart_frames.setdefault(index, frame)
         try:
             return snapshot, entry, prepare_catalog_chart_preview_frame(frame, entry, multivendor=snapshot.multivendor)[0]
         except ValueError as exc:
@@ -330,13 +518,25 @@ def install_dashboard_routes(core):
     @app.get('/api/e2e-dashboards/preview/{token}/{index}.png')
     def chart(token: str, index: int, user=Depends(dashboard_user)):
         snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False)
-        key = (token, index)
+        entry_key = sha256(repr(entry).encode()).hexdigest()
+        key = (snapshot.selection_key, entry_key)
+        cache_dir = Path(snapshot.workspace).parent / '.dashboard-chart-cache'
+        cache_path = cache_dir / sha256(
+            f'{DASHBOARD_RENDER_CACHE_VERSION}:{snapshot.selection_key}:{entry_key}'.encode()
+        ).hexdigest()
+        cache_path = cache_path.with_suffix('.png')
         # PIL chart renderers have no shared global canvas. Let browser image
         # requests for the same slide render concurrently instead of placing
         # every chart behind one process-wide lock; only cache mutation needs
         # synchronization.
         with lock:
             png = images.get(key)
+        if png is None and cache_path.is_file():
+            try:
+                png = cache_path.read_bytes()
+                cache_path.touch()
+            except OSError:
+                png = None
         if png is None:
             _, _, frame = snapshot_chart(token, index, user)
             try:
@@ -348,6 +548,16 @@ def install_dashboard_routes(core):
                 images[key] = png
                 while len(images) > 100:
                     images.popitem(last=False)
+            try:
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                temporary = cache_path.with_suffix(f'.{uuid4().hex}.tmp')
+                temporary.write_bytes(png)
+                temporary.replace(cache_path)
+                cached_files = sorted(cache_dir.glob('*.png'), key=lambda path: path.stat().st_mtime, reverse=True)
+                for stale in cached_files[200:]:
+                    stale.unlink(missing_ok=True)
+            except OSError:
+                pass
         return Response(png, media_type='image/png', headers={'Cache-Control': 'private, max-age=3600'})
 
     @app.get('/api/e2e-dashboards/data/{token}/{index}')

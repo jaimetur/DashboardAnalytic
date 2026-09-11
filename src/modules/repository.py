@@ -82,6 +82,28 @@ CREATE TABLE IF NOT EXISTS workspace_state (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS dashboard_filter_selections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cache_key TEXT NOT NULL UNIQUE,
+    options_json TEXT NOT NULL DEFAULT '{}',
+    row_counts_json TEXT NOT NULL DEFAULT '{}',
+    materialized INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_accessed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dashboard_filter_selection_rows (
+    selection_id INTEGER NOT NULL,
+    dataset_kind TEXT NOT NULL,
+    dataset_id INTEGER NOT NULL,
+    source_row_id INTEGER NOT NULL,
+    PRIMARY KEY (selection_id, dataset_kind, dataset_id, source_row_id),
+    FOREIGN KEY(selection_id) REFERENCES dashboard_filter_selections(id) ON DELETE CASCADE
+) WITHOUT ROWID;
+
+CREATE INDEX IF NOT EXISTS idx_dashboard_filter_selection_kind
+ON dashboard_filter_selection_rows(selection_id, dataset_kind);
+
 
 
 CREATE TABLE IF NOT EXISTS autocalculated_fields (
@@ -273,11 +295,32 @@ class Repository:
         )
         conn.execute('DROP TABLE calculated_dimensions')
 
+    @staticmethod
+    def _ensure_dashboard_filter_selection_columns(conn: sqlite3.Connection) -> None:
+        columns = {str(row['name']) for row in conn.execute('PRAGMA table_info(dashboard_filter_selections)').fetchall()}
+        if 'options_json' not in columns:
+            conn.execute("ALTER TABLE dashboard_filter_selections ADD COLUMN options_json TEXT NOT NULL DEFAULT '{}'")
+        if 'row_counts_json' not in columns:
+            conn.execute("ALTER TABLE dashboard_filter_selections ADD COLUMN row_counts_json TEXT NOT NULL DEFAULT '{}'")
+        if 'materialized' not in columns:
+            conn.execute('ALTER TABLE dashboard_filter_selections ADD COLUMN materialized INTEGER NOT NULL DEFAULT 0')
+
+    def _ensure_existing_reporting_indexes(self, conn: sqlite3.Connection) -> None:
+        for kind in ('data', 'voice', 'speech'):
+            table_name = self.reporting_rows_table_name(kind)
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,),
+            ).fetchone()
+            if exists:
+                self._create_reporting_row_indexes(conn, table_name, self._table_columns(conn, table_name))
+
     def initialize(self) -> None:
         self.remove_legacy_global_tables()
         with self.connection() as conn:
             self._migrate_calculated_dimensions_table(conn)
             conn.executescript(SCHEMA)
+            self._ensure_dashboard_filter_selection_columns(conn)
+            self._ensure_existing_reporting_indexes(conn)
             self._ensure_report_template_columns(conn)
             self._ensure_dataset_profile_columns(conn)
             self._ensure_generated_job_columns(conn)
@@ -1231,7 +1274,11 @@ class Repository:
         safe_df = self._sqlite_safe_frame(df)
         with self.connection() as conn:
             conn.execute(f"DROP TABLE IF EXISTS {self._quote_identifier(table_name)}")
-            safe_df.to_sql(table_name, conn, index=False)
+            # pandas rechecks sqlite metadata before creating the table.  In a
+            # long-lived workspace connection that metadata can still reflect
+            # the just-dropped table, so use its explicit replacement mode to
+            # make this operation idempotent.
+            safe_df.to_sql(table_name, conn, if_exists='replace', index=False)
             self._create_dataset_row_indexes(conn, table_name, safe_df.columns.tolist())
 
     def reporting_rows_table_name(self, dataset_kind: str) -> str:
@@ -1348,6 +1395,10 @@ class Repository:
         conn.execute(
             f"CREATE INDEX IF NOT EXISTS {self._quote_identifier(self._index_name(table_name, 'dataset_id', 'rows'))} "
             f"ON {quoted_table} (dataset_id)"
+        )
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS {self._quote_identifier(self._index_name(table_name, 'dataset_source_row', 'lookup'))} "
+            f"ON {quoted_table} (dataset_id, source_row_id)"
         )
         self._create_dataset_row_indexes(conn, table_name, columns)
 
@@ -1576,6 +1627,55 @@ class Repository:
         query = f"SELECT {select_clause} FROM {self._quote_identifier(table_name)} WHERE dataset_id IN ({placeholders})"
         with self.connection() as conn:
             return pd.read_sql_query(query, conn, params=[int(dataset_id) for dataset_id in dataset_ids])
+
+    def load_dashboard_selection_rows(
+        self, selection_id: int, dataset_kind: str, columns: list[str],
+    ) -> pd.DataFrame:
+        """Load only rows already selected by a persistent Dashboard filter."""
+        table_name = self.reporting_rows_table_name(dataset_kind)
+        existing_columns = set(self.list_reporting_row_columns(dataset_kind))
+        selected_columns: list[tuple[str, str]] = []
+        for column in columns:
+            resolved = self._resolve_dataset_row_column_name(existing_columns, column)
+            if resolved and all(actual != resolved for _requested, actual in selected_columns):
+                selected_columns.append((column, resolved))
+        if not selected_columns:
+            return pd.DataFrame()
+        select_clause = ', '.join(
+            f"data.{self._quote_identifier(actual)} AS {self._quote_identifier(requested)}"
+            if actual != requested else f"data.{self._quote_identifier(actual)}"
+            for requested, actual in selected_columns
+        )
+        query = (
+            f"SELECT {select_clause} FROM {self._quote_identifier(table_name)} AS data "
+            "INNER JOIN dashboard_filter_selection_rows AS selected "
+            "ON selected.dataset_id = data.dataset_id AND selected.source_row_id = data.source_row_id "
+            "WHERE selected.selection_id = ? AND selected.dataset_kind = ?"
+        )
+        with self.connection() as conn:
+            return pd.read_sql_query(query, conn, params=[int(selection_id), dataset_kind])
+
+    def load_filtered_reporting_rows(
+        self, dataset_kind: str, columns: list[str], where_sql: str, parameters: list[Any],
+    ) -> pd.DataFrame:
+        """Load a SQL-filtered projection from one combined CDR table."""
+        table_name = self.reporting_rows_table_name(dataset_kind)
+        existing_columns = set(self.list_reporting_row_columns(dataset_kind))
+        selected_columns: list[tuple[str, str]] = []
+        for column in columns:
+            resolved = self._resolve_dataset_row_column_name(existing_columns, column)
+            if resolved and all(actual != resolved for _requested, actual in selected_columns):
+                selected_columns.append((column, resolved))
+        if not selected_columns:
+            return pd.DataFrame()
+        select_clause = ', '.join(
+            f"{self._quote_identifier(actual)} AS {self._quote_identifier(requested)}"
+            if actual != requested else self._quote_identifier(actual)
+            for requested, actual in selected_columns
+        )
+        query = f"SELECT {select_clause} FROM {self._quote_identifier(table_name)} WHERE {where_sql}"
+        with self.connection() as conn:
+            return pd.read_sql_query(query, conn, params=parameters)
 
     def _create_dataset_row_indexes(self, conn: sqlite3.Connection, table_name: str, columns: list[str]) -> None:
         normalized_columns = {str(column).strip().lower(): column for column in columns}

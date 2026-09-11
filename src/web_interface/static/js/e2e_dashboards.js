@@ -36,6 +36,17 @@
   const safe = fn => async (...args) => { try { await fn(...args); } catch (error) { if (error.name !== 'AbortError') { status(error.message); if (window.showInfoDialog) window.showInfoDialog(error.message, {title:'E2E Dashboards',tone:'error'}); } } };
   const bind = (id, fn) => $(id).addEventListener('click', safe(fn));
   const setViewEnabled = enabled => { $('ds-view').disabled = !enabled; };
+  const setPreparationState = state => {
+    const notice = $('ds-preparing');
+    notice.hidden = state === 'hidden';
+    if (state === 'hidden') return;
+    const ready = state === 'ready';
+    notice.dataset.state = state;
+    $('ds-preparing-title').textContent = ready ? 'Dashboard is ready' : 'Dashboard is being prepared';
+    $('ds-preparing-detail').textContent = ready
+      ? 'Data and filters are ready. You can now open View Dashboard.'
+      : 'Data and filters are still loading. View Dashboard will become available when preparation is complete.';
+  };
   function overlay(id, show) {
     const el = $(id);
     if (show) { focusReturn.set(id, document.activeElement); el.hidden = false; el.querySelector('[role=dialog]').focus(); }
@@ -105,7 +116,7 @@
     globalThis.setupCustomMultiSelects?.();
   }
   function facets() {
-    const host = $('ds-facets'); host.replaceChildren();
+    const defaultHost = $('ds-default-facets'), additionalHost = $('ds-additional-facets'); defaultHost.replaceChildren(); additionalHost.replaceChildren();
     definition.hidden_filters ||= [];
     const hidden = new Set(definition.hidden_filters.map(identity));
     const fields = new Set([...facetFields.filter(field => !hidden.has(identity(field))), ...Object.keys(definition.filters), ...definition.custom_fields]);
@@ -132,19 +143,26 @@
       if (!available.length) { values.disabled = true; values.append(option('', facetsLoading ? 'Loading values…' : 'No matching values')); }
       values.onchange = () => { definition.filters[field] = [...values.selectedOptions].filter(item => item.value).map(item => item.value); changed(); };
       facet.append(values);
-      host.append(facet);
+      (custom ? additionalHost : defaultHost).append(facet);
     }
+    if (!additionalHost.childElementCount) additionalHost.append(node('p', 'No additional filters have been added.', 'form-note ds-no-additional-filters'));
     const visible = [...fields].map(field => identity(field));
     const restorable = facetFields.filter(field => hidden.has(identity(field)));
     const choices = [...restorable, ...availableFields].filter((field, index, all) => !visible.includes(identity(field)) && all.findIndex(item => identity(item) === identity(field)) === index);
-    $('ds-custom-field').replaceChildren(...choices.map(field => option(field, field)));
-    $('ds-add-filter').disabled = !$('ds-custom-field').options.length;
+    const fieldPicker = $('ds-custom-field');
+    const previous = fieldPicker.value;
+    fieldPicker.replaceChildren(...choices.map(field => option(field, field)));
+    fieldPicker.disabled = choices.length === 0;
+    $('ds-add-filter').disabled = choices.length === 0;
+    if ([...fieldPicker.options].some(item => item.value === previous)) fieldPicker.value = previous;
+    fieldPicker.dispatchEvent(new Event('multiselect:options-updated'));
     globalThis.setupCustomMultiSelects?.();
   }
   function changed() {
     dirty = true; prepared = null; ++sequence; controller?.abort(); preparing = null;
     setViewEnabled(false);
-    $('ds-rows').textContent = 'Updating all dashboards…';
+    setPreparationState('preparing');
+    $('ds-rows').textContent = '';
     if (!$('ds-viewer').hidden) $('ds-charts').replaceChildren(node('div','Updating dashboards…','ds-empty'));
     clearTimeout(timer); timer = setTimeout(safe(prepare), 350);
   }
@@ -154,14 +172,16 @@
     clearTimeout(timer); const current = ++sequence; controller?.abort(); controller = new AbortController();
     facetsLoading = true; facets();
     setViewEnabled(false);
-    $('ds-rows').textContent = 'Preparing shared CDR data… View Dashboard will open when it is ready.';
+    setPreparationState('preparing');
+    $('ds-rows').textContent = '';
     try {
       const payload = await api('/prepare','POST',definition,controller.signal);
       if (current !== sequence) return;
-      prepared = payload; facetOptions = payload.options; facetFields = payload.filter_fields || facetFields; availableFields = payload.available_fields || payload.custom_fields || []; facetsLoading = false; facets(); setViewEnabled(Boolean(payload.slides?.length));
+      prepared = payload; facetOptions = payload.options; facetFields = payload.filter_fields || facetFields; availableFields = payload.available_fields || payload.custom_fields || []; facetsLoading = false; facets(); setViewEnabled(Boolean(payload.slides?.length)); setPreparationState('ready');
       $('ds-rows').textContent = Object.entries(payload.rows).map(([kind,count]) => `${kind.toUpperCase()}: ${count.toLocaleString()} rows`).join(' · ');
+      prefetchedChartUrls.clear(); prefetchedCharts.clear(); prefetchSlide(0);
       if (!$('ds-viewer').hidden) renderSlide();
-    } catch (error) { if (current === sequence && error.name !== 'AbortError') { facetsLoading = false; facets(); setViewEnabled(false); $('ds-rows').textContent = error.message; if (!$('ds-viewer').hidden) $('ds-charts').replaceChildren(node('div',error.message,'ds-empty')); } throw error; }
+    } catch (error) { if (current === sequence && error.name !== 'AbortError') { facetsLoading = false; facets(); setViewEnabled(false); setPreparationState('hidden'); $('ds-rows').textContent = error.message; if (!$('ds-viewer').hidden) $('ds-charts').replaceChildren(node('div',error.message,'ds-empty')); } throw error; }
     })();
     preparing = pending;
     try { return await pending; }
@@ -201,7 +221,7 @@
   }
   bind('ds-import',() => $('ds-import-file').click());
   $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name); const id = dashboardId(); await api(`/${id}`,'PUT',payload.definition); dashboards[id] = payload.definition; await openDashboard(id); $('ds-import-file').value = ''; });
-  function closeDashboard() { rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; prepared = null; dirty = false; setViewEnabled(false); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard Name: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
+  function closeDashboard() { rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; prepared = null; dirty = false; setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard Name: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
   $('ds-name').oninput = () => { if (definition) { definition.name = $('ds-name').value; dirty = true; } };
   $('ds-nr-mode').onchange = () => {
     const selected = setNrMode($('ds-nr-mode').value);
