@@ -2329,6 +2329,12 @@ document.querySelectorAll('[data-catalogue-auto-rename]').forEach((input) => {
       if (value?.includes(rawOldSegment)) element.setAttribute(attribute, value.replace(rawOldSegment, rawNewSegment));
       else if (value?.includes(oldSegment)) element.setAttribute(attribute, value.replace(oldSegment, newSegment));
     });
+    row.querySelectorAll('[data-open-template-editor]').forEach((element) => {
+      const value = element.getAttribute('data-open-template-editor');
+      if (value?.includes(rawOldSegment)) element.setAttribute('data-open-template-editor', value.replace(rawOldSegment, rawNewSegment));
+      else if (value?.includes(oldSegment)) element.setAttribute('data-open-template-editor', value.replace(oldSegment, newSegment));
+      element.setAttribute('data-template-name', input.value.trim());
+    });
     document.querySelectorAll('option').forEach((option) => {
       if (option.value !== `${technology}:${previousName}`) return;
       option.value = `${technology}:${identifier}`;

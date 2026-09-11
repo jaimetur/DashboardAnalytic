@@ -10392,9 +10392,7 @@ def rename_report_catalogue(
         return render_admin_template(request, user, error=str(exc), status_code=400)
     repository.add_log(user.username, 'rename_report_template', json.dumps({'technology': technology, 'template': catalogue_id, 'name': name}))
     if 'application/json' in request.headers.get('accept', ''):
-        payload = {'name': name}
-        payload['identifier'] = name
-        return JSONResponse(payload)
+        return JSONResponse({'name': name, 'identifier': catalogue_id})
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 
