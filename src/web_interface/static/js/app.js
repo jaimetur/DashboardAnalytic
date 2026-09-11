@@ -5447,6 +5447,22 @@ if (queueNode) {
     panel.className = `background-task-panel background-task-panel-${group.is_active ? 'active' : 'other'}`;
     panel.setAttribute('aria-label', `Background tasks for ${group.workspace_name || 'workspace'}`);
 
+    const minimizedKey = `dashboard-analytic:background-task-panel:${group.workspace_id}:minimized`;
+    const minimize = document.createElement('button');
+    minimize.type = 'button';
+    minimize.className = 'background-task-minimize-button';
+    minimize.setAttribute('aria-label', 'Minimize background tasks');
+    const setMinimized = (value) => {
+      panel.classList.toggle('is-minimized', value);
+      minimize.textContent = value ? '+' : '−';
+      minimize.title = value ? 'Expand background tasks' : 'Minimize background tasks';
+      minimize.setAttribute('aria-label', minimize.title);
+      localStorage.setItem(minimizedKey, value ? '1' : '0');
+    };
+    minimize.addEventListener('click', () => setMinimized(!panel.classList.contains('is-minimized')));
+    setMinimized(localStorage.getItem(minimizedKey) === '1');
+    panel.append(minimize);
+
     const heading = document.createElement('h3');
     heading.className = 'background-task-workspace';
     heading.textContent = group.is_active && group.workspace_id !== '__server__'
@@ -5536,8 +5552,8 @@ if (queueNode) {
     const signature = JSON.stringify(normalized);
     if (signature === renderedSignature) return;
     renderedSignature = signature;
-    const activeGroups = normalized.filter((group) => Boolean(group.is_active));
-    const otherGroups = normalized.filter((group) => !group.is_active);
+    const activeGroups = normalized.filter((group) => Boolean(group.is_active) || group.dock === 'right');
+    const otherGroups = normalized.filter((group) => !group.is_active && group.dock !== 'right');
     activeDock.replaceChildren(...activeGroups.map(createTaskPanel));
     otherDock.replaceChildren(...otherGroups.map(createTaskPanel));
     root.classList.toggle('has-both-sides', activeGroups.length > 0 && otherGroups.length > 0);

@@ -74,7 +74,7 @@ class WorkspaceRegistry:
                     (
                         'default', 'Default', str(default_root / 'Default.db'),
                         str(default_root / 'input'), str(default_root / 'output'),
-                        str(default_root / 'output' / 'reports'), str(default_root / 'slides-templates'), now, now,
+                        str(default_root / 'output' / 'reports'), str(default_root / 'report-templates'), now, now,
                     ),
                 )
                 conn.execute("INSERT OR REPLACE INTO workspace_state (key, value) VALUES ('active_workspace_id', 'default')")
@@ -88,17 +88,18 @@ class WorkspaceRegistry:
 
     def _migrate_workspace_templates(self) -> None:
         """Copy the legacy shared library to the workspaces that existed at migration time."""
-        migration_key = 'workspace_templates_files_v2'
+        migration_key = 'workspace_templates_files_v3'
         if self.get_state(migration_key) == '1':
             return
         workspaces = self.list()
-        sources = [self.legacy_slides_templates_dir, *(workspace.slides_templates_dir for workspace in workspaces)]
+        old_shared_directory = self.legacy_slides_templates_dir.with_name('slides-templates')
+        sources = [old_shared_directory, self.legacy_slides_templates_dir, *(workspace.slides_templates_dir for workspace in workspaces)]
         source = next(
             (candidate for candidate in sources if candidate.is_dir() and any(candidate.rglob('*.csv'))),
             None,
         )
         for workspace in workspaces:
-            target = workspace.database_path.parent / 'slides-templates'
+            target = workspace.database_path.parent / 'report-templates'
             own_source = workspace.slides_templates_dir
             for candidate in (own_source, source):
                 if candidate is None or candidate == target or not candidate.exists():
@@ -110,12 +111,12 @@ class WorkspaceRegistry:
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     if not destination.exists():
                         shutil.copy2(path, destination)
-            target.mkdir(parents=True, exist_ok=True)
-            (target / '.migrate-library').touch()
+            if target.exists():
+                (target / '.migrate-library').touch()
             with self._connection() as conn:
                 conn.execute('UPDATE workspaces SET slides_templates_dir = ? WHERE id = ?',
                              (str(target), workspace.id))
-        if source == self.legacy_slides_templates_dir and source.exists():
+        if source in {self.legacy_slides_templates_dir, old_shared_directory} and source.exists():
             shutil.rmtree(source)
         self.set_state(migration_key, '1')
 
@@ -323,7 +324,7 @@ class WorkspaceRegistry:
             now = self._now()
             data_root = self._workspace_root(normalized_name)
             db_path = data_root / f'{normalized_name}.db'
-            slides_templates_dir = data_root / 'slides-templates'
+            slides_templates_dir = data_root / 'report-templates'
             try:
                 conn.execute(
                     """INSERT INTO workspaces (

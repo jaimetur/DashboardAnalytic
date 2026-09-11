@@ -242,6 +242,10 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .admin-stack .full-environment-workspace-dialog .confirm-cancel:hover:not(:disabled) { background: #dce5e9; color: #263f4c; }
 .full-environment-workspace-toolbar { display: flex; gap: 0.55rem; margin-top: 1rem; }
 .full-environment-workspace-toolbar .ghost-link { padding: 0.45rem 0.7rem; font-size: 0.78rem; }
+.incoming-transfer-confirm .auto-calculated-field-workspace-dialog .full-environment-workspace-toolbar .ghost-link { background: #f4d5d3; border-color: rgba(158, 41, 51, 0.30); color: #7d2731; box-shadow: none; }
+.incoming-transfer-confirm .auto-calculated-field-workspace-dialog .full-environment-workspace-toolbar .ghost-link:hover:not(:disabled) { background: #edbebc; color: #691c25; }
+.incoming-transfer-confirm .auto-calculated-field-workspace-dialog .full-environment-workspace-toolbar .ghost-link + .ghost-link { background: #edf1f3; border-color: rgba(68, 81, 93, 0.26); color: #36505f; }
+.incoming-transfer-confirm .auto-calculated-field-workspace-dialog .full-environment-workspace-toolbar .ghost-link + .ghost-link:hover:not(:disabled) { background: #dce5e9; color: #263f4c; }
 .full-environment-workspace-list { display: grid; gap: 0.45rem; max-height: min(42vh, 360px); margin-top: 0.7rem; padding: 0.7rem; overflow-y: auto; border: 1px solid rgba(21, 93, 131, 0.18); border-radius: 14px; background: rgba(255, 255, 255, 0.62); }
 .full-environment-workspace-choice { display: flex; align-items: center; gap: 0.65rem; padding: 0.58rem 0.65rem; border-radius: 10px; color: #243f52; font-weight: 650; cursor: pointer; }
 .admin-stack .full-environment-workspace-choice { color: #243f52 !important; }
@@ -1545,11 +1549,18 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .background-task-dock-active { right: 1rem; }
 .background-task-dock-other { left: 1rem; }
 .background-task-panels.has-both-sides .background-task-dock { width: min(360px, calc(50vw - 1.5rem)); }
-.background-task-panel { flex: 0 0 auto; box-sizing: border-box; overflow: hidden; padding: 0.85rem 0.9rem; border: 1px solid rgba(113, 36, 43, 0.38); border-radius: 14px; background: linear-gradient(150deg, rgba(255, 250, 248, 0.98), rgba(247, 230, 229, 0.98)); color: #492127; box-shadow: 0 14px 34px rgba(44, 24, 29, 0.24); backdrop-filter: blur(12px); }
-.background-task-panel-other { border-color: rgba(20, 102, 112, 0.42); background: linear-gradient(150deg, rgba(245, 253, 252, 0.98), rgba(216, 239, 239, 0.98)); color: #124d55; box-shadow: 0 14px 34px rgba(12, 61, 68, 0.22); }
-.background-task-workspace { margin: 0 0 0.68rem; font-size: 0.78rem; font-weight: 850; letter-spacing: 0.045em; line-height: 1.25; text-transform: uppercase; overflow-wrap: anywhere; }
-.background-task-panel-active .background-task-workspace { color: #8b1d24; }
-.background-task-panel-other .background-task-workspace { color: #126773; }
+.background-task-panel { position: relative; pointer-events: auto; flex: 0 0 auto; box-sizing: border-box; overflow: hidden; padding: 0.85rem 0.9rem; border: 1px solid rgba(113, 36, 43, 0.38); border-radius: 14px; background: linear-gradient(150deg, rgba(255, 250, 248, 0.98), rgba(247, 230, 229, 0.98)); color: #492127; box-shadow: 0 14px 34px rgba(44, 24, 29, 0.24); backdrop-filter: blur(12px); }
+.background-task-panel-active { border-color: rgba(41, 126, 80, 0.42); background: linear-gradient(150deg, rgba(244, 253, 246, 0.98), rgba(209, 239, 217, 0.98)); color: #1e5d37; box-shadow: 0 14px 34px rgba(25, 99, 59, 0.18); }
+.background-task-panel-other { border-color: rgba(170, 131, 23, 0.42); background: linear-gradient(150deg, rgba(255, 253, 234, 0.98), rgba(255, 244, 194, 0.98)); color: #665016; box-shadow: 0 14px 34px rgba(116, 88, 13, 0.18); }
+.background-task-workspace { margin: 0 1.4rem 0.68rem 0; font-size: 0.78rem; font-weight: 850; letter-spacing: 0.045em; line-height: 1.25; text-transform: uppercase; overflow-wrap: anywhere; }
+.background-task-minimize-button { position: absolute; top: 0.46rem; right: 0.54rem; z-index: 1; display: grid; place-items: center; width: 1.35rem; height: 1.35rem; min-height: 0; padding: 0; border: 1px solid rgba(73, 33, 39, 0.28); border-radius: 7px; background: rgba(255, 255, 255, 0.58); color: #54232b; font-size: 1.2rem; font-weight: 900; line-height: 1; cursor: pointer; }
+.background-task-panel-other .background-task-minimize-button { border-color: rgba(102, 80, 22, 0.28); color: #80610d; }
+.background-task-minimize-button:hover { background: rgba(255, 255, 255, 0.96); color: #8b1d24; }
+.background-task-panel.is-minimized { padding: 0.58rem 0.8rem; }
+.background-task-panel.is-minimized .background-task-workspace { margin-bottom: 0; }
+.background-task-panel.is-minimized .background-task-list { display: none; }
+.background-task-panel-active .background-task-workspace { color: #267044; }
+.background-task-panel-other .background-task-workspace { color: #80610d; }
 .background-task-list { display: grid; gap: 0.7rem; }
 .background-task-item { min-width: 0; }
 .background-task-head { display: flex; align-items: flex-start; gap: 0.45rem; }
@@ -1560,11 +1571,14 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .background-task-stop-button:hover:not(:disabled) { background: linear-gradient(135deg, #7d1b25, #ae3743); }
 .background-task-stop-button:disabled { opacity: 0.58; cursor: wait; }
 .background-task-detail { display: block; min-height: 1em; margin-bottom: 0.38rem; color: rgba(73, 33, 39, 0.72); font-size: 0.71rem; line-height: 1.22; overflow-wrap: anywhere; }
-.background-task-panel-other .background-task-detail { color: rgba(18, 77, 85, 0.74); }
+.background-task-panel-other .background-task-detail { color: rgba(102, 80, 22, 0.76); }
+.background-task-panel-active .background-task-detail { color: rgba(30, 93, 55, 0.76); }
 .background-task-progress { position: relative; height: 0.46rem; overflow: hidden; border-radius: 999px; background: rgba(139, 29, 36, 0.14); }
-.background-task-panel-other .background-task-progress { background: rgba(18, 103, 115, 0.15); }
+.background-task-panel-other .background-task-progress { background: rgba(170, 131, 23, 0.18); }
+.background-task-panel-active .background-task-progress { background: rgba(41, 126, 80, 0.18); }
 .background-task-progress-bar { height: 100%; min-width: 0.25rem; border-radius: inherit; background: linear-gradient(90deg, #a52a32, #d15a56); transition: width 0.35s ease; }
-.background-task-panel-other .background-task-progress-bar { background: linear-gradient(90deg, #126773, #2ca4a6); }
+.background-task-panel-other .background-task-progress-bar { background: linear-gradient(90deg, #b58b13, #ddbd48); }
+.background-task-panel-active .background-task-progress-bar { background: linear-gradient(90deg, #287b49, #64b77a); }
 .background-task-progress.is-indeterminate .background-task-progress-bar { width: 38% !important; animation: background-task-progress-slide 1.25s ease-in-out infinite; }
 @keyframes background-task-progress-slide { from { transform: translateX(-110%); } to { transform: translateX(275%); } }
 @media (max-width: 640px) {

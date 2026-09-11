@@ -97,12 +97,15 @@ RECURRING_BACKUP_LOCK = Lock()
 RECURRING_BACKUP_RUNNING = False
 MANUAL_BACKUP_JOBS: dict[str, dict[str, Any]] = {}
 MANUAL_BACKUP_JOBS_LOCK = Lock()
+SCHEDULED_BACKUP_JOBS: dict[str, dict[str, Any]] = {}
+SCHEDULED_BACKUP_JOBS_LOCK = Lock()
 MANUAL_RESTORE_JOBS: dict[str, dict[str, Any]] = {}
 MANUAL_RESTORE_JOBS_LOCK = Lock()
 EXPORT_PACKAGE_TTL = timedelta(hours=24)
 TRANSFER_OFFER_TTL = timedelta(minutes=15)
 DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
 application_config_dir = settings.database_path.parent
+application_data_dir = settings.data_dir
 
 
 def _reporting_memory_mb() -> float:
@@ -435,7 +438,7 @@ def rename_calculated_dimension_template_references(renames: dict[str, str]) -> 
     changed_templates = 0
     for technology in TEMPLATE_NAMES:
         for template in report_catalogue_options(technology):
-            entries = load_catalog_csv(template['path'], technology, validate_filters=False)
+            entries = parse_catalog_csv(template['content'], technology, validate_filters=False)
             updated_entries = [renamed_entry(entry) for entry in entries]
             if updated_entries == entries:
                 continue
@@ -448,11 +451,11 @@ def rename_calculated_dimension_template_references(renames: dict[str, str]) -> 
     return changed_templates
 
 
-def load_template_catalogue(catalogue_path: Path, technology: str, *, validate_filters: bool = True, task_repository: Repository | None = None):
+def load_template_catalogue(catalogue_content: bytes | str, technology: str, *, validate_filters: bool = True, task_repository: Repository | None = None):
     dimensions = load_repository_calculated_dimensions(task_repository) if task_repository else load_workspace_calculated_dimensions()
     return [
         replace(entry, calculated_dimensions=dimensions)
-        for entry in load_catalog_csv(catalogue_path, technology, validate_filters=validate_filters)
+        for entry in parse_catalog_csv(catalogue_content, technology, validate_filters=validate_filters)
     ]
 
 
@@ -1083,33 +1086,19 @@ def _template_row_content(row: Any) -> bytes:
     return bytes(row['content'] or b'')
 
 
-def _write_template_compatibility_files(technology: str, name: str, content: bytes, *, is_default: bool) -> None:
-    """Materialise database-backed templates only for legacy package compatibility."""
-    library_path = named_catalogue_path(technology, name, name)
-    atomic_write_template(library_path, content)
-    if is_default:
-        default_dir = settings.slides_templates_dir / 'default' / technology
-        default_path = default_dir / template_filename(name)
-        for previous in default_dir.glob('*.csv'):
-            if previous != default_path:
-                previous.unlink()
-        atomic_write_template(default_path, content)
-
-
 def persist_report_template(technology: str, name: str, content: bytes, *, is_default: bool | None = None) -> None:
-    """Persist CSV content in SQLite and refresh its compatibility export copy."""
+    """Persist Report Template CSV content in the workspace database."""
     repository.set_report_template_content(technology, name, content)
     if is_default is None:
         is_default = bool(next(row for row in repository.list_report_templates(technology) if str(row['name']) == name)['is_default'])
-    _write_template_compatibility_files(technology, name, content, is_default=is_default)
 
 
 def synchronize_template_file_names(technology: str) -> None:
-    """Migrate old CSVs once, then materialise DB templates for package compatibility."""
+    """Migrate legacy CSVs once without recreating compatibility directories."""
     library_dir = settings.slides_templates_dir / 'library' / technology
-    library_dir.mkdir(parents=True, exist_ok=True)
     default_dir = settings.slides_templates_dir / 'default' / technology
-    default_dir.mkdir(parents=True, exist_ok=True)
+    if not library_dir.exists() and not default_dir.exists():
+        return
     existing = {str(row['name']): row for row in repository.list_report_templates(technology)}
     default_files = sorted(default_dir.glob('*.csv'))
     physical_files = [*library_dir.glob('*.csv'), *default_files]
@@ -1124,10 +1113,6 @@ def synchronize_template_file_names(technology: str) -> None:
     if len(default_files) == 1:
         default_name = catalogue_registry_key(default_files[0].stem)
         repository.set_default_report_template(technology, default_name)
-    for row in repository.list_report_templates(technology):
-        content = _template_row_content(row)
-        if content:
-            _write_template_compatibility_files(technology, str(row['name']), content, is_default=bool(row['is_default']))
 
 
 def promote_report_template_to_default(
@@ -1141,14 +1126,7 @@ def promote_report_template_to_default(
     source_content = _template_row_content(available[identifier])
     if not source_content:
         raise ValueError('The Report Template has no CSV content.')
-    default_dir = settings.slides_templates_dir / 'default' / technology
-    promoted_path = default_dir / template_filename(identifier)
     promoted_name = identifier
-    promoted_path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_template(promoted_path, source_content)
-    for active_copy in promoted_path.parent.glob('*.csv'):
-        if active_copy != promoted_path:
-            active_copy.unlink()
     repository.set_default_report_template(technology, promoted_name)
 
 
@@ -1162,14 +1140,10 @@ def report_catalogue_options(technology: str) -> list[dict[str, Any]]:
         content = _template_row_content(row)
         if not content:
             continue
-        path = named_catalogue_path(technology, identifier, identifier)
-        _write_template_compatibility_files(technology, identifier, content, is_default=is_default)
-        if is_default:
-            path = active_catalog_path(settings.slides_templates_dir, default_report_slides_template_path(technology, identifier), technology)
         options.append({
             'identifier': identifier,
             'name': identifier,
-            'path': path,
+            'content': content,
             'content': content,
             'source': 'Default source' if is_default else 'Named workspace template',
             'active': is_default,
@@ -1179,16 +1153,15 @@ def report_catalogue_options(technology: str) -> list[dict[str, Any]]:
     return options
 
 
-def reporting_catalog_path(technology: str) -> Path:
+def reporting_catalog_content(technology: str) -> bytes:
     active = next((option for option in report_catalogue_options(technology) if option['active']), None)
     if not active:
         raise FileNotFoundError(f'No default {technology.upper()} Report Template is configured.')
-    return active['path']
+    return bytes(active['content'])
 
 
 def reporting_catalog_entries(technology: str):
-    path = reporting_catalog_path(technology)
-    return load_template_catalogue(path, technology)
+    return load_template_catalogue(reporting_catalog_content(technology), technology)
 
 
 def catalogue_editor_columns(datasets: Iterable[Any] | None = None, calculated_dimensions: Iterable[Any] = ()) -> dict[str, list[str]]:
@@ -1262,7 +1235,7 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
         return None
     validation_error = None
     try:
-        entries = load_template_catalogue(catalogue['path'], technology)
+        entries = load_template_catalogue(catalogue['content'], technology)
     except ValueError as exc:
         # A newly created template deliberately contains only the current CSV
         # headers.  It is valid to open that blank canvas in the editor, while
@@ -1275,7 +1248,7 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
             # generation and saving still use strict validation, but opening
             # Admin must not become impossible because of a damaged row.
             validation_error = str(exc)
-            entries = load_template_catalogue(catalogue['path'], technology, validate_filters=False)
+            entries = load_template_catalogue(catalogue['content'], technology, validate_filters=False)
         else:
             raise
     # CSVs are allowed to have been edited out of order. The editor always
@@ -1353,7 +1326,7 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
         migration_marker = workspace.slides_templates_dir / '.migrate-library'
         if migration_marker.exists():
             register_workspace_template_files(workspace)
-            migration_marker.unlink()
+            shutil.rmtree(workspace.slides_templates_dir, ignore_errors=True)
         # The workspace database is self-contained.  In particular, a
         # duplicate already includes its reporting-row store, so rebuilding
         # every ready CDR here can take minutes and make opening the copied
@@ -2955,7 +2928,7 @@ def recurring_backup_settings() -> dict[str, Any]:
         'components': ['app_database', 'workspace_database', 'report_templates', 'auto_calculated_fields'],
         'workspace_ids': [],
         'recurrence': 'daily', 'execution_time': '02:00', 'weekly_day': 0, 'monthly_day': 1, 'max_backups': 30,
-        'backup_path': str(application_config_dir / 'scheduled-backups'), 'last_run_period': '',
+        'backup_path': str(application_data_dir / 'scheduled-backups'), 'last_run_period': '',
     }
     raw = repository.get_application_state(RECURRING_BACKUP_STATE_KEY)
     try:
@@ -2996,19 +2969,20 @@ def recurring_backup_settings() -> dict[str, Any]:
 
 
 def recurring_backup_path(config: dict[str, Any]) -> Path:
-    path = Path(str(config.get('backup_path') or application_config_dir / 'scheduled-backups')).expanduser()
-    return path if path.is_absolute() else application_config_dir / path
+    path = Path(str(config.get('backup_path') or application_data_dir / 'scheduled-backups')).expanduser()
+    return path if path.is_absolute() else application_data_dir / path
 
 
 def backup_config_root() -> Path:
-    return application_config_dir.resolve()
+    """Return the server-visible root allowed for backup storage."""
+    return application_data_dir.resolve()
 
 
 def ensure_backup_path_is_within_config(path: Path) -> Path:
     resolved = path.resolve()
     root = backup_config_root()
     if resolved != root and root not in resolved.parents:
-        raise ValueError('Backup directories must be inside the application config directory.')
+        raise ValueError('Backup directories must be inside the application data directory.')
     return resolved
 
 
@@ -3016,8 +2990,16 @@ def recurring_backup_status(config: dict[str, Any]) -> dict[str, str | int]:
     root = recurring_backup_path(config)
     files = sorted(root.glob('dashboard-analytic-backup-*.zip'), key=lambda item: item.stat().st_mtime) if root.is_dir() else []
     total = sum(item.stat().st_size for item in files)
-    last = datetime.fromtimestamp(files[-1].stat().st_mtime).astimezone().strftime('%Y-%m-%d %H:%M') if files else 'No successful backup yet'
+    last = backup_started_at_label(files[-1]) if files else 'No successful backup yet'
     return {'count': len(files), 'size': format_workspace_size(total), 'last_success': last, 'next_run': recurring_backup_next_run(config)}
+
+
+def backup_started_at_label(path: Path) -> str:
+    """Read the start timestamp embedded in a Dashboard Analytic backup filename."""
+    match = re.fullmatch(r'dashboard-analytic-backup-(\d{8}-\d{6})\.zip', path.name)
+    if match:
+        return datetime.strptime(match.group(1), '%Y%m%d-%H%M%S').strftime('%Y-%m-%d %H:%M')
+    return datetime.fromtimestamp(path.stat().st_mtime).astimezone().strftime('%Y-%m-%d %H:%M')
 
 
 def recurring_backup_next_run(config: dict[str, Any]) -> str:
@@ -3077,12 +3059,6 @@ def create_recurring_database_backup(
         if progress_callback:
             progress_callback(message, max(1.0, min(98.0, progress)))
 
-    # Materialise database-backed templates before sizing the legacy CSV
-    # compatibility tree, then report every archive byte against that total.
-    if 'report_templates' in components:
-        for workspace in workspaces:
-            report_progress(f'Preparing Report Templates for {workspace.name}', 1.0)
-            materialize_workspace_report_templates(workspace)
     report_progress('Inspecting backup sources', 3.0)
     def source_tree_size(source: Path) -> int:
         return sum(
@@ -3094,7 +3070,9 @@ def create_recurring_database_backup(
         if 'workspace_database' in components:
             total_bytes += workspace.database_path.stat().st_size
         if 'report_templates' in components:
-            total_bytes += source_tree_size(workspace.slides_templates_dir)
+            template_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
+            total_bytes += sum(len(_template_row_content(row)) * (2 if row['is_default'] else 1)
+                               for technology in TEMPLATE_NAMES for row in template_repository.list_report_templates(technology))
         if 'input' in components:
             total_bytes += source_tree_size(workspace.input_dir)
         if 'output' in components:
@@ -3129,7 +3107,7 @@ def create_recurring_database_backup(
                 _archive_database(archive, workspace.database_path, f'{archive_workspace_root}/database.sqlite', backup_root, archived_bytes)
             if 'report_templates' in components:
                 report_progress(f'Archiving Report Templates for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
-                _archive_tree(archive, workspace.slides_templates_dir, f'{archive_workspace_root}/report-templates', progress_callback=archived_bytes)
+                _archive_workspace_report_templates(archive, workspace, f'{archive_workspace_root}/report-templates', archived_bytes)
             if 'auto_calculated_fields' in components:
                 report_progress(f'Exporting Auto-calculated Fields for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                 task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
@@ -3189,10 +3167,36 @@ def run_recurring_backup_scheduler() -> None:
         RECURRING_BACKUP_RUNNING = True
     config['last_run_period'] = period
     repository.set_application_state(RECURRING_BACKUP_STATE_KEY, json.dumps(config))
+    job_id = uuid4().hex
+    job = {
+        'id': job_id, 'status': 'queued', 'message': 'Waiting to create scheduled backup', 'progress': 0,
+        'created_at': datetime.now(timezone.utc).timestamp(),
+    }
+    with SCHEDULED_BACKUP_JOBS_LOCK:
+        SCHEDULED_BACKUP_JOBS[job_id] = job
     def run() -> None:
         global RECURRING_BACKUP_RUNNING
         try:
-            create_recurring_database_backup(config)
+            with SCHEDULED_BACKUP_JOBS_LOCK:
+                job.update(status='processing', message='Preparing scheduled backup', progress=1)
+            def update_progress(message: str, progress: float) -> None:
+                with SCHEDULED_BACKUP_JOBS_LOCK:
+                    current = SCHEDULED_BACKUP_JOBS.get(job_id)
+                    if current and current.get('status') == 'processing':
+                        current.update(message=message, progress=max(1, min(98, round(progress))))
+            destination = create_recurring_database_backup(config, update_progress)
+            with SCHEDULED_BACKUP_JOBS_LOCK:
+                if job.get('cancel_requested'):
+                    destination.unlink(missing_ok=True)
+                    job.update(status='cancelled', message='Scheduled backup stopped and incomplete ZIP removed', progress=100,
+                               finished_at=datetime.now(timezone.utc).timestamp())
+                    return
+                job.update(status='ready', message=f'Backup created: {destination.name}', progress=100,
+                           finished_at=datetime.now(timezone.utc).timestamp())
+        except Exception as exc:
+            with SCHEDULED_BACKUP_JOBS_LOCK:
+                job.update(status='failed', message=f'Backup failed: {exc}', progress=100,
+                           finished_at=datetime.now(timezone.utc).timestamp())
         finally:
             with RECURRING_BACKUP_LOCK:
                 RECURRING_BACKUP_RUNNING = False
@@ -3455,7 +3459,6 @@ def _archive_workspace(
     progress_callback: Callable[[int], None] | None = None, include_generated_outputs: bool = True,
     include_input_files: bool = True,
 ) -> None:
-    materialize_workspace_report_templates(workspace)
     task_repository = Repository(
         workspace.database_path,
         global_db_path=repository.global_db_path,
@@ -3465,7 +3468,7 @@ def _archive_workspace(
         archive, workspace.database_path, f'{archive_prefix}/database.sqlite', scratch_dir, progress_callback,
         exclude_tables=() if include_generated_outputs else ('generated_jobs',),
     )
-    _archive_tree(archive, workspace.slides_templates_dir, f'{archive_prefix}/report-templates', progress_callback=progress_callback)
+    _archive_workspace_report_templates(archive, workspace, f'{archive_prefix}/report-templates', progress_callback)
     archive.writestr(
         f'{archive_prefix}/auto-calculated-fields/auto-calculated-fields.json',
         json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
@@ -3571,8 +3574,7 @@ def build_export_archive_file(
                 source_workspace={'id': source_workspace.id, 'name': source_workspace.name}, archive_path=archive_path,
             )
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
-            materialize_workspace_report_templates(source_workspace)
-            _archive_tree(archive, source_workspace.slides_templates_dir, archive_path, progress_callback=progress_callback)
+            _archive_workspace_report_templates(archive, source_workspace, archive_path, progress_callback)
         elif target == 'auto-calculated-fields':
             source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
             source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
@@ -4175,8 +4177,11 @@ def register_workspace_template_files(workspace: Workspace) -> None:
             target_repository.set_default_report_template(technology, catalogue_registry_key(default_files[0].stem))
 
 
-def materialize_workspace_report_templates(workspace: Workspace) -> None:
-    """Create legacy CSV copies from database-backed Report Templates for an archive."""
+def _archive_workspace_report_templates(
+    archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str,
+    progress_callback: Callable[[int], None] | None = None,
+) -> None:
+    """Write database-backed Report Template CSV files directly into a ZIP."""
     target_repository = Repository(workspace.database_path, global_db_path=repository.global_db_path)
     target_repository.initialize_template_registry()
     for technology in TEMPLATE_NAMES:
@@ -4184,15 +4189,15 @@ def materialize_workspace_report_templates(workspace: Workspace) -> None:
             content = _template_row_content(row)
             if not content:
                 continue
-            library_path = workspace.slides_templates_dir / 'library' / technology / template_filename(str(row['name']))
-            atomic_write_template(library_path, content)
+            library_path = f'{archive_prefix}/library/{technology}/{template_filename(str(row["name"]))}'
+            archive.writestr(library_path, content)
+            if progress_callback:
+                progress_callback(len(content))
             if bool(row['is_default']):
-                default_dir = workspace.slides_templates_dir / 'default' / technology
-                default_path = default_dir / template_filename(str(row['name']))
-                for previous in default_dir.glob('*.csv'):
-                    if previous != default_path:
-                        previous.unlink()
-                atomic_write_template(default_path, content)
+                default_path = f'{archive_prefix}/default/{technology}/{template_filename(str(row["name"]))}'
+                archive.writestr(default_path, content)
+                if progress_callback:
+                    progress_callback(len(content))
 
 
 def migrate_workspace_template_registries() -> None:
@@ -4234,21 +4239,24 @@ def import_slides_templates_archive(
     if any(workspace is None for workspace in destinations):
         raise ValueError('A destination workspace no longer exists.')
     for workspace in destinations:
+        target_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
+        target_repository.initialize_template_registry()
         for path in templates_payload.rglob('*'):
             if not path.is_file() or path.suffix.lower() != '.csv':
                 continue
             relative = path.relative_to(templates_payload)
             if len(relative.parts) != 3 or relative.parts[0] not in {'library', 'default'} or relative.parts[1] not in TEMPLATE_NAMES:
                 raise ValueError('The package contains an invalid Report Template path.')
-            # Keep one default per technology; library copies remain available.
-            target = workspace.slides_templates_dir / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
+            technology = relative.parts[1]
+            name = catalogue_registry_key(path.stem)
+            content = path.read_bytes()
+            existing = next((row for row in target_repository.list_report_templates(technology) if str(row['name']) == name), None)
+            if existing:
+                target_repository.set_report_template_content(technology, name, content)
+            else:
+                target_repository.add_report_template(technology, name, content, is_default=False)
             if relative.parts[0] == 'default':
-                for previous in target.parent.glob('*.csv'):
-                    if previous != target:
-                        previous.unlink()
-            atomic_write_template(target, path.read_bytes())
-        register_workspace_template_files(workspace)
+                target_repository.set_default_report_template(technology, name)
     _clear_chart_preview_caches()
     return len(destinations)
 
@@ -5001,7 +5009,6 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             catalogues = report_catalogue_options(technology)
             active_catalogue = next((catalogue for catalogue in catalogues if catalogue['active']), None)
             report_catalogs[technology] = {
-                'path': active_catalogue['path'] if active_catalogue else None,
                 'source': 'Active template' if active_catalogue else 'No default template configured',
                 'catalogues': catalogues,
             }
@@ -5038,6 +5045,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         'datasets': 'Datasets',
         'generated_jobs': 'Generated jobs',
         'report_templates': 'Report Templates',
+        'workspace_state': 'Workspace State',
         'transfer_offers': 'Server transfer offers',
         'users': 'Users',
     }
@@ -5813,6 +5821,21 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
             'stop_url': '/api/background-tasks/server/stop',
         })
 
+    if user.role == 'super-admin':
+        with SCHEDULED_BACKUP_JOBS_LOCK:
+            scheduled_backup_jobs = [dict(job) for job in SCHEDULED_BACKUP_JOBS.values()]
+        for job in scheduled_backup_jobs:
+            if job.get('status') not in {'queued', 'processing'}:
+                continue
+            tasks.append({
+                'id': f'scheduled-backup:{job.get("id")}', 'workspace_id': '__server__',
+                'label': 'Creating scheduled database backup',
+                'detail': str(job.get('message') or 'Creating ZIP backup'),
+                'progress': max(0, min(100, int(job.get('progress') or 0))),
+                'stop_task_id': f'scheduled-backup:{job.get("id")}',
+                'stop_url': '/api/background-tasks/server/stop',
+            })
+
     with MANUAL_RESTORE_JOBS_LOCK:
         manual_restore_jobs = [dict(job) for job in MANUAL_RESTORE_JOBS.values()]
     for job in manual_restore_jobs:
@@ -5835,7 +5858,7 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
         append_job(job, 'transfer', f'Transferring {str(job.get("target") or "package").replace("-", " ").title()}')
     if user.role == 'super-admin':
         for offer in incoming_transfers:
-            if offer.get('status') not in {'receiving', 'received', 'importing'}:
+            if offer.get('status') not in {'receiving', 'importing'}:
                 continue
             label = 'Importing transferred package' if offer.get('status') == 'importing' else 'Receiving server transfer'
             append_job(
@@ -5952,7 +5975,7 @@ def background_tasks_status(user: SessionUser = Depends(current_user)) -> JSONRe
         if workspace_id == '__server__':
             group = grouped.setdefault('__server__', {
                 'workspace_id': '__server__', 'workspace_name': 'Server tasks',
-                'is_active': True, 'tasks': [],
+                'is_active': False, 'dock': 'right', 'tasks': [],
             })
         else:
             group = grouped.setdefault(workspace_id, {
@@ -6055,8 +6078,17 @@ def stop_background_task(
 def stop_server_background_task(task_id: str = Form(...), user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Stop an owner-visible server task that does not belong to one workspace."""
     prefix, _, job_id = str(task_id).partition(':')
-    if prefix != 'manual-backup' or not job_id:
+    if prefix not in {'manual-backup', 'scheduled-backup'} or not job_id:
         raise HTTPException(status_code=400, detail='This background task cannot be stopped.')
+    if prefix == 'scheduled-backup':
+        if user.role != 'super-admin':
+            raise HTTPException(status_code=403, detail='Only super-admins can stop scheduled backups.')
+        with SCHEDULED_BACKUP_JOBS_LOCK:
+            job = SCHEDULED_BACKUP_JOBS.get(job_id)
+            if not job or job.get('status') not in {'queued', 'processing'}:
+                raise HTTPException(status_code=409, detail='This database backup can no longer be stopped.')
+            job.update(cancel_requested=True, message='Stopping scheduled backup')
+        return JSONResponse({'stopping': task_id})
     with MANUAL_BACKUP_JOBS_LOCK:
         job = MANUAL_BACKUP_JOBS.get(job_id)
         if not job or job.get('owner') != user.username or job.get('status') not in {'queued', 'processing'}:
@@ -6992,7 +7024,7 @@ def _temporary_chart_preview_context(source: str, identifier: str, chart_index: 
     template = next((item for item in report_catalogue_options(technology) if item['name'] == template_name), None)
     if technology not in TEMPLATE_NAMES or not template:
         raise HTTPException(status_code=404, detail='The Report Template used by this Chart Set is no longer available.')
-    indexed_entries = list(enumerate(load_template_catalogue(template['path'], technology)))
+    indexed_entries = list(enumerate(load_template_catalogue(template['content'], technology)))
     # Standalone Chart Sets retain the CSV chart-row order. PowerPoint reports
     # render slides numerically, then retain chart order inside each slide.
     # The editor always presents every row sorted by slide. Keep the original
@@ -7722,9 +7754,9 @@ def generate_netcheck_cdr_report(
         selected_catalogue = available_catalogues[catalogue_identifier]
     if selected_catalogue is None:
         raise HTTPException(status_code=400, detail=f'No {technology.upper()} Report Template is available.')
-    catalog_path = selected_catalogue['path']
+    catalog_content = selected_catalogue['content']
     try:
-        catalog_entries = load_template_catalogue(catalog_path, technology)
+        catalog_entries = load_template_catalogue(catalog_content, technology)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Unable to load the selected {technology.upper()} report template: {exc}") from exc
     generated_at = datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -7840,14 +7872,11 @@ def _run_report_chart_job(
             multivendor = report_scope == 'multivendor'
             if multivendor and not all(dataset.get('vendor_mapping_applied') for datasets in selected.values() for dataset in datasets):
                 raise ValueError('Multivendor reporting requires every selected Data, Voice and Speech CDR to have a Workspace Vendor mapping.')
-            template_root = task_repository.db_path.parent / 'slides-templates'
             metadata = next((row for row in task_repository.list_report_templates(technology)
                              if row['name'] == template_name), None)
-            area = 'default' if metadata and metadata['is_default'] else 'library'
-            template_path = template_root / area / technology / template_filename(template_name)
-            if not metadata or not template_path.is_file():
+            if not metadata or not _template_row_content(metadata):
                 raise ValueError('The Report Template used by this Chart Set is no longer available.')
-            catalog_entries = load_template_catalogue(template_path, technology, task_repository=task_repository)
+            catalog_entries = load_template_catalogue(_template_row_content(metadata), technology, task_repository=task_repository)
             _ensure_report_job_active(task_repository, job_id, chart_job=True)
             task_repository.update_report_chart_job(job_id, status='processing', progress=12)
             chart_entries = [entry for entry in catalog_entries if entry.source_kind]
@@ -8541,7 +8570,7 @@ def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) 
     if not template_option:
         raise HTTPException(status_code=400, detail='The Report Template used by this report is no longer available.')
     try:
-        catalog_entries = load_template_catalogue(template_option['path'], technology)
+        catalog_entries = load_template_catalogue(template_option['content'], technology)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f'Unable to load the selected {technology.upper()} report template: {exc}') from exc
     file_name = Path(str(previous['output_file'] or '')).name
@@ -9138,7 +9167,7 @@ def save_recurring_backup_settings(
         raise HTTPException(status_code=400, detail='Choose a maximum between 1 and 1000 backups.')
     if not 0 <= weekly_day <= 6 or not 1 <= monthly_day <= 31:
         raise HTTPException(status_code=400, detail='Choose a valid scheduled day.')
-    storage_path = recurring_backup_path({'backup_path': backup_path.strip() or str(application_config_dir / 'scheduled-backups')})
+    storage_path = recurring_backup_path({'backup_path': backup_path.strip() or str(application_data_dir / 'scheduled-backups')})
     try:
         storage_path = ensure_backup_path_is_within_config(storage_path)
         storage_path.mkdir(parents=True, exist_ok=True)
@@ -9155,6 +9184,38 @@ def save_recurring_backup_settings(
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JSONResponse({'message': 'Scheduler settings saved.'})
     return RedirectResponse('/admin?backup_notice=Scheduler+settings+saved.', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/admin/database/backups/selection')
+def save_recurring_backup_selection(
+    enabled: bool = Form(False),
+    components: list[str] = Form(default=[]),
+    workspace_ids: list[str] = Form(default=[]),
+    backup_path: str = Form(''),
+    user: SessionUser = Depends(admin_user),
+) -> JSONResponse:
+    """Persist immediate Backup panel choices without modifying scheduler timing."""
+    selected_components = [item for item in components if item in {'app_database', *WORKSPACE_ARCHIVE_COMPONENTS}]
+    allowed_workspace_ids = {workspace.id for workspace in accessible_workspaces(user)}
+    selected_workspace_ids = list(dict.fromkeys(item for item in workspace_ids if item in allowed_workspace_ids))
+    if any(item in selected_components for item in WORKSPACE_ARCHIVE_COMPONENTS) and not selected_workspace_ids:
+        raise HTTPException(status_code=400, detail='Select at least one accessible workspace for the selected backup content.')
+    if enabled and not selected_components:
+        raise HTTPException(status_code=400, detail='Select at least one backup component.')
+    storage_path = recurring_backup_path({'backup_path': backup_path.strip() or str(application_data_dir / 'scheduled-backups')})
+    try:
+        storage_path = ensure_backup_path_is_within_config(storage_path)
+        storage_path.mkdir(parents=True, exist_ok=True)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f'Unable to use the backup path: {exc}') from exc
+    config = recurring_backup_settings() | {
+        'enabled': enabled,
+        'components': selected_components,
+        'workspace_ids': selected_workspace_ids,
+        'backup_path': str(storage_path),
+    }
+    repository.set_application_state(RECURRING_BACKUP_STATE_KEY, json.dumps(config))
+    return JSONResponse({'message': 'Backup selection saved.'})
 
 
 @app.post('/admin/database/backups/run')
@@ -9176,7 +9237,7 @@ def run_manual_database_backup(
         raise HTTPException(status_code=400, detail='Select at least one backup component.')
     if not 1 <= max_backups <= 1000:
         raise HTTPException(status_code=400, detail='Choose a maximum between 1 and 1000 backups.')
-    storage_path = recurring_backup_path({'backup_path': backup_path.strip() or str(application_config_dir / 'scheduled-backups')})
+    storage_path = recurring_backup_path({'backup_path': backup_path.strip() or str(application_data_dir / 'scheduled-backups')})
     try:
         storage_path = ensure_backup_path_is_within_config(storage_path)
         storage_path.mkdir(parents=True, exist_ok=True)
@@ -9188,6 +9249,7 @@ def run_manual_database_backup(
         'backup_path': str(storage_path),
         'workspace_ids': selected_workspace_ids,
     }
+    repository.set_application_state(RECURRING_BACKUP_STATE_KEY, json.dumps(config))
     job = start_manual_database_backup(config, user.username)
     repository.add_log(user.username, 'start_manual_database_backup', json.dumps({
         'job_id': job['id'], 'components': selected_components, 'backup_path': str(storage_path),
@@ -9209,10 +9271,16 @@ def backup_files(backup_path: str = Query(default=''), user: SessionUser = Depen
         for item in sorted(root.glob('*.zip'), key=lambda value: value.stat().st_mtime, reverse=True):
             try:
                 files.append({'name': item.name, 'size': format_workspace_size(item.stat().st_size),
-                              'modified': datetime.fromtimestamp(item.stat().st_mtime).astimezone().strftime('%Y-%m-%d %H:%M')})
+                              'modified': backup_started_at_label(item)})
             except OSError:
                 continue
     return JSONResponse({'files': files})
+
+
+@app.get('/api/admin/backup-status')
+def backup_status(user: SessionUser = Depends(admin_user)) -> JSONResponse:
+    """Return live backup status without reloading the Administration page."""
+    return JSONResponse(recurring_backup_status(recurring_backup_settings()), headers={'Cache-Control': 'no-store'})
 
 
 @app.post('/api/admin/backup-files/inspect')
@@ -10262,7 +10330,6 @@ def change_report_catalogue_type(
             raise ValueError('The Report Template has no CSV content.')
         repository.move_report_template(technology, catalogue_id, target_technology)
         repository.set_report_template_content(target_technology, catalogue_id, content)
-        _write_template_compatibility_files(target_technology, catalogue_id, content, is_default=False)
     except ValueError as exc:
         return render_admin_template(request, user, error=str(exc), status_code=400)
     repository.add_log(user.username, 'change_report_template_type', json.dumps({
@@ -10300,9 +10367,6 @@ def rename_report_catalogue(
         if new_identifier != catalogue_id:
             repository.rename_report_template(technology, catalogue_id, new_identifier)
             content = bytes(catalogue['content'])
-            _write_template_compatibility_files(technology, new_identifier, content, is_default=bool(catalogue['active']))
-            named_catalogue_path(technology, catalogue_id, catalogue_id).unlink(missing_ok=True)
-            (settings.slides_templates_dir / 'default' / technology / template_filename(catalogue_id)).unlink(missing_ok=True)
             catalogue_id = new_identifier
     except ValueError as exc:
         if 'application/json' in request.headers.get('accept', ''):
@@ -10341,7 +10405,6 @@ def duplicate_report_catalogue(
         identifier = catalogue_registry_key(name)
         suffix += 1
     repository.add_report_template(technology, identifier, bytes(catalogue['content']))
-    _write_template_compatibility_files(technology, identifier, bytes(catalogue['content']), is_default=False)
     repository.add_log(user.username, 'duplicate_report_template', json.dumps({'technology': technology, 'source': catalogue_id, 'template': name}))
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
@@ -10361,7 +10424,6 @@ def create_empty_report_catalogue(
         suffix += 1
     content = catalogue_csv([])
     repository.add_report_template(technology, name, content)
-    _write_template_compatibility_files(technology, name, content, is_default=False)
     repository.add_log(user.username, 'create_report_template', json.dumps({
         'technology': technology,
         'template': name,
@@ -10385,7 +10447,6 @@ def delete_report_catalogue(
         return render_admin_template(request, user, error='Report Template not found.', status_code=404)
     if catalogue['active']:
         return render_admin_template(request, user, error='The default template cannot be deleted.', status_code=400)
-    named_catalogue_path(technology, catalogue_id, catalogue_id).unlink(missing_ok=True)
     repository.delete_report_template(technology, catalogue_id)
     repository.add_log(user.username, 'delete_report_template', json.dumps({'technology': technology, 'template': catalogue['name']}))
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
@@ -10623,7 +10684,7 @@ def export_report_catalogue(technology: str, user: SessionUser = Depends(admin_u
         raise HTTPException(status_code=404, detail='Report Template not found')
     # Export is a file retrieval operation. Keep legacy/manual filter captions
     # intact even when they cannot be executed as current Filter Builder rules.
-    entries = load_template_catalogue(active['path'], technology, validate_filters=False)
+    entries = load_template_catalogue(active['content'], technology, validate_filters=False)
     filename = template_download_filename(active['name']) if active else f'{technology.upper()} Slide Template.csv'
     return Response(
         content=catalogue_csv(entries),
@@ -10647,7 +10708,7 @@ def export_selected_report_catalogue(
     if not catalogue:
         raise HTTPException(status_code=404, detail='Report Template not found')
     return Response(
-        content=catalogue_csv(load_template_catalogue(catalogue['path'], technology, validate_filters=False)),
+        content=catalogue_csv(load_template_catalogue(catalogue['content'], technology, validate_filters=False)),
         media_type='text/csv; charset=utf-8',
         headers={'Content-Disposition': f'attachment; filename="{template_download_filename(catalogue["name"])}"'},
     )
@@ -10661,7 +10722,7 @@ def export_named_report_catalogue(technology: str, catalogue_id: str, user: Sess
     catalogue = next((item for item in report_catalogue_options(technology) if item['identifier'] == catalogue_id), None)
     if not catalogue:
         raise HTTPException(status_code=404, detail='Report Template not found')
-    entries = load_template_catalogue(catalogue['path'], technology, validate_filters=False)
+    entries = load_template_catalogue(catalogue['content'], technology, validate_filters=False)
     filename = template_download_filename(catalogue['name'])
     return Response(
         content=catalogue_csv(entries),
@@ -10869,7 +10930,7 @@ def report_catalogue_copy_options(user: SessionUser = Depends(admin_user)) -> JS
     for technology in TEMPLATE_NAMES:
         for catalogue in report_catalogue_options(technology):
             try:
-                entries = load_template_catalogue(catalogue['path'], technology, validate_filters=False)
+                entries = load_template_catalogue(catalogue['content'], technology, validate_filters=False)
             except ValueError:
                 entries = []
             slides = [
@@ -11089,7 +11150,7 @@ async def copy_report_catalogue_items(
         if not target:
             raise FileNotFoundError('Destination Report Template not found.')
         try:
-            target_entries = load_template_catalogue(target['path'], target_technology, validate_filters=False)
+            target_entries = load_template_catalogue(target['content'], target_technology, validate_filters=False)
         except ValueError as exc:
             if str(exc) != 'The report template does not contain any rows.':
                 raise
@@ -11122,9 +11183,7 @@ async def copy_report_catalogue_items(
         ]
         content = catalogue_csv(copied_entries)
         with TEMPLATE_SAVE_LOCK:
-            atomic_write_template(Path(target['path']), content)
-            if target['active']:
-                atomic_write_template(named_catalogue_path(target_technology, target_identifier, target_identifier), content)
+            persist_report_template(target_technology, target_identifier, content, is_default=bool(target['active']))
     except (IndexError, StopIteration, TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc) or 'The selected template content is unavailable.') from exc
     except (FileNotFoundError, OSError, sqlite3.Error) as exc:

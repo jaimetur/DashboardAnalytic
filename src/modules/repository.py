@@ -820,7 +820,10 @@ class Repository:
                 for row in column_rows
             ]
             rows = [
-                dict(row)
+                {
+                    key: (value.decode('utf-8', errors='replace') if isinstance(value, (bytes, memoryview)) else value)
+                    for key, value in dict(row).items()
+                }
                 for row in conn.execute(
                     f"SELECT rowid AS __database_rowid__, * FROM {quoted_table}{where_clause} ORDER BY rowid DESC LIMIT ? OFFSET ?",
                     (*parameters, page_size, page_offset),

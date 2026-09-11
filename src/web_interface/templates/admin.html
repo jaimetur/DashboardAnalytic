@@ -516,11 +516,11 @@
               <label>Retention backups<input type="number" name="max_backups" min="1" max="1000" value="{{ recurring_backup.max_backups }}" required></label>
               <button type="submit">Save scheduler settings</button>
             </div>
-            <p class="database-backup-status">Stored backups: <strong>{{ recurring_backup_status.count }}</strong> · Total size: <strong>{{ recurring_backup_status.size }}</strong> · Last successful backup: <strong>{{ recurring_backup_status.last_success }}</strong> · Next backup: <strong>{{ recurring_backup_status.next_run }}</strong></p>
+            <p class="database-backup-status" data-backup-status>Stored backups: <strong data-backup-status-count>{{ recurring_backup_status.count }}</strong> · Total size: <strong data-backup-status-size>{{ recurring_backup_status.size }}</strong> · Last successful backup: <strong data-backup-status-last>{{ recurring_backup_status.last_success }}</strong> · Next backup: <strong data-backup-status-next>{{ recurring_backup_status.next_run }}</strong></p>
           </div>
           </section>
         </form>
-        <dialog class="database-backup-path-dialog" data-backup-path-dialog><div><p class="eyebrow">Application config directory</p><h3>Select backup directory</h3><div class="database-backup-path-navigation"><button type="button" data-backup-path-home title="Go to config" aria-label="Go to config"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1Z"/></svg><span>Home</span></button><button type="button" data-backup-path-parent title="Go up one folder" aria-label="Go up one folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h5l2 2h7a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><path d="m12 16 0-6m0 0-3 3m3-3 3 3"/></svg><span>Up</span></button></div><p data-backup-path-current></p><div class="database-backup-new-directory"><input type="text" placeholder="New folder name" data-backup-path-new-name><button type="button" data-backup-path-new>Create folder</button></div><div class="database-backup-directory-list" data-backup-path-list></div><div class="confirm-actions"><button type="button" class="ghost-link" data-backup-path-cancel>Cancel</button><button type="button" data-backup-path-select>Select this directory</button></div></div></dialog>
+        <dialog class="database-backup-path-dialog" data-backup-path-dialog><div><p class="eyebrow">Application data directory</p><h3>Select backup directory</h3><div class="database-backup-path-navigation"><button type="button" data-backup-path-home title="Go to data" aria-label="Go to data"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/></svg><span>Home</span></button><button type="button" data-backup-path-parent title="Go up one folder" aria-label="Go up one folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h5l2 2h7a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><path d="m12 16 0-6m0 0-3 3m3-3 3 3"/></svg><span>Up</span></button></div><p data-backup-path-current></p><div class="database-backup-new-directory"><input type="text" placeholder="New folder name" data-backup-path-new-name><button type="button" data-backup-path-new>Create folder</button></div><div class="database-backup-directory-list" data-backup-path-list></div><div class="confirm-actions"><button type="button" class="ghost-link" data-backup-path-cancel>Cancel</button><button type="button" data-backup-path-select>Select this directory</button></div></div></dialog>
         <dialog class="confirm-dialog database-backup-restore-dialog" data-backup-restore-dialog><div><div class="database-backup-restore-dialog-head"><p class="eyebrow">Overwrite confirmation</p><h3>Restore backup</h3><p>The selected data will overwrite existing data. Select the parts to restore.</p></div><section class="database-backup-restore-workspaces"><strong>Affected workspaces</strong><div data-backup-restore-workspaces></div></section><section class="database-backup-restore-selection"><strong>Backup content</strong><div class="restore-component-options" data-backup-restore-components></div></section><div class="confirm-actions"><button type="button" class="ghost-link" data-backup-restore-cancel>Cancel</button><button type="button" class="danger-button" data-backup-restore-confirm>Restore selected data</button></div></div></dialog>
       </section>
       <section class="database-view-subpanel" data-database-view>
@@ -711,6 +711,10 @@
   const restoreWorkspaces = document.querySelector('[data-backup-restore-workspaces]');
   const backupComponents = document.querySelector('[data-backup-components]');
   const backupWorkspaces = document.querySelector('[data-backup-workspaces]');
+  const statusCount = document.querySelector('[data-backup-status-count]');
+  const statusSize = document.querySelector('[data-backup-status-size]');
+  const statusLast = document.querySelector('[data-backup-status-last]');
+  const statusNext = document.querySelector('[data-backup-status-next]');
   if (!form || !enabled || !settings) return;
   const refresh = () => { settings.hidden = !enabled.checked; };
   const refreshBackupWorkspaces = () => {
@@ -722,6 +726,28 @@
     if (!recurrence) return;
     if (weekday) weekday.hidden = recurrence.value !== 'weekly';
     if (monthday) monthday.hidden = recurrence.value !== 'monthly';
+  };
+  const refreshBackupStatus = async () => {
+    try {
+      const response = await fetch('/api/admin/backup-status', {credentials: 'same-origin', cache: 'no-store'});
+      const payload = await response.json();
+      if (!response.ok) return;
+      if (statusCount) statusCount.textContent = String(payload.count ?? '0');
+      if (statusSize) statusSize.textContent = String(payload.size ?? '0 B');
+      if (statusLast) statusLast.textContent = String(payload.last_success ?? 'No successful backup yet');
+      if (statusNext) statusNext.textContent = String(payload.next_run ?? 'Disabled');
+    } catch (_) { /* A later poll will retry. */ }
+  };
+  let selectionSaveTimer = 0;
+  const persistBackupSelection = () => {
+    window.clearTimeout(selectionSaveTimer);
+    selectionSaveTimer = window.setTimeout(async () => {
+      try {
+        await fetch('/admin/database/backups/selection', {
+          method: 'POST', credentials: 'same-origin', headers: {'X-Requested-With': 'XMLHttpRequest'}, body: new FormData(form),
+        });
+      } catch (_) { /* Saving explicitly remains available if this transient request fails. */ }
+    }, 350);
   };
   let selectedPath = '';
   let pathTarget = pathInput;
@@ -771,10 +797,11 @@
     } catch (error) { showInfoDialog(error.message || 'Unable to create the directory.', {title: 'Backup path', tone: 'error'}); }
   });
   dialog?.querySelector('[data-backup-path-cancel]')?.addEventListener('click', () => dialog.close());
-  dialog?.querySelector('[data-backup-path-select]')?.addEventListener('click', () => { if (pathTarget) pathTarget.value = selectedPath; dialog.close(); if (pathTarget === restorePath) loadBackupFiles().catch((error) => showInfoDialog(error.message, {title: 'Restore', tone: 'error'})); });
+  dialog?.querySelector('[data-backup-path-select]')?.addEventListener('click', () => { if (pathTarget) pathTarget.value = selectedPath; dialog.close(); if (pathTarget === restorePath) loadBackupFiles().catch((error) => showInfoDialog(error.message, {title: 'Restore', tone: 'error'})); else persistBackupSelection(); });
   restorePath?.addEventListener('change', () => loadBackupFiles().catch(() => {}));
   loadBackupFiles().catch(() => {});
   window.setInterval(() => loadBackupFiles().catch(() => {}), 10000);
+  window.setInterval(refreshBackupStatus, 5000);
   restore?.addEventListener('click', async () => {
     if (!restorePath?.value || !restoreFile?.value) return showInfoDialog('Select a backup file to restore.', {title: 'Restore', tone: 'error'});
     try {
@@ -839,9 +866,10 @@
       submitter.disabled = false;
     }
   });
-  enabled.addEventListener('change', refresh);
+  enabled.addEventListener('change', () => { refresh(); persistBackupSelection(); });
   recurrence?.addEventListener('change', refreshRecurrence);
-  backupComponents?.addEventListener('change', refreshBackupWorkspaces);
+  backupComponents?.addEventListener('change', () => { refreshBackupWorkspaces(); persistBackupSelection(); });
+  backupWorkspaces?.addEventListener('change', persistBackupSelection);
   refresh();
   refreshRecurrence();
   refreshBackupWorkspaces();
