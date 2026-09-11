@@ -203,7 +203,7 @@ Templates belong to their workspace. A new workspace starts without templates. E
 ### Database Management
 
 - Use **Backup Protection** for on-demand or scheduled ZIP backups. It offers independent Application database, Workspace Database, Report Templates, Auto-calculated Fields, Input and Output selections, then restores detected granular components after an overwrite confirmation.
-- Use **Databases Viewer** to browse grouped application-configuration, active-workspace and combined-CDR tables.
+- Use **Database Viewer** to browse grouped application-configuration, active-workspace and combined-CDR tables.
 - Filter complete tables with Excel-style column menus.
 - Edit or delete individual rows.
 - Clean orphaned materialised dataset rows.

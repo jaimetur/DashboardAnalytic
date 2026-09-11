@@ -524,7 +524,7 @@
         <dialog class="confirm-dialog database-backup-restore-dialog" data-backup-restore-dialog><div><div class="database-backup-restore-dialog-head"><p class="eyebrow">Overwrite confirmation</p><h3>Restore backup</h3><p>The selected data will overwrite existing data. Select the parts to restore.</p></div><section class="database-backup-restore-workspaces"><strong>Affected workspaces</strong><div data-backup-restore-workspaces></div></section><section class="database-backup-restore-selection"><strong>Backup content</strong><div class="restore-component-options" data-backup-restore-components></div></section><div class="confirm-actions"><button type="button" class="ghost-link" data-backup-restore-cancel>Cancel</button><button type="button" class="danger-button" data-backup-restore-confirm>Restore selected data</button></div></div></dialog>
       </section>
       <section class="database-view-subpanel" data-database-view>
-      <div><p class="eyebrow">Application and Workspace Databases</p><h3>Databases Viewer</h3></div>
+      <div><p class="eyebrow">Application and Workspace Databases</p><h3>Database Viewer</h3></div>
       {% if active_workspace %}
       <p class="lede">Browse, edit or remove individual records in any table of the Application database or Active Workspace: <strong>"{{ active_workspace.name }}"</strong>.</p>
       {% if database_notice %}<div class="alert database-cleanup-notice">{{ database_notice }}</div>{% endif %}

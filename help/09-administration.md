@@ -111,7 +111,7 @@ Complete unimported packages appear in **Recovered transfer packages** with cont
 
 ## Database Management
 
-Database Management has two clearly separated subsections: **Backup Protection** and **Databases Viewer**.
+Database Management has two clearly separated subsections: **Backup Protection** and **Database Viewer**.
 
 ### Backup Protection
 
@@ -136,9 +136,9 @@ Set **Retention backups** to keep a maximum number of ZIPs; the scheduler remove
 
 The status line reports the stored backup count and size, the most recent successful backup and the next scheduled run. Scheduled backups use the same chosen content and workspace selection as the Backup panel. Select Input and/or Output when raw datasets, reports or Chart Sets must be included. Scheduled backups complement infrastructure backups and portable Export packages.
 
-### Databases Viewer
+### Database Viewer
 
-**Databases Viewer** covers Application and Workspace Databases. It exposes global application-configuration tables, the active workspace database and the materialised combined CDR tables used to accelerate reporting; it is therefore broader than the active workspace alone.
+**Database Viewer** covers Application and Workspace Databases. It exposes global application-configuration tables, the active workspace database and the materialised combined CDR tables used to accelerate reporting; it is therefore broader than the active workspace alone.
 
 Tables are grouped by ownership:
 

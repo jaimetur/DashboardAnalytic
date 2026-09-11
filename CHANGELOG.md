@@ -41,7 +41,7 @@
 - Added compact-screen pagination to the Workspace Auto-calculated Fields definitions list.
 
 #### 📚 Documentation:
-- Documented Database Management's **Backup Protection** and **Databases Viewer** subsections, including granular application/workspace backup content, accessible workspace selection, on-demand and scheduled ZIPs, Restore content detection with Configuration/Workspace grouping and overwrite confirmation, config-scoped folder and ZIP pickers, retention, Docker storage requirements, combined CDR tables and floating-task progress with confirmed Stop Job controls.
+- Documented Database Management's **Backup Protection** and **Database Viewer** subsections, including granular application/workspace backup content, accessible workspace selection, on-demand and scheduled ZIPs, Restore content detection with Configuration/Workspace grouping and overwrite confirmation, config-scoped folder and ZIP pickers, retention, Docker storage requirements, combined CDR tables and floating-task progress with confirmed Stop Job controls.
 
 ---
 

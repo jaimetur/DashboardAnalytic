@@ -78,7 +78,7 @@ Chart Builder reuses the shared Interactive Preview for ad-hoc analysis.
 - **Report Templates Management**: create, import, duplicate, rename, export, delete and set defaults within the active workspace.
 - **Report Template Editor**: validated grid editing, cell assistance, Filter Builder and shared Chart Preview.
 - **Import / Export / Transfer**: portable ZIP jobs, Full Environment workspace selection, server-to-server transfer and recovered packages.
-- **Database Management**: **Backup Protection** for granular on-demand/scheduled backups and overwrite-confirmed restore, plus **Databases Viewer** for grouped application, workspace and combined-CDR tables with server-side filters, editing and cleanup.
+- **Database Management**: **Backup Protection** for granular on-demand/scheduled backups and overwrite-confirmed restore, plus **Database Viewer** for grouped application, workspace and combined-CDR tables with server-side filters, editing and cleanup.
 - **Datasets Management**: inspect and rename workspace datasets.
 
 ### Documentation tabs
