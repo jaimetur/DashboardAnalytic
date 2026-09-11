@@ -34,6 +34,7 @@
 - Moved Database View Actions to the first sticky column so row actions remain visible while horizontally scrolling, and styled the row Save action in green.
 - Scheduled database backups now appear live in Server Tasks with phase-aware progress and refresh Backup Protection status without reloading Admin. Backup filenames, Restore lists and Last successful backup consistently use the ZIP creation time; backup storage and its constrained server-side picker now default to `data/scheduled-backups`; and changing Backup Content, Workspaces to include, Backup folder or Enable recurring backups persists immediately, while Save scheduler settings persists recurrence, day, execution time and retention.
 - Kept Server Tasks in the right floating-task dock, styled active-workspace task cards green and non-active workspace/server cards soft pastel yellow, and exposed the global `application_state` table as **Application State** in Database Viewer.
+- Increased cached OpenStreetMap Map-chart source resolution to street-level zoom, with a bounded 48-tile maximum per cold render, so roads and labels remain sharper in generated PNGs.
 
 #### 🐛 Bug fixes:
 - Fixed the Reporting Chart Preview header so Manage Auto-calculated Fields appears beside its red Close control; Escape now leaves active Auto-calculated Fields and filtered-dataset child dialogs open, closing the preview only when no child dialog is active.

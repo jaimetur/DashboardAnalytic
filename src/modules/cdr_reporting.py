@@ -63,7 +63,10 @@ MAX_CDF_HOVER_TARGETS_PER_SERIES = 120
 # Increment when renderer coordinates or semantic hit-area geometry changes.
 HOVER_TARGETS_VERSION = 3
 OSM_TILE_SIZE = 256
-OSM_TILE_MAX_COUNT = 24
+# A Map PNG is 1260 pixels wide. Starting at a street-level zoom keeps labels
+# and roads crisp after the final resize while still bounding a cold cache.
+OSM_TILE_MAX_COUNT = 48
+OSM_TILE_MAX_ZOOM = 18
 OSM_TILE_CACHE_DIR = settings.data_dir / 'map-tiles-cache' / 'openstreetmap'
 OSM_TLS_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
@@ -3307,7 +3310,7 @@ def _load_osm_tile(zoom: int, x: int, y: int) -> Image.Image | None:
 
 def _osm_map_background(lon_low: float, lon_high: float, lat_low: float, lat_high: float, width: int, height: int) -> tuple[Image.Image | None, Callable[[float, float], tuple[float, float]]]:
     """Create a cached OSM base layer and coordinate transform for one chart."""
-    for zoom in range(14, 1, -1):
+    for zoom in range(OSM_TILE_MAX_ZOOM, 1, -1):
         top_left = _osm_world_coordinates(lat_high, lon_low, zoom)
         bottom_right = _osm_world_coordinates(lat_low, lon_high, zoom)
         tile_left, tile_top = int(top_left[0] // OSM_TILE_SIZE), int(top_left[1] // OSM_TILE_SIZE)
