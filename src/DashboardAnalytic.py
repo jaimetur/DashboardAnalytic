@@ -5062,10 +5062,10 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
                 'label': friendly_tables.get(table_name, table_name),
             })
     export_options = [
-        {'value': 'config', 'label': 'Config'},
+        {'value': 'config', 'label': 'App Config'},
         {'value': 'slides-templates', 'label': 'Report Templates (from active workspace)', 'disabled': not active_workspace},
         {'value': 'auto-calculated-fields', 'label': 'Auto-calculated Fields (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'full-environment', 'label': 'Full Environment (Config + Report Templates + Selected Workspaces)'},
+        {'value': 'full-environment', 'label': 'Full Environment (App Config + Report Templates + Auto-calculated Fields + Selected Workspaces)'},
         *[
             {'value': f'workspace:{workspace.id}', 'label': f'Full Workspace: {workspace.name}'}
             for workspace in accessible_workspaces(user)
