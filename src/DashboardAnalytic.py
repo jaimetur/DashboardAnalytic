@@ -1412,7 +1412,6 @@ async def lifespan(_: FastAPI):
     ensure_directories([
         settings.database_path.parent,
         settings.template_dir,
-        settings.slides_templates_dir,
         settings.ppt_templates_dir,
         settings.static_dir,
     ])
@@ -1427,6 +1426,11 @@ async def lifespan(_: FastAPI):
         legacy_workspace_registry_path(),
     )
     workspace_registry.initialize()
+    # A previous release created this obsolete compatibility root at every
+    # startup. Keep a legacy CSV tree only long enough for the registry
+    # migration above, then remove an empty root.
+    if settings.slides_templates_dir.is_dir() and not any(path.is_file() for path in settings.slides_templates_dir.rglob('*')):
+        shutil.rmtree(settings.slides_templates_dir)
     repository.set_global_database(settings.database_path.parent / 'application.db')
     repository.set_workspace_registry_database(workspace_registry.registry_path)
     migrate_workspace_template_registries()
@@ -3368,14 +3372,23 @@ def restore_database_backup(archive_path: Path, components: Iterable[str]) -> No
             if 'report_templates' in selected:
                 template_members = [name for name in names if name.startswith(f'{prefix}report-templates/')]
                 if template_members:
-                    shutil.rmtree(workspace.slides_templates_dir, ignore_errors=True)
+                    task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
+                    task_repository.initialize_template_registry()
                     for name in template_members:
                         relative = PurePosixPath(name).relative_to(PurePosixPath(f'{prefix}report-templates'))
-                        target = workspace.slides_templates_dir.joinpath(*relative.parts)
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        with archive.open(name) as source, target.open('wb') as output:
-                            shutil.copyfileobj(source, output)
-                    register_workspace_template_files(workspace)
+                        if len(relative.parts) != 3 or relative.parts[0] not in {'library', 'default'} or relative.parts[1] not in TEMPLATE_NAMES:
+                            raise ValueError(f'Backup Report Templates for "{workspace_name}" have an invalid path.')
+                        technology = relative.parts[1]
+                        template_name = catalogue_registry_key(relative.parts[2].removesuffix('.csv'))
+                        content = archive.read(name)
+                        existing = next((row for row in task_repository.list_report_templates(technology) if str(row['name']) == template_name), None)
+                        if existing:
+                            task_repository.set_report_template_content(technology, template_name, content)
+                        else:
+                            task_repository.add_report_template(technology, template_name, content, is_default=False)
+                        if relative.parts[0] == 'default':
+                            task_repository.set_default_report_template(technology, template_name)
+                    shutil.rmtree(workspace.slides_templates_dir, ignore_errors=True)
             if 'auto_calculated_fields' in selected:
                 member = next((candidate for candidate in (
                     f'{prefix}auto-calculated-fields/auto-calculated-fields.json',
@@ -4286,7 +4299,12 @@ def import_config_archive(staging_root: Path, manifest: dict[str, Any]) -> None:
         relative_path = path.relative_to(config_payload)
         if relative_path in {Path('application.db'), Path(workspace_registry.registry_path.name)}:
             continue
-        target = settings.slides_templates_dir / relative_path.relative_to('report-templates') if relative_path.parts[0] == 'report-templates' else application_config_dir / relative_path
+        # Report Templates are workspace database records. Configuration ZIPs
+        # created by older versions may still carry a CSV compatibility tree;
+        # never restore that obsolete runtime directory.
+        if relative_path.parts[0] == 'report-templates':
+            continue
+        target = application_config_dir / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
     repository.set_global_database(application_database)
