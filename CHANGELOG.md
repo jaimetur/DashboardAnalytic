@@ -45,6 +45,7 @@
 - Added compact-screen pagination to the Workspace Auto-calculated Fields definitions list.
 - Fixed Report Templates inspection in Database Viewer by rendering stored CSV BLOB values as text, capitalized `Workspace State` in the table selector, stopped completed incoming-transfer receipts from lingering as active Server Tasks, and restored legible Select all/Select none controls in the incoming transfer workspace picker.
 - Fixed immediate Report Template editing after an in-place rename by returning the canonical renamed identifier and updating the row’s editor action without requiring an Admin page reload.
+- Fixed OpenStreetMap Map-chart tile downloads on Python installations whose system certificate chain is incomplete by using the installed CA bundle while retaining TLS certificate validation.
 
 #### 📚 Documentation:
 - Documented Database Management's **Backup Protection** and **Database Viewer** subsections, including granular application/workspace backup content, accessible workspace selection, on-demand and scheduled ZIPs, Restore content detection with Configuration/Workspace grouping and overwrite confirmation, config-scoped folder and ZIP pickers, retention, Docker storage requirements, combined CDR tables and floating-task progress with confirmed Stop Job controls.

@@ -9,6 +9,7 @@ import json
 import math
 import os
 import re
+import ssl
 import unicodedata
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -21,6 +22,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
 import pandas as pd
+import certifi
 from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
@@ -63,6 +65,7 @@ HOVER_TARGETS_VERSION = 3
 OSM_TILE_SIZE = 256
 OSM_TILE_MAX_COUNT = 24
 OSM_TILE_CACHE_DIR = settings.data_dir / 'map-tiles-cache' / 'openstreetmap'
+OSM_TLS_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
 
 def _catalogue_header_key(value: str) -> str:
@@ -3289,7 +3292,7 @@ def _load_osm_tile(zoom: int, x: int, y: int) -> Image.Image | None:
             f'https://tile.openstreetmap.org/{zoom}/{x}/{y}.png',
             headers={'User-Agent': 'DashboardAnalytic/0.2.3 (cached Map chart renderer)'},
         )
-        with urlopen(request, timeout=2.5) as response:
+        with urlopen(request, timeout=2.5, context=OSM_TLS_CONTEXT) as response:
             payload = response.read()
         with Image.open(BytesIO(payload)) as downloaded:
             image = downloaded.convert('RGB')
