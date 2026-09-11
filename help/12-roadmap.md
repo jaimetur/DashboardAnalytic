@@ -8,7 +8,7 @@
 - Ad-hoc Chart Builder.
 - Template-driven NSA/SA Reports and Chart Sets.
 - Shared Interactive Preview and filtered-data viewer.
-- Slides Template management and validation.
+- Report Template management and validation.
 - Unified background jobs.
 - App Logs with user/system execution identity.
 - Portable and server-to-server environment transfer.

@@ -1235,7 +1235,9 @@ def test_admin_export_and_transfer_are_limited_to_templates_and_accessible_works
     templates_export = client.get('/admin/import-export/export?export_target=slides-templates')
     assert templates_export.status_code == 200
     with zipfile.ZipFile(BytesIO(templates_export.content)) as archive:
-        assert json.loads(archive.read('manifest.json'))['kind'] == 'slides-templates'
+        manifest = json.loads(archive.read('manifest.json'))
+        assert manifest['kind'] == 'slides-templates'
+        assert manifest['archive_path'].endswith('/report-templates')
 
     workspace_export = client.get('/admin/import-export/export?export_target=workspace:default')
     assert workspace_export.status_code == 200
@@ -2109,7 +2111,7 @@ def test_backup_skips_stale_workspace_registry_entries(monkeypatch, tmp_path: Pa
     with zipfile.ZipFile(archive_path) as archive:
         names = archive.namelist()
         manifest = json.loads(archive.read('manifest.json'))
-    assert 'workspaces/Current-Workspace/slides-templates/current-workspace.csv' in names
+    assert 'workspaces/Current-Workspace/report-templates/current-workspace.csv' in names
     assert not any(name.startswith('workspaces/Default/') for name in names)
     assert not any(name.startswith('workspaces/Workspace-3/') for name in names)
     assert manifest['components'] == ['workspace_components']

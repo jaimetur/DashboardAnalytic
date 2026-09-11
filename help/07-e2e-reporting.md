@@ -26,9 +26,9 @@ Default dataset selection:
 - Changing to Vendor Comparison reduces multiple selections to the newest currently selected CDR of each type.
 - An existing single selection is preserved even when it is not the newest dataset in the workspace.
 
-## Slides Templates
+## Report Templates
 
-PowerPoint reports use CSV Slides Templates from the active workspace, managed in **Admin → Slides Templates Management**. Administrators can create, duplicate, import, rename, export and classify NSA/SA templates there. A new workspace has no template until one is created or imported.
+PowerPoint reports use CSV Report Templates from the active workspace, managed in **Admin → Report Templates Management**. Administrators can create, duplicate, import, rename, export and classify NSA/SA templates there. A new workspace has no template until one is created or imported.
 
 The common `assets/ppt-templates/Template_CDR_analysis.pptx` supplies masters and layouts:
 

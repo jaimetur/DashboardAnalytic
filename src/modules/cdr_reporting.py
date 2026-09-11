@@ -100,7 +100,7 @@ def _canonical_catalog_headers(headers: Iterable[str]) -> tuple[str, ...]:
 
 
 def _default_catalogue_layout(technology: str, chart_count: int) -> str:
-    """Choose the standard template layout when a legacy Slides Template omitted it."""
+    """Choose the standard template layout when a legacy Report Template omitted it."""
     if technology == "nsa":
         return {
             1: "Title and 1 column + Comments",
@@ -298,7 +298,7 @@ def parse_catalog_grouping(value: str) -> GroupingSpec:
 
 
 def parse_legend_position(value: str) -> str:
-    """Return the canonical legend position declared by a Slides Template row."""
+    """Return the canonical legend position declared by a Report Template row."""
     normalized = value.strip().casefold()
     if not normalized:
         return "top"
@@ -419,7 +419,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
 
 
 def convert_catalog_csv(content: bytes | str, technology: str) -> bytes:
-    """Migrate a compatible legacy CSV into the current editable Slides Templates schema.
+    """Migrate a compatible legacy CSV into the current editable Report Templates schema.
 
     The importer deliberately accepts common title spelling variants and the former
     single ``Grouping`` column.  Missing newer presentation-only columns are left
@@ -499,7 +499,7 @@ def load_catalog_csv(path: Path, technology: str, *, validate_filters: bool = Tr
 
 
 def active_catalog_path(catalog_dir: Path, fallback_catalog: Path, technology: str) -> Path:
-    """Return the built-in Slides Template kept in the technology library."""
+    """Return the built-in Report Template kept in the technology library."""
     return fallback_catalog
 
 
@@ -3818,7 +3818,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
     if not template.exists():
         raise FileNotFoundError(f"Reporting template not found: {template.name}")
     if not catalog:
-        raise ValueError("A Slides Template is required to generate the report.")
+        raise ValueError("A Report Template is required to generate the report.")
     # A report may concatenate campaigns that were exported using different
     # operator spellings.  Apply aliases only to these in-memory report frames
     # before filtering and grouping; Workspace datasets remain source-faithful.

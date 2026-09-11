@@ -1,6 +1,6 @@
 # Chart Builder
 
-Chart Builder is the ad-hoc chart editor. It reuses the Interactive Preview from E2E Reporting and Slides Template editing, but its definition is temporary: it never changes a stored template or creates a PowerPoint report.
+Chart Builder is the ad-hoc chart editor. It reuses the Interactive Preview from E2E Reporting and Report Template editing, but its definition is temporary: it never changes a stored template or creates a PowerPoint report.
 
 ## Workflow
 
@@ -60,4 +60,4 @@ Legend Position: Bottom
 - If no source appears, process a dataset and select its matching CDR Type.
 - If a chart is empty, inspect filtered data and verify KPI, technology and filter values.
 
-Use E2E Reporting for persistent Chart Sets and Slides Template Editor for reusable definitions.
+Use E2E Reporting for persistent Chart Sets and Report Template Editor for reusable definitions.

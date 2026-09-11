@@ -59,7 +59,7 @@ CONTAINER_NAME=dashboardanalytic
 Persist both roots:
 
 - Config: users, permissions and transfer offers.
-- Data: workspace registry, databases, Slides Templates, uploads, reports, Chart Sets and transfer packages.
+- Data: workspace registry, databases, Report Templates, uploads, reports, Chart Sets and transfer packages.
 
 Do not rely on the writable container layer. Recreating a container must not remove application state.
 

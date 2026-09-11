@@ -4,12 +4,12 @@
 ---
 
 ## Release: v0.2.3
-### Release Date: 2026-09-10
+### Release Date: 2026-09-11
 #### ⚠️ Breaking Changes:
 - Workspace duplication no longer includes generated Reports and Chart Sets by default. Select the new inclusion option when a duplicate must retain the source `output` tree; imported workspaces continue to rebase copied report artifacts so Reporting can show their chart thumbnails.
 - Renamed the workspace table `calculated_dimensions` to `autocalculated_fields`. Existing workspace databases migrate automatically, but direct SQL queries, scripts and integrations must use the new table name.
 - Renamed Slides Templates to Report Templates and moved their CSV content into each workspace's `report_templates` table. Existing CSV templates migrate automatically when their workspace is opened, but integrations reading template files or using the former terminology must be updated.
-- Unified Backup and Import / Export ZIP layouts under `workspaces/<workspace name>/`, removed the intermediate `full-workspace` directory and store Auto-calculated Fields as `auto-calculated-fields/auto-calculated-fields.json`. The application continues to import older layouts, but external ZIP readers and writers must adopt the new paths.
+- Unified Backup and Import / Export ZIP layouts under `workspaces/<workspace name>/`, removed the intermediate `full-workspace` directory, store Report Template CSV files in `report-templates/` and Auto-calculated Fields as `auto-calculated-fields/auto-calculated-fields.json`. External ZIP readers and writers must adopt the new paths.
 - Replaced the flat archive manifest component list across Backup, Restore, Import / Export and Transfer. Packages now declare only `app_database` and/or `workspace_components` in `components`, with `workspace_components` separately listing `workspace_database`, `input`, `output`, `report_templates` and/or `auto_calculated_fields`; backup settings, automation and external manifest consumers must adopt this schema.
 
 #### 🌟 New Features:
@@ -41,7 +41,7 @@
 - Added compact-screen pagination to the Workspace Auto-calculated Fields definitions list.
 
 #### 📚 Documentation:
-- Documented Database Backups: scoped configuration/workspace and full-workspace content, accessible-workspace selection, on-demand and scheduled ZIPs, Restore content detection and overwrite confirmation, config-scoped directory and ZIP pickers, retention, Docker storage requirements and floating-task progress, plus workspace-grouped background-task cards and their confirmed Stop Job behaviour.
+- Documented Database Management's **Backup Protection** and **Databases Viewer** subsections, including granular application/workspace backup content, accessible workspace selection, on-demand and scheduled ZIPs, Restore content detection with Configuration/Workspace grouping and overwrite confirmation, config-scoped folder and ZIP pickers, retention, Docker storage requirements, combined CDR tables and floating-task progress with confirmed Stop Job controls.
 
 ---
 

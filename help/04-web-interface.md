@@ -46,7 +46,7 @@ Single-select and multi-select controls share a compact searchable style.
 
 ## Filter Builder
 
-The shared Filter Builder is used by Chart Builder, E2E Reporting Chart Preview and Slides Template Chart Preview.
+The shared Filter Builder is used by Chart Builder, E2E Reporting Chart Preview and Report Template Chart Preview.
 
 - The field selector is searchable.
 - Operators adapt to list, text and numeric conditions.

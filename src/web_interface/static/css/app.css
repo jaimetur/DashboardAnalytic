@@ -268,7 +268,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .admin-stack .module-hero-admin { order: -2; }
 .admin-stack .import-export-panel { order: -1; }
 .admin-stack .database-management-panel { order: 1; }
-.admin-stack [data-panel-state-key="admin:datasets"] { order: 0; }
+.admin-stack [data-panel-state-key="admin:datasets"] { order: 2; }
 .admin-stack [data-panel-state-key="admin:audit"] { order: 3; }
 .database-management-content { display: grid; gap: 1rem; }
 .database-management-content .lede { margin: 0; }
@@ -290,7 +290,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .database-backup-restore-dialog-head h3 { color: #7d2731; }
 .database-backup-restore-workspaces, .database-backup-restore-selection { display: grid; gap: 0.6rem; padding: 0.85rem; border: 1px solid rgba(139, 29, 36, 0.18); border-radius: 12px; background: #fffafa; color: #6a2b31; }
 .database-backup-restore-workspaces > div { display: flex; flex-wrap: wrap; gap: 0.45rem; }
-.database-backup-restore-selection .restore-component-options { display: grid; gap: 0.45rem; }
+.database-backup-restore-selection .restore-component-options { display: grid; gap: 0.7rem; }
+.database-backup-restore-selection .restore-component-group { display: grid; gap: 0.45rem; }
+.database-backup-restore-selection .restore-component-group h4 { margin: 0; padding: 0.34rem 0.55rem; border-bottom: 1px solid rgba(139, 29, 36, 0.18); color: #6d222b; font-size: 0.76rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
 .database-backup-restore-selection .confirm-option { padding: 0.55rem 0.65rem; border: 1px solid rgba(139, 29, 36, 0.16); border-radius: 9px; background: #fff; }
 .database-backup-restore-selection .confirm-option.is-disabled { opacity: 0.52; cursor: not-allowed; }
 .database-backup-restore-dialog [data-backup-restore-cancel] { background: #e7ecef; border-color: #b7c2c9; color: #3e5562; box-shadow: none; }
@@ -333,6 +335,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .database-backup-path-picker { display: flex; gap: 0.45rem; }
 .database-backup-path input { width: 100%; min-width: 0; box-sizing: border-box; }
 .database-backup-path-picker button { flex: 0 0 auto; padding: 0.58rem 0.75rem; background: #f3e5e4; border-color: rgba(139, 29, 36, 0.28); color: #7d2731; box-shadow: none; }
+.admin-stack .database-backup-path-picker button:hover:not(:disabled), .admin-stack .database-backup-path-picker button:focus-visible { background: #e8c9c7; border-color: rgba(110, 24, 36, 0.62); color: #591820; box-shadow: 0 0 0 3px rgba(139, 29, 36, 0.12); }
 .database-backup-now { justify-self: start; background: linear-gradient(135deg, #8f2932, #c24a4d); border-color: rgba(125, 39, 49, 0.72); color: #fff; }
 .backup-notice { margin: 0; }
 .database-backup-path-dialog { width: min(94vw, 980px); height: min(88dvh, 760px); border: 0; border-radius: 16px; padding: 0; color: #4a3033; box-shadow: 0 24px 60px rgba(65,18,27,0.3); overflow: hidden; }
@@ -345,7 +348,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .database-backup-path-navigation svg { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .database-backup-path-navigation [data-backup-path-home] svg path:first-child { fill: currentColor; stroke: none; }
 .database-backup-path-navigation [data-backup-path-home] { background: #255f93; border-color: #1c4a74; color: #fff; }
+.admin-stack .database-backup-path-navigation [data-backup-path-home]:hover:not(:disabled), .admin-stack .database-backup-path-navigation [data-backup-path-home]:focus-visible { background: #174a78; border-color: #10375b; color: #fff; box-shadow: 0 0 0 3px rgba(37, 95, 147, 0.22); }
 .database-backup-path-navigation [data-backup-path-parent] { background: #e9eef2; border-color: #a8b7c2; color: #284553; }
+.admin-stack .database-backup-path-navigation [data-backup-path-parent]:hover:not(:disabled), .admin-stack .database-backup-path-navigation [data-backup-path-parent]:focus-visible { background: #d3e0e8; border-color: #7894a5; color: #173d51; box-shadow: 0 0 0 3px rgba(44, 87, 112, 0.14); }
 .database-backup-path-navigation [data-backup-path-parent]:disabled { background: #f1f3f4; border-color: #d5dde2; color: #98a5ad; cursor: not-allowed; }
 .database-backup-new-directory { display: flex; gap: 0.5rem; }
 .database-backup-new-directory input { min-width: 0; flex: 1 1 auto; }
@@ -354,7 +359,9 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .database-backup-directory-list button { display: flex; align-items: center; width: 100%; height: 2.65rem; padding: 0.55rem 0.7rem; overflow: hidden; border: 0; border-radius: 8px; background: transparent; color: #6f202a; text-align: left; text-overflow: ellipsis; white-space: nowrap; box-shadow: none; }
 .database-backup-directory-list button:hover { background: #8d2631; color: #ffffff !important; }
 .database-backup-path-dialog [data-backup-path-cancel] { background: #e7ecef; border-color: #b7c2c9; color: #3e5562; box-shadow: none; }
+.admin-stack .database-backup-path-dialog [data-backup-path-cancel]:hover:not(:disabled), .admin-stack .database-backup-path-dialog [data-backup-path-cancel]:focus-visible { background: #d1dce2; border-color: #899da9; color: #243f4d; box-shadow: 0 0 0 3px rgba(62, 85, 98, 0.14); }
 .database-backup-path-dialog [data-backup-path-select] { background: #1d7b70; border-color: #146158; color: #fff; }
+.admin-stack .database-backup-path-dialog [data-backup-path-select]:hover:not(:disabled), .admin-stack .database-backup-path-dialog [data-backup-path-select]:focus-visible { background: #12645b; border-color: #0b4c45; color: #fff; box-shadow: 0 0 0 3px rgba(29, 123, 112, 0.20); }
 .database-backup-status { margin: 0; padding-top: 0.75rem; border-top: 1px solid rgba(125, 39, 49, 0.14); color: #50363a; font-size: 0.9rem; }
 @media (max-width: 680px) { .database-backup-components, .database-backup-components .multiselect-shell { width: 100%; } .database-backup-components .multiselect-menu { min-width: 0; } .database-backup-components .multiselect-option { white-space: normal; } }
 .database-view-toolbar { display: flex; align-items: end; gap: 0.75rem; flex-wrap: wrap; }

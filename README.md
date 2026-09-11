@@ -47,7 +47,7 @@ E2E Dashboard analyses one ready Data, Voice or Speech CDR.
 
 ### E2E Reporting
 
-E2E Reporting combines ready CDRs with a Slides Template from the active workspace.
+E2E Reporting combines ready CDRs with a Report Template from the active workspace.
 
 - **Reporting module**: choose NetCheck CDR Reports or the future Smart Orchestrator Logs workflow.
 - **NetCheck CDR Reports**: select Data, Voice and Speech campaigns, NSA/SA, template and Operator/Vendor Comparison.
@@ -78,7 +78,7 @@ Chart Builder reuses the shared Interactive Preview for ad-hoc analysis.
 - **Report Templates Management**: create, import, duplicate, rename, export, delete and set defaults within the active workspace.
 - **Report Template Editor**: validated grid editing, cell assistance, Filter Builder and shared Chart Preview.
 - **Import / Export / Transfer**: portable ZIP jobs, Full Environment workspace selection, server-to-server transfer and recovered packages.
-- **Database Management**: scoped on-demand and scheduled backups, overwrite-confirmed restore, grouped global/workspace tables, server-side filters, editing and cleanup.
+- **Database Management**: **Backup Protection** for granular on-demand/scheduled backups and overwrite-confirmed restore, plus **Databases Viewer** for grouped application, workspace and combined-CDR tables with server-side filters, editing and cleanup.
 - **Datasets Management**: inspect and rename workspace datasets.
 
 ### Documentation tabs
@@ -134,7 +134,7 @@ Local storage roots can be set in [`storage-paths.conf`](storage-paths.conf). En
 | `APP_DEV_PORT` | Development service port. |
 | `APP_SECRET_KEY` | Private session-signing secret. |
 | `APP_CONFIG_DIR` | Global database, users, permissions and transfer offers. |
-| `APP_DATA_DIR` | Workspace registry, workspaces, Slides Templates and transfer packages. |
+| `APP_DATA_DIR` | Workspace registry, workspaces, Report Templates and transfer packages. |
 | `APP_ASSETS_DIR` | Bundled assets and PowerPoint masters. |
 | `TZ` | Container timezone, for example `Europe/Madrid`. |
 | `HOST_CONFIG_DIR` | Host path mounted as persistent configuration. |
@@ -269,7 +269,7 @@ DashboardAnalytic/
 ├── tests/                  # Unit and integration tests
 ├── docker/                 # Dockerfiles, Compose and environment settings
 ├── assets/ppt-templates/   # PowerPoint master/layout file
-├── config/                 # Global database and Slides Templates
+├── config/                 # Global database and Report Templates
 ├── data/workspaces/        # Workspace registry and isolated workspace data
 ├── help/                   # Detailed in-app documentation
 ├── README.md

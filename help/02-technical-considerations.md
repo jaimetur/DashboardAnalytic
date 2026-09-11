@@ -16,8 +16,8 @@ Stored below `APP_CONFIG_DIR`:
 
 Stored below `APP_DATA_DIR/workspaces/<workspace>/`:
 
-- `<workspace>.db`: datasets, profiles, audit events, generated jobs, Auto-calculated Fields, Slides Template metadata and materialised reporting rows.
-- `slides-templates/`: workspace-owned CSV Slides Templates.
+- `<workspace>.db`: datasets, profiles, audit events, generated jobs, Auto-calculated Fields, Report Template metadata and materialised reporting rows.
+- `slides-templates/`: workspace-owned CSV Report Templates.
 - `input/`: uploaded source files.
 - `output/reports/`: generated PowerPoint reports and their PNG charts.
 - `output/charts/`: standalone Chart Sets.
@@ -198,7 +198,7 @@ vendor NOT CONTAINS (Mixed, Other);
 
 ## Interactive Preview caching
 
-The shared Interactive Preview is used by E2E Reporting, Chart Builder and Slides Template editing.
+The shared Interactive Preview is used by E2E Reporting, Chart Builder and Report Template editing.
 
 Its cache separates expensive data work from presentation work:
 

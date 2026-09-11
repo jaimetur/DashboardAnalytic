@@ -77,12 +77,12 @@ One template can be default for each technology within a workspace. Reporting in
 ### Export targets
 
 - Config
-- Slides Templates from the active workspace
+- Report Templates from the active workspace
 - Auto-calculated Fields from the active workspace
 - An accessible workspace
 - Full Environment with selected workspaces
 
-Admins can export/transfer the active workspace's Slides Templates and Auto-calculated Fields, plus workspaces they can access. Super-admins can also include global configuration and Full Environment content. Template and field packages preselect a destination workspace with the same name as their source, where available, and allow more destinations to be selected.
+Admins can export/transfer the active workspace's Report Templates and Auto-calculated Fields, plus workspaces they can access. Super-admins can also include global configuration and Full Environment content. Template and field packages preselect a destination workspace with the same name as their source, where available, and allow more destinations to be selected.
 
 Exports run as disk-backed jobs and show estimated progress. The ZIP download starts when package creation finishes.
 
@@ -109,13 +109,36 @@ The dialog remembers the last destination. Active state is restored after page r
 
 Complete unimported packages appear in **Recovered transfer packages** with content, workspaces, creation time, size, Import and Delete actions. Incomplete remnants are removed automatically.
 
-## Datasets Management
-
-- Review dataset ID, filename, kind, status and ownership.
-- Rename datasets.
-- Use Workspace for processing, preview and deletion actions.
-
 ## Database Management
+
+Database Management has two clearly separated subsections: **Backup Protection** and **Databases Viewer**.
+
+### Backup Protection
+
+**Admin → Database Management → Backup Protection** separates **On demand backup** from **Scheduled backups**. On demand backup contains side-by-side **Backup** and **Restore** panels.
+
+In **Backup**, select one or more content types:
+
+- **Configuration Content: Application database** stores the shared application configuration.
+- **Workspace Content: Workspace Database** stores the selected workspace SQLite databases.
+- **Workspace Content: Report Templates** stores one CSV file for each Report Template.
+- **Workspace Content: Auto-calculated Fields** stores one JSON file containing every selected workspace definition.
+- **Workspace Content: Input** stores raw dataset files when explicitly selected.
+- **Workspace Content: Output** stores generated reports and Chart Sets when explicitly selected.
+
+Application database, Workspace Database, Report Templates and Auto-calculated Fields are selected by default. Input and Output are opt-in. Selecting any workspace content reveals **Workspaces to include**, containing only workspaces you can access. Report Template CSV files use `workspaces/<workspace name>/report-templates/` in Backup and Export ZIPs; this portable path is independent from the application's internal workspace folder name. Use **Backup folder** and **Browse** to choose the server-visible destination, then use **Backup Now** to create a ZIP in the background from the current content and workspace selection. It does not enable or change the recurring schedule, appears in the floating background-task card and keeps the Admin panel in place.
+
+In **Restore**, choose a server-visible **Backup folder** and one of its ZIP files. The application reads the selected backup's manifest to detect its granular content and affected workspace names, with a structural fallback for older ZIPs, then shows a structured overwrite confirmation grouped into **Configuration Content** and **Workspace Content**. Choose the individual parts to restore only after reviewing that existing data will be replaced. Restore work also runs in the floating background-task card. The ZIP selector refreshes after an immediate backup and periodically while Admin remains open, so completed scheduled backups appear without a page reload.
+
+Enable the schedule to select hourly, daily, weekly or monthly execution. Weekly schedules expose a weekday selector and monthly schedules expose a day-of-month selector.
+
+Set **Retention backups** to keep a maximum number of ZIPs; the scheduler removes the oldest successful backups after creating a newer one. The default storage directory is `config/scheduled-backups`. **Browse** opens a server-side directory picker limited to the application `config` tree, so it reflects directories visible to the host or Docker container rather than the browser's computer. It can create a folder before selecting it.
+
+The status line reports the stored backup count and size, the most recent successful backup and the next scheduled run. Scheduled backups use the same chosen content and workspace selection as the Backup panel. Select Input and/or Output when raw datasets, reports or Chart Sets must be included. Scheduled backups complement infrastructure backups and portable Export packages.
+
+### Databases Viewer
+
+**Databases Viewer** covers Application and Workspace Databases. It exposes global application-configuration tables, the active workspace database and the materialised combined CDR tables used to accelerate reporting; it is therefore broader than the active workspace alone.
 
 Tables are grouped by ownership:
 
@@ -138,26 +161,13 @@ Capabilities:
 
 Database edits affect the active workspace immediately. Use Export first when changing production data manually.
 
-## Database Backups
+## Datasets Management
 
-**Admin → Database Management → Database Backups** separates **On demand backup** from **Scheduled backups**. On demand backup contains side-by-side **Backup** and **Restore** panels.
+- Review dataset ID, filename, kind, status and ownership.
+- Rename datasets.
+- Use Workspace for processing, preview and deletion actions.
 
-In **Backup**, select one or more content types:
-
-- **Configuration Content: Application database** stores the shared application configuration.
-- **Workspace Content: Full workspaces** stores every selected workspace database, Slides Templates and Auto-calculated Fields. It includes templates and fields, so those two redundant choices are disabled while it is selected. A second selector controls whether to include **Input** raw dataset files and **Output** generated reports and Chart Sets.
-- **Workspace Content: Slides Templates** stores template files for the selected workspaces.
-- **Workspace Content: Auto-calculated Fields** stores definitions for the selected workspaces.
-
-Selecting workspace content reveals a workspace multi-select containing only workspaces you can access. Use **Backup Now** to create a ZIP in the background from the current path, content and workspace selection. It does not enable or change the recurring schedule, appears in the floating background-task card and keeps the Admin panel in place.
-
-In **Restore**, choose a server-visible backup directory and one of its ZIP files. The application reads the selected backup's manifest to detect its content and affected workspace names, with a structural fallback for older ZIPs, then shows a structured overwrite confirmation. Selecting Full workspaces disables redundant Slides Templates and Auto-calculated Fields there as well. Choose the parts to restore only after reviewing that existing data will be replaced. Restore work also runs in the floating background-task card. The ZIP selector refreshes after an immediate backup and periodically while Admin remains open, so completed scheduled backups appear without a page reload.
-
-Enable the schedule to select hourly, daily, weekly or monthly execution. Weekly schedules expose a weekday selector and monthly schedules expose a day-of-month selector.
-
-Set **Retention backups** to keep a maximum number of ZIPs; the scheduler removes the oldest successful backups after creating a newer one. The default storage directory is `config/scheduled-backups`. **Browse** opens a server-side directory picker limited to the application `config` tree, so it reflects directories visible to the host or Docker container rather than the browser's computer. It can create a folder before selecting it.
-
-The status line reports the stored backup count and size, the most recent successful backup and the next scheduled run. Scheduled backups use the same chosen content and workspace selection as the Backup panel. Use **Full workspaces** when datasets, reports and Chart Sets must be included; otherwise those items are not part of a template- or field-only backup. Scheduled backups complement infrastructure backups and portable Export packages.
+Datasets Management appears below Database Management in Admin.
 
 ## App Logs
 

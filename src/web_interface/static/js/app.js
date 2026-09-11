@@ -287,7 +287,7 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
           const next = [...dimensions]; if (index === null) next.push(dimension); else next[index] = dimension;
           const rename = index === null || current.name === dimension.name ? null : {from: current.name, to: dimension.name};
           const message = rename
-            ? `Renaming '${rename.from}' to '${rename.to}' will rebuild every applicable CDR table and update every Slides Template that uses this field. Continue?`
+            ? `Renaming '${rename.from}' to '${rename.to}' will rebuild every applicable CDR table and update every Report Template that uses this field. Continue?`
             : 'Saving will rebuild this auto-calculated field in every applicable CDR table. Continue?';
           if (!await showConfirmDialog(message, {title: 'Save and Materialize', confirmLabel: 'Save and Materialize', tone: 'warning'})) return;
           save.disabled = true; await saveDimensions(next, rename); form.hidden = true; list.hidden = false; restoreManagerActions(); render();
@@ -1025,7 +1025,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
           if (editingIndex === null) next.push(dimension); else next[editingIndex] = dimension;
           const rename = editingIndex === null || current.name === dimension.name ? null : {from: current.name, to: dimension.name};
           const message = rename
-            ? `Renaming '${rename.from}' to '${rename.to}' will rebuild every applicable CDR table and update every Slides Template that uses this field. Continue?`
+            ? `Renaming '${rename.from}' to '${rename.to}' will rebuild every applicable CDR table and update every Report Template that uses this field. Continue?`
             : 'Saving will rebuild this auto-calculated field in every applicable CDR table. Continue?';
           if (!await showConfirmDialog(message, {title: 'Save and Materialize', confirmLabel: 'Save and Materialize', tone: 'warning'})) return;
           calculatedDimensions = next; await saveCalculatedDimensions(rename); form.hidden = true; list.hidden = false; restoreManagerActions(); renderList();
@@ -2044,11 +2044,11 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const sourceRow = Array.from(table.querySelectorAll('tbody tr'))[rowIndex];
     const sourceSlide = rowValue(sourceRow, 'Slide');
     const sourceBlockIndex = sourceBlocks.findIndex((block) => block.slide === sourceSlide);
-    showLoadingOverlay('Loading Slides Templates', 'Please wait while the available destinations are loaded.');
+    showLoadingOverlay('Loading Report Templates', 'Please wait while the available destinations are loaded.');
     try {
       const response = await fetch(editor.dataset.templateOptionsUrl, {credentials: 'same-origin'});
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.detail || 'Unable to load Slides Templates.');
+      if (!response.ok) throw new Error(payload.detail || 'Unable to load Report Templates.');
       hideLoadingOverlay();
       const templates = Array.isArray(payload.templates) ? payload.templates : [];
       const selection = await showCatalogueExportDialog(kind, templates, sourceBlocks);
@@ -2081,7 +2081,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       const result = await copyResponse.json().catch(() => ({}));
       if (!copyResponse.ok) throw new Error(result.detail || `Unable to copy the ${kind}.`);
       hideLoadingOverlay();
-      showInfoDialog(`The ${kind} was copied to the selected Slides Template.`, {title: 'Template content copied'});
+      showInfoDialog(`The ${kind} was copied to the selected Report Template.`, {title: 'Template content copied'});
     } catch (error) {
       hideLoadingOverlay();
       showInfoDialog(error instanceof Error ? error.message : 'Unable to copy template content.', {title: 'Copy template content', tone: 'error'});
@@ -2267,7 +2267,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const saveButton = saveForm.querySelector('button[type="submit"]');
     hideCellAssistance();
     if (saveButton) saveButton.disabled = true;
-    showLoadingOverlay('Saving Slides Template', 'Please wait while the Slides Template is being saved.');
+    showLoadingOverlay('Saving Report Template', 'Please wait while the Report Template is being saved.');
     try {
       const response = await fetch(saveForm.action, {
         method: 'POST',
@@ -2276,21 +2276,21 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         headers: {Accept: 'application/json'},
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.detail || 'Unable to save the Slides Template.');
+      if (!response.ok) throw new Error(payload.detail || 'Unable to save the Report Template.');
       savedCatalogueContent = contentField.value;
       // The persisted CSV is now the comparison baseline. Remove both the
       // edited-cell tint and any inline added-text marks; subsequent edits are
       // compared with these newly saved values.
       acceptCurrentCatalogueAsBaseline();
       hideLoadingOverlay();
-      showInfoDialog(`Slides Template '${payload.template || 'selected template'}' has been saved.`, {
-        title: 'Slides Template saved',
+      showInfoDialog(`Report Template '${payload.template || 'selected template'}' has been saved.`, {
+        title: 'Report Template saved',
       });
       return true;
     } catch (error) {
       hideLoadingOverlay();
-      showInfoDialog(error instanceof Error ? error.message : 'Unable to save the Slides Template.', {
-        title: 'Slides Template save failed',
+    showInfoDialog(error instanceof Error ? error.message : 'Unable to save the Report Template.', {
+      title: 'Report Template save failed',
         tone: 'error',
       });
       return false;
@@ -2387,7 +2387,7 @@ document.querySelectorAll('.catalogue-editor-picker-form').forEach((form) => {
     if (editor?.hasUnsavedCatalogueChanges?.()) {
       const saveChanges = await showConfirmDialog(
         'This template has unsaved changes. Save them before opening the selected template?',
-        {title: 'Unsaved Slides Template changes', confirmLabel: 'Save changes', cancelLabel: 'Discard changes'},
+        {title: 'Unsaved Report Template changes', confirmLabel: 'Save changes', cancelLabel: 'Discard changes'},
       );
       if (saveChanges) {
         const saved = await editor.saveCatalogueTemplate?.();
@@ -2416,7 +2416,7 @@ document.querySelectorAll('[data-open-template-editor]').forEach((button) => {
   button.addEventListener('click', () => {
     if (!adminTemplateEditor || !adminTemplateEditorFrame) return;
     adminTemplateEditorFrame.src = button.dataset.openTemplateEditor || '';
-    if (adminTemplateEditorTitle) adminTemplateEditorTitle.textContent = `Edit Slides Template: "${button.dataset.templateName || 'Selected Template'}"`;
+    if (adminTemplateEditorTitle) adminTemplateEditorTitle.textContent = `Edit Report Template: "${button.dataset.templateName || 'Selected Template'}"`;
     adminTemplateEditor.hidden = false;
     adminTemplateEditorClose?.focus();
   });
@@ -2481,8 +2481,8 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
     }
     if (shouldConvert) {
       const accepted = await showConfirmDialog(
-        'This CSV uses an older or different column layout. Compatible fields will be migrated to the current Slides Templates format; new presentation fields will be left blank where they do not exist.',
-        {title: 'Convert Slides Templates?', confirmLabel: 'Convert and Import'},
+        'This CSV uses an older or different column layout. Compatible fields will be migrated to the current Report Templates format; new presentation fields will be left blank where they do not exist.',
+        {title: 'Convert Report Templates?', confirmLabel: 'Convert and Import'},
       );
       if (!accepted) return;
     }
@@ -2494,14 +2494,14 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
     if (existing) {
       const accepted = await showConfirmDialog(
         `A ${templateType.toUpperCase()} template named '${existing}' already exists. Do you want to overwrite it?`,
-        {title: 'Overwrite Slides Template?', confirmLabel: 'Overwrite template'},
+        {title: 'Overwrite Report Template?', confirmLabel: 'Overwrite template'},
       );
       if (!accepted) return;
     }
     if (convert) convert.value = shouldConvert ? '1' : '0';
     if (overwrite) overwrite.value = existing ? '1' : '0';
     form.dataset.catalogueSubmitting = '1';
-    showLoadingOverlay('Importing Slides Templates', 'Validating and storing the selected template in the workspace.');
+    showLoadingOverlay('Importing Report Templates', 'Validating and storing the selected template in the workspace.');
     preserveAdminScrollPosition();
     HTMLFormElement.prototype.submit.call(form);
   });
@@ -3393,7 +3393,7 @@ function setupCustomMultiSelects() {
   });
 }
 
-// The Chart Viewer and the Slides Template editor deliberately share this
+// The Chart Viewer and the Report Template editor deliberately share this
 // control surface. Keeping the filter builder and the searchable popovers in
 // one component prevents the two previews from drifting apart.
 function createInteractiveChartPreviewControls(fieldsElement, definition, options = {}) {
@@ -3768,7 +3768,7 @@ function importWarningDetails(payload) {
     return payload.includes_slides_templates
       ? {
         title: 'Overwrite configuration and templates?',
-        message: 'This will overwrite the configuration files and Slides Templates included in the package. The local workspace registry and existing workspaces will be preserved.',
+        message: 'This will overwrite the configuration files and Report Templates included in the package. The local workspace registry and existing workspaces will be preserved.',
       }
       : {
         title: 'Overwrite configuration?',
@@ -3777,7 +3777,7 @@ function importWarningDetails(payload) {
   }
   if (kind === 'slides-templates') {
     return {
-      title: 'Overwrite Slides Templates?',
+      title: 'Overwrite Report Templates?',
       message: 'Choose the destination workspaces next. Templates with matching names will be overwritten only in those workspaces. Importing templates does not rebuild CDR tables.',
     };
   }
@@ -3804,7 +3804,7 @@ function importWarningDetails(payload) {
     : ' New workspaces will be created from the package.';
   return {
     title: 'Overwrite full environment?',
-    message: `This will overwrite the configuration files and Slides Templates included in the package.${collisionCopy} The local workspace registry will be rebuilt from the imported workspaces.`,
+    message: `This will overwrite the configuration files and Report Templates included in the package.${collisionCopy} The local workspace registry will be rebuilt from the imported workspaces.`,
   };
 }
 
@@ -4767,7 +4767,7 @@ const catalogueImportError = document.querySelector('[data-catalogue-import-erro
 if (catalogueImportError?.textContent.trim()) {
   requestAnimationFrame(() => {
     showInfoDialog(catalogueImportError.textContent.trim(), {
-      title: 'Slides Templates Import Failed',
+      title: 'Report Templates Import Failed',
       onClose: clearCatalogueImportQuery,
     });
   });
@@ -4777,7 +4777,7 @@ const catalogueImportNotice = document.querySelector('[data-catalogue-import-not
 if (catalogueImportNotice?.textContent.trim()) {
   requestAnimationFrame(() => {
     showInfoDialog(catalogueImportNotice.textContent.trim(), {
-      title: 'Slides Templates Imported',
+      title: 'Report Templates Imported',
       onClose: clearCatalogueImportQuery,
     });
   });

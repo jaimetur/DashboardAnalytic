@@ -3129,7 +3129,7 @@ def create_recurring_database_backup(
                 _archive_database(archive, workspace.database_path, f'{archive_workspace_root}/database.sqlite', backup_root, archived_bytes)
             if 'report_templates' in components:
                 report_progress(f'Archiving Report Templates for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
-                _archive_tree(archive, workspace.slides_templates_dir, f'{archive_workspace_root}/slides-templates', progress_callback=archived_bytes)
+                _archive_tree(archive, workspace.slides_templates_dir, f'{archive_workspace_root}/report-templates', progress_callback=archived_bytes)
             if 'auto_calculated_fields' in components:
                 report_progress(f'Exporting Auto-calculated Fields for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                 task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
@@ -3292,7 +3292,7 @@ def _backup_archive_components(archive_path: Path) -> list[str]:
         components.append('app_database')
     if any(name.startswith('workspaces/') and name.endswith('/database.sqlite') for name in names):
         components.append('workspace_database')
-    if any(name.startswith('workspaces/') and '/slides-templates/' in name for name in names):
+    if any(name.startswith('workspaces/') and '/report-templates/' in name for name in names):
         components.append('report_templates')
     if any(name.startswith('workspaces/') and '/auto-calculated-fields/' in name and name.endswith('.json') for name in names):
         components.append('auto_calculated_fields')
@@ -3362,11 +3362,11 @@ def restore_database_backup(archive_path: Path, components: Iterable[str]) -> No
                         sidecar.unlink(missing_ok=True)
                     shutil.copy2(payload, workspace.database_path)
             if 'report_templates' in selected:
-                template_members = [name for name in names if name.startswith(f'{prefix}slides-templates/')]
+                template_members = [name for name in names if name.startswith(f'{prefix}report-templates/')]
                 if template_members:
                     shutil.rmtree(workspace.slides_templates_dir, ignore_errors=True)
                     for name in template_members:
-                        relative = PurePosixPath(name).relative_to(PurePosixPath(f'{prefix}slides-templates'))
+                        relative = PurePosixPath(name).relative_to(PurePosixPath(f'{prefix}report-templates'))
                         target = workspace.slides_templates_dir.joinpath(*relative.parts)
                         target.parent.mkdir(parents=True, exist_ok=True)
                         with archive.open(name) as source, target.open('wb') as output:
@@ -3465,7 +3465,7 @@ def _archive_workspace(
         archive, workspace.database_path, f'{archive_prefix}/database.sqlite', scratch_dir, progress_callback,
         exclude_tables=() if include_generated_outputs else ('generated_jobs',),
     )
-    _archive_tree(archive, workspace.slides_templates_dir, f'{archive_prefix}/slides-templates', progress_callback=progress_callback)
+    _archive_tree(archive, workspace.slides_templates_dir, f'{archive_prefix}/report-templates', progress_callback=progress_callback)
     archive.writestr(
         f'{archive_prefix}/auto-calculated-fields/auto-calculated-fields.json',
         json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
@@ -3526,7 +3526,7 @@ def build_export_archive_file(
         """Archive application configuration, with its database as a known payload.
 
         ``application.db`` owns users, roles and workspace access.
-        Slides Template registries belong to the workspace snapshots.  Do not rely on the currently selected
+        Report Template registries belong to the workspace snapshots.  Do not rely on the currently selected
         workspace when deciding which database to export.
         """
         application_database = application_config_dir / 'application.db'
@@ -3549,7 +3549,7 @@ def build_export_archive_file(
                 continue
             _archive_file(archive, path, f'config/{path.name}', progress_callback)
         if include_templates:
-            _archive_tree(archive, settings.slides_templates_dir, 'config/slides-templates', progress_callback=progress_callback)
+            _archive_tree(archive, settings.slides_templates_dir, 'config/report-templates', progress_callback=progress_callback)
 
     # Level 1 retains most of SQLite's compression benefit while avoiding the
     # disproportionate CPU cost of the default level on multi-GB databases.
@@ -3564,7 +3564,7 @@ def build_export_archive_file(
             source_workspace = workspace_registry.get(source_id) if source_id else None
             if not source_workspace:
                 raise ValueError('Open a workspace before exporting Report Templates.')
-            archive_path = f'workspaces/{source_workspace.name}/slides-templates'
+            archive_path = f'workspaces/{source_workspace.name}/report-templates'
             manifest = archive_manifest(
                 'slides-templates', includes_slides_templates=True,
                 workspace_components=archive_workspace_components_for_target(target),
@@ -4091,7 +4091,7 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
         for source, destination in (
             (payload / 'input', workspace.input_dir),
             (payload / 'output', workspace.output_dir),
-            (payload / 'slides-templates', workspace.slides_templates_dir),
+            (payload / 'report-templates', workspace.slides_templates_dir),
             # Archives created before generated Chart Sets were included used
             # this reports-only directory name.
             (payload / 'exports', workspace.export_dir),
@@ -4196,7 +4196,7 @@ def materialize_workspace_report_templates(workspace: Workspace) -> None:
 
 
 def migrate_workspace_template_registries() -> None:
-    """Finish the one-time migration from the old global Slides Templates registry."""
+    """Finish the one-time migration from the old global Report Templates registry."""
     migration_key = 'workspace_templates_registry_v2'
     if workspace_registry.get_state(migration_key) == '1':
         return
@@ -4222,7 +4222,7 @@ def import_slides_templates_archive(
     staging_root: Path, destination_workspace_ids: Iterable[str] = (),
     manifest: dict[str, Any] | None = None,
 ) -> int:
-    templates_payload = staging_root / 'slides-templates'
+    templates_payload = staging_root / 'report-templates'
     if not templates_payload.exists():
         raise ValueError('The Report Templates archive does not contain template files.')
     selected = list(dict.fromkeys(destination_workspace_ids))
@@ -4278,7 +4278,7 @@ def import_config_archive(staging_root: Path, manifest: dict[str, Any]) -> None:
         relative_path = path.relative_to(config_payload)
         if relative_path in {Path('application.db'), Path(workspace_registry.registry_path.name)}:
             continue
-        target = settings.slides_templates_dir / relative_path.relative_to('slides-templates') if relative_path.parts[0] == 'slides-templates' else application_config_dir / relative_path
+        target = settings.slides_templates_dir / relative_path.relative_to('report-templates') if relative_path.parts[0] == 'report-templates' else application_config_dir / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
     repository.set_global_database(application_database)
@@ -4411,13 +4411,13 @@ def _apply_import_archive(
                 progress_callback('finalising', 100.0)
             return 'Configuration imported successfully. Local workspaces were preserved.'
         if kind == 'slides-templates':
-            archive_path = str(manifest.get('archive_path') or 'slides-templates')
-            if archive_path != 'slides-templates' and not re.fullmatch(r'workspaces/[^/]+/slides-templates', archive_path):
+            archive_path = str(manifest.get('archive_path') or 'report-templates')
+            if archive_path != 'report-templates' and not re.fullmatch(r'workspaces/[^/]+/report-templates', archive_path):
                 raise ValueError('The Report Templates package contains an invalid template path.')
             _safe_extract_archive_prefix(archive, staging_root, archive_path, extracted)
             if progress_callback:
                 progress_callback('importing Report Templates', 90.0)
-            import_slides_templates_archive(staging_root if archive_path == 'slides-templates' else staging_root / Path(archive_path).parent, destination_workspace_ids, manifest)
+            import_slides_templates_archive(staging_root if archive_path == 'report-templates' else staging_root / Path(archive_path).parent, destination_workspace_ids, manifest)
             if progress_callback:
                 progress_callback('finalising', 100.0)
             return 'Report Templates imported successfully.'
@@ -8381,7 +8381,7 @@ def retry_report_chart_job(job_id: int, user: SessionUser = Depends(current_user
         raise HTTPException(status_code=400, detail='The Chart Set job has an unsupported technology.')
     template_name = str(previous['template_name'] or '')
     if not any(option['name'] == template_name for option in report_catalogue_options(technology)):
-        raise HTTPException(status_code=400, detail='The Slides Template used by this Chart Set is no longer available.')
+        raise HTTPException(status_code=400, detail='The Report Template used by this Chart Set is no longer available.')
     generation = str(previous['generation'] or '')
     if previous_status == 'ready' and generation and _valid_report_chart_generation(generation):
         # A completed job owns this exact Chart Set. Remove it before reuse so
@@ -9286,7 +9286,7 @@ def embedded_report_template_editor(
     catalogue_id: str,
     user: SessionUser = Depends(admin_user),
 ) -> HTMLResponse:
-    """Render only the selected Slides Template editor for modal iframes."""
+    """Render only the selected Report Template editor for modal iframes."""
     technology = technology.strip().lower()
     if technology == 'auto':
         technology = next((
@@ -9297,7 +9297,7 @@ def embedded_report_template_editor(
         raise HTTPException(status_code=404, detail='Report technology not found')
     editor = catalogue_editor_payload(technology, catalogue_id)
     if not editor:
-        raise HTTPException(status_code=404, detail='Slides Template not found')
+        raise HTTPException(status_code=404, detail='Report Template not found')
     return render_template(request, 'admin.html', {
         'user': user,
         'embedded_template_editor': True,
@@ -10196,7 +10196,7 @@ def import_slides_template(
     overwrite_existing: bool = Form(False),
     user: SessionUser = Depends(admin_user),
 ) -> HTMLResponse:
-    """Import one Slides Template after the user has selected its NSA/SA type."""
+    """Import one Report Template after the user has selected its NSA/SA type."""
     return _import_report_catalogue(request, template_type, catalogue_file, catalogue_name, convert_catalogue, overwrite_existing, user)
 
 
@@ -10233,12 +10233,12 @@ def change_report_catalogue_type(
     template_type: str = Form(...),
     user: SessionUser = Depends(admin_user),
 ) -> HTMLResponse:
-    """Move a non-default Slides Template between the NSA and SA libraries."""
+    """Move a non-default Report Template between the NSA and SA libraries."""
     technology = technology.strip().lower()
     target_technology = template_type.strip().lower()
     catalogue = _named_catalogue(technology, catalogue_id) if technology in TEMPLATE_NAMES else None
     if not catalogue or target_technology not in TEMPLATE_NAMES:
-        return render_admin_template(request, user, error='Slides Template or target type was not found.', status_code=404)
+        return render_admin_template(request, user, error='Report Template or target type was not found.', status_code=404)
     if target_technology == technology:
         return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
     if catalogue['active']:
@@ -10285,8 +10285,8 @@ def rename_report_catalogue(
     catalogue = _named_catalogue(technology, catalogue_id) if technology in TEMPLATE_NAMES else None
     if not catalogue:
         if 'application/json' in request.headers.get('accept', ''):
-            return JSONResponse({'error': 'Slides Template not found.'}, status_code=404)
-        return render_admin_template(request, user, error='Slides Template not found.', status_code=404)
+            return JSONResponse({'error': 'Report Template not found.'}, status_code=404)
+        return render_admin_template(request, user, error='Report Template not found.', status_code=404)
     try:
         name = catalogue_name.strip()
         if not name:
@@ -10294,7 +10294,7 @@ def rename_report_catalogue(
         names = {str(row['name']) for row in repository.list_report_templates(technology)}
         new_identifier = catalogue_registry_key(name)
         if catalogue_id not in names:
-            raise ValueError('Slides Template was not found.')
+            raise ValueError('Report Template was not found.')
         if new_identifier != catalogue_id and new_identifier in names:
             raise ValueError(f"A {technology.upper()} template named '{new_identifier}' already exists.")
         if new_identifier != catalogue_id:
@@ -10326,7 +10326,7 @@ def duplicate_report_catalogue(
     technology = technology.strip().lower()
     catalogue = _named_catalogue(technology, catalogue_id) if technology in TEMPLATE_NAMES else None
     if not catalogue:
-        return render_admin_template(request, user, error='Slides Template not found.', status_code=404)
+        return render_admin_template(request, user, error='Report Template not found.', status_code=404)
     names = {str(row['name']) for row in repository.list_report_templates(technology)}
     # The physical CSV name is the canonical template name.  Deriving the
     # duplicate label from it prevents a stale/default registry label from
@@ -10382,7 +10382,7 @@ def delete_report_catalogue(
         raise HTTPException(status_code=404, detail='Report technology not found')
     catalogue = _named_catalogue(technology, catalogue_id)
     if not catalogue:
-        return render_admin_template(request, user, error='Slides Template not found.', status_code=404)
+        return render_admin_template(request, user, error='Report Template not found.', status_code=404)
     if catalogue['active']:
         return render_admin_template(request, user, error='The default template cannot be deleted.', status_code=400)
     named_catalogue_path(technology, catalogue_id, catalogue_id).unlink(missing_ok=True)
@@ -10402,20 +10402,20 @@ def finalize_template_save(
     try:
         task_repository.touch_report_template(technology, template_name)
     except (sqlite3.Error, OSError) as exc:
-        warnings.warn(f'Unable to update Slides Template metadata: {exc}', RuntimeWarning)
+        warnings.warn(f'Unable to update Report Template metadata: {exc}', RuntimeWarning)
         try:
             task_repository.add_log(username, 'save_report_template_metadata_failed', json.dumps({
                 'technology': technology, 'template': template_name, 'error': str(exc),
             }))
         except (sqlite3.Error, OSError) as log_exc:
-            warnings.warn(f'Unable to log Slides Template metadata failure: {log_exc}', RuntimeWarning)
+            warnings.warn(f'Unable to log Report Template metadata failure: {log_exc}', RuntimeWarning)
         return
     try:
         task_repository.add_log(username, 'save_report_template', json.dumps({
             'technology': technology, 'template': template_name, 'chart_rows': chart_rows,
         }))
     except (sqlite3.Error, OSError) as exc:
-        warnings.warn(f'Unable to log Slides Template save: {exc}', RuntimeWarning)
+        warnings.warn(f'Unable to log Report Template save: {exc}', RuntimeWarning)
 
 
 @app.post('/admin/report-templates/{technology}/{catalogue_id}/save')
@@ -10434,7 +10434,7 @@ def save_report_catalogue(
     try:
         metadata = next((row for row in repository.list_report_templates(technology) if str(row['name']) == catalogue_id), None)
         if not metadata:
-            raise FileNotFoundError('Slides Template not found.')
+            raise FileNotFoundError('Report Template not found.')
         template_name = str(metadata['name'])
         is_default = bool(metadata['is_default'])
         entries = [entry for _index, entry in sorted(enumerate(parse_catalog_csv(catalogue_content, technology)), key=lambda item: (item[1].slide, item[0]))]
@@ -10448,7 +10448,7 @@ def save_report_catalogue(
             return JSONResponse({'detail': str(exc)}, status_code=400)
         return render_admin_template(request, user, error=str(exc), status_code=400)
     except (FileNotFoundError, OSError, sqlite3.Error) as exc:
-        detail = f'Unable to save the Slides Template: {exc}'
+        detail = f'Unable to save the Report Template: {exc}'
         if wants_json:
             return JSONResponse({'detail': detail}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
         return render_admin_template(request, user, error=detail, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
@@ -10478,7 +10478,7 @@ async def preview_report_template_chart(
     technology = technology.strip().lower()
     catalogue = _named_catalogue(technology, catalogue_id) if technology in TEMPLATE_NAMES else None
     if not catalogue:
-        raise HTTPException(status_code=404, detail='Slides Template not found.')
+        raise HTTPException(status_code=404, detail='Report Template not found.')
     try:
         payload = await request.json()
         dimensions = load_workspace_calculated_dimensions()
@@ -10574,7 +10574,7 @@ async def preview_report_template_chart_image(
     technology = technology.strip().lower()
     catalogue = _named_catalogue(technology, catalogue_id) if technology in TEMPLATE_NAMES else None
     if not catalogue:
-        raise HTTPException(status_code=404, detail='Slides Template not found.')
+        raise HTTPException(status_code=404, detail='Report Template not found.')
     try:
         payload = await request.json()
         dimensions = load_workspace_calculated_dimensions()
@@ -10620,7 +10620,7 @@ def export_report_catalogue(technology: str, user: SessionUser = Depends(admin_u
         raise HTTPException(status_code=404, detail='Report technology not found')
     active = next((item for item in report_catalogue_options(technology) if item['active']), None)
     if not active:
-        raise HTTPException(status_code=404, detail='Slides Template not found')
+        raise HTTPException(status_code=404, detail='Report Template not found')
     # Export is a file retrieval operation. Keep legacy/manual filter captions
     # intact even when they cannot be executed as current Filter Builder rules.
     entries = load_template_catalogue(active['path'], technology, validate_filters=False)
@@ -10638,14 +10638,14 @@ def export_selected_report_catalogue(
     user: SessionUser = Depends(admin_user),
 ) -> Response:
     if ':' not in catalogue_selection:
-        raise HTTPException(status_code=400, detail='Select a Slides Template to export.')
+        raise HTTPException(status_code=400, detail='Select a Report Template to export.')
     technology, catalogue_id = catalogue_selection.split(':', 1)
     technology = technology.strip().lower()
     if technology not in TEMPLATE_NAMES:
         raise HTTPException(status_code=404, detail='Report technology not found')
     catalogue = next((item for item in report_catalogue_options(technology) if item['identifier'] == catalogue_id), None)
     if not catalogue:
-        raise HTTPException(status_code=404, detail='Slides Template not found')
+        raise HTTPException(status_code=404, detail='Report Template not found')
     return Response(
         content=catalogue_csv(load_template_catalogue(catalogue['path'], technology, validate_filters=False)),
         media_type='text/csv; charset=utf-8',
@@ -10660,7 +10660,7 @@ def export_named_report_catalogue(technology: str, catalogue_id: str, user: Sess
         raise HTTPException(status_code=404, detail='Report technology not found')
     catalogue = next((item for item in report_catalogue_options(technology) if item['identifier'] == catalogue_id), None)
     if not catalogue:
-        raise HTTPException(status_code=404, detail='Slides Template not found')
+        raise HTTPException(status_code=404, detail='Report Template not found')
     entries = load_template_catalogue(catalogue['path'], technology, validate_filters=False)
     filename = template_download_filename(catalogue['name'])
     return Response(
@@ -11087,7 +11087,7 @@ async def copy_report_catalogue_items(
         source_entry = source_entries[source_index]
         target = next((item for item in report_catalogue_options(target_technology) if item['identifier'] == target_identifier), None)
         if not target:
-            raise FileNotFoundError('Destination Slides Template not found.')
+            raise FileNotFoundError('Destination Report Template not found.')
         try:
             target_entries = load_template_catalogue(target['path'], target_technology, validate_filters=False)
         except ValueError as exc:

@@ -1,6 +1,6 @@
 # Product overview
 
-Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, reusable charts and template-driven PowerPoint reports. It is a multi-user application: datasets, generated output, Auto-calculated Fields and Slides Templates are isolated by workspace, while users and access permissions are shared configuration.
+Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, reusable charts and template-driven PowerPoint reports. It is a multi-user application: datasets, generated output, Auto-calculated Fields and Report Templates are isolated by workspace, while users and access permissions are shared configuration.
 
 ## End-to-end workflow
 
@@ -94,7 +94,7 @@ E2E Dashboard analyses one processed CDR at a time.
 
 ## E2E Reporting
 
-E2E Reporting combines processed CDRs and a Slides Template from the active workspace.
+E2E Reporting combines processed CDRs and a Report Template from the active workspace.
 
 ### Reporting module selector
 
@@ -107,7 +107,7 @@ E2E Reporting combines processed CDRs and a Slides Template from the active work
 - The two newest CDRs of each type are selected initially for Operator Comparison.
 - Vendor Comparison keeps one selected CDR per type and requires persisted vendor mapping.
 - Choose NSA or SA technology.
-- Choose a compatible Slides Template.
+- Choose a compatible Report Template.
 - Generate a PowerPoint report or a standalone Chart Set.
 
 ### Charts Panel
@@ -117,7 +117,7 @@ E2E Reporting combines processed CDRs and a Slides Template from the active work
 - Temporarily change chart type, datasets, KPI, filters, aggregations and legend.
 - Open the complete filtered dataset with server-side pagination and column filters.
 - Download or delete Chart Sets.
-- Administrators can open the Slides Template used by the selected set.
+- Administrators can open the Report Template used by the selected set.
 
 ### Reports and Charts Jobs
 
@@ -172,7 +172,7 @@ Admin is available to `admin` and `super-admin` roles, with permission-sensitive
 - Reset passwords.
 - Assign roles and workspace access where permitted.
 
-### Slides Templates Management
+### Report Templates Management
 
 - Create, import, rename, duplicate, export and delete templates in the active workspace.
 - Change NSA/SA type.
@@ -181,7 +181,7 @@ Admin is available to `admin` and `super-admin` roles, with permission-sensitive
 
 Templates belong to their workspace. A new workspace starts without templates. Existing shared libraries are copied once into each existing workspace during migration; the former shared directory is retained as a safety copy.
 
-### Slides Template Editor
+### Report Template Editor
 
 - Edit cells in a scrollable grid.
 - Validate filter syntax immediately.
@@ -192,7 +192,7 @@ Templates belong to their workspace. A new workspace starts without templates. E
 
 ### Import / Export / Transfer
 
-- Export the active workspace's Slides Templates, Auto-calculated Fields, accessible workspaces or a Full Environment.
+- Export the active workspace's Report Templates, Auto-calculated Fields, accessible workspaces or a Full Environment.
 - Select which workspaces belong to a Full Environment package.
 - Inspect an import before overwriting configuration or workspaces.
 - Template and Auto-calculated Field packages select the source workspace automatically when a workspace with the same name exists; additional accessible workspaces can also be selected.
@@ -202,9 +202,9 @@ Templates belong to their workspace. A new workspace starts without templates. E
 
 ### Database Management
 
-- Browse global configuration and active-workspace tables by group.
+- Use **Backup Protection** for on-demand or scheduled ZIP backups. It offers independent Application database, Workspace Database, Report Templates, Auto-calculated Fields, Input and Output selections, then restores detected granular components after an overwrite confirmation.
+- Use **Databases Viewer** to browse grouped application-configuration, active-workspace and combined-CDR tables.
 - Filter complete tables with Excel-style column menus.
-- Create or schedule ZIP backups in **Database Backups**, choose configuration or accessible workspace content, and restore detected backup components after an overwrite confirmation.
 - Edit or delete individual rows.
 - Clean orphaned materialised dataset rows.
 - Inspect the unified **Generated jobs** table for Reports and Chart Sets.
@@ -219,7 +219,7 @@ Templates belong to their workspace. A new workspace starts without templates. E
 | Role | Typical permissions |
 | --- | --- |
 | `user` | Use accessible workspaces, Dashboard, Reporting, Chart Builder and App Logs. |
-| `admin` | User operations allowed by policy, Slides Templates, accessible-workspace export/transfer and database administration. |
+| `admin` | User operations allowed by policy, Report Templates, accessible-workspace export/transfer and database administration. |
 | `super-admin` | Full account/workspace access management, configuration/full-environment portability and incoming transfer approval. |
 
 For the detailed Workspace/Data Ingestion workflow, continue with [Workspace Management](05-workspace-management.md). For storage rules, calculated fields, filter syntax, reporting semantics and migration behaviour, continue with [Technical considerations](02-technical-considerations.md).
