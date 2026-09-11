@@ -2,6 +2,8 @@
 
 Use **E2E Reporting → NetCheck CDR Reports** to create a PowerPoint report or a persistent set of PNG charts from processed CDR-Data, CDR-Voice and CDR-Speech datasets.
 
+The canonical page route is `/e2e-reporting`. Existing `/reporting` bookmarks redirect there; its API uses `/api/e2e-reporting`.
+
 ## Before generating a report
 
 Process at least one ready CDR of each type in Workspace. The reporting page can combine several datasets of the same type, retaining their `Campaign` values for multi-campaign comparisons.

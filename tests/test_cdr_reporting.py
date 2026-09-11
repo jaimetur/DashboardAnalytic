@@ -27,7 +27,7 @@ def with_default_calculated_dimensions(entry: CatalogEntry) -> CatalogEntry:
 def wait_for_report_job(client, job_id: int) -> dict:
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        response = client.get('/api/reporting/jobs')
+        response = client.get('/api/e2e-reporting/jobs')
         assert response.status_code == 200
         job = next(item for item in response.json()['jobs'] if item['id'] == job_id)
         if job['status'] not in {'queued', 'processing'}:
@@ -39,7 +39,7 @@ def wait_for_report_job(client, job_id: int) -> dict:
 def wait_for_report_chart_job(client, job_id: int) -> dict:
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        response = client.get('/api/reporting/chart-jobs')
+        response = client.get('/api/e2e-reporting/chart-jobs')
         assert response.status_code == 200
         job = next(item for item in response.json()['jobs'] if item['id'] == job_id)
         if job['status'] not in {'queued', 'processing'}:
@@ -1632,10 +1632,10 @@ def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client) ->
     app_module.repository.update_report_job(report_id, status='processing', progress=40)
     stopped_report = client.post(f'/reporting/jobs/{report_id}/stop')
     assert stopped_report.status_code == 200
-    report = next(item for item in client.get('/api/reporting/jobs').json()['jobs'] if item['id'] == report_id)
+    report = next(item for item in client.get('/api/e2e-reporting/jobs').json()['jobs'] if item['id'] == report_id)
     assert report['status'] == 'stopped'
     assert report['stop_url'] is None
-    assert report['retry_url'] == f'/reporting/jobs/{report_id}/retry'
+    assert report['retry_url'] == f'/e2e-reporting/jobs/{report_id}/retry'
     assert client.post(report['delete_url']).status_code == 200
 
     chart_id = app_module.repository.create_report_chart_job(
@@ -1647,10 +1647,10 @@ def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client) ->
     app_module.repository.update_report_chart_job(chart_id, status='processing', progress=40)
     stopped_chart = client.post(f'/reporting/chart-jobs/{chart_id}/stop')
     assert stopped_chart.status_code == 200
-    chart = next(item for item in client.get('/api/reporting/chart-jobs').json()['jobs'] if item['id'] == chart_id)
+    chart = next(item for item in client.get('/api/e2e-reporting/chart-jobs').json()['jobs'] if item['id'] == chart_id)
     assert chart['status'] == 'stopped'
     assert chart['stop_url'] is None
-    assert chart['retry_url'] == f'/reporting/chart-jobs/{chart_id}/retry'
+    assert chart['retry_url'] == f'/e2e-reporting/chart-jobs/{chart_id}/retry'
     assert client.post(chart['delete_url']).status_code == 200
 
 
@@ -1903,7 +1903,7 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
     rerun = wait_for_report_job(client, job['id'])
     assert rerun['status'] == 'ready'
     assert not stale_file.exists()
-    assert [item['id'] for item in client.get('/api/reporting/jobs').json()['jobs']] == [job['id']]
+    assert [item['id'] for item in client.get('/api/e2e-reporting/jobs').json()['jobs']] == [job['id']]
     deleted = client.post(job['delete_url'])
     assert deleted.status_code == 200
     assert client.get(job['download_url']).status_code == 404
@@ -1948,7 +1948,7 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert job['date'] == payload['generated_at']
     assert payload['generation'] == datetime.strptime(payload['generated_at'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d-%H%M%S')
     assert payload['charts']
-    preview_context = client.get('/api/reporting/chart-preview/context', params={
+    preview_context = client.get('/api/e2e-reporting/chart-preview/context', params={
         'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
     })
     assert preview_context.status_code == 200
@@ -1962,13 +1962,13 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert context_payload['datasets_by_source']['cdr-data'] == [{'value': '1', 'label': 'NetCheck_CDR_Data.csv'}]
     assert context_payload['datasets_by_source']['cdr-voice'] == [{'value': '2', 'label': 'NetCheck_CDR_Voice.csv'}]
     wrong_id = next(value for value in ('1', '2', '3') if value != expected_id)
-    invalid_dataset_type = client.post('/api/reporting/chart-preview', json={
+    invalid_dataset_type = client.post('/api/e2e-reporting/chart-preview', json={
         'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
         'definition': {'cdr_source': context_payload['cdr_source'], 'dataset_ids': [wrong_id]},
     })
     assert invalid_dataset_type.status_code == 400
     image_url = payload['charts'][0]['image_url']
-    assert re.match(r'/reporting/charts/\d{8}-\d{6}/chart-\d+\.png\?v=', image_url)
+    assert re.match(r'/e2e-reporting/charts/\d{8}-\d{6}/chart-\d+\.png\?v=', image_url)
     assert client.get(image_url).content == b'PNG'
     second = client.post('/reporting/netcheck-cdr/charts', data={
         'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
@@ -1979,7 +1979,7 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert second_job['status'] == 'ready'
     second_payload = client.get(second_job['open_url']).json()
     assert second_payload['generation'] != payload['generation']
-    assert client.get(f"/api/reporting/chart-sets/{payload['generation']}").status_code == 200
+    assert client.get(f"/api/e2e-reporting/chart-sets/{payload['generation']}").status_code == 200
     deleted = client.post(f"/reporting/chart-sets/{second_payload['generation']}/delete")
     assert deleted.status_code == 200
     assert [item['generation'] for item in deleted.json()['chart_sets']] == [payload['generation']]
@@ -2006,7 +2006,7 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     deletion_id = cleared.json()['job_id']
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
-        deletion = client.get(f'/api/reporting/bulk-deletions/{deletion_id}')
+        deletion = client.get(f'/api/e2e-reporting/bulk-deletions/{deletion_id}')
         assert deletion.status_code == 200
         if deletion.json()['status'] in {'ready', 'failed'}:
             break
@@ -2016,7 +2016,7 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert app_module.repository.get_report_chart_job(orphaned_job) is None
     assert app_module.repository.list_report_chart_jobs(limit=None) == []
     assert list(app_module.report_charts_directory().iterdir()) == []
-    assert client.get(f"/api/reporting/chart-sets/{payload['generation']}").status_code == 404
+    assert client.get(f"/api/e2e-reporting/chart-sets/{payload['generation']}").status_code == 404
 
 
 def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(client, monkeypatch) -> None:
@@ -2050,7 +2050,7 @@ def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(c
     unavailable_image = client.get(payload['charts'][unavailable_index]['image_url'])
     assert unavailable_image.status_code == 200
     assert unavailable_image.content.startswith(b'\x89PNG')
-    context = client.get('/api/reporting/chart-preview/context', params={
+    context = client.get('/api/e2e-reporting/chart-preview/context', params={
         'source': 'standalone', 'identifier': payload['generation'], 'chart_index': unavailable_index,
     })
     assert context.status_code == 200
@@ -2079,7 +2079,7 @@ def test_chart_preview_focus_row_matches_the_editors_sorted_row(client) -> None:
     )
     app_module.repository.update_report_chart_job(job_id, status='failed', generation='20260101-000000')
 
-    context = client.get('/api/reporting/chart-preview/context', params={
+    context = client.get('/api/e2e-reporting/chart-preview/context', params={
         'source': 'standalone', 'identifier': '20260101-000000', 'chart_index': 0,
     })
 

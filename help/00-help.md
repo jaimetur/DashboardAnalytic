@@ -21,7 +21,7 @@ Use this Help centre for detailed workflows, examples and technical rules. For a
 4. [Web Interface](04-web-interface.md) — shared navigation, dialogs, tables and responsive behaviour.
 5. [Workspace Management](05-workspace-management.md) — workspaces, data ingestion, processing, previews and mappings.
 6. [Datasets Analysis](06-datasets-analysis.md) — interactive single-dataset analysis and exports.
-7. [E2E Dashboards](07-e2e-dashboards.md) — saved Dashboard Sets, synchronized filters and slide layouts.
+7. [E2E Dashboards](07-e2e-dashboards.md) — saved Dashboards, synchronized filters and slide layouts.
 8. [E2E Reporting](08-e2e-reporting.md) — reports, Chart Sets, templates, chart recipes and jobs.
 9. [Chart Builder](09-chart-builder.md) — temporary ad-hoc chart construction.
 10. [Administration](10-administration.md) — users, templates, portability, databases and datasets.

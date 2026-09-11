@@ -3590,7 +3590,7 @@ def prepare_catalog_chart_preview_frame(
 ) -> tuple[pd.DataFrame, CatalogEntry]:
     """Return reusable chart rows after source and template filtering."""
     render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
-    normalised = normalise_report_operator_aliases(frame)
+    normalised = frame if frame.attrs.get('report_operator_aliases_normalized') else normalise_report_operator_aliases(frame)
     spec = _catalog_spec(render_entry)
     filtered, _group, _period = _source_for_spec({render_entry.source_kind: normalised}, spec, multivendor)
     filtered.attrs["catalogue_calculated_dimensions"] = render_entry.calculated_dimensions

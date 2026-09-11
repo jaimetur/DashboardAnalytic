@@ -1689,7 +1689,7 @@ def test_interrupted_background_jobs_become_retryable_failures(client) -> None:
     report = app_module.repository.get_report_run(report_id)
     assert report['status'] == 'failed'
     assert 'application restarted' in report['last_error']
-    assert app_module.serialize_report_job(report)['retry_url'] == f'/reporting/jobs/{report_id}/retry'
+    assert app_module.serialize_report_job(report)['retry_url'] == f'/e2e-reporting/jobs/{report_id}/retry'
 
 
 def test_ready_chart_set_job_supports_relaunch_and_row_reuse(client) -> None:
@@ -1705,7 +1705,7 @@ def test_ready_chart_set_job_supports_relaunch_and_row_reuse(client) -> None:
 
     ready_job = app_module.repository.get_report_chart_job(job_id)
     assert ready_job is not None
-    assert app_module.serialize_report_chart_job(ready_job)['retry_url'] == f'/reporting/chart-jobs/{job_id}/retry'
+    assert app_module.serialize_report_chart_job(ready_job)['retry_url'] == f'/e2e-reporting/chart-jobs/{job_id}/retry'
     assert app_module.repository.retry_report_chart_job(job_id)
 
     relaunched_job = app_module.repository.get_report_chart_job(job_id)
@@ -1976,7 +1976,7 @@ def test_delete_all_reports_removes_orphaned_output_directories(client) -> None:
     job_id = response.json()['job_id']
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
-        status_response = client.get(f'/api/reporting/bulk-deletions/{job_id}')
+        status_response = client.get(f'/api/e2e-reporting/bulk-deletions/{job_id}')
         assert status_response.status_code == 200
         if status_response.json()['status'] in {'ready', 'failed'}:
             break

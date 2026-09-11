@@ -1,17 +1,17 @@
 # E2E Dashboards
 
-E2E Dashboards combines processed CDRs into interactive, template-driven Dashboard Sets. Each template Slide becomes one dashboard, displaying all its charts together.
+E2E Dashboards combines processed CDRs into interactive, template-driven Dashboards. Each template Slide becomes one dashboard, displaying all its charts together.
 
-## Manage Dashboards Set
+## Manage Dashboards
 
-1. Enter a **Dashboard Set name** and select a workspace **Template**. Both NSA and SA template libraries are available.
+1. Enter a **Dashboard name** and select a workspace **Template**. Both NSA and SA template libraries are available.
 2. Click **Create**. All available processed CDRs are initially selected; refine the selection before interpreting results.
 3. Use **Save** to retain the current name, template, sources and filters in the active workspace database.
-4. Use **Open** to restore a saved set, **Duplicate** to create an independent copy, or **Close Set** to leave the current set.
+4. Use **Open** to restore a saved dashboard, **Duplicate** to create an independent copy, or **Close** to leave the current dashboard.
 5. **Delete** removes only the selected definition after confirmation.
 6. **Export** downloads a versioned JSON definition; **Import** restores one with a new identity. The JSON contains template and dataset references and filters, not source data or chart images. Import into a workspace with the corresponding template and dataset IDs, or adjust its source selections before viewing.
 
-Dashboard definitions belong to the workspace and are included when its database is backed up, exported or duplicated. They do not create Reporting jobs or PowerPoint files. The last open set is restored when returning to this tab in the same browser session. Changes are retained when **Save** is pressed; unsaved changes trigger a warning before leaving or opening another set.
+Dashboard definitions belong to the workspace and are included when its database is backed up, exported or duplicated. They do not create Reporting jobs or PowerPoint files. The last open dashboard is restored when returning to this tab in the same browser session. Changes are retained when **Save** is pressed; unsaved changes trigger a warning before leaving or opening another dashboard.
 
 ## Adaptative Filters
 
@@ -21,9 +21,11 @@ The right subpanel exposes available Market, Operator, Vendor, Region, City, Ses
 
 Each categorical filter supports searching values, **All**, **None**, and individual checkboxes. All removes that restriction; None intentionally selects zero rows. Available values adapt to the other active filters. Selected values remain visible even if the current combination has no matches. A source without an actively filtered column contributes no rows instead of silently ignoring that restriction.
 
-### Custom Auto-calculated Fields
+Each filter has a circular **×** action. Confirming it removes an added filter or hides a default filter from the Dashboard; hidden default filters can be restored with **Select field to add new filter**.
 
-Choose a workspace field in **Custom Auto-calculated Field** and click **Add Filter**. Its choices come from materialized values in the selected combined datasets, including the current geographic and date scope.
+### Additional Filters
+
+Use **Select field to add new filter** to choose any column available in the selected CDRs, including workspace Auto-calculated Fields, then click **Add Filter**. Its choices come from materialized values in the selected combined datasets, including the current geographic and date scope. The field is loaded only when it is added, so Dashboard preparation stays compact.
 
 For example, define `7-cities` for CDR-Data with `Yes` when City belongs to the comparison group and `No` otherwise. Add the field as a filter and select only `Yes`. Every dashboard chart using CDR-Data then receives only those matching samples, followed by its own template filters. Removing a custom filter removes its restriction.
 
@@ -35,9 +37,9 @@ A filter change invalidates every dashboard in the set. Requests are debounced a
 
 NR Mode follows Reporting semantics: Voice and Speech are classified by NSA/SA, while valid Data attempts are retained even when their sample RAT records a fallback. Use Technology or RAT filters for explicit sample-level restrictions.
 
-## View Dashboard Set
+## View Dashboard
 
-Click **View Dashboard Set** after preparation completes. The viewer occupies 80% of the desktop viewport width and expands on small screens.
+Click **View Dashboard** after preparation completes. The viewer occupies 96% of the desktop viewport width and expands on small screens.
 
 - **Previous**, **Next**, and the dashboard selector navigate template Slides in numeric order.
 - Charts retain their order and relative placeholder positions from the selected Layout in `Template_CDR_analysis.pptx`. Title and Transition slides appear as section dashboards. Small screens stack charts for readability.

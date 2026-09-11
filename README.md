@@ -15,7 +15,7 @@ After login, the application opens the **Readme** tab by default.
 - Combine operator workbook sheets and materialise normalised reporting fields.
 - Preview complete datasets with pagination and Excel-style column filters.
 - Analyse one processed CDR in Datasets Analysis.
-- Explore template-driven Dashboard Sets with synchronized adaptive filters in E2E Dashboards.
+- Explore template-driven Dashboards with synchronized adaptive filters in E2E Dashboards.
 - Create temporary ad-hoc charts in Chart Builder.
 - Generate NSA/SA PowerPoint reports and standalone Chart Sets.
 - Create workspace-owned Auto-calculated Fields and apply them asynchronously to the applicable CDR tables.
@@ -48,7 +48,7 @@ Datasets Analysis analyses one ready Data, Voice or Speech CDR.
 
 ### E2E Dashboards
 
-Create, save, duplicate, import and export workspace Dashboard Sets from any Report Template. Combine CDR sources, apply adaptive and custom Auto-calculated Field filters, and view each Slide with all its charts in the template layout. The large viewer provides dashboard navigation, chart datasets and CSV downloads, template editing, and synchronized floating filters. See [E2E Dashboards Help](help/07-e2e-dashboards.md).
+Create, save, duplicate, import and export workspace Dashboards from any Report Template. Combine CDR sources, apply adaptive and custom Auto-calculated Field filters, and view each Slide with all its charts in the template layout. The large viewer provides dashboard navigation, chart datasets and CSV downloads, template editing, and synchronized floating filters. See [E2E Dashboards Help](help/07-e2e-dashboards.md).
 
 ### E2E Reporting
 

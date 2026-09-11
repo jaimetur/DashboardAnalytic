@@ -1302,10 +1302,21 @@ class Repository:
                 target_lookup = current_lookup
                 target_sql_names = current_sql_names
                 continue
-            conn.execute(f"ALTER TABLE {self._quote_identifier(table_name)} ADD COLUMN {self._quote_identifier(source)}")
-            target_columns.append(source)
-            target_lookup[source_key] = source
-            target_sql_names.add(str(source).casefold())
+            try:
+                conn.execute(f"ALTER TABLE {self._quote_identifier(table_name)} ADD COLUMN {self._quote_identifier(source)}")
+            except sqlite3.OperationalError as exc:
+                # Another preview or materialization can add this projection
+                # after the schema probe above. SQLite then rejects the same
+                # ALTER TABLE; refresh the physical metadata and continue.
+                if 'duplicate column name' not in str(exc).casefold():
+                    raise
+                target_columns = self._table_columns(conn, table_name)
+                target_lookup = {self._column_identity(column): column for column in target_columns}
+                target_sql_names = {str(column).casefold() for column in target_columns}
+            else:
+                target_columns.append(source)
+                target_lookup[source_key] = source
+                target_sql_names.add(str(source).casefold())
         return target_columns
 
     def replace_reporting_rows(self, dataset_id: int, dataset_kind: str, df: pd.DataFrame) -> None:

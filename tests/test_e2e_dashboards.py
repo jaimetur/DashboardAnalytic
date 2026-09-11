@@ -1,3 +1,4 @@
+import json
 from io import BytesIO
 
 import pandas as pd
@@ -35,16 +36,25 @@ def test_filter_empty_missing_and_inclusive_dates():
     assert len(filter_frame(radio, definition(filters={'RAT': ['NR'], 'Technology': ['5G']}))) == 1
 
 
-def test_dashboard_sets_lifecycle_and_layout(client):
+def test_dashboards_lifecycle_and_layout(client):
     payload = setup_dashboard(client)
     page = client.get('/e2e-dashboards')
     assert page.status_code == 200
     assert page.text.index('>Datasets Analysis<') < page.text.index('>E2E Dashboards<') < page.text.index('>E2E Reporting<')
+    assert client.get('/e2e-reporting').status_code == 200
+    legacy_reporting = client.get('/reporting', follow_redirects=False)
+    assert legacy_reporting.status_code == 307
+    assert legacy_reporting.headers['location'] == '/e2e-reporting'
     assert 'id="ds-nr-mode"' in page.text
-    assert 'id="ds-sets-body"' in page.text
+    assert 'id="ds-dashboards-body"' in page.text
     assert 'id="ds-library"' not in page.text
     assert 'id="ds-save"' in page.text
-    assert '>Import Dashboard Set<' in page.text
+    assert '>Import Dashboard<' in page.text
+    assert 'Total Dashboards: 0' in page.text
+    assert '>Dashboard Data<' in page.text
+    assert 'Select field to add new filter' in page.text
+    assert 'hidden_filters' in DashboardDefinition.model_fields
+    assert 'id="ds-view" disabled' in page.text
     assert client.put('/api/e2e-dashboards/test', json=payload).status_code == 200
     assert client.get('/api/e2e-dashboards').json()['test']['name'] == 'Comparison'
     result = client.post('/api/e2e-dashboards/prepare', json=payload)
@@ -69,6 +79,15 @@ def test_dashboard_sets_lifecycle_and_layout(client):
     assert client.get('/api/e2e-dashboards').json() == {}
 
 
+def test_dashboard_state_migrates_from_legacy_storage(client):
+    payload = setup_dashboard(client)
+    core.repository.set_workspace_state('e2e_dashboard_sets_v1', '{"legacy": ' + json.dumps(payload) + '}')
+    result = client.get('/api/e2e-dashboards')
+    assert result.status_code == 200
+    assert result.json()['legacy']['name'] == 'Comparison'
+    assert json.loads(core.repository.get_workspace_state('e2e_dashboards_v2')) == result.json()
+
+
 def test_dashboard_custom_fields_and_snapshot_filters(client):
     payload = setup_dashboard(client)
     core.write_workspace_calculated_dimensions([{'name': '7-cities', 'sources': ['cdr-data'], 'rules': [{'when': 'City IN (London)', 'value': 'Yes'}], 'default': 'No'}])
@@ -86,6 +105,14 @@ def test_dashboard_custom_fields_and_snapshot_filters(client):
     assert client.get(f'/api/e2e-dashboards/data/{original}/0').json()['total'] == 3
     payload['filters'] = {'7-cities': []}
     assert client.post('/api/e2e-dashboards/prepare', json=payload).json()['rows']['data'] == 0
+    payload['filters'] = {'Test_Name': ['HTTP DL']}
+    payload['custom_fields'] = ['Test_Name']
+    preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
+    assert 'Test_Name' in preview['available_fields']
+    assert preview['options']['Test_Name'] == ['HTTP DL']
+    payload['hidden_filters'] = ['Market']
+    preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
+    assert 'Market' not in preview['options']
 
 
 def test_dashboard_validates_template_dates_and_sources(client):
@@ -132,6 +159,24 @@ def test_dashboard_reuses_sources_and_invalidates_database_edits(client, monkeyp
     core.repository.set_workspace_state('dashboard_cache_test', 'updated')
     assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 200
     assert len(loads) == 2
+
+
+def test_dashboard_reuses_normalized_snapshot_for_every_chart(client, monkeypatch):
+    payload = setup_dashboard(client)
+    import src.modules.e2e_dashboards as dashboards_module
+
+    calls = []
+    original = dashboards_module.normalise_report_operator_aliases
+
+    def tracked(frame):
+        calls.append(len(frame))
+        return original(frame)
+
+    monkeypatch.setattr(dashboards_module, 'normalise_report_operator_aliases', tracked)
+    preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
+    for index in (0, 1, 2):
+        assert client.get(f"/api/e2e-dashboards/preview/{preview['token']}/{index}.png").status_code == 200
+    assert calls == [3]
 
 
 def test_dashboard_is_restricted_to_super_admins_and_ejaitur(client):

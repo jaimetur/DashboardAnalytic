@@ -19,14 +19,15 @@ from pptx import Presentation
 
 from src.modules.cdr_reporting import (
     _layout_chart_frames, _named_slide_layout, classify_sessions,
-    ensure_report_vendor_group, materialize_calculated_dimensions,
+    ensure_report_vendor_group, materialize_calculated_dimensions, normalise_report_operator_aliases,
     prepare_catalog_chart_preview_frame, render_catalog_chart_preview,
 )
 
 from src.modules.repository import Repository
 
 KINDS = ('data', 'voice', 'speech')
-STATE_KEY = 'e2e_dashboard_sets_v1'
+STATE_KEY = 'e2e_dashboards_v2'
+LEGACY_STATE_KEY = 'e2e_dashboard_sets_v1'
 
 
 class DashboardDefinition(BaseModel):
@@ -38,6 +39,7 @@ class DashboardDefinition(BaseModel):
     datasets: dict[str, list[int]] = Field(default_factory=dict)
     filters: dict[str, list[str]] = Field(default_factory=dict)
     custom_fields: list[str] = Field(default_factory=list)
+    hidden_filters: list[str] = Field(default_factory=list)
     date_from: date | None = None
     date_to: date | None = None
 
@@ -123,8 +125,12 @@ def install_dashboard_routes(core):
     def bound_repository():
         return Repository(Path(workspace_key()), core.repository.global_db_path)
 
-    def read_sets(task_repository):
-        return json.loads(task_repository.get_workspace_state(STATE_KEY) or '{}')
+    def read_dashboards(task_repository):
+        stored = task_repository.get_workspace_state(STATE_KEY)
+        if stored is None:
+            stored = task_repository.get_workspace_state(LEGACY_STATE_KEY) or '{}'
+            task_repository.set_workspace_state(STATE_KEY, stored)
+        return json.loads(stored or '{}')
 
     def catalogue(definition, task_repository=None):
         task_repository = task_repository or core.repository
@@ -139,7 +145,7 @@ def install_dashboard_routes(core):
 
     def validate(definition, task_repository=None):
         if not definition.name.strip():
-            raise HTTPException(400, 'Enter a Dashboard Set name.')
+            raise HTTPException(400, 'Enter a Dashboard name.')
         if definition.date_from and definition.date_to and definition.date_from > definition.date_to:
             raise HTTPException(400, 'The start date must not follow the end date.')
         if set(definition.datasets) - set(KINDS):
@@ -160,34 +166,34 @@ def install_dashboard_routes(core):
         })
 
     @app.get('/api/e2e-dashboards')
-    def list_sets(user=Depends(dashboard_user)):
+    def list_dashboards(user=Depends(dashboard_user)):
         with lock:
-            return read_sets(bound_repository())
+            return read_dashboards(bound_repository())
 
-    @app.put('/api/e2e-dashboards/{set_id}')
-    def save_set(set_id: str, definition: DashboardDefinition, user=Depends(dashboard_user)):
+    @app.put('/api/e2e-dashboards/{dashboard_id}')
+    def save_dashboard(dashboard_id: str, definition: DashboardDefinition, user=Depends(dashboard_user)):
         with lock:
             task_repository = bound_repository()
             validate(definition, task_repository)
-            sets = read_sets(task_repository)
-            if any(key != set_id and item['name'].strip().casefold() == definition.name.strip().casefold() for key, item in sets.items()):
-                raise HTTPException(409, 'A Dashboard Set with this name already exists.')
+            dashboards = read_dashboards(task_repository)
+            if any(key != dashboard_id and item['name'].strip().casefold() == definition.name.strip().casefold() for key, item in dashboards.items()):
+                raise HTTPException(409, 'A Dashboard with this name already exists.')
             definition.name = definition.name.strip()
-            sets[set_id] = definition.model_dump(mode='json')
-            task_repository.set_workspace_state(STATE_KEY, json.dumps(sets))
-            task_repository.add_log(user.username, 'save_dashboard_set', json.dumps({'id': set_id, 'name': definition.name}))
-        return {'id': set_id}
+            dashboards[dashboard_id] = definition.model_dump(mode='json')
+            task_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
+            task_repository.add_log(user.username, 'save_dashboard', json.dumps({'id': dashboard_id, 'name': definition.name}))
+        return {'id': dashboard_id}
 
-    @app.delete('/api/e2e-dashboards/{set_id}')
-    def delete_set(set_id: str, user=Depends(dashboard_user)):
+    @app.delete('/api/e2e-dashboards/{dashboard_id}')
+    def delete_dashboard(dashboard_id: str, user=Depends(dashboard_user)):
         with lock:
             task_repository = bound_repository()
-            sets = read_sets(task_repository)
-            if set_id not in sets:
-                raise HTTPException(404, 'Dashboard Set not found.')
-            del sets[set_id]
-            task_repository.set_workspace_state(STATE_KEY, json.dumps(sets))
-            task_repository.add_log(user.username, 'delete_dashboard_set', json.dumps({'id': set_id}))
+            dashboards = read_dashboards(task_repository)
+            if dashboard_id not in dashboards:
+                raise HTTPException(404, 'Dashboard not found.')
+            del dashboards[dashboard_id]
+            task_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
+            task_repository.add_log(user.username, 'delete_dashboard', json.dumps({'id': dashboard_id}))
         return {'deleted': True}
 
     def data_stamp(path):
@@ -219,6 +225,7 @@ def install_dashboard_routes(core):
             # filter and workspace-field dependencies.
             requested = set(core.reporting_query_columns(kind, entries, definition.scope == 'multivendor'))
             requested.update(core.combined_reporting_required_columns(active_dimensions, kind))
+            requested.update(definition.custom_fields)
             requested.update(alias for aliases in FILTER_COLUMNS.values() for alias in aliases)
             requested.update(('event_start_time', 'Test_Start_Time', 'Timestamp', 'Date'))
             columns = sorted(requested, key=str.casefold)
@@ -245,10 +252,13 @@ def install_dashboard_routes(core):
         frames = load_frames(definition, task_repository, dimensions, workspace, entries)
         if not frames:
             raise HTTPException(400, 'Select at least one CDR dataset.')
-        custom = {dimension.name for dimension in dimensions}
-        fields = set()
+        selected_dataset_ids = {dataset_id for ids in definition.datasets.values() for dataset_id in ids}
+        available_fields = {column for dataset_id in selected_dataset_ids for column in task_repository.list_dataset_row_columns(dataset_id)}
+        available_fields.update(dimension.name for dimension in dimensions)
+        hidden_filter_keys = {identity(field) for field in definition.hidden_filters}
+        fields = {field for field in ADAPTATIVE_FILTER_FIELDS if identity(field) not in hidden_filter_keys}
+        fields.update(definition.custom_fields)
         for frame in frames.values():
-            fields.update(column for column in frame if column in custom)
             for label in FILTER_COLUMNS:
                 column = resolve_filter_column(frame, label)
                 if column is not None and frame[column].fillna('').astype(str).str.strip().ne('').any():
@@ -263,7 +273,14 @@ def install_dashboard_routes(core):
                     mask = filter_mask(frame, definition, exclude=field)
                     values.update(frame.loc[mask, column].fillna('').astype(str).unique())
             options[field] = sorted(values, key=str.casefold)
-        filtered_frames = {kind: filter_frame(frame, definition) for kind, frame in frames.items()}
+        filtered_frames = {}
+        for kind, frame in frames.items():
+            # Adaptive facets keep their original CDR values. Once filtered,
+            # normalise the snapshot only once so every chart on every slide
+            # reuses it instead of copying millions of rows per render.
+            filtered = normalise_report_operator_aliases(filter_frame(frame, definition))
+            filtered.attrs['report_operator_aliases_normalized'] = True
+            filtered_frames[kind] = filtered
         slides = OrderedDict()
         deck = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
         for editor_index, (index, entry) in enumerate(sorted(enumerate(entries), key=lambda item: (item[1].slide, item[0]))):
@@ -283,7 +300,7 @@ def install_dashboard_routes(core):
             snapshots[token] = Snapshot(workspace, user.username, entries, filtered_frames, definition.scope == 'multivendor')
             while len(snapshots) > 6:
                 snapshots.popitem(last=False)
-        return {'token': token, 'slides': list(slides.values()), 'options': options, 'filter_fields': list(ADAPTATIVE_FILTER_FIELDS), 'custom_fields': sorted(custom), 'rows': {kind: len(frame) for kind, frame in filtered_frames.items()}}
+        return {'token': token, 'slides': list(slides.values()), 'options': options, 'filter_fields': list(ADAPTATIVE_FILTER_FIELDS), 'available_fields': sorted(available_fields, key=str.casefold), 'rows': {kind: len(frame) for kind, frame in filtered_frames.items()}}
 
     @app.post('/api/e2e-dashboards/prepare')
     def prepare(definition: DashboardDefinition, user=Depends(dashboard_user)):
@@ -296,7 +313,7 @@ def install_dashboard_routes(core):
         with lock:
             snapshot = snapshots.get(token)
         if snapshot is None or snapshot.workspace != workspace_key() or snapshot.owner != user.username:
-            raise HTTPException(410, 'Dashboard preview expired. Refresh the Dashboard Set.')
+            raise HTTPException(410, 'Dashboard preview expired. Refresh the Dashboard.')
         if index < 0 or index >= len(snapshot.entries):
             raise HTTPException(404, 'Chart not found.')
         entry = snapshot.entries[index]

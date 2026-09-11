@@ -94,7 +94,7 @@ Datasets Analysis analyses one processed CDR at a time.
 
 ## E2E Dashboards
 
-Create named Dashboard Sets from workspace templates and combine CDR sources with adaptive filters, including custom Auto-calculated Fields. Each Slide appears as a dashboard with its charts arranged using the template Layout. The viewer supports navigation, filtered datasets, template editing and synchronized floating filters. See [E2E Dashboards](07-e2e-dashboards.md) for the complete workflow.
+Create named Dashboards from workspace templates and combine CDR sources with adaptive filters, including custom Auto-calculated Fields. Each Slide appears as a dashboard with its charts arranged using the template Layout. The viewer supports navigation, filtered datasets, template editing and synchronized floating filters. See [E2E Dashboards](07-e2e-dashboards.md) for the complete workflow.
 
 ## E2E Reporting
 

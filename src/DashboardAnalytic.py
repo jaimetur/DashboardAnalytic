@@ -6172,7 +6172,8 @@ def select_workspace(
     # never send the user to Workspace merely because the active data source
     # changed.  Restrict the destination to application modules so this form
     # cannot become an open redirect.
-    target = return_to if return_to in {'/workspace', '/datasets-analysis', '/e2e-dashboards', '/reporting', '/admin'} else '/workspace'
+    target = '/e2e-reporting' if return_to == '/reporting' else return_to
+    target = target if target in {'/workspace', '/datasets-analysis', '/e2e-dashboards', '/e2e-reporting', '/admin'} else '/workspace'
     if user.role != 'super-admin' and not repository.user_has_workspace_access(user.username, workspace_id):
         return RedirectResponse(f'{target}?workspace_error=You+do+not+have+access+to+that+workspace.', status_code=status.HTTP_303_SEE_OTHER)
     try:
@@ -7025,7 +7026,7 @@ def _report_job_charts_payload(row: Any) -> dict[str, Any] | None:
         charts.append({
             'slide': item.get('slide'), 'title': str(item.get('title') or ''),
             'source': str(item.get('source') or ''), 'chart_type': str(item.get('chart_type') or ''),
-            'image_url': f"/reporting/jobs/{int(row['id'])}/charts/{file_name}",
+            'image_url': f"/e2e-reporting/jobs/{int(row['id'])}/charts/{file_name}",
         })
     if not charts:
         return None
@@ -7118,7 +7119,7 @@ def _temporary_preview_dataset_ids(editable: dict[str, Any], selected_ids: dict[
     return requested
 
 
-@app.get('/api/reporting/chart-preview/context')
+@app.get('/api/e2e-reporting/chart-preview/context')
 def temporary_chart_preview_context(source: str, identifier: str, chart_index: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Return an immutable chart definition for the interactive viewer sandbox."""
     entry, selected_ids, _technology, _multivendor, template_row_index = _temporary_chart_preview_context(source, identifier, chart_index)
@@ -7148,7 +7149,7 @@ def temporary_chart_preview_context(source: str, identifier: str, chart_index: i
     })
 
 
-@app.post('/api/reporting/chart-preview')
+@app.post('/api/e2e-reporting/chart-preview')
 async def temporary_chart_preview(request: Request, user: SessionUser = Depends(current_user)) -> Response:
     """Render a transient chart from viewer edits without altering stored output."""
     try:
@@ -7339,7 +7340,7 @@ def _store_report_hover_targets(report_id: str, chart_index: int, targets: list[
         return
 
 
-@app.post('/api/reporting/chart-preview/hover')
+@app.post('/api/e2e-reporting/chart-preview/hover')
 async def temporary_chart_preview_hover(request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Return semantic chart hit areas for the interactive PNG preview."""
     try:
@@ -7352,7 +7353,7 @@ async def temporary_chart_preview_hover(request: Request, user: SessionUser = De
     return JSONResponse({'targets': targets})
 
 
-@app.post('/api/reporting/chart-preview/data')
+@app.post('/api/e2e-reporting/chart-preview/data')
 async def temporary_chart_preview_data(request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Return the bounded filtered chart dataset for the viewer sandbox."""
     try:
@@ -7484,13 +7485,13 @@ def serialize_report_job(row: Any) -> dict[str, Any]:
         'status': status_value,
         'progress': int(row['progress'] or 0),
         'error': str(row['last_error'] or ''),
-        'download_url': f'/reporting/jobs/{report_id}/download' if output_available else None,
-        'open_url': f'/reporting/jobs/{report_id}/open' if output_available else None,
-        'charts_url': f'/api/reporting/jobs/{report_id}/charts' if charts_payload else None,
-        'charts_download_url': f'/reporting/jobs/{report_id}/charts/download' if charts_payload else None,
-        'delete_url': f'/reporting/jobs/{report_id}/delete',
-        'stop_url': f'/reporting/jobs/{report_id}/stop' if status_value == 'processing' else None,
-        'retry_url': f'/reporting/jobs/{report_id}/retry' if status_value in {'failed', 'stopped', 'ready'} else None,
+        'download_url': f'/e2e-reporting/jobs/{report_id}/download' if output_available else None,
+        'open_url': f'/e2e-reporting/jobs/{report_id}/open' if output_available else None,
+        'charts_url': f'/api/e2e-reporting/jobs/{report_id}/charts' if charts_payload else None,
+        'charts_download_url': f'/e2e-reporting/jobs/{report_id}/charts/download' if charts_payload else None,
+        'delete_url': f'/e2e-reporting/jobs/{report_id}/delete',
+        'stop_url': f'/e2e-reporting/jobs/{report_id}/stop' if status_value == 'processing' else None,
+        'retry_url': f'/e2e-reporting/jobs/{report_id}/retry' if status_value in {'failed', 'stopped', 'ready'} else None,
     }
 
 
@@ -7524,11 +7525,11 @@ def serialize_report_chart_job(row: Any) -> dict[str, Any]:
         'progress': int(row['progress'] or 0),
         'error': str(row['last_error'] or ''),
         'generation': generation or None,
-        'open_url': f'/api/reporting/chart-sets/{generation}' if status_value == 'ready' and generation else None,
-        'charts_download_url': f'/reporting/chart-sets/{generation}/download' if chart_set else None,
-        'delete_url': f'/reporting/chart-jobs/{job_id}/delete',
-        'stop_url': f'/reporting/chart-jobs/{job_id}/stop' if status_value == 'processing' else None,
-        'retry_url': f'/reporting/chart-jobs/{job_id}/retry' if status_value in {'failed', 'stopped', 'ready'} else None,
+        'open_url': f'/api/e2e-reporting/chart-sets/{generation}' if status_value == 'ready' and generation else None,
+        'charts_download_url': f'/e2e-reporting/chart-sets/{generation}/download' if chart_set else None,
+        'delete_url': f'/e2e-reporting/chart-jobs/{job_id}/delete',
+        'stop_url': f'/e2e-reporting/chart-jobs/{job_id}/stop' if status_value == 'processing' else None,
+        'retry_url': f'/e2e-reporting/chart-jobs/{job_id}/retry' if status_value in {'failed', 'stopped', 'ready'} else None,
     }
 
 
@@ -7631,7 +7632,7 @@ def _run_netcheck_report_job_locked(
         }))
 
 
-@app.get('/reporting', response_class=HTMLResponse)
+@app.get('/e2e-reporting', response_class=HTMLResponse)
 def reporting(request: Request, user: SessionUser = Depends(current_user)) -> HTMLResponse:
     if not active_workspace:
         return RedirectResponse('/workspace?workspace_warning=Open+a+workspace+before+using+Reporting.', status_code=status.HTTP_303_SEE_OTHER)
@@ -7754,7 +7755,7 @@ async def chart_builder_preview(request: Request, user: SessionUser = Depends(cu
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.post('/reporting/netcheck-cdr')
+@app.post('/e2e-reporting/netcheck-cdr')
 def generate_netcheck_cdr_report(
     data_dataset_id: list[int] = Form([]),
     voice_dataset_id: list[int] = Form([]),
@@ -7829,7 +7830,7 @@ def generate_netcheck_cdr_report(
     return JSONResponse({'job_id': report_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
 
 
-@app.post('/reporting/netcheck-cdr/charts')
+@app.post('/e2e-reporting/netcheck-cdr/charts')
 def generate_netcheck_cdr_charts(
     data_dataset_id: list[int] = Form([]),
     voice_dataset_id: list[int] = Form([]),
@@ -8117,7 +8118,7 @@ def _report_chart_payload(manifest: dict[str, Any], generation: str, output_dir:
             'title': str(item.get('title') or ''),
             'source': str(item.get('source') or ''),
             'chart_type': str(item.get('chart_type') or ''),
-            'image_url': f'/reporting/charts/{generation}/{file_name}?v={manifest.get("generated_at", "")}',
+            'image_url': f'/e2e-reporting/charts/{generation}/{file_name}?v={manifest.get("generated_at", "")}',
         })
     if not charts:
         return None
@@ -8326,7 +8327,7 @@ def persist_report_charts(
     return payload
 
 
-@app.get('/reporting/charts/{generation}/{chart_file}')
+@app.get('/e2e-reporting/charts/{generation}/{chart_file}')
 def report_chart_image(generation: str, chart_file: str, user: SessionUser = Depends(current_user)) -> FileResponse:
     if not _valid_report_chart_generation(generation) or not re.fullmatch(r'chart-\d+\.png', chart_file):
         raise HTTPException(status_code=404, detail='Chart not found.')
@@ -8336,7 +8337,7 @@ def report_chart_image(generation: str, chart_file: str, user: SessionUser = Dep
     return FileResponse(chart_path, media_type='image/png')
 
 
-@app.get('/reporting/chart-sets/{generation}/download')
+@app.get('/e2e-reporting/chart-sets/{generation}/download')
 def download_report_chart_set(generation: str, user: SessionUser = Depends(current_user)) -> FileResponse:
     """Download every PNG belonging to one standalone Chart Set."""
     if not _valid_report_chart_generation(generation) or load_persisted_report_charts(generation) is None:
@@ -8345,7 +8346,7 @@ def download_report_chart_set(generation: str, user: SessionUser = Depends(curre
     return _chart_png_zip_response(directory, f'Chart_Set_{generation}.zip')
 
 
-@app.get('/api/reporting/chart-sets/{generation}')
+@app.get('/api/e2e-reporting/chart-sets/{generation}')
 def report_chart_set(generation: str, user: SessionUser = Depends(current_user)) -> JSONResponse:
     payload = load_persisted_report_charts(generation)
     if payload is None:
@@ -8416,7 +8417,7 @@ def start_bulk_report_deletion(workspace: Workspace, kind: str, username: str) -
     return job
 
 
-@app.post('/reporting/chart-sets/delete-all')
+@app.post('/e2e-reporting/chart-sets/delete-all')
 def delete_all_report_chart_sets(user: SessionUser = Depends(admin_user)) -> JSONResponse:
     """Remove every standalone Chart Set and every Charts Job row."""
     if not active_workspace:
@@ -8425,7 +8426,7 @@ def delete_all_report_chart_sets(user: SessionUser = Depends(admin_user)) -> JSO
     return JSONResponse({'job_id': job['id'], 'status': job['status']}, status_code=status.HTTP_202_ACCEPTED)
 
 
-@app.get('/api/reporting/bulk-deletions/{job_id}')
+@app.get('/api/e2e-reporting/bulk-deletions/{job_id}')
 def bulk_report_deletion_status(job_id: str, user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Return the state of one bulk Reports or Chart Sets deletion job."""
     with BULK_REPORT_DELETION_JOBS_LOCK:
@@ -8439,7 +8440,7 @@ def bulk_report_deletion_status(job_id: str, user: SessionUser = Depends(current
     })
 
 
-@app.post('/reporting/chart-sets/{generation}/delete')
+@app.post('/e2e-reporting/chart-sets/{generation}/delete')
 def delete_report_chart_set(generation: str, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     if not _valid_report_chart_generation(generation):
         raise HTTPException(status_code=404, detail='Chart set not found.')
@@ -8453,12 +8454,12 @@ def delete_report_chart_set(generation: str, user: SessionUser = Depends(admin_u
     return JSONResponse({'chart_sets': list_persisted_report_chart_sets()})
 
 
-@app.get('/api/reporting/chart-jobs')
+@app.get('/api/e2e-reporting/chart-jobs')
 def report_chart_jobs(user: SessionUser = Depends(current_user)) -> JSONResponse:
     return JSONResponse({'jobs': [serialize_report_chart_job(row) for row in repository.list_report_chart_jobs(limit=None)]})
 
 
-@app.post('/reporting/chart-jobs/{job_id}/delete')
+@app.post('/e2e-reporting/chart-jobs/{job_id}/delete')
 def delete_report_chart_job(job_id: int, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     job = repository.get_report_chart_job(job_id)
     if not job:
@@ -8476,7 +8477,7 @@ def delete_report_chart_job(job_id: int, user: SessionUser = Depends(admin_user)
     return JSONResponse({'deleted': job_id, 'generation': generation or None})
 
 
-@app.post('/reporting/chart-jobs/{job_id}/stop')
+@app.post('/e2e-reporting/chart-jobs/{job_id}/stop')
 def stop_report_chart_job(job_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     if not repository.stop_report_chart_job(job_id):
         raise HTTPException(status_code=409, detail='Only processing Chart Set jobs can be stopped.')
@@ -8484,7 +8485,7 @@ def stop_report_chart_job(job_id: int, user: SessionUser = Depends(current_user)
     return JSONResponse({'stopped': job_id})
 
 
-@app.post('/reporting/chart-jobs/{job_id}/retry')
+@app.post('/e2e-reporting/chart-jobs/{job_id}/retry')
 def retry_report_chart_job(job_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     if not active_workspace:
         raise HTTPException(status_code=409, detail='Open a workspace before retrying Report Charts.')
@@ -8530,7 +8531,7 @@ def retry_report_chart_job(job_id: int, user: SessionUser = Depends(current_user
     return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
 
 
-@app.get('/api/reporting/jobs')
+@app.get('/api/e2e-reporting/jobs')
 def reporting_jobs(user: SessionUser = Depends(current_user)) -> JSONResponse:
     return JSONResponse({'jobs': [serialize_report_job(row) for row in repository.list_report_runs(limit=None)]})
 
@@ -8548,19 +8549,19 @@ def _report_job_file(report_id: int) -> tuple[dict[str, Any], Path]:
     return payload, path
 
 
-@app.get('/reporting/jobs/{report_id}/download')
+@app.get('/e2e-reporting/jobs/{report_id}/download')
 def download_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> FileResponse:
     payload, path = _report_job_file(report_id)
     return FileResponse(path, filename=payload['report_name'], media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation')
 
 
-@app.get('/reporting/jobs/{report_id}/open')
+@app.get('/e2e-reporting/jobs/{report_id}/open')
 def open_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> FileResponse:
     payload, path = _report_job_file(report_id)
     return FileResponse(path, filename=payload['report_name'], media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation', content_disposition_type='inline')
 
 
-@app.get('/api/reporting/jobs/{report_id}/charts')
+@app.get('/api/e2e-reporting/jobs/{report_id}/charts')
 def report_job_charts(report_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     report = repository.get_report_run(report_id)
     payload = _report_job_charts_payload(report) if report else None
@@ -8569,7 +8570,7 @@ def report_job_charts(report_id: int, user: SessionUser = Depends(current_user))
     return JSONResponse(payload)
 
 
-@app.get('/reporting/jobs/{report_id}/charts/download')
+@app.get('/e2e-reporting/jobs/{report_id}/charts/download')
 def download_report_job_charts(report_id: int, user: SessionUser = Depends(current_user)) -> FileResponse:
     """Download the PNG charts rendered while generating one PowerPoint report."""
     report = repository.get_report_run(report_id)
@@ -8580,7 +8581,7 @@ def download_report_job_charts(report_id: int, user: SessionUser = Depends(curre
     return _chart_png_zip_response(directory, f'{report_name}_charts.zip')
 
 
-@app.get('/reporting/jobs/{report_id}/charts/{chart_file}')
+@app.get('/e2e-reporting/jobs/{report_id}/charts/{chart_file}')
 def report_job_chart_image(report_id: int, chart_file: str, user: SessionUser = Depends(current_user)) -> FileResponse:
     if not re.fullmatch(r'slide-\d+-chart-\d+\.png', chart_file):
         raise HTTPException(status_code=404, detail='Chart not found.')
@@ -8594,7 +8595,7 @@ def report_job_chart_image(report_id: int, chart_file: str, user: SessionUser = 
     return FileResponse(chart_path, media_type='image/png')
 
 
-@app.post('/reporting/jobs/{report_id}/charts/delete')
+@app.post('/e2e-reporting/jobs/{report_id}/charts/delete')
 def delete_report_job_charts(report_id: int, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     """Delete only the rendered-chart folder belonging to one report."""
     report = repository.get_report_run(report_id)
@@ -8607,7 +8608,7 @@ def delete_report_job_charts(report_id: int, user: SessionUser = Depends(admin_u
     return JSONResponse({'deleted': report_id})
 
 
-@app.post('/reporting/jobs/{report_id}/delete')
+@app.post('/e2e-reporting/jobs/{report_id}/delete')
 def delete_report_job(report_id: int, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     report = repository.delete_report_run(report_id)
     if not report:
@@ -8617,7 +8618,7 @@ def delete_report_job(report_id: int, user: SessionUser = Depends(admin_user)) -
     return JSONResponse({'deleted': report_id})
 
 
-@app.post('/reporting/jobs/{report_id}/stop')
+@app.post('/e2e-reporting/jobs/{report_id}/stop')
 def stop_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     if not repository.stop_report_job(report_id):
         raise HTTPException(status_code=409, detail='Only processing report jobs can be stopped.')
@@ -8625,7 +8626,7 @@ def stop_report_job(report_id: int, user: SessionUser = Depends(current_user)) -
     return JSONResponse({'stopped': report_id})
 
 
-@app.post('/reporting/jobs/delete-all')
+@app.post('/e2e-reporting/jobs/delete-all')
 def delete_all_report_jobs(user: SessionUser = Depends(admin_user)) -> JSONResponse:
     """Delete every persisted PowerPoint report job and its generated file."""
     if not active_workspace:
@@ -8634,7 +8635,7 @@ def delete_all_report_jobs(user: SessionUser = Depends(admin_user)) -> JSONRespo
     return JSONResponse({'job_id': job['id'], 'status': job['status']}, status_code=status.HTTP_202_ACCEPTED)
 
 
-@app.post('/reporting/jobs/{report_id}/retry')
+@app.post('/e2e-reporting/jobs/{report_id}/retry')
 def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     if not active_workspace:
         raise HTTPException(status_code=409, detail='Open a workspace before retrying a report.')
@@ -8695,6 +8696,16 @@ def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) 
         'report_id': report_id, 'reused': True, 'generate_tooltips': generate_tooltips,
     }))
     return JSONResponse({'job_id': report_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
+
+
+@app.api_route('/reporting', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], include_in_schema=False)
+@app.api_route('/reporting/{legacy_path:path}', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], include_in_schema=False)
+def legacy_reporting_redirect(request: Request, legacy_path: str = '') -> RedirectResponse:
+    """Keep old Reporting bookmarks and generated links working during the route rename."""
+    destination = '/e2e-reporting' + (f'/{legacy_path}' if legacy_path else '')
+    if request.url.query:
+        destination += f'?{request.url.query}'
+    return RedirectResponse(destination, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @app.get('/api/datasets/status')

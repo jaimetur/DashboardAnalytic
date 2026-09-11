@@ -6,26 +6,30 @@
     <p class="eyebrow">E2E Dashboards</p><h2>Your workspace, live on screen</h2>
     <p class="lede">Explore complete template slides as dashboards. Combine campaigns, refine your scope and inspect the samples behind every chart.</p>
   </article>
-  <article class="panel">
-    <div class="section-head"><div><p class="eyebrow">Workspace library</p><h2>Manage Dashboards Set</h2></div><span class="pill" id="ds-count">0 sets</span></div>
+  <details class="panel collapsible-panel ds-manage-panel" open data-panel-state-key="e2e-dashboards:manage">
+    <summary class="collapsible-summary"><div><p class="eyebrow">Dashboards library</p><h2>Manage Dashboards</h2></div><div class="summary-inline-actions"><span class="pill ds-total-badge" id="ds-count">Total Dashboards: 0</span><span class="collapse-chip">Collapse</span></div></summary>
+    <div class="collapsible-panel-body">
     <div class="ds-management">
-      <label>Dashboard Set name<input id="ds-name" maxlength="120" placeholder="Campaign comparison"></label>
+      <label>Dashboard name<input id="ds-name" maxlength="120" placeholder="Campaign comparison"></label>
       <label>NR Mode<select id="ds-nr-mode"><option value="nsa">NSA (Non-Standalone)</option><option value="sa">SA (Standalone)</option></select></label>
       <label>Template<select id="ds-template"></select></label>
     </div>
     <div class="form-actions ds-actions">
-      <button type="button" id="ds-create">Create Dashboard Set</button><button type="button" id="ds-import">Import Dashboard Set</button><input type="file" id="ds-import-file" accept=".json,application/json" hidden>
+      <button type="button" id="ds-create">Create Dashboard</button><button type="button" id="ds-import">Import Dashboard</button><input type="file" id="ds-import-file" accept=".json,application/json" hidden>
     </div>
-    <div class="table-wrap ds-sets-table-wrap"><table class="ds-sets-table"><thead><tr><th>Dashboard Set</th><th>NR Mode</th><th>Template</th><th>Actions</th></tr></thead><tbody id="ds-sets-body"></tbody></table></div>
-    <p class="form-note" id="ds-status" role="status" aria-live="polite">Create a Dashboard Set or open one from your workspace.</p>
-  </article>
+    <div class="table-wrap ds-dashboards-table-wrap"><table class="ds-dashboards-table"><thead><tr><th>Dashboard</th><th>NR Mode</th><th>Template</th><th>Actions</th></tr></thead><tbody id="ds-dashboards-body"></tbody></table></div>
+    <p class="form-note" id="ds-status" role="status" aria-live="polite">Create a Dashboard or open one from your workspace.</p>
+    </div>
+  </details>
   <div id="ds-filter-home">
-    <article class="panel" id="ds-filter-panel" hidden>
-      <div class="section-head"><div><p class="eyebrow">Shared selection</p><h2>Adaptative Filters</h2></div><button type="button" id="ds-reset">Reset Filters</button></div>
-      <div class="ds-filter-columns"><div class="ds-source-filters" id="ds-sources"></div><div><div class="ds-facets" id="ds-facets"></div><div class="ds-custom"><label>Custom Auto-calculated Field<select id="ds-custom-field"></select></label><button type="button" id="ds-add-filter">Add Filter</button></div></div></div>
-      <div class="ds-actions"><button type="button" id="ds-save">Save</button><button type="button" id="ds-refresh">Refresh Data</button><button type="button" id="ds-view" disabled>View Dashboard Set</button><span id="ds-rows" class="form-note" role="status"></span></div>
-      <p class="form-note">Filters update automatically. All values means no restriction; clearing every checkbox selects no rows. Save stores the current filters as the default selection for this Dashboard Set.</p>
-    </article>
+    <details class="panel collapsible-panel ds-data-panel" id="ds-filter-panel" open data-panel-state-key="e2e-dashboards:data" hidden>
+      <summary class="collapsible-summary"><div><p class="eyebrow">Active dashboard</p><h2>Dashboard Data</h2></div><div class="summary-inline-actions"><span class="pill ds-dashboard-name-badge" id="ds-dashboard-name">Dashboard Name: —</span><span class="collapse-chip">Collapse</span></div></summary>
+      <div class="collapsible-panel-body">
+      <div class="ds-filter-columns"><div class="ds-source-filters" id="ds-sources"></div><div><div class="ds-facets" id="ds-facets"></div><div class="ds-custom"><label>Select field to add new filter<select id="ds-custom-field"></select></label><button type="button" id="ds-add-filter">Add Filter</button></div></div></div>
+      <div class="ds-actions"><button type="button" id="ds-save">Save</button><button type="button" id="ds-refresh">Refresh Data</button><button type="button" id="ds-reset">Reset Filters</button><button type="button" id="ds-view" disabled>View Dashboard</button><span id="ds-rows" class="form-note" role="status"></span></div>
+      <p class="form-note">Filters update automatically. All values means no restriction; clearing every checkbox selects no rows. Save stores the current filters as the default selection for this Dashboard.</p>
+      </div>
+    </details>
   </div>
 </section>
 <div class="confirm-overlay ds-overlay e2e-dashboards" id="ds-viewer" hidden>
