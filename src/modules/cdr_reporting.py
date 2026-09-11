@@ -3209,7 +3209,9 @@ def _render_cdf_line(
     data.attrs = frame.attrs.copy()
     if campaign_column:
         data["__cdf_campaign"] = data[campaign_column].fillna("(blank)").astype(str).map(_campaign_display_value)
-    data[metric] = pd.to_numeric(data[metric], errors="coerce"); data = data.dropna()
+    data[metric] = pd.to_numeric(data[metric], errors="coerce")
+    # Optional campaign metadata must not discard otherwise valid CDF samples.
+    data = data.dropna(subset=[metric, *grouping_columns])
     if data.empty: return _empty_chart(title)
     combinations = _hierarchical_unique_keys(data, grouping_columns)
     series_data: list[tuple[tuple[str, ...], pd.DataFrame, list[float]]] = []
@@ -3917,7 +3919,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
                       chart_output_dir: Path | None = None,
                       frame_loader: Callable[[str], pd.DataFrame] | None = None,
                       on_chart_rendered: Callable[[CatalogEntry, int, bool], None] | None = None,
-                      generate_tooltips: bool = True) -> Path:
+                      generate_tooltips: bool = True, reuse_existing_charts: bool = False) -> Path:
     if not template.exists():
         raise FileNotFoundError(f"Reporting template not found: {template.name}")
     if not catalog:
@@ -3955,6 +3957,21 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
     for entry in render_catalog:
         catalogue_slides[entry.slide].append(entry)
 
+    expected_chart_files = set()
+    if chart_output_dir is not None:
+        for number, entries in catalogue_slides.items():
+            automated = [entry for entry in entries if entry.source_kind]
+            expected_chart_files.update(
+                f'slide-{number:03d}-chart-{index:02d}.png'
+                for index, _entry in enumerate(automated, start=1)
+            )
+        chart_output_dir.mkdir(parents=True, exist_ok=True)
+        # A cancelled worker can leave a half-written image or assets from an
+        # older template. Keep only deterministic chart names; each candidate
+        # is verified again when it is consumed below.
+        for child in chart_output_dir.iterdir():
+            if child.name == 'manifest.json' or child.name.removesuffix('.hover.json') + '.png' not in expected_chart_files and child.name not in expected_chart_files:
+                child.unlink(missing_ok=True)
     hover_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='report-hover') if generate_tooltips else None
     for number in sorted(catalogue_slides):
         slide_entries = catalogue_slides[number]
@@ -3999,16 +4016,36 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
             # editor and Report Charts.  Keeping this call shared prevents an
             # unnoticed drift in normalisation, multivendor preparation or
             # catalogue filtering between preview and export.
+            file_name = f'slide-{number:03d}-chart-{chart_index:02d}.png'
+            hover_file = f'slide-{number:03d}-chart-{chart_index:02d}.hover.json'
+            chart_path = chart_output_dir / file_name if chart_output_dir is not None else None
+            chart_bytes = None
+            if reuse_existing_charts and chart_path and chart_path.is_file():
+                try:
+                    with Image.open(chart_path) as existing:
+                        existing.verify()
+                    chart_bytes = chart_path.read_bytes()
+                except (OSError, ValueError, SyntaxError):
+                    chart_path.unlink(missing_ok=True)
             source_frame = frame_for(entry.source_kind)
             source_unavailable = bool(source_frame.attrs.get("report_source_unavailable"))
+            reusable_hover = None
+            if chart_bytes is not None and generate_tooltips and chart_output_dir is not None:
+                try:
+                    reusable_hover = json.loads((chart_output_dir / hover_file).read_text(encoding='utf-8'))
+                    if not isinstance(reusable_hover, list):
+                        reusable_hover = None
+                except (OSError, json.JSONDecodeError):
+                    reusable_hover = None
             hover_future = hover_executor.submit(
                 catalog_chart_hover_targets, source_frame, entry, multivendor=multivendor,
-            ) if hover_executor and not source_unavailable else None
-            chart_bytes = (
-                render_unavailable_source_chart(entry)
-                if source_unavailable
-                else render_catalog_chart_preview(source_frame, entry, multivendor=multivendor)
-            )
+            ) if hover_executor and not source_unavailable and reusable_hover is None else None
+            if chart_bytes is None:
+                chart_bytes = (
+                    render_unavailable_source_chart(entry)
+                    if source_unavailable
+                    else render_catalog_chart_preview(source_frame, entry, multivendor=multivendor)
+                )
             # Rebuild the source frame before retrying an unexpected empty
             # chart. Retrying the same already-loaded frame cannot recover a
             # worker that was under memory pressure while materialising it.
@@ -4020,12 +4057,10 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
                 gc.collect()
                 source_frame = frame_for(entry.source_kind)
                 chart_bytes = render_catalog_chart_preview(source_frame, entry, multivendor=multivendor)
-            hover_targets = hover_future.result() if hover_future else None
+            hover_targets = reusable_hover if reusable_hover is not None else (hover_future.result() if hover_future else None)
             if on_chart_rendered:
                 on_chart_rendered(entry, len(source_frame.index), is_empty_catalog_chart(chart_bytes, entry))
             if chart_output_dir is not None:
-                chart_output_dir.mkdir(parents=True, exist_ok=True)
-                file_name = f'slide-{number:03d}-chart-{chart_index:02d}.png'
                 (chart_output_dir / file_name).write_bytes(chart_bytes)
                 rendered_charts.append({
                     'slide': number,
@@ -4035,7 +4070,6 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
                     'file': file_name,
                 })
                 if isinstance(hover_targets, list):
-                    hover_file = f'slide-{number:03d}-chart-{chart_index:02d}.hover.json'
                     (chart_output_dir / hover_file).write_text(json.dumps(hover_targets, ensure_ascii=False), encoding='utf-8')
                     rendered_charts[-1]['hover_file'] = hover_file
             slide.shapes.add_picture(BytesIO(chart_bytes), *placement)

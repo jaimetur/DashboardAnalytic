@@ -2549,15 +2549,15 @@ document.addEventListener('click', (event) => {
     showLoadingOverlay(previewLink.dataset.loadingLabel || 'Generating dataset preview');
     return;
   }
-  const openLink = event.target.closest('[data-dashboard-open-link]');
+  const openLink = event.target.closest('[data-datasets-analysis-open-link]');
   if (!openLink) return;
   const datasetId = openLink.dataset.datasetId;
   if (!datasetId) return;
   event.preventDefault();
-  navigateToPersistedDatasetDashboard(
+  navigateToPersistedDatasetAnalysis(
     datasetId,
     openLink.dataset.inputKind,
-    openLink.dataset.loadingLabel || 'Opening dataset dashboard',
+    openLink.dataset.loadingLabel || 'Opening datasets analysis',
   );
 });
 
@@ -2652,9 +2652,9 @@ const infoIcon = document.getElementById('info-icon');
 const inputKindSelect = document.querySelector('[data-input-kind-select]');
 const datasetSelect = document.querySelector('[data-dataset-select]');
 const logTypeFilter = document.querySelector('[data-log-type-filter]');
-const persistencePathnames = new Set(['/dashboard', '/admin']);
-const dashboardStateKey = 'dashboard-analytic:/dashboard:last-query';
-const dashboardStateKeyPrefix = 'dashboard-analytic:/dashboard:last-query:dataset:';
+const persistencePathnames = new Set(['/datasets-analysis', '/admin']);
+const datasetsAnalysisStateKey = 'dashboard-analytic:/datasets-analysis:last-query';
+const datasetsAnalysisStateKeyPrefix = 'dashboard-analytic:/datasets-analysis:last-query:dataset:';
 const activeDatasetStateKey = 'dashboard-analytic:active-dataset';
 const adminScrollRestoreKey = 'dashboard-analytic:/admin:scroll-restore';
 let hasPendingLocationRestore = false;
@@ -2685,7 +2685,7 @@ function restoreAdminScrollPosition() {
 
 restoreAdminScrollPosition();
 
-function hasMeaningfulDashboardState(params) {
+function hasMeaningfulDatasetsAnalysisState(params) {
   if (!params) return false;
   for (const [key, value] of params.entries()) {
     if (key === 'dataset_id' || key === 'input_kind' || key === 'load') continue;
@@ -2697,7 +2697,7 @@ function hasMeaningfulDashboardState(params) {
   return false;
 }
 
-function sanitizeDashboardState(params) {
+function sanitizeDatasetsAnalysisState(params) {
   const source = params instanceof URLSearchParams ? params : new URLSearchParams(params || '');
   const sanitized = new URLSearchParams(source.toString());
   sanitized.delete('aggregation_overrides');
@@ -2705,31 +2705,31 @@ function sanitizeDashboardState(params) {
   return sanitized;
 }
 
-function buildDashboardStateKey(datasetId) {
+function buildDatasetsAnalysisStateKey(datasetId) {
   const normalizedDatasetId = String(datasetId || '').trim();
-  return normalizedDatasetId ? `${dashboardStateKeyPrefix}${normalizedDatasetId}` : dashboardStateKey;
+  return normalizedDatasetId ? `${datasetsAnalysisStateKeyPrefix}${normalizedDatasetId}` : datasetsAnalysisStateKey;
 }
 
-function getDashboardStateKeyForParams(params) {
-  return buildDashboardStateKey(params?.get?.('dataset_id'));
+function getDatasetsAnalysisStateKeyForParams(params) {
+  return buildDatasetsAnalysisStateKey(params?.get?.('dataset_id'));
 }
 
-function getPersistedDashboardQuery(params) {
-  const stateKey = getDashboardStateKeyForParams(params || new URLSearchParams());
+function getPersistedDatasetsAnalysisQuery(params) {
+  const stateKey = getDatasetsAnalysisStateKeyForParams(params || new URLSearchParams());
   let persistedQuery = window.localStorage.getItem(stateKey);
-  if (!persistedQuery && stateKey !== dashboardStateKey) {
-    persistedQuery = window.localStorage.getItem(dashboardStateKey);
+  if (!persistedQuery && stateKey !== datasetsAnalysisStateKey) {
+    persistedQuery = window.localStorage.getItem(datasetsAnalysisStateKey);
   }
   return persistedQuery;
 }
 
-function persistDashboardState(params) {
-  if (!hasMeaningfulDashboardState(params)) return;
+function persistDatasetsAnalysisState(params) {
+  if (!hasMeaningfulDatasetsAnalysisState(params)) return;
   try {
-    const sanitized = sanitizeDashboardState(params);
+    const sanitized = sanitizeDatasetsAnalysisState(params);
     const serialized = sanitized.toString();
-    window.localStorage.setItem(getDashboardStateKeyForParams(params), serialized);
-    window.localStorage.setItem(dashboardStateKey, serialized);
+    window.localStorage.setItem(getDatasetsAnalysisStateKeyForParams(params), serialized);
+    window.localStorage.setItem(datasetsAnalysisStateKey, serialized);
   } catch (_error) {
     // Ignore storage failures.
   }
@@ -2749,8 +2749,8 @@ function persistActiveDatasetState(params) {
   }
 }
 
-function buildRestoredDashboardUrl(currentParams, persistedDashboardQuery) {
-  const persistedParams = sanitizeDashboardState(new URLSearchParams(persistedDashboardQuery || ''));
+function buildRestoredDatasetsAnalysisUrl(currentParams, persistedDatasetsAnalysisQuery) {
+  const persistedParams = sanitizeDatasetsAnalysisState(new URLSearchParams(persistedDatasetsAnalysisQuery || ''));
   const merged = new URLSearchParams(persistedParams.toString());
   const currentDatasetId = String(currentParams.get('dataset_id') || '').trim();
   const currentInputKind = String(currentParams.get('input_kind') || '').trim();
@@ -2763,19 +2763,19 @@ function buildRestoredDashboardUrl(currentParams, persistedDashboardQuery) {
     merged.delete('input_kind');
   }
   const query = merged.toString();
-  return query ? `/dashboard?${query}` : '/dashboard';
+  return query ? `/datasets-analysis?${query}` : '/datasets-analysis';
 }
 
-function buildDatasetDashboardUrl(params) {
-  const persistedDashboardQuery = getPersistedDashboardQuery(params);
-  if (persistedDashboardQuery) {
-    return buildRestoredDashboardUrl(params, persistedDashboardQuery);
+function buildDatasetAnalysisUrl(params) {
+  const persistedDatasetsAnalysisQuery = getPersistedDatasetsAnalysisQuery(params);
+  if (persistedDatasetsAnalysisQuery) {
+    return buildRestoredDatasetsAnalysisUrl(params, persistedDatasetsAnalysisQuery);
   }
   const query = params.toString();
-  return query ? `/dashboard?${query}` : '/dashboard';
+  return query ? `/datasets-analysis?${query}` : '/datasets-analysis';
 }
 
-function navigateToPersistedDatasetDashboard(datasetId, inputKind, loadingLabel = 'Opening dataset dashboard') {
+function navigateToPersistedDatasetAnalysis(datasetId, inputKind, loadingLabel = 'Opening datasets analysis') {
   const params = new URLSearchParams();
   const normalizedDatasetId = String(datasetId || '').trim();
   const normalizedInputKind = String(inputKind || '').trim();
@@ -2785,7 +2785,7 @@ function navigateToPersistedDatasetDashboard(datasetId, inputKind, loadingLabel 
     params.set('input_kind', normalizedInputKind);
   }
   showLoadingOverlay(loadingLabel);
-  replaceLocation(buildDatasetDashboardUrl(params));
+  replaceLocation(buildDatasetAnalysisUrl(params));
   return true;
 }
 
@@ -2809,7 +2809,7 @@ function replaceLocation(url) {
   window.location.replace(url);
 }
 
-function buildDashboardParamsFromForm(form) {
+function buildDatasetsAnalysisParamsFromForm(form) {
   const params = new URLSearchParams();
   const formData = new FormData(form);
   for (const [key, value] of formData.entries()) {
@@ -2854,8 +2854,8 @@ function buildDashboardParamsFromForm(form) {
   return params;
 }
 
-function syncDashboardHiddenControl(name, value) {
-  const form = document.getElementById('dashboard-filters-form');
+function syncDatasetsAnalysisHiddenControl(name, value) {
+  const form = document.getElementById('datasets-analysis-filters-form');
   if (!form) return;
   const control = form.querySelector(`input[type="hidden"][name="${name}"]`);
   if (control) {
@@ -2945,7 +2945,7 @@ function restoreControlValue(control, rawValue) {
 }
 
 function queryAlreadyControlsValue(control) {
-  if (window.location.pathname !== '/dashboard') return false;
+  if (window.location.pathname !== '/datasets-analysis') return false;
   const params = new URLSearchParams(window.location.search);
   if (
     control &&
@@ -3612,7 +3612,7 @@ function hideLoadingOverlay() {
 function showLoadingOverlay(label, copy) {
   if (!loadingOverlay) return;
   loadingTitle.textContent = label || 'Processing request';
-  loadingCopy.textContent = copy || 'Please wait while the workspace processes the selected dataset or updates the dashboard.';
+  loadingCopy.textContent = copy || 'Please wait while the workspace processes the selected dataset or updates the analysis.';
   if (loadingCancel instanceof HTMLButtonElement) { loadingCancel.hidden = true; loadingCancel.onclick = null; loadingCancel.disabled = false; }
   if (loadingProgressBar instanceof HTMLElement) {
     loadingProgressBar.style.width = '45%';
@@ -3692,16 +3692,16 @@ async function submitDownloadForm(form) {
   }
 }
 
-if (window.location.pathname === '/dashboard') {
+if (window.location.pathname === '/datasets-analysis') {
   const params = new URLSearchParams(window.location.search);
-  const persistedDashboardQuery = getPersistedDashboardQuery(params);
+  const persistedDatasetsAnalysisQuery = getPersistedDatasetsAnalysisQuery(params);
   if (params.get('dataset_id')) {
     persistActiveDatasetState(params);
   }
-  if (hasMeaningfulDashboardState(params)) {
-    persistDashboardState(params);
-  } else if (persistedDashboardQuery) {
-    replaceLocation(buildRestoredDashboardUrl(params, persistedDashboardQuery));
+  if (hasMeaningfulDatasetsAnalysisState(params)) {
+    persistDatasetsAnalysisState(params);
+  } else if (persistedDatasetsAnalysisQuery) {
+    replaceLocation(buildRestoredDatasetsAnalysisUrl(params, persistedDatasetsAnalysisQuery));
   }
 }
 
@@ -3727,8 +3727,8 @@ setupWorkspaceUserPickers();
 setupCustomMultiSelects();
 setupSearchableSingleSelects();
 
-function maybeSyncPersistedGlobalDashboardSelectors() {
-  if (window.location.pathname !== '/dashboard' || hasPendingLocationRestore) return;
+function maybeSyncPersistedGlobalDatasetsAnalysisSelectors() {
+  if (window.location.pathname !== '/datasets-analysis' || hasPendingLocationRestore) return;
   const aggregationSelect = document.querySelector('[data-global-aggregation-select]');
   const cdfSelect = document.querySelector('[data-global-cdf-grouping-select]');
   if (!aggregationSelect && !cdfSelect) return;
@@ -3762,10 +3762,10 @@ function maybeSyncPersistedGlobalDashboardSelectors() {
   if (!params.get('load')) {
     params.set('load', '1');
   }
-  replaceLocation(`/dashboard?${params.toString()}`);
+  replaceLocation(`/datasets-analysis?${params.toString()}`);
 }
 
-maybeSyncPersistedGlobalDashboardSelectors();
+maybeSyncPersistedGlobalDatasetsAnalysisSelectors();
 
 function importWarningDetails(payload) {
   const kind = String(payload.kind || '');
@@ -4520,29 +4520,29 @@ document.querySelectorAll('form[data-loading-label]').forEach((form) => {
       submitDownloadForm(form);
       return;
     }
-    if (window.location.pathname === '/dashboard' && form.id === 'dashboard-dataset-form') {
+    if (window.location.pathname === '/datasets-analysis' && form.id === 'datasets-analysis-dataset-form') {
       event.preventDefault();
-      const params = buildDashboardParamsFromForm(form);
-      if (!navigateToPersistedDatasetDashboard(
+      const params = buildDatasetsAnalysisParamsFromForm(form);
+      if (!navigateToPersistedDatasetAnalysis(
         params.get('dataset_id'),
         params.get('input_kind'),
         form.dataset.loadingLabel,
       )) {
         showLoadingOverlay(form.dataset.loadingLabel, form.dataset.loadingCopy);
-        replaceLocation(buildDatasetDashboardUrl(params));
+        replaceLocation(buildDatasetAnalysisUrl(params));
       }
       return;
     }
-    if (window.location.pathname === '/dashboard' && form.id === 'dashboard-filters-form') {
+    if (window.location.pathname === '/datasets-analysis' && form.id === 'datasets-analysis-filters-form') {
       event.preventDefault();
       const globalCdfSelect = document.querySelector('[data-global-cdf-grouping-select]');
       const globalAggregationSelect = document.querySelector('[data-global-aggregation-select]');
-      syncDashboardHiddenControl('cdf_grouping', globalCdfSelect?.value || 'all');
-      syncDashboardHiddenControl('aggregation', globalAggregationSelect?.value || 'all');
-      const params = buildDashboardParamsFromForm(form);
+      syncDatasetsAnalysisHiddenControl('cdf_grouping', globalCdfSelect?.value || 'all');
+      syncDatasetsAnalysisHiddenControl('aggregation', globalAggregationSelect?.value || 'all');
+      const params = buildDatasetsAnalysisParamsFromForm(form);
       params.set('load', '1');
       params.delete('cdf_overrides');
-      persistDashboardState(params);
+      persistDatasetsAnalysisState(params);
       persistActiveDatasetState(params);
       showLoadingOverlay(form.dataset.loadingLabel);
       window.location.search = params.toString();
@@ -4967,7 +4967,7 @@ if (inputKindSelect && datasetSelect) {
   };
 
   const maybeRestoreLastDataset = () => {
-    if (window.location.pathname !== '/dashboard' || hasPendingLocationRestore) return;
+    if (window.location.pathname !== '/datasets-analysis' || hasPendingLocationRestore) return;
     const params = new URLSearchParams(window.location.search);
     if (params.has('dataset_id')) {
       persistActiveDatasetContext();
@@ -4994,7 +4994,7 @@ if (inputKindSelect && datasetSelect) {
     } else if (inputKindSelect.value) {
       params.set('input_kind', String(inputKindSelect.value));
     }
-    replaceLocation(`/dashboard?${params.toString()}`);
+    replaceLocation(`/datasets-analysis?${params.toString()}`);
   };
 
   persistActiveDatasetContext();
@@ -5193,7 +5193,7 @@ document.querySelectorAll('[data-chart-aggregation-select]').forEach((select) =>
       params.delete('aggregation_overrides');
     }
     params.set('load', '1');
-    persistDashboardState(params);
+    persistDatasetsAnalysisState(params);
     persistActiveDatasetState(params);
     showLoadingOverlay(`Updating ${metric} comparison`);
     window.location.search = params.toString();
@@ -5210,14 +5210,14 @@ document.querySelectorAll('[data-summary-control]').forEach((node) => {
 
 document.querySelectorAll('[data-global-aggregation-select]').forEach((select) => {
   select.addEventListener('change', () => {
-    const form = select.form || document.getElementById('dashboard-filters-form');
+    const form = select.form || document.getElementById('datasets-analysis-filters-form');
     if (!form) return;
-    syncDashboardHiddenControl('aggregation', select.value || 'all');
-    const params = buildDashboardParamsFromForm(form);
+    syncDatasetsAnalysisHiddenControl('aggregation', select.value || 'all');
+    const params = buildDatasetsAnalysisParamsFromForm(form);
     params.set('aggregation', String(select.value || 'all'));
     params.set('load', '1');
     params.delete('aggregation_overrides');
-    persistDashboardState(params);
+    persistDatasetsAnalysisState(params);
     showLoadingOverlay('Updating all chart aggregations');
     window.location.search = params.toString();
   });
@@ -5225,14 +5225,14 @@ document.querySelectorAll('[data-global-aggregation-select]').forEach((select) =
 
 document.querySelectorAll('[data-global-cdf-grouping-select]').forEach((select) => {
   select.addEventListener('change', () => {
-    const form = select.form || document.getElementById('dashboard-filters-form');
+    const form = select.form || document.getElementById('datasets-analysis-filters-form');
     if (!form) return;
-    syncDashboardHiddenControl('cdf_grouping', select.value || 'all');
-    const params = buildDashboardParamsFromForm(form);
+    syncDatasetsAnalysisHiddenControl('cdf_grouping', select.value || 'all');
+    const params = buildDatasetsAnalysisParamsFromForm(form);
     params.set('cdf_grouping', String(select.value || 'all'));
     params.set('load', '1');
     params.delete('cdf_overrides');
-    persistDashboardState(params);
+    persistDatasetsAnalysisState(params);
     showLoadingOverlay('Updating all CDF comparisons');
     window.location.search = params.toString();
   });
@@ -5258,7 +5258,7 @@ document.querySelectorAll('[data-chart-cdf-grouping-select]').forEach((select) =
       params.delete('cdf_overrides');
     }
     params.set('load', '1');
-    persistDashboardState(params);
+    persistDatasetsAnalysisState(params);
     persistActiveDatasetState(params);
     showLoadingOverlay(`Updating ${metric} CDF comparison`);
     window.location.search = params.toString();
@@ -5342,7 +5342,7 @@ if (queueNode) {
       if (datasetKind && datasetKind !== 'generic') {
         openParams.set('input_kind', String(datasetKind));
       }
-      const openHref = `/dashboard?${openParams.toString()}`;
+      const openHref = `/datasets-analysis?${openParams.toString()}`;
       const isCdr = ['data', 'voice', 'speech'].includes(datasetKind);
       const hadMapVendors = Boolean(actions.querySelector('[data-vendor-map-open]'));
       const hadClearVendors = Boolean(actions.querySelector('[data-vendor-clear-open]'));
@@ -5355,33 +5355,33 @@ if (queueNode) {
       if (dataset.status === 'ready') {
         actions.innerHTML = `
           <a class="ghost-link action-link-preview" href="/workspace/preview/${dataset.id}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview" title="Preview dataset" aria-label="Preview dataset">Preview</a>
-          <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete dataset '${fileName}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
+          <form method="post" action="/datasets-analysis/delete/${dataset.id}" data-confirm="Delete dataset '${fileName}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
             <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
           </form>
-          ${isCdr ? `<a class="ghost-link action-link-primary" href="${openHref}" data-dashboard-open-link data-dataset-id="${dataset.id}" title="Show dashboard" aria-label="Show dashboard"${datasetKind ? ` data-input-kind="${String(datasetKind)}"` : ''}>Show Dashboard</a>` : ''}
+          ${isCdr ? `<a class="ghost-link action-link-primary" href="${openHref}" data-datasets-analysis-open-link data-dataset-id="${dataset.id}" title="Show analysis" aria-label="Show analysis"${datasetKind ? ` data-input-kind="${String(datasetKind)}"` : ''}>Show Analysis</a>` : ''}
           ${canClearVendors ? `<button type="button" class="action-link-clear-vendors" data-vendor-clear-open data-dataset-id="${dataset.id}" title="Clear vendor mapping" aria-label="Clear vendor mapping">Clear Vendors</button>` : ''}
           ${canMapVendors ? `<button type="button" class="ghost-link action-link-map-vendors" data-vendor-map-open data-dataset-id="${dataset.id}" data-dataset-name="${fileName}">Map Vendors</button>` : ''}
         `;
       } else if (dataset.status === 'processing') {
         actions.innerHTML = `
           <span class="ghost-link action-link-preview action-link-disabled" aria-disabled="true" title="Preview unavailable while processing" aria-label="Preview unavailable while processing">Preview</span>
-          <form method="post" action="/dashboard/stop/${dataset.id}" data-confirm="Stop processing for '${dataset.file_name}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
+          <form method="post" action="/datasets-analysis/stop/${dataset.id}" data-confirm="Stop processing for '${dataset.file_name}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
             <button type="submit" class="danger-button icon-action" aria-label="Stop processing" title="Stop processing">■</button>
           </form>
         `;
       } else if (dataset.status === 'queued') {
         actions.innerHTML = `
           <span class="ghost-link action-link-preview action-link-disabled" aria-disabled="true" title="Preview unavailable while queued" aria-label="Preview unavailable while queued">Preview</span>
-          <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete queued dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
+          <form method="post" action="/datasets-analysis/delete/${dataset.id}" data-confirm="Delete queued dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
             <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
           </form>
         `;
       } else if (dataset.status === 'failed' || dataset.status === 'stopped') {
         actions.innerHTML = `
-          <form method="post" action="/dashboard/retry/${dataset.id}" data-loading-label="Retrying dataset processing">
+          <form method="post" action="/datasets-analysis/retry/${dataset.id}" data-loading-label="Retrying dataset processing">
             <button type="submit" class="warning-button icon-action" aria-label="Retry processing" title="Retry processing">↻</button>
           </form>
-          <form method="post" action="/dashboard/delete/${dataset.id}" data-confirm="Delete dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
+          <form method="post" action="/datasets-analysis/delete/${dataset.id}" data-confirm="Delete dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
             <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
           </form>
         `;
@@ -5419,7 +5419,7 @@ if (queueNode) {
       if (waitingPanel && selectedDatasetId) {
         const selected = datasets.find((dataset) => String(dataset.id) === String(selectedDatasetId));
         if (selected) {
-          waitingPanel.innerHTML = `The dashboard queue is updating live. Current state: <strong>${selected.status_label}</strong>.`;
+          waitingPanel.innerHTML = `The dataset queue is updating live. Current state: <strong>${selected.status_label}</strong>.`;
           if (selected.status === 'ready') {
             window.location.reload();
           }

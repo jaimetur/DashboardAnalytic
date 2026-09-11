@@ -94,3 +94,7 @@ pytest -q
 ```
 
 Keep databases, uploaded customer files and generated output out of source control.
+
+## Template-driven dashboards
+
+`src/modules/e2e_dashboards.py` registers Dashboard Set persistence, preparation, chart PNG and filtered-data endpoints. `e2e_dashboards.html`, `e2e_dashboards.js` and `e2e_dashboards.css` provide the workspace tab and synchronized overlays. Definitions are stored under `e2e_dashboard_sets_v1` in workspace state; preview snapshots and PNGs are transient bounded caches. Single-dataset analysis uses `datasets_analysis.html` and `/datasets-analysis`; legacy `/dashboard` endpoints remain compatibility aliases.

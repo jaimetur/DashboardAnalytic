@@ -7,7 +7,7 @@ The UI uses a shared header, module tabs, panels, dialogs and tables. Read [Prod
 Primary tabs:
 
 - Workspace
-- E2E Dashboard
+- Datasets Analysis
 - E2E Reporting
 - Chart Builder
 
@@ -91,3 +91,7 @@ The interface targets compact screens around the iPhone 13 base viewport (`390 �
 - Workspace Management remains visible when expanded.
 
 On a phone, use portrait orientation for forms and landscape orientation when inspecting a very wide data table.
+
+## Dashboard navigation and overlays
+
+The analytical tabs are ordered **Datasets Analysis → E2E Dashboards → E2E Reporting**. Datasets Analysis uses blue, E2E Dashboards uses muted violet, and Reporting uses brighter purple. The dashboard viewer groups charts by Slide and opens the same Adaptative Filters controls in a floating panel. Its dataset dialog provides pagination and CSV export.

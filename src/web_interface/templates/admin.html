@@ -450,7 +450,7 @@
       <p>The destination super-admin will be asked to accept this transfer before the export package is created and sent. Use HTTPS, or HTTP only on a trusted private network.</p>
       <div class="server-transfer-fields">
         <label>Server URL or IP
-          <input type="text" inputmode="url" placeholder="https://dashboard.example.com or 192.168.1.20" data-server-transfer-url>
+          <input type="text" inputmode="url" placeholder="https://datasets-analysis.example.com or 192.168.1.20" data-server-transfer-url>
         </label>
         <label>Port
           <input type="number" min="1" max="65535" value="7278" data-server-transfer-port>
@@ -613,7 +613,7 @@
                 {% if row.status == 'ready' %}
                 <a class="ghost-link action-link-preview" href="/workspace/preview/{{ row.id }}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview" title="Preview dataset" aria-label="Preview dataset">Preview</a>
                 {% if row.dataset_kind in ['data', 'voice', 'speech'] %}
-                <a class="ghost-link action-link-primary" href="/dashboard?dataset_id={{ row.id }}&input_kind={{ row.dataset_kind }}" data-dashboard-open-link data-dataset-id="{{ row.id }}" data-input-kind="{{ row.dataset_kind }}" title="Show dashboard" aria-label="Show dashboard">Show Dashboard</a>
+                <a class="ghost-link action-link-primary" href="/datasets-analysis?dataset_id={{ row.id }}&input_kind={{ row.dataset_kind }}" data-datasets-analysis-open-link data-dataset-id="{{ row.id }}" data-input-kind="{{ row.dataset_kind }}" title="Show analysis" aria-label="Show analysis">Show Analysis</a>
                 {% endif %}
                 {% if row.can_map_vendors %}
                 <button type="button" class="action-link-map-vendors icon-action" aria-label="Map vendors" title="Map vendors" data-admin-vendor-map-open data-dataset-id="{{ row.id }}" data-dataset-name="{{ row.file_name }}">↗</button>
@@ -627,7 +627,7 @@
                 {% endif %}
                 {% endif %}
                 {% if row.status != 'processing' %}
-                <form method="post" action="/dashboard/delete/{{ row.id }}" data-confirm="Delete dataset '{{ row.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
+                <form method="post" action="/datasets-analysis/delete/{{ row.id }}" data-confirm="Delete dataset '{{ row.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
                   <input type="hidden" name="return_to" value="admin">
                   <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
                 </form>

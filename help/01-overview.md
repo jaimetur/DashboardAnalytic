@@ -8,7 +8,7 @@ Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, r
 2. Upload Data, Voice or Speech CDRs from **Workspace**.
 3. Confirm the detected input type and wait for processing to finish.
 4. Optionally map Vodafone and Three vendor information.
-5. Explore one dataset in **E2E Dashboard**, build an ad-hoc chart in **Chart Builder**, or combine campaigns in **E2E Reporting**.
+5. Explore one dataset in **Datasets Analysis**, build an ad-hoc chart in **Chart Builder**, or combine campaigns in **E2E Reporting**.
 6. Follow background work in the floating task cards and **Reports and Charts Jobs**.
 7. Use **App Logs** for traceability and **Admin** for shared configuration.
 
@@ -48,7 +48,7 @@ Workspace is the entry point for data and storage management.
 - Follow processing progress.
 - Filter the queue by dataset type.
 - Preview processed rows with searchable, Excel-style column filters.
-- Open eligible datasets in E2E Dashboard.
+- Open eligible datasets in Datasets Analysis.
 - Stop, retry or delete work.
 - Apply, clear and reapply vendor mappings.
 
@@ -60,22 +60,22 @@ Workspace is the entry point for data and storage management.
 - Existing combined `CDR-Data`, `CDR-Voice` and `CDR-Speech` tables appear at the bottom of Datasets. Preview them with the same filters as individual CDRs.
 - Use the circular **Recreate** action when a combined table needs rebuilding. It restores missing individual persisted rows from their source file when possible, then verifies contributed and total row counts.
 
-Example: upload `NetCheck_CDR_Data_2026_Q2.xlsx`, confirm **CDR-Data**, wait for **Processed**, then use **Show Dashboard** or select it from Reporting.
+Example: upload `NetCheck_CDR_Data_2026_Q2.xlsx`, confirm **CDR-Data**, wait for **Processed**, then use **Show Analysis** or select it from Reporting.
 
-## E2E Dashboard
+## Datasets Analysis
 
-E2E Dashboard analyses one processed CDR at a time.
+Datasets Analysis analyses one processed CDR at a time.
 
-### Dashboard Controls
+### Analysis Controls
 
 - Select a processed Data, Voice or Speech CDR.
 - Choose one or more numeric KPIs.
 - Apply adaptive categorical and date filters.
 - Select comparison aggregations supported by the dataset.
-- Use **Update Dashboard** to calculate the requested view.
+- Use **Update Analysis** to calculate the requested view.
 - Open the persisted dataset preview.
 
-### Executive Dashboard
+### Dataset Summary
 
 - Shows the active dataset and filtered sample count.
 - Presents headline KPI cards and percentile scorecards.
@@ -91,6 +91,10 @@ E2E Dashboard analyses one processed CDR at a time.
 
 - Shows the filtered and aggregated records behind the dashboard.
 - Supports Word and PowerPoint exports of the active analysis.
+
+## E2E Dashboards
+
+Create named Dashboard Sets from workspace templates and combine CDR sources with adaptive filters, including custom Auto-calculated Fields. Each Slide appears as a dashboard with its charts arranged using the template Layout. The viewer supports navigation, filtered datasets, template editing and synchronized floating filters. See [E2E Dashboards](07-e2e-dashboards.md) for the complete workflow.
 
 ## E2E Reporting
 
@@ -218,7 +222,7 @@ Templates belong to their workspace. A new workspace starts without templates. E
 
 | Role | Typical permissions |
 | --- | --- |
-| `user` | Use accessible workspaces, Dashboard, Reporting, Chart Builder and App Logs. |
+| `user` | Use accessible workspaces, Datasets Analysis, E2E Dashboards, Reporting, Chart Builder and App Logs. |
 | `admin` | User operations allowed by policy, Report Templates, accessible-workspace export/transfer and database administration. |
 | `super-admin` | Full account/workspace access management, configuration/full-environment portability and incoming transfer approval. |
 

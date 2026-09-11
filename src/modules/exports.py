@@ -633,7 +633,7 @@ def export_powerpoint_report(destination: Path, report: dict[str, Any]) -> Path:
     _add_panel(cover, 8.75, 0.75, 3.85, 5.95, fill="#1C4665", line="#2D607B")
     _add_textbox(cover, 9.0, 1.05, 3.2, 0.28, "Export Contents", size=14, bold=True, color="#FFFFFF")
     contents = [
-        "Executive Dashboard",
+        "Dataset Summary",
         "Global Metrics",
         "Metric KPI cards",
         "Visual Analytics per metric",
@@ -644,7 +644,7 @@ def export_powerpoint_report(destination: Path, report: dict[str, Any]) -> Path:
 
     global_slide = presentation.slides.add_slide(presentation.slide_layouts[6])
     _add_full_bg(global_slide, BG)
-    _add_textbox(global_slide, 0.55, 0.35, 5.5, 0.28, "Executive Dashboard", size=22, bold=True)
+    _add_textbox(global_slide, 0.55, 0.35, 5.5, 0.28, "Dataset Summary", size=22, bold=True)
     _add_badge(global_slide, 9.95, 0.34, 2.75, payload["dataset_name"][:28], fill=TEAL)
     _add_multiline_textbox(global_slide, 0.55, 0.72, 12.1, 0.18, _structured_filters_summary_lines(payload["filters_text"]), size=9, color=MUTED)
     global_items = [(key, value) for key, value in payload["global_kpis"].items() if key not in {"date_from", "date_to"}]
@@ -654,7 +654,7 @@ def export_powerpoint_report(destination: Path, report: dict[str, Any]) -> Path:
     for page_index, metric_page in enumerate(metric_card_pages, start=1):
         metric_slide = presentation.slides.add_slide(presentation.slide_layouts[6])
         _add_full_bg(metric_slide, BG)
-        _add_textbox(metric_slide, 0.55, 0.35, 5.5, 0.28, "Executive Dashboard", size=22, bold=True)
+        _add_textbox(metric_slide, 0.55, 0.35, 5.5, 0.28, "Dataset Summary", size=22, bold=True)
         title = "Selected Metric Cards" if len(metric_card_pages) == 1 else f"Selected Metric Cards · Page {page_index}"
         _add_textbox(metric_slide, 0.55, 0.72, 6.0, 0.24, title, size=12, bold=True, color=ORANGE)
         _add_multiline_textbox(metric_slide, 0.55, 0.96, 12.1, 0.18, _structured_filters_summary_lines(payload["filters_text"]), size=9, color=MUTED)

@@ -4,7 +4,7 @@
 
 - Named, access-controlled workspaces.
 - CDR ingestion, profiling, preview and vendor mapping.
-- E2E Dashboard analysis and exports.
+- Datasets Analysis analysis and exports.
 - Ad-hoc Chart Builder.
 - Template-driven NSA/SA Reports and Chart Sets.
 - Shared Interactive Preview and filtered-data viewer.

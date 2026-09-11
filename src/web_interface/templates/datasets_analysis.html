@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block content %}
-<section class="dashboard-stack spacious-stack analytics-dashboard-stack">
-  <article class="panel dataset-summary-panel select-dataset-card module-hero-dashboard" style="background: linear-gradient(135deg, #0c4c8c, #68b8ff) !important; color: #ffffff;">
+<section class="dashboard-stack spacious-stack datasets-analysis-stack">
+  <article class="panel dataset-summary-panel select-dataset-card module-hero-datasets-analysis" style="background: linear-gradient(135deg, #0c4c8c, #68b8ff) !important; color: #ffffff;">
         <div class="section-head tight-head">
           <div>
             <p class="eyebrow">Selected Dataset</p>
@@ -9,8 +9,8 @@
           </div>
           {% if selected_dataset %}<span class="pill status-pill status-{{ selected_dataset.status }}">{{ selected_dataset.status_label }}</span>{% endif %}
         </div>
-        <p class="lede">Explore a processed source with adaptive filters, KPI summaries, percentile scorecards and comparison charts. The selected dataset and active scope are also used by the Word and PowerPoint dashboard exports.</p>
-        <form id="dashboard-dataset-form" class="dataset-selector-grid" action="/dashboard" method="get" data-loading-label="Opening dataset dashboard">
+        <p class="lede">Explore a processed source with adaptive filters, KPI summaries, percentile scorecards and comparison charts. The selected dataset and active scope are also used by the Word and PowerPoint analysis exports.</p>
+        <form id="datasets-analysis-dataset-form" class="dataset-selector-grid" action="/datasets-analysis" method="get" data-loading-label="Opening datasets analysis">
           <label>Input Type
             <select name="input_kind" data-input-kind-select>
               <option value="">All CDR Types</option>
@@ -32,7 +32,7 @@
         </form>
         {% if selected_dataset %}
         {% if selected_dataset.status in ['failed', 'stopped'] %}
-        <form method="post" action="/dashboard/retry/{{ selected_dataset.id }}" class="retry-form" data-loading-label="Retrying dataset processing">
+        <form method="post" action="/datasets-analysis/retry/{{ selected_dataset.id }}" class="retry-form" data-loading-label="Retrying dataset processing">
           <button type="submit" class="warning-button">Retry Processing</button>
         </form>
         {% endif %}
@@ -46,7 +46,7 @@
         <div class="dataset-export-actions inline-actions">
           <a class="ghost-link action-link-preview" href="/workspace/preview/{{ selected_dataset.id }}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview Dataset</a>
           {% if analysis_loaded and analysis %}
-          <form method="post" action="/dashboard/export/word" data-loading-label="Exporting Word report" data-download-form="1">
+          <form method="post" action="/datasets-analysis/export/word" data-loading-label="Exporting Word report" data-download-form="1">
             <input type="hidden" name="dataset_id" value="{{ selected_dataset.id }}">
             {% for metric_name in selected_metrics %}
             <input type="hidden" name="metric" value="{{ metric_name }}">
@@ -69,7 +69,7 @@
             {% endfor %}
             <button type="submit">Export Word</button>
           </form>
-          <form method="post" action="/dashboard/export/powerpoint" data-loading-label="Exporting PowerPoint report" data-download-form="1">
+          <form method="post" action="/datasets-analysis/export/powerpoint" data-loading-label="Exporting PowerPoint report" data-download-form="1">
             <input type="hidden" name="dataset_id" value="{{ selected_dataset.id }}">
             {% for metric_name in selected_metrics %}
             <input type="hidden" name="metric" value="{{ metric_name }}">
@@ -99,14 +99,14 @@
         {% endif %}
   </article>
 
-  <section class="workspace-grid dashboard-content-grid">
-    <main class="dashboard-main-stack">
+  <section class="workspace-grid datasets-analysis-content-grid">
+    <main class="datasets-analysis-main-stack">
       {% if selected_dataset and selected_dataset.is_ready %}
-      <details class="panel collapsible-panel" open data-panel-state-key="dashboard:executive-dashboard">
+      <details class="panel collapsible-panel" open data-panel-state-key="datasets-analysis:dataset-summary">
         <summary class="collapsible-summary">
           <div>
             <p class="eyebrow">Global and Metric KPIs</p>
-            <h2>Executive Dashboard</h2>
+            <h2>Dataset Summary</h2>
           </div>
           <span class="collapse-chip">Collapse</span>
         </summary>
@@ -168,14 +168,14 @@
         {% elif error %}
         <section class="empty-state-panel">
           <p class="eyebrow">Analysis State</p>
-          <h2>Dashboard update unavailable</h2>
+          <h2>Analysis update unavailable</h2>
           <p class="lede">{{ error }}</p>
         </section>
         {% else %}
         <section class="empty-state-panel">
           <p class="eyebrow">Lazy Load</p>
-          <h2>Dashboard opened from cache</h2>
-          <p class="lede">Choose filters and press <strong>Update Dashboard</strong> to load KPIs, charts and tables for the selected dataset.</p>
+          <h2>Analysis opened from cache</h2>
+          <p class="lede">Choose filters and press <strong>Update Analysis</strong> to load KPIs, charts and tables for the selected dataset.</p>
         </section>
         {% endif %}
       </details>
@@ -183,11 +183,11 @@
       {% if error %}
       <section class="panel empty-state-panel">
         <p class="eyebrow">Analysis State</p>
-        <h2>Dashboard update unavailable</h2>
+        <h2>Analysis update unavailable</h2>
         <p class="lede">{{ error }}</p>
       </section>
       {% elif analysis_loaded and analysis %}
-      <details class="panel collapsible-panel" open data-panel-state-key="dashboard:charts-scorecards">
+      <details class="panel collapsible-panel" open data-panel-state-key="datasets-analysis:charts-scorecards">
         <summary class="collapsible-summary">
           <div>
             <p class="eyebrow">Visual Analytics</p>
@@ -196,7 +196,7 @@
           <div class="summary-inline-actions">
             <label class="chart-aggregation-control panel-aggregation-control" data-summary-control>
               <span>Global CDF Comparison</span>
-              <select name="cdf_grouping" form="dashboard-filters-form" data-global-cdf-grouping-select>
+              <select name="cdf_grouping" form="datasets-analysis-filters-form" data-global-cdf-grouping-select>
                 <option value="all" {% if (selected_cdf_grouping or 'all')|lower == 'all' %}selected{% endif %}>Single CDF</option>
                 {% for item in ['vendor', 'market', 'operator', 'region', 'city'] %}
                 <option value="{{ item }}" {% if item == ((selected_cdf_grouping or 'all')|lower) %}selected{% endif %} {% if item not in selected_dataset.available_cdf_groupings %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
@@ -205,7 +205,7 @@
             </label>
             <label class="chart-aggregation-control panel-aggregation-control" data-summary-control>
               <span>Global Aggregation</span>
-              <select name="aggregation" form="dashboard-filters-form" data-global-aggregation-select>
+              <select name="aggregation" form="datasets-analysis-filters-form" data-global-aggregation-select>
                 <option value="all" {% if selected_aggregation == 'all' %}selected{% endif %}>Auto / raw view</option>
                 {% for item in ['operator', 'vendor', 'region', 'city', 'market', 'period', 'session_type', 'test_name', 'direction', 'technology_primary', 'source_sheet'] %}
                 <option value="{{ item }}" {% if item == selected_aggregation %}selected{% endif %} {% if item not in selected_dataset.available_aggregations %}disabled{% endif %}>{{ format_aggregation_label(item) }}</option>
@@ -332,7 +332,7 @@
         </section>
       </details>
 
-      <details class="panel collapsible-panel" open data-panel-state-key="dashboard:data-table">
+      <details class="panel collapsible-panel" open data-panel-state-key="datasets-analysis:data-table">
         <summary class="collapsible-summary">
           <div>
             <p class="eyebrow">Data Table</p>
@@ -370,26 +370,26 @@
       <section class="panel empty-state-panel">
         <p class="eyebrow">Waiting</p>
         <h2>Dataset still processing</h2>
-        <p class="lede">This dataset is not ready for dashboard analysis yet. Open the Workspace view to monitor processing progress.</p>
+        <p class="lede">This dataset is not ready for dataset analysis yet. Open the Workspace view to monitor processing progress.</p>
       </section>
       {% else %}
       <section class="panel empty-state-panel">
         <p class="eyebrow">Start Here</p>
-        <h2>Open a processed dataset to build the dashboard</h2>
+        <h2>Open a processed dataset to view the analysis</h2>
         <p class="lede">Use the selector above to open any processed dataset and work with KPIs, charts and filtered tables.</p>
       </section>
       {% endif %}
     </main>
 
-    <aside class="dashboard-sidebar">
+    <aside class="datasets-analysis-sidebar">
       <article class="panel dataset-summary-panel sticky-panel adaptive-filters-panel">
         <div class="section-head tight-head">
           <div>
             <p class="eyebrow">Adaptive Filters</p>
-            <h2>Dashboard Controls</h2>
+            <h2>Analysis Controls</h2>
           </div>
         </div>
-        <form id="dashboard-filters-form" class="sidebar-filters" action="/dashboard" method="get" data-loading-label="Updating dashboard analytics">
+        <form id="datasets-analysis-filters-form" class="sidebar-filters" action="/datasets-analysis" method="get" data-loading-label="Updating dataset analytics">
           <input type="hidden" name="aggregation_overrides" value="">
           <input type="hidden" name="aggregation" value="{{ selected_aggregation or 'all' }}">
           <input type="hidden" name="cdf_grouping" value="{{ selected_cdf_grouping or 'all' }}">
@@ -428,8 +428,8 @@
           {% endfor %}
           {% endif %}
           <div class="sidebar-actions">
-            <button type="submit">Update Dashboard</button>
-            {% if selected_dataset %}<a class="ghost-link reset-link" href="/dashboard?dataset_id={{ selected_dataset.id }}{% if input_kind %}&input_kind={{ input_kind }}{% endif %}">Reset</a>{% endif %}
+            <button type="submit">Update Analysis</button>
+            {% if selected_dataset %}<a class="ghost-link reset-link" href="/datasets-analysis?dataset_id={{ selected_dataset.id }}{% if input_kind %}&input_kind={{ input_kind }}{% endif %}">Reset</a>{% endif %}
           </div>
         </form>
       </article>

@@ -14,7 +14,8 @@ After login, the application opens the **Readme** tab by default.
 - Classify CDR-Data, CDR-Voice, CDR-Speech, Smart Orchestrator Logs and VFUK/3UK mapping files.
 - Combine operator workbook sheets and materialise normalised reporting fields.
 - Preview complete datasets with pagination and Excel-style column filters.
-- Analyse one processed CDR in E2E Dashboard.
+- Analyse one processed CDR in Datasets Analysis.
+- Explore template-driven Dashboard Sets with synchronized adaptive filters in E2E Dashboards.
 - Create temporary ad-hoc charts in Chart Builder.
 - Generate NSA/SA PowerPoint reports and standalone Chart Sets.
 - Create workspace-owned Auto-calculated Fields and apply them asynchronously to the applicable CDR tables.
@@ -32,18 +33,22 @@ Workspace owns data ingestion and workspace-local storage.
 
 - **Workspaces Management**: create, open, close, rename, duplicate or remove workspaces; review disk usage and access.
 - **Data Ingestion**: upload one or more source files and confirm each detected type.
-- **Queue and Status**: monitor processing, preview data, open Dashboard, map/clear vendors, stop, retry or delete datasets.
+- **Queue and Status**: monitor processing, preview data, open Datasets Analysis, map/clear vendors, stop, retry or delete datasets.
 - **Auto-calculated Fields**: create, duplicate, import, export and rematerialize fields for applicable CDR types; follow background progress from Workspace.
 - **Combined CDR tables**: inspect CDR-Data, CDR-Voice and CDR-Speech combined rows, preview them and recreate a table in the background when required.
 
-### E2E Dashboard
+### Datasets Analysis
 
-E2E Dashboard analyses one ready Data, Voice or Speech CDR.
+Datasets Analysis analyses one ready Data, Voice or Speech CDR.
 
-- **Dashboard Controls**: dataset, KPI, adaptive filters and aggregations.
-- **Executive Dashboard**: context, sample counts, KPI cards and percentiles.
+- **Analysis Controls**: dataset, KPI, adaptive filters and aggregations.
+- **Dataset Summary**: context, sample counts, KPI cards and percentiles.
 - **Charts and Scorecards**: CDF curves and grouped comparisons.
 - **Processed Metrics**: filtered/aggregated results and Word/PowerPoint exports.
+
+### E2E Dashboards
+
+Create, save, duplicate, import and export workspace Dashboard Sets from any Report Template. Combine CDR sources, apply adaptive and custom Auto-calculated Field filters, and view each Slide with all its charts in the template layout. The large viewer provides dashboard navigation, chart datasets and CSV downloads, template editing, and synchronized floating filters. See [E2E Dashboards Help](help/07-e2e-dashboards.md).
 
 ### E2E Reporting
 
@@ -56,7 +61,7 @@ E2E Reporting combines ready CDRs with a Report Template from the active workspa
 
 ### Chart Builder
 
-Chart Builder is the ad-hoc chart editor immediately after E2E Reporting in Help. It reuses Interactive Preview, filters sources by CDR Type, supports multiple processed datasets and creates temporary charts without modifying templates. See [Chart Builder Help](help/08-chart-builder.md) for examples.
+Chart Builder is the ad-hoc chart editor immediately after E2E Reporting in Help. It reuses Interactive Preview, filters sources by CDR Type, supports multiple processed datasets and creates temporary charts without modifying templates. See [Chart Builder Help](help/09-chart-builder.md) for examples.
 
 Chart Builder reuses the shared Interactive Preview for ad-hoc analysis.
 
@@ -95,7 +100,7 @@ See [Product overview](help/01-overview.md) for a detailed tour of every module 
 2. Upload the required source files in Workspace.
 3. Confirm their types and wait for **Processed**.
 4. Optionally map VFUK/3UK vendor data.
-5. Use Dashboard, Chart Builder or Reporting.
+5. Use Datasets Analysis, E2E Dashboards, Chart Builder or Reporting.
 6. Review long-running work in the floating task cards and **Reports and Charts Jobs**.
 7. Check App Logs if an operation fails.
 
@@ -291,10 +296,11 @@ DashboardAnalytic/
 - [Configuration](help/03-configuration.md)
 - [Web interface](help/04-web-interface.md)
 - [Workspace Management](help/05-workspace-management.md)
-- [E2E Dashboard](help/06-e2e-dashboard.md)
-- [E2E Reporting](help/07-e2e-reporting.md)
-- [Chart Builder](help/08-chart-builder.md)
-- [Administration](help/09-administration.md)
-- [Docker deployment](help/10-docker-deployment.md)
-- [Project structure](help/11-project-structure.md)
-- [Roadmap](help/12-roadmap.md)
+- [Datasets Analysis](help/06-datasets-analysis.md)
+- [E2E Dashboards](help/07-e2e-dashboards.md)
+- [E2E Reporting](help/08-e2e-reporting.md)
+- [Chart Builder](help/09-chart-builder.md)
+- [Administration](help/10-administration.md)
+- [Docker deployment](help/11-docker-deployment.md)
+- [Project structure](help/12-project-structure.md)
+- [Roadmap](help/13-roadmap.md)

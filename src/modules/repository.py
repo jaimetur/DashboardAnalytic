@@ -1276,15 +1276,36 @@ class Repository:
     ) -> list[str]:
         target_columns = self._table_columns(conn, table_name)
         target_lookup = {self._column_identity(column): column for column in target_columns}
+        # SQLite itself compares identifiers case-insensitively. Keep that
+        # guard in addition to the semantic identity map: a source can retain
+        # punctuation that distinguishes two logical aliases while still
+        # colliding with a physical column name already created by an earlier
+        # dataset.
+        target_sql_names = {str(column).casefold() for column in target_columns}
         source_lookup = {self._column_identity(column): column for column in source_columns}
         for requested in requested_columns:
             source = source_lookup.get(self._column_identity(requested))
             source_key = self._column_identity(source) if source else ''
-            if not source or source_key in {'datasetid', 'sourcerowid'} or source_key in target_lookup:
+            if (not source or source_key in {'datasetid', 'sourcerowid'}
+                    or source_key in target_lookup or str(source).casefold() in target_sql_names):
+                continue
+            # A reporting projection can be requested by concurrent preview
+            # preparations. Refresh the physical schema immediately before
+            # adding a column because SQLite treats names case-insensitively.
+            # This also covers legacy tables containing an equivalent heading
+            # with a different case or separator.
+            current_columns = self._table_columns(conn, table_name)
+            current_sql_names = {str(column).casefold() for column in current_columns}
+            current_lookup = {self._column_identity(column): column for column in current_columns}
+            if source_key in current_lookup or str(source).casefold() in current_sql_names:
+                target_columns = current_columns
+                target_lookup = current_lookup
+                target_sql_names = current_sql_names
                 continue
             conn.execute(f"ALTER TABLE {self._quote_identifier(table_name)} ADD COLUMN {self._quote_identifier(source)}")
             target_columns.append(source)
             target_lookup[source_key] = source
+            target_sql_names.add(str(source).casefold())
         return target_columns
 
     def replace_reporting_rows(self, dataset_id: int, dataset_kind: str, df: pd.DataFrame) -> None:
@@ -1457,11 +1478,6 @@ class Repository:
             desired = list(dict.fromkeys([*self.REPORTING_CORE_COLUMNS, *(columns or [])]))
             previous_columns = {self._column_identity(column) for column in target_columns}
             source_lookup = {self._column_identity(column): column for column in source_columns}
-            needs_new_columns = any(
-                self._column_identity(requested) in source_lookup
-                and self._column_identity(requested) not in previous_columns
-                for requested in desired
-            )
             target_columns = self._ensure_reporting_columns(conn, target_table, source_columns, desired)
             existing_rows = conn.execute(
                 f"SELECT 1 FROM {quoted_target} WHERE dataset_id = ? LIMIT 1", (dataset_id,)
@@ -1472,14 +1488,17 @@ class Repository:
             # requested by the chart, not just derived dimensions. The two
             # LIMIT 1 probes retain the fast path as soon as cached data exists.
             target_lookup = {self._column_identity(column): column for column in target_columns}
-            needs_content_refresh = False
-            if existing_rows and not needs_new_columns:
+            columns_to_refresh: list[tuple[str, str]] = []
+            if existing_rows:
                 for requested in desired:
                     identity = self._column_identity(requested)
                     if identity not in source_lookup or identity not in target_lookup:
                         continue
                     source = source_lookup[identity]
                     target = target_lookup[identity]
+                    if identity not in previous_columns:
+                        columns_to_refresh.append((target, source))
+                        continue
                     cached_value = conn.execute(
                         f"SELECT 1 FROM {quoted_target} WHERE dataset_id = ? "
                         f"AND {self._quote_identifier(target)} IS NOT NULL LIMIT 1",
@@ -1492,9 +1511,23 @@ class Repository:
                         f"WHERE {self._quote_identifier(source)} IS NOT NULL LIMIT 1"
                     ).fetchone()
                     if source_value:
-                        needs_content_refresh = True
-                        break
-            if existing_rows and not needs_new_columns and not needs_content_refresh:
+                        columns_to_refresh.append((target, source))
+                if not columns_to_refresh:
+                    return
+                # Adding a template field used to delete and recreate every
+                # shared CDR row, including columns that were already ready.
+                # Fill only the newly required or incomplete columns by their
+                # stable source-row id, keeping large dashboard preparations
+                # proportional to the added data rather than table width.
+                for target, source in dict.fromkeys(columns_to_refresh):
+                    conn.execute(
+                        f"UPDATE {quoted_target} SET {self._quote_identifier(target)} = "
+                        f"(SELECT {self._quote_identifier(source)} FROM {self._quote_identifier(source_table)} "
+                        f"WHERE {self._quote_identifier(source_table)}.rowid = {quoted_target}.source_row_id) "
+                        "WHERE dataset_id = ?",
+                        (dataset_id,),
+                    )
+                self._create_reporting_row_indexes(conn, target_table, target_columns)
                 return
             conn.execute(f"DELETE FROM {quoted_target} WHERE dataset_id = ?", (dataset_id,))
             insert_columns = ['dataset_id', 'source_row_id', *(column for column in target_columns if column not in {'dataset_id', 'source_row_id'})]
@@ -2064,7 +2097,8 @@ class Repository:
         with self.connection() as conn:
             cursor = conn.execute(
                 "UPDATE generated_jobs SET status = 'queued', progress = 0, last_error = '', chart_count = 0, "
-                "generation = NULL, finished_at = NULL, updated_at = ? WHERE id = ? AND job_type = 'chart_set' AND status IN ('failed', 'stopped', 'ready')",
+                "generation = CASE WHEN status = 'ready' THEN NULL ELSE generation END, finished_at = NULL, updated_at = ? "
+                "WHERE id = ? AND job_type = 'chart_set' AND status IN ('failed', 'stopped', 'ready')",
                 (local_now_iso(), job_id),
             )
             return cursor.rowcount == 1

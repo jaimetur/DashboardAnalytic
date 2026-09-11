@@ -69,4 +69,4 @@ After first login:
 - The workspace size badge and Workspace Management show matching values.
 - `config/` and `data/` are included in backups.
 
-Continue with [Docker Deployment](10-docker-deployment.md) for Compose examples.
+Continue with [Docker Deployment](11-docker-deployment.md) for Compose examples.

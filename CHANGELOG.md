@@ -6,14 +6,25 @@
 ## Release: v0.3.0
 ### Release Date: 2026-09-14
 #### ⚠️ Breaking Changes:
+- Renamed E2E Dashboard to Datasets Analysis, including its controls, internal analysis references and canonical `/datasets-analysis` routes; legacy `/dashboard` routes remain available as compatibility aliases. Help chapters now place E2E Dashboards immediately before E2E Reporting.
 
 #### 🌟 New Features:
+- Added E2E Dashboards with workspace-persisted Dashboard Sets, create/open/save/close/duplicate/delete and JSON import/export, all workspace templates, combined CDR selections, adaptive date/dimension filters and custom Auto-calculated Field value filters. Its large viewer groups all charts by Slide using template Layout positions, with navigation, synchronized floating filters, filtered chart datasets and CSV downloads, template editing and the shared Auto-calculated Field manager.
 
 #### 🚀 Enhancements:
+- Reused shared materialized CDR tables and Reporting chart preparation for Dashboard Sets, with consistent filtered snapshots across slides, debounced filter changes, stale-response protection and bounded preview caches; added a distinct muted-violet dashboard theme and responsive chart layouts.
+- Relaunching an interrupted Report or Chart Set now verifies and reuses its completed PNG charts and tooltip JSON files, removes incomplete or obsolete artifacts, and generates only the remaining charts; a deliberate relaunch of a completed job still starts clean.
+- Restricted E2E Dashboards to super-admins and the EJAITUR account, matched its inactive tab styling to the other E2E module tabs while retaining its distinct violet active state, and expanded the dashboard viewer to a 96%-viewport 16:9 slide canvas so template chart layouts use the available screen area. Dashboard Set management now selects NR Mode beside its name and filters the Template list accordingly; its library is a table with compact open/close, duplicate, export and delete actions per set. The close action uses an exit icon, Import Dashboard Set clearly restores a previously exported Set, and Save now sits before Refresh Data in Adaptative Filters to persist the current filters as that Set's defaults.
 
 #### 🐛 Bug fixes:
+- Fixed CDF previews discarding valid samples when optional Campaign metadata is empty.
+- Fixed recurring Report Template backups for workspaces whose database had not yet been initialized, and prevented obsolete compatibility CSV directories from being rescanned after their one-time database migration.
+- Fixed Dashboard Set creation, duplication and import in browsers that do not implement `crypto.randomUUID`.
+- Fixed E2E Dashboards adaptive-filter preparation by exposing every requested dimension immediately, displaying a loading state instead of empty facet values while selected CDRs are prepared, loading custom-field values when the field is added, reducing large CDR projections to the columns required for filtering and rendering, and allowing View Dashboard Set to wait for the active preparation instead of appearing unavailable. Date bounds now appear with CDR selection, NR Mode and Scope, while the redundant template filter has been removed.
 
 #### 📚 Documentation:
+- Added the E2E Dashboards workflow, filter semantics, Dashboard Set portability and viewer controls; updated Readme, module overview, interface and project-structure help, renamed Datasets Analysis documentation and renumbered subsequent Help chapters and links.
+- Added a release navigation panel and collapsible Release sections to the Changelog document view, generated from its Release headings.
 
 ---
 

@@ -1,6 +1,6 @@
-# E2E Dashboard
+# Datasets Analysis
 
-E2E Dashboard provides on-demand KPI analysis for one processed CDR in the active workspace.
+Datasets Analysis provides on-demand KPI analysis for one processed CDR in the active workspace.
 
 ## Eligible datasets
 
@@ -8,7 +8,7 @@ E2E Dashboard provides on-demand KPI analysis for one processed CDR in the activ
 - CDR-Voice
 - CDR-Speech
 
-Mappings, logs and generic datasets are excluded from the Dashboard selector.
+Mappings, logs and generic datasets are excluded from the Datasets Analysis selector.
 
 ## Analysis workflow
 
@@ -16,12 +16,12 @@ Mappings, logs and generic datasets are excluded from the Dashboard selector.
 2. Choose one or more KPI-like numeric fields.
 3. Apply the available categorical/date filters.
 4. Choose an aggregation where offered.
-5. Click **Update Dashboard**.
+5. Click **Update Analysis**.
 6. Confirm the filtered sample count.
 7. Review charts, scorecards and processed metrics.
 8. Export only after validating the analytical context.
 
-## Dashboard Controls
+## Analysis Controls
 
 Controls adapt to the selected dataset.
 
@@ -30,7 +30,7 @@ Controls adapt to the selected dataset.
 - Technical identifiers and coordinates are not offered as KPIs.
 - Filter choices are retained for the requested analysis, not written back to source data.
 
-## Executive Dashboard
+## Dataset Summary
 
 - Dataset identity and current context.
 - Global summary cards.
@@ -71,6 +71,6 @@ First compare group sample counts. Then inspect the CDF and group benchmark. If 
 ## Performance
 
 - Opening the page reads cached metadata.
-- Full analysis starts only after **Update Dashboard**.
+- Full analysis starts only after **Update Analysis**.
 - Repeated dataset/filter/metric combinations reuse in-memory cache entries.
 - Large caches are process-local and are cleared by an application restart.

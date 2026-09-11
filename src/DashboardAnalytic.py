@@ -34,6 +34,7 @@ from uuid import uuid4
 
 import httpx
 import pandas as pd
+from PIL import Image
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -245,20 +246,22 @@ HELP_NAVIGATION_DOCUMENTS = (
     '03-configuration.md',
     '04-web-interface.md',
     '05-workspace-management.md',
-    '06-e2e-dashboard.md',
-    '07-e2e-reporting.md',
-    '08-chart-builder.md',
-    '09-administration.md',
-    '10-docker-deployment.md',
-    '11-project-structure.md',
-    '12-roadmap.md',
+    '06-datasets-analysis.md',
+    '07-e2e-dashboards.md',
+    '08-e2e-reporting.md',
+    '09-chart-builder.md',
+    '10-administration.md',
+    '11-docker-deployment.md',
+    '12-project-structure.md',
+    '13-roadmap.md',
 )
 HELP_DOCUMENT_LABELS = {
     '01-overview.md': 'Product Overview',
     '02-technical-considerations.md': 'Technical Considerations',
-    '06-e2e-dashboard.md': 'E2E Dashboard',
-    '07-e2e-reporting.md': 'E2E Reporting',
-    '08-chart-builder.md': 'Chart Builder',
+    '06-datasets-analysis.md': 'Datasets Analysis',
+    '07-e2e-dashboards.md': 'E2E Dashboards',
+    '08-e2e-reporting.md': 'E2E Reporting',
+    '09-chart-builder.md': 'Chart Builder',
     '05-workspace-management.md': 'Workspace Management',
 }
 
@@ -1131,7 +1134,9 @@ def promote_report_template_to_default(
 
 
 def report_catalogue_options(technology: str) -> list[dict[str, Any]]:
-    synchronize_template_file_names(technology)
+    # Legacy CSVs are imported exactly once while the workspace is activated.
+    # Reading the library must stay database-only so a stale or manually
+    # recreated compatibility directory cannot silently add templates later.
     templates = repository.list_report_templates(technology)
     options: list[dict[str, Any]] = []
     for row in templates:
@@ -1143,7 +1148,6 @@ def report_catalogue_options(technology: str) -> list[dict[str, Any]]:
         options.append({
             'identifier': identifier,
             'name': identifier,
-            'content': content,
             'content': content,
             'source': 'Default source' if is_default else 'Named workspace template',
             'active': is_default,
@@ -2047,7 +2051,7 @@ def rebuild_dataset_artifacts(
             auto_vendor_mapping_applied = True
         except Exception as exc:
             # Mapping is optional during import. A mapping issue must not make
-            # an otherwise valid CDR unusable in Workspace or Dashboard.
+            # an otherwise valid CDR unusable in Workspace or Datasets Analysis.
             auto_vendor_mapping_error = str(exc)
     if dataset_kind in CDR_DATASET_KINDS:
         df = materialize_cdr_derived_columns(df, dataset_kind, workspace_dimensions)
@@ -2262,7 +2266,7 @@ def process_vendor_mapping(
         # Mapping reads and enriches an already materialised CDR.  Until the
         # final persistence step succeeds, it does not alter that CDR.  A bad
         # mapping or an unrecognised Cell ID field must therefore leave the
-        # source dataset ready for Preview, Dashboard and a later retry.
+        # source dataset ready for Preview, Datasets Analysis and a later retry.
         repository.update_dataset_profile(dataset_id, status='ready', progress=100, last_error=None, processed_at=now_iso())
         repository.add_log(username, 'map_dataset_vendors_failed', json.dumps({'dataset_id': dataset_id, 'error': str(exc)}))
     finally:
@@ -2307,7 +2311,7 @@ def queue_legacy_vendor_mapping_recovery(
         if not dataset_path.exists():
             continue
         # Rebuild from the original workbook with no mappings selected. This
-        # restores Preview/Dashboard availability without repeating the error.
+        # restores Preview/Datasets Analysis availability without repeating the error.
         enqueue_dataset_processing(background_tasks, int(dataset['id']), dataset_path, username)
         repository.add_log(username, 'recover_vendor_mapping_dataset', json.dumps({'dataset_id': dataset['id']}))
         queued_recovery = True
@@ -2511,7 +2515,7 @@ def choose_selected_dataset(
     return candidate_datasets[0] if candidate_datasets else None
 
 
-def enrich_selected_dataset_for_dashboard(selected_dataset: dict[str, Any] | None) -> dict[str, Any] | None:
+def enrich_selected_dataset_for_analysis(selected_dataset: dict[str, Any] | None) -> dict[str, Any] | None:
     if not selected_dataset or not selected_dataset['is_ready']:
         return selected_dataset
     selected_dataset['metric_availability'] = derive_runtime_metric_availability(selected_dataset)
@@ -2529,7 +2533,7 @@ def enrich_selected_dataset_for_dashboard(selected_dataset: dict[str, Any] | Non
     return selected_dataset
 
 
-def build_dashboard_table_rows(df: pd.DataFrame, selected_metrics: list[str], aggregation: str | None) -> list[dict[str, Any]]:
+def build_datasets_analysis_table_rows(df: pd.DataFrame, selected_metrics: list[str], aggregation: str | None) -> list[dict[str, Any]]:
     if df.empty:
         return []
 
@@ -3075,8 +3079,12 @@ def create_recurring_database_backup(
             total_bytes += workspace.database_path.stat().st_size
         if 'report_templates' in components:
             template_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
-            total_bytes += sum(len(_template_row_content(row)) * (2 if row['is_default'] else 1)
-                               for technology in TEMPLATE_NAMES for row in template_repository.list_report_templates(technology))
+            template_repository.initialize()
+            total_bytes += sum(
+                len(_template_row_content(row)) * (2 if row['is_default'] else 1)
+                for technology in TEMPLATE_NAMES
+                for row in template_repository.list_report_templates(technology)
+            )
         if 'input' in components:
             total_bytes += source_tree_size(workspace.input_dir)
         if 'output' in components:
@@ -5249,7 +5257,7 @@ def build_app_logs() -> list[dict[str, Any]]:
     return logs
 
 
-def build_dashboard_payload(selected_dataset: dict[str, Any] | None, request: Request, username: str | None = None) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[str], dict[str, Any], str | None, bool]:
+def build_datasets_analysis_payload(selected_dataset: dict[str, Any] | None, request: Request, username: str | None = None) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[str], dict[str, Any], str | None, bool]:
     if not selected_dataset:
         return None, [], [], {}, None, False
     if not selected_dataset['is_ready']:
@@ -5368,7 +5376,7 @@ def build_dashboard_payload(selected_dataset: dict[str, Any] | None, request: Re
 
     primary_analysis = analyses[0]['result'] if analyses else None
     if primary_analysis is not None:
-        primary_analysis.table_rows = build_dashboard_table_rows(df, selected_metrics, primary_analysis.filters.get('aggregation'))
+        primary_analysis.table_rows = build_datasets_analysis_table_rows(df, selected_metrics, primary_analysis.filters.get('aggregation'))
     return primary_analysis, analyses, selected_metrics, filter_options, None, True
 
 
@@ -5492,6 +5500,7 @@ def documents_view(request: Request, doc_name: str, user: SessionUser = Depends(
             'back_label': back_label,
             'doc_api_url': f'/api/documents/{normalized}',
             'help_navigation': normalized == 'help',
+            'changelog_navigation': normalized == 'changelog',
         },
     )
 
@@ -5534,6 +5543,16 @@ def get_help_documents_index(user: SessionUser = Depends(current_user)) -> dict[
             'url': '/documents/view/help' if relative_path == HELP_HOME_DOCUMENT else f'/documents/view/help/{relative_path}',
         })
     return {'root': str(help_root), 'documents': documents}
+
+
+@app.get('/api/documents/changelog-index')
+def get_changelog_index(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
+    changelog = resolve_doc_path('changelog').read_text(encoding='utf-8', errors='replace')
+    releases = [
+        {'version': match.group(1), 'id': f'release-v{match.group(1)}'}
+        for match in re.finditer(r'^##\s+Release:\s+v([^\s]+)', changelog, re.MULTILINE)
+    ]
+    return {'releases': releases}
 
 
 @app.get('/api/documents/help/{doc_file:path}')
@@ -6153,7 +6172,7 @@ def select_workspace(
     # never send the user to Workspace merely because the active data source
     # changed.  Restrict the destination to application modules so this form
     # cannot become an open redirect.
-    target = return_to if return_to in {'/workspace', '/dashboard', '/reporting', '/admin'} else '/workspace'
+    target = return_to if return_to in {'/workspace', '/datasets-analysis', '/e2e-dashboards', '/reporting', '/admin'} else '/workspace'
     if user.role != 'super-admin' and not repository.user_has_workspace_access(user.username, workspace_id):
         return RedirectResponse(f'{target}?workspace_error=You+do+not+have+access+to+that+workspace.', status_code=status.HTTP_303_SEE_OTHER)
     try:
@@ -6702,24 +6721,30 @@ def app_logs_data(user: SessionUser = Depends(current_user)) -> JSONResponse:
     return JSONResponse({'logs': build_app_logs()})
 
 
-@app.get('/dashboard', response_class=HTMLResponse)
-def dashboard(
+@app.get('/dashboard', include_in_schema=False)
+def legacy_datasets_analysis(request: Request, user: SessionUser = Depends(current_user)):
+    query = f'?{request.url.query}' if request.url.query else ''
+    return RedirectResponse(f'/datasets-analysis{query}', status_code=307)
+
+
+@app.get('/datasets-analysis', response_class=HTMLResponse)
+def datasets_analysis(
     request: Request,
     dataset_id: int | None = Query(default=None),
     input_kind: str | None = Query(default=None),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
     if not active_workspace:
-        return RedirectResponse('/workspace?workspace_warning=Open+a+workspace+before+using+Dashboard.', status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse('/workspace?workspace_warning=Open+a+workspace+before+using+Datasets+Analysis.', status_code=status.HTTP_303_SEE_OTHER)
     datasets, ready_datasets, input_kind_options, selected_dataset = build_dataset_view_state(dataset_id, input_kind, CDR_DATASET_KINDS)
     selected_dataset = refresh_selected_dataset_if_stale(selected_dataset)
     selected_dataset = ensure_canonical_mapped_vendor_column(selected_dataset)
-    selected_dataset = enrich_selected_dataset_for_dashboard(selected_dataset)
-    analysis, analyses, selected_metrics, filter_options, analysis_error, analysis_loaded = build_dashboard_payload(selected_dataset, request, user.username)
+    selected_dataset = enrich_selected_dataset_for_analysis(selected_dataset)
+    analysis, analyses, selected_metrics, filter_options, analysis_error, analysis_loaded = build_datasets_analysis_payload(selected_dataset, request, user.username)
 
     return render_template(
         request,
-        'dashboard.html',
+        'datasets_analysis.html',
         {
             'user': user,
             'datasets': datasets,
@@ -7576,6 +7601,7 @@ def _run_netcheck_report_job_locked(
             frame_loader=load_frame,
             on_chart_rendered=chart_rendered,
             generate_tooltips=generate_tooltips,
+            reuse_existing_charts=True,
         )
         gc.collect()
         _ensure_report_job_active(task_repository, report_id)
@@ -7592,16 +7618,12 @@ def _run_netcheck_report_job_locked(
             'chart_metrics': chart_metrics,
         }))
     except ReportJobStopped:
-        if destination.parent == _report_job_directory(destination.name):
-            shutil.rmtree(destination.parent, ignore_errors=True)
-        else:
-            destination.unlink(missing_ok=True)
+        # Keep valid rendered charts for a later retry. The presentation itself
+        # is written only at the end and is never a reusable partial artifact.
+        destination.unlink(missing_ok=True)
         invalidate_workspace_size_cache(task_repository.db_path.parent)
     except Exception as exc:
-        if destination.parent == _report_job_directory(destination.name):
-            shutil.rmtree(destination.parent, ignore_errors=True)
-        else:
-            destination.unlink(missing_ok=True)
+        destination.unlink(missing_ok=True)
         invalidate_workspace_size_cache(task_repository.db_path.parent)
         task_repository.update_report_job(report_id, status='failed', progress=100, last_error=str(exc), finished=True)
         task_repository.add_log(username, 'export_netcheck_cdr_report_failed', json.dumps({
@@ -7900,6 +7922,10 @@ def _run_report_chart_job(
             chart_entries = [entry for entry in catalog_entries if entry.source_kind]
             if not chart_entries:
                 raise ValueError('The selected Report Template does not contain automated CDR charts.')
+            current_job = task_repository.get_report_chart_job(job_id)
+            resume_generation = str(current_job['generation'] or '') if current_job else ''
+            resume_directory = report_charts_directory(output_dir) / resume_generation if _valid_report_chart_generation(resume_generation) else None
+            reusable_charts = _load_reusable_chart_set_assets(resume_directory, chart_entries, generate_tooltips)
             def rendered_charts() -> Iterable[tuple[dict[str, Any], bytes]]:
                 rendered = 0
                 empty_charts: list[dict[str, Any]] = []
@@ -7938,6 +7964,18 @@ def _run_report_chart_job(
                         task_repository.update_report_chart_job(job_id, status='processing', progress=12 + int(rendered * 83 / len(chart_entries)))
                         for order, entry in entries:
                             _ensure_report_job_active(task_repository, job_id, chart_job=True)
+                            reusable = reusable_charts.get(order)
+                            if reusable is not None:
+                                image, hover_targets = reusable
+                                rendered += 1
+                                task_repository.update_report_chart_job(
+                                    job_id, status='processing', progress=12 + int(rendered * 83 / len(chart_entries)),
+                                )
+                                yield ({'order': order, 'slide': entry.slide,
+                                        'title': entry.chart_title or entry.slide_title or f'Slide {entry.slide}',
+                                        'source': entry.cdr_source, 'chart_type': entry.chart_type,
+                                        **({'hover_targets': hover_targets} if hover_targets is not None else {})}, image)
+                                continue
                             try:
                                 hover_future = hover_executor.submit(
                                     catalog_chart_hover_targets, frame, entry, multivendor=multivendor,
@@ -8006,6 +8044,7 @@ def _run_report_chart_job(
                 ),
                 generate_tooltips=generate_tooltips,
                 technology=technology,
+                resume_generation=resume_generation or None,
             )
             _ensure_report_job_active(task_repository, job_id, chart_job=True)
             task_repository.update_report_chart_job(
@@ -8018,8 +8057,8 @@ def _run_report_chart_job(
                 'scope': report_scope, 'template': template_name, 'charts': len(chart_entries),
             }))
         except ReportJobStopped:
-            if report_charts:
-                shutil.rmtree(report_charts_directory(output_dir) / str(report_charts['generation']), ignore_errors=True)
+            # The directory remains private while no manifest exists, so its
+            # verified PNG/JSON assets can be reused by a later retry.
             invalidate_workspace_size_cache(task_repository.db_path.parent)
         except Exception as exc:
             task_repository.add_log(username, 'chart_set_generation_failed', json.dumps({
@@ -8167,6 +8206,41 @@ def list_persisted_report_chart_sets() -> list[dict[str, Any]]:
     return sorted(sets, key=lambda item: (item['generated_at'], item['generation']), reverse=True)
 
 
+def _load_reusable_chart_set_assets(
+    directory: Path | None, chart_entries: list[Any], generate_tooltips: bool,
+) -> dict[int, tuple[bytes, list[dict[str, Any]] | None]]:
+    """Return only complete, deterministic partial Chart Set assets."""
+    if directory is None or not directory.is_dir() or (directory / 'manifest.json').exists():
+        return {}
+    reusable: dict[int, tuple[bytes, list[dict[str, Any]] | None]] = {}
+    for order, _entry in enumerate(chart_entries):
+        image_path = directory / f'chart-{order + 1:03d}.png'
+        try:
+            with Image.open(image_path) as image:
+                if image.format != 'PNG':
+                    continue
+                image.verify()
+            image_bytes = image_path.read_bytes()
+        except (OSError, ValueError, SyntaxError):
+            image_path.unlink(missing_ok=True)
+            continue
+        hover_targets: list[dict[str, Any]] | None = None
+        hover_path = directory / f'chart-{order + 1:03d}.hover.json'
+        if generate_tooltips:
+            try:
+                loaded = json.loads(hover_path.read_text(encoding='utf-8'))
+                if isinstance(loaded, list):
+                    hover_targets = loaded
+                else:
+                    hover_path.unlink(missing_ok=True)
+                    continue
+            except (OSError, json.JSONDecodeError):
+                hover_path.unlink(missing_ok=True)
+                continue
+        reusable[order] = (image_bytes, hover_targets)
+    return reusable
+
+
 def persist_report_charts(
     template_name: str,
     scope: str,
@@ -8176,6 +8250,7 @@ def persist_report_charts(
     before_publish: Callable[[str], None] | None = None,
     generate_tooltips: bool = True,
     technology: str = '',
+    resume_generation: str | None = None,
 ) -> dict[str, Any]:
     """Persist a new timestamped Chart Set directly in its final directory."""
     _migrate_report_charts_root(output_dir)
@@ -8195,11 +8270,12 @@ def persist_report_charts(
     generated_at = datetime.now().astimezone()
     generation = generated_at.strftime('%Y%m%d-%H%M%S')
     suffix = 2
-    target = destination / generation
-    while target.exists():
+    target = destination / resume_generation if resume_generation and _valid_report_chart_generation(resume_generation) else destination / generation
+    while target.exists() and not resume_generation:
         target = destination / f'{generation}-{suffix}'
         suffix += 1
-    target.mkdir(parents=True)
+    target.mkdir(parents=True, exist_ok=True)
+    (target / 'manifest.json').unlink(missing_ok=True)
     if before_publish:
         before_publish(target.name)
     try:
@@ -8240,7 +8316,9 @@ def persist_report_charts(
         # it last so an in-progress generation is never offered as ready.
         (target / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
     except Exception:
-        shutil.rmtree(target, ignore_errors=True)
+        # Keep per-chart files for a retry; manifest is intentionally absent,
+        # therefore a partial generation is never visible as a Chart Set.
+        (target / 'manifest.json').unlink(missing_ok=True)
         raise
     payload = _report_chart_payload(manifest, target.name, output_dir)
     if payload is None:
@@ -8595,10 +8673,14 @@ def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) 
     if not file_name:
         raise HTTPException(status_code=400, detail='The report does not have a valid output file name.')
     destination = safe_join(_report_job_directory(file_name), file_name)
-    # Remove the full dedicated directory even if a prior run failed before it
-    # created the PPTX itself, so reruns never inherit partial charts or files.
-    _delete_report_job_artifacts(previous)
-    shutil.rmtree(destination.parent, ignore_errors=True)
+    if str(previous['status'] or '').casefold() == 'ready':
+        # A deliberate relaunch of a completed report starts from scratch.
+        _delete_report_job_artifacts(previous)
+    else:
+        # Preserve only deterministic chart artifacts. render_cdr_report
+        # validates every reused PNG/JSON and discards stale or corrupt files.
+        destination.unlink(missing_ok=True)
+        (destination.parent / 'report-charts' / 'manifest.json').unlink(missing_ok=True)
     invalidate_workspace_size_cache()
     if not repository.retry_report_job(report_id):
         raise HTTPException(status_code=409, detail='This report job is no longer available for relaunch.')
@@ -8622,7 +8704,8 @@ def dataset_status(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
     return {'datasets': datasets}
 
 
-@app.post('/dashboard/upload', response_class=HTMLResponse)
+@app.post('/dashboard/upload', response_class=HTMLResponse, include_in_schema=False)
+@app.post('/datasets-analysis/upload', response_class=HTMLResponse)
 async def upload_dataset(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -8856,7 +8939,8 @@ def rename_dataset_file(
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/dashboard/retry/{dataset_id}')
+@app.post('/dashboard/retry/{dataset_id}', include_in_schema=False)
+@app.post('/datasets-analysis/retry/{dataset_id}')
 def retry_dataset(dataset_id: int, background_tasks: BackgroundTasks, user: SessionUser = Depends(current_user)) -> Response:
     dataset = repository.get_dataset(dataset_id)
     if not dataset:
@@ -8971,7 +9055,8 @@ def clear_dataset_vendors(dataset_id: int, background_tasks: BackgroundTasks, us
     return RedirectResponse(f'/workspace?dataset_id={dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/dashboard/stop/{dataset_id}')
+@app.post('/dashboard/stop/{dataset_id}', include_in_schema=False)
+@app.post('/datasets-analysis/stop/{dataset_id}')
 def stop_dataset(dataset_id: int, user: SessionUser = Depends(current_user)) -> Response:
     dataset = repository.get_dataset(dataset_id)
     if not dataset:
@@ -8990,7 +9075,8 @@ def stop_dataset(dataset_id: int, user: SessionUser = Depends(current_user)) -> 
     return RedirectResponse(f'/workspace?dataset_id={dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/dashboard/delete/{dataset_id}')
+@app.post('/dashboard/delete/{dataset_id}', include_in_schema=False)
+@app.post('/datasets-analysis/delete/{dataset_id}')
 def delete_dataset(dataset_id: int, return_to: str = Form(''), user: SessionUser = Depends(current_user)) -> Response:
     dataset = repository.get_dataset(dataset_id)
     if not dataset:
@@ -9022,7 +9108,8 @@ def delete_dataset(dataset_id: int, return_to: str = Form(''), user: SessionUser
     return RedirectResponse('/admin' if return_to == 'admin' else '/workspace', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/dashboard/analyze', response_class=HTMLResponse)
+@app.post('/dashboard/analyze', response_class=HTMLResponse, include_in_schema=False)
+@app.post('/datasets-analysis/analyze', response_class=HTMLResponse)
 def analyze_dataset(
     dataset_id: int = Form(...),
     metric: str = Form(''),
@@ -9042,10 +9129,11 @@ def analyze_dataset(
         params[key] = value
     query = urlencode({key: value for key, value in params.items() if value})
     repository.add_log(user.username, 'analyze_dataset', json.dumps(params))
-    return RedirectResponse(f'/dashboard?{query}', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(f'/datasets-analysis?{query}', status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post('/dashboard/export/{export_kind}')
+@app.post('/dashboard/export/{export_kind}', include_in_schema=False)
+@app.post('/datasets-analysis/export/{export_kind}')
 def export_report(
     export_kind: str,
     dataset_id: int = Form(...),
@@ -9068,11 +9156,11 @@ def export_report(
     dataset = repository.get_dataset(dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail='Dataset not found')
-    selected_dataset = enrich_selected_dataset_for_dashboard(serialize_dataset_row(dataset))
+    selected_dataset = enrich_selected_dataset_for_analysis(serialize_dataset_row(dataset))
     if not selected_dataset or not selected_dataset['is_ready']:
         raise HTTPException(status_code=400, detail='Dataset is not ready for export')
     if selected_dataset.get('dataset_kind') not in CDR_DATASET_KINDS:
-        raise HTTPException(status_code=400, detail='Only NetCheck CDR Data, Voice and Speech datasets can be exported from E2E Dashboard.')
+        raise HTTPException(status_code=400, detail='Only NetCheck CDR Data, Voice and Speech datasets can be exported from Datasets Analysis.')
 
     query_items: list[tuple[str, str]] = [
         ('dataset_id', str(dataset_id)),
@@ -9109,9 +9197,9 @@ def export_report(
             query_items.append((key, str(value)))
 
     export_request = type('ExportRequest', (), {'query_params': QueryParams(query_items)})()
-    analysis, analyses, selected_metrics, _, analysis_error, analysis_loaded = build_dashboard_payload(selected_dataset, export_request, user.username)
+    analysis, analyses, selected_metrics, _, analysis_error, analysis_loaded = build_datasets_analysis_payload(selected_dataset, export_request, user.username)
     if not analysis_loaded or not analysis or not analyses:
-        raise HTTPException(status_code=400, detail=analysis_error or 'Dashboard state is not ready for export')
+        raise HTTPException(status_code=400, detail=analysis_error or 'Analysis state is not ready for export')
 
     file_stem = Path(selected_dataset['stored_path']).stem
     filters_text = _summarize_export_filters(analysis.filters)
@@ -11218,3 +11306,7 @@ templates.env.globals['format_extra_filters'] = format_extra_filters
 templates.env.globals['format_aggregation_overrides'] = format_aggregation_overrides
 templates.env.globals['format_cdf_overrides'] = format_cdf_overrides
 templates.env.globals['format_aggregation_label'] = format_aggregation_label
+
+# Register the template-driven dashboard workspace after the shared reporting helpers.
+from src.modules.e2e_dashboards import install_dashboard_routes
+install_dashboard_routes(sys.modules[__name__])

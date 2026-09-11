@@ -363,7 +363,7 @@ def test_renaming_calculated_dimension_rebuilds_references_in_workspace_template
     assert response.json()['renamed_templates'] >= 1
     assert any(item.name == 'Test Classification' for item in app_module.load_workspace_calculated_dimensions())
     template = next(item for item in app_module.report_catalogue_options('nsa') if item['active'])
-    template_text = template['path'].read_text(encoding='utf-8')
+    template_text = bytes(template['content']).decode('utf-8')
     assert 'Test Classification' in template_text
     assert 'Test Family' not in template_text
 
@@ -577,7 +577,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert 'Import / Export / Transfer' in admin_response.text
     assert 'Transfer to other server' in admin_response.text
     assert 'Config</option>' in admin_response.text
-    assert 'Config + Slides Templates' in admin_response.text
+    assert 'Config + Report Templates' in admin_response.text
     assert 'Workspace: Default' in admin_response.text
 
     config_response = client.get('/admin/import-export/export?export_target=config')
@@ -586,6 +586,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
         manifest = json.loads(archive.read('manifest.json'))
         assert 'config/workspace-registry.db' not in archive.namelist()
     assert manifest == {
+        'components': ['app_database'],
         'format': 'dashboard-analytic-export',
         'includes_slides_templates': False,
         'kind': 'config',
@@ -596,7 +597,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert fields_response.status_code == 200
     with zipfile.ZipFile(BytesIO(fields_response.content)) as archive:
         fields_manifest = json.loads(archive.read('manifest.json'))
-        exported_fields = json.loads(archive.read('auto-calculated-fields.json'))
+        exported_fields = json.loads(archive.read(fields_manifest['archive_path']))
     assert fields_manifest['kind'] == 'auto-calculated-fields'
     assert fields_manifest['source_workspace']['name'] == 'Default'
     assert exported_fields
@@ -818,14 +819,14 @@ def test_workspace_export_can_exclude_generated_reports_and_chart_sets(client, t
     app_module.build_export_archive_file('workspace:default', included_archive, include_generated_outputs=True)
     with zipfile.ZipFile(included_archive) as archive:
         assert json.loads(archive.read('manifest.json'))['includes_generated_outputs'] is True
-        assert 'workspace/output/reports/generated.pptx' in archive.namelist()
-        assert 'workspace/output/charts/20260907-120000/chart-1.png' in archive.namelist()
+        assert 'workspaces/Default/output/reports/generated.pptx' in archive.namelist()
+        assert 'workspaces/Default/output/charts/20260907-120000/chart-1.png' in archive.namelist()
 
     excluded_archive = tmp_path / 'excluded.zip'
     app_module.build_export_archive_file('workspace:default', excluded_archive, include_generated_outputs=False)
     with zipfile.ZipFile(excluded_archive) as archive:
         assert json.loads(archive.read('manifest.json'))['includes_generated_outputs'] is False
-    assert not any(name.startswith('workspace/output/') for name in archive.namelist())
+    assert not any(name.startswith('workspaces/Default/output/') for name in archive.namelist())
 
 
 def test_full_environment_selector_offers_generated_outputs_by_default(client) -> None:
@@ -846,7 +847,7 @@ def test_voice_and_speech_import_without_measured_kpis_remain_ready(client) -> N
         ('speech.csv', 'speech', b'Operator,Test_Result\nOrange,Completed\n'),
     ):
         response = client.post(
-            '/dashboard/upload', data={'dataset_kinds': kind},
+            '/datasets-analysis/upload', data={'dataset_kinds': kind},
             files={'dataset_files': (filename, BytesIO(content), 'text/csv')},
         )
         assert response.status_code == 200
@@ -1223,10 +1224,11 @@ def test_admin_export_and_transfer_are_limited_to_templates_and_accessible_works
     panel = client.get('/admin')
     assert panel.status_code == 200
     assert 'data-panel-state-key="admin:import-export"' in panel.text
-    assert 'Slides Templates</option>' in panel.text
+    assert 'Report Templates (from active workspace)</option>' in panel.text
     assert 'Transfer to other server' in panel.text
     assert 'value="config"' not in panel.text
-    assert 'value="workspace:default" >Workspace: Default</option>' in panel.text
+    assert 'value="workspace:default"' in panel.text
+    assert 'Workspace: Default</option>' in panel.text
     assert f'value="workspace:{restricted.id}"' not in panel.text
 
     blocked_export = client.get('/admin/import-export/export?export_target=config')
@@ -1278,7 +1280,7 @@ def test_admin_can_login_upload_and_see_automatic_dashboard(client) -> None:
     login(client)
     csv_content = b"market,period,score,gap\nES,2026-Q1,91,2.1\nES,2026-Q1,87,3.3\nDE,2026-Q2,76,5.2\n"
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
@@ -1293,7 +1295,7 @@ def test_admin_can_login_upload_and_see_automatic_dashboard(client) -> None:
     assert "Workspace opened from cache" in dashboard_response.text
 
     analysis_redirect = client.post(
-        "/dashboard/analyze",
+        "/datasets-analysis/analyze",
         data={
             "dataset_id": 1,
             "metric": "score",
@@ -1319,14 +1321,14 @@ def test_dashboard_disables_metrics_without_non_null_values(client) -> None:
         b"ES,2026-Q1,Orange,South,,87\n"
     )
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
     assert upload_response.status_code == 303
 
-    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
+    response = client.get("/datasets-analysis?dataset_id=1&metric=score&aggregation=all&load=1")
     assert response.status_code == 200
     assert 'value="score"' in response.text
     assert 'value="latency_ms" disabled' in response.text
@@ -1337,7 +1339,7 @@ def test_dashboard_disables_metrics_without_non_null_values(client) -> None:
 def test_admin_can_retry_stuck_dataset(client) -> None:
     login(client)
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
@@ -1346,7 +1348,7 @@ def test_admin_can_retry_stuck_dataset(client) -> None:
     import src.DashboardAnalytic as app_module
 
     app_module.repository.update_dataset_profile(1, status="failed", progress=100, dataset_kind=None, row_count=None, column_count=None, default_metric=None)
-    retry_response = client.post("/dashboard/retry/1", follow_redirects=False)
+    retry_response = client.post("/datasets-analysis/retry/1", follow_redirects=False)
     assert retry_response.status_code == 303
 
     dashboard_response = client.get(retry_response.headers["location"])
@@ -1357,13 +1359,13 @@ def test_admin_can_retry_stuck_dataset(client) -> None:
 def test_admin_cannot_retry_queued_dataset(client) -> None:
     login(client)
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
     )
 
-    response = client.post("/dashboard/retry/1")
+    response = client.post("/datasets-analysis/retry/1")
     assert response.status_code == 400
     assert "Only failed or stopped datasets can be retried" in response.text
 
@@ -1371,7 +1373,7 @@ def test_admin_cannot_retry_queued_dataset(client) -> None:
 def test_admin_can_delete_queued_dataset(client) -> None:
     login(client)
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
@@ -1383,7 +1385,7 @@ def test_admin_can_delete_queued_dataset(client) -> None:
     assert dataset is not None
     dataset_path = Path(dataset["stored_path"])
     assert dataset_path.exists()
-    response = client.post("/dashboard/delete/1", follow_redirects=False)
+    response = client.post("/datasets-analysis/delete/1", follow_redirects=False)
     assert response.status_code == 303
     assert app_module.repository.get_dataset(1) is None
     assert not dataset_path.exists()
@@ -1392,7 +1394,7 @@ def test_admin_can_delete_queued_dataset(client) -> None:
 def test_admin_can_stop_processing_dataset(client) -> None:
     login(client)
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
@@ -1401,7 +1403,7 @@ def test_admin_can_stop_processing_dataset(client) -> None:
     import src.DashboardAnalytic as app_module
 
     app_module.repository.update_dataset_profile(1, status="processing", progress=33)
-    response = client.post("/dashboard/stop/1", follow_redirects=False)
+    response = client.post("/datasets-analysis/stop/1", follow_redirects=False)
     assert response.status_code == 303
 
     dataset = app_module.repository.get_dataset(1)
@@ -1413,13 +1415,13 @@ def test_reupload_same_file_reuses_existing_dataset_entry(client) -> None:
     login(client)
     payload = b"market,period,score\nES,2026-Q1,91\n"
     first_upload = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(payload), "text/csv")},
         follow_redirects=False,
     )
     second_upload = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(payload), "text/csv")},
         follow_redirects=False,
@@ -1437,7 +1439,7 @@ def test_reupload_preserves_original_upload_date_for_dataset_ordering(client) ->
     login(client)
     payload = b"market,period,score\nES,2026-Q1,91\n"
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(payload), "text/csv")},
         follow_redirects=False,
@@ -1448,7 +1450,7 @@ def test_reupload_preserves_original_upload_date_for_dataset_ordering(client) ->
     with app_module.repository.connection() as conn:
         conn.execute('UPDATE datasets SET uploaded_at = ? WHERE id = 1', (original_upload,))
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(payload), "text/csv")},
         follow_redirects=False,
@@ -1521,7 +1523,7 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
     assert app_module.workspace_registry.registry_path == app_module.settings.input_dir.parent.parent / 'workspace-registry.db'
     payload = b"market,period,score\nES,2026-Q1,91\n"
     client.post(
-        '/dashboard/upload', data={'dataset_kinds': 'data'},
+        '/datasets-analysis/upload', data={'dataset_kinds': 'data'},
         files={'dataset_files': ('default.csv', BytesIO(payload), 'text/csv')},
     )
     default_db = app_module.repository.db_path
@@ -1594,7 +1596,7 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
     closed_workspace = client.get('/workspace')
     assert 'Data Ingestion' not in closed_workspace.text
     assert 'module-tab-disabled' in closed_workspace.text
-    assert client.get('/dashboard', follow_redirects=False).status_code == 303
+    assert client.get('/datasets-analysis', follow_redirects=False).status_code == 303
     login_page = client.get('/login')
     assert login_page.text.index('>Campaign benchmark Q3</option>') < login_page.text.index('>Default</option>')
     assert '<option value="default" selected>Default</option>' in login_page.text
@@ -2026,8 +2028,8 @@ def test_admin_recurring_backup_settings_are_persisted(client) -> None:
     assert config['max_backups'] == 12
     assert config['backup_path'].endswith('scheduled-backups')
     page = client.get('/admin')
-    assert 'Database Backups' in page.text
-    assert 'database-editor-subpanel' in page.text
+    assert 'Backup Protection' in page.text
+    assert 'database-view-subpanel' in page.text
     assert 'Retention backups' in page.text
     assert 'Stored backups:' in page.text
     assert 'Retention backups' in page.text
@@ -2088,10 +2090,13 @@ def test_backup_skips_stale_workspace_registry_entries(monkeypatch, tmp_path: Pa
         database_path = root / f'{identifier}.db'
         if database_exists:
             database_path.parent.mkdir(parents=True)
-            database_path.touch()
-        templates = root / 'slides-templates'
+            workspace_repository = app_module.Repository(database_path, app_module.repository.global_db_path)
+            workspace_repository.initialize()
+            workspace_repository.add_report_template(
+                'nsa', f'{identifier} template', b'template', is_default=True,
+            )
+        templates = root / 'report-templates'
         templates.mkdir(parents=True)
-        (templates / f'{identifier}.csv').write_text('template', encoding='utf-8')
         return app_module.Workspace(
             id=identifier, name=identifier.title(), database_path=database_path,
             input_dir=root / 'input', output_dir=root / 'output', export_dir=root / 'output' / 'reports',
@@ -2111,7 +2116,8 @@ def test_backup_skips_stale_workspace_registry_entries(monkeypatch, tmp_path: Pa
     with zipfile.ZipFile(archive_path) as archive:
         names = archive.namelist()
         manifest = json.loads(archive.read('manifest.json'))
-    assert 'workspaces/Current-Workspace/report-templates/current-workspace.csv' in names
+    assert 'workspaces/Current-Workspace/report-templates/library/nsa/current-workspace template.csv' in names
+    assert 'workspaces/Current-Workspace/report-templates/default/nsa/current-workspace template.csv' in names
     assert not any(name.startswith('workspaces/Default/') for name in names)
     assert not any(name.startswith('workspaces/Workspace-3/') for name in names)
     assert manifest['components'] == ['workspace_components']
@@ -2228,7 +2234,7 @@ def test_admin_dataset_management_renames_dataset_file_and_materialised_source_l
 
     login(client)
     upload = client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'data'},
         files={'dataset_files': ('original-cdr.csv', BytesIO(b'Campaign,LQ\nUK_Q2_SA_2026,3.8\n'), 'text/csv')},
         follow_redirects=False,
@@ -2269,7 +2275,7 @@ def test_admin_dataset_management_renames_dataset_file_and_materialised_source_l
     assert 'dataset-rename-1' in admin.text
     assert 'data-admin-dataset-rename-save' in admin.text
     assert 'Save name' not in admin.text
-    assert 'Show Dashboard' in admin.text
+    assert 'Show Analysis' in admin.text
     assert 'Preview' in admin.text
 
 
@@ -2278,7 +2284,7 @@ def test_admin_dataset_management_rename_returns_compact_json_for_interactive_ta
 
     login(client)
     upload = client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'data'},
         files={'dataset_files': ('original-cdr.csv', BytesIO(b'Campaign,LQ\nUK_Q2_SA_2026,3.8\n'), 'text/csv')},
         follow_redirects=False,
@@ -2302,7 +2308,7 @@ def test_dashboard_upload_accepts_multiple_files(client) -> None:
     login(client)
 
     response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         files=[
             ("dataset_files", ("sample-a.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")),
             ("dataset_files", ("sample-b.csv", BytesIO(b"market,period,score\nDE,2026-Q2,78\n"), "text/csv")),
@@ -2321,7 +2327,7 @@ def test_workspace_upload_persists_selected_dataset_kind(client) -> None:
     login(client)
 
     response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "mapping_vodafone"},
         files={"dataset_files": ("operator_cells.csv", BytesIO(b"Cell ID,OP/ Vendor\n123,Ericsson\n"), "text/csv")},
         follow_redirects=False,
@@ -2338,7 +2344,7 @@ def test_workspace_upload_persists_selected_dataset_kind(client) -> None:
 def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     login(client)
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("cdr_data.csv", BytesIO(b"operator,score\nVodafone UK,91\n"), "text/csv")},
         follow_redirects=False,
@@ -2349,13 +2355,13 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     assert 'data-queue-type-filter' in workspace_response.text
     assert 'value="">All Types' in workspace_response.text
     assert 'href="/workspace/preview/1" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview"' in workspace_response.text
-    assert 'Show Dashboard</a>' in workspace_response.text
+    assert 'Show Analysis</a>' in workspace_response.text
 
     preview_response = client.get("/workspace/preview/1")
     assert preview_response.status_code == 200
     assert "Dataset preview" in preview_response.text
     assert "Vodafone UK" in preview_response.text
-    assert "Show Dashboard" in preview_response.text
+    assert "Show Analysis" in preview_response.text
     assert 'name="row_limit" value="100"' in preview_response.text
     assert 'data-preview-column-filter' in preview_response.text
     assert 'data-preview-row-filter' in preview_response.text
@@ -2369,7 +2375,7 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     assert limited_preview_response.status_code == 200
     assert 'name="row_limit" value="25"' in limited_preview_response.text
 
-    dashboard_response = client.get('/dashboard?dataset_id=1&input_kind=data')
+    dashboard_response = client.get('/datasets-analysis?dataset_id=1&input_kind=data')
     assert dashboard_response.status_code == 200
     assert 'href="/workspace/preview/1" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview Dataset</a>' in dashboard_response.text
 
@@ -2379,7 +2385,7 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     import src.DashboardAnalytic as app_module
 
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("cdr_data.csv", BytesIO(b"operator,score\nVodafone UK,91\n"), "text/csv")},
         follow_redirects=False,
@@ -2401,7 +2407,7 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     assert 'name="cdr_operator"' in preview_response.text
     assert 'data-preview-column-filter' in preview_response.text
     assert 'data-preview-row-filter' in preview_response.text
-    assert 'Show Dashboard' not in preview_response.text
+    assert 'Show Analysis' not in preview_response.text
 
 
 def test_combined_dataset_missing_rows_are_flagged_and_require_confirmation(client, tmp_path: Path) -> None:
@@ -2491,7 +2497,7 @@ def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> Non
 
     login(client)
     client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'data'},
         files={'dataset_files': (
             'cdr_data.csv',
@@ -2549,7 +2555,7 @@ def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> Non
 def test_workspace_uses_persisted_vendor_flags_without_reloading_cdr_files(client, monkeypatch) -> None:
     login(client)
     client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'data'},
         files={'dataset_files': ('cdr_data.csv', BytesIO(b'operator,score\nVodafone UK,91\n'), 'text/csv')},
         follow_redirects=False,
@@ -2566,13 +2572,13 @@ def test_workspace_uses_persisted_vendor_flags_without_reloading_cdr_files(clien
 def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mapping(client) -> None:
     login(client)
     client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'data'},
         files={'dataset_files': ('cdr_data.csv', BytesIO(b'operator,Cell_ID_A,score\n3,200 -> 200,91\n'), 'text/csv')},
         follow_redirects=False,
     )
     client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'mapping_three'},
         files={'dataset_files': ('Multivendor_Mapping_3UK.csv', BytesIO(b'Cid__ECI,Vendor\n200,Nokia\n'), 'text/csv')},
         follow_redirects=False,
@@ -2626,7 +2632,7 @@ def test_workspace_queues_vendor_mapping_for_multiple_cdrs(client) -> None:
     ]
     for file_name, kind, content in uploads:
         response = client.post(
-            '/dashboard/upload',
+            '/datasets-analysis/upload',
             data={'dataset_kinds': kind},
             files={'dataset_files': (file_name, BytesIO(content), 'text/csv')},
             follow_redirects=False,
@@ -2655,13 +2661,13 @@ def test_workspace_queues_vendor_mapping_for_multiple_cdrs(client) -> None:
 def test_failed_vendor_mapping_keeps_the_cdr_available(client) -> None:
     login(client)
     client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'data'},
         files={'dataset_files': ('cdr_without_cell_id.csv', BytesIO(b'Operator,score\n3,91\n'), 'text/csv')},
         follow_redirects=False,
     )
     client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'mapping_three'},
         files={'dataset_files': ('Multivendor_Mapping_3UK.csv', BytesIO(b'Cid__ECI,Vendor\n200,Nokia\n'), 'text/csv')},
         follow_redirects=False,
@@ -2680,7 +2686,7 @@ def test_failed_vendor_mapping_keeps_the_cdr_available(client) -> None:
 def test_workspace_recovers_legacy_vendor_mapping_failures(client) -> None:
     login(client)
     client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'data'},
         files={'dataset_files': ('legacy_cdr.csv', BytesIO(b'Operator,score\n3,91\n'), 'text/csv')},
         follow_redirects=False,
@@ -2704,7 +2710,7 @@ def test_workspace_recovers_legacy_vendor_mapping_failures(client) -> None:
 def test_workspace_upload_can_map_selected_cdr_vendor_during_processing(client) -> None:
     login(client)
     mapping_response = client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'mapping_three'},
         files={'dataset_files': ('Multivendor_Mapping_3UK.csv', BytesIO(b'Cid__ECI,Vendor\n200,Nokia\n'), 'text/csv')},
         follow_redirects=False,
@@ -2719,7 +2725,7 @@ def test_workspace_upload_can_map_selected_cdr_vendor_during_processing(client) 
     assert "mappingSelect.name = fieldName" in workspace.text
 
     cdr_response = client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={
             'dataset_kinds': 'data',
             'vodafone_mapping_dataset_ids': '',
@@ -2742,14 +2748,14 @@ def test_workspace_upload_can_map_selected_cdr_vendor_during_processing(client) 
 def test_workspace_batch_upload_keeps_vendor_mapping_choices_aligned_per_file(client) -> None:
     login(client)
     client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'mapping_three'},
         files={'dataset_files': ('Multivendor_Mapping_3UK.csv', BytesIO(b'Cid__ECI,Vendor\n200,Nokia\n'), 'text/csv')},
         follow_redirects=False,
     )
 
     response = client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={
             'dataset_kinds': ['data', 'generic'],
             'vodafone_mapping_dataset_ids': ['', ''],
@@ -2768,12 +2774,12 @@ def test_workspace_batch_upload_keeps_vendor_mapping_choices_aligned_per_file(cl
 def test_workspace_batch_upload_processes_uploaded_mapping_before_its_cdr(client) -> None:
     login(client)
 
-    upload_page = client.get('/dashboard')
+    upload_page = client.get('/datasets-analysis')
     assert upload_page.status_code == 200
     assert 'uploaded with this batch' not in upload_page.text
 
     response = client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={
             'dataset_kinds': ['mapping_three', 'data'],
             'vodafone_mapping_dataset_ids': ['', ''],
@@ -2813,7 +2819,7 @@ def test_vfuk_preview_limits_mapping_sheets_and_displays_materialised_gcid(clien
     workbook.seek(0)
 
     response = client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'mapping_vodafone'},
         files={'dataset_files': ('Multivendor_Mapping_VFUK.xlsx', workbook, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
         follow_redirects=False,
@@ -2849,7 +2855,7 @@ def test_vfuk_preview_limits_mapping_sheets_and_displays_materialised_gcid(clien
 def test_three_mapping_preview_excludes_empty_normalized_columns(client) -> None:
     login(client)
     response = client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'mapping_three'},
         files={'dataset_files': ('Multivendor_Mapping_3UK.csv', BytesIO(b'MBNL_ID,Vendor,Site_Name,Cid__ECI\nAAB013,Ericsson,United Reformed Church,123\n'), 'text/csv')},
         follow_redirects=False,
@@ -2876,7 +2882,7 @@ def test_mapping_preview_shows_every_source_column(client) -> None:
     source_row = ['123', 'Ericsson', *(str(number) for number in range(1, 27))]
     content = (','.join(source_columns) + '\n' + ','.join(source_row) + '\n').encode()
     response = client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'mapping_three'},
         files={'dataset_files': ('Multivendor_Mapping_3UK.csv', BytesIO(content), 'text/csv')},
         follow_redirects=False,
@@ -2891,7 +2897,7 @@ def test_mapping_preview_shows_every_source_column(client) -> None:
 def test_mapping_preview_formats_integral_gcid_without_decimal_suffix(client) -> None:
     login(client)
     response = client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'mapping_vodafone'},
         files={'dataset_files': ('Multivendor_Mapping_VFUK.csv', BytesIO(b'source_sheet,gNodeB ID,Local Cell ID,OP/ Vendor\n5G,53986,302,Ericsson\n5G,,,Ericsson\n'), 'text/csv')},
         follow_redirects=False,
@@ -2907,7 +2913,7 @@ def test_mapping_preview_formats_integral_gcid_without_decimal_suffix(client) ->
 def test_mapping_preview_hides_unnamed_columns_but_keeps_cell_name(client) -> None:
     login(client)
     response = client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'mapping_vodafone'},
         files={'dataset_files': ('Multivendor_Mapping_VFUK.csv', BytesIO(b'source_sheet,eNodeB ID,Local Cell ID,Cell Name,Unnamed_2,OP/ Vendor\n4G,13008,1,Cell A,,Samsung\n'), 'text/csv')},
         follow_redirects=False,
@@ -2941,7 +2947,7 @@ def test_vfuk_preview_uses_only_the_selected_source_sheet_columns(client) -> Non
         }).to_excel(writer, sheet_name='5G', index=False)
     workbook.seek(0)
     response = client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'mapping_vodafone'},
         files={'dataset_files': ('Multivendor_Mapping_VFUK.xlsx', workbook, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
         follow_redirects=False,
@@ -2965,7 +2971,7 @@ def test_vfuk_preview_uses_only_the_selected_source_sheet_columns(client) -> Non
 def test_mapping_preview_filters_by_vendor_and_gcid(client) -> None:
     login(client)
     response = client.post(
-        '/dashboard/upload',
+        '/datasets-analysis/upload',
         data={'dataset_kinds': 'mapping_three'},
         files={'dataset_files': ('Multivendor_Mapping_3UK.csv', BytesIO(b'Vendor,CId___ECI,Site_Name\nEricsson,123,Site A\nNokia,456,Site B\n'), 'text/csv')},
         follow_redirects=False,
@@ -3012,17 +3018,17 @@ def test_dataset_selector_shows_all_datasets_when_no_input_kind_filter_is_set(cl
     login(client)
 
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         files={"dataset_files": ("voice.csv", BytesIO(b"POLQA_LQ_Avg,market,period\n4.2,ES,2026-Q1\n"), "text/csv")},
         follow_redirects=False,
     )
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         files={"dataset_files": ("data.csv", BytesIO(b"Mean_Data_Rate,market,period\n25.1,DE,2026-Q2\n"), "text/csv")},
         follow_redirects=False,
     )
 
-    response = client.get("/dashboard?dataset_id=2")
+    response = client.get("/datasets-analysis?dataset_id=2")
     assert response.status_code == 200
     assert '<option value="1"' in response.text
     assert '<option value="2"' in response.text
@@ -3032,13 +3038,13 @@ def test_dataset_selector_only_lists_ready_datasets(client) -> None:
     login(client)
 
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("ready.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
     )
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("stopped.csv", BytesIO(b"market,period,score\nDE,2026-Q2,78\n"), "text/csv")},
         follow_redirects=False,
@@ -3048,7 +3054,7 @@ def test_dataset_selector_only_lists_ready_datasets(client) -> None:
 
     app_module.repository.update_dataset_profile(2, status="stopped", progress=50)
 
-    response = client.get("/dashboard")
+    response = client.get("/datasets-analysis")
     selector_fragment = response.text.split('data-dataset-select', 1)[1].split('</select>', 1)[0]
     assert response.status_code == 200
     assert 'value="1"' in selector_fragment
@@ -3060,19 +3066,19 @@ def test_dataset_selector_only_lists_ready_datasets(client) -> None:
 def test_dashboard_selector_excludes_mapping_and_other_dataset_types(client) -> None:
     login(client)
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("cdr-data.csv", BytesIO(b"Mean_Data_Rate,Operator\n12.5,EE\n"), "text/csv")},
         follow_redirects=False,
     )
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "mapping_vodafone"},
         files={"dataset_files": ("VFUK.csv", BytesIO(b"eNodeB ID,Local Cell ID,OP/ Vendor\n1,1,Ericsson\n"), "text/csv")},
         follow_redirects=False,
     )
 
-    response = client.get("/dashboard?dataset_id=2")
+    response = client.get("/datasets-analysis?dataset_id=2")
     selector_fragment = response.text.split('data-dataset-select', 1)[1].split('</select>', 1)[0]
     assert 'cdr-data.csv' in selector_fragment
     assert 'VFUK.csv' not in selector_fragment
@@ -3083,13 +3089,13 @@ def test_dashboard_ignores_non_ready_dataset_id_in_selector_flow(client) -> None
     login(client)
 
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("ready.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
     )
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("failed.csv", BytesIO(b"market,period,score\nDE,2026-Q2,78\n"), "text/csv")},
         follow_redirects=False,
@@ -3099,7 +3105,7 @@ def test_dashboard_ignores_non_ready_dataset_id_in_selector_flow(client) -> None
 
     app_module.repository.update_dataset_profile(2, status="failed", progress=100, last_error="broken")
 
-    response = client.get("/dashboard?dataset_id=2")
+    response = client.get("/datasets-analysis?dataset_id=2")
     selector_fragment = response.text.split('data-dataset-select', 1)[1].split('</select>', 1)[0]
     assert response.status_code == 200
     assert 'option value="1"' in selector_fragment
@@ -3116,7 +3122,7 @@ def test_reporting_preselects_two_latest_ready_cdrs_of_each_type(client) -> None
     ]
     for filename, kind, content in uploads:
         response = client.post(
-            '/dashboard/upload',
+            '/datasets-analysis/upload',
             data={'dataset_kinds': kind},
             files={'dataset_files': (filename, BytesIO(content), 'text/csv')},
             follow_redirects=False,
@@ -3146,17 +3152,17 @@ def test_dashboard_explicit_dataset_id_overrides_mismatched_input_kind_filter(cl
     login(client)
 
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         files={"dataset_files": ("voice.csv", BytesIO(b"POLQA_LQ_Avg,market,period\n4.2,ES,2026-Q1\n"), "text/csv")},
         follow_redirects=False,
     )
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         files={"dataset_files": ("data.csv", BytesIO(b"Mean_Data_Rate,market,period,test_name,vendor,region\n25.1,DE,2026-Q2,Speed,Nokia,North\n"), "text/csv")},
         follow_redirects=False,
     )
 
-    response = client.get("/dashboard?dataset_id=2&input_kind=voice")
+    response = client.get("/datasets-analysis?dataset_id=2&input_kind=voice")
     assert response.status_code == 200
     assert "<h2>data.csv</h2>" in response.text
     assert 'option value="2" data-dataset-kind="data" selected' in response.text
@@ -3166,12 +3172,12 @@ def test_dashboard_data_filters_show_test_name_between_vendor_and_region(client)
     login(client)
 
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         files={"dataset_files": ("data.csv", BytesIO(b"Mean_Data_Rate,market,period,test_name,vendor,region\n25.1,DE,2026-Q2,Speed,Nokia,North\n"), "text/csv")},
         follow_redirects=False,
     )
 
-    response = client.get("/dashboard?dataset_id=1")
+    response = client.get("/datasets-analysis?dataset_id=1")
     assert response.status_code == 200
     vendor_pos = response.text.index("Vendor")
     test_name_pos = response.text.index("Test Name")
@@ -3397,21 +3403,21 @@ def test_top_navigation_shows_document_links(client) -> None:
     assert 'href="/documents/view/changelog"' in response.text
     assert 'href="/documents/view/help"' in response.text
     assert 'target="_blank"' not in response.text
-    assert 'href="/dashboard"' in response.text
+    assert 'href="/datasets-analysis"' in response.text
     assert 'class="module-tabs"' in response.text
     assert 'class="module-tabs-secondary"' in response.text
-    assert 'module-hero-dashboard' not in response.text
+    assert 'module-hero-datasets-analysis' not in response.text
     assert 'class="module-tab module-tab-workspace active" href="/workspace"' in response.text
     assert '<span class="module-tab-label-desktop">E2E Reporting</span>' in response.text
     assert 'title="Open Changelog"' in response.text
     assert '<span class="module-tab-label-mobile">Reporting</span>' in response.text
-    assert '<span class="module-tab-label-mobile">Dashboard</span>' in response.text
+    assert '<span class="module-tab-label-mobile">Analysis</span>' in response.text
     assert 'href="/logout"' in response.text
     assert '<span class="topnav-link topnav-user-badge topnav-user-badge-admin">User: admin (admin)</span>' in response.text
 
-    dashboard = client.get("/dashboard")
+    dashboard = client.get("/datasets-analysis")
     assert dashboard.status_code == 200
-    assert 'module-hero-dashboard' in dashboard.text
+    assert 'module-hero-datasets-analysis' in dashboard.text
     assert 'linear-gradient(135deg, #0c4c8c, #68b8ff)' in dashboard.text
 
     reporting = client.get("/reporting")
@@ -3457,7 +3463,7 @@ def test_admin_imports_report_catalogue(client) -> None:
     )
 
     assert response.status_code == 303
-    assert app_module.reporting_catalog_path('nsa').read_bytes() == content
+    assert app_module.reporting_catalog_content('nsa') == content
 
     exported = client.get('/admin/report-templates/nsa/export')
     assert exported.status_code == 200
@@ -3485,7 +3491,7 @@ def test_admin_import_preserves_hyphens_in_uploaded_template_name(client) -> Non
     )
 
     assert response.status_code == 303
-    assert app_module.named_catalogue_path('nsa', 'NSA Slide Template - Gabriele').is_file()
+    assert app_module.repository.report_template_content('nsa', 'NSA Slide Template - Gabriele') == content
 
 
 def test_importing_an_existing_template_requires_explicit_overwrite(client) -> None:
@@ -3507,7 +3513,7 @@ def test_importing_an_existing_template_requires_explicit_overwrite(client) -> N
     )
     assert blocked.status_code == 303
     assert 'Confirm+overwrite' in blocked.headers['location']
-    assert 'Original' in app_module.named_catalogue_path('nsa', 'Shared Template').read_text(encoding='utf-8')
+    assert b'Original' in app_module.repository.report_template_content('nsa', 'Shared Template')
 
     overwritten = client.post(
         '/admin/slides-templates/import',
@@ -3516,8 +3522,8 @@ def test_importing_an_existing_template_requires_explicit_overwrite(client) -> N
     )
     assert overwritten.status_code == 303
     assert 'Overwrote+Shared+Template' in overwritten.headers['location']
-    assert 'Replacement' in app_module.named_catalogue_path('nsa', 'Shared Template').read_text(encoding='utf-8')
-    assert 'Replacement' in app_module.reporting_catalog_path('nsa').read_text(encoding='utf-8')
+    assert b'Replacement' in app_module.repository.report_template_content('nsa', 'Shared Template')
+    assert b'Replacement' in app_module.reporting_catalog_content('nsa')
 
 
 def test_admin_import_converts_a_legacy_catalogue_when_requested(client) -> None:
@@ -3537,7 +3543,7 @@ def test_admin_import_converts_a_legacy_catalogue_when_requested(client) -> None
     )
 
     assert response.status_code == 303
-    stored = app_module.reporting_catalog_path('nsa').read_text(encoding='utf-8')
+    stored = app_module.reporting_catalog_content('nsa').decode('utf-8')
     assert 'Chart Tittle' in stored
     assert 'Legacy quality' in stored
 
@@ -3570,8 +3576,8 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'catalogue-default-mark is-default' in admin.text
     assert '/admin/report-templates/nsa/Baseline Q4/export' in admin.text
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Second'
-    assert app_module.reporting_catalog_path('nsa').name == 'Updated Q4.csv'
-    assert app_module.named_catalogue_path('nsa', 'Baseline Q4').exists()
+    assert next(item['identifier'] for item in app_module.report_catalogue_options('nsa') if item['active']) == 'Updated Q4'
+    assert app_module.repository.report_template_content('nsa', 'Baseline Q4') == first
 
     reporting = client.get('/reporting')
     assert 'value="nsa:Updated Q4" data-catalogue-technology="nsa" data-catalogue-active="true" selected' in reporting.text
@@ -3638,13 +3644,13 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
         'target_slide_index': 0, 'chart_position': 1,
     })
     assert copied_chart.status_code == 200
-    assert len(app_module.load_catalog_csv(app_module.named_catalogue_path('nsa', 'Updated Q4'), 'nsa')) == 2
+    assert len(app_module.load_template_catalogue(app_module.repository.report_template_content('nsa', 'Updated Q4'), 'nsa')) == 2
     copied_slide = client.post('/admin/report-templates/nsa/Baseline%20Q4/copy-items', json={
         'kind': 'slide', 'catalogue_content': first.decode(), 'source_row_index': 0,
         'target_technology': 'nsa', 'target_identifier': 'Updated Q4', 'slide_position': 1,
     })
     assert copied_slide.status_code == 200
-    copied_entries = app_module.load_catalog_csv(app_module.named_catalogue_path('nsa', 'Updated Q4'), 'nsa')
+    copied_entries = app_module.load_template_catalogue(app_module.repository.report_template_content('nsa', 'Updated Q4'), 'nsa')
     assert len(copied_entries) == 3
     assert sorted({entry.slide for entry in copied_entries}) == [1, 2]
 
@@ -3674,8 +3680,8 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     activated = client.post('/admin/report-templates/nsa/Baseline%20Q4/activate', follow_redirects=False)
     assert activated.status_code == 303
     assert app_module.reporting_catalog_entries('nsa')[0].slide_title == 'Edited'
-    assert app_module.reporting_catalog_path('nsa').name == 'Baseline Q4.csv'
-    assert app_module.named_catalogue_path('nsa', 'Updated Q4').exists()
+    assert next(item['identifier'] for item in app_module.report_catalogue_options('nsa') if item['active']) == 'Baseline Q4'
+    assert app_module.repository.report_template_content('nsa', 'Updated Q4')
 
     protected_delete = client.post('/admin/report-templates/nsa/Baseline%20Q4/delete')
     assert protected_delete.status_code == 400
@@ -3734,18 +3740,16 @@ def test_admin_renaming_named_catalogue_renames_its_csv_file(client) -> None:
     )
     assert replacement.status_code == 303
 
-    original_path = app_module.named_catalogue_path('nsa', 'Original catalogue')
     response = client.post(
         '/admin/report-templates/nsa/Original%20catalogue/rename',
         data={'catalogue_name': 'Renamed catalogue'},
         headers={'accept': 'application/json'},
     )
 
-    renamed_path = app_module.named_catalogue_path('nsa', 'Renamed catalogue')
     assert response.status_code == 200
     assert response.json() == {'name': 'Renamed catalogue', 'identifier': 'Renamed catalogue'}
-    assert not original_path.exists()
-    assert renamed_path.read_bytes() == content
+    assert all(str(row['name']) != 'Original catalogue' for row in app_module.repository.list_report_templates('nsa'))
+    assert app_module.repository.report_template_content('nsa', 'Renamed catalogue') == content
     assert not next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'Renamed catalogue')['active']
 
 
@@ -3771,47 +3775,26 @@ def test_admin_duplicates_template_using_the_source_template_name(client) -> Non
     assert duplicated.status_code == 303
     copied = next(item for item in app_module.report_catalogue_options('nsa') if item['identifier'] == 'Regional NSA Template - Copy')
     assert copied['name'] == 'Regional NSA Template - Copy'
-    assert copied['path'].name == 'Regional NSA Template - Copy.csv'
+    assert copied['content'] == content
 
 
-def test_template_registry_reconciles_an_unambiguous_manual_csv_rename(client) -> None:
+def test_template_registry_does_not_rescan_legacy_csv_directories(client) -> None:
     from src.modules.cdr_reporting import CATALOG_HEADERS
     import src.DashboardAnalytic as app_module
 
-    # Keep this reconciliation scenario independent from whichever templates
-    # are currently bundled with the project.
-    default_dir = app_module.settings.slides_templates_dir / 'default' / 'nsa'
-    current_default = next(default_dir.glob('*.csv'))
-    base_default = default_dir / 'Base template.csv'
-    current_default.rename(base_default)
+    login(client)
     library_dir = app_module.settings.slides_templates_dir / 'library' / 'nsa'
     library_dir.mkdir(parents=True, exist_ok=True)
-    for path in library_dir.glob('*.csv'):
-        path.unlink()
-    app_module.repository.add_report_template('nsa', 'Base template')
-    app_module.repository.set_default_report_template('nsa', 'Base template')
-    login(client)
     content = (
         ','.join(CATALOG_HEADERS)
         + '\n8,First,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
     ).encode('utf-8')
-    for name in ('First template', 'Second template'):
-        response = client.post(
-            '/admin/report-templates/nsa',
-            data={'catalogue_name': name},
-            files={'catalogue_file': ('nsa.csv', BytesIO(content), 'text/csv')},
-            follow_redirects=False,
-        )
-        assert response.status_code == 303
+    (library_dir / 'Historic baseline.csv').write_bytes(content)
 
-    original = app_module.named_catalogue_path('nsa', 'First template', 'First template')
-    renamed = original.with_name('Historic baseline.csv')
-    original.rename(renamed)
-
-    options = app_module.report_catalogue_options('nsa')
-    reconciled = next(item for item in options if item['identifier'] == 'Historic baseline')
-    assert reconciled['name'] == 'Historic baseline'
-    assert reconciled['path'] == renamed
+    assert all(
+        item['identifier'] != 'Historic baseline'
+        for item in app_module.report_catalogue_options('nsa')
+    )
 
 
 def test_template_registry_ignores_unregistered_library_csvs(client) -> None:
@@ -3840,7 +3823,7 @@ def test_admin_importer_selects_template_type_and_moves_a_named_template(client)
         follow_redirects=False,
     )
     assert imported_sa.status_code == 303
-    assert app_module.reporting_catalog_path('sa').name == 'SA imported template.csv'
+    assert next(item['identifier'] for item in app_module.report_catalogue_options('sa') if item['active']) == 'SA imported template'
 
     # Add two NSA templates: the second becomes default, so the first remains
     # a movable library item.
@@ -3858,8 +3841,8 @@ def test_admin_importer_selects_template_type_and_moves_a_named_template(client)
         follow_redirects=False,
     )
     assert moved.status_code == 303
-    assert app_module.named_catalogue_path('sa', 'Move me').exists()
-    assert not app_module.named_catalogue_path('nsa', 'Move me').exists()
+    assert app_module.repository.report_template_content('sa', 'Move me') == content
+    assert all(str(row['name']) != 'Move me' for row in app_module.repository.list_report_templates('nsa'))
 
 
 def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
@@ -3876,6 +3859,15 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     payload = changelog_api.json()
     assert payload["name"] == "CHANGELOG.md"
     assert "0.1.0" in payload["content"]
+    changelog_view = client.get("/documents/view/changelog")
+    assert changelog_view.status_code == 200
+    assert 'changelog-nav-list' in changelog_view.text
+    assert 'class="doc-layout"' in changelog_view.text
+    assert 'makeChangelogReleasesCollapsible' in changelog_view.text
+    assert 'collapseOthers' in changelog_view.text
+    changelog_index = client.get('/api/documents/changelog-index')
+    assert changelog_index.status_code == 200
+    assert changelog_index.json()['releases'][0] == {'version': '0.3.0', 'id': 'release-v0.3.0'}
 
     help_view = client.get("/documents/view/help")
     assert help_view.status_code == 200
@@ -3895,17 +3887,17 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     assert help_documents[2]["label"] == "Technical Considerations"
     assert any(item["relative_path"] == "04-web-interface.md" for item in help_documents)
     assert any(
-        item["relative_path"] == "06-e2e-dashboard.md"
-        and item["label"] == "E2E Dashboard"
+        item["relative_path"] == "06-datasets-analysis.md"
+        and item["label"] == "Datasets Analysis"
         for item in help_documents
     )
     assert any(
-        item["relative_path"] == "07-e2e-reporting.md"
+        item["relative_path"] == "08-e2e-reporting.md"
         and item["label"] == "E2E Reporting"
         for item in help_documents
     )
     assert any(
-        item["relative_path"] == "08-chart-builder.md"
+        item["relative_path"] == "09-chart-builder.md"
         and item["label"] == "Chart Builder"
         for item in help_documents
     )
@@ -3929,7 +3921,7 @@ def test_dashboard_analysis_reuses_cached_result_on_reload(client, monkeypatch) 
     login(client)
     csv_content = b"market,period,score,gap\nES,2026-Q1,91,2.1\nES,2026-Q1,87,3.3\n"
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
@@ -3950,11 +3942,11 @@ def test_dashboard_analysis_reuses_cached_result_on_reload(client, monkeypatch) 
 
     monkeypatch.setattr(app_module, "load_dataset", counting_load_dataset)
 
-    first_response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
+    first_response = client.get("/datasets-analysis?dataset_id=1&metric=score&aggregation=all&load=1")
     assert first_response.status_code == 200
     assert calls["count"] == 0
 
-    second_response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
+    second_response = client.get("/datasets-analysis?dataset_id=1&metric=score&aggregation=all&load=1")
     assert second_response.status_code == 200
     assert calls["count"] == 0
 
@@ -3963,7 +3955,7 @@ def test_dashboard_analysis_reuses_cached_dataset_frame_across_metric_changes(cl
     login(client)
     csv_content = b"market,period,score,gap\nES,2026-Q1,91,2.1\nES,2026-Q1,87,3.3\n"
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
@@ -3984,11 +3976,11 @@ def test_dashboard_analysis_reuses_cached_dataset_frame_across_metric_changes(cl
 
     monkeypatch.setattr(app_module, "load_dataset", counting_load_dataset)
 
-    first_response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
+    first_response = client.get("/datasets-analysis?dataset_id=1&metric=score&aggregation=all&load=1")
     assert first_response.status_code == 200
     assert calls["count"] == 0
 
-    second_response = client.get("/dashboard?dataset_id=1&metric=gap&aggregation=all&load=1")
+    second_response = client.get("/datasets-analysis?dataset_id=1&metric=gap&aggregation=all&load=1")
     assert second_response.status_code == 200
     assert calls["count"] == 0
 
@@ -3997,14 +3989,14 @@ def test_dashboard_renders_multiple_selected_metrics(client) -> None:
     login(client)
     csv_content = b"market,period,score,gap\nES,2026-Q1,91,2.1\nES,2026-Q1,87,3.3\n"
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
     assert upload_response.status_code == 303
 
-    response = client.get("/dashboard?dataset_id=1&metric=score&metric=gap&aggregation=all&load=1")
+    response = client.get("/datasets-analysis?dataset_id=1&metric=score&metric=gap&aggregation=all&load=1")
     assert response.status_code == 200
     assert "Use the dropdown to select one, several, or all KPIs." in response.text
     assert response.text.count("Metric View") >= 2
@@ -4022,14 +4014,14 @@ def test_dashboard_shows_date_range_filters_and_applies_them(client) -> None:
         b"ES,2026-Q1,87,2026-07-11 12:00:00\n"
     )
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
     assert upload_response.status_code == 303
 
-    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&date_from=2026-07-11&load=1")
+    response = client.get("/datasets-analysis?dataset_id=1&metric=score&aggregation=all&date_from=2026-07-11&load=1")
     assert response.status_code == 200
     assert 'name="date_from"' in response.text
     assert 'name="date_to"' in response.text
@@ -4045,14 +4037,14 @@ def test_dashboard_adaptive_filters_include_city_and_multi_select_fields(client)
         b"ES,2026-Q1,87,Barcelona,East\n"
     )
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
     assert upload_response.status_code == 303
 
-    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
+    response = client.get("/datasets-analysis?dataset_id=1&metric=score&aggregation=all&load=1")
     assert response.status_code == 200
     assert 'select name="city" multiple' in response.text
     assert 'select name="region" multiple' in response.text
@@ -4069,7 +4061,7 @@ def test_dashboard_adaptive_filters_populate_netcheck_a_columns_for_existing_cdr
         b"NR,Three UK,VoNR,Dropped,42\n"
     )
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "voice"},
         files={"dataset_files": ("netcheck_voice.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
@@ -4091,7 +4083,7 @@ def test_dashboard_adaptive_filters_populate_netcheck_a_columns_for_existing_cdr
             """
         )
 
-    response = client.get("/dashboard?dataset_id=1&metric=Call_Duration&aggregation=all&load=1")
+    response = client.get("/datasets-analysis?dataset_id=1&metric=Call_Duration&aggregation=all&load=1")
     assert response.status_code == 200
     assert 'select name="operator" multiple' in response.text
     assert 'value="Vodafone UK"' in response.text
@@ -4105,14 +4097,14 @@ def test_dashboard_adaptive_filters_label_technology_without_primary(client) -> 
     login(client)
     csv_content = b"market,period,score,RAT\nES,2026-Q1,91,5G\nES,2026-Q1,87,LTE\n"
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
     assert upload_response.status_code == 303
 
-    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
+    response = client.get("/datasets-analysis?dataset_id=1&metric=score&aggregation=all&load=1")
     assert response.status_code == 200
     assert ">Technology<" in response.text
     assert "Technology Primary" not in response.text
@@ -4122,14 +4114,14 @@ def test_dashboard_comparison_chart_exposes_per_metric_aggregation_override_cont
     login(client)
     csv_content = b"market,period,score,gap,operator,region\nES,2026-Q1,91,2.1,Vodafone,North\nES,2026-Q1,87,3.3,o2,South\n"
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
     assert upload_response.status_code == 303
 
-    response = client.get("/dashboard?dataset_id=1&metric=score&metric=gap&aggregation=region&aggregation_overrides=score=operator&load=1")
+    response = client.get("/datasets-analysis?dataset_id=1&metric=score&metric=gap&aggregation=region&aggregation_overrides=score=operator&load=1")
     assert response.status_code == 200
     assert 'data-chart-aggregation-select' in response.text
     assert 'data-metric="score"' in response.text
@@ -4144,14 +4136,14 @@ def test_dashboard_exposes_global_and_per_metric_cdf_comparison_controls(client)
         b"ES,2026-Q1,87,Huawei,South,Vodafone,Barcelona\n"
     )
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
     assert upload_response.status_code == 303
 
-    response = client.get("/dashboard?dataset_id=1&metric=score&load=1&cdf_grouping=vendor")
+    response = client.get("/datasets-analysis?dataset_id=1&metric=score&load=1&cdf_grouping=vendor")
     assert response.status_code == 200
     assert "Global CDF Comparison" in response.text
     assert 'data-global-cdf-grouping-select' in response.text
@@ -4169,7 +4161,7 @@ def test_dashboard_powerpoint_export_includes_visual_analytics_payload(client) -
         b"ES,2026-Q1,87,3.3,Huawei,Orange,South,Barcelona,2026-07-11 11:00:00\n"
     )
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
@@ -4177,7 +4169,7 @@ def test_dashboard_powerpoint_export_includes_visual_analytics_payload(client) -
     assert upload_response.status_code == 303
 
     response = client.post(
-        "/dashboard/export/powerpoint",
+        "/datasets-analysis/export/powerpoint",
         data={
             "dataset_id": "1",
             "metric": ["score", "gap"],
@@ -4218,7 +4210,7 @@ def test_workspace_logs_capture_analysis_warnings(client, monkeypatch) -> None:
     login(client)
     csv_content = b"market,period,score,gap\nES,2026-Q1,91,2.1\nES,2026-Q1,87,3.3\n"
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
@@ -4234,7 +4226,7 @@ def test_workspace_logs_capture_analysis_warnings(client, monkeypatch) -> None:
 
     monkeypatch.setattr(app_module, "build_analysis", warned_build_analysis)
 
-    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
+    response = client.get("/datasets-analysis?dataset_id=1&metric=score&aggregation=all&load=1")
     assert response.status_code == 200
 
     logs = app_module.repository.list_workspace_logs(1)
@@ -4247,14 +4239,14 @@ def test_dashboard_handles_empty_table_rows_without_template_failure(client) -> 
     login(client)
     csv_content = b"market,period,operator,score\nES,2026-Q1,VDF,91\nES,2026-Q1,VDF,87\n"
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
     assert upload_response.status_code == 303
 
-    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=operator&market=DE&load=1")
+    response = client.get("/datasets-analysis?dataset_id=1&metric=score&aggregation=operator&market=DE&load=1")
     assert response.status_code == 200
     assert "No rows match the selected filters" in response.text or "No tabular rows match the selected filters" in response.text
 
@@ -4263,7 +4255,7 @@ def test_dashboard_materializes_legacy_ready_dataset_on_first_analysis(client) -
     login(client)
     csv_content = b"market,period,operator,score\nES,2026-Q1,VDF,91\nES,2026-Q1,VDF,87\n"
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
@@ -4275,7 +4267,7 @@ def test_dashboard_materializes_legacy_ready_dataset_on_first_analysis(client) -
     app_module.repository.drop_dataset_rows(1)
     assert not app_module.repository.dataset_rows_table_exists(1)
 
-    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=operator&load=1")
+    response = client.get("/datasets-analysis?dataset_id=1&metric=score&aggregation=operator&load=1")
     assert response.status_code == 200
     assert "Charts and Scorecards" in response.text
     assert app_module.repository.dataset_rows_table_exists(1)
@@ -4285,7 +4277,7 @@ def test_dashboard_reuses_materialized_table_when_legacy_columns_only_differ_by_
     login(client)
     csv_content = b"market,period,operator,score\nES,2026-Q1,VDF,91\nES,2026-Q1,ORG,87\n"
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
@@ -4315,7 +4307,7 @@ def test_dashboard_reuses_materialized_table_when_legacy_columns_only_differ_by_
 
     monkeypatch.setattr(app_module, "load_dataset", counting_load_dataset)
 
-    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=operator&load=1")
+    response = client.get("/datasets-analysis?dataset_id=1&metric=score&aggregation=operator&load=1")
     assert response.status_code == 200
     assert "Charts and Scorecards" in response.text
     assert calls["count"] == 0
@@ -4325,7 +4317,7 @@ def test_dashboard_refreshes_stale_dataset_normalization_before_render(client) -
     login(client)
     csv_content = b"market,period,score,RAT,PCell_RAT_Timeline\nES,2026-Q1,91,5G NSA,NR->LTE\nES,2026-Q1,87,LTE,LTE->NR\n"
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
@@ -4349,7 +4341,7 @@ def test_dashboard_refreshes_stale_dataset_normalization_before_render(client) -
             ),
         )
 
-    response = client.get("/dashboard?dataset_id=1&metric=score&aggregation=all&load=1")
+    response = client.get("/datasets-analysis?dataset_id=1&metric=score&aggregation=all&load=1")
     assert response.status_code == 200
     assert ">5G NSA<" in response.text
     assert ">LTE<" in response.text
@@ -4363,7 +4355,7 @@ def test_dashboard_refreshes_stale_dataset_normalization_before_render(client) -
 def test_dataset_status_endpoint_returns_queue_payload(client) -> None:
     login(client)
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
@@ -4397,7 +4389,7 @@ def test_dashboard_handles_missing_source_file_without_500(client) -> None:
             (99,),
         )
 
-    response = client.get("/dashboard?dataset_id=99&metric=throughput_mbps&aggregation=operator&load=1")
+    response = client.get("/datasets-analysis?dataset_id=99&metric=throughput_mbps&aggregation=operator&load=1")
     assert response.status_code == 200
     assert "source file is missing" in response.text
 
@@ -4406,7 +4398,7 @@ def test_materialized_dataset_handles_case_insensitive_duplicate_columns(client)
     login(client)
     csv_content = b"Campaign,campaign,score\nES_Q1_2026,manual-campaign,91\n"
     upload_response = client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         files={"dataset_files": ("duplicate-columns.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
@@ -4448,7 +4440,7 @@ def test_failed_dataset_shows_last_error_in_queue(client) -> None:
 def test_workspace_queue_shows_dataset_size_column(client) -> None:
     login(client)
     client.post(
-        "/dashboard/upload",
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,

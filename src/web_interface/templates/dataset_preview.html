@@ -58,7 +58,7 @@
     <div class="inline-actions preview-actions">
       <a class="ghost-link" href="/workspace">Back to Workspace</a>
       {% if dataset.dataset_kind in ['data', 'voice', 'speech'] and not dataset.is_combined %}
-      <a class="ghost-link action-link-primary" href="/dashboard?dataset_id={{ dataset.id }}&input_kind={{ dataset.dataset_kind }}" data-dashboard-open-link data-dataset-id="{{ dataset.id }}" data-input-kind="{{ dataset.dataset_kind }}">Show Dashboard</a>
+      <a class="ghost-link action-link-primary" href="/datasets-analysis?dataset_id={{ dataset.id }}&input_kind={{ dataset.dataset_kind }}" data-datasets-analysis-open-link data-dataset-id="{{ dataset.id }}" data-input-kind="{{ dataset.dataset_kind }}">Show Analysis</a>
       {% endif %}
     </div>
   </article>

@@ -19,6 +19,15 @@
       </aside>
       <article id="doc-content" class="doc-markdown markdown-viewer"></article>
     </div>
+    {% elif changelog_navigation %}
+    <div class="doc-layout">
+      <aside class="doc-sidebar" aria-label="Release navigation">
+        <h3>Releases</h3>
+        <p>Jump to a release.</p>
+        <nav><ul id="changelog-nav-list" class="help-nav-list"></ul></nav>
+      </aside>
+      <article id="doc-content" class="doc-markdown markdown-viewer"></article>
+    </div>
     {% else %}
     <article id="doc-content" class="doc-markdown markdown-viewer"></article>
     {% endif %}
@@ -32,6 +41,7 @@
   const pathEl = document.getElementById('doc-path');
   const contentEl = document.getElementById('doc-content');
   const helpNavEl = document.getElementById('help-nav-list');
+  const changelogNavEl = document.getElementById('changelog-nav-list');
   let currentDocumentPath = '';
   if (!pathEl || !contentEl || !window.MarkdownRenderer) return;
 
@@ -82,6 +92,40 @@
     includeHeadingIds: false,
   });
 
+  function openChangelogRelease(id, scrollIntoView = false, collapseOthers = false) {
+    const release = document.getElementById(id);
+    if (!(release instanceof HTMLDetailsElement)) return;
+    if (collapseOthers) contentEl.querySelectorAll('.changelog-release[open]').forEach((item) => {
+      if (item !== release) item.open = false;
+    });
+    release.open = true;
+    if (scrollIntoView) release.scrollIntoView({block: 'start'});
+  }
+
+  function makeChangelogReleasesCollapsible() {
+    const headings = [...contentEl.querySelectorAll('h2')].filter((heading) => /^Release:\s*v.+$/i.test(heading.textContent));
+    headings.forEach((heading, index) => {
+      const details = document.createElement('details');
+      details.className = 'changelog-release';
+      details.id = heading.id;
+      details.open = index === 0;
+      const summary = document.createElement('summary');
+      summary.textContent = heading.textContent;
+      const body = document.createElement('div');
+      body.className = 'changelog-release-body';
+      details.append(summary, body);
+      heading.before(details);
+      let node = heading.nextSibling;
+      heading.remove();
+      while (node) {
+        const next = node.nextSibling;
+        if (node.nodeType === Node.ELEMENT_NODE && node.matches('h2') && /^Release:\s*v.+$/i.test(node.textContent)) break;
+        body.appendChild(node);
+        node = next;
+      }
+    });
+  }
+
   fetch({{ doc_api_url | tojson }})
     .then(async (response) => {
       const data = await response.json();
@@ -91,6 +135,14 @@
       currentDocumentPath = data.path || '';
       pathEl.textContent = currentDocumentPath;
       contentEl.innerHTML = markdownRenderer.render(data.content || '');
+      if (changelogNavEl) {
+        contentEl.querySelectorAll('h2').forEach((heading) => {
+          const match = heading.textContent.match(/^Release:\s*v(.+)$/i);
+          if (match) heading.id = `release-v${match[1].trim()}`;
+        });
+        makeChangelogReleasesCollapsible();
+      }
+      if (window.location.hash) openChangelogRelease(window.location.hash.slice(1), true, true);
     })
     .catch((error) => {
       pathEl.textContent = '';
@@ -123,6 +175,25 @@
       .catch(() => {
         helpNavEl.innerHTML = '<li>Unable to load help navigation.</li>';
       });
+  }
+  if (changelogNavEl) {
+    fetch('/api/documents/changelog-index')
+      .then(async (response) => ({response, data: await response.json()}))
+      .then(({response, data}) => {
+        if (!response.ok || !Array.isArray(data.releases)) throw new Error('Unable to load release navigation.');
+        data.releases.forEach((release) => {
+          const item = document.createElement('li');
+          const link = document.createElement('a');
+          link.href = `#${release.id}`;
+          link.textContent = `v${release.version}`;
+          link.addEventListener('click', () => {
+            requestAnimationFrame(() => openChangelogRelease(release.id, true, true));
+          });
+          item.appendChild(link);
+          changelogNavEl.appendChild(item);
+        });
+      })
+      .catch(() => { changelogNavEl.innerHTML = '<li>Unable to load releases.</li>'; });
   }
 })();
 </script>

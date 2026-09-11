@@ -363,4 +363,4 @@ The Charts Panel supports:
 
 Reports and Chart Sets appear together in **Reports and Charts Jobs** and share the workspace `generated_jobs` table. The UI preserves the appropriate actions for each type.
 
-If a job fails, consult **App Logs** and retry it after correcting the reported input or template issue. Completed jobs can be relaunched in the same row; relaunch removes their previous output first.
+If a job is stopped or interrupted, retrying it validates the existing deterministic PNG charts and tooltip JSON files, keeps the completed assets and regenerates only incomplete or invalid ones. Partial output has no published manifest and is never offered in the Charts Panel. Completed jobs can be deliberately relaunched in the same row; that relaunch removes their previous output first.

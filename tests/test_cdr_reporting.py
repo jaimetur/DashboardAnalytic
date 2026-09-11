@@ -7,6 +7,7 @@ from dataclasses import replace
 from datetime import datetime
 import pandas as pd
 import pytest
+from PIL import Image
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -1768,6 +1769,29 @@ def test_chart_set_writes_sidecars_directly_to_its_final_generation(tmp_path: Pa
     assert json.loads((generation_dir / 'chart-001.hover.json').read_text(encoding='utf-8')) == [{'kind': 'bar', 'x': 1}]
 
 
+def test_interrupted_chart_set_reuses_only_verified_assets(tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    directory = tmp_path / 'charts' / '20260914-120000'
+    directory.mkdir(parents=True)
+    # Valid 1×1 transparent PNG; the second file mimics an interrupted write.
+    image = Image.new('RGBA', (1, 1))
+    image.save(directory / 'chart-001.png', format='PNG')
+    directory.joinpath('chart-001.hover.json').write_text('[{"kind":"point"}]', encoding='utf-8')
+    directory.joinpath('chart-002.png').write_bytes(b'incomplete')
+    entries = [
+        CatalogEntry(1, '', '', '', 'One', 'CDR-Data', 'KPI', 'CDF Line', '', '', '', '', 'Top'),
+        CatalogEntry(1, '', '', '', 'Two', 'CDR-Data', 'KPI', 'CDF Line', '', '', '', '', 'Top'),
+    ]
+
+    reusable = app_module._load_reusable_chart_set_assets(directory, entries, True)
+
+    assert reusable[0][0].startswith(b'\x89PNG')
+    assert reusable[0][1] == [{'kind': 'point'}]
+    assert 1 not in reusable
+    assert not (directory / 'chart-002.png').exists()
+
+
 def test_retrying_a_failed_chart_job_reuses_its_row(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -1819,7 +1843,7 @@ def test_reporting_multivendor_requires_a_previously_mapped_selected_cdr(client)
     ]
     for filename, dataset_kind, content in uploads:
         response = client.post(
-            '/dashboard/upload',
+            '/datasets-analysis/upload',
             data={'dataset_kinds': dataset_kind},
             files={'dataset_files': (filename, BytesIO(content), 'text/csv')},
         )
@@ -1844,7 +1868,7 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
         ('NetCheck_CDR_Speech.csv', b'Sample_RAT_A,Operator,LQ\nENDC,Vodafone UK,3.8\n', 'text/csv'),
     ]
     for filename, content, media_type in uploads:
-        response = client.post('/dashboard/upload', files={'dataset_files': (filename, BytesIO(content), media_type)})
+        response = client.post('/datasets-analysis/upload', files={'dataset_files': (filename, BytesIO(content), media_type)})
         assert response.status_code == 200
 
     report = client.post('/reporting/netcheck-cdr', data={
@@ -1896,7 +1920,7 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     ]
     for filename, kind, content in uploads:
         response = client.post(
-            '/dashboard/upload', data={'dataset_kinds': kind},
+            '/datasets-analysis/upload', data={'dataset_kinds': kind},
             files={'dataset_files': (filename, BytesIO(content), 'text/csv')},
         )
         assert response.status_code == 200
@@ -2000,7 +2024,7 @@ def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(c
 
     client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
     uploaded = client.post(
-        '/dashboard/upload', data={'dataset_kinds': 'data'},
+        '/datasets-analysis/upload', data={'dataset_kinds': 'data'},
         files={'dataset_files': ('NetCheck_CDR_Data.csv', BytesIO(b'RAT,Operator,Mean_Data_Rate,Test_Result\nENDC,Vodafone UK,42,Success\n'), 'text/csv')},
     )
     assert uploaded.status_code == 200
@@ -2136,7 +2160,7 @@ def test_partial_cdr_report_worker_receives_unavailable_frames(client, monkeypat
 
     client.post('/login', data={'username': 'admin', 'password': 'admin123'}, follow_redirects=False)
     uploaded = client.post(
-        '/dashboard/upload', data={'dataset_kinds': 'data'},
+        '/datasets-analysis/upload', data={'dataset_kinds': 'data'},
         files={'dataset_files': ('NetCheck_CDR_Data.csv', BytesIO(b'RAT,Operator,Mean_Data_Rate,Test_Result\nENDC,Vodafone UK,42,Success\n'), 'text/csv')},
     )
     assert uploaded.status_code == 200
@@ -2180,7 +2204,7 @@ def test_report_chart_generation_failures_return_json_and_are_logged(client, mon
         ('NetCheck_CDR_Voice.csv', 'voice', b'RAT_A,Operator,Call_Status\nENDC,Vodafone UK,Completed\n'),
         ('NetCheck_CDR_Speech.csv', 'speech', b'Sample_RAT_A,Operator,LQ\nENDC,Vodafone UK,3.8\n'),
     ):
-        upload = client.post('/dashboard/upload', data={'dataset_kinds': kind}, files={'dataset_files': (filename, BytesIO(content), 'text/csv')})
+        upload = client.post('/datasets-analysis/upload', data={'dataset_kinds': kind}, files={'dataset_files': (filename, BytesIO(content), 'text/csv')})
         assert upload.status_code == 200
 
     def fail_render(*_args, **_kwargs):
@@ -2221,7 +2245,7 @@ def test_report_generation_failures_show_the_error_and_are_logged(client, monkey
         ('NetCheck_CDR_Voice.csv', 'voice', b'RAT_A,Operator,Call_Status\nENDC,Vodafone UK,Completed\n'),
         ('NetCheck_CDR_Speech.csv', 'speech', b'Sample_RAT_A,Operator,LQ\nENDC,Vodafone UK,3.8\n'),
     ):
-        assert client.post('/dashboard/upload', data={'dataset_kinds': kind}, files={
+        assert client.post('/datasets-analysis/upload', data={'dataset_kinds': kind}, files={
             'dataset_files': (filename, BytesIO(content), 'text/csv'),
         }).status_code == 200
 
@@ -2256,7 +2280,7 @@ def test_reporting_concatenates_multiple_campaign_cdrs_per_source(client, monkey
     ]
     for filename, kind, content in uploads:
         response = client.post(
-            '/dashboard/upload',
+            '/datasets-analysis/upload',
             data={'dataset_kinds': kind},
             files={'dataset_files': (filename, BytesIO(content), 'text/csv')},
         )

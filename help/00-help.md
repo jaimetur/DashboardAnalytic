@@ -6,11 +6,12 @@ Use this Help centre for detailed workflows, examples and technical rules. For a
 
 - New to the product? Read [Product Overview](01-overview.md).
 - Comparing results with another tool? Read [Technical Considerations](02-technical-considerations.md).
-- Installing the service? Read [Configuration](03-configuration.md) and [Docker Deployment](10-docker-deployment.md).
+- Installing the service? Read [Configuration](03-configuration.md) and [Docker Deployment](11-docker-deployment.md).
 - Uploading data? Read the [Data Ingestion](05-workspace-management.md#data-ingestion) section in Workspace Management.
-- Building a dashboard? Read [E2E Dashboard](06-e2e-dashboard.md).
-- Generating charts or PowerPoint? Read [E2E Reporting](07-e2e-reporting.md).
-- Managing users, templates or transfers? Read [Administration](09-administration.md).
+- Building a dashboard? Read [Datasets Analysis](06-datasets-analysis.md).
+- Exploring a template as live dashboards? Read [E2E Dashboards](07-e2e-dashboards.md).
+- Generating charts or PowerPoint? Read [E2E Reporting](08-e2e-reporting.md).
+- Managing users, templates or transfers? Read [Administration](10-administration.md).
 
 ## Documentation map
 
@@ -19,13 +20,14 @@ Use this Help centre for detailed workflows, examples and technical rules. For a
 3. [Configuration](03-configuration.md) — runtime variables, storage roots and initial access.
 4. [Web Interface](04-web-interface.md) — shared navigation, dialogs, tables and responsive behaviour.
 5. [Workspace Management](05-workspace-management.md) — workspaces, data ingestion, processing, previews and mappings.
-6. [E2E Dashboard](06-e2e-dashboard.md) — interactive single-dataset analysis and exports.
-7. [E2E Reporting](07-e2e-reporting.md) — reports, Chart Sets, templates, chart recipes and jobs.
-8. [Chart Builder](08-chart-builder.md) — temporary ad-hoc chart construction.
-9. [Administration](09-administration.md) — users, templates, portability, databases and datasets.
-10. [Docker Deployment](10-docker-deployment.md) — production, development, persistence and upgrades.
-11. [Project Structure](11-project-structure.md) — source, storage and runtime components.
-12. [Roadmap](12-roadmap.md) — current limitations and planned work.
+6. [Datasets Analysis](06-datasets-analysis.md) — interactive single-dataset analysis and exports.
+7. [E2E Dashboards](07-e2e-dashboards.md) — saved Dashboard Sets, synchronized filters and slide layouts.
+8. [E2E Reporting](08-e2e-reporting.md) — reports, Chart Sets, templates, chart recipes and jobs.
+9. [Chart Builder](09-chart-builder.md) — temporary ad-hoc chart construction.
+10. [Administration](10-administration.md) — users, templates, portability, databases and datasets.
+11. [Docker Deployment](11-docker-deployment.md) — production, development, persistence and upgrades.
+12. [Project Structure](12-project-structure.md) — source, storage and runtime components.
+13. [Roadmap](13-roadmap.md) — current limitations and planned work.
 
 ## Fast troubleshooting
 

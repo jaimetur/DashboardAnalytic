@@ -14,7 +14,6 @@ import src.DashboardAnalytic as app_module
 def test_new_workspaces_have_empty_independent_template_libraries(tmp_path):
     legacy = tmp_path / 'shared'
     legacy.mkdir()
-    (legacy / 'unused.csv').write_text('old defaults')
     registry = WorkspaceRegistry(tmp_path / 'data/workspaces/registry.db', tmp_path / 'data', legacy)
     registry.initialize()
     first = registry.get('default')
@@ -37,17 +36,13 @@ def test_legacy_library_migration_is_independent_and_idempotent(tmp_path):
     registry = WorkspaceRegistry(tmp_path / 'data/workspaces/registry.db', tmp_path / 'data', legacy)
     registry.initialize()
     original = registry.get('default')
-    with registry._connection() as conn:
-        conn.execute('UPDATE workspaces SET slides_templates_dir = ?', (str(legacy),))
-    registry.initialize()
-    migrated = registry.get('default')
-    local = migrated.slides_templates_dir / 'library/nsa/Existing.csv'
+    local = original.slides_templates_dir / 'library/nsa/Existing.csv'
     assert local.read_text() == 'original'
+    assert not legacy.exists()
     local.write_text('workspace edit')
     registry.initialize()
     assert local.read_text() == 'workspace edit'
-    assert template.read_text() == 'original'
-    assert migrated.database_path == original.database_path
+    assert registry.get('default').database_path == original.database_path
 
 
 def test_template_registry_is_workspace_owned(tmp_path):
@@ -75,17 +70,19 @@ def test_template_package_matches_source_and_imports_to_multiple_workspaces(clie
     archive_path.write_bytes(package)
     assert app_module.matching_template_workspaces(manifest, [other, source]) == [source.id]
     app_module._apply_import_archive(archive_path, manifest, destination_workspace_ids=[source.id, other.id])
-    assert repo.list_report_templates('nsa')
-    copied = next((other.slides_templates_dir / 'default/nsa').glob('*.csv'))
-    original = source.slides_templates_dir / copied.relative_to(other.slides_templates_dir)
-    copied.write_text('independent')
-    assert original.read_text() != 'independent'
+    copied = next(row for row in repo.list_report_templates('nsa') if row['is_default'])
+    source_content = app_module.reporting_catalog_content('nsa')
+    assert bytes(copied['content']) == source_content
+    repo.set_report_template_content('nsa', str(copied['name']), b'independent')
+    assert app_module.reporting_catalog_content('nsa') == source_content
     assert repo.list_datasets() == []
 
 
 def test_template_import_without_matching_workspace_requires_selection(client, tmp_path):
     staging = tmp_path / 'payload'
-    (staging / 'slides-templates').mkdir(parents=True)
+    templates = staging / 'report-templates/library/nsa'
+    templates.mkdir(parents=True)
+    (templates / 'Imported.csv').write_bytes(app_module.catalogue_csv([]))
     with pytest.raises(ValueError, match='Select at least'):
         app_module.import_slides_templates_archive(staging, manifest={'source_workspace': {'name': 'Absent'}})
 
@@ -123,17 +120,17 @@ def test_workspace_archive_and_duplicate_include_templates(client, tmp_path):
     source = app_module.active_workspace
     package, _name = app_module.build_export_archive(f'workspace:{source.id}')
     with zipfile.ZipFile(io.BytesIO(package)) as archive:
-        assert any(name.startswith('workspace/slides-templates/') and name.endswith('.csv')
+        assert any(name.startswith('workspaces/Default/report-templates/') and name.endswith('.csv')
                    for name in archive.namelist())
         snapshot = tmp_path / 'snapshot.db'
-        snapshot.write_bytes(archive.read('workspace/database.sqlite'))
+        snapshot.write_bytes(archive.read('workspaces/Default/database.sqlite'))
     with sqlite3.connect(snapshot) as conn:
         assert conn.execute('SELECT COUNT(*) FROM report_templates').fetchone()[0] > 0
     duplicate = app_module.workspace_registry.duplicate(source.id)
-    assert list(duplicate.slides_templates_dir.rglob('*.csv'))
     repo = Repository(duplicate.database_path, app_module.repository.global_db_path)
     repo.initialize()
     assert repo.list_report_templates('nsa')
+    assert not list(duplicate.slides_templates_dir.rglob('*.csv'))
 
 
 def test_workspace_duplicate_optionally_copies_generated_reports_and_chart_sets(tmp_path):
@@ -219,5 +216,5 @@ def test_database_management_groups_template_registry_with_workspace_tables(clie
     assert response.status_code == 200
     groups = dict(re.findall(r'<optgroup label="([^"]+)">(.*?)</optgroup>', response.text, re.S))
     assert 'value="report_templates"' in groups['Workspace Tables']
-    assert 'Slides Templates registry' in groups['Workspace Tables']
+    assert 'Report Templates' in groups['Workspace Tables']
     assert 'value="report_templates"' not in groups['Config Tables']

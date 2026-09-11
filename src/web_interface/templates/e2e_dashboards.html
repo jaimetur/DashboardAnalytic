@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_path('css/e2e_dashboards.css') }}?v={{ asset_version('css/e2e_dashboards.css') }}">
+<section class="dashboard-stack spacious-stack e2e-dashboards" id="e2e-dashboards">
+  <article class="panel hero-panel module-hero-e2e-dashboards">
+    <p class="eyebrow">E2E Dashboards</p><h2>Your workspace, live on screen</h2>
+    <p class="lede">Explore complete template slides as dashboards. Combine campaigns, refine your scope and inspect the samples behind every chart.</p>
+  </article>
+  <article class="panel">
+    <div class="section-head"><div><p class="eyebrow">Workspace library</p><h2>Manage Dashboards Set</h2></div><span class="pill" id="ds-count">0 sets</span></div>
+    <div class="ds-management">
+      <label>Dashboard Set name<input id="ds-name" maxlength="120" placeholder="Campaign comparison"></label>
+      <label>NR Mode<select id="ds-nr-mode"><option value="nsa">NSA (Non-Standalone)</option><option value="sa">SA (Standalone)</option></select></label>
+      <label>Template<select id="ds-template"></select></label>
+    </div>
+    <div class="form-actions ds-actions">
+      <button type="button" id="ds-create">Create Dashboard Set</button><button type="button" id="ds-import">Import Dashboard Set</button><input type="file" id="ds-import-file" accept=".json,application/json" hidden>
+    </div>
+    <div class="table-wrap ds-sets-table-wrap"><table class="ds-sets-table"><thead><tr><th>Dashboard Set</th><th>NR Mode</th><th>Template</th><th>Actions</th></tr></thead><tbody id="ds-sets-body"></tbody></table></div>
+    <p class="form-note" id="ds-status" role="status" aria-live="polite">Create a Dashboard Set or open one from your workspace.</p>
+  </article>
+  <div id="ds-filter-home">
+    <article class="panel" id="ds-filter-panel" hidden>
+      <div class="section-head"><div><p class="eyebrow">Shared selection</p><h2>Adaptative Filters</h2></div><button type="button" id="ds-reset">Reset Filters</button></div>
+      <div class="ds-filter-columns"><div class="ds-source-filters" id="ds-sources"></div><div><div class="ds-facets" id="ds-facets"></div><div class="ds-custom"><label>Custom Auto-calculated Field<select id="ds-custom-field"></select></label><button type="button" id="ds-add-filter">Add Filter</button></div></div></div>
+      <div class="ds-actions"><button type="button" id="ds-save">Save</button><button type="button" id="ds-refresh">Refresh Data</button><button type="button" id="ds-view" disabled>View Dashboard Set</button><span id="ds-rows" class="form-note" role="status"></span></div>
+      <p class="form-note">Filters update automatically. All values means no restriction; clearing every checkbox selects no rows. Save stores the current filters as the default selection for this Dashboard Set.</p>
+    </article>
+  </div>
+</section>
+<div class="confirm-overlay ds-overlay e2e-dashboards" id="ds-viewer" hidden>
+  <section class="confirm-panel ds-viewer-panel" role="dialog" aria-modal="true" aria-labelledby="ds-title" tabindex="-1" data-workspace-calculated-dimensions-panel data-calculated-dimensions='{{ calculated_dimensions | tojson }}' data-save-url="/api/workspace/calculated-dimensions">
+    <header class="ds-viewer-header"><div><p class="eyebrow" id="ds-position"></p><h2 id="ds-title"></h2><p id="ds-subtitle"></p></div><button type="button" id="ds-viewer-close" aria-label="Close dashboard viewer">×</button></header>
+    <nav class="ds-actions" aria-label="Dashboard controls"><button type="button" id="ds-prev">← Previous</button><select id="ds-slide" aria-label="Dashboard"></select><button type="button" id="ds-next">Next →</button><button type="button" id="ds-floating-filters">Adaptative Filters</button><button type="button" id="ds-viewer-refresh">Refresh</button>{% if user.role in ['admin', 'super-admin'] %}<button type="button" id="ds-edit">Edit Template</button><button type="button" data-workspace-manage-calculated-dimensions>Manage Auto-calculated Fields</button>{% endif %}</nav>
+    <div id="ds-charts" class="ds-chart-stage" aria-live="polite"></div>
+  </section>
+</div>
+<div class="confirm-overlay ds-overlay ds-secondary e2e-dashboards" id="ds-filter-overlay" hidden><section class="confirm-panel ds-filter-dialog" role="dialog" aria-modal="true" aria-label="Adaptative Filters" tabindex="-1"><button type="button" id="ds-filter-close" class="ds-dialog-close" aria-label="Close filters">×</button><div id="ds-filter-float"></div></section></div>
+<div class="confirm-overlay ds-overlay ds-secondary e2e-dashboards" id="ds-data-overlay" hidden><section class="confirm-panel ds-data-dialog" role="dialog" aria-modal="true" aria-labelledby="ds-data-title" tabindex="-1"><div class="section-head"><h2 id="ds-data-title">Filtered Chart Dataset</h2><button type="button" id="ds-data-close" aria-label="Close dataset">×</button></div><div class="ds-actions"><button type="button" id="ds-data-prev">← Previous</button><span id="ds-data-page"></span><button type="button" id="ds-data-next">Next →</button><a id="ds-data-download" class="button" download>Download CSV</a></div><div class="table-wrap" id="ds-data-table"></div></section></div>
+<div class="confirm-overlay ds-overlay ds-secondary e2e-dashboards" id="ds-editor-overlay" hidden><section class="confirm-panel ds-data-dialog" role="dialog" aria-modal="true" aria-label="Edit Template" tabindex="-1"><button type="button" id="ds-editor-close" class="ds-dialog-close" aria-label="Close template editor">×</button><iframe id="ds-editor-frame" title="Edit Template"></iframe></section></div>
+<script id="ds-config" type="application/json">{{ {'datasets': dashboard_datasets, 'templates': dashboard_templates, 'workspace': dashboard_workspace_id, 'filter_fields': dashboard_filter_fields} | tojson }}</script>
+<script defer src="{{ static_path('js/e2e_dashboards.js') }}?v={{ asset_version('js/e2e_dashboards.js') }}"></script>
+{% endblock %}
