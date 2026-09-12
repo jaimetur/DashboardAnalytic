@@ -3599,7 +3599,7 @@ def prepare_catalog_chart_preview_frame(
     return _apply_catalog_filters(filtered, render_entry, multivendor, metric), render_entry
 
 
-INTERACTIVE_CHART_POINTS_PER_SERIES = 480
+INTERACTIVE_CHART_POINTS_PER_SERIES = 900
 INTERACTIVE_SCATTER_POINTS_PER_SERIES = 900
 
 
@@ -3611,6 +3611,54 @@ def _interactive_sample(values: list[object], limit: int) -> list[tuple[int, obj
     return [(index, values[index]) for index in indexes]
 
 
+def _chart_payload_value(value: object) -> str:
+    """Return a stable JSON/display value for a chart hierarchy member."""
+    return "(blank)" if pd.isna(value) else str(value)
+
+
+def _chart_payload_legend(
+    entry: CatalogEntry,
+    frame: pd.DataFrame,
+    metric: str | None,
+    fallback: list[tuple[str, str, int]] | None = None,
+    *,
+    line_markers: bool = False,
+) -> dict[str, object]:
+    """Resolve the browser legend with the same rules as the PNG renderer."""
+    items = fallback or [] if _legend_labels(entry.legend) else _resolved_legend_items(entry, frame, metric)
+    return {
+        "position": parse_legend_position(entry.legend_position),
+        "line_markers": line_markers,
+        "items": [
+            {"label": str(label), "colour": colour, "width": int(width)}
+            for label, colour, width in items
+        ],
+    }
+
+
+def _chart_payload_base(
+    chart_type: str,
+    title: str,
+    entry: CatalogEntry,
+    frame: pd.DataFrame,
+    metric: str | None,
+    fallback_legend: list[tuple[str, str, int]] | None = None,
+    *,
+    line_markers: bool = False,
+) -> dict[str, object]:
+    """Create the fixed 1600 x 900 model used by both chart presentations."""
+    return {
+        "renderer": "catalog-v2",
+        "width": 1600,
+        "height": 900,
+        "type": chart_type,
+        "title": title,
+        "legend": _chart_payload_legend(
+            entry, frame, metric, fallback_legend, line_markers=line_markers,
+        ),
+    }
+
+
 def catalog_chart_payload(
     frame: pd.DataFrame,
     entry: CatalogEntry,
@@ -3618,11 +3666,11 @@ def catalog_chart_payload(
     multivendor: bool = False,
     prefiltered: bool = False,
 ) -> dict[str, object]:
-    """Build a compact browser-renderable chart model from template chart rows.
+    """Build a browser model using the report renderer's exact chart semantics.
 
-    Report and PowerPoint generation retain the pixel renderer. Dashboards use
-    this reduced model so filter interactions transfer hundreds of visual
-    points instead of rendering and transferring a full PNG for every change.
+    The payload retains the historical renderer's aggregation hierarchy,
+    ordering, colours, legend resolution and logical 1600 x 900 geometry. The
+    browser only performs the inexpensive final paint and tooltip hit testing.
     """
     render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
     spec = _catalog_spec(render_entry)
@@ -3633,174 +3681,462 @@ def catalog_chart_payload(
         filtered, _group, _period = _source_for_spec({render_entry.source_kind: frame}, spec, multivendor)
         metric = _metric_column(filtered, spec)
         filtered = _apply_catalog_filters(filtered, render_entry, multivendor, metric)
+    filtered.attrs["catalogue_calculated_dimensions"] = render_entry.calculated_dimensions
+    filtered.attrs["catalogue_cdr_source"] = render_entry.cdr_source
     metric = _metric_column(filtered, spec)
     try:
         data, group, period = _apply_catalog_grouping(filtered, render_entry, multivendor, metric)
     except ValueError:
-        return {'type': 'empty', 'title': title, 'message': 'No valid samples for this KPI and technology filter'}
+        return {
+            **_chart_payload_base("empty", title, render_entry, filtered, metric),
+            "message": "No valid samples for this KPI and technology filter",
+        }
     if data.empty:
-        return {'type': 'empty', 'title': title, 'message': 'No valid samples for this KPI and technology filter'}
-
-    def axes(*, distribution: bool = False) -> list[str]:
-        resolved = _chart_axis_hierarchy(data, distribution=distribution)
-        if resolved:
-            return resolved
-        return list(dict.fromkeys(column for column in (group, period) if column))
-
-    def key_label(key: tuple[object, ...], columns: list[str]) -> str:
-        return _legend_key_caption(key, columns, data, _legend_dimensions(render_entry.legend)) or ' · '.join(map(str, key)) or 'All'
-
-    def cdf_series(candidate_metric: str) -> list[dict[str, object]]:
-        grouping = axes()
-        columns = [*grouping, candidate_metric]
-        numeric = data[columns].copy()
-        numeric[candidate_metric] = pd.to_numeric(numeric[candidate_metric], errors='coerce')
-        numeric = numeric.dropna(subset=[candidate_metric, *grouping])
-        if numeric.empty:
-            return []
-        if not grouping:
-            grouped_rows = [((), numeric)]
-        else:
-            grouper = grouping[0] if len(grouping) == 1 else grouping
-            grouped_rows = numeric.groupby(grouper, sort=False, dropna=False)
-        result = []
-        for raw_key, subset in grouped_rows:
-            key = raw_key if isinstance(raw_key, tuple) else (raw_key,)
-            values = sorted(float(value) for value in subset[candidate_metric].tolist())
-            sampled = _interactive_sample(values, INTERACTIVE_CHART_POINTS_PER_SERIES)
-            result.append({
-                'name': key_label(key, grouping),
-                'x': [value for _index, value in sampled],
-                'y': [(index + 1) / len(values) for index, _value in sampled],
-                'samples': len(values),
-            })
-        return result
+        return {
+            **_chart_payload_base("empty", title, render_entry, data, metric),
+            "message": "No valid samples for this KPI and technology filter",
+        }
 
     chart_type = render_entry.chart_type.casefold()
-    if spec['kind'] == 'multi_cdf':
-        panels = []
-        for candidate in spec.get('metrics', ()):
-            resolved = _column(data, (candidate,)) or _catalog_column(data, candidate, multivendor)
-            if resolved and (series := cdf_series(resolved)):
-                panels.append({'title': candidate, 'x_label': resolved.replace('_', ' '), 'series': series})
-        return {'type': 'multi_line', 'title': title, 'panels': panels}
-    if spec['kind'] == 'cdf_mean' or chart_type == 'cdf line':
-        series = cdf_series(metric) if metric else []
+    if chart_type != "distribution stacked vertical bars" and "__catalog_stack" in data.columns and period:
+        data[period] = data[period].astype(str) + " · " + data["__catalog_stack"].astype(str)
+
+    hierarchy_columns = sorted(
+        [column for column in data.columns if column.startswith("__catalog_row_") or column.startswith("__catalog_column_")],
+        key=lambda column: (0 if column.startswith("__catalog_row_") else 1, int(column.rsplit("_", 1)[1])),
+    )
+    row_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_row_")]
+    column_hierarchy = [column for column in hierarchy_columns if column.startswith("__catalog_column_")]
+
+    def serialise_key(key: tuple[object, ...]) -> list[str]:
+        return [_chart_payload_value(value) for value in key]
+
+    def empty(message: str) -> dict[str, object]:
         return {
-            'type': 'line' if series else 'empty', 'title': title,
-            'message': 'No valid samples for this KPI and technology filter',
-            'x_label': (metric or '').replace('_', ' '), 'y_label': 'Cumulative probability', 'series': series,
+            **_chart_payload_base("empty", title, render_entry, data, metric),
+            "message": message,
         }
 
-    grouping = axes(distribution=chart_type == 'distribution stacked vertical bars')
-    if not grouping:
-        grouping = [group] if group else []
-
-    def category_rows(source: pd.DataFrame) -> list[tuple[tuple[object, ...], pd.DataFrame]]:
-        if not grouping:
-            return [(('All',), source)]
-        grouper = grouping[0] if len(grouping) == 1 else grouping
-        return [
-            (raw_key if isinstance(raw_key, tuple) else (raw_key,), subset)
-            for raw_key, subset in source.groupby(grouper, sort=False, dropna=False)
-        ]
-
-    if spec['kind'] in {'status_100', 'quality_100'} and metric:
-        classified, states, _colours = _status_chart_categories(
-            data, metric, quality=spec['kind'] == 'quality_100', threshold=spec.get('threshold', 1.6),
-        )
-        categories = category_rows(classified)
-        return {
-            'type': 'stacked', 'title': title, 'y_label': 'Percentage',
-            'categories': [key_label(key, grouping) for key, _subset in categories],
-            'series': [
-                {'name': state, 'values': [float(subset['state'].eq(state).sum()) / max(len(subset), 1) * 100 for _key, subset in categories]}
-                for state in states
-            ],
-        }
-
-    if spec['kind'] == 'failure_count':
-        state_column = _column(data, ('Call_Status', 'Test_Result', 'status')) or metric
-        if not state_column:
-            return {'type': 'empty', 'title': title, 'message': 'No failure status field is available'}
-        failed = data[data[state_column].astype(str).str.contains('failed|drop|cutoff', case=False, na=False)].copy()
-        failed['__interactive_failure'] = failed[state_column].astype(str).map(
-            lambda value: 'Dropped' if 'drop' in value.casefold() else 'Failed'
-        )
-        categories = category_rows(data)
-        return {
-            'type': 'horizontal_stacked', 'title': title, 'x_label': '# of failed / dropped sessions',
-            'categories': [key_label(key, grouping) for key, _subset in categories],
-            'series': [
-                {'name': state, 'values': [
-                    int(failed.loc[subset.index.intersection(failed.index), '__interactive_failure'].eq(state).sum())
-                    for _key, subset in categories
-                ]}
-                for state in ('Failed', 'Dropped')
-            ],
-        }
-
-    if chart_type == 'distribution stacked vertical bars' and '__catalog_stack' in data:
-        categories = category_rows(data)
-        buckets = [str(value) for value in data['__catalog_stack'].dropna().drop_duplicates()]
-        return {
-            'type': 'stacked', 'title': title, 'y_label': 'Percentage',
-            'categories': [key_label(key, grouping) for key, _subset in categories],
-            'series': [
-                {'name': bucket, 'values': [float(subset['__catalog_stack'].astype(str).eq(bucket).sum()) / max(len(subset), 1) * 100 for _key, subset in categories]}
-                for bucket in buckets
-            ],
-        }
-
-    if spec['kind'] in {'scatter', 'map'} and metric:
-        x_metric = _column(data, spec.get('x_metric', ()))
-        if not x_metric:
-            return {'type': 'empty', 'title': title, 'message': 'No coordinate or comparison field is available'}
-        points = data[[*grouping, x_metric, metric]].copy()
-        points[x_metric] = pd.to_numeric(points[x_metric], errors='coerce')
-        points[metric] = pd.to_numeric(points[metric], errors='coerce')
-        points = points.dropna(subset=[x_metric, metric])
+    def cdf_model(candidate_metric: str, candidate_title: str) -> dict[str, object] | None:
+        campaign_column = _period_column(data)
+        grouping_columns = _chart_axis_hierarchy(data) or list(dict.fromkeys(
+            [*([group] if group else []), *([period] if period and period != group else [])]
+        ))
+        columns = list(dict.fromkeys([
+            *grouping_columns, candidate_metric, *([campaign_column] if campaign_column else []),
+        ]))
+        numeric = data[columns].copy()
+        numeric.attrs = data.attrs.copy()
+        if campaign_column:
+            numeric["__cdf_campaign"] = numeric[campaign_column].fillna("(blank)").astype(str).map(_campaign_display_value)
+        numeric[candidate_metric] = pd.to_numeric(numeric[candidate_metric], errors="coerce")
+        numeric = numeric.dropna(subset=[candidate_metric, *grouping_columns])
+        if numeric.empty:
+            return None
+        combinations = _hierarchical_unique_keys(numeric, grouping_columns) if grouping_columns else [()]
+        series_rows: list[tuple[tuple[object, ...], pd.DataFrame, list[float]]] = []
+        for combination in combinations:
+            subset = numeric
+            for column, value in zip(grouping_columns, combination, strict=True):
+                subset = subset[subset[column].astype(str).eq(str(value))]
+            values = sorted(float(value) for value in subset[candidate_metric].tolist())
+            if values:
+                series_rows.append((combination, subset, values))
+        if not series_rows:
+            return None
+        low = float(numeric[candidate_metric].min())
+        observed_high = float(numeric[candidate_metric].max())
+        high = _cdf_terminal_x_maximum([values for _key, _subset, values in series_rows], low, observed_high)
+        high = high if high > low else low + 1
+        colours = _series_colours(combinations, grouping_columns, numeric, line_chart=True)
+        latest_campaign = None
+        campaign_count = 0
+        if campaign_column and "__cdf_campaign" in numeric:
+            campaigns = sorted(numeric["__cdf_campaign"].dropna().astype(str).unique(), key=_campaign_sort_key)
+            campaign_count = len(campaigns)
+            latest_campaign = campaigns[-1] if len(campaigns) > 1 else None
         payload_series = []
-        for key, subset in category_rows(points):
+        fallback_legend = []
+        requested_legend = _legend_dimensions(render_entry.legend)
+        for index, (combination, subset, values) in enumerate(series_rows):
+            visible_values = [value for value in values if value <= high]
+            if not visible_values:
+                continue
+            sampled = _interactive_sample(visible_values, INTERACTIVE_CHART_POINTS_PER_SERIES)
+            campaigns = subset["__cdf_campaign"].astype(str).unique() if latest_campaign else ()
+            line_width = 4 if campaign_count <= 1 or (latest_campaign and latest_campaign in campaigns) else 1
+            full_label = _legend_key_caption(combination, grouping_columns, numeric, ())
+            tooltip_label = _legend_key_caption(combination, grouping_columns, numeric, requested_legend)
+            colour = colours.get(combination, _colour(full_label, index))
+            payload_series.append({
+                "key": serialise_key(combination),
+                "name": tooltip_label,
+                "legend_name": full_label,
+                "colour": colour,
+                "width": line_width,
+                "x": [value for _source_index, value in sampled],
+                "y": [(source_index + 1) / len(values) for source_index, _value in sampled],
+                "samples": len(values),
+            })
+            fallback_legend.append((full_label, colour, line_width))
+        model = _chart_payload_base(
+            "cdf", candidate_title, render_entry, numeric, candidate_metric,
+            fallback_legend, line_markers=True,
+        )
+        model.update({
+            "metric": candidate_metric.replace("_", " "),
+            "domain": {"x": [low, high], "y": [0, 1]},
+            "series": payload_series,
+        })
+        return model
+
+    if spec["kind"] == "multi_cdf":
+        panels = []
+        for candidate in spec.get("metrics", ()):
+            resolved = _column(data, (candidate,)) or _catalog_column(data, candidate, multivendor)
+            if resolved and (panel := cdf_model(resolved, candidate)):
+                panels.append(panel)
+        if not panels:
+            return empty("No valid samples for this KPI and technology filter")
+        return {
+            **_chart_payload_base("multi_cdf", title, render_entry, data, metric),
+            "panels": panels,
+        }
+
+    if chart_type == "cdf line":
+        model = cdf_model(metric, title) if metric else None
+        return model or empty("No valid samples for this KPI and technology filter")
+
+    if spec["kind"] in {"status_100", "quality_100"} and metric:
+        state_data = data[[group, period, metric, *hierarchy_columns]].copy()
+        state_data.attrs = data.attrs.copy()
+        state_data, states, colours = _status_chart_categories(
+            state_data, metric,
+            quality=spec["kind"] == "quality_100",
+            threshold=spec.get("threshold", 1.6),
+        )
+        state_data = state_data.dropna(subset=[group, period])
+        fallback = [
+            (_legend_caption(_legend_labels(render_entry.legend), index, state), colour, 2)
+            for index, (state, colour) in enumerate(zip(states, colours, strict=True))
+        ]
+        model = _chart_payload_base("status_100", title, render_entry, state_data, metric, fallback)
+        model["states"] = [
+            {"name": state, "colour": colour}
+            for state, colour in zip(states, colours, strict=True)
+        ]
+        if column_hierarchy or row_hierarchy:
+            render_columns = list(column_hierarchy)
+            if not render_columns:
+                state_data["__catalog_single_column"] = "(all)"
+                render_columns = ["__catalog_single_column"]
+            row_keys = _hierarchical_unique_keys(state_data, row_hierarchy) if row_hierarchy else [()]
+            column_keys = _hierarchical_unique_keys(state_data, render_columns)
+            cells = []
+            for row_key in row_keys:
+                row_mask = pd.Series(True, index=state_data.index)
+                for field, value in zip(row_hierarchy, row_key, strict=True):
+                    row_mask &= state_data[field].astype(str).eq(str(value))
+                row_cells = []
+                for column_key in column_keys:
+                    mask = row_mask.copy()
+                    for field, value in zip(render_columns, column_key, strict=True):
+                        mask &= state_data[field].astype(str).eq(str(value))
+                    subset = state_data.loc[mask]
+                    row_cells.append(None if subset.empty else [
+                        float(subset["state"].eq(state).sum()) / len(subset) for state in states
+                    ])
+                cells.append(row_cells)
+            model.update({
+                "mode": "hierarchy",
+                "row_keys": [serialise_key(key) for key in row_keys],
+                "column_keys": [serialise_key(key) for key in column_keys],
+                "single_column": render_columns == ["__catalog_single_column"],
+                "cells": cells,
+            })
+            return model
+        combinations = [
+            (str(category), str(series))
+            for category, series in state_data[[group, period]].drop_duplicates().itertuples(index=False, name=None)
+        ]
+        model.update({
+            "mode": "flat",
+            "categories": [_catalogue_display_label(*key) for key in combinations],
+            "cells": [
+                [
+                    float(subset["state"].eq(state).sum()) / max(len(subset), 1)
+                    for state in states
+                ]
+                for key in combinations
+                for subset in [state_data[
+                    state_data[group].astype(str).eq(key[0]) & state_data[period].astype(str).eq(key[1])
+                ]]
+            ],
+        })
+        return model
+
+    if spec["kind"] == "failure_count":
+        status = _column(data, ("Call_Status", "Test_Result", "status"))
+        if not status:
+            return empty("No failure status field is available")
+        failed = data[data[status].astype(str).str.contains("failed|drop|cutoff", case=False, na=False)].copy()
+        failed["__catalog_failure_state"] = failed[status].astype(str).map(
+            lambda value: "Dropped" if "drop" in value.casefold() else "Failed"
+        )
+        state_colours = {"Failed": "#E15759", "Dropped": "#F28E2B"}
+        fallback = [
+            (_legend_caption(_legend_labels(render_entry.legend), index, state), state_colours[state], 2)
+            for index, state in enumerate(("Failed", "Dropped"))
+        ]
+        model = _chart_payload_base("failure_count", title, render_entry, data, metric, fallback)
+        model["states"] = [
+            {"name": state, "colour": state_colours[state]} for state in ("Failed", "Dropped")
+        ]
+        if column_hierarchy or len(row_hierarchy) > 1:
+            render_rows = row_hierarchy if column_hierarchy else []
+            render_columns = column_hierarchy or row_hierarchy
+            row_keys = _hierarchical_complete_keys(data, render_rows) if render_rows else [()]
+            column_keys = _hierarchical_complete_keys(data, render_columns)
+            counts = failed.groupby([*render_rows, *render_columns, "__catalog_failure_state"], dropna=False).size()
+            levels = list(range(len(render_rows) + len(render_columns)))
+            maximum = max(int(counts.groupby(level=levels).sum().max()), 1) if not counts.empty else 1
+            cells = [
+                [
+                    [int(counts.get((*row_key, *column_key, state), 0)) for state in ("Failed", "Dropped")]
+                    for column_key in column_keys
+                ]
+                for row_key in row_keys
+            ]
+            model.update({
+                "mode": "hierarchy",
+                "row_keys": [serialise_key(key) for key in row_keys],
+                "column_keys": [serialise_key(key) for key in column_keys],
+                "maximum": maximum,
+                "cells": cells,
+            })
+            return model
+        has_series = bool(period) and not data[period].fillna("(all)").astype(str).eq("(all)").all()
+        fields = [group, period] if has_series else [group]
+        counts = failed.groupby([*fields, "__catalog_failure_state"], dropna=False).size().unstack(fill_value=0)
+        keys = _hierarchical_complete_keys(data, fields)
+        comparison_index = (
+            pd.Index([key[0] for key in keys], name=fields[0])
+            if len(fields) == 1 else pd.MultiIndex.from_tuples(keys, names=fields)
+        )
+        counts = counts.reindex(comparison_index, fill_value=0).head(16)
+        model.update({
+            "mode": "flat",
+            "maximum": max(int(counts.sum(axis=1).max()), 1) if not counts.empty else 1,
+            "rows": [
+                {
+                    "key": serialise_key(label if isinstance(label, tuple) else (label,)),
+                    "values": [int(values.get(state, 0)) for state in ("Failed", "Dropped")],
+                }
+                for label, values in counts.iterrows()
+            ],
+        })
+        return model
+
+    if chart_type == "distribution stacked vertical bars" and "__catalog_stack" in data:
+        axes = _chart_axis_hierarchy(data, distribution=True) or [group, period]
+        distribution = data[[*axes, "__catalog_stack"]].dropna()
+        distribution.attrs = data.attrs.copy()
+        combinations = _hierarchical_unique_keys(distribution, axes)
+        buckets = list(distribution["__catalog_stack"].drop_duplicates())
+        if not combinations or not buckets:
+            return empty("No valid samples for this KPI and technology filter")
+        colours = _series_colours([(bucket,) for bucket in buckets], ["__catalog_stack"], distribution)
+        fallback = [
+            (
+                _legend_caption(_legend_labels(render_entry.legend), index, bucket),
+                colours.get((bucket,), _colour(bucket, index)), 2,
+            )
+            for index, bucket in enumerate(buckets[:8])
+        ]
+        model = _chart_payload_base("distribution", title, render_entry, distribution, metric, fallback)
+        model.update({
+            "axis_columns": axes,
+            "keys": [serialise_key(key) for key in combinations],
+            "buckets": [
+                {"name": _chart_payload_value(bucket), "colour": colours.get((bucket,), _colour(bucket, index))}
+                for index, bucket in enumerate(buckets)
+            ],
+            "cells": [
+                [
+                    float(subset["__catalog_stack"].eq(bucket).sum()) / max(len(subset), 1)
+                    for bucket in buckets
+                ]
+                for key in combinations
+                for subset in [distribution.loc[
+                    pd.concat([
+                        distribution[column].astype(str).eq(str(value))
+                        for column, value in zip(axes, key, strict=True)
+                    ], axis=1).all(axis=1)
+                ]]
+            ],
+        })
+        return model
+
+    if spec["kind"] == "map" and metric:
+        longitude = _column(data, spec.get("x_metric", ()))
+        if not longitude:
+            return empty("No coordinate or comparison field is available")
+        columns = [metric, longitude, *([group] if group else []), *([period] if period and period != group else [])]
+        points = data[columns].copy()
+        points.attrs = data.attrs.copy()
+        points[metric] = pd.to_numeric(points[metric], errors="coerce")
+        points[longitude] = pd.to_numeric(points[longitude], errors="coerce")
+        points = points.dropna(subset=[metric, longitude])
+        if points.empty:
+            return empty("No valid map coordinates are available")
+        key_columns = [group, period] if period and group and period != group else [group] if group else []
+        raw_keys = (
+            [tuple(values) for values in points[key_columns].fillna("(blank)").astype(str).to_numpy()]
+            if key_columns else [("All",)] * len(points)
+        )
+        unique_keys = list(dict.fromkeys(raw_keys))
+        colours = _series_colours(unique_keys, key_columns, points)
+        series_payload = []
+        fallback = []
+        for index, key in enumerate(unique_keys):
+            rows = [
+                (float(row[longitude]), float(row[metric]))
+                for row_position, (_row_index, row) in enumerate(points.iterrows())
+                if raw_keys[row_position] == key
+            ]
+            sampled = _interactive_sample(rows, INTERACTIVE_SCATTER_POINTS_PER_SERIES)
+            label = _legend_key_caption(key, key_columns, points, _legend_dimensions(render_entry.legend)) or " · ".join(key)
+            colour = colours.get(key, _colour(key, index))
+            series_payload.append({
+                "name": label, "colour": colour,
+                "points": [[longitude_value, latitude_value] for _source_index, (longitude_value, latitude_value) in sampled],
+            })
+            fallback.append((_legend_caption(_legend_labels(render_entry.legend), index, label), colour, 2))
+        return {
+            **_chart_payload_base("map", title, render_entry, points, metric, fallback),
+            "x_label": longitude.replace("_", " "),
+            "y_label": metric.replace("_", " "),
+            "domain": {
+                "x": [float(points[longitude].min()), float(points[longitude].max())],
+                "y": [float(points[metric].min()), float(points[metric].max())],
+            },
+            "series": series_payload,
+        }
+
+    if chart_type == "table" and metric:
+        table_data = data[[group, period, metric]].copy() if period else data[[group, metric]].copy()
+        numeric_metric = pd.to_numeric(table_data[metric], errors="coerce")
+        has_series = bool(period) and not table_data[period].fillna("(all)").astype(str).eq("(all)").all()
+        suffix = ""
+        if numeric_metric.notna().any():
+            table_data[metric] = numeric_metric
+            table_data = table_data.dropna(subset=[metric])
+            if "percentile" in title.casefold():
+                table = table_data.groupby(group, sort=False)[metric].quantile([.1, .5, .9]).unstack()
+                table.columns = ["P10", "P50", "P90"]
+            elif has_series:
+                table = table_data.pivot_table(index=group, columns=period, values=metric, aggfunc="mean", sort=False)
+            else:
+                table = table_data.groupby(group, sort=False)[metric].mean().to_frame("Value")
+        else:
+            categorical = table_data.dropna(subset=[group, metric]).copy()
+            if categorical.empty:
+                return empty("No valid samples for this KPI and technology filter")
+            columns = [period, metric] if has_series else [metric]
+            table = pd.crosstab(categorical[group], [categorical[column] for column in columns], normalize="index") * 100
+            suffix = "%"
+        headers = [str(table.index.name or "Category"), *[str(value) for value in table.columns]]
+        rows = [
+            [str(index), *["" if pd.isna(value) else f"{float(value):.2f}{suffix}" for value in values]]
+            for index, values in table.head(18).iterrows()
+        ]
+        return {
+            **_chart_payload_base("table", title, render_entry, data, metric),
+            "headers": headers,
+            "rows": rows,
+        }
+
+    if metric and "vertical bars" in chart_type:
+        axes = _chart_axis_hierarchy(data) or ([group, period] if period and period != group else [group])
+        values = data[[*axes, metric]].copy()
+        values.attrs = data.attrs.copy()
+        values[metric] = pd.to_numeric(values[metric], errors="coerce")
+        aggregate = values.dropna().groupby(axes, dropna=False, sort=False)[metric]
+        aggregation = "median" if chart_type == "median vertical bars" else "mean"
+        means = aggregate.median() if aggregation == "median" else aggregate.mean()
+        if means.empty:
+            return empty("No valid samples for this KPI and technology filter")
+        keys = [label if isinstance(label, tuple) else (label,) for label in means.index]
+        colours = _series_colours(keys, axes, values)
+        fallback: list[tuple[str, str, int]] = []
+        if _legend_labels(render_entry.legend):
+            seen: set[str] = set()
+            for index, key in enumerate(keys):
+                caption = _legend_key_caption(key, axes, values, _legend_dimensions(render_entry.legend))
+                if caption not in seen:
+                    seen.add(caption)
+                    fallback.append((caption, colours.get(key, _colour(key, index)), 2))
+        return {
+            **_chart_payload_base("mean_bar", title, render_entry, values, metric, fallback),
+            "metric": metric.replace("_", " "),
+            "aggregation": aggregation,
+            "axis_columns": axes,
+            "maximum": max(float(means.max()), 1.0),
+            "bars": [
+                {
+                    "key": serialise_key(key),
+                    "value": float(value),
+                    "colour": colours.get(key, _colour(key, index)),
+                    "legend": _legend_key_caption(key, axes, values, _legend_dimensions(render_entry.legend)),
+                }
+                for index, (key, value) in enumerate(zip(keys, means.tolist(), strict=True))
+            ],
+        }
+
+    if spec["kind"] == "scatter" and metric:
+        x_metric = _column(data, spec.get("x_metric", ()))
+        if not x_metric:
+            return empty("No coordinate or comparison field is available")
+        data["__catalog_label"] = [
+            _catalogue_display_label(category, series)
+            for category, series in data[[group, period]].fillna("(blank)").itertuples(index=False, name=None)
+        ]
+        points = data[["__catalog_label", metric, x_metric]].copy()
+        points.attrs = data.attrs.copy()
+        points[metric] = pd.to_numeric(points[metric], errors="coerce")
+        points[x_metric] = pd.to_numeric(points[x_metric], errors="coerce")
+        points = points.dropna()
+        if points.empty:
+            return empty("No valid samples for this KPI and technology filter")
+        keys = [(str(label),) for label in points["__catalog_label"].drop_duplicates().tolist()]
+        colours = _series_colours(keys, ["__catalog_label"], points)
+        payload_series = []
+        fallback = []
+        for index, (label, subset) in enumerate(points.groupby("__catalog_label", sort=False)):
             rows = list(subset[[x_metric, metric]].itertuples(index=False, name=None))
             sampled = _interactive_sample(rows, INTERACTIVE_SCATTER_POINTS_PER_SERIES)
-            payload_series.append({'name': key_label(key, grouping), 'points': [[float(x), float(y)] for _index, (x, y) in sampled]})
+            colour = colours.get((str(label),), _colour(label, index))
+            payload_series.append({
+                "name": str(label), "colour": colour,
+                "points": [[float(x), float(y)] for _source_index, (x, y) in sampled],
+            })
+            fallback.append((_legend_caption(_legend_labels(render_entry.legend), index, label), colour, 2))
         return {
-            'type': spec['kind'], 'title': title,
-            'x_label': x_metric.replace('_', ' '), 'y_label': metric.replace('_', ' '), 'series': payload_series,
+            **_chart_payload_base("scatter", title, render_entry, points, metric, fallback),
+            "x_label": x_metric.replace("_", " "),
+            "y_label": metric.replace("_", " "),
+            "domain": {
+                "x": [float(points[x_metric].min()), float(points[x_metric].max())],
+                "y": [float(points[metric].min()), float(points[metric].max())],
+            },
+            "series": payload_series,
         }
 
-    if chart_type == 'table' and metric:
-        categories = category_rows(data)
-        numeric = pd.to_numeric(data[metric], errors='coerce')
-        if numeric.notna().any():
-            rows = []
-            for key, subset in categories[:18]:
-                values = pd.to_numeric(subset[metric], errors='coerce').dropna()
-                if 'percentile' in title.casefold():
-                    rows.append([key_label(key, grouping), *[round(float(values.quantile(level)), 3) if not values.empty else None for level in (.1, .5, .9)]])
-                else:
-                    rows.append([key_label(key, grouping), round(float(values.mean()), 3) if not values.empty else None])
-            headers = ['Category', 'P10', 'P50', 'P90'] if 'percentile' in title.casefold() else ['Category', 'Value']
-        else:
-            values = [str(value) for value in data[metric].dropna().drop_duplicates()]
-            headers = ['Category', *values]
-            rows = [[key_label(key, grouping), *[round(float(subset[metric].astype(str).eq(value).mean() * 100), 2) for value in values]] for key, subset in categories[:18]]
-        return {'type': 'table', 'title': title, 'headers': headers, 'rows': rows}
+    if spec["kind"] == "cdf_mean":
+        model = cdf_model(metric, title) if metric else None
+        return model or empty("No valid samples for this KPI and technology filter")
 
-    if metric and 'vertical bars' in chart_type:
-        categories = category_rows(data)
-        aggregation = 'median' if chart_type == 'median vertical bars' else 'mean'
-        values = []
-        for _key, subset in categories:
-            numeric = pd.to_numeric(subset[metric], errors='coerce').dropna()
-            values.append(round(float(numeric.median() if aggregation == 'median' else numeric.mean()), 6) if not numeric.empty else None)
-        return {
-            'type': 'bar', 'title': title, 'y_label': metric.replace('_', ' '),
-            'categories': [key_label(key, grouping) for key, _subset in categories],
-            'series': [{'name': aggregation.title(), 'values': values}],
-        }
-    return {'type': 'empty', 'title': title, 'message': 'This chart type has no interactive renderer'}
+    return empty("This chart type has no interactive renderer")
 
 
 def _chart_for_catalog_entry(

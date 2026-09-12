@@ -80,7 +80,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert image.content.startswith(b'\x89PNG')
     interactive = client.get(f'/api/e2e-dashboards/chart/{token}/0')
     assert interactive.status_code == 200, interactive.text
-    assert interactive.json()['type'] == 'line'
+    assert interactive.json()['type'] == 'cdf'
+    assert interactive.json()['renderer'] == 'catalog-v2'
     assert interactive.json()['series']
     assert list((Path(core.repository.db_path).parent / '.dashboard-chart-cache').glob('*.png'))
     entry = core.load_template_catalogue(next(row['content'] for row in core.repository.list_report_templates('nsa') if row['name'] == 'Dashboard test'), 'nsa')[0]
