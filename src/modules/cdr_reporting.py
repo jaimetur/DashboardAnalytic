@@ -3678,7 +3678,11 @@ def catalog_chart_payload(
     if prefiltered:
         filtered = frame.copy()
     else:
-        filtered, _group, _period = _source_for_spec({render_entry.source_kind: frame}, spec, multivendor)
+        source_frame = (
+            frame if frame.attrs.get("report_operator_aliases_normalized")
+            else normalise_report_operator_aliases(frame)
+        )
+        filtered, _group, _period = _source_for_spec({render_entry.source_kind: source_frame}, spec, multivendor)
         metric = _metric_column(filtered, spec)
         filtered = _apply_catalog_filters(filtered, render_entry, multivendor, metric)
     filtered.attrs["catalogue_calculated_dimensions"] = render_entry.calculated_dimensions

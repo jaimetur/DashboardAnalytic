@@ -117,6 +117,7 @@ class Snapshot:
     selection_key: str
     selection_materialized: bool
     chart_frames: dict[int, pd.DataFrame] = field(default_factory=dict)
+    filtered_frames: dict[str, pd.DataFrame] = field(default_factory=dict)
     chart_payloads: dict[int, dict[str, object]] = field(default_factory=dict)
     frame_locks: dict[str, RLock] = field(default_factory=dict)
     projections: dict[str, tuple[Path, str, list[str]]] = field(default_factory=dict)
@@ -870,12 +871,30 @@ def install_dashboard_routes(core):
                         raw_frame.attrs['report_operator_aliases_normalized'] = True
                         with lock:
                             snapshot.frames[raw_key] = raw_frame
-            try:
-                prepared_frame = prepare_catalog_chart_preview_frame(
-                    raw_frame, entry, multivendor=snapshot.multivendor,
-                )[0]
-            except ValueError as exc:
-                raise HTTPException(400, str(exc)) from exc
+            # A CDF and its companion Average/Median chart normally use the
+            # same source, KPI and template filters. Share that expensive
+            # filtering pass while keeping each chart's aggregation and visual
+            # model independent.
+            filtered_key = sha256(repr((
+                raw_key, entry.cdr_source, entry.kpi, entry.filters,
+                entry.calculated_dimensions, snapshot.multivendor,
+            )).encode()).hexdigest()
+            with lock:
+                prepared_frame = snapshot.filtered_frames.get(filtered_key)
+                filter_lock = snapshot.frame_locks.setdefault(f'filtered:{filtered_key}', RLock())
+            if prepared_frame is None:
+                with filter_lock:
+                    with lock:
+                        prepared_frame = snapshot.filtered_frames.get(filtered_key)
+                    if prepared_frame is None:
+                        try:
+                            prepared_frame = prepare_catalog_chart_preview_frame(
+                                raw_frame, entry, multivendor=snapshot.multivendor,
+                            )[0]
+                        except ValueError as exc:
+                            raise HTTPException(400, str(exc)) from exc
+                        with lock:
+                            prepared_frame = snapshot.filtered_frames.setdefault(filtered_key, prepared_frame)
             with lock:
                 frame = snapshot.chart_frames.setdefault(index, prepared_frame)
         return snapshot, entry, frame
