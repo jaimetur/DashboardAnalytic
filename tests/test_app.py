@@ -307,7 +307,8 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     assert page.status_code == 200
     assert 'data-workspace-calculated-dimensions-panel' in page.text
     assert 'data-auto-calculated-field-progress' in page.text
-    assert 'Manage Auto-calculated Fields' in page.text
+    assert '>Auto-calculated Fields</button>' in page.text
+    assert 'Manage Auto-calculated Fields' not in page.text
     assert 'workspace-calculated-dimensions-import-panel' in page.text
     assert 'workspace-calculated-dimensions-list' in page.text
     assert 'combined-dataset-row' not in page.text

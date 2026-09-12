@@ -74,7 +74,7 @@
 - Increased cached OpenStreetMap Map-chart source resolution to street-level zoom, with a bounded 48-tile maximum per cold render, so roads and labels remain sharper in generated PNGs.
 
 #### 🐛 Bug fixes:
-- Fixed the Reporting Chart Preview header so Manage Auto-calculated Fields appears beside its red Close control; Escape now leaves active Auto-calculated Fields and filtered-dataset child dialogs open, closing the preview only when no child dialog is active.
+- Fixed the Reporting Chart Preview header so Auto-calculated Fields appears beside its red Close control; Escape now leaves active Auto-calculated Fields and filtered-dataset child dialogs open, closing the preview only when no child dialog is active.
 - Matched the Auto-calculated Fields dialog's circular close control to the Chart Preview close button and styled its text Close control in red with white text; each field deletion control uses a thick white minus on muted burgundy.
 - Made Slides Templates Editor chart image and data previews load the chosen CDR type from its materialized combined reporting table instead of concatenating every individual CDR table.
 - Fixed Slides Templates Editor Chart Preview so every template filter value is displayed and retained in its Filter builder.
