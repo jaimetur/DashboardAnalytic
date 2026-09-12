@@ -52,7 +52,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-save"' in page.text
     assert '>Import Dashboard<' in page.text
     assert 'Total Dashboards: 0' in page.text
-    assert '>Dashboard Data<' in page.text
+    assert '>Dashboard Data & Filters<' in page.text
     assert '>Default Filters<' in page.text
     assert '>Additional Filters<' in page.text
     assert 'id="ds-default-facets"' in page.text
@@ -60,11 +60,21 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'Select field to add new filter' in page.text
     assert 'id="ds-custom-field" multiple size="1" data-multiselect-single="true"' in page.text
     assert 'hidden_filters' in DashboardDefinition.model_fields
+    assert 'slide_comments' in DashboardDefinition.model_fields
     assert 'id="ds-view" disabled' in page.text
     assert 'id="ds-preparing"' in page.text
     assert 'id="ds-preparing-title"' in page.text
+    assert 'id="ds-viewer-preparing"' in page.text
     assert client.put('/api/e2e-dashboards/test', json=payload).status_code == 200
     assert client.get('/api/e2e-dashboards').json()['test']['name'] == 'Comparison'
+    renamed = client.patch('/api/e2e-dashboards/test/name', json={'name': 'Renamed comparison'})
+    assert renamed.status_code == 200
+    assert renamed.json()['name'] == 'Renamed comparison'
+    assert client.get('/api/e2e-dashboards').json()['test']['name'] == 'Renamed comparison'
+    comments = client.patch('/api/e2e-dashboards/test/comments', json={'slide_comments': {'1': ['Review city outliers']}})
+    assert comments.status_code == 200
+    assert comments.json()['slide_comments'] == {'1': ['Review city outliers']}
+    assert client.get('/api/e2e-dashboards').json()['test']['slide_comments'] == {'1': ['Review city outliers']}
     result = client.post('/api/e2e-dashboards/prepare', json=payload)
     assert result.status_code == 200, result.text
     preview = result.json()

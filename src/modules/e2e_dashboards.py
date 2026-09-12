@@ -43,8 +43,17 @@ class DashboardDefinition(BaseModel):
     filters: dict[str, list[str]] = Field(default_factory=dict)
     custom_fields: list[str] = Field(default_factory=list)
     hidden_filters: list[str] = Field(default_factory=list)
+    slide_comments: dict[str, list[str]] = Field(default_factory=dict)
     date_from: date | None = None
     date_to: date | None = None
+
+
+class DashboardComments(BaseModel):
+    slide_comments: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class DashboardName(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
 
 
 def identity(value):
@@ -206,6 +215,23 @@ def install_dashboard_routes(core):
         schedule_dashboard_warmup(task_repository.db_path, (definition.model_copy(deep=True),))
         return {'id': dashboard_id}
 
+    @app.patch('/api/e2e-dashboards/{dashboard_id}/name')
+    def rename_dashboard(dashboard_id: str, payload: DashboardName, user=Depends(dashboard_user)):
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(400, 'Enter a Dashboard name.')
+        with lock:
+            task_repository = bound_repository()
+            dashboards = read_dashboards(task_repository)
+            if dashboard_id not in dashboards:
+                raise HTTPException(404, 'Dashboard not found.')
+            if any(key != dashboard_id and item['name'].strip().casefold() == name.casefold() for key, item in dashboards.items()):
+                raise HTTPException(409, 'A Dashboard with this name already exists.')
+            dashboards[dashboard_id]['name'] = name
+            task_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
+            task_repository.add_log(user.username, 'rename_dashboard', json.dumps({'id': dashboard_id, 'name': name}))
+        return {'id': dashboard_id, 'name': name}
+
     @app.delete('/api/e2e-dashboards/{dashboard_id}')
     def delete_dashboard(dashboard_id: str, user=Depends(dashboard_user)):
         with lock:
@@ -217,6 +243,22 @@ def install_dashboard_routes(core):
             task_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
             task_repository.add_log(user.username, 'delete_dashboard', json.dumps({'id': dashboard_id}))
         return {'deleted': True}
+
+    @app.patch('/api/e2e-dashboards/{dashboard_id}/comments')
+    def save_dashboard_comments(dashboard_id: str, payload: DashboardComments, user=Depends(dashboard_user)):
+        with lock:
+            task_repository = bound_repository()
+            dashboards = read_dashboards(task_repository)
+            if dashboard_id not in dashboards:
+                raise HTTPException(404, 'Dashboard not found.')
+            comments = {
+                str(slide): [str(comment).strip() for comment in values if str(comment).strip()][:50]
+                for slide, values in payload.slide_comments.items()
+            }
+            dashboards[dashboard_id]['slide_comments'] = {slide: values for slide, values in comments.items() if values}
+            task_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
+            task_repository.add_log(user.username, 'save_dashboard_comments', json.dumps({'id': dashboard_id}))
+        return {'slide_comments': dashboards[dashboard_id]['slide_comments']}
 
     def selected_sources(definition, task_repository):
         selected_by_kind = {}

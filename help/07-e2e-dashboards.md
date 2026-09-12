@@ -7,7 +7,7 @@ E2E Dashboards combines processed CDRs into interactive, template-driven Dashboa
 1. Enter a **Dashboard name** and select a workspace **Template**. Both NSA and SA template libraries are available.
 2. Click **Create**. All available processed CDRs are initially selected; refine the selection before interpreting results.
 3. Use **Save** to retain the current name, template, sources and filters in the active workspace database.
-4. Use **Open** to restore a saved dashboard, **Duplicate** to create an independent copy, or **Close** to leave the current dashboard.
+4. Edit a Dashboard name directly in its table field and use the green check that appears inside the field while editing to save it. Use the eye icon to open that Dashboard directly in **View Dashboard**, **Open** to restore it in the editor, **Duplicate** to create an independent copy, or **Close** to leave the current dashboard.
 5. **Delete** removes only the selected definition after confirmation.
 6. **Export** downloads a versioned JSON definition; **Import** restores one with a new identity. The JSON contains template and dataset references and filters, not source data or chart images. Import into a workspace with the corresponding template and dataset IDs, or adjust its source selections before viewing.
 
@@ -19,7 +19,7 @@ The left subpanel contains **CDR Data**, **CDR Voice**, **CDR Speech**, **Scope*
 
 The right subpanel exposes available Market, Operator, Vendor, Region, City, Session Type, Technology and RAT columns. **Date from** and **Date to** use the source timestamp; the end date includes its entire day. Sources without a usable date column contribute no rows when a date range is active.
 
-The right side separates built-in **Default Filters** from Dashboard-specific **Additional Filters**. Additional filters use a pastel-pink panel and controls so they remain visually distinct. Each categorical filter supports searching values, **All**, **None**, and individual checkboxes. All removes that restriction; None intentionally selects zero rows. The value catalogue is loaded from the selected datasets' persisted profiles, so all choices appear without scanning the combined CDR tables. Selected values remain visible even if the current combination has no matches. A source without an actively filtered column contributes no rows instead of silently ignoring that restriction.
+The right side separates built-in **Default Filters** from Dashboard-specific **Additional Filters**. Additional filters use a pastel-pink panel and controls so they remain visually distinct. Each categorical filter supports searching values, **All**, **None**, and individual checkboxes. Its multi-select menu stays open while values are selected, closes when its control is clicked again, or one second after the pointer leaves it. All removes that restriction; None intentionally selects zero rows. The value catalogue is loaded from the selected datasets' persisted profiles, so all choices appear without scanning the combined CDR tables. Selected values remain visible even if the current combination has no matches. A source without an actively filtered column contributes no rows instead of silently ignoring that restriction.
 
 Each filter has a circular **×** action. Confirming it removes an added filter or hides a default filter from the Dashboard; hidden default filters can be restored with **Select field to add new filter**.
 
@@ -45,16 +45,19 @@ NR Mode follows Reporting semantics: Voice and Speech are classified by NSA/SA, 
 
 ## View Dashboard
 
-Click **View Dashboard** after preparation completes. The viewer occupies 96% of the desktop viewport width and expands on small screens.
+Click **View Dashboard** after preparation completes, or use a Dashboard's eye icon to open its viewer immediately. While its data and filters update, a centered status card explains that charts refresh automatically, then disappears when the update is complete. The viewer occupies 96% of the desktop viewport width and expands on small screens.
 
-- **Previous**, **Next**, and the dashboard selector navigate template Slides in numeric order.
+- The dashboard selector is followed by compact First, Previous, Next and Last icon controls, each with an accessible label and hover tooltip, to navigate template Slides in numeric order.
+- The viewer header reserves one subtitle line even when a slide has no subtitle, keeping the navigation controls in a stable vertical position between slides.
 - Charts retain their order and relative placeholder positions from the selected Layout in `Template_CDR_analysis.pptx`, and each chart fills its complete placeholder. Its Rendering message stays centred until the live chart is ready. Small screens stack charts for readability.
-- Title and Transition Slides appear as 16:9 section dashboards with substantially larger title/subtitle typography and a Dashboard Analytic logo lockup in the upper-right corner.
-- Every live chart has independent **−**, **+**, and **Reset zoom** controls from 100% to 400%. Drag the chart while zoomed to inspect a different area; tooltips continue to report the underlying values.
-- **View Dataset** appears over a chart on hover or keyboard focus, remains visible for two seconds after the pointer leaves, and is always available on touch devices. It opens the chart's filtered samples, with pagination and a full **Download CSV** action.
+- Title and Transition Slides appear as 16:9 section dashboards with a Dashboard Analytic logo lockup in the upper-right corner. Title Pages use a wide, prominent title with a yellow subtitle that uses more relaxed lettering; Transition Slide titles are also enlarged.
+- Every live chart has independent **−**, **+**, and **Reset zoom** controls from 100% to 400%. The compact dataset icon and zoom controls appear when hovering or focusing the chart, then disappear half a second after the pointer leaves. CDF charts show horizontal guides at 0%, 25%, 50%, 75% and 100%. Drag the chart while zoomed to inspect a different area; tooltips continue to report the underlying values.
+- The dataset icon appears with the zoom controls on hover or keyboard focus, remains visible for half a second after the pointer leaves, and is always available on touch devices. It opens the chart's filtered samples, with pagination and a full **Download CSV** action.
+- The **Comments** area follows the selected Layout: layouts whose name ends in `Comments right` place it beside the chart canvas, which then uses the full available height; other layouts place it below the charts. Its note list scrolls independently, keeping the comments heading and entry controls fixed. Add or remove a note and it is saved immediately with the Dashboard.
+- **Presentation** opens settings for a 3, 5, 10 or 15-second automatic slide interval and a Fade, Slide or no transition effect. It stops at the last slide or when navigation is used manually.
 - **Edit Template**, available to administrators, opens the workspace template editor at the first row of the current dashboard. Closing the editor refreshes the dashboard definition.
 - **Manage Auto-calculated Fields**, available to administrators, uses the shared workspace field manager. Refresh data after a materialization job finishes if the viewer was left open.
-- **Adaptative Filters** moves the same filter panel into a floating dialog. The fixed and floating views share the same controls and state; edits update every dashboard without closing the viewer. Closing this dialog returns the controls to the main tab.
+- **Adaptative Filters** moves the same filter panel into a floating dialog. The fixed and floating views share the same controls and temporary state because they are the same panel; edits regenerate the visible charts after a short debounce without saving the filters to the Dashboard. In this dialog, **View Dashboard** is replaced by a grey **Close** action that returns the controls to the main tab.
 - Escape closes the active dashboard dialog; keyboard focus returns to its invoking control.
 
 Missing sources, invalid templates and render errors are displayed instead of being mistaken for successful charts. Check source selections, filtered row counts and template fields, then use **Refresh Data**.

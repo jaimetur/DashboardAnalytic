@@ -8,6 +8,7 @@
   const models = new WeakMap();
   const views = new WeakMap();
   const cameraStates = new WeakMap();
+  const nativeFillTexts = new WeakMap();
   const renderStates = new WeakMap();
   const observed = new WeakSet();
   const mapTiles = new Map();
@@ -132,6 +133,23 @@
       pixelRatio * scaleX * camera.zoom, 0, 0, pixelRatio * scaleY * camera.zoom,
       pixelRatio * scaleX * originX, pixelRatio * scaleY * originY,
     );
+    let nativeFillText = nativeFillTexts.get(context);
+    if (!nativeFillText) {
+      nativeFillText = context.fillText.bind(context);
+      nativeFillTexts.set(context, nativeFillText);
+    }
+    context.fillText = (value, x, y, maximumWidth) => {
+      const transform = context.getTransform();
+      const textScale = Math.min(Math.hypot(transform.a, transform.b), Math.hypot(transform.c, transform.d));
+      const pointX = transform.a * x + transform.c * y + transform.e;
+      const pointY = transform.b * x + transform.d * y + transform.f;
+      const angle = Math.atan2(transform.b, transform.a);
+      context.save();
+      context.setTransform(textScale * Math.cos(angle), textScale * Math.sin(angle), -textScale * Math.sin(angle), textScale * Math.cos(angle), pointX, pointY);
+      if (maximumWidth === undefined) nativeFillText(value, 0, 0);
+      else nativeFillText(value, 0, 0, maximumWidth);
+      context.restore();
+    };
     context.lineJoin = 'round'; context.lineCap = 'round'; context.textBaseline = 'top';
     views.set(canvas, {scaleX, scaleY, zoom: camera.zoom, originX, originY});
     return context;
@@ -357,7 +375,8 @@
       context.fillStyle = '#4E6271'; context.textAlign = 'left'; font(context, 19, true); context.fillText('# of failed / dropped sessions', 390, 820); return;
     }
     const rowKeys = payload.row_keys || [[]], columnKeys = payload.column_keys || [];
-    const chartLeft = 285, chartTop = 245, chartHeight = 510, chartWidth = payload.plot_legend_position === 'right' ? 980 : 1250;
+    const hasRightLegend = payload.plot_legend_position === 'right' || (payload.legend?.position === 'right' && payload.legend.items?.length);
+    const chartLeft = 285, chartTop = 245, chartHeight = 510, chartWidth = hasRightLegend ? 980 : 1250;
     const outerTop = chartTop - 64, rowHeight = chartHeight / rowKeys.length, columnWidth = chartWidth / columnKeys.length;
     const groups = hierarchySpans(columnKeys, 0); font(context, 18, true);
     const rotate = groups.some(([start, end, value]) => textWidth(context, value.slice(0, 20)) + 14 > (end - start) * columnWidth);
@@ -405,7 +424,7 @@
       });
     });
     line(context, chartLeft + chartWidth, outerTop, chartLeft + chartWidth, chartTop + chartHeight + 25, '#AEBBC4', 2);
-    drawLegend(context, payload.legend, {fontSize: 13, sideX: payload.legend?.position === 'right' ? chartLeft + chartWidth + 24 : undefined});
+    drawLegend(context, payload.legend, {fontSize: 13, sideX: hasRightLegend ? chartLeft + chartWidth + 24 : undefined});
   }
 
   function drawDistribution(context, payload, state, transform) {
@@ -444,7 +463,7 @@
         pushLineHit(state, transform, points, {label: payload.metric, series: series.name || series.legend_name});
       }
     });
-    for (let tick = 0; tick <= 100; tick += 20) {
+    for (let tick = 0; tick <= 100; tick += 25) {
       const y = plot.top + plot.height - tick / 100 * plot.height; line(context, plot.left, y, plot.left + plot.width, y, '#E4E9ED');
       context.fillStyle = '#4E6271'; context.textAlign = 'left'; font(context, 18, true); context.fillText(`${tick}%`, plot.left - 84, y - 10);
     }

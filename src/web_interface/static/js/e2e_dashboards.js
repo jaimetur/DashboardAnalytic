@@ -5,7 +5,9 @@
   const config = JSON.parse($('ds-config').textContent);
   let dashboards = {}, activeId = '', definition = null, prepared = null, slideIndex = 0;
   let sequence = 0, timer, controller, preparing = null, dirty = false, dataIndex = 0, dataPage = 0, dataToken = '';
-  let facetOptions = {}, availableFields = [], facetFields = config.filter_fields || [], facetsLoading = false;
+  let presentationTimer = 0;
+  const presentation = {running: false, delay: 5000, effect: 'fade'};
+  let facetOptions = {}, availableFields = [], facetFields = config.filter_fields || [], facetsLoading = false, facetsRefreshTimer = 0;
   const completedFieldJobs = new Set();
   const chartPayloads = new Map();
   const openStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:open`;
@@ -36,8 +38,9 @@
   const bind = (id, fn) => $(id).addEventListener('click', safe(fn));
   const setViewEnabled = enabled => { $('ds-view').disabled = !enabled; };
   const setPreparationState = state => {
-    const notice = $('ds-preparing');
+    const notice = $('ds-preparing'), viewerNotice = $('ds-viewer-preparing');
     notice.hidden = state === 'hidden';
+    viewerNotice.hidden = state !== 'preparing' || $('ds-viewer').hidden;
     if (state === 'hidden') return;
     const ready = state === 'ready';
     notice.dataset.state = state;
@@ -50,6 +53,7 @@
     const el = $(id);
     if (show) { focusReturn.set(id, document.activeElement); el.hidden = false; el.querySelector('[role=dialog]').focus(); }
     else { el.hidden = true; focusReturn.get(id)?.focus(); }
+    if (id === 'ds-viewer') $('ds-viewer-preparing').hidden = !show || $('ds-preparing').dataset.state !== 'preparing';
     document.body.style.overflow = [...document.querySelectorAll('.ds-overlay')].some(el => !el.hidden) ? 'hidden' : '';
   }
   function library() {
@@ -60,11 +64,42 @@
     if (!rows.length) { const row = node('tr'), cell = node('td', 'No Dashboards have been created yet.', 'form-note'); cell.colSpan = 4; row.append(cell); body.append(row); return; }
     for (const [id, item] of rows) {
       const row = node('tr'); if (id === activeId) row.classList.add('ds-dashboard-active');
-      row.append(node('td', item.name), node('td', (item.technology || item.template_technology || 'nsa').toUpperCase()), node('td', item.template));
+      const nameCell = node('td');
+      const nameEditor = node('div', undefined, 'ds-dashboard-name-editor');
+      const nameInput = document.createElement('input'); nameInput.type = 'text'; nameInput.value = item.name; nameInput.maxLength = 120; nameInput.setAttribute('aria-label', `Dashboard name: ${item.name}`);
+      const nameSave = node('button', '✓', 'ds-dashboard-name-save'); nameSave.type = 'button'; nameSave.title = 'Save Dashboard name'; nameSave.setAttribute('aria-label', 'Save Dashboard name'); nameSave.hidden = true;
+      const updateNameSave = () => { nameSave.hidden = nameInput.value.trim() === item.name; };
+      nameInput.addEventListener('input', updateNameSave);
+      nameInput.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); nameSave.click(); } });
+      nameSave.onclick = safe(async () => {
+        const name = nameInput.value.trim();
+        if (!name || name === item.name) { nameInput.value = item.name; updateNameSave(); return; }
+        const result = await api(`/${id}/name`, 'PATCH', {name});
+        dashboards[id].name = result.name;
+        if (id === activeId && definition) {
+          definition.name = result.name; $('ds-name').value = result.name; $('ds-dashboard-name').textContent = `Dashboard Name: ${result.name}`;
+          if (!$('ds-viewer').hidden) renderSlide();
+        }
+        library(); status(`Renamed Dashboard to “${result.name}”.`);
+      });
+      nameEditor.append(nameInput, nameSave); nameCell.append(nameEditor);
+      row.append(nameCell, node('td', (item.technology || item.template_technology || 'nsa').toUpperCase()), node('td', item.template));
       const actions = node('div', undefined, 'ds-dashboard-actions');
       const action = (label, glyph, handler, tone = '') => {
         const button = node('button', glyph, `icon-action ds-dashboard-action ${tone}`); button.type = 'button'; button.title = label; button.setAttribute('aria-label', label); button.onclick = safe(handler); actions.append(button);
       };
+      action('View Dashboard', '◉', async () => {
+        if (id !== activeId) {
+          if (!await confirmDiscard()) return;
+          const loading = openDashboard(id);
+          overlay('ds-viewer', true);
+          await loading;
+        } else {
+          overlay('ds-viewer', true);
+          if (!prepared) await prepare();
+          else renderSlide();
+        }
+      }, 'ds-dashboard-view');
       action(id === activeId ? 'Close Dashboard' : 'Open Dashboard', id === activeId ? '🚪' : '📂', async () => {
         if (id === activeId) { if (await confirmDiscard()) closeDashboard(); }
         else if (await confirmDiscard()) await openDashboard(id);
@@ -96,7 +131,7 @@
   }
   function selectControl(label, values, selected, change, multiple = false) {
     const host = node('label', label), select = document.createElement('select');
-    select.multiple = multiple; if (multiple) select.size = Math.max(2, Math.min(4, values.length));
+    select.multiple = multiple; if (multiple) { select.size = Math.max(2, Math.min(4, values.length)); select.dataset.multiselectAutoClose = '1000'; }
     if (!values.length) { select.disabled = true; select.multiple = false; select.size = 1; select.append(option('', 'No datasets available')); }
     for (const [value, text] of values) { const opt = option(value, text); opt.selected = multiple ? selected.map(String).includes(String(value)) : value === selected; select.append(opt); }
     select.addEventListener('change', () => { change(multiple ? [...select.selectedOptions].map(opt => opt.value) : select.value); changed(); });
@@ -134,7 +169,7 @@
         delete definition.filters[field]; facets(); changed();
       });
       head.append(remove); facet.append(head);
-      const values = document.createElement('select'); values.multiple = true; values.size = 1; values.setAttribute('aria-label', `${label} filter`);
+      const values = document.createElement('select'); values.multiple = true; values.size = 1; values.dataset.multiselectAutoClose = '1000'; values.setAttribute('aria-label', `${label} filter`);
       const available = [...new Set([...(facetOptions[field] || []), ...(selected || [])])];
       for (const value of available) {
         const item = option(value, value || '(Empty)'); item.selected = !selected || selected.includes(value); values.append(item);
@@ -157,26 +192,36 @@
     fieldPicker.dispatchEvent(new Event('multiselect:options-updated'));
     globalThis.setupCustomMultiSelects?.();
   }
+  const hasOpenFacetMenu = () => Boolean($('ds-filter-panel').querySelector('.multiselect-menu:not([hidden])'));
+  function refreshFacetsAfterMenusClose() {
+    clearTimeout(facetsRefreshTimer);
+    if (!hasOpenFacetMenu()) { facets(); return; }
+    facetsRefreshTimer = setTimeout(refreshFacetsAfterMenusClose, 100);
+  }
   function changed() {
     dirty = true; prepared = null; ++sequence; controller?.abort(); preparing = null;
     setViewEnabled(false);
     setPreparationState('preparing');
     $('ds-rows').textContent = '';
     if (!$('ds-viewer').hidden) $('ds-charts').replaceChildren(node('div','Updating dashboards…','ds-empty'));
-    clearTimeout(timer); timer = setTimeout(safe(prepare), 350);
+    const delay = $('ds-filter-overlay').hidden ? 350 : 120;
+    clearTimeout(timer); timer = setTimeout(safe(prepare), delay);
   }
   async function prepare() {
     if (preparing) return preparing;
     const pending = (async () => {
     clearTimeout(timer); const current = ++sequence; controller?.abort(); controller = new AbortController();
-    facetsLoading = true; facets();
+    facetsLoading = true;
+    if (!hasOpenFacetMenu()) facets();
     setViewEnabled(false);
     setPreparationState('preparing');
     $('ds-rows').textContent = '';
     try {
       const payload = await api('/prepare','POST',definition,controller.signal);
       if (current !== sequence) return;
-      prepared = payload; facetOptions = payload.options; facetFields = payload.filter_fields || facetFields; availableFields = payload.available_fields || payload.custom_fields || []; facetsLoading = false; facets(); setViewEnabled(Boolean(payload.slides?.length)); setPreparationState('ready');
+      prepared = payload; facetOptions = payload.options; facetFields = payload.filter_fields || facetFields; availableFields = payload.available_fields || payload.custom_fields || []; facetsLoading = false;
+      if (hasOpenFacetMenu()) refreshFacetsAfterMenusClose(); else facets();
+      setViewEnabled(Boolean(payload.slides?.length)); setPreparationState('ready');
       const rowLabel = payload.rows_exact === false ? 'source rows' : 'rows';
       $('ds-rows').textContent = Object.entries(payload.rows).map(([kind,count]) => `${kind.toUpperCase()}: ${count.toLocaleString()} ${rowLabel}`).join(' · ');
       chartPayloads.clear(); const firstSlideReady = prefetchSlide(0); prefetchRemainingCharts(firstSlideReady);
@@ -188,6 +233,8 @@
     finally { if (preparing === pending) preparing = null; }
   }
   async function openDashboard(id) {
+    clearTimeout(facetsRefreshTimer);
+    stopPresentation();
     activeId = id; definition = structuredClone(dashboards[id]); dirty = false; prepared = null; facetOptions = {}; availableFields = []; slideIndex = 0; setViewEnabled(false); rememberOpen(id);
     $('ds-name').value = definition.name; setNrMode(definition.technology || definition.template_technology, definition.template);
     $('ds-filter-panel').hidden = false; $('ds-dashboard-name').textContent = `Dashboard Name: ${definition.name}`; sources(); facets(); library(); status(''); await prepare();
@@ -221,7 +268,7 @@
   }
   bind('ds-import',() => $('ds-import-file').click());
   $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name); const id = dashboardId(); await api(`/${id}`,'PUT',payload.definition); dashboards[id] = payload.definition; await openDashboard(id); $('ds-import-file').value = ''; });
-  function closeDashboard() { rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; prepared = null; dirty = false; setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard Name: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
+  function closeDashboard() { clearTimeout(facetsRefreshTimer); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; prepared = null; dirty = false; setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard Name: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
   $('ds-name').oninput = () => { if (definition) { definition.name = $('ds-name').value; dirty = true; } };
   $('ds-nr-mode').onchange = () => {
     const selected = setNrMode($('ds-nr-mode').value);
@@ -296,14 +343,65 @@
     canvas.addEventListener('dashboardchartzoom', event => sync(event.detail?.zoom));
     sync(1); controls.append(zoomOut, level, zoomIn, reset); return controls;
   }
+  const currentSlideCommentKey = () => String(prepared?.slides[slideIndex]?.number ?? slideIndex + 1);
+  function renderComments() {
+    const list = $('ds-comments-list');
+    if (!list || !definition) return;
+    definition.slide_comments ||= {};
+    const comments = definition.slide_comments[currentSlideCommentKey()] || [];
+    list.replaceChildren();
+    if (!comments.length) { list.append(node('li', 'No comments for this slide.', 'ds-comments-empty')); return; }
+    comments.forEach((comment, index) => {
+      const item = node('li', undefined, 'ds-comment'), text = node('span', comment);
+      const remove = node('button', '×', 'ds-comment-remove'); remove.type = 'button'; remove.title = 'Remove comment'; remove.setAttribute('aria-label', 'Remove comment');
+      remove.onclick = safe(async () => { definition.slide_comments[currentSlideCommentKey()].splice(index, 1); await persistComments(); renderComments(); });
+      item.append(text, remove); list.append(item);
+    });
+  }
+  async function persistComments() {
+    if (!activeId || !definition) return;
+    const id = activeId;
+    $('ds-comments-status').textContent = 'Saving…';
+    const payload = await api(`/${id}/comments`, 'PATCH', {slide_comments: definition.slide_comments || {}});
+    if (!definition || activeId !== id) return;
+    definition.slide_comments = payload.slide_comments;
+    dashboards[id] = {...dashboards[id], slide_comments: structuredClone(payload.slide_comments)};
+    $('ds-comments-status').textContent = 'Saved';
+  }
+  function syncPresentationControls() {
+    $('ds-presentation').textContent = presentation.running ? 'Stop presentation' : 'Presentation';
+    $('ds-presentation-start').disabled = presentation.running;
+    $('ds-presentation-stop').disabled = !presentation.running;
+  }
+  function stopPresentation() {
+    clearTimeout(presentationTimer); presentationTimer = 0;
+    if (!presentation.running) return;
+    presentation.running = false; syncPresentationControls(); status('Presentation stopped.');
+  }
+  function schedulePresentationAdvance() {
+    clearTimeout(presentationTimer);
+    presentationTimer = setTimeout(() => {
+      if (!presentation.running || !prepared) return;
+      if (slideIndex >= prepared.slides.length - 1) { stopPresentation(); return; }
+      slideIndex += 1; renderSlide(); schedulePresentationAdvance();
+    }, presentation.delay);
+  }
+  function startPresentation() {
+    if (!prepared?.slides.length) return;
+    presentation.delay = Number($('ds-presentation-delay').value) * 1000;
+    presentation.effect = $('ds-presentation-effect').value;
+    presentation.running = true; syncPresentationControls(); overlay('ds-presentation-overlay', false); renderSlide(); schedulePresentationAdvance(); status(`Presentation started: ${presentation.delay / 1000} seconds per slide.`);
+  }
   function renderSlide() {
     if (!prepared) return; slideIndex = Math.max(0,Math.min(slideIndex,prepared.slides.length-1));
     const slide = prepared.slides[slideIndex]; if (!slide) return;
     $('ds-title').textContent = slide.title || `Dashboard ${slide.number}`; $('ds-subtitle').textContent = slide.subtitle;
     $('ds-position').textContent = `${definition.name} · Dashboard ${slideIndex+1} / ${prepared.slides.length}`;
     $('ds-slide').replaceChildren(...prepared.slides.map((item,index)=>option(String(index),`${item.number} · ${item.title || 'Dashboard'}`))); $('ds-slide').value = String(slideIndex);
-    $('ds-prev').disabled = slideIndex === 0; $('ds-next').disabled = slideIndex === prepared.slides.length-1;
-    const stage = $('ds-charts'); stage.replaceChildren(); stage.classList.toggle('ds-positioned',slide.charts.length > 0 && slide.charts.every(chart=>chart.position)); stage.classList.toggle('ds-structural-stage', !slide.charts.length);
+    $('ds-first').disabled = $('ds-prev').disabled = slideIndex === 0;
+    $('ds-next').disabled = $('ds-last').disabled = slideIndex === prepared.slides.length - 1;
+    $('ds-slide-content').classList.toggle('ds-comments-right', /\bcomments\s+right\b/i.test(slide.layout || ''));
+    const stage = $('ds-charts'); stage.classList.remove('ds-slide-transition'); stage.replaceChildren(); stage.classList.toggle('ds-positioned',slide.charts.length > 0 && slide.charts.every(chart=>chart.position)); stage.classList.toggle('ds-structural-stage', !slide.charts.length);
     if (!slide.charts.length) structuralDashboard(stage, slide);
     for (const chart of slide.charts) {
       const card = node('article',undefined,'ds-chart'); card.setAttribute('aria-label',chart.title); card.tabIndex = 0;
@@ -324,21 +422,36 @@
           if (prepared?.token === token) message.textContent = error.message || `Unable to render ${chart.title || 'chart'}.`;
         });
       } else message.textContent = `Unavailable source type: select a ${chart.source ? chart.source.toUpperCase() : 'supported'} CDR dataset.`;
-      const data = node('button','View Dataset','ds-chart-data'); data.type = 'button'; data.disabled = !chart.available; data.onclick = safe(async () => { dataIndex = chart.index; dataPage = 0; dataToken = prepared.token; overlay('ds-data-overlay',true); await renderData(); }); card.append(data);
+      const data = node('button','', 'ds-chart-data'); data.type = 'button'; data.title = 'View dataset'; data.setAttribute('aria-label', 'View dataset'); data.disabled = !chart.available; data.onclick = safe(async () => { dataIndex = chart.index; dataPage = 0; dataToken = prepared.token; overlay('ds-data-overlay',true); await renderData(); });
+      const controls = node('div', undefined, 'ds-chart-controls'); controls.append(data, zoom); card.append(controls);
       let hideTimer;
-      const hideDataAction = () => { if (!hideTimer) hideTimer = setTimeout(() => { card.classList.remove('ds-hover'); hideTimer = null; }, 2000); };
-      card.onpointermove = event => { const bounds = card.getBoundingClientRect(); if (event.clientX > bounds.right - 160 && event.clientY < bounds.top + 65) { clearTimeout(hideTimer); hideTimer = null; card.classList.add('ds-hover'); } else hideDataAction(); };
-      card.onpointerleave = hideDataAction;
+      const showControls = () => { clearTimeout(hideTimer); hideTimer = null; card.classList.add('ds-hover'); };
+      const hideControls = () => { if (!hideTimer) hideTimer = setTimeout(() => { card.classList.remove('ds-hover'); hideTimer = null; }, 500); };
+      card.onpointerenter = showControls;
+      card.onpointerleave = hideControls;
+      card.onfocusin = showControls;
+      card.onfocusout = () => { if (!card.contains(document.activeElement)) hideControls(); };
       stage.append(card);
     }
-    prefetchSlide(slideIndex + 1);
+    if (presentation.running) { stage.dataset.presentationEffect = presentation.effect; void stage.offsetWidth; stage.classList.add('ds-slide-transition'); }
+    renderComments(); prefetchSlide(slideIndex + 1);
   }
-  bind('ds-prev',()=>{ slideIndex--; renderSlide(); }); bind('ds-next',()=>{ slideIndex++; renderSlide(); });
-  $('ds-slide').onchange = () => { slideIndex = Number($('ds-slide').value); renderSlide(); };
-  const closeFilters = () => { $('ds-filter-home').append($('ds-filter-panel')); overlay('ds-filter-overlay',false); };
-  bind('ds-floating-filters',()=>{ $('ds-filter-float').append($('ds-filter-panel')); overlay('ds-filter-overlay',true); });
+  bind('ds-first',()=>{ stopPresentation(); slideIndex = 0; renderSlide(); });
+  bind('ds-prev',()=>{ stopPresentation(); slideIndex--; renderSlide(); });
+  bind('ds-next',()=>{ stopPresentation(); slideIndex++; renderSlide(); });
+  bind('ds-last',()=>{ stopPresentation(); slideIndex = Math.max(0, (prepared?.slides.length || 1) - 1); renderSlide(); });
+  $('ds-slide').onchange = () => { stopPresentation(); slideIndex = Number($('ds-slide').value); renderSlide(); };
+  bind('ds-comment-add', async () => { const input = $('ds-comment-input'), comment = input.value.trim(); if (!comment || !definition) return; const key = currentSlideCommentKey(); definition.slide_comments ||= {}; const comments = definition.slide_comments[key] ||= []; if (comments.length >= 50) throw new Error('A slide can have at most 50 comments.'); comments.push(comment); input.value = ''; await persistComments(); renderComments(); });
+  $('ds-comment-input').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); $('ds-comment-add').click(); } });
+  bind('ds-presentation', () => { if (presentation.running) stopPresentation(); else overlay('ds-presentation-overlay', true); });
+  bind('ds-presentation-close', () => overlay('ds-presentation-overlay', false));
+  bind('ds-presentation-start', startPresentation);
+  bind('ds-presentation-stop', stopPresentation);
+  const closeFilters = () => { $('ds-filter-home').append($('ds-filter-panel')); $('ds-view').hidden = false; $('ds-filter-close-action').hidden = true; overlay('ds-filter-overlay',false); };
+  bind('ds-floating-filters',()=>{ $('ds-filter-float').append($('ds-filter-panel')); $('ds-view').hidden = true; $('ds-filter-close-action').hidden = false; overlay('ds-filter-overlay',true); });
   bind('ds-filter-close',closeFilters);
-  bind('ds-viewer-close',()=>{ if (!$('ds-filter-overlay').hidden) closeFilters(); overlay('ds-viewer',false); });
+  bind('ds-filter-close-action',closeFilters);
+  bind('ds-viewer-close',()=>{ stopPresentation(); if (!$('ds-filter-overlay').hidden) closeFilters(); overlay('ds-viewer',false); });
   async function renderData() {
     $('ds-data-table').textContent = 'Loading chart dataset…';
     const token = dataToken, payload = await api(`/data/${token}/${dataIndex}?page=${dataPage}`);
@@ -352,8 +465,8 @@
   if ($('ds-edit')) bind('ds-edit',()=>{ const slide = prepared?.slides[slideIndex]; if (!slide) return; $('ds-editor-frame').src = `/admin/report-templates/${encodeURIComponent(definition.template_technology)}/${encodeURIComponent(definition.template)}/editor?focus_row=${slide.focus_row}`; overlay('ds-editor-overlay',true); });
   bind('ds-editor-close',async ()=>{ overlay('ds-editor-overlay',false); $('ds-editor-frame').removeAttribute('src'); await prepare(); });
   document.addEventListener('keydown',event=>{
-    const visible = ['ds-editor-overlay','ds-data-overlay','ds-filter-overlay','ds-viewer'].find(id=>!$(id).hidden); if (!visible || !$(visible).contains(document.activeElement)) return;
-    if (event.key === 'Escape') { event.preventDefault(); $({'ds-editor-overlay':'ds-editor-close','ds-data-overlay':'ds-data-close','ds-filter-overlay':'ds-filter-close','ds-viewer':'ds-viewer-close'}[visible]).click(); }
+    const visible = ['ds-editor-overlay','ds-data-overlay','ds-filter-overlay','ds-presentation-overlay','ds-viewer'].find(id=>!$(id).hidden); if (!visible || !$(visible).contains(document.activeElement)) return;
+    if (event.key === 'Escape') { event.preventDefault(); $({'ds-editor-overlay':'ds-editor-close','ds-data-overlay':'ds-data-close','ds-filter-overlay':'ds-filter-close','ds-presentation-overlay':'ds-presentation-close','ds-viewer':'ds-viewer-close'}[visible]).click(); }
     if (event.key === 'Tab') { const controls = [...$(visible).querySelectorAll('button:not(:disabled),a[href],input,select,summary,[tabindex="0"]')].filter(el=>el.getClientRects().length); if (!controls.length) return; const first = controls[0], last = controls.at(-1); if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
   });
   window.addEventListener('message', event => {
