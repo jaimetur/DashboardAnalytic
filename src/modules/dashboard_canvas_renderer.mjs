@@ -4,9 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import {spawn} from 'node:child_process';
+import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 
-const WebSocketImplementation = globalThis.WebSocket || (await import('ws')).default;
+const require = createRequire(import.meta.url);
+const webSocketImplementation = () => globalThis.WebSocket || require('ws');
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const rendererSource = fs.readFileSync(
@@ -43,6 +45,7 @@ const delay = milliseconds => new Promise(resolve => setTimeout(resolve, millise
 
 class DevToolsConnection {
   constructor(url) {
+    const WebSocketImplementation = webSocketImplementation();
     this.socket = new WebSocketImplementation(url);
     this.nextId = 1;
     this.pending = new Map();
