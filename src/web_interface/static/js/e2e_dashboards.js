@@ -4,7 +4,8 @@
   const $ = id => document.getElementById(id);
   const config = JSON.parse($('ds-config').textContent);
   let dashboards = {}, activeId = '', definition = null, prepared = null, slideIndex = 0;
-  let sequence = 0, timer, controller, preparing = null, dirty = false, dataIndex = 0, dataPage = 0, dataToken = '';
+  let sequence = 0, timer, controller, preparing = null, dirty = false, dataIndex = 0, dataPage = 0, dataToken = '', dataRequest = 0;
+  const dataPages = new Map();
   let presentationTimer = 0;
   const presentation = {running: false, delay: 5000, effect: 'fade'};
   let facetOptions = {}, availableFields = [], facetFields = config.filter_fields || [], facetsLoading = false, facetsRefreshTimer = 0;
@@ -305,13 +306,20 @@
   function prefetchRemainingCharts(firstSlideReady = Promise.resolve()) {
     const token = prepared?.token;
     if (!token) return;
-    let index = 1;
-    const next = async () => {
-      if (prepared?.token !== token || index >= prepared.slides.length) return;
-      await prefetchSlide(index++);
-      setTimeout(next, 60);
+    const pendingCharts = prepared.slides.flatMap((slide, index) => index === slideIndex ? [] : slide.charts)
+      .filter(chart => chart.available);
+    let nextChart = 0;
+    const warmNextChart = async () => {
+      while (prepared?.token === token && nextChart < pendingCharts.length) {
+        const chart = pendingCharts[nextChart++];
+        await loadChartPayload(chart).catch(() => undefined);
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
     };
-    firstSlideReady.finally(() => setTimeout(next, 60));
+    firstSlideReady.finally(() => {
+      const workers = Math.min(4, pendingCharts.length);
+      for (let index = 0; index < workers; index += 1) setTimeout(() => { void warmNextChart(); }, 60 + index * 20);
+    });
   }
   function structuralDashboard(stage, slide) {
     const kind = String(slide.structural_type || '').toLowerCase().includes('transition') ? 'transition' : 'title';
@@ -437,7 +445,7 @@
           if (prepared?.token === token) message.textContent = error.message || `Unable to render ${chart.title || 'chart'}.`;
         });
       } else message.textContent = `Unavailable source type: select a ${chart.source ? chart.source.toUpperCase() : 'supported'} CDR dataset.`;
-      const data = node('button','', 'ds-chart-data'); data.type = 'button'; data.title = 'View dataset'; data.setAttribute('aria-label', 'View dataset'); data.disabled = !chart.available; data.onclick = safe(async () => { dataIndex = chart.index; dataPage = 0; dataToken = prepared.token; overlay('ds-data-overlay',true); await renderData(); });
+      const data = node('button','', 'ds-chart-data'); data.type = 'button'; data.title = 'View dataset'; data.setAttribute('aria-label', 'View dataset'); data.disabled = !chart.available; data.onclick = safe(async () => { dataIndex = chart.index; dataPage = 0; dataToken = prepared.token; dataPages.clear(); overlay('ds-data-overlay',true); await renderData(); });
       const controls = node('div', undefined, 'ds-chart-controls'); controls.append(data, zoom); card.append(controls);
       let hideTimer;
       const showControls = () => { clearTimeout(hideTimer); hideTimer = null; card.classList.add('ds-hover'); };
@@ -467,16 +475,50 @@
   bind('ds-filter-close',closeFilters);
   bind('ds-filter-close-action',closeFilters);
   bind('ds-viewer-close',()=>{ stopPresentation(); if (!$('ds-filter-overlay').hidden) closeFilters(); overlay('ds-viewer',false); });
-  async function renderData() {
-    $('ds-data-table').textContent = 'Loading chart dataset…';
-    const token = dataToken, payload = await api(`/data/${token}/${dataIndex}?page=${dataPage}`);
-    const table = node('table'), head = node('thead'), header = node('tr'); payload.columns.forEach(column=>header.append(node('th',column))); head.append(header); table.append(head);
-    const body = node('tbody'); for (const row of payload.rows) { const tr = node('tr'); row.forEach(value=>tr.append(node('td',value))); body.append(tr); } table.append(body); $('ds-data-table').replaceChildren(table);
-    $('ds-data-page').textContent = `${payload.total.toLocaleString()} rows · Page ${dataPage+1} / ${Math.max(1,Math.ceil(payload.total/100))}`;
-    $('ds-data-prev').disabled = dataPage === 0; $('ds-data-next').disabled = (dataPage+1)*100 >= payload.total;
-    $('ds-data-download').href = `/api/e2e-dashboards/data/${token}/${dataIndex}?download=true`;
+  function loadDataPage(token, index, page) {
+    const key = `${token}:${index}:${page}`;
+    let request = dataPages.get(key);
+    if (!request) {
+      request = api(`/data/${token}/${index}?page=${page}`);
+      dataPages.set(key, request);
+      request.catch(() => dataPages.delete(key));
+      while (dataPages.size > 24) dataPages.delete(dataPages.keys().next().value);
+    }
+    return request;
   }
-  bind('ds-data-prev',async ()=>{ dataPage--; await renderData(); }); bind('ds-data-next',async ()=>{ dataPage++; await renderData(); }); bind('ds-data-close',()=>overlay('ds-data-overlay',false));
+  const prefetchDataPage = (token, index, page, totalPages) => {
+    if (page >= 0 && page < totalPages) void loadDataPage(token, index, page).catch(() => undefined);
+  };
+  async function renderData() {
+    const token = dataToken, index = dataIndex, requestedPage = dataPage, request = ++dataRequest;
+    const host = $('ds-data-table');
+    if (!host.querySelector('table')) host.textContent = 'Loading chart dataset…';
+    const payload = await loadDataPage(token, index, requestedPage);
+    if (request !== dataRequest || token !== dataToken || index !== dataIndex) return;
+    dataPage = payload.page;
+    let table = host.querySelector('table');
+    const columns = JSON.stringify(payload.columns);
+    if (!table || table.dataset.columns !== columns) {
+      table = node('table'); table.dataset.columns = columns;
+      const head = node('thead'), header = node('tr'); payload.columns.forEach(column => header.append(node('th', column))); head.append(header); table.append(head, node('tbody'));
+      host.replaceChildren(table);
+    }
+    const body = table.tBodies[0];
+    body.replaceChildren(...payload.rows.map(row => { const tr = node('tr'); row.forEach(value => tr.append(node('td', value))); return tr; }));
+    const totalPages = Math.max(1, Math.ceil(payload.total / 100));
+    $('ds-data-page').textContent = `${payload.total.toLocaleString()} rows · Page ${dataPage + 1} / ${totalPages}`;
+    $('ds-data-first').disabled = $('ds-data-prev').disabled = dataPage === 0;
+    $('ds-data-next').disabled = $('ds-data-last').disabled = dataPage >= totalPages - 1;
+    $('ds-data-download').href = `/api/e2e-dashboards/data/${token}/${index}?download=true`;
+    prefetchDataPage(token, index, dataPage - 1, totalPages);
+    prefetchDataPage(token, index, dataPage + 1, totalPages);
+    prefetchDataPage(token, index, totalPages - 1, totalPages);
+  }
+  bind('ds-data-first', async () => { dataPage = 0; await renderData(); });
+  bind('ds-data-prev', async () => { dataPage = Math.max(0, dataPage - 1); await renderData(); });
+  bind('ds-data-next', async () => { dataPage += 1; await renderData(); });
+  bind('ds-data-last', async () => { const label = $('ds-data-page').textContent; const pages = Number(label.match(/\/ (\d+)$/)?.[1]) || 1; dataPage = pages - 1; await renderData(); });
+  bind('ds-data-close',()=>overlay('ds-data-overlay',false));
   if ($('ds-edit')) bind('ds-edit',()=>{ const slide = prepared?.slides[slideIndex]; if (!slide) return; $('ds-editor-frame').src = `/admin/report-templates/${encodeURIComponent(definition.template_technology)}/${encodeURIComponent(definition.template)}/editor?focus_row=${slide.focus_row}`; overlay('ds-editor-overlay',true); });
   bind('ds-editor-close',async ()=>{ overlay('ds-editor-overlay',false); $('ds-editor-frame').removeAttribute('src'); await prepare(); });
   document.addEventListener('keydown',event=>{
