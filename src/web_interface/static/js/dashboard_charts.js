@@ -706,6 +706,7 @@
     models.set(canvas, payload); draw(canvas, payload); attachTooltip(canvas); attachPan(canvas);
     if (resizeObserver && !observed.has(canvas)) { observed.add(canvas); resizeObserver.observe(canvas); }
   };
+  globalThis.getDashboardChartHits = canvas => structuredClone(renderStates.get(canvas)?.hits || []);
   globalThis.setDashboardChartZoom = setChartZoom;
   globalThis.getDashboardChartZoom = canvas => cameraFor(canvas).zoom;
 })();

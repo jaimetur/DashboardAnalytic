@@ -1140,6 +1140,70 @@ def test_multi_kpi_cdf_lines_render_each_tableau_measure() -> None:
     assert any(target['x'] > 750 for target in targets)
 
 
+def test_dashboard_canvas_report_renderer_uses_dashboard_payload() -> None:
+    entry = CatalogEntry(
+        1, 'Radio quality', '', '', 'Radio quality', 'CDR-Data',
+        'NR SINR', 'CDF Line', 'Operator', '', 'Operator', 'Campaign', 'Right',
+    )
+    frame = pd.DataFrame({
+        'Operator': ['EE', 'VF'],
+        'Campaign': ['2026 Q1', '2026 Q1'],
+        'NR SINR': [4.0, 8.0],
+    })
+
+    with patch('src.modules.cdr_reporting._render_dashboard_payload_png', return_value=b'canvas-png') as render:
+        image = render_catalog_chart_preview(frame, entry, renderer='dashboard-canvas')
+
+    assert image == b'canvas-png'
+    payload = render.call_args.args[0]
+    assert payload['renderer'] == 'catalog-v2'
+    assert payload['type'] == 'cdf'
+    assert payload['title'] == 'Radio quality'
+
+
+def test_report_renderer_rejects_unknown_engine() -> None:
+    entry = CatalogEntry(
+        1, 'Radio quality', '', '', 'Radio quality', 'CDR-Data',
+        'NR SINR', 'CDF Line', '', '', 'Operator', 'Campaign', 'Right',
+    )
+    frame = pd.DataFrame({'Operator': ['EE'], 'Campaign': ['2026 Q1'], 'NR SINR': [4.0]})
+
+    with pytest.raises(ValueError, match="Expected 'pil' or 'dashboard-canvas'"):
+        render_catalog_chart_preview(frame, entry, renderer='unknown')
+
+
+def test_report_renderer_defaults_to_canvas_and_keeps_pil_override(monkeypatch) -> None:
+    import src.modules.cdr_reporting as reporting
+
+    monkeypatch.delenv(reporting.REPORT_CHART_RENDERER_ENV, raising=False)
+    assert reporting.report_chart_renderer_name() == 'dashboard-canvas'
+    monkeypatch.setenv(reporting.REPORT_CHART_RENDERER_ENV, 'pil')
+    assert reporting.report_chart_renderer_name() == 'pil'
+
+
+def test_canvas_hits_are_reused_by_static_chart_tooltips() -> None:
+    import src.modules.cdr_reporting as reporting
+
+    entry = CatalogEntry(
+        1, 'Throughput', '', '', 'Throughput', 'CDR-Data',
+        'Mean_Data_Rate', 'Average Vertical Bars', '', '', 'Operator', 'Campaign', 'Right',
+    )
+    frame = pd.DataFrame({'Operator': ['EE'], 'Campaign': ['2026 Q1'], 'Mean_Data_Rate': [42.0]})
+    hits = [{
+        'kind': 'rectangle', 'x': 10, 'y': 20, 'width': 30, 'height': 40,
+        'label': 'EE · 2026 Q1', 'series': 'EE', 'value': '42.00',
+    }]
+
+    with patch('src.modules.cdr_reporting._render_dashboard_payload', return_value=(b'canvas-png', hits)):
+        image, targets = reporting.render_catalog_chart_preview_with_hover(frame, entry)
+
+    assert image == b'canvas-png'
+    assert targets == [{
+        'kind': 'bar', 'x': 10.0, 'y': 20.0, 'width': 30.0, 'height': 40.0,
+        'label': 'EE · 2026 Q1', 'legend': 'EE', 'value': '42.00',
+    }]
+
+
 def test_not_contains_filter_excludes_each_comma_separated_term() -> None:
     entry = CatalogEntry(
         1, 'Quality', '', 'Title and 1 column', '', 'CDR-Speech', 'LQ', 'CDF Line',
@@ -2103,11 +2167,12 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
 
     rendered: list[tuple[str, bool]] = []
 
-    def render_preview(frame, entry, *, multivendor=False):
+    def render_preview(frame, entry, *, multivendor=False, **_kwargs):
         rendered.append((entry.cdr_source, multivendor))
         return b'PNG'
 
     monkeypatch.setattr(app_module, 'render_catalog_chart_preview', render_preview)
+    monkeypatch.setattr(app_module, 'report_chart_renderer_name', lambda: 'pil')
     response = client.post('/reporting/netcheck-cdr/charts', data={
         'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
         'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',
@@ -2206,11 +2271,12 @@ def test_reporting_accepts_partial_cdr_sources_and_marks_missing_chart_sources(c
     assert uploaded.status_code == 200
     rendered_sources: list[str] = []
 
-    def render_preview(frame, entry, *, multivendor=False):
+    def render_preview(frame, entry, *, multivendor=False, **_kwargs):
         rendered_sources.append(entry.cdr_source)
         return b'PNG'
 
     monkeypatch.setattr(app_module, 'render_catalog_chart_preview', render_preview)
+    monkeypatch.setattr(app_module, 'report_chart_renderer_name', lambda: 'pil')
     response = client.post('/reporting/netcheck-cdr/charts', data={
         'data_dataset_id': 1, 'technology': 'nsa', 'report_scope': 'single',
         'slides_templates': 'nsa:NSA Slide Template',
@@ -2387,6 +2453,7 @@ def test_report_chart_generation_failures_return_json_and_are_logged(client, mon
         raise RuntimeError('Synthetic renderer failure')
 
     monkeypatch.setattr(app_module, 'render_catalog_chart_preview', fail_render)
+    monkeypatch.setattr(app_module, 'report_chart_renderer_name', lambda: 'pil')
     response = client.post('/reporting/netcheck-cdr/charts', data={
         'data_dataset_id': 1, 'voice_dataset_id': 2, 'speech_dataset_id': 3,
         'technology': 'nsa', 'report_scope': 'single', 'slides_templates': 'nsa:NSA Slide Template',

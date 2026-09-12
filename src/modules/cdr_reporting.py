@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import atexit
+import base64
 import csv
 import gc
 import io
@@ -10,6 +12,8 @@ import math
 import os
 import re
 import ssl
+import subprocess
+import threading
 import unicodedata
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -69,6 +73,149 @@ OSM_TILE_MAX_COUNT = 48
 OSM_TILE_MAX_ZOOM = 18
 OSM_TILE_CACHE_DIR = settings.data_dir / 'map-tiles-cache' / 'openstreetmap'
 OSM_TLS_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+REPORT_CHART_RENDERER_ENV = "DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER"
+_DASHBOARD_CANVAS_RENDERER = None
+_DASHBOARD_CANVAS_RENDERER_LOCK = threading.RLock()
+
+
+class _DashboardCanvasRenderer:
+    """Keep one headless Chromium canvas alive for repeated report PNG exports."""
+
+    def __init__(self) -> None:
+        script = Path(__file__).with_name("dashboard_canvas_renderer.mjs")
+        self.process = subprocess.Popen(
+            ["node", str(script)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
+        )
+        ready_line = self.process.stdout.readline() if self.process.stdout else ""
+        ready = json.loads(ready_line or "{}")
+        if not ready.get("ready"):
+            self.close()
+            raise RuntimeError(ready.get("error") or "Unable to start the Dashboard Canvas renderer.")
+        self.request_id = 0
+
+    def render(self, payload: dict[str, object]) -> tuple[bytes, list[dict[str, object]]]:
+        if not self.process.stdin or not self.process.stdout or self.process.poll() is not None:
+            raise RuntimeError("The Dashboard Canvas renderer is not running.")
+        self.request_id += 1
+        self.process.stdin.write(json.dumps({"id": self.request_id, "payload": payload}, separators=(",", ":")) + "\n")
+        self.process.stdin.flush()
+        response = json.loads(self.process.stdout.readline() or "{}")
+        if response.get("error"):
+            raise RuntimeError(response["error"])
+        if response.get("id") != self.request_id or not response.get("png"):
+            raise RuntimeError("The Dashboard Canvas renderer returned an invalid response.")
+        hits = response.get("hits")
+        return base64.b64decode(response["png"]), hits if isinstance(hits, list) else []
+
+    def close(self) -> None:
+        process = getattr(self, "process", None)
+        if process is None or process.poll() is not None:
+            return
+        if process.stdin:
+            process.stdin.close()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+
+
+def _render_dashboard_payload(
+    payload: dict[str, object],
+) -> tuple[bytes, list[dict[str, object]]]:
+    global _DASHBOARD_CANVAS_RENDERER
+    with _DASHBOARD_CANVAS_RENDERER_LOCK:
+        if _DASHBOARD_CANVAS_RENDERER is None or _DASHBOARD_CANVAS_RENDERER.process.poll() is not None:
+            _DASHBOARD_CANVAS_RENDERER = _DashboardCanvasRenderer()
+        return _DASHBOARD_CANVAS_RENDERER.render(payload)
+
+
+def _render_dashboard_payload_png(payload: dict[str, object]) -> bytes:
+    return _render_dashboard_payload(payload)[0]
+
+
+def _close_dashboard_canvas_renderer() -> None:
+    global _DASHBOARD_CANVAS_RENDERER
+    with _DASHBOARD_CANVAS_RENDERER_LOCK:
+        if _DASHBOARD_CANVAS_RENDERER is not None:
+            _DASHBOARD_CANVAS_RENDERER.close()
+            _DASHBOARD_CANVAS_RENDERER = None
+
+
+atexit.register(_close_dashboard_canvas_renderer)
+
+
+def report_chart_renderer_name(renderer: str | None = None) -> str:
+    """Resolve the shared export painter, with PIL retained as an explicit fallback."""
+    selected = (renderer or os.environ.get(REPORT_CHART_RENDERER_ENV, "dashboard-canvas")).strip().casefold()
+    aliases = {
+        "pil": "pil",
+        "legacy": "pil",
+        "dashboard": "dashboard-canvas",
+        "canvas": "dashboard-canvas",
+        "dashboard-canvas": "dashboard-canvas",
+    }
+    if selected not in aliases:
+        raise ValueError(
+            f"Unsupported report chart renderer '{selected}'. Expected 'pil' or 'dashboard-canvas'."
+        )
+    return aliases[selected]
+
+
+def _dashboard_hits_to_hover_targets(
+    hits: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Convert live Canvas hit geometry to the static PNG viewer contract."""
+    targets: list[dict[str, object]] = []
+    for hit in hits:
+        kind = str(hit.get("kind") or "")
+        label = str(hit.get("label") or "")
+        legend = str(hit.get("series") or hit.get("legend") or "")
+        if kind == "rectangle":
+            targets.append({
+                "kind": "bar",
+                "x": float(hit.get("x") or 0),
+                "y": float(hit.get("y") or 0),
+                "width": float(hit.get("width") or 0),
+                "height": float(hit.get("height") or 0),
+                "label": label,
+                "legend": legend,
+                "value": str(hit.get("value") or ""),
+            })
+        elif kind == "point":
+            x, y = float(hit.get("x") or 0), float(hit.get("y") or 0)
+            targets.append({
+                "kind": "bar", "x": x - 7, "y": y - 7, "width": 14.0, "height": 14.0,
+                "label": label, "legend": legend, "value": str(hit.get("value") or ""),
+            })
+        elif kind == "line":
+            points = hit.get("points") if isinstance(hit.get("points"), list) else []
+            if len(points) > MAX_CDF_HOVER_TARGETS_PER_SERIES:
+                indexes = sorted({
+                    round(index * (len(points) - 1) / (MAX_CDF_HOVER_TARGETS_PER_SERIES - 1))
+                    for index in range(MAX_CDF_HOVER_TARGETS_PER_SERIES)
+                })
+                points = [points[index] for index in indexes]
+            series_key = f"{label}\0{legend}"
+            for point in points:
+                if not isinstance(point, dict):
+                    continue
+                cumulative = point.get("cumulative")
+                targets.append({
+                    "kind": "line",
+                    "x": float(point.get("x") or 0),
+                    "y": float(point.get("y") or 0),
+                    "label": label,
+                    "legend": legend,
+                    "series": series_key,
+                    "value": str(point.get("value") or ""),
+                    **({"cumulative": f"{float(cumulative) * 100:.1f}%"} if cumulative is not None else {}),
+                })
+    return targets
 
 
 def _catalogue_header_key(value: str) -> str:
@@ -1628,18 +1775,57 @@ def render_catalog_chart_preview(
     *,
     multivendor: bool = False,
     prefiltered: bool = False,
+    renderer: str | None = None,
 ) -> bytes:
     """Render the same PNG chart used by a report for editor/report previews."""
     if not entry.source_kind:
         raise ValueError('Only chart rows with a CDR source can be previewed.')
     render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
     render_frame = frame if prefiltered else normalise_report_operator_aliases(frame)
+    if report_chart_renderer_name(renderer) == "dashboard-canvas":
+        payload = catalog_chart_payload(
+            render_frame,
+            render_entry,
+            multivendor=False,
+            prefiltered=prefiltered,
+        )
+        return _render_dashboard_payload_png(payload)
     return _chart_for_catalog_entry(
         render_entry,
         {render_entry.source_kind: render_frame},
         multivendor,
         prefiltered=prefiltered,
     ).getvalue()
+
+
+def render_catalog_chart_preview_with_hover(
+    frame: pd.DataFrame,
+    entry: CatalogEntry,
+    *,
+    multivendor: bool = False,
+    prefiltered: bool = False,
+    renderer: str | None = None,
+) -> tuple[bytes, list[dict[str, object]]]:
+    """Render one PNG and return hit geometry from the selected painter."""
+    selected = report_chart_renderer_name(renderer)
+    if selected != "dashboard-canvas":
+        return (
+            render_catalog_chart_preview(
+                frame, entry, multivendor=multivendor, prefiltered=prefiltered, renderer=selected,
+            ),
+            catalog_chart_hover_targets(
+                frame, entry, multivendor=multivendor, prefiltered=prefiltered,
+            ),
+        )
+    if not entry.source_kind:
+        raise ValueError('Only chart rows with a CDR source can be previewed.')
+    render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
+    render_frame = frame if prefiltered else normalise_report_operator_aliases(frame)
+    payload = catalog_chart_payload(
+        render_frame, render_entry, multivendor=False, prefiltered=prefiltered,
+    )
+    image, hits = _render_dashboard_payload(payload)
+    return image, _dashboard_hits_to_hover_targets(hits)
 
 
 def catalog_chart_hover_targets(
@@ -4538,6 +4724,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
         # releases the previous large DataFrame before loading the next one.
         if frame_loader is not None and source != active_source:
             cached_frames.clear()
+            prepared_frames.clear()
             gc.collect()
         if source not in cached_frames:
             if frame_loader is None:
@@ -4548,6 +4735,27 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
     presentation = Presentation(template)
     _remove_all_slides(presentation)
     rendered_charts: list[dict[str, object]] = []
+    prepared_frames: dict[tuple[object, ...], pd.DataFrame] = {}
+    selected_renderer = report_chart_renderer_name()
+
+    def prepared_chart_frame(source_frame: pd.DataFrame, entry: CatalogEntry) -> tuple[pd.DataFrame, CatalogEntry]:
+        prepared_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
+        key = (
+            id(source_frame), prepared_entry.source_kind, prepared_entry.cdr_source,
+            prepared_entry.kpi, prepared_entry.filters, prepared_entry.calculated_dimensions,
+        )
+        prepared = prepared_frames.get(key)
+        if prepared is None:
+            try:
+                prepared = prepare_catalog_chart_preview_frame(
+                    source_frame, prepared_entry, multivendor=False,
+                )[0]
+            except ValueError:
+                # Historical templates can reference a field absent from one
+                # selected CDR. Preserve the established empty-chart result.
+                prepared = source_frame.iloc[0:0].copy()
+            prepared_frames[key] = prepared
+        return prepared, prepared_entry
 
     catalogue_slides: dict[int, list[CatalogEntry]] = defaultdict(list)
     render_catalog = [prepare_multivendor_catalog_entry(entry) if multivendor else entry for entry in catalog]
@@ -4569,7 +4777,10 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
         for child in chart_output_dir.iterdir():
             if child.name == 'manifest.json' or child.name.removesuffix('.hover.json') + '.png' not in expected_chart_files and child.name not in expected_chart_files:
                 child.unlink(missing_ok=True)
-    hover_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='report-hover') if generate_tooltips else None
+    hover_executor = (
+        ThreadPoolExecutor(max_workers=1, thread_name_prefix='report-hover')
+        if generate_tooltips and selected_renderer == 'pil' else None
+    )
     for number in sorted(catalogue_slides):
         slide_entries = catalogue_slides[number]
         header = slide_entries[0]
@@ -4626,6 +4837,9 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
                     chart_path.unlink(missing_ok=True)
             source_frame = frame_for(entry.source_kind)
             source_unavailable = bool(source_frame.attrs.get("report_source_unavailable"))
+            prepared_frame, prepared_entry = (
+                (source_frame, entry) if source_unavailable else prepared_chart_frame(source_frame, entry)
+            )
             reusable_hover = None
             if chart_bytes is not None and generate_tooltips and chart_output_dir is not None:
                 try:
@@ -4635,14 +4849,20 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
                 except (OSError, json.JSONDecodeError):
                     reusable_hover = None
             hover_future = hover_executor.submit(
-                catalog_chart_hover_targets, source_frame, entry, multivendor=multivendor,
+                catalog_chart_hover_targets, prepared_frame, prepared_entry, prefiltered=True,
             ) if hover_executor and not source_unavailable and reusable_hover is None else None
+            canvas_hover = None
             if chart_bytes is None:
-                chart_bytes = (
-                    render_unavailable_source_chart(entry)
-                    if source_unavailable
-                    else render_catalog_chart_preview(source_frame, entry, multivendor=multivendor)
-                )
+                if source_unavailable:
+                    chart_bytes = render_unavailable_source_chart(entry)
+                elif selected_renderer == 'dashboard-canvas':
+                    chart_bytes, canvas_hover = render_catalog_chart_preview_with_hover(
+                        prepared_frame, prepared_entry, prefiltered=True, renderer=selected_renderer,
+                    )
+                else:
+                    chart_bytes = render_catalog_chart_preview(
+                        prepared_frame, prepared_entry, prefiltered=True, renderer=selected_renderer,
+                    )
             # Rebuild the source frame before retrying an unexpected empty
             # chart. Retrying the same already-loaded frame cannot recover a
             # worker that was under memory pressure while materialising it.
@@ -4651,10 +4871,29 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
                     break
                 del chart_bytes
                 cached_frames.pop(entry.source_kind, None)
+                prepared_frames.clear()
                 gc.collect()
                 source_frame = frame_for(entry.source_kind)
-                chart_bytes = render_catalog_chart_preview(source_frame, entry, multivendor=multivendor)
-            hover_targets = reusable_hover if reusable_hover is not None else (hover_future.result() if hover_future else None)
+                prepared_frame, prepared_entry = prepared_chart_frame(source_frame, entry)
+                if selected_renderer == 'dashboard-canvas':
+                    chart_bytes, canvas_hover = render_catalog_chart_preview_with_hover(
+                        prepared_frame, prepared_entry, prefiltered=True, renderer=selected_renderer,
+                    )
+                else:
+                    chart_bytes = render_catalog_chart_preview(
+                        prepared_frame, prepared_entry, prefiltered=True, renderer=selected_renderer,
+                    )
+            if reusable_hover is not None:
+                hover_targets = reusable_hover
+            elif generate_tooltips and canvas_hover is not None:
+                hover_targets = canvas_hover
+            elif hover_future:
+                hover_targets = hover_future.result()
+            elif generate_tooltips and chart_bytes is not None and selected_renderer == 'dashboard-canvas' and not source_unavailable:
+                # A reused PNG without a matching sidecar cannot expose its in-memory Canvas hits.
+                hover_targets = catalog_chart_hover_targets(prepared_frame, prepared_entry, prefiltered=True)
+            else:
+                hover_targets = None
             if on_chart_rendered:
                 on_chart_rendered(entry, len(source_frame.index), is_empty_catalog_chart(chart_bytes, entry))
             if chart_output_dir is not None:

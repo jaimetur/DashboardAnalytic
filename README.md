@@ -141,6 +141,7 @@ Local storage roots can be set in [`storage-paths.conf`](storage-paths.conf). En
 | `APP_CONFIG_DIR` | Global database, users, permissions and transfer offers. |
 | `APP_DATA_DIR` | Workspace registry, workspaces, Report Templates and transfer packages. |
 | `APP_ASSETS_DIR` | Bundled assets and PowerPoint masters. |
+| `DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER` | Report, Chart Set and preview renderer. Defaults to `dashboard-canvas`; set `pil` to use the legacy server-side painter. |
 | `TZ` | Container timezone, for example `Europe/Madrid`. |
 | `HOST_CONFIG_DIR` | Host path mounted as persistent configuration. |
 | `HOST_DATA_DIR` | Host path mounted as persistent data. |

@@ -4,6 +4,7 @@ ARG TZ=Europe/Madrid
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER=dashboard-canvas \
     TZ=${TZ}
 
 WORKDIR /app
@@ -15,7 +16,7 @@ COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tzdata fonts-liberation \
+    && apt-get install -y --no-install-recommends chromium nodejs node-ws tzdata fonts-liberation \
     && ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime \
     && echo ${TZ} > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*

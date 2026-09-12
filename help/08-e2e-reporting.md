@@ -355,6 +355,8 @@ Vendor colour families are stable:
 
 **Generate Report Charts** queues a Chart Set job under `output/charts/<timestamp>/`.
 
+Reports, Chart Sets, Dashboard charts and interactive previews use the shared Dashboard Canvas painter. It produces the PNG and its semantic tooltip geometry in one pass, so visual formatting remains consistent across every destination. Server administrators can temporarily select the legacy PIL painter by setting `DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER=pil` before starting the application.
+
 The Charts Panel supports:
 
 - report-generated and standalone sets;

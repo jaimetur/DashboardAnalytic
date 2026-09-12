@@ -49,7 +49,7 @@ DEFAULT_TRANSFER_PORT = 7278
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_cdr_report, render_unavailable_source_chart
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE
@@ -7938,7 +7938,11 @@ def _run_report_chart_job(
                 rendered = 0
                 empty_charts: list[dict[str, Any]] = []
                 chart_metrics: list[dict[str, Any]] = []
-                hover_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='chart-hover') if generate_tooltips else None
+                selected_renderer = report_chart_renderer_name()
+                hover_executor = (
+                    ThreadPoolExecutor(max_workers=1, thread_name_prefix='chart-hover')
+                    if generate_tooltips and selected_renderer == 'pil' else None
+                )
                 try:
                     for kind in ('data', 'voice', 'speech'):
                         entries = [
@@ -7969,6 +7973,7 @@ def _run_report_chart_job(
                         frame = _combined_reporting_frame(selected[kind], technology, catalog_entries, multivendor, task_repository)
                         if multivendor:
                             frame = ensure_report_vendor_group(frame)
+                        prepared_frames: dict[tuple[Any, ...], pd.DataFrame] = {}
                         task_repository.update_report_chart_job(job_id, status='processing', progress=12 + int(rendered * 83 / len(chart_entries)))
                         for order, entry in entries:
                             _ensure_report_job_active(task_repository, job_id, chart_job=True)
@@ -7985,10 +7990,34 @@ def _run_report_chart_job(
                                         **({'hover_targets': hover_targets} if hover_targets is not None else {})}, image)
                                 continue
                             try:
+                                prepared_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
+                                prepared_key = (
+                                    prepared_entry.cdr_source, prepared_entry.kpi, prepared_entry.filters,
+                                    prepared_entry.calculated_dimensions,
+                                )
+                                prepared_frame = prepared_frames.get(prepared_key)
+                                if prepared_frame is None:
+                                    try:
+                                        prepared_frame = prepare_catalog_chart_preview_frame(
+                                            frame, prepared_entry, multivendor=False,
+                                        )[0]
+                                    except ValueError:
+                                        prepared_frame = frame.iloc[0:0].copy()
+                                    prepared_frames[prepared_key] = prepared_frame
                                 hover_future = hover_executor.submit(
-                                    catalog_chart_hover_targets, frame, entry, multivendor=multivendor,
+                                    catalog_chart_hover_targets, prepared_frame, prepared_entry, prefiltered=True,
                                 ) if hover_executor else None
-                                image = render_catalog_chart_preview(frame, entry, multivendor=multivendor)
+                                if selected_renderer == 'dashboard-canvas':
+                                    image, hover_targets = render_catalog_chart_preview_with_hover(
+                                        prepared_frame, prepared_entry, prefiltered=True, renderer=selected_renderer,
+                                    )
+                                    if not generate_tooltips:
+                                        hover_targets = None
+                                else:
+                                    image = render_catalog_chart_preview(
+                                        prepared_frame, prepared_entry, prefiltered=True, renderer=selected_renderer,
+                                    )
+                                    hover_targets = None
                             except Exception as exc:
                                 chart_name = entry.chart_title or entry.slide_title or 'Untitled chart'
                                 raise ValueError(f"Slide {entry.slide}, chart '{chart_name}': {exc}") from exc
@@ -8000,11 +8029,28 @@ def _run_report_chart_job(
                                 # reproduce the same empty placeholder.
                                 del image
                                 del frame
+                                prepared_frames.clear()
                                 gc.collect()
                                 frame = _combined_reporting_frame(selected[kind], technology, catalog_entries, multivendor, task_repository)
                                 if multivendor:
                                     frame = ensure_report_vendor_group(frame)
-                                image = render_catalog_chart_preview(frame, entry, multivendor=multivendor)
+                                try:
+                                    prepared_frame, prepared_entry = prepare_catalog_chart_preview_frame(
+                                        frame, entry, multivendor=multivendor,
+                                    )
+                                except ValueError:
+                                    prepared_frame = frame.iloc[0:0].copy()
+                                    prepared_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
+                                if selected_renderer == 'dashboard-canvas':
+                                    image, hover_targets = render_catalog_chart_preview_with_hover(
+                                        prepared_frame, prepared_entry, prefiltered=True, renderer=selected_renderer,
+                                    )
+                                    if not generate_tooltips:
+                                        hover_targets = None
+                                else:
+                                    image = render_catalog_chart_preview(
+                                        prepared_frame, prepared_entry, prefiltered=True, renderer=selected_renderer,
+                                    )
                             if is_empty_catalog_chart(image, entry):
                                 empty_charts.append({'slide': entry.slide, 'source': entry.cdr_source, 'source_rows': len(frame.index)})
                             chart_metrics.append({
@@ -8015,7 +8061,8 @@ def _run_report_chart_job(
                                 job_id, status='processing', progress=12 + int((rendered + .5) * 83 / len(chart_entries)),
                             )
                             try:
-                                hover_targets = hover_future.result() if hover_future else None
+                                if hover_future:
+                                    hover_targets = hover_future.result()
                             except Exception as exc:
                                 chart_name = entry.chart_title or entry.slide_title or 'Untitled chart'
                                 raise ValueError(f"Slide {entry.slide}, chart '{chart_name}' tooltip generation: {exc}") from exc
