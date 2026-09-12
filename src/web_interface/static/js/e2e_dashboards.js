@@ -352,10 +352,22 @@
     list.replaceChildren();
     if (!comments.length) { list.append(node('li', 'No comments for this slide.', 'ds-comments-empty')); return; }
     comments.forEach((comment, index) => {
-      const item = node('li', undefined, 'ds-comment'), text = node('span', comment);
+      const item = node('li', undefined, 'ds-comment');
+      const editor = document.createElement('input'); editor.type = 'text'; editor.value = comment; editor.maxLength = 500; editor.setAttribute('aria-label', `Comment ${index + 1}`);
+      let savedComment = comment;
+      const saveEdit = safe(async () => {
+        const value = editor.value.trim();
+        if (value === savedComment || !definition) return;
+        const slideComments = definition.slide_comments[currentSlideCommentKey()];
+        if (!slideComments) return;
+        slideComments[index] = value;
+        await persistComments(); savedComment = value; renderComments();
+      });
+      editor.addEventListener('change', saveEdit);
+      editor.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); editor.blur(); } });
       const remove = node('button', '×', 'ds-comment-remove'); remove.type = 'button'; remove.title = 'Remove comment'; remove.setAttribute('aria-label', 'Remove comment');
       remove.onclick = safe(async () => { definition.slide_comments[currentSlideCommentKey()].splice(index, 1); await persistComments(); renderComments(); });
-      item.append(text, remove); list.append(item);
+      item.append(editor, remove); list.append(item);
     });
   }
   async function persistComments() {
@@ -369,7 +381,10 @@
     $('ds-comments-status').textContent = 'Saved';
   }
   function syncPresentationControls() {
-    $('ds-presentation').textContent = presentation.running ? 'Stop presentation' : 'Presentation';
+    const button = $('ds-presentation');
+    button.classList.toggle('is-running', presentation.running);
+    button.title = presentation.running ? 'Stop presentation' : 'Presentation';
+    button.setAttribute('aria-label', presentation.running ? 'Stop presentation' : 'Presentation');
     $('ds-presentation-start').disabled = presentation.running;
     $('ds-presentation-stop').disabled = !presentation.running;
   }

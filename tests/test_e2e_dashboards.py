@@ -65,6 +65,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-preparing"' in page.text
     assert 'id="ds-preparing-title"' in page.text
     assert 'id="ds-viewer-preparing"' in page.text
+    assert '>Auto-Calculated Fields<' in page.text
+    assert 'class="ds-viewer-icon-action ds-viewer-refresh-action"' in page.text
     assert client.put('/api/e2e-dashboards/test', json=payload).status_code == 200
     assert client.get('/api/e2e-dashboards').json()['test']['name'] == 'Comparison'
     renamed = client.patch('/api/e2e-dashboards/test/name', json={'name': 'Renamed comparison'})

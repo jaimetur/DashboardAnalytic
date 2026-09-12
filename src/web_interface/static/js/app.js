@@ -234,6 +234,11 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
     managerActions.append(add, panelClose);
     const form = document.createElement('div'); form.className = 'calculated-dimension-editor'; form.hidden = true;
     panel.append(header, note, list, managerActions, form); overlay.append(panel); document.body.append(overlay);
+    let savedEditorState = '';
+    const editorState = () => JSON.stringify(Array.from(form.querySelectorAll('input, textarea')).map((input) => ({
+      type: input.type, value: input.value, checked: input.checked,
+    })));
+    const hasUnsavedEditorChanges = () => !form.hidden && editorState() !== savedEditorState;
     const finish = () => {
       window.removeEventListener('keydown', handleEscape, true);
       overlay.remove();
@@ -242,6 +247,7 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopImmediatePropagation();
+      if (!hasUnsavedEditorChanges()) finish();
     };
     close.addEventListener('click', finish); panelClose.addEventListener('click', finish);
     overlay.addEventListener('click', (event) => { if (event.target === overlay) finish(); });
@@ -293,6 +299,7 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
           save.disabled = true; await saveDimensions(next, rename); form.hidden = true; list.hidden = false; restoreManagerActions(); render();
         } catch (error) { save.disabled = false; showInfoDialog(error.message || 'Unable to save auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'}); }
       });
+      savedEditorState = editorState();
       name.focus();
     };
     const render = () => {
@@ -960,7 +967,11 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     managerActions.append(add, panelClose);
     const form = document.createElement('div'); form.className = 'calculated-dimension-editor'; form.hidden = true;
     panel.append(header, note, list, managerActions, form); overlay.append(panel); document.body.append(overlay);
-    let editingIndex = null;
+    let editingIndex = null, savedEditorState = '';
+    const editorState = () => JSON.stringify(Array.from(form.querySelectorAll('input, textarea')).map((input) => ({
+      type: input.type, value: input.value, checked: input.checked,
+    })));
+    const hasUnsavedEditorChanges = () => !form.hidden && editorState() !== savedEditorState;
     const finish = () => {
       window.removeEventListener('keydown', handleEscape, true);
       overlay.remove();
@@ -969,6 +980,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopImmediatePropagation();
+      if (!hasUnsavedEditorChanges()) finish();
     };
     close.addEventListener('click', finish);
     panelClose.addEventListener('click', finish);
@@ -1034,6 +1046,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
           showInfoDialog(error.message || 'Unable to save auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'});
         }
       });
+      savedEditorState = editorState();
       name.focus();
     };
 
@@ -2228,6 +2241,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   });
   addFilter?.addEventListener('click', () => addFilterCondition());
   closeDialog?.addEventListener('click', () => window.parent.postMessage({type: 'dashboard-analytic:close-template-editor'}, window.location.origin));
+  document.addEventListener('keydown', (event) => {
+    if (event.defaultPrevented || event.key !== 'Escape' || !helper.hidden) return;
+    if (hasUnsavedCatalogueChanges()) { event.preventDefault(); return; }
+    event.preventDefault();
+    window.parent.postMessage({type: 'dashboard-analytic:close-template-editor'}, window.location.origin);
+  });
   const displayChartType = (value) => String(value || '').replace(/\b\w+/g, (word) => (
     word.toLocaleLowerCase() === 'cdf'
       ? 'CDF' : `${word.charAt(0).toLocaleUpperCase()}${word.slice(1).toLocaleLowerCase()}`
