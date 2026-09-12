@@ -93,6 +93,25 @@ def test_dashboards_lifecycle_and_layout(client):
     assert client.get('/api/e2e-dashboards').json() == {}
 
 
+def test_dashboard_preview_identifies_title_and_transition_slides(client):
+    payload = setup_dashboard(client)
+    core.repository.add_report_template('nsa', 'Structural dashboard', (
+        'Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position\n'
+        '1,Quarterly review,Network results,Title Page,,,,Title Slide,,,,,Top\n'
+        '2,Voice performance,,Title Only,,,,Transition Slide,,,,,Top\n'
+    ).encode(), is_default=False)
+    payload['template'] = 'Structural dashboard'
+
+    preview = client.post('/api/e2e-dashboards/prepare', json=payload)
+
+    assert preview.status_code == 200, preview.text
+    slides = preview.json()['slides']
+    assert [(slide['title'], slide['structural_type'], slide['charts']) for slide in slides] == [
+        ('Quarterly review', 'title slide', []),
+        ('Voice performance', 'transition slide', []),
+    ]
+
+
 def test_dashboard_state_migrates_from_legacy_storage(client):
     payload = setup_dashboard(client)
     core.repository.set_workspace_state('e2e_dashboard_sets_v1', '{"legacy": ' + json.dumps(payload) + '}')

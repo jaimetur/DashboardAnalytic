@@ -545,7 +545,15 @@ def install_dashboard_routes(core):
         slides = OrderedDict()
         deck = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
         for editor_index, (index, entry) in enumerate(sorted(enumerate(entries), key=lambda item: (item[1].slide, item[0]))):
-            slide = slides.setdefault(entry.slide, {'number': entry.slide, 'title': entry.slide_title, 'subtitle': entry.slide_subtitle, 'layout': entry.layout, 'charts': [], 'focus_row': editor_index})
+            slide = slides.setdefault(entry.slide, {
+                'number': entry.slide,
+                'title': entry.slide_title,
+                'subtitle': entry.slide_subtitle,
+                'layout': entry.layout,
+                'structural_type': entry.structural_type or '',
+                'charts': [],
+                'focus_row': editor_index,
+            })
             if not entry.structural_type:
                 slide['charts'].append({'index': index, 'title': entry.chart_title, 'source': entry.source_kind, 'available': entry.source_kind in selected_by_kind})
         for slide in slides.values():

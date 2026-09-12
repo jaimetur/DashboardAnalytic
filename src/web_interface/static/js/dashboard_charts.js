@@ -7,6 +7,7 @@
   const FONT_FAMILY = 'Arial, sans-serif';
   const models = new WeakMap();
   const views = new WeakMap();
+  const cameraStates = new WeakMap();
   const renderStates = new WeakMap();
   const observed = new WeakSet();
   const mapTiles = new Map();
@@ -89,21 +90,50 @@
     return records;
   }
 
+  function cameraFor(canvas) {
+    let camera = cameraStates.get(canvas);
+    if (!camera) {
+      camera = {zoom: 1, panX: 0, panY: 0};
+      cameraStates.set(canvas, camera);
+    }
+    return camera;
+  }
+
+  function constrainCamera(camera) {
+    camera.zoom = clamp(Number(camera.zoom) || 1, 1, 4);
+    if (camera.zoom === 1) {
+      camera.panX = 0;
+      camera.panY = 0;
+      return camera;
+    }
+    const maximumX = LOGICAL_WIDTH * (camera.zoom - 1) / 2;
+    const maximumY = LOGICAL_HEIGHT * (camera.zoom - 1) / 2;
+    camera.panX = clamp(Number(camera.panX) || 0, -maximumX, maximumX);
+    camera.panY = clamp(Number(camera.panY) || 0, -maximumY, maximumY);
+    return camera;
+  }
+
   function prepareCanvas(canvas) {
     const bounds = canvas.getBoundingClientRect();
-    const cssWidth = Math.max(260, Math.round(bounds.width || canvas.parentElement?.clientWidth || 600));
-    const cssHeight = Math.max(180, Math.round(bounds.height || canvas.parentElement?.clientHeight || 360));
+    const cssWidth = Math.max(1, bounds.width || canvas.parentElement?.clientWidth || 600);
+    const cssHeight = Math.max(1, bounds.height || canvas.parentElement?.clientHeight || 360);
     const pixelRatio = Math.min(globalThis.devicePixelRatio || 1, 2);
     const backingWidth = Math.round(cssWidth * pixelRatio), backingHeight = Math.round(cssHeight * pixelRatio);
     if (canvas.width !== backingWidth || canvas.height !== backingHeight) { canvas.width = backingWidth; canvas.height = backingHeight; }
     const context = canvas.getContext('2d');
     context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0); context.clearRect(0, 0, cssWidth, cssHeight);
     context.fillStyle = '#FFFFFF'; context.fillRect(0, 0, cssWidth, cssHeight);
-    const scale = Math.min(cssWidth / LOGICAL_WIDTH, cssHeight / LOGICAL_HEIGHT);
-    const offsetX = (cssWidth - LOGICAL_WIDTH * scale) / 2, offsetY = (cssHeight - LOGICAL_HEIGHT * scale) / 2;
-    context.setTransform(pixelRatio * scale, 0, 0, pixelRatio * scale, pixelRatio * offsetX, pixelRatio * offsetY);
+    const scaleX = cssWidth / LOGICAL_WIDTH, scaleY = cssHeight / LOGICAL_HEIGHT;
+    const camera = cameraFor(canvas);
+    constrainCamera(camera);
+    const originX = (1 - camera.zoom) * LOGICAL_WIDTH / 2 + camera.panX;
+    const originY = (1 - camera.zoom) * LOGICAL_HEIGHT / 2 + camera.panY;
+    context.setTransform(
+      pixelRatio * scaleX * camera.zoom, 0, 0, pixelRatio * scaleY * camera.zoom,
+      pixelRatio * scaleX * originX, pixelRatio * scaleY * originY,
+    );
     context.lineJoin = 'round'; context.lineCap = 'round'; context.textBaseline = 'top';
-    views.set(canvas, {scale, offsetX, offsetY});
+    views.set(canvas, {scaleX, scaleY, zoom: camera.zoom, originX, originY});
     return context;
   }
 
@@ -580,7 +610,10 @@
     if (canvas.dataset.tooltipReady) return; canvas.dataset.tooltipReady = 'true';
     canvas.addEventListener('pointermove', event => {
       const view = views.get(canvas), state = renderStates.get(canvas), tooltip = tooltipFor(canvas); if (!view || !state || !tooltip) return;
-      const bounds = canvas.getBoundingClientRect(), x = (event.clientX - bounds.left - view.offsetX) / view.scale, y = (event.clientY - bounds.top - view.offsetY) / view.scale;
+      if (canvas.classList.contains('is-panning')) { tooltip.hidden = true; return; }
+      const bounds = canvas.getBoundingClientRect();
+      const x = ((event.clientX - bounds.left) / view.scaleX - view.originX) / view.zoom;
+      const y = ((event.clientY - bounds.top) / view.scaleY - view.originY) / view.zoom;
       const hit = closestHit(state.hits, x, y); if (!hit) { tooltip.hidden = true; return; }
       const point = hit.point, lines = [hit.label, hit.series, hit.value || (point ? numericLabel(point.value) : '')].filter(Boolean);
       if (point && finite(point.cumulative)) lines.push(percent(point.cumulative));
@@ -593,13 +626,67 @@
     canvas.addEventListener('pointerleave', () => { const tooltip = tooltipFor(canvas); if (tooltip) tooltip.hidden = true; });
   }
 
+  function setChartZoom(canvas, requestedZoom) {
+    const camera = cameraFor(canvas);
+    camera.zoom = requestedZoom;
+    constrainCamera(camera);
+    canvas.classList.toggle('ds-chart-zoomed', camera.zoom > 1);
+    const payload = models.get(canvas);
+    if (payload) draw(canvas, payload);
+    canvas.dispatchEvent(new CustomEvent('dashboardchartzoom', {detail: {zoom: camera.zoom}}));
+    return camera.zoom;
+  }
+
+  function attachPan(canvas) {
+    if (canvas.dataset.panReady) return;
+    canvas.dataset.panReady = 'true';
+    let drag = null, pendingX = 0, pendingY = 0, panFrame = 0;
+    const paintPan = () => {
+      panFrame = 0;
+      const view = views.get(canvas), payload = models.get(canvas);
+      if (!view || !payload || (!pendingX && !pendingY)) return;
+      const camera = cameraFor(canvas);
+      camera.panX += pendingX / view.scaleX;
+      camera.panY += pendingY / view.scaleY;
+      pendingX = 0; pendingY = 0;
+      constrainCamera(camera);
+      draw(canvas, payload);
+    };
+    canvas.addEventListener('pointerdown', event => {
+      if (event.button !== 0 || cameraFor(canvas).zoom <= 1) return;
+      drag = {pointerId: event.pointerId, x: event.clientX, y: event.clientY};
+      canvas.classList.add('is-panning');
+      canvas.setPointerCapture?.(event.pointerId);
+      const tooltip = tooltipFor(canvas); if (tooltip) tooltip.hidden = true;
+      event.preventDefault();
+    });
+    canvas.addEventListener('pointermove', event => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      pendingX += event.clientX - drag.x; pendingY += event.clientY - drag.y;
+      drag.x = event.clientX; drag.y = event.clientY;
+      if (!panFrame) panFrame = requestAnimationFrame(paintPan);
+      event.preventDefault();
+    });
+    const stopPan = event => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      if (panFrame) { cancelAnimationFrame(panFrame); paintPan(); }
+      canvas.releasePointerCapture?.(event.pointerId);
+      canvas.classList.remove('is-panning');
+      drag = null;
+    };
+    canvas.addEventListener('pointerup', stopPan);
+    canvas.addEventListener('pointercancel', stopPan);
+  }
+
   const resizeObserver = 'ResizeObserver' in globalThis ? new ResizeObserver(entries => {
     cancelAnimationFrame(resizeFrame);
     resizeFrame = requestAnimationFrame(() => entries.forEach(entry => { const payload = models.get(entry.target); if (payload) draw(entry.target, payload); }));
   }) : null;
 
   globalThis.renderDashboardChart = (canvas, payload) => {
-    models.set(canvas, payload); draw(canvas, payload); attachTooltip(canvas);
+    models.set(canvas, payload); draw(canvas, payload); attachTooltip(canvas); attachPan(canvas);
     if (resizeObserver && !observed.has(canvas)) { observed.add(canvas); resizeObserver.observe(canvas); }
   };
+  globalThis.setDashboardChartZoom = setChartZoom;
+  globalThis.getDashboardChartZoom = canvas => cameraFor(canvas).zoom;
 })();

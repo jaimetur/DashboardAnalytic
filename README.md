@@ -48,7 +48,7 @@ Datasets Analysis analyses one ready Data, Voice or Speech CDR.
 
 ### E2E Dashboards
 
-Create, save, duplicate, import and export workspace Dashboards from any Report Template. Combine CDR sources, apply adaptive and custom Auto-calculated Field filters, and view each Slide with all its charts in the template layout. Persisted filter catalogues and narrow analytical projections make opening and refiltering large Dashboards fast; the browser renders compact live chart models without waiting for PNG generation. The large viewer provides dashboard navigation, chart datasets and CSV downloads, template editing, and synchronized floating filters. See [E2E Dashboards Help](help/07-e2e-dashboards.md).
+Create, save, duplicate, import and export workspace Dashboards from any Report Template. Combine CDR sources, apply adaptive and custom Auto-calculated Field filters, and view each Slide with all its charts filling the template layout. Persisted filter catalogues and narrow analytical projections make opening and refiltering large Dashboards fast; the browser renders compact live chart models without waiting for PNG generation. The large viewer provides dashboard navigation, independent chart zoom and pan, branded Title and Transition Slides, chart datasets and CSV downloads, template editing, and synchronized floating filters. See [E2E Dashboards Help](help/07-e2e-dashboards.md).
 
 ### E2E Reporting
 

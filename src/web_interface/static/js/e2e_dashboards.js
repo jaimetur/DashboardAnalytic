@@ -266,6 +266,36 @@
     };
     firstSlideReady.finally(() => setTimeout(next, 60));
   }
+  function structuralDashboard(stage, slide) {
+    const kind = String(slide.structural_type || '').toLowerCase().includes('transition') ? 'transition' : 'title';
+    const cover = node('section', undefined, `ds-structural-slide ds-structural-${kind}`);
+    cover.setAttribute('aria-label', `${kind === 'transition' ? 'Transition' : 'Title'} dashboard: ${slide.title || 'Untitled'}`);
+    const brand = node('div', undefined, 'ds-structural-brand');
+    const mark = document.createElement('img'); mark.src = config.brand_mark; mark.alt = `${config.app_name || 'Dashboard Analytic'} logo`; mark.width = 72; mark.height = 72;
+    brand.append(node('strong', config.app_name || 'Dashboard Analytic'), mark);
+    const content = node('div', undefined, 'ds-structural-content');
+    content.append(node('h3', slide.title || 'Dashboard', 'ds-structural-title'));
+    if (slide.subtitle) content.append(node('p', slide.subtitle, 'ds-structural-subtitle'));
+    cover.append(content, brand); stage.append(cover);
+  }
+  function chartZoomControls(canvas) {
+    const controls = node('div', undefined, 'ds-chart-zoom'); controls.hidden = true; controls.setAttribute('role', 'group'); controls.setAttribute('aria-label', 'Chart zoom');
+    const zoomOut = node('button', '−', 'ds-chart-zoom-button'); zoomOut.type = 'button'; zoomOut.title = 'Zoom out'; zoomOut.setAttribute('aria-label', 'Zoom out');
+    const level = node('output', '100%', 'ds-chart-zoom-level'); level.setAttribute('aria-label', 'Current zoom');
+    const zoomIn = node('button', '+', 'ds-chart-zoom-button'); zoomIn.type = 'button'; zoomIn.title = 'Zoom in'; zoomIn.setAttribute('aria-label', 'Zoom in');
+    const reset = node('button', '↺', 'ds-chart-zoom-button ds-chart-zoom-reset'); reset.type = 'button'; reset.title = 'Reset zoom'; reset.setAttribute('aria-label', 'Reset zoom');
+    const sync = zoom => {
+      const value = Math.max(1, Math.min(4, Number(zoom) || 1));
+      level.value = `${Math.round(value * 100)}%`; level.textContent = level.value;
+      zoomOut.disabled = value <= 1; reset.disabled = value <= 1; zoomIn.disabled = value >= 4;
+    };
+    const apply = zoom => { if (globalThis.setDashboardChartZoom) sync(globalThis.setDashboardChartZoom(canvas, zoom)); };
+    zoomOut.onclick = event => { event.stopPropagation(); apply((globalThis.getDashboardChartZoom?.(canvas) || 1) - .25); };
+    zoomIn.onclick = event => { event.stopPropagation(); apply((globalThis.getDashboardChartZoom?.(canvas) || 1) + .25); };
+    reset.onclick = event => { event.stopPropagation(); apply(1); };
+    canvas.addEventListener('dashboardchartzoom', event => sync(event.detail?.zoom));
+    sync(1); controls.append(zoomOut, level, zoomIn, reset); return controls;
+  }
   function renderSlide() {
     if (!prepared) return; slideIndex = Math.max(0,Math.min(slideIndex,prepared.slides.length-1));
     const slide = prepared.slides[slideIndex]; if (!slide) return;
@@ -273,19 +303,23 @@
     $('ds-position').textContent = `${definition.name} · Dashboard ${slideIndex+1} / ${prepared.slides.length}`;
     $('ds-slide').replaceChildren(...prepared.slides.map((item,index)=>option(String(index),`${item.number} · ${item.title || 'Dashboard'}`))); $('ds-slide').value = String(slideIndex);
     $('ds-prev').disabled = slideIndex === 0; $('ds-next').disabled = slideIndex === prepared.slides.length-1;
-    const stage = $('ds-charts'); stage.replaceChildren(); stage.classList.toggle('ds-positioned',slide.charts.length > 0 && slide.charts.every(chart=>chart.position));
-    if (!slide.charts.length) stage.append(node('div',slide.title || 'Section dashboard','ds-empty'));
+    const stage = $('ds-charts'); stage.replaceChildren(); stage.classList.toggle('ds-positioned',slide.charts.length > 0 && slide.charts.every(chart=>chart.position)); stage.classList.toggle('ds-structural-stage', !slide.charts.length);
+    if (!slide.charts.length) structuralDashboard(stage, slide);
     for (const chart of slide.charts) {
       const card = node('article',undefined,'ds-chart'); card.setAttribute('aria-label',chart.title); card.tabIndex = 0;
       if (chart.position) { const [left,top,width,height] = chart.position; Object.assign(card.style,{left:`${left}%`,top:`${top}%`,width:`${width}%`,height:`${height}%`}); }
-      const message = node('div',`Preparing live ${chart.title || 'chart'}…`,'ds-chart-message'); card.append(message);
+      const message = node('div',`Rendering ${chart.title || 'chart'}…`,'ds-chart-message'); card.append(message);
       const canvas = document.createElement('canvas'); canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', chart.title); canvas.hidden = true; card.append(canvas);
+      const zoom = chartZoomControls(canvas); card.append(zoom);
       if (chart.available) {
         const token = prepared.token;
         loadChartPayload(chart).then(payload => {
           if (!card.isConnected || prepared?.token !== token) return;
-          message.remove(); canvas.hidden = false;
-          requestAnimationFrame(() => globalThis.renderDashboardChart(canvas, payload));
+          canvas.hidden = false;
+          requestAnimationFrame(() => {
+            try { globalThis.renderDashboardChart(canvas, payload); zoom.hidden = false; message.remove(); }
+            catch (error) { canvas.hidden = true; message.textContent = error.message || `Unable to render ${chart.title || 'chart'}.`; }
+          });
         }).catch(error => {
           if (prepared?.token === token) message.textContent = error.message || `Unable to render ${chart.title || 'chart'}.`;
         });
