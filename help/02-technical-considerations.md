@@ -265,7 +265,7 @@ Incomplete transfer files are cleaned up. Complete packages that were not import
 
 - SQLite uses WAL mode, a busy timeout and normal synchronous mode.
 - Processed CDR rows are materialised per dataset and into combined tables by CDR type.
-- E2E Dashboard filter catalogues come from persisted dataset profiles instead of repeated wide-table scans. Narrow, revision-keyed SQLite projections are warmed in the background and exact compact chart models persist across restarts; live charts are drawn in the browser rather than rendered as PNGs.
+- E2E Dashboard filter catalogues come from persisted dataset profiles instead of repeated wide-table scans. Narrow, revision-keyed SQLite projections are warmed in the background and exact compact chart models persist across restarts; live charts are drawn on a fixed logical browser canvas using the same aggregation, hierarchy, colour, title, legend and tooltip contracts as Report and Chart Set charts.
 - Interactive Preview caches combined and filtered frames separately.
 - Database import prefers bulk database/file replacement over row-by-row queries where safe.
 

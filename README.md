@@ -283,7 +283,7 @@ DashboardAnalytic/
 
 ## Current limitations
 
-- General analysis caches remain process-local; E2E Dashboard analytical projections and compact chart models persist beside each workspace database and survive application restarts.
+- General analysis caches remain process-local; E2E Dashboard analytical projections and report-faithful compact chart models persist beside each workspace database and survive application restarts.
 - SQLite is the current persistence model and may not suit very large concurrent deployments.
 - Smart Orchestrator Logs reporting is visible but not implemented.
 - Scoring and GAP automation remain planned work.

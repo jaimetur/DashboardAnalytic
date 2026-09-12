@@ -9,6 +9,8 @@
   const views = new WeakMap();
   const renderStates = new WeakMap();
   const observed = new WeakSet();
+  const mapTiles = new Map();
+  const mapWaits = new WeakMap();
   let resizeFrame = 0;
 
   const finite = value => Number.isFinite(Number(value));
@@ -39,6 +41,53 @@
   const pushLineHit = (state, transform, points, details) => {
     state.hits.push({kind: 'line', points: points.map(point => ({...point, ...transformPoint(transform, point.x, point.y)})), ...details});
   };
+
+  function osmWorldCoordinates(latitude, longitude, zoom) {
+    const boundedLatitude = clamp(Number(latitude), -85.05112878, 85.05112878);
+    const scale = 256 * (2 ** Number(zoom));
+    const x = (Number(longitude) + 180) / 360 * scale;
+    const radians = boundedLatitude * Math.PI / 180;
+    const y = (1 - Math.asinh(Math.tan(radians)) / Math.PI) / 2 * scale;
+    return [x, y];
+  }
+
+  function mapTileRecord(url) {
+    if (mapTiles.has(url)) return mapTiles.get(url);
+    const image = new Image();
+    const record = {image, status: 'loading'};
+    record.promise = new Promise(resolve => {
+      image.addEventListener('load', () => { record.status = 'ready'; resolve(record); }, {once: true});
+      image.addEventListener('error', () => { record.status = 'error'; resolve(record); }, {once: true});
+    });
+    image.decoding = 'async';
+    image.src = url;
+    mapTiles.set(url, record);
+    return record;
+  }
+
+  function mapTileRecords(canvas, payload) {
+    const basemap = payload.basemap, range = basemap?.tile_range;
+    if (!basemap || !Array.isArray(range) || range.length !== 4) return [];
+    const [left, top, right, bottom] = range.map(Number), records = [];
+    for (let y = top; y <= bottom; y += 1) {
+      for (let x = left; x <= right; x += 1) {
+        const url = String(basemap.url_template || '')
+          .replace('{z}', String(basemap.zoom)).replace('{x}', String(x)).replace('{y}', String(y));
+        records.push({x, y, ...mapTileRecord(url)});
+      }
+    }
+    const pending = records.filter(record => record.status === 'loading');
+    const signature = `${basemap.zoom}:${range.join(':')}`;
+    const waiting = mapWaits.get(canvas);
+    if (pending.length && (waiting?.signature !== signature || waiting?.payload !== payload)) {
+      mapWaits.set(canvas, {signature, payload});
+      Promise.all(pending.map(record => record.promise)).then(() => {
+        if (mapWaits.get(canvas)?.payload === payload) mapWaits.delete(canvas);
+        if (models.get(canvas) === payload) draw(canvas, payload);
+      });
+    }
+    return records;
+  }
 
   function prepareCanvas(canvas) {
     const bounds = canvas.getBoundingClientRect();
@@ -278,7 +327,7 @@
       context.fillStyle = '#4E6271'; context.textAlign = 'left'; font(context, 19, true); context.fillText('# of failed / dropped sessions', 390, 820); return;
     }
     const rowKeys = payload.row_keys || [[]], columnKeys = payload.column_keys || [];
-    const chartLeft = 285, chartTop = 245, chartHeight = 510, chartWidth = payload.legend?.position === 'right' ? 980 : 1250;
+    const chartLeft = 285, chartTop = 245, chartHeight = 510, chartWidth = payload.plot_legend_position === 'right' ? 980 : 1250;
     const outerTop = chartTop - 64, rowHeight = chartHeight / rowKeys.length, columnWidth = chartWidth / columnKeys.length;
     const groups = hierarchySpans(columnKeys, 0); font(context, 18, true);
     const rotate = groups.some(([start, end, value]) => textWidth(context, value.slice(0, 20)) + 14 > (end - start) * columnWidth);
@@ -431,14 +480,43 @@
     const xDomain = [rawX[0] - xPad, rawX[1] + xPad], yDomain = [rawY[0] - yPad, rawY[1] + yPad];
     context.fillStyle = '#EDF4F0'; context.fillRect(left, top, width, height);
     for (const fraction of [.2, .4, .6, .8]) { line(context, left + width * fraction, top, left + width * fraction, top + height, '#D8E5DF'); line(context, left, top + height * fraction, left + width, top + height * fraction, '#D8E5DF'); }
+    const basemap = payload.basemap, worldBounds = basemap?.world_bounds;
+    const tileRecords = mapTileRecords(state.canvas, payload);
+    if (Array.isArray(worldBounds) && worldBounds.length === 4) {
+      const [worldLeft, worldTop, worldRight, worldBottom] = worldBounds.map(Number);
+      const sourceWidth = worldRight - worldLeft, sourceHeight = worldBottom - worldTop;
+      if (sourceWidth > 0 && sourceHeight > 0) {
+        const tileSize = Number(basemap.tile_size || 256);
+        context.save(); context.beginPath(); context.rect(left, top, width, height); context.clip();
+        tileRecords.filter(record => record.status === 'ready').forEach(record => {
+          const x = left + (record.x * tileSize - worldLeft) / sourceWidth * width;
+          const y = top + (record.y * tileSize - worldTop) / sourceHeight * height;
+          context.drawImage(record.image, x, y, tileSize / sourceWidth * width + .5, tileSize / sourceHeight * height + .5);
+        });
+        context.restore();
+      }
+    }
     context.strokeStyle = '#B9CDC4'; context.lineWidth = 2; context.strokeRect(left, top, width, height);
     (payload.series || []).forEach(series => (series.points || []).forEach(point => {
-      const x = left + (Number(point[0]) - xDomain[0]) / (xDomain[1] - xDomain[0]) * width, y = top + height - (Number(point[1]) - yDomain[0]) / (yDomain[1] - yDomain[0]) * height;
+      let x, y;
+      if (Array.isArray(worldBounds) && worldBounds.length === 4) {
+        const [worldLeft, worldTop, worldRight, worldBottom] = worldBounds.map(Number);
+        const projected = osmWorldCoordinates(point[1], point[0], basemap.zoom);
+        x = left + (projected[0] - worldLeft) / (worldRight - worldLeft) * width;
+        y = top + (projected[1] - worldTop) / (worldBottom - worldTop) * height;
+      } else {
+        x = left + (Number(point[0]) - xDomain[0]) / (xDomain[1] - xDomain[0]) * width;
+        y = top + height - (Number(point[1]) - yDomain[0]) / (yDomain[1] - yDomain[0]) * height;
+      }
       context.fillStyle = series.colour; context.strokeStyle = '#FFFFFF'; context.lineWidth = 1; context.beginPath(); context.arc(x, y, 4, 0, Math.PI * 2); context.fill(); context.stroke();
       pushPointHit(state, transform, x, y, {label: series.name, series: `${payload.y_label} / ${payload.x_label}`, value: `${numericLabel(point[1])} / ${numericLabel(point[0])}`});
     }));
     drawLegend(context, payload.legend, {fontSize: 13});
     context.fillStyle = '#405765'; context.textAlign = 'left'; font(context, 17, true); context.fillText(payload.x_label || '', left, top + height + 16); context.fillText(payload.y_label || '', 26, top - 25);
+    if (basemap?.attribution) {
+      context.fillStyle = '#FFFFFF'; context.fillRect(left + width - 210, top + height - 25, 206, 21);
+      context.fillStyle = '#405765'; font(context, 11); context.fillText(String(basemap.attribution), left + width - 204, top + height - 22);
+    }
   }
 
   function drawTable(context, payload) {
@@ -475,7 +553,7 @@
   }
 
   function draw(canvas, payload) {
-    const context = prepareCanvas(canvas), state = {hits: []};
+    const context = prepareCanvas(canvas), state = {canvas, hits: []};
     context.fillStyle = '#FFFFFF'; context.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
     drawPayload(context, payload, state, {x: 0, y: 0, scale: 1}); renderStates.set(canvas, state);
   }

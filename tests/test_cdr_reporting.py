@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, assign_cdr_vendors, catalog_chart_hover_targets, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -440,6 +440,182 @@ def test_cdf_resolved_legend_reproduces_historical_and_latest_line_widths() -> N
     assert [(caption, width) for caption, _colour_value, width in items] == [
         ('EE · 2026-Q1', 1), ('EE · 2026-Q2', 4),
     ]
+
+
+def test_interactive_cdf_model_uses_reporting_hierarchy_palette_and_legend() -> None:
+    entry = CatalogEntry(
+        1, 'Speech', '', '', 'POLQA CDF', 'CDR-Speech', 'LQ', 'CDF Line',
+        'Vendor, Campaign', '', 'Vendor', 'Campaign', 'Right',
+    )
+    frame = pd.DataFrame({
+        'Vendor': ['VF_Ericsson'] * 4 + ['VF_Huawei'] * 4,
+        'Campaign': ['UK_Q2_2026', 'UK_Q2_2026', 'UK_Q1_2026', 'UK_Q1_2026'] * 2,
+        'LQ': [1.2, 4.2, 1.0, 4.0, 1.4, 4.4, 1.1, 4.1],
+    })
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert (model['renderer'], model['type'], model['width'], model['height'], model['title']) == (
+        'catalog-v2', 'cdf', 1600, 900, 'POLQA CDF',
+    )
+    assert [(series['key'], series['colour'], series['width']) for series in model['series']] == [
+        (['VF_Ericsson', '2026-Q1'], '#2E8B57', 1),
+        (['VF_Ericsson', '2026-Q2'], '#2E8B57', 4),
+        (['VF_Huawei', '2026-Q1'], '#E15759', 1),
+        (['VF_Huawei', '2026-Q2'], '#E15759', 4),
+    ]
+    assert model['legend'] == {
+        'position': 'right',
+        'line_markers': True,
+        'items': [
+            {'label': 'VF_Ericsson · 2026-Q1', 'colour': '#2E8B57', 'width': 1},
+            {'label': 'VF_Ericsson · 2026-Q2', 'colour': '#2E8B57', 'width': 4},
+            {'label': 'VF_Huawei · 2026-Q1', 'colour': '#E15759', 'width': 1},
+            {'label': 'VF_Huawei · 2026-Q2', 'colour': '#E15759', 'width': 4},
+        ],
+    }
+    assert all(series['x'] and series['y'] and series['samples'] == 2 for series in model['series'])
+
+
+def test_interactive_status_model_preserves_reporting_row_and_column_aggregation() -> None:
+    entry = CatalogEntry(
+        1, 'Voice', '', '', 'Completed Ratio', 'CDR-Voice', 'Test_Result',
+        '100% Stacked Vertical Bars', 'Test_Result', '', 'Call Family',
+        'Operator × Campaign', 'Right',
+    )
+    frame = pd.DataFrame({
+        'Call Family': ['VoLTE'] * 8,
+        'Operator': ['VF'] * 4 + ['3'] * 4,
+        'Campaign': ['UK_Q2_2026', 'UK_Q2_2026', 'UK_Q1_2026', 'UK_Q1_2026'] * 2,
+        'Test_Result': [
+            'Completed', 'Failed', 'Completed', 'Completed',
+            'Failed', 'Failed', 'Completed', 'Failed',
+        ],
+    })
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert (model['type'], model['mode'], model['row_keys']) == ('status_100', 'hierarchy', [['VoLTE']])
+    assert model['column_keys'] == [
+        ['VF', '2026-Q1'], ['VF', '2026-Q2'],
+        ['3', '2026-Q1'], ['3', '2026-Q2'],
+    ]
+    assert model['cells'][0] == [
+        pytest.approx([1.0, 0.0]), pytest.approx([0.5, 0.5]),
+        pytest.approx([0.5, 0.5]), pytest.approx([0.0, 1.0]),
+    ]
+    assert model['states'] == [
+        {'name': 'Completed', 'colour': '#2C9A62'},
+        {'name': 'Failed', 'colour': '#D8555F'},
+    ]
+    assert model['legend']['items'] == [
+        {'label': 'Completed', 'colour': '#2C9A62', 'width': 2},
+        {'label': 'Failed', 'colour': '#D8555F', 'width': 2},
+    ]
+
+
+def test_interactive_distribution_model_uses_reporting_buckets_and_nested_keys() -> None:
+    entry = CatalogEntry(
+        1, 'Data', '', '', 'Rate distribution', 'CDR-Data', 'Mean_Data_Rate',
+        'Distribution Stacked Vertical Bars', 'Buckets', 'Buckets = 1,5,20;',
+        'Operator', 'Campaign × Rate Bucket', 'Bottom',
+    )
+    frame = pd.DataFrame({
+        'Operator': ['VF'] * 4 + ['3'] * 4,
+        'Campaign': ['UK_Q2_2026', 'UK_Q2_2026', 'UK_Q1_2026', 'UK_Q1_2026'] * 2,
+        'Mean_Data_Rate': [2, 25, .5, 7, 2, 2, .2, 25],
+    })
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert model['type'] == 'distribution'
+    assert model['keys'] == [
+        ['VF', '2026-Q1'], ['VF', '2026-Q2'],
+        ['3', '2026-Q1'], ['3', '2026-Q2'],
+    ]
+    assert [bucket['name'] for bucket in model['buckets']] == ['<1', '5-20', '1-5', '20+']
+    assert model['cells'] == [
+        pytest.approx([.5, .5, 0, 0]), pytest.approx([0, 0, .5, .5]),
+        pytest.approx([.5, 0, 0, .5]), pytest.approx([0, 0, 1, 0]),
+    ]
+    assert model['legend']['position'] == 'bottom'
+    assert [item['label'] for item in model['legend']['items']] == ['<1', '5-20', '1-5', '20+']
+    assert [item['colour'] for item in model['legend']['items']] == [
+        bucket['colour'] for bucket in model['buckets']
+    ]
+
+
+def test_interactive_mean_model_uses_reporting_aggregation_and_vendor_palette() -> None:
+    entry = CatalogEntry(
+        1, 'Speech', '', '', 'Average POLQA', 'CDR-Speech', 'LQ',
+        'Average Vertical Bars', 'Vendor', '', 'Vendor', 'Campaign', 'Right',
+    )
+    frame = pd.DataFrame({
+        'Vendor': ['VF_Ericsson'] * 4 + ['VF_Huawei'] * 4,
+        'Campaign': ['UK_Q2_2026', 'UK_Q2_2026', 'UK_Q1_2026', 'UK_Q1_2026'] * 2,
+        'LQ': [4.0, 4.4, 3.8, 4.0, 3.0, 3.4, 2.8, 3.0],
+    })
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert model['type'] == 'mean_bar'
+    assert [(bar['key'], bar['value'], bar['colour']) for bar in model['bars']] == [
+        (['VF_Ericsson', '2026-Q1'], pytest.approx(3.9), '#2E8B57'),
+        (['VF_Ericsson', '2026-Q2'], pytest.approx(4.2), '#2E8B57'),
+        (['VF_Huawei', '2026-Q1'], pytest.approx(2.9), '#E15759'),
+        (['VF_Huawei', '2026-Q2'], pytest.approx(3.2), '#E15759'),
+    ]
+    assert [(item['label'], item['colour']) for item in model['legend']['items']] == [
+        ('VF_Ericsson', '#2E8B57'), ('VF_Huawei', '#E15759'),
+    ]
+
+
+def test_interactive_failure_model_matches_reporting_legend_plot_geometry() -> None:
+    entry = CatalogEntry(
+        1, 'Failures', '', '', 'Voice failures', 'CDR-Voice', 'Call_Status',
+        'Count Stacked Horizontal Bars', 'Call_Status', '', 'Call Family',
+        'Operator × Campaign', 'Right',
+    )
+    frame = pd.DataFrame({
+        'Call Family': ['VoLTE', 'VoLTE', 'MultiRAB'],
+        'Operator': ['VF', 'VF', '3'],
+        'Campaign': ['2026 Q1', '2026 Q2', '2026 Q2'],
+        'Call_Status': ['Failed', 'Dropped', 'Completed'],
+    })
+
+    field_legend = catalog_chart_payload(frame, entry, prefiltered=True)
+    manual_legend = catalog_chart_payload(
+        frame, replace(entry, legend='Failed/Dropped'), prefiltered=True,
+    )
+
+    assert field_legend['type'] == manual_legend['type'] == 'failure_count'
+    assert field_legend['plot_legend_position'] == 'none'
+    assert manual_legend['plot_legend_position'] == 'right'
+    assert [state['name'] for state in manual_legend['states']] == ['Failed', 'Dropped']
+
+
+def test_interactive_map_model_preserves_operator_colours_and_osm_geometry() -> None:
+    entry = CatalogEntry(
+        1, 'Map', '', '', 'Coverage', 'CDR-Data', 'Latitude vs Longitude',
+        'Map', 'Operator', '', 'Operator', 'Campaign', 'Right',
+    )
+    frame = pd.DataFrame({
+        'Latitude': [51.5, 51.51, 53.8],
+        'Longitude': [-.12, -.11, -1.55],
+        'Operator': ['VF', 'VF', '3'],
+        'Campaign': ['2026 Q2'] * 3,
+    })
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert model['type'] == 'map'
+    assert [(series['name'], series['colour'], len(series['points'])) for series in model['series']] == [
+        ('VF', '#E15759', 2), ('3', '#F28E2B', 1),
+    ]
+    assert model['basemap']['provider'] == 'OpenStreetMap'
+    tile_left, tile_top, tile_right, tile_bottom = model['basemap']['tile_range']
+    assert (tile_right - tile_left + 1) * (tile_bottom - tile_top + 1) <= 48
+    assert len(model['basemap']['world_bounds']) == 4
 
 
 def test_cdf_plot_reserves_space_for_side_legends() -> None:

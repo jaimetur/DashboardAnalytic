@@ -2208,6 +2208,11 @@ def _resolved_legend_items(
     elif is_cdf and chart_fields and axis_columns:
         combinations = _hierarchical_unique_keys(frame, axis_columns)
         colours = _series_colours(combinations, axis_columns, frame, line_chart=True)
+        grouper = axis_columns[0] if len(axis_columns) == 1 else axis_columns
+        grouped_subsets = {
+            tuple(str(value) for value in (key if isinstance(key, tuple) else (key,))): subset
+            for key, subset in frame.groupby(grouper, sort=False, dropna=False)
+        }
         campaign_column = _period_column(frame)
         campaigns = (
             sorted(
@@ -2218,10 +2223,7 @@ def _resolved_legend_items(
         )
         latest_campaign = campaigns[-1] if len(campaigns) > 1 else None
         for index, combination in enumerate(combinations):
-            mask = pd.Series(True, index=frame.index)
-            for column, value in zip(axis_columns, combination, strict=True):
-                mask &= frame[column].astype(str).eq(str(value))
-            subset = frame.loc[mask]
+            subset = grouped_subsets.get(tuple(str(value) for value in combination), frame.iloc[0:0])
             subset_campaigns = (
                 subset[campaign_column].dropna().astype(str).map(_campaign_display_value).unique()
                 if campaign_column else ()
@@ -3286,6 +3288,24 @@ def _osm_tile_path(zoom: int, x: int, y: int) -> Path:
     return OSM_TILE_CACHE_DIR / str(zoom) / str(x) / f'{y}.png'
 
 
+def _osm_map_tile_geometry(
+    lon_low: float, lon_high: float, lat_low: float, lat_high: float,
+) -> tuple[int, int, int, int, int, tuple[float, float], tuple[float, float]]:
+    """Choose the shared OSM zoom, tile range and projected viewport."""
+    for zoom in range(OSM_TILE_MAX_ZOOM, 1, -1):
+        top_left = _osm_world_coordinates(lat_high, lon_low, zoom)
+        bottom_right = _osm_world_coordinates(lat_low, lon_high, zoom)
+        tile_left, tile_top = int(top_left[0] // OSM_TILE_SIZE), int(top_left[1] // OSM_TILE_SIZE)
+        tile_right, tile_bottom = int(bottom_right[0] // OSM_TILE_SIZE), int(bottom_right[1] // OSM_TILE_SIZE)
+        tile_count = (tile_right - tile_left + 1) * (tile_bottom - tile_top + 1)
+        if tile_count <= OSM_TILE_MAX_COUNT:
+            return zoom, tile_left, tile_top, tile_right, tile_bottom, top_left, bottom_right
+    zoom = 2
+    top_left = _osm_world_coordinates(lat_high, lon_low, zoom)
+    bottom_right = _osm_world_coordinates(lat_low, lon_high, zoom)
+    return zoom, 0, 0, 3, 3, top_left, bottom_right
+
+
 def _load_osm_tile(zoom: int, x: int, y: int) -> Image.Image | None:
     """Read one cached OSM tile or retrieve it once for a Map chart."""
     tile_path = _osm_tile_path(zoom, x, y)
@@ -3312,18 +3332,9 @@ def _load_osm_tile(zoom: int, x: int, y: int) -> Image.Image | None:
 
 def _osm_map_background(lon_low: float, lon_high: float, lat_low: float, lat_high: float, width: int, height: int) -> tuple[Image.Image | None, Callable[[float, float], tuple[float, float]]]:
     """Create a cached OSM base layer and coordinate transform for one chart."""
-    for zoom in range(OSM_TILE_MAX_ZOOM, 1, -1):
-        top_left = _osm_world_coordinates(lat_high, lon_low, zoom)
-        bottom_right = _osm_world_coordinates(lat_low, lon_high, zoom)
-        tile_left, tile_top = int(top_left[0] // OSM_TILE_SIZE), int(top_left[1] // OSM_TILE_SIZE)
-        tile_right, tile_bottom = int(bottom_right[0] // OSM_TILE_SIZE), int(bottom_right[1] // OSM_TILE_SIZE)
-        tile_count = (tile_right - tile_left + 1) * (tile_bottom - tile_top + 1)
-        if tile_count <= OSM_TILE_MAX_COUNT:
-            break
-    else:
-        zoom, tile_left, tile_top, tile_right, tile_bottom = 2, 0, 0, 3, 3
-        top_left = _osm_world_coordinates(lat_high, lon_low, zoom)
-        bottom_right = _osm_world_coordinates(lat_low, lon_high, zoom)
+    zoom, tile_left, tile_top, tile_right, tile_bottom, top_left, bottom_right = _osm_map_tile_geometry(
+        lon_low, lon_high, lat_low, lat_high,
+    )
     tile_columns, tile_rows = tile_right - tile_left + 1, tile_bottom - tile_top + 1
     mosaic = Image.new('RGB', (tile_columns * OSM_TILE_SIZE, tile_rows * OSM_TILE_SIZE), '#EDF4F0')
     coordinates = [(x, y) for y in range(tile_top, tile_bottom + 1) for x in range(tile_left, tile_right + 1)]
@@ -3625,7 +3636,7 @@ def _chart_payload_legend(
     line_markers: bool = False,
 ) -> dict[str, object]:
     """Resolve the browser legend with the same rules as the PNG renderer."""
-    items = fallback or [] if _legend_labels(entry.legend) else _resolved_legend_items(entry, frame, metric)
+    items = (fallback or []) if _legend_labels(entry.legend) else _resolved_legend_items(entry, frame, metric)
     return {
         "position": parse_legend_position(entry.legend_position),
         "line_markers": line_markers,
@@ -3738,11 +3749,19 @@ def catalog_chart_payload(
         if numeric.empty:
             return None
         combinations = _hierarchical_unique_keys(numeric, grouping_columns) if grouping_columns else [()]
+        if grouping_columns:
+            grouper = grouping_columns[0] if len(grouping_columns) == 1 else grouping_columns
+            grouped_subsets = {
+                tuple(str(value) for value in (key if isinstance(key, tuple) else (key,))): subset
+                for key, subset in numeric.groupby(grouper, sort=False, dropna=False)
+            }
+        else:
+            grouped_subsets = {(): numeric}
         series_rows: list[tuple[tuple[object, ...], pd.DataFrame, list[float]]] = []
         for combination in combinations:
-            subset = numeric
-            for column, value in zip(grouping_columns, combination, strict=True):
-                subset = subset[subset[column].astype(str).eq(str(value))]
+            subset = grouped_subsets.get(tuple(str(value) for value in combination))
+            if subset is None:
+                continue
             values = sorted(float(value) for value in subset[candidate_metric].tolist())
             if values:
                 series_rows.append((combination, subset, values))
@@ -3826,8 +3845,11 @@ def catalog_chart_payload(
         ]
         model = _chart_payload_base("status_100", title, render_entry, state_data, metric, fallback)
         model["states"] = [
-            {"name": state, "colour": colour}
-            for state, colour in zip(states, colours, strict=True)
+            {
+                "name": _legend_caption(_legend_labels(render_entry.legend), index, state),
+                "colour": colour,
+            }
+            for index, (state, colour) in enumerate(zip(states, colours, strict=True))
         ]
         if column_hierarchy or row_hierarchy:
             render_columns = list(column_hierarchy)
@@ -3836,19 +3858,23 @@ def catalog_chart_payload(
                 render_columns = ["__catalog_single_column"]
             row_keys = _hierarchical_unique_keys(state_data, row_hierarchy) if row_hierarchy else [()]
             column_keys = _hierarchical_unique_keys(state_data, render_columns)
+            dimensions = [*row_hierarchy, *render_columns]
+            dimension_grouper = dimensions[0] if len(dimensions) == 1 else dimensions
+            totals = state_data.groupby(dimension_grouper, sort=False, dropna=False).size()
+            counts = state_data.groupby([*dimensions, "state"], sort=False, dropna=False).size()
+
+            def hierarchy_total(key: tuple[object, ...]) -> int:
+                lookup = key[0] if len(dimensions) == 1 else key
+                return int(totals.get(lookup, 0))
+
             cells = []
             for row_key in row_keys:
-                row_mask = pd.Series(True, index=state_data.index)
-                for field, value in zip(row_hierarchy, row_key, strict=True):
-                    row_mask &= state_data[field].astype(str).eq(str(value))
                 row_cells = []
                 for column_key in column_keys:
-                    mask = row_mask.copy()
-                    for field, value in zip(render_columns, column_key, strict=True):
-                        mask &= state_data[field].astype(str).eq(str(value))
-                    subset = state_data.loc[mask]
-                    row_cells.append(None if subset.empty else [
-                        float(subset["state"].eq(state).sum()) / len(subset) for state in states
+                    key = (*row_key, *column_key)
+                    total = hierarchy_total(key)
+                    row_cells.append(None if not total else [
+                        float(counts.get((*key, state), 0)) / total for state in states
                     ])
                 cells.append(row_cells)
             model.update({
@@ -3859,22 +3885,18 @@ def catalog_chart_payload(
                 "cells": cells,
             })
             return model
-        combinations = [
-            (str(category), str(series))
-            for category, series in state_data[[group, period]].drop_duplicates().itertuples(index=False, name=None)
-        ]
+        combinations = list(state_data[[group, period]].drop_duplicates().itertuples(index=False, name=None))
+        totals = state_data.groupby([group, period], sort=False, dropna=False).size()
+        counts = state_data.groupby([group, period, "state"], sort=False, dropna=False).size()
         model.update({
             "mode": "flat",
             "categories": [_catalogue_display_label(*key) for key in combinations],
             "cells": [
                 [
-                    float(subset["state"].eq(state).sum()) / max(len(subset), 1)
+                    float(counts.get((*key, state), 0)) / max(int(totals.get(key, 0)), 1)
                     for state in states
                 ]
                 for key in combinations
-                for subset in [state_data[
-                    state_data[group].astype(str).eq(key[0]) & state_data[period].astype(str).eq(key[1])
-                ]]
             ],
         })
         return model
@@ -3893,8 +3915,16 @@ def catalog_chart_payload(
             for index, state in enumerate(("Failed", "Dropped"))
         ]
         model = _chart_payload_base("failure_count", title, render_entry, data, metric, fallback)
+        model["plot_legend_position"] = (
+            parse_legend_position(render_entry.legend_position)
+            if _legend_labels(render_entry.legend) else "none"
+        )
         model["states"] = [
-            {"name": state, "colour": state_colours[state]} for state in ("Failed", "Dropped")
+            {
+                "name": _legend_caption(_legend_labels(render_entry.legend), index, state),
+                "colour": state_colours[state],
+            }
+            for index, state in enumerate(("Failed", "Dropped"))
         ]
         if column_hierarchy or len(row_hierarchy) > 1:
             render_rows = row_hierarchy if column_hierarchy else []
@@ -3950,6 +3980,14 @@ def catalog_chart_payload(
         if not combinations or not buckets:
             return empty("No valid samples for this KPI and technology filter")
         colours = _series_colours([(bucket,) for bucket in buckets], ["__catalog_stack"], distribution)
+        counts = distribution.groupby([*axes, "__catalog_stack"], sort=False, dropna=False).size()
+        axis_grouper = axes[0] if len(axes) == 1 else axes
+        totals = distribution.groupby(axis_grouper, sort=False, dropna=False).size()
+
+        def distribution_total(key: tuple[object, ...]) -> int:
+            lookup = key[0] if len(axes) == 1 else key
+            return int(totals.get(lookup, 0))
+
         fallback = [
             (
                 _legend_caption(_legend_labels(render_entry.legend), index, bucket),
@@ -3962,21 +4000,20 @@ def catalog_chart_payload(
             "axis_columns": axes,
             "keys": [serialise_key(key) for key in combinations],
             "buckets": [
-                {"name": _chart_payload_value(bucket), "colour": colours.get((bucket,), _colour(bucket, index))}
+                {
+                    "name": _legend_caption(
+                        _legend_labels(render_entry.legend), index, _chart_payload_value(bucket),
+                    ),
+                    "colour": colours.get((bucket,), _colour(bucket, index)),
+                }
                 for index, bucket in enumerate(buckets)
             ],
             "cells": [
                 [
-                    float(subset["__catalog_stack"].eq(bucket).sum()) / max(len(subset), 1)
+                    float(counts.get((*key, bucket), 0)) / max(distribution_total(key), 1)
                     for bucket in buckets
                 ]
                 for key in combinations
-                for subset in [distribution.loc[
-                    pd.concat([
-                        distribution[column].astype(str).eq(str(value))
-                        for column, value in zip(axes, key, strict=True)
-                    ], axis=1).all(axis=1)
-                ]]
             ],
         })
         return model
@@ -4000,14 +4037,17 @@ def catalog_chart_payload(
         )
         unique_keys = list(dict.fromkeys(raw_keys))
         colours = _series_colours(unique_keys, key_columns, points)
+        rows_by_key: dict[tuple[str, ...], list[tuple[float, float]]] = {
+            key: [] for key in unique_keys
+        }
+        for key, longitude_value, latitude_value in zip(
+            raw_keys, points[longitude], points[metric], strict=True,
+        ):
+            rows_by_key[key].append((float(longitude_value), float(latitude_value)))
         series_payload = []
         fallback = []
         for index, key in enumerate(unique_keys):
-            rows = [
-                (float(row[longitude]), float(row[metric]))
-                for row_position, (_row_index, row) in enumerate(points.iterrows())
-                if raw_keys[row_position] == key
-            ]
+            rows = rows_by_key[key]
             sampled = _interactive_sample(rows, INTERACTIVE_SCATTER_POINTS_PER_SERIES)
             label = _legend_key_caption(key, key_columns, points, _legend_dimensions(render_entry.legend)) or " · ".join(key)
             colour = colours.get(key, _colour(key, index))
@@ -4016,13 +4056,34 @@ def catalog_chart_payload(
                 "points": [[longitude_value, latitude_value] for _source_index, (longitude_value, latitude_value) in sampled],
             })
             fallback.append((_legend_caption(_legend_labels(render_entry.legend), index, label), colour, 2))
+        lon_low, lon_high = float(points[longitude].min()), float(points[longitude].max())
+        lat_low, lat_high = float(points[metric].min()), float(points[metric].max())
+        lon_padding = max((lon_high - lon_low) * .06, .004)
+        lat_padding = max((lat_high - lat_low) * .06, .004)
+        geometry = _osm_map_tile_geometry(
+            lon_low - lon_padding, lon_high + lon_padding,
+            lat_low - lat_padding, lat_high + lat_padding,
+        )
+        zoom, tile_left, tile_top, tile_right, tile_bottom, top_left, bottom_right = geometry
         return {
-            **_chart_payload_base("map", title, render_entry, points, metric, fallback),
+            **_chart_payload_base(
+                "map", title, render_entry, data, metric,
+                fallback[:10] if _legend_labels(render_entry.legend) else fallback,
+            ),
             "x_label": longitude.replace("_", " "),
             "y_label": metric.replace("_", " "),
             "domain": {
-                "x": [float(points[longitude].min()), float(points[longitude].max())],
-                "y": [float(points[metric].min()), float(points[metric].max())],
+                "x": [lon_low, lon_high],
+                "y": [lat_low, lat_high],
+            },
+            "basemap": {
+                "provider": "OpenStreetMap",
+                "url_template": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                "attribution": "© OpenStreetMap contributors",
+                "zoom": zoom,
+                "tile_range": [tile_left, tile_top, tile_right, tile_bottom],
+                "world_bounds": [*top_left, *bottom_right],
+                "tile_size": OSM_TILE_SIZE,
             },
             "series": series_payload,
         }
@@ -4072,16 +4133,8 @@ def catalog_chart_payload(
             return empty("No valid samples for this KPI and technology filter")
         keys = [label if isinstance(label, tuple) else (label,) for label in means.index]
         colours = _series_colours(keys, axes, values)
-        fallback: list[tuple[str, str, int]] = []
-        if _legend_labels(render_entry.legend):
-            seen: set[str] = set()
-            for index, key in enumerate(keys):
-                caption = _legend_key_caption(key, axes, values, _legend_dimensions(render_entry.legend))
-                if caption not in seen:
-                    seen.add(caption)
-                    fallback.append((caption, colours.get(key, _colour(key, index)), 2))
         return {
-            **_chart_payload_base("mean_bar", title, render_entry, values, metric, fallback),
+            **_chart_payload_base("mean_bar", title, render_entry, values, metric),
             "metric": metric.replace("_", " "),
             "aggregation": aggregation,
             "axis_columns": axes,
@@ -4126,7 +4179,7 @@ def catalog_chart_payload(
             })
             fallback.append((_legend_caption(_legend_labels(render_entry.legend), index, label), colour, 2))
         return {
-            **_chart_payload_base("scatter", title, render_entry, points, metric, fallback),
+            **_chart_payload_base("scatter", title, render_entry, data, metric, fallback),
             "x_label": x_metric.replace("_", " "),
             "y_label": metric.replace("_", " "),
             "domain": {
