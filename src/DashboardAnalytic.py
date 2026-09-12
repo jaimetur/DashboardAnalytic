@@ -134,7 +134,11 @@ active_workspace: Workspace | None = None
 _workspace_size_cache: dict[str, tuple[float, int]] = {}
 _workspace_size_cache_lock = Lock()
 _WORKSPACE_SIZE_CACHE_SECONDS = 15.0
-FILTER_DIMENSIONS = ['market', 'period', 'operator', 'vendor', 'test_name', 'region', 'city', 'session_type', 'direction', 'technology_primary', 'source_sheet']
+FILTER_DIMENSIONS = [
+    'market', 'period', 'operator', 'vendor', 'test_name', 'region', 'city',
+    'session_type', 'direction', 'technology_primary', 'RAT', 'RAT_A',
+    'Sample_RAT_A', 'source_sheet',
+]
 FILTER_DIMENSIONS_BY_KIND = {
     'voice': ['market', 'operator', 'vendor', 'region', 'city', 'session_type', 'technology_primary', 'source_sheet'],
     'speech': ['market', 'operator', 'vendor', 'region', 'city', 'session_type', 'technology_primary', 'source_sheet'],
@@ -1338,6 +1342,9 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
         # exact columns it needs lazily in ``_combined_reporting_frame``.
         for technology in TEMPLATE_NAMES:
             synchronize_template_file_names(technology)
+    dashboard_warmup = globals().get('schedule_e2e_dashboard_warmup')
+    if callable(dashboard_warmup):
+        dashboard_warmup(workspace.database_path)
     return workspace
 
 

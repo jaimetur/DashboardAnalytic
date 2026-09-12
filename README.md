@@ -48,7 +48,7 @@ Datasets Analysis analyses one ready Data, Voice or Speech CDR.
 
 ### E2E Dashboards
 
-Create, save, duplicate, import and export workspace Dashboards from any Report Template. Combine CDR sources, apply adaptive and custom Auto-calculated Field filters, and view each Slide with all its charts in the template layout. The large viewer provides dashboard navigation, chart datasets and CSV downloads, template editing, and synchronized floating filters. See [E2E Dashboards Help](help/07-e2e-dashboards.md).
+Create, save, duplicate, import and export workspace Dashboards from any Report Template. Combine CDR sources, apply adaptive and custom Auto-calculated Field filters, and view each Slide with all its charts in the template layout. Persisted filter catalogues and narrow analytical projections make opening and refiltering large Dashboards fast; the browser renders compact live chart models without waiting for PNG generation. The large viewer provides dashboard navigation, chart datasets and CSV downloads, template editing, and synchronized floating filters. See [E2E Dashboards Help](help/07-e2e-dashboards.md).
 
 ### E2E Reporting
 
@@ -283,7 +283,7 @@ DashboardAnalytic/
 
 ## Current limitations
 
-- In-memory analytical caches do not survive a process restart.
+- General analysis caches remain process-local; E2E Dashboard analytical projections and compact chart models persist beside each workspace database and survive application restarts.
 - SQLite is the current persistence model and may not suit very large concurrent deployments.
 - Smart Orchestrator Logs reporting is visible but not implemented.
 - Scoring and GAP automation remain planned work.

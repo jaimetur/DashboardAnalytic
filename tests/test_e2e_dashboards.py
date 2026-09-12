@@ -78,6 +78,10 @@ def test_dashboards_lifecycle_and_layout(client):
     image = client.get(f'/api/e2e-dashboards/preview/{token}/0.png')
     assert image.status_code == 200, image.text if image.status_code != 200 else ''
     assert image.content.startswith(b'\x89PNG')
+    interactive = client.get(f'/api/e2e-dashboards/chart/{token}/0')
+    assert interactive.status_code == 200, interactive.text
+    assert interactive.json()['type'] == 'line'
+    assert interactive.json()['series']
     assert list((Path(core.repository.db_path).parent / '.dashboard-chart-cache').glob('*.png'))
     entry = core.load_template_catalogue(next(row['content'] for row in core.repository.list_report_templates('nsa') if row['name'] == 'Dashboard test'), 'nsa')[0]
     assert not core.is_empty_catalog_chart(image.content, entry)
@@ -171,6 +175,7 @@ def test_dashboard_snapshot_access_and_legacy_redirect(client):
     client.post('/login', data={'username': 'demo', 'password': 'demo123'})
     assert client.get(f"/api/e2e-dashboards/data/{preview['token']}/0").status_code == 403
     assert client.get(f"/api/e2e-dashboards/preview/{preview['token']}/0.png").status_code == 403
+    assert client.get(f"/api/e2e-dashboards/chart/{preview['token']}/0").status_code == 403
 
 
 def test_dashboard_reuses_persistent_sql_selection_and_invalidates_dataset_versions(client):
@@ -238,9 +243,9 @@ def test_dashboard_reuses_normalized_snapshot_for_every_chart(client, monkeypatc
     preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
     for index in (0, 1, 2):
         assert client.get(f"/api/e2e-dashboards/preview/{preview['token']}/{index}.png").status_code == 200
-    assert calls == [3, 3, 3]
+    assert calls == [3]
     assert client.get(f"/api/e2e-dashboards/preview/{preview['token']}/0.png").status_code == 200
-    assert calls == [3, 3, 3]
+    assert calls == [3]
 
 
 def test_dashboard_is_restricted_to_super_admins_and_ejaitur(client):

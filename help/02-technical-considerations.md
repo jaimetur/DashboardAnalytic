@@ -21,6 +21,7 @@ Stored below `APP_DATA_DIR/workspaces/<workspace>/`:
 - `input/`: uploaded source files.
 - `output/reports/`: generated PowerPoint reports and their PNG charts.
 - `output/charts/`: standalone Chart Sets.
+- `.dashboard-data-cache/`: bounded, regenerable E2E Dashboard analytical projections and compact live-chart models. This cache is not a user dataset or source of record.
 
 The workspace registry is local to the deployment. Full Environment imports rebuild it from the imported workspaces instead of retaining source-server absolute paths. Migrating from the old shared template directory copies its contents to every existing workspace and retains the old directory until it is manually archived or removed after verification.
 
@@ -264,7 +265,7 @@ Incomplete transfer files are cleaned up. Complete packages that were not import
 
 - SQLite uses WAL mode, a busy timeout and normal synchronous mode.
 - Processed CDR rows are materialised per dataset and into combined tables by CDR type.
-- Dashboard analysis is on demand and cached by dataset/filter/metric context.
+- E2E Dashboard filter catalogues come from persisted dataset profiles instead of repeated wide-table scans. Narrow, revision-keyed SQLite projections are warmed in the background and exact compact chart models persist across restarts; live charts are drawn in the browser rather than rendered as PNGs.
 - Interactive Preview caches combined and filtered frames separately.
 - Database import prefers bulk database/file replacement over row-by-row queries where safe.
 

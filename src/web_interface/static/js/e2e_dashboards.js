@@ -7,8 +7,7 @@
   let sequence = 0, timer, controller, preparing = null, dirty = false, dataIndex = 0, dataPage = 0, dataToken = '';
   let facetOptions = {}, availableFields = [], facetFields = config.filter_fields || [], facetsLoading = false;
   const completedFieldJobs = new Set();
-  const prefetchedChartUrls = new Set();
-  const prefetchedCharts = new Map();
+  const chartPayloads = new Map();
   const openStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:open`;
   const dashboardId = () => {
     if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -178,8 +177,9 @@
       const payload = await api('/prepare','POST',definition,controller.signal);
       if (current !== sequence) return;
       prepared = payload; facetOptions = payload.options; facetFields = payload.filter_fields || facetFields; availableFields = payload.available_fields || payload.custom_fields || []; facetsLoading = false; facets(); setViewEnabled(Boolean(payload.slides?.length)); setPreparationState('ready');
-      $('ds-rows').textContent = Object.entries(payload.rows).map(([kind,count]) => `${kind.toUpperCase()}: ${count.toLocaleString()} rows`).join(' · ');
-      prefetchedChartUrls.clear(); prefetchedCharts.clear(); prefetchSlide(0);
+      const rowLabel = payload.rows_exact === false ? 'source rows' : 'rows';
+      $('ds-rows').textContent = Object.entries(payload.rows).map(([kind,count]) => `${kind.toUpperCase()}: ${count.toLocaleString()} ${rowLabel}`).join(' · ');
+      chartPayloads.clear(); const firstSlideReady = prefetchSlide(0); prefetchRemainingCharts(firstSlideReady);
       if (!$('ds-viewer').hidden) renderSlide();
     } catch (error) { if (current === sequence && error.name !== 'AbortError') { facetsLoading = false; facets(); setViewEnabled(false); setPreparationState('hidden'); $('ds-rows').textContent = error.message; if (!$('ds-viewer').hidden) $('ds-charts').replaceChildren(node('div',error.message,'ds-empty')); } throw error; }
     })();
@@ -232,15 +232,39 @@
   bind('ds-reset',() => { definition.filters = {}; definition.date_from = definition.date_to = null; changed(); });
   bind('ds-refresh',prepare); bind('ds-viewer-refresh',prepare);
   bind('ds-view',async () => { if (!prepared?.slides.length) return; overlay('ds-viewer',true); renderSlide(); });
+  function loadChartPayload(chart) {
+    const url = `/api/e2e-dashboards/chart/${prepared.token}/${chart.index}`;
+    let request = chartPayloads.get(url);
+    if (!request) {
+      request = fetch(url).then(async response => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : 'Unable to prepare chart data.');
+        return payload;
+      });
+      chartPayloads.set(url, request);
+      while (chartPayloads.size > 160) chartPayloads.delete(chartPayloads.keys().next().value);
+    }
+    return request;
+  }
   function prefetchSlide(index) {
-    const slide = prepared?.slides[index]; if (!slide) return;
+    const slide = prepared?.slides[index]; if (!slide) return Promise.resolve([]);
+    const requests = [];
     for (const chart of slide.charts) {
       if (!chart.available) continue;
-      const url = `/api/e2e-dashboards/preview/${prepared.token}/${chart.index}.png`;
-      if (prefetchedChartUrls.has(url)) continue;
-      prefetchedChartUrls.add(url); const image = new Image(); image.src = url; prefetchedCharts.set(url, image);
-      while (prefetchedCharts.size > 24) prefetchedCharts.delete(prefetchedCharts.keys().next().value);
+      requests.push(loadChartPayload(chart));
     }
+    return Promise.allSettled(requests);
+  }
+  function prefetchRemainingCharts(firstSlideReady = Promise.resolve()) {
+    const token = prepared?.token;
+    if (!token) return;
+    let index = 1;
+    const next = async () => {
+      if (prepared?.token !== token || index >= prepared.slides.length) return;
+      await prefetchSlide(index++);
+      setTimeout(next, 60);
+    };
+    firstSlideReady.finally(() => setTimeout(next, 60));
   }
   function renderSlide() {
     if (!prepared) return; slideIndex = Math.max(0,Math.min(slideIndex,prepared.slides.length-1));
@@ -254,10 +278,18 @@
     for (const chart of slide.charts) {
       const card = node('article',undefined,'ds-chart'); card.setAttribute('aria-label',chart.title); card.tabIndex = 0;
       if (chart.position) { const [left,top,width,height] = chart.position; Object.assign(card.style,{left:`${left}%`,top:`${top}%`,width:`${width}%`,height:`${height}%`}); }
-      const message = node('div',`Rendering ${chart.title || 'chart'}…`,'ds-chart-message'); card.append(message);
-      const image = document.createElement('img'); image.alt = chart.title; image.hidden = true; if (chart.available) image.src = `/api/e2e-dashboards/preview/${prepared.token}/${chart.index}.png`; else message.textContent = `Unavailable source type: select a ${chart.source ? chart.source.toUpperCase() : 'supported'} CDR dataset.`;
-      image.onload = () => { message.remove(); image.hidden = false; }; image.onerror = () => { message.textContent = `Unable to render ${chart.title || 'chart'}. Check the selected source, template fields and filters, then refresh.`; };
-      card.append(image);
+      const message = node('div',`Preparing live ${chart.title || 'chart'}…`,'ds-chart-message'); card.append(message);
+      const canvas = document.createElement('canvas'); canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', chart.title); canvas.hidden = true; card.append(canvas);
+      if (chart.available) {
+        const token = prepared.token;
+        loadChartPayload(chart).then(payload => {
+          if (!card.isConnected || prepared?.token !== token) return;
+          message.remove(); canvas.hidden = false;
+          requestAnimationFrame(() => globalThis.renderDashboardChart(canvas, payload));
+        }).catch(error => {
+          if (prepared?.token === token) message.textContent = error.message || `Unable to render ${chart.title || 'chart'}.`;
+        });
+      } else message.textContent = `Unavailable source type: select a ${chart.source ? chart.source.toUpperCase() : 'supported'} CDR dataset.`;
       const data = node('button','View Dataset','ds-chart-data'); data.type = 'button'; data.disabled = !chart.available; data.onclick = safe(async () => { dataIndex = chart.index; dataPage = 0; dataToken = prepared.token; overlay('ds-data-overlay',true); await renderData(); }); card.append(data);
       let hideTimer;
       const hideDataAction = () => { if (!hideTimer) hideTimer = setTimeout(() => { card.classList.remove('ds-hover'); hideTimer = null; }, 2000); };
