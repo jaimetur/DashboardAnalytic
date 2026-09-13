@@ -69,6 +69,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'class="ds-viewer-icon-action ds-viewer-refresh-action"' in page.text
     assert 'id="ds-chart-expanded-overlay"' in page.text
     assert 'id="ds-chart-expanded-canvas"' in page.text
+    assert 'id="ds-chart-expanded-data"' in page.text
+    assert 'id="ds-chart-expanded-zoom"' in page.text
     dashboard_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
     assert "controls.append(data, expand, zoom)" in dashboard_script
     saved = client.put('/api/e2e-dashboards/test', json=payload)

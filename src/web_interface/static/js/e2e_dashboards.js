@@ -403,8 +403,17 @@
     zoomIn.onclick = event => { event.stopPropagation(); apply((globalThis.getDashboardChartZoom?.(canvas) || 1) + .25); };
     reset.onclick = event => { event.stopPropagation(); apply(1); };
     canvas.addEventListener('dashboardchartzoom', event => sync(event.detail?.zoom));
+    controls.reset = () => apply(1);
     sync(1); controls.append(zoomOut, level, zoomIn, reset); return controls;
   }
+  const expandedZoom = chartZoomControls($('ds-chart-expanded-canvas'));
+  $('ds-chart-expanded-zoom').append(expandedZoom);
+  let expandedChart = null;
+  async function openChartDataset(chart) {
+    dataIndex = chart.index; dataPage = 0; dataToken = prepared.token; dataPages.clear();
+    overlay('ds-data-overlay', true); await renderData();
+  }
+  $('ds-chart-expanded-data').onclick = safe(async () => { if (expandedChart) await openChartDataset(expandedChart); });
   function expandedChartOverlay(show) {
     const overlay = $('ds-chart-expanded-overlay');
     if (show) {
@@ -413,6 +422,7 @@
       overlay.querySelector('[role=dialog]').focus();
     } else {
       expandedChartRequest += 1;
+      expandedChart = null;
       overlay.hidden = true;
       $('ds-chart-expanded-canvas').hidden = true;
       focusReturn.get('ds-chart-expanded-overlay')?.focus();
@@ -424,6 +434,8 @@
     const token = prepared?.token;
     const canvas = $('ds-chart-expanded-canvas');
     const message = $('ds-chart-expanded-message');
+    expandedChart = chart;
+    expandedZoom.reset(); expandedZoom.hidden = true;
     const initialTitle = renderedPayload?.title || chart.title || 'Expanded chart';
     $('ds-chart-expanded-title').textContent = initialTitle;
     canvas.setAttribute('aria-label', initialTitle);
@@ -447,6 +459,7 @@
     if (request !== expandedChartRequest || token !== prepared?.token || $('ds-chart-expanded-overlay').hidden) return;
     try {
       globalThis.renderDashboardChart(canvas, payload);
+      expandedZoom.hidden = false;
       message.hidden = true;
     } catch (error) {
       canvas.hidden = true;
@@ -552,7 +565,7 @@
           if (prepared?.token === token) message.textContent = error.message || `Unable to render ${chart.title || 'chart'}.`;
         });
       } else message.textContent = `Unavailable source type: select a ${chart.source ? chart.source.toUpperCase() : 'supported'} CDR dataset.`;
-      const data = node('button','', 'ds-chart-data'); data.type = 'button'; data.title = 'View dataset'; data.setAttribute('aria-label', 'View dataset'); data.disabled = !chart.available; data.onclick = safe(async () => { dataIndex = chart.index; dataPage = 0; dataToken = prepared.token; dataPages.clear(); overlay('ds-data-overlay',true); await renderData(); });
+      const data = node('button','', 'ds-chart-data'); data.type = 'button'; data.title = 'View dataset'; data.setAttribute('aria-label', 'View dataset'); data.disabled = !chart.available; data.onclick = safe(async () => { await openChartDataset(chart); });
       const expand = node('button', '', 'ds-chart-expand'); expand.type = 'button'; expand.title = 'Expand chart'; expand.setAttribute('aria-label', 'Expand chart'); expand.disabled = !chart.available; expand.onclick = safe(async event => { event.stopPropagation(); await openExpandedChart(chart, renderedPayload); });
       const controls = node('div', undefined, 'ds-chart-controls'); controls.append(data, expand, zoom); card.append(controls);
       let hideTimer;
@@ -631,7 +644,10 @@
   if ($('ds-edit')) bind('ds-edit',()=>{ const slide = prepared?.slides[slideIndex]; if (!slide) return; $('ds-editor-frame').src = `/admin/report-templates/${encodeURIComponent(definition.template_technology)}/${encodeURIComponent(definition.template)}/editor?focus_row=${slide.focus_row}`; overlay('ds-editor-overlay',true); });
   bind('ds-editor-close',async ()=>{ overlay('ds-editor-overlay',false); $('ds-editor-frame').removeAttribute('src'); await prepare(); });
   document.addEventListener('keydown',event=>{
-    const visible = ['ds-chart-expanded-overlay','ds-editor-overlay','ds-data-overlay','ds-filter-overlay','ds-presentation-overlay','ds-viewer'].find(id=>!$(id).hidden); if (!visible || !$(visible).contains(document.activeElement)) return;
+    const visible = ['ds-chart-expanded-overlay','ds-editor-overlay','ds-data-overlay','ds-filter-overlay','ds-presentation-overlay','ds-viewer'].find(id=>!$(id).hidden && $(id).contains(document.activeElement)); if (!visible) return;
+    const editing = event.target.closest?.('input,textarea,select,[contenteditable="true"]');
+    if (visible === 'ds-viewer' && !editing && event.key === 'ArrowLeft' && slideIndex > 0) { event.preventDefault(); stopPresentation(); slideIndex -= 1; renderSlide(); return; }
+    if (visible === 'ds-viewer' && !editing && event.key === 'ArrowRight' && slideIndex < (prepared?.slides.length || 1) - 1) { event.preventDefault(); stopPresentation(); slideIndex += 1; renderSlide(); return; }
     if (event.key === 'Escape') { event.preventDefault(); $({'ds-chart-expanded-overlay':'ds-chart-expanded-close','ds-editor-overlay':'ds-editor-close','ds-data-overlay':'ds-data-close','ds-filter-overlay':'ds-filter-close','ds-presentation-overlay':'ds-presentation-close','ds-viewer':'ds-viewer-close'}[visible]).click(); }
     if (event.key === 'Tab') { const controls = [...$(visible).querySelectorAll('button:not(:disabled),a[href],input,select,summary,[tabindex="0"]')].filter(el=>el.getClientRects().length); if (!controls.length) return; const first = controls[0], last = controls.at(-1); if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
   });
