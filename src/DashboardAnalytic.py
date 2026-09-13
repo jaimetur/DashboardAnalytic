@@ -2398,12 +2398,26 @@ def refresh_selected_dataset_if_stale(selected_dataset: dict[str, Any] | None) -
 def create_session(response: Response, user: SessionUser) -> None:
     token = secrets.token_urlsafe(32)
     SESSIONS[token] = user
+    repository.save_application_session(token, user.username)
     response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite='lax')
 
 
+def session_user(token: str | None) -> SessionUser | None:
+    if not token:
+        return None
+    user = SESSIONS.get(token)
+    if user:
+        return user
+    record = repository.get_application_session_user(token)
+    if not record:
+        return None
+    user = SessionUser(username=record.username, role=record.role)
+    SESSIONS[token] = user
+    return user
+
+
 def current_user(request: Request) -> SessionUser:
-    token = request.cookies.get(SESSION_COOKIE)
-    user = SESSIONS.get(token or '')
+    user = session_user(request.cookies.get(SESSION_COOKIE))
     if not user:
         raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={'Location': '/login'})
     return user
@@ -5394,7 +5408,7 @@ def healthz() -> dict[str, str]:
 
 @app.get('/', response_class=HTMLResponse)
 def index(request: Request) -> HTMLResponse:
-    if request.cookies.get(SESSION_COOKIE) in SESSIONS:
+    if session_user(request.cookies.get(SESSION_COOKIE)):
         return RedirectResponse('/documents/view/readme', status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse('/login', status_code=status.HTTP_303_SEE_OTHER)
 
@@ -5481,11 +5495,12 @@ def login(
 @app.get('/logout')
 def logout(request: Request) -> Response:
     token = request.cookies.get(SESSION_COOKIE)
-    session_user = SESSIONS.get(token or '')
-    if session_user:
-        repository.add_log(session_user.username, 'logout', json.dumps({'success': True}))
+    logged_in_user = session_user(token)
+    if logged_in_user:
+        repository.add_log(logged_in_user.username, 'logout', json.dumps({'success': True}))
     if token:
         SESSIONS.pop(token, None)
+        repository.delete_application_session(token)
     response = RedirectResponse('/login', status_code=status.HTTP_303_SEE_OTHER)
     response.delete_cookie(SESSION_COOKIE)
     return response

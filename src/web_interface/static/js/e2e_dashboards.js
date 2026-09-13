@@ -11,6 +11,7 @@
   let facetOptions = {}, availableFields = [], facetFields = config.filter_fields || [], facetsLoading = false, facetsRefreshTimer = 0;
   const completedFieldJobs = new Set();
   const chartPayloads = new Map();
+  const renderedChartPayloads = new Map();
   let expandedChartRequest = 0;
   const openStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:open`;
   const dashboardId = () => {
@@ -252,7 +253,7 @@
       setViewEnabled(Boolean(payload.slides?.length)); setPreparationState('ready');
       const rowLabel = payload.rows_exact === false ? 'source rows' : 'rows';
       $('ds-rows').textContent = Object.entries(payload.rows).map(([kind,count]) => `${kind.toUpperCase()}: ${count.toLocaleString()} ${rowLabel}`).join(' · ');
-      chartPayloads.clear(); const firstSlideReady = prefetchSlide(0); prefetchRemainingCharts(firstSlideReady);
+      chartPayloads.clear(); renderedChartPayloads.clear(); const firstSlideReady = prefetchSlide(0); prefetchRemainingCharts(firstSlideReady);
       if (!$('ds-viewer').hidden) renderSlide();
     } catch (error) { if (current === sequence && error.name !== 'AbortError') { facetsLoading = false; facets(); setViewEnabled(false); setPreparationState('hidden'); $('ds-rows').textContent = error.message; if (!$('ds-viewer').hidden) $('ds-charts').replaceChildren(node('div',error.message,'ds-empty')); } throw error; }
     })();
@@ -309,15 +310,25 @@
   bind('ds-view',async () => { if (!prepared?.slides.length) return; overlay('ds-viewer',true); renderSlide(); });
   function loadChartPayload(chart) {
     const url = `/api/e2e-dashboards/chart/${prepared.token}/${chart.index}`;
+    const rendered = renderedChartPayloads.get(url);
+    if (rendered) return Promise.resolve(rendered);
     let request = chartPayloads.get(url);
     if (!request) {
-      request = fetch(url).then(async response => {
+      request = fetch(url, {cache: 'no-store', credentials: 'same-origin'}).then(async response => {
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          if (response.redirected || response.url.includes('/login')) throw new Error('Your session has expired. Please sign in again.');
+          throw new Error('The chart service returned an invalid response.');
+        }
         const payload = await response.json();
         if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : 'Unable to prepare chart data.');
+        renderedChartPayloads.set(url, payload);
+        while (renderedChartPayloads.size > 160) renderedChartPayloads.delete(renderedChartPayloads.keys().next().value);
         return payload;
       });
       chartPayloads.set(url, request);
       while (chartPayloads.size > 160) chartPayloads.delete(chartPayloads.keys().next().value);
+      request.catch(() => { if (chartPayloads.get(url) === request) chartPayloads.delete(url); });
     }
     return request;
   }
@@ -391,26 +402,30 @@
       focusReturn.get('ds-chart-expanded-overlay')?.focus();
     }
   }
-  async function openExpandedChart(chart) {
+  async function openExpandedChart(chart, renderedPayload = null) {
     stopPresentation();
     const request = ++expandedChartRequest;
     const token = prepared?.token;
     const canvas = $('ds-chart-expanded-canvas');
     const message = $('ds-chart-expanded-message');
-    $('ds-chart-expanded-title').textContent = chart.title || 'Expanded chart';
-    canvas.setAttribute('aria-label', chart.title || 'Expanded chart');
+    const initialTitle = renderedPayload?.title || chart.title || 'Expanded chart';
+    $('ds-chart-expanded-title').textContent = initialTitle;
+    canvas.setAttribute('aria-label', initialTitle);
     canvas.hidden = true;
     message.hidden = false;
     message.textContent = `Loading ${chart.title || 'chart'}…`;
     expandedChartOverlay(true);
     let payload;
     try {
-      payload = await loadChartPayload(chart);
+      payload = renderedPayload || await loadChartPayload(chart);
     } catch (error) {
       if (request === expandedChartRequest && !$('ds-chart-expanded-overlay').hidden) message.textContent = error.message || `Unable to load ${chart.title || 'chart'}.`;
       throw error;
     }
     if (request !== expandedChartRequest || token !== prepared?.token || $('ds-chart-expanded-overlay').hidden) return;
+    const title = payload?.title || chart.title || 'Expanded chart';
+    $('ds-chart-expanded-title').textContent = title;
+    canvas.setAttribute('aria-label', title);
     canvas.hidden = false;
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     if (request !== expandedChartRequest || token !== prepared?.token || $('ds-chart-expanded-overlay').hidden) return;
@@ -502,6 +517,7 @@
     if (!slide.charts.length) structuralDashboard(stage, slide);
     for (const chart of slide.charts) {
       const card = node('article',undefined,'ds-chart'); card.setAttribute('aria-label',chart.title); card.tabIndex = 0;
+      let renderedPayload = null;
       if (chart.position) { const [left,top,width,height] = chart.position; Object.assign(card.style,{left:`${left}%`,top:`${top}%`,width:`${width}%`,height:`${height}%`}); }
       const message = node('div',`Rendering ${chart.title || 'chart'}…`,'ds-chart-message'); card.append(message);
       const canvas = document.createElement('canvas'); canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', chart.title); canvas.hidden = true; card.append(canvas);
@@ -510,6 +526,7 @@
         const token = prepared.token;
         loadChartPayload(chart).then(payload => {
           if (!card.isConnected || prepared?.token !== token) return;
+          renderedPayload = payload;
           canvas.hidden = false;
           requestAnimationFrame(() => {
             try { globalThis.renderDashboardChart(canvas, payload); zoom.hidden = false; message.remove(); }
@@ -520,7 +537,7 @@
         });
       } else message.textContent = `Unavailable source type: select a ${chart.source ? chart.source.toUpperCase() : 'supported'} CDR dataset.`;
       const data = node('button','', 'ds-chart-data'); data.type = 'button'; data.title = 'View dataset'; data.setAttribute('aria-label', 'View dataset'); data.disabled = !chart.available; data.onclick = safe(async () => { dataIndex = chart.index; dataPage = 0; dataToken = prepared.token; dataPages.clear(); overlay('ds-data-overlay',true); await renderData(); });
-      const expand = node('button', '', 'ds-chart-expand'); expand.type = 'button'; expand.title = 'Expand chart'; expand.setAttribute('aria-label', 'Expand chart'); expand.disabled = !chart.available; expand.onclick = safe(async event => { event.stopPropagation(); await openExpandedChart(chart); });
+      const expand = node('button', '', 'ds-chart-expand'); expand.type = 'button'; expand.title = 'Expand chart'; expand.setAttribute('aria-label', 'Expand chart'); expand.disabled = !chart.available; expand.onclick = safe(async event => { event.stopPropagation(); await openExpandedChart(chart, renderedPayload); });
       const controls = node('div', undefined, 'ds-chart-controls'); controls.append(data, expand, zoom); card.append(controls);
       let hideTimer;
       const showControls = () => { clearTimeout(hideTimer); hideTimer = null; card.classList.add('ds-hover'); };

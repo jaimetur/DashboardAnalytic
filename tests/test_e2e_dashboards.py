@@ -114,6 +114,15 @@ def test_dashboards_lifecycle_and_layout(client):
     assert client.get('/api/e2e-dashboards').json() == {}
 
 
+def test_dashboard_api_session_survives_an_application_process_restart(client):
+    setup_dashboard(client)
+    import src.DashboardAnalytic as app_module
+
+    app_module.SESSIONS.clear()
+
+    assert client.get('/api/e2e-dashboards').status_code == 200
+
+
 def test_dashboard_preview_identifies_title_and_transition_slides(client):
     payload = setup_dashboard(client)
     core.repository.add_report_template('nsa', 'Structural dashboard', (

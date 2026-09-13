@@ -6,7 +6,7 @@
 ## Release: v0.3.0
 ### Release Date: 2026-09-14
 #### ⚠️ Breaking Changes:
-- Renamed E2E Dashboard to Datasets Analysis, including its controls, internal analysis references and canonical `/datasets-analysis` routes; legacy `/dashboard` routes remain available as compatibility aliases. Help chapters now place E2E Dashboards immediately before E2E Reporting.
+- Renamed former `E2E Dashboard` module to `Datasets Analysis`, including its controls, internal analysis references and canonical `/datasets-analysis` routes; legacy `/dashboard` routes remain available as compatibility aliases. Help chapters now place E2E Dashboards immediately before E2E Reporting.
 - Renamed the E2E Reporting page, API, generated report, Chart Set and job routes to the canonical `/e2e-reporting` and `/api/e2e-reporting` prefixes. Legacy `/reporting` links redirect to the new location.
 
 #### 🌟 New Features:
@@ -36,6 +36,8 @@
 - Reserved a right-side lane for Dashboard failure-chart legends whenever the resolved legend contains items, preventing them from overflowing the chart canvas.
 - Fixed the shared Canvas chart renderer to prefer a working Chrome binary over Ubuntu's unavailable Chromium Snap wrapper in automated test environments. Dashboard creation, duplication and import now adopt the persisted canonical definition immediately, and Dashboard dirty-state comparison normalizes defaults and key order, preventing false unsaved-change warnings and stale client library state after reload.
 - Fixed a concurrent legacy-dataset materialization race that could recreate a SQLite dataset table between replacement steps and interrupt Dataset Analysis loading.
+- Persisted authenticated sessions in the mounted application database so Dashboard chart requests remain authenticated after a Docker restart or process replacement.
+- Fixed expanded Dashboard charts to reuse the already-rendered chart model and report non-JSON chart-service responses clearly instead of remaining indefinitely on the loading state.
 
 #### 📚 Documentation:
 - Added the E2E Dashboards workflow, filter semantics, Dashboard portability and viewer controls; updated Readme, module overview, interface and project-structure help, renamed Datasets Analysis documentation and renumbered subsequent Help chapters and links. Documented the canonical `/e2e-reporting` route and its legacy redirect.
