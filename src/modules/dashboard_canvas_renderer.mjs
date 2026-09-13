@@ -22,10 +22,10 @@ function browserExecutable() {
     '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
     '/usr/bin/google-chrome',
     '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
   ].filter(Boolean);
   return candidates.find(candidate => fs.existsSync(candidate));
 }

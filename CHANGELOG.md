@@ -34,6 +34,7 @@
 - Fixed Dashboard creation, duplication and import in browsers that do not implement `crypto.randomUUID`.
 - Fixed E2E Dashboards adaptive-filter preparation by exposing every requested dimension immediately, displaying a loading state instead of empty facet values while selected CDRs are prepared, loading custom-field values when the field is added, reducing large CDR projections to the columns required for filtering and rendering, and enabling View Dashboard only after the combined data and dashboard definition are ready. Date bounds now appear with CDR selection, NR Mode and Scope, while the redundant template filter has been removed. Non-applicable Auto-calculated Fields no longer advance combined-table revisions on every opening and invalidate otherwise reusable Dashboard data.
 - Reserved a right-side lane for Dashboard failure-chart legends whenever the resolved legend contains items, preventing them from overflowing the chart canvas.
+- Fixed the shared Canvas chart renderer to prefer a working Chrome binary over Ubuntu's unavailable Chromium Snap wrapper in automated test environments.
 
 #### 📚 Documentation:
 - Added the E2E Dashboards workflow, filter semantics, Dashboard portability and viewer controls; updated Readme, module overview, interface and project-structure help, renamed Datasets Analysis documentation and renumbered subsequent Help chapters and links. Documented the canonical `/e2e-reporting` route and its legacy redirect.
