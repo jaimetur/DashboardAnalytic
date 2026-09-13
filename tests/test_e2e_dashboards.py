@@ -114,13 +114,15 @@ def test_dashboards_lifecycle_and_layout(client):
     assert client.get('/api/e2e-dashboards').json() == {}
 
 
-def test_dashboard_api_session_survives_an_application_process_restart(client):
+def test_dashboard_api_session_expires_on_application_process_restart(client):
     setup_dashboard(client)
     import src.DashboardAnalytic as app_module
 
     app_module.SESSIONS.clear()
 
-    assert client.get('/api/e2e-dashboards').status_code == 200
+    response = client.get('/api/e2e-dashboards', follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers['location'] == '/login'
 
 
 def test_dashboard_preview_identifies_title_and_transition_slides(client):

@@ -161,12 +161,6 @@ CREATE TABLE IF NOT EXISTS application_state (
     value TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS application_sessions (
-    token TEXT PRIMARY KEY,
-    username TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE TABLE IF NOT EXISTS transfer_offers (
     id TEXT PRIMARY KEY,
     payload_json TEXT NOT NULL,
@@ -1245,29 +1239,6 @@ class Repository:
                 'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
                 (key, value),
             )
-
-    def save_application_session(self, token: str, username: str) -> None:
-        with self.global_connection() as conn:
-            conn.execute(
-                'INSERT OR REPLACE INTO application_sessions (token, username, created_at) VALUES (?, ?, ?)',
-                (token, username, local_now_iso()),
-            )
-
-    def get_application_session_user(self, token: str) -> UserRecord | None:
-        with self.global_connection() as conn:
-            row = conn.execute(
-                'SELECT users.username, users.password_hash, users.role, users.active '
-                'FROM application_sessions INNER JOIN users ON users.username = application_sessions.username '
-                'WHERE application_sessions.token = ?',
-                (token,),
-            ).fetchone()
-        if not row or not row['active']:
-            return None
-        return UserRecord(row['username'], row['password_hash'], row['role'], bool(row['active']))
-
-    def delete_application_session(self, token: str) -> None:
-        with self.global_connection() as conn:
-            conn.execute('DELETE FROM application_sessions WHERE token = ?', (token,))
 
     def list_calculated_dimensions(self) -> list[dict[str, Any]]:
         with self.connection() as conn:

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from hashlib import sha256
 from pathlib import Path
-from threading import RLock, Thread
+from threading import RLock
 from typing import Literal
 from uuid import uuid4
 
@@ -138,7 +138,6 @@ def install_dashboard_routes(core):
     snapshots = OrderedDict()
     images = OrderedDict()
     projection_load_locks: dict[str, RLock] = {}
-    warming_workspaces: set[str] = set()
 
     def workspace_key():
         if not core.active_workspace:
@@ -216,7 +215,6 @@ def install_dashboard_routes(core):
             dashboards[dashboard_id] = saved_definition
             task_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
             task_repository.add_log(user.username, 'save_dashboard', json.dumps({'id': dashboard_id, 'name': definition.name}))
-        schedule_dashboard_warmup(task_repository.db_path, (definition.model_copy(deep=True),))
         return {'id': dashboard_id, 'definition': saved_definition}
 
     @app.patch('/api/e2e-dashboards/{dashboard_id}/name')
@@ -833,53 +831,6 @@ def install_dashboard_routes(core):
         finally:
             connection.close()
 
-    def schedule_dashboard_warmup(workspace_path, definitions=None):
-        """Build narrow analytical projections without delaying the calling request."""
-        resolved_workspace = str(Path(workspace_path).resolve())
-        with lock:
-            if resolved_workspace in warming_workspaces:
-                return
-            warming_workspaces.add(resolved_workspace)
-
-        def warm():
-            try:
-                task_repository = Repository(Path(resolved_workspace), core.repository.global_db_path)
-                items = list(definitions or ())
-                if not items:
-                    try:
-                        stored = task_repository.get_workspace_state(STATE_KEY)
-                        if stored is None:
-                            stored = task_repository.get_workspace_state(LEGACY_STATE_KEY) or '{}'
-                        items = [
-                            DashboardDefinition.model_validate(item)
-                            for item in json.loads(stored or '{}').values()
-                        ]
-                    except (json.JSONDecodeError, TypeError, ValueError):
-                        items = []
-                for definition in items:
-                    try:
-                        entries = validate(definition, task_repository)
-                        dimensions = core.load_repository_calculated_dimensions(task_repository)
-                        selected_by_kind = selected_sources(definition, task_repository)
-                        ensure_filter_projection(definition, task_repository, dimensions, selected_by_kind, entries)
-                        snapshot = Snapshot(
-                            resolved_workspace, 'system', entries, {}, definition.scope == 'multivendor',
-                            definition, tuple(dimensions), 0, '', False,
-                        )
-                        for kind in selected_by_kind:
-                            ensure_projection(snapshot, kind, task_repository)
-                    except (HTTPException, KeyError, OSError, sqlite3.Error, TypeError, ValueError):
-                        continue
-            finally:
-                with lock:
-                    warming_workspaces.discard(resolved_workspace)
-
-        Thread(
-            target=warm,
-            name=f'dashboard-warmup-{sha256(resolved_workspace.encode()).hexdigest()[:8]}',
-            daemon=True,
-        ).start()
-
     def snapshot_chart(token, index, user, *, include_frame=True):
         with lock:
             snapshot = snapshots.get(token)
@@ -1045,5 +996,3 @@ def install_dashboard_routes(core):
         page = max(page, 0)
         visible = frame.iloc[page*100:(page+1)*100].fillna('').astype(str)
         return {'columns': list(visible.columns), 'rows': visible.values.tolist(), 'total': len(frame), 'page': page}
-
-    core.schedule_e2e_dashboard_warmup = schedule_dashboard_warmup

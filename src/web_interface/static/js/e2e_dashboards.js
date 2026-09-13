@@ -14,6 +14,7 @@
   const renderedChartPayloads = new Map();
   let expandedChartRequest = 0;
   const openStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:open`;
+  const libraryStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:library`;
   const dashboardId = () => {
     if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
     const bytes = new Uint8Array(16);
@@ -25,6 +26,7 @@
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   };
   const rememberOpen = id => { try { if (id) sessionStorage.setItem(openStorageKey, id); else sessionStorage.removeItem(openStorageKey); } catch (_) { /* Storage is optional. */ } };
+  const rememberLibrary = () => { try { sessionStorage.setItem(libraryStorageKey, JSON.stringify(dashboards)); } catch (_) { /* Storage is optional. */ } };
   const nextName = value => { let name = value, number = 2; while (Object.values(dashboards).some(item => item.name.toLowerCase() === name.toLowerCase())) name = `${value.slice(0, 108)} (${number++})`; return name; };
   const focusReturn = new Map();
   const status = message => { $('ds-status').textContent = message; };
@@ -47,6 +49,15 @@
     return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalize(value[key])]));
   };
   const definitionFingerprint = value => JSON.stringify(canonicalize(canonicalDashboardDefinition(value)));
+  const hasUnsavedDashboardChanges = (ignoreName = false) => {
+    if (!definition) return false;
+    const current = canonicalDashboardDefinition(definition);
+    let saved;
+    try { saved = canonicalDashboardDefinition(JSON.parse(savedDefinition || '{}')); }
+    catch (_) { return true; }
+    if (ignoreName) current.name = saved.name;
+    return definitionFingerprint(current) !== definitionFingerprint(saved);
+  };
   const api = async (path = '', method = 'GET', body, signal) => {
     const response = await fetch(`/api/e2e-dashboards${path}`, {method, signal, cache: 'no-store', headers: {'Content-Type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
     const payload = await response.json();
@@ -56,7 +67,7 @@
   const safe = fn => async (...args) => { try { await fn(...args); } catch (error) { if (error.name !== 'AbortError') { status(error.message); if (window.showInfoDialog) window.showInfoDialog(error.message, {title:'E2E Dashboards',tone:'error'}); } } };
   const bind = (id, fn) => $(id).addEventListener('click', safe(fn));
   const setViewEnabled = enabled => { $('ds-view').disabled = !enabled; };
-  const updateDirtyState = () => { dirty = Boolean(definition && definitionFingerprint(definition) !== savedDefinition); return dirty; };
+  const updateDirtyState = () => { dirty = hasUnsavedDashboardChanges(); return dirty; };
   const updateSavedDefinition = updates => {
     try {
       savedDefinition = definitionFingerprint({...JSON.parse(savedDefinition || '{}'), ...updates});
@@ -85,6 +96,7 @@
     document.body.style.overflow = [...document.querySelectorAll('.ds-overlay')].some(el => !el.hidden) ? 'hidden' : '';
   }
   function library() {
+    rememberLibrary();
     $('ds-create').disabled = !$('ds-template').options.length;
     $('ds-count').textContent = `Total Dashboards: ${Object.keys(dashboards).length}`;
     const body = $('ds-dashboards-body'); body.replaceChildren();
@@ -275,25 +287,29 @@
     if (dashboardId !== activeId || item !== definition) return;
     definition = canonicalDashboardDefinition(result.definition); dashboards[dashboardId] = structuredClone(definition); savedDefinition = definitionFingerprint(definition); dirty = false; library(); status(`Saved “${definition.name}”.`);
   }
-  const confirmDiscard = async () => !updateDirtyState() || await window.showConfirmDialog('Discard unsaved Dashboard changes?', {title:'Unsaved changes',confirmLabel:'Discard'});
+  const confirmDiscard = async (ignoreName = false) => !hasUnsavedDashboardChanges(ignoreName) || await window.showConfirmDialog('Discard unsaved Dashboard changes?', {title:'Unsaved changes',confirmLabel:'Discard'});
   bind('ds-create', async () => {
-    if (!await confirmDiscard()) return;
+    if (!await confirmDiscard(true)) return;
     const technology = $('ds-nr-mode').value;
     const selected = (config.templates[technology] || []).find(row => row.identifier === $('ds-template').value);
     if (!selected) throw new Error('Choose a template for the selected NR Mode.');
     const item = {name:$('ds-name').value.trim(),template_technology:technology,template:selected.name,technology,scope:'single',datasets:Object.fromEntries(Object.entries(config.datasets).map(([kind,rows])=>[kind,rows.map(row=>row.id)])),filters:{},custom_fields:[],date_from:null,date_to:null};
-    const id = dashboardId(), result = await api(`/${id}`,'PUT',item); dashboards[id] = result.definition; await openDashboard(id);
+    status(`Creating “${item.name}”…`); $('ds-create').disabled = true;
+    try { const id = dashboardId(), result = await api(`/${id}`,'PUT',item); dashboards[id] = result.definition; await openDashboard(id); }
+    finally { $('ds-create').disabled = !$('ds-template').options.length; }
   });
   bind('ds-save', save);
   async function duplicateDashboard(sourceId) {
     const id = dashboardId(), item = structuredClone(dashboards[sourceId]); item.name = nextName(`${item.name.slice(0,110)} (copy)`);
+    status(`Duplicating “${dashboards[sourceId].name}”…`);
     const result = await api(`/${id}`,'PUT',item); dashboards[id] = result.definition; await openDashboard(id);
   }
   function exportDashboard(item) { const blob = new Blob([JSON.stringify({format:'dashboard-analytic-dashboard',version:2,definition:item},null,2)],{type:'application/json'}); const url = URL.createObjectURL(blob), a = node('a'); a.href = url; a.download = `${item.name.replace(/[^a-z0-9_-]/gi,'_')}.json`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000); status(`Exported “${item.name}”.`); }
   async function deleteDashboard(id) {
     const item = dashboards[id]; if (!item || !await window.showConfirmDialog(`Delete “${item.name}”?`,{title:'Delete Dashboard',confirmLabel:'Delete',tone:'danger'})) return;
     if (id === activeId && !await confirmDiscard()) return;
-    await api(`/${id}`,'DELETE'); delete dashboards[id]; if (id === activeId) closeDashboard(); else library();
+    status(`Deleting “${item.name}”…`);
+    await api(`/${id}`,'DELETE'); delete dashboards[id]; if (id === activeId) closeDashboard(); else { library(); status(`Deleted “${item.name}”.`); }
   }
   bind('ds-import',() => $('ds-import-file').click());
   $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name); const id = dashboardId(), result = await api(`/${id}`,'PUT',payload.definition); dashboards[id] = result.definition; await openDashboard(id); $('ds-import-file').value = ''; });
@@ -624,5 +640,16 @@
   });
   window.addEventListener('beforeunload',event=>{ if (dirty) { event.preventDefault(); event.returnValue = ''; } });
   window.addEventListener('auto-calculated-field-job-status',event=>{ const job = event.detail; if (definition && job?.id && ['ready','completed'].includes(job.status) && !completedFieldJobs.has(job.id)) { completedFieldJobs.add(job.id); changed(); } });
-  safe(async ()=>{ dashboards = await api(); library(); let last = ''; try { last = sessionStorage.getItem(openStorageKey) || ''; } catch (_) { /* Storage is optional. */ } if (dashboards[last]) await openDashboard(last); })();
+  safe(async ()=>{
+    let last = '';
+    try {
+      last = sessionStorage.getItem(openStorageKey) || '';
+      const cached = JSON.parse(sessionStorage.getItem(libraryStorageKey) || '{}');
+      dashboards = cached && typeof cached === 'object' && !Array.isArray(cached)
+        && Object.values(cached).every(item => item && typeof item === 'object' && typeof item.name === 'string') ? cached : {};
+      if (Object.keys(dashboards).length) library();
+    } catch (_) { dashboards = {}; }
+    dashboards = await api(); library();
+    if (dashboards[last]) await openDashboard(last);
+  })();
 })();

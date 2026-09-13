@@ -1342,9 +1342,6 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
         # exact columns it needs lazily in ``_combined_reporting_frame``.
         for technology in TEMPLATE_NAMES:
             synchronize_template_file_names(technology)
-    dashboard_warmup = globals().get('schedule_e2e_dashboard_warmup')
-    if callable(dashboard_warmup):
-        dashboard_warmup(workspace.database_path)
     return workspace
 
 
@@ -2398,22 +2395,13 @@ def refresh_selected_dataset_if_stale(selected_dataset: dict[str, Any] | None) -
 def create_session(response: Response, user: SessionUser) -> None:
     token = secrets.token_urlsafe(32)
     SESSIONS[token] = user
-    repository.save_application_session(token, user.username)
     response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite='lax')
 
 
 def session_user(token: str | None) -> SessionUser | None:
     if not token:
         return None
-    user = SESSIONS.get(token)
-    if user:
-        return user
-    record = repository.get_application_session_user(token)
-    if not record:
-        return None
-    user = SessionUser(username=record.username, role=record.role)
-    SESSIONS[token] = user
-    return user
+    return SESSIONS.get(token)
 
 
 def current_user(request: Request) -> SessionUser:
@@ -5500,7 +5488,6 @@ def logout(request: Request) -> Response:
         repository.add_log(logged_in_user.username, 'logout', json.dumps({'success': True}))
     if token:
         SESSIONS.pop(token, None)
-        repository.delete_application_session(token)
     response = RedirectResponse('/login', status_code=status.HTTP_303_SEE_OTHER)
     response.delete_cookie(SESSION_COOKIE)
     return response
