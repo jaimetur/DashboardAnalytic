@@ -32,7 +32,13 @@ on:
         required: false
   push:
     branches: [main]
-    tags: ['v*']
+
+# A manual Build All invocation and the push trigger can otherwise compile the
+# same multi-platform image concurrently, which duplicates the ARM64 emulation
+# work and races while publishing the shared cache.
+concurrency:
+  group: dashboard-analytic-docker-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   docker:
@@ -136,10 +142,11 @@ jobs:
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          # Use one explicit scope across commits and workflow entry points so
-          # both platform dependency layers survive application-only changes.
-          cache-from: type=gha,scope=dashboard-analytic-multiplatform-v1
-          cache-to: type=gha,mode=max,scope=dashboard-analytic-multiplatform-v1
+          # Keep the multi-platform cache beside the image. GitHub Actions
+          # cache storage repeatedly evicts large Chromium/ARM64 layers, while
+          # the registry retains and deduplicates them across workflow runs.
+          cache-from: type=registry,ref=${{ steps.image.outputs.image_name }}:buildcache
+          cache-to: type=registry,ref=${{ steps.image.outputs.image_name }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
 
       - name: Prepare Docker package
         run: |
