@@ -72,7 +72,9 @@ def test_dashboards_lifecycle_and_layout(client):
     dashboard_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
     assert "controls.append(data, expand, zoom)" in dashboard_script
     assert client.put('/api/e2e-dashboards/test', json=payload).status_code == 200
-    assert client.get('/api/e2e-dashboards').json()['test']['name'] == 'Comparison'
+    listed = client.get('/api/e2e-dashboards')
+    assert listed.json()['test']['name'] == 'Comparison'
+    assert listed.headers['cache-control'] == 'no-store, max-age=0, must-revalidate'
     renamed = client.patch('/api/e2e-dashboards/test/name', json={'name': 'Renamed comparison'})
     assert renamed.status_code == 200
     assert renamed.json()['name'] == 'Renamed comparison'

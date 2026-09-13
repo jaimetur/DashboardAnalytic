@@ -198,7 +198,10 @@ def install_dashboard_routes(core):
     @app.get('/api/e2e-dashboards')
     def list_dashboards(user=Depends(dashboard_user)):
         with lock:
-            return read_dashboards(bound_repository())
+            return JSONResponse(
+                read_dashboards(bound_repository()),
+                headers={'Cache-Control': 'no-store, max-age=0, must-revalidate'},
+            )
 
     @app.put('/api/e2e-dashboards/{dashboard_id}')
     def save_dashboard(dashboard_id: str, definition: DashboardDefinition, user=Depends(dashboard_user)):

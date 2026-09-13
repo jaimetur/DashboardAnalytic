@@ -3,7 +3,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const config = JSON.parse($('ds-config').textContent);
-  let dashboards = {}, activeId = '', definition = null, prepared = null, slideIndex = 0;
+  let dashboards = {}, activeId = '', definition = null, savedDefinition = '', prepared = null, slideIndex = 0;
   let sequence = 0, timer, controller, preparing = null, dirty = false, dataIndex = 0, dataPage = 0, dataToken = '', dataRequest = 0;
   const dataPages = new Map();
   let presentationTimer = 0;
@@ -31,7 +31,7 @@
   const option = (value, label) => { const el = node('option', label); el.value = value; return el; };
   const identity = value => String(value).toLocaleLowerCase().replace(/[^a-z0-9]/g, '');
   const api = async (path = '', method = 'GET', body, signal) => {
-    const response = await fetch(`/api/e2e-dashboards${path}`, {method, signal, headers: {'Content-Type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
+    const response = await fetch(`/api/e2e-dashboards${path}`, {method, signal, cache: 'no-store', headers: {'Content-Type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
     const payload = await response.json();
     if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : JSON.stringify(payload.detail));
     return payload;
@@ -39,6 +39,15 @@
   const safe = fn => async (...args) => { try { await fn(...args); } catch (error) { if (error.name !== 'AbortError') { status(error.message); if (window.showInfoDialog) window.showInfoDialog(error.message, {title:'E2E Dashboards',tone:'error'}); } } };
   const bind = (id, fn) => $(id).addEventListener('click', safe(fn));
   const setViewEnabled = enabled => { $('ds-view').disabled = !enabled; };
+  const updateDirtyState = () => { dirty = Boolean(definition && JSON.stringify(definition) !== savedDefinition); return dirty; };
+  const updateSavedDefinition = updates => {
+    try {
+      savedDefinition = JSON.stringify({...JSON.parse(savedDefinition || '{}'), ...updates});
+    } catch (_) {
+      savedDefinition = JSON.stringify(definition);
+    }
+    updateDirtyState();
+  };
   const setPreparationState = state => {
     const notice = $('ds-preparing'), viewerNotice = $('ds-viewer-preparing');
     notice.hidden = state === 'hidden';
@@ -80,6 +89,7 @@
         dashboards[id].name = result.name;
         if (id === activeId && definition) {
           definition.name = result.name; $('ds-name').value = result.name; $('ds-dashboard-name').textContent = `Dashboard Name: ${result.name}`;
+          updateSavedDefinition({name: result.name});
           if (!$('ds-viewer').hidden) renderSlide();
         }
         library(); status(`Renamed Dashboard to “${result.name}”.`);
@@ -201,7 +211,7 @@
     facetsRefreshTimer = setTimeout(refreshFacetsAfterMenusClose, 100);
   }
   function changed() {
-    dirty = true; prepared = null; ++sequence; controller?.abort(); preparing = null;
+    updateDirtyState(); prepared = null; ++sequence; controller?.abort(); preparing = null;
     setViewEnabled(false);
     setPreparationState('preparing');
     $('ds-rows').textContent = '';
@@ -237,7 +247,7 @@
   async function openDashboard(id) {
     clearTimeout(facetsRefreshTimer);
     stopPresentation();
-    activeId = id; definition = structuredClone(dashboards[id]); dirty = false; prepared = null; facetOptions = {}; availableFields = []; slideIndex = 0; setViewEnabled(false); rememberOpen(id);
+    activeId = id; definition = structuredClone(dashboards[id]); savedDefinition = JSON.stringify(definition); dirty = false; prepared = null; facetOptions = {}; availableFields = []; slideIndex = 0; setViewEnabled(false); rememberOpen(id);
     $('ds-name').value = definition.name; setNrMode(definition.technology || definition.template_technology, definition.template);
     $('ds-filter-panel').hidden = false; $('ds-dashboard-name').textContent = `Dashboard Name: ${definition.name}`; sources(); facets(); library(); status(''); await prepare();
   }
@@ -246,9 +256,9 @@
     const dashboardId = activeId, item = definition;
     item.name = $('ds-name').value.trim(); await api(`/${dashboardId}`,'PUT',item);
     if (dashboardId !== activeId || item !== definition) return;
-    dashboards[dashboardId] = structuredClone(item); dirty = false; library(); status(`Saved “${item.name}”.`);
+    dashboards[dashboardId] = structuredClone(item); savedDefinition = JSON.stringify(item); dirty = false; library(); status(`Saved “${item.name}”.`);
   }
-  const confirmDiscard = async () => !dirty || await window.showConfirmDialog('Discard unsaved Dashboard changes?', {title:'Unsaved changes',confirmLabel:'Discard'});
+  const confirmDiscard = async () => !updateDirtyState() || await window.showConfirmDialog('Discard unsaved Dashboard changes?', {title:'Unsaved changes',confirmLabel:'Discard'});
   bind('ds-create', async () => {
     if (!await confirmDiscard()) return;
     const technology = $('ds-nr-mode').value;
@@ -270,8 +280,8 @@
   }
   bind('ds-import',() => $('ds-import-file').click());
   $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name); const id = dashboardId(); await api(`/${id}`,'PUT',payload.definition); dashboards[id] = payload.definition; await openDashboard(id); $('ds-import-file').value = ''; });
-  function closeDashboard() { clearTimeout(facetsRefreshTimer); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; prepared = null; dirty = false; setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard Name: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
-  $('ds-name').oninput = () => { if (definition) { definition.name = $('ds-name').value; dirty = true; } };
+  function closeDashboard() { clearTimeout(facetsRefreshTimer); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; savedDefinition = ''; prepared = null; dirty = false; setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard Name: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
+  $('ds-name').oninput = () => { if (definition) { definition.name = $('ds-name').value; updateDirtyState(); } };
   $('ds-nr-mode').onchange = () => {
     const selected = setNrMode($('ds-nr-mode').value);
     if (definition && selected) { definition.template_technology = definition.technology = $('ds-nr-mode').value; definition.template = selected.name; changed(); }
@@ -432,6 +442,7 @@
     const payload = await api(`/${id}/comments`, 'PATCH', {slide_comments: definition.slide_comments || {}});
     if (!definition || activeId !== id) return;
     definition.slide_comments = payload.slide_comments;
+    updateSavedDefinition({slide_comments: payload.slide_comments});
     dashboards[id] = {...dashboards[id], slide_comments: structuredClone(payload.slide_comments)};
     $('ds-comments-status').textContent = 'Saved';
   }

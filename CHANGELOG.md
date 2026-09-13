@@ -26,6 +26,7 @@
 - Replaced the floating Adaptative Filters panel's View Dashboard action with a grey Close control that returns to the viewer.
 - Made floating Adaptative Filter edits regenerate the visible Dashboard charts after a short debounce while retaining their unsaved, synchronized temporary state. Multi-select filter menus now remain open while values are selected and close one second after the pointer leaves.
 - Made Dashboard names editable directly in Manage Dashboards with a compact green save check inside the field that appears only while the name is being edited, and added an eye action that opens the selected Dashboard straight in View Dashboard, including a centered loading card that closes automatically when its slides or updated charts are ready.
+- Fixed Dashboard creation and reloads so the library always reads its persisted no-cache state and does not warn about changes when the active definition matches its last saved version.
 
 #### 🐛 Bug fixes:
 - Fixed CDF previews discarding valid samples when optional Campaign metadata is empty.
