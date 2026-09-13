@@ -30,6 +30,22 @@
   const node = (tag, text, className) => { const el = document.createElement(tag); if (text !== undefined) el.textContent = text; if (className) el.className = className; return el; };
   const option = (value, label) => { const el = node('option', label); el.value = value; return el; };
   const identity = value => String(value).toLocaleLowerCase().replace(/[^a-z0-9]/g, '');
+  const canonicalDashboardDefinition = value => {
+    const definitionValue = structuredClone(value || {});
+    definitionValue.datasets ||= {};
+    for (const kind of ['data', 'voice', 'speech']) definitionValue.datasets[kind] ||= [];
+    definitionValue.filters ||= {};
+    definitionValue.custom_fields ||= [];
+    definitionValue.hidden_filters ||= [];
+    definitionValue.slide_comments ||= {};
+    return definitionValue;
+  };
+  const canonicalize = value => {
+    if (Array.isArray(value)) return value.map(canonicalize);
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalize(value[key])]));
+  };
+  const definitionFingerprint = value => JSON.stringify(canonicalize(canonicalDashboardDefinition(value)));
   const api = async (path = '', method = 'GET', body, signal) => {
     const response = await fetch(`/api/e2e-dashboards${path}`, {method, signal, cache: 'no-store', headers: {'Content-Type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
     const payload = await response.json();
@@ -39,12 +55,12 @@
   const safe = fn => async (...args) => { try { await fn(...args); } catch (error) { if (error.name !== 'AbortError') { status(error.message); if (window.showInfoDialog) window.showInfoDialog(error.message, {title:'E2E Dashboards',tone:'error'}); } } };
   const bind = (id, fn) => $(id).addEventListener('click', safe(fn));
   const setViewEnabled = enabled => { $('ds-view').disabled = !enabled; };
-  const updateDirtyState = () => { dirty = Boolean(definition && JSON.stringify(definition) !== savedDefinition); return dirty; };
+  const updateDirtyState = () => { dirty = Boolean(definition && definitionFingerprint(definition) !== savedDefinition); return dirty; };
   const updateSavedDefinition = updates => {
     try {
-      savedDefinition = JSON.stringify({...JSON.parse(savedDefinition || '{}'), ...updates});
+      savedDefinition = definitionFingerprint({...JSON.parse(savedDefinition || '{}'), ...updates});
     } catch (_) {
-      savedDefinition = JSON.stringify(definition);
+      savedDefinition = definitionFingerprint(definition);
     }
     updateDirtyState();
   };
@@ -247,7 +263,7 @@
   async function openDashboard(id) {
     clearTimeout(facetsRefreshTimer);
     stopPresentation();
-    activeId = id; definition = structuredClone(dashboards[id]); savedDefinition = JSON.stringify(definition); dirty = false; prepared = null; facetOptions = {}; availableFields = []; slideIndex = 0; setViewEnabled(false); rememberOpen(id);
+    activeId = id; definition = canonicalDashboardDefinition(dashboards[id]); savedDefinition = definitionFingerprint(definition); dirty = false; prepared = null; facetOptions = {}; availableFields = []; slideIndex = 0; setViewEnabled(false); rememberOpen(id);
     $('ds-name').value = definition.name; setNrMode(definition.technology || definition.template_technology, definition.template);
     $('ds-filter-panel').hidden = false; $('ds-dashboard-name').textContent = `Dashboard Name: ${definition.name}`; sources(); facets(); library(); status(''); await prepare();
   }
@@ -256,7 +272,7 @@
     const dashboardId = activeId, item = definition;
     item.name = $('ds-name').value.trim(); const result = await api(`/${dashboardId}`,'PUT',item);
     if (dashboardId !== activeId || item !== definition) return;
-    definition = structuredClone(result.definition); dashboards[dashboardId] = structuredClone(result.definition); savedDefinition = JSON.stringify(definition); dirty = false; library(); status(`Saved “${definition.name}”.`);
+    definition = canonicalDashboardDefinition(result.definition); dashboards[dashboardId] = structuredClone(definition); savedDefinition = definitionFingerprint(definition); dirty = false; library(); status(`Saved “${definition.name}”.`);
   }
   const confirmDiscard = async () => !updateDirtyState() || await window.showConfirmDialog('Discard unsaved Dashboard changes?', {title:'Unsaved changes',confirmLabel:'Discard'});
   bind('ds-create', async () => {
