@@ -11,6 +11,7 @@
   let facetOptions = {}, availableFields = [], facetFields = config.filter_fields || [], facetsLoading = false, facetsRefreshTimer = 0;
   const completedFieldJobs = new Set();
   const chartPayloads = new Map();
+  let expandedChartRequest = 0;
   const openStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:open`;
   const dashboardId = () => {
     if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -351,6 +352,52 @@
     canvas.addEventListener('dashboardchartzoom', event => sync(event.detail?.zoom));
     sync(1); controls.append(zoomOut, level, zoomIn, reset); return controls;
   }
+  function expandedChartOverlay(show) {
+    const overlay = $('ds-chart-expanded-overlay');
+    if (show) {
+      focusReturn.set('ds-chart-expanded-overlay', document.activeElement);
+      overlay.hidden = false;
+      overlay.querySelector('[role=dialog]').focus();
+    } else {
+      expandedChartRequest += 1;
+      overlay.hidden = true;
+      $('ds-chart-expanded-canvas').hidden = true;
+      focusReturn.get('ds-chart-expanded-overlay')?.focus();
+    }
+  }
+  async function openExpandedChart(chart) {
+    stopPresentation();
+    const request = ++expandedChartRequest;
+    const token = prepared?.token;
+    const canvas = $('ds-chart-expanded-canvas');
+    const message = $('ds-chart-expanded-message');
+    $('ds-chart-expanded-title').textContent = chart.title || 'Expanded chart';
+    canvas.setAttribute('aria-label', chart.title || 'Expanded chart');
+    canvas.hidden = true;
+    message.hidden = false;
+    message.textContent = `Loading ${chart.title || 'chart'}…`;
+    expandedChartOverlay(true);
+    let payload;
+    try {
+      payload = await loadChartPayload(chart);
+    } catch (error) {
+      if (request === expandedChartRequest && !$('ds-chart-expanded-overlay').hidden) message.textContent = error.message || `Unable to load ${chart.title || 'chart'}.`;
+      throw error;
+    }
+    if (request !== expandedChartRequest || token !== prepared?.token || $('ds-chart-expanded-overlay').hidden) return;
+    canvas.hidden = false;
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    if (request !== expandedChartRequest || token !== prepared?.token || $('ds-chart-expanded-overlay').hidden) return;
+    try {
+      globalThis.renderDashboardChart(canvas, payload);
+      message.hidden = true;
+    } catch (error) {
+      canvas.hidden = true;
+      message.hidden = false;
+      message.textContent = error.message || `Unable to render ${chart.title || 'chart'}.`;
+      throw error;
+    }
+  }
   const currentSlideCommentKey = () => String(prepared?.slides[slideIndex]?.number ?? slideIndex + 1);
   function renderComments() {
     const list = $('ds-comments-list');
@@ -446,7 +493,8 @@
         });
       } else message.textContent = `Unavailable source type: select a ${chart.source ? chart.source.toUpperCase() : 'supported'} CDR dataset.`;
       const data = node('button','', 'ds-chart-data'); data.type = 'button'; data.title = 'View dataset'; data.setAttribute('aria-label', 'View dataset'); data.disabled = !chart.available; data.onclick = safe(async () => { dataIndex = chart.index; dataPage = 0; dataToken = prepared.token; dataPages.clear(); overlay('ds-data-overlay',true); await renderData(); });
-      const controls = node('div', undefined, 'ds-chart-controls'); controls.append(data, zoom); card.append(controls);
+      const expand = node('button', '', 'ds-chart-expand'); expand.type = 'button'; expand.title = 'Expand chart'; expand.setAttribute('aria-label', 'Expand chart'); expand.disabled = !chart.available; expand.onclick = safe(async event => { event.stopPropagation(); await openExpandedChart(chart); });
+      const controls = node('div', undefined, 'ds-chart-controls'); controls.append(data, expand, zoom); card.append(controls);
       let hideTimer;
       const showControls = () => { clearTimeout(hideTimer); hideTimer = null; card.classList.add('ds-hover'); };
       const hideControls = () => { if (!hideTimer) hideTimer = setTimeout(() => { card.classList.remove('ds-hover'); hideTimer = null; }, 500); };
@@ -474,7 +522,7 @@
   bind('ds-floating-filters',()=>{ $('ds-filter-float').append($('ds-filter-panel')); $('ds-view').hidden = true; $('ds-filter-close-action').hidden = false; overlay('ds-filter-overlay',true); });
   bind('ds-filter-close',closeFilters);
   bind('ds-filter-close-action',closeFilters);
-  bind('ds-viewer-close',()=>{ stopPresentation(); if (!$('ds-filter-overlay').hidden) closeFilters(); overlay('ds-viewer',false); });
+  bind('ds-viewer-close',()=>{ stopPresentation(); if (!$('ds-chart-expanded-overlay').hidden) expandedChartOverlay(false); if (!$('ds-filter-overlay').hidden) closeFilters(); overlay('ds-viewer',false); });
   function loadDataPage(token, index, page) {
     const key = `${token}:${index}:${page}`;
     let request = dataPages.get(key);
@@ -519,11 +567,12 @@
   bind('ds-data-next', async () => { dataPage += 1; await renderData(); });
   bind('ds-data-last', async () => { const label = $('ds-data-page').textContent; const pages = Number(label.match(/\/ (\d+)$/)?.[1]) || 1; dataPage = pages - 1; await renderData(); });
   bind('ds-data-close',()=>overlay('ds-data-overlay',false));
+  bind('ds-chart-expanded-close',()=>expandedChartOverlay(false));
   if ($('ds-edit')) bind('ds-edit',()=>{ const slide = prepared?.slides[slideIndex]; if (!slide) return; $('ds-editor-frame').src = `/admin/report-templates/${encodeURIComponent(definition.template_technology)}/${encodeURIComponent(definition.template)}/editor?focus_row=${slide.focus_row}`; overlay('ds-editor-overlay',true); });
   bind('ds-editor-close',async ()=>{ overlay('ds-editor-overlay',false); $('ds-editor-frame').removeAttribute('src'); await prepare(); });
   document.addEventListener('keydown',event=>{
-    const visible = ['ds-editor-overlay','ds-data-overlay','ds-filter-overlay','ds-presentation-overlay','ds-viewer'].find(id=>!$(id).hidden); if (!visible || !$(visible).contains(document.activeElement)) return;
-    if (event.key === 'Escape') { event.preventDefault(); $({'ds-editor-overlay':'ds-editor-close','ds-data-overlay':'ds-data-close','ds-filter-overlay':'ds-filter-close','ds-presentation-overlay':'ds-presentation-close','ds-viewer':'ds-viewer-close'}[visible]).click(); }
+    const visible = ['ds-chart-expanded-overlay','ds-editor-overlay','ds-data-overlay','ds-filter-overlay','ds-presentation-overlay','ds-viewer'].find(id=>!$(id).hidden); if (!visible || !$(visible).contains(document.activeElement)) return;
+    if (event.key === 'Escape') { event.preventDefault(); $({'ds-chart-expanded-overlay':'ds-chart-expanded-close','ds-editor-overlay':'ds-editor-close','ds-data-overlay':'ds-data-close','ds-filter-overlay':'ds-filter-close','ds-presentation-overlay':'ds-presentation-close','ds-viewer':'ds-viewer-close'}[visible]).click(); }
     if (event.key === 'Tab') { const controls = [...$(visible).querySelectorAll('button:not(:disabled),a[href],input,select,summary,[tabindex="0"]')].filter(el=>el.getClientRects().length); if (!controls.length) return; const first = controls[0], last = controls.at(-1); if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
   });
   window.addEventListener('message', event => {

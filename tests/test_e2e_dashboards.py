@@ -67,6 +67,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-viewer-preparing"' in page.text
     assert '>Auto-Calculated Fields<' in page.text
     assert 'class="ds-viewer-icon-action ds-viewer-refresh-action"' in page.text
+    assert 'id="ds-chart-expanded-overlay"' in page.text
+    assert 'id="ds-chart-expanded-canvas"' in page.text
+    dashboard_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+    assert "controls.append(data, expand, zoom)" in dashboard_script
     assert client.put('/api/e2e-dashboards/test', json=payload).status_code == 200
     assert client.get('/api/e2e-dashboards').json()['test']['name'] == 'Comparison'
     renamed = client.patch('/api/e2e-dashboards/test/name', json={'name': 'Renamed comparison'})
