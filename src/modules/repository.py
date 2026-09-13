@@ -1273,12 +1273,15 @@ class Repository:
         table_name = self.dataset_rows_table_name(dataset_id)
         safe_df = self._sqlite_safe_frame(df)
         with self.connection() as conn:
+            # Reserve the writer before dropping the old materialisation.  A
+            # background refresh can otherwise create the same table during
+            # pandas' replace path between its DROP and CREATE statements.
+            conn.execute('BEGIN IMMEDIATE')
             conn.execute(f"DROP TABLE IF EXISTS {self._quote_identifier(table_name)}")
-            # pandas rechecks sqlite metadata before creating the table.  In a
-            # long-lived workspace connection that metadata can still reflect
-            # the just-dropped table, so use its explicit replacement mode to
-            # make this operation idempotent.
-            safe_df.to_sql(table_name, conn, if_exists='replace', index=False)
+            # The table has just been removed under the writer lock.  Appending
+            # makes pandas create it without issuing a second DROP/commit,
+            # leaving no window for another connection to recreate it first.
+            safe_df.to_sql(table_name, conn, if_exists='append', index=False)
             self._create_dataset_row_indexes(conn, table_name, safe_df.columns.tolist())
 
     def reporting_rows_table_name(self, dataset_kind: str) -> str:

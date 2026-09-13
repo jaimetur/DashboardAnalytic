@@ -254,9 +254,9 @@
   async function save() {
     if (!activeId || !definition) return;
     const dashboardId = activeId, item = definition;
-    item.name = $('ds-name').value.trim(); await api(`/${dashboardId}`,'PUT',item);
+    item.name = $('ds-name').value.trim(); const result = await api(`/${dashboardId}`,'PUT',item);
     if (dashboardId !== activeId || item !== definition) return;
-    dashboards[dashboardId] = structuredClone(item); savedDefinition = JSON.stringify(item); dirty = false; library(); status(`Saved “${item.name}”.`);
+    definition = structuredClone(result.definition); dashboards[dashboardId] = structuredClone(result.definition); savedDefinition = JSON.stringify(definition); dirty = false; library(); status(`Saved “${definition.name}”.`);
   }
   const confirmDiscard = async () => !updateDirtyState() || await window.showConfirmDialog('Discard unsaved Dashboard changes?', {title:'Unsaved changes',confirmLabel:'Discard'});
   bind('ds-create', async () => {
@@ -265,12 +265,12 @@
     const selected = (config.templates[technology] || []).find(row => row.identifier === $('ds-template').value);
     if (!selected) throw new Error('Choose a template for the selected NR Mode.');
     const item = {name:$('ds-name').value.trim(),template_technology:technology,template:selected.name,technology,scope:'single',datasets:Object.fromEntries(Object.entries(config.datasets).map(([kind,rows])=>[kind,rows.map(row=>row.id)])),filters:{},custom_fields:[],date_from:null,date_to:null};
-    const id = dashboardId(); await api(`/${id}`,'PUT',item); dashboards[id] = item; await openDashboard(id);
+    const id = dashboardId(), result = await api(`/${id}`,'PUT',item); dashboards[id] = result.definition; await openDashboard(id);
   });
   bind('ds-save', save);
   async function duplicateDashboard(sourceId) {
     const id = dashboardId(), item = structuredClone(dashboards[sourceId]); item.name = nextName(`${item.name.slice(0,110)} (copy)`);
-    await api(`/${id}`,'PUT',item); dashboards[id] = item; await openDashboard(id);
+    const result = await api(`/${id}`,'PUT',item); dashboards[id] = result.definition; await openDashboard(id);
   }
   function exportDashboard(item) { const blob = new Blob([JSON.stringify({format:'dashboard-analytic-dashboard',version:2,definition:item},null,2)],{type:'application/json'}); const url = URL.createObjectURL(blob), a = node('a'); a.href = url; a.download = `${item.name.replace(/[^a-z0-9_-]/gi,'_')}.json`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000); status(`Exported “${item.name}”.`); }
   async function deleteDashboard(id) {
@@ -279,7 +279,7 @@
     await api(`/${id}`,'DELETE'); delete dashboards[id]; if (id === activeId) closeDashboard(); else library();
   }
   bind('ds-import',() => $('ds-import-file').click());
-  $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name); const id = dashboardId(); await api(`/${id}`,'PUT',payload.definition); dashboards[id] = payload.definition; await openDashboard(id); $('ds-import-file').value = ''; });
+  $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name); const id = dashboardId(), result = await api(`/${id}`,'PUT',payload.definition); dashboards[id] = result.definition; await openDashboard(id); $('ds-import-file').value = ''; });
   function closeDashboard() { clearTimeout(facetsRefreshTimer); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; savedDefinition = ''; prepared = null; dirty = false; setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard Name: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
   $('ds-name').oninput = () => { if (definition) { definition.name = $('ds-name').value; updateDirtyState(); } };
   $('ds-nr-mode').onchange = () => {

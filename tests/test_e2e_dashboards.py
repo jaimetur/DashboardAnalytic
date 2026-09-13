@@ -71,7 +71,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-chart-expanded-canvas"' in page.text
     dashboard_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
     assert "controls.append(data, expand, zoom)" in dashboard_script
-    assert client.put('/api/e2e-dashboards/test', json=payload).status_code == 200
+    saved = client.put('/api/e2e-dashboards/test', json=payload)
+    assert saved.status_code == 200
+    assert saved.json()['definition']['hidden_filters'] == []
+    assert saved.json()['definition']['slide_comments'] == {}
     listed = client.get('/api/e2e-dashboards')
     assert listed.json()['test']['name'] == 'Comparison'
     assert listed.headers['cache-control'] == 'no-store, max-age=0, must-revalidate'

@@ -212,11 +212,12 @@ def install_dashboard_routes(core):
             if any(key != dashboard_id and item['name'].strip().casefold() == definition.name.strip().casefold() for key, item in dashboards.items()):
                 raise HTTPException(409, 'A Dashboard with this name already exists.')
             definition.name = definition.name.strip()
-            dashboards[dashboard_id] = definition.model_dump(mode='json')
+            saved_definition = definition.model_dump(mode='json')
+            dashboards[dashboard_id] = saved_definition
             task_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
             task_repository.add_log(user.username, 'save_dashboard', json.dumps({'id': dashboard_id, 'name': definition.name}))
         schedule_dashboard_warmup(task_repository.db_path, (definition.model_copy(deep=True),))
-        return {'id': dashboard_id}
+        return {'id': dashboard_id, 'definition': saved_definition}
 
     @app.patch('/api/e2e-dashboards/{dashboard_id}/name')
     def rename_dashboard(dashboard_id: str, payload: DashboardName, user=Depends(dashboard_user)):
