@@ -84,14 +84,20 @@ async function startRenderer() {
   if (!executable) throw new Error('No supported Chromium browser is installed.');
   const port = await availablePort();
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'dashboard-canvas-renderer-'));
+  let browserError = '';
   const browser = spawn(executable, [
-    '--headless=new', '--disable-gpu', '--disable-extensions', '--hide-scrollbars',
+    '--headless=new', '--disable-gpu', '--disable-dev-shm-usage',
+    '--disable-extensions', '--hide-scrollbars',
     '--no-first-run', '--no-default-browser-check', '--no-sandbox',
-    `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, 'about:blank',
-  ], {stdio: 'ignore'});
+    '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${port}`,
+    `--user-data-dir=${profile}`, 'about:blank',
+  ], {stdio: ['ignore', 'ignore', 'pipe']});
+  browser.stderr?.on('data', chunk => {
+    browserError = `${browserError}${chunk}`.slice(-2000);
+  });
 
   let version;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/json/version`);
       if (response.ok) { version = await response.json(); break; }
@@ -101,7 +107,11 @@ async function startRenderer() {
   if (!version) {
     browser.kill();
     fs.rmSync(profile, {recursive: true, force: true});
-    throw new Error('Chromium did not expose its rendering endpoint.');
+    const detail = browserError.trim().replace(/\s+/g, ' ');
+    throw new Error(
+      `Chromium did not expose its rendering endpoint (${executable}; exit ${browser.exitCode ?? 'running'})`
+      + (detail ? `: ${detail}` : '.'),
+    );
   }
 
   const targetResponse = await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, {method: 'PUT'});
