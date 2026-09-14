@@ -2084,11 +2084,13 @@ def test_reporting_module_is_available_to_authenticated_users(client) -> None:
     assert 'data-report-job-form' in page.text
     assert 'name="data_dataset_id" multiple required' not in page.text
     assert 'data-reporting-filter-panel="charts"' in page.text
-    assert 'data-reporting-filter-panel="jobs"' in page.text
-    assert page.text.count('data-reporting-job-filter="tech"') == 2
-    assert page.text.count('data-reporting-job-filter="type"') == 2
-    assert page.text.count('data-reporting-job-filter="template"') == 2
-    assert page.text.count('data-reporting-job-filter="scope"') == 2
+    assert 'data-reporting-filter-panel="jobs"' not in page.text
+    assert 'data-report-job-datasets-dialog' in page.text
+    assert 'data-report-job-datasets-tooltip' in page.text
+    assert page.text.count('data-reporting-job-filter="tech"') == 1
+    assert page.text.count('data-reporting-job-filter="type"') == 1
+    assert page.text.count('data-reporting-job-filter="template"') == 1
+    assert page.text.count('data-reporting-job-filter="scope"') == 1
     assert 'data-report-multicampaign-dialog' in page.text
     assert 'Review selected campaigns' in page.text
     assert 'latest selected CDR for each type is preselected' in page.text
@@ -2121,6 +2123,8 @@ def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client) ->
     assert stopped_report.status_code == 200
     report = next(item for item in client.get('/api/e2e-reporting/jobs').json()['jobs'] if item['id'] == report_id)
     assert report['status'] == 'stopped'
+    assert report['duration_seconds'] is not None
+    assert report['duration_label'].endswith('s')
     assert report['stop_url'] is None
     assert report['retry_url'] == f'/e2e-reporting/jobs/{report_id}/retry'
     assert client.post(report['delete_url']).status_code == 200
@@ -2136,6 +2140,8 @@ def test_processing_report_and_chart_jobs_can_be_stopped_then_deleted(client) ->
     assert stopped_chart.status_code == 200
     chart = next(item for item in client.get('/api/e2e-reporting/chart-jobs').json()['jobs'] if item['id'] == chart_id)
     assert chart['status'] == 'stopped'
+    assert chart['duration_seconds'] is not None
+    assert chart['duration_label'].endswith('s')
     assert chart['stop_url'] is None
     assert chart['retry_url'] == f'/e2e-reporting/chart-jobs/{chart_id}/retry'
     assert client.post(chart['delete_url']).status_code == 200

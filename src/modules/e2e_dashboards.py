@@ -252,6 +252,9 @@ def install_dashboard_routes(core):
                 dashboard_id TEXT NOT NULL,
                 dashboard_name TEXT NOT NULL,
                 template_name TEXT NOT NULL,
+                nr_mode TEXT NOT NULL DEFAULT 'nsa',
+                scope TEXT NOT NULL DEFAULT 'single',
+                filters_json TEXT NOT NULL DEFAULT '[]',
                 output_file TEXT NOT NULL,
                 output_path TEXT NOT NULL,
                 created_by TEXT NOT NULL,
@@ -263,6 +266,21 @@ def install_dashboard_routes(core):
                 last_error TEXT NOT NULL DEFAULT '',
                 finished_at TEXT
             )''')
+            columns = {str(row['name']) for row in connection.execute(
+                f'PRAGMA table_info({DASHBOARD_PPT_JOBS_TABLE})'
+            ).fetchall()}
+            if 'scope' not in columns:
+                connection.execute(
+                    f"ALTER TABLE {DASHBOARD_PPT_JOBS_TABLE} ADD COLUMN scope TEXT NOT NULL DEFAULT 'single'"
+                )
+            if 'nr_mode' not in columns:
+                connection.execute(
+                    f"ALTER TABLE {DASHBOARD_PPT_JOBS_TABLE} ADD COLUMN nr_mode TEXT NOT NULL DEFAULT 'nsa'"
+                )
+            if 'filters_json' not in columns:
+                connection.execute(
+                    f"ALTER TABLE {DASHBOARD_PPT_JOBS_TABLE} ADD COLUMN filters_json TEXT NOT NULL DEFAULT '[]'"
+                )
             if first_check:
                 connection.execute(
                     f'''UPDATE {DASHBOARD_PPT_JOBS_TABLE}
@@ -290,6 +308,36 @@ def install_dashboard_routes(core):
                 (*changes.values(), job_id),
             )
 
+    def dashboard_filter_lines(definition: dict, task_repository) -> list[str]:
+        lines = []
+        for kind in KINDS:
+            datasets = core._optional_reporting_datasets(definition.get('datasets', {}).get(kind, []), kind, task_repository)
+            names = [str(dataset.get('file_name') or dataset.get('display_name') or dataset.get('id')) for dataset in datasets]
+            if names:
+                lines.append(f'CDR {kind.title()}: {", ".join(names)}')
+        date_from = str(definition.get('date_from') or '').strip()
+        date_to = str(definition.get('date_to') or '').strip()
+        if date_from and date_to:
+            lines.append(f'Date: {date_from} to {date_to}')
+        elif date_from:
+            lines.append(f'Date from: {date_from}')
+        elif date_to:
+            lines.append(f'Date to: {date_to}')
+        filters = definition.get('filters')
+        if not isinstance(filters, dict):
+            return lines
+        for field, values in filters.items():
+            if isinstance(values, (list, tuple, set)):
+                selected = [str(value).strip() for value in values if str(value).strip()]
+            elif str(values).strip():
+                selected = [str(values).strip()]
+            else:
+                selected = []
+            if selected:
+                label = re.sub(r'[_-]+', ' ', str(field)).strip().title() or 'Filter'
+                lines.append(f'{label}: {", ".join(selected)}')
+        return lines
+
     def serialize_dashboard_ppt_job(row):
         output_path = Path(str(row['output_path'] or ''))
         charts_dir = output_path.parent / 'dashboard-charts'
@@ -305,16 +353,26 @@ def install_dashboard_routes(core):
                 ).total_seconds())
             except ValueError:
                 pass
+        try:
+            filters = json.loads(str(row['filters_json'] or '[]'))
+            filters = [str(item) for item in filters if str(item).strip()] if isinstance(filters, list) else []
+        except (TypeError, json.JSONDecodeError):
+            filters = []
         return {
             'id': job_id, 'dashboard_id': str(row['dashboard_id']),
-            'dashboard_name': str(row['dashboard_name']), 'template': str(row['template_name']),
-            'generated_by': str(row['created_by']), 'date': str(row['created_at']),
+            'dashboard_name': str(row['dashboard_name']),
+            'nr_mode': str(row['nr_mode'] or 'nsa').upper(),
+            'scope': 'Multivendor Comparison' if str(row['scope'] or '').casefold() == 'multivendor' else 'Operator Comparison',
+            'filters': filters,
+            'generated_by': str(row['created_by']),
+            'date': core._local_report_date(row['created_at']).replace(' ', '\n', 1),
             'status': str(row['status']), 'progress': int(row['progress'] or 0),
             'duration_seconds': duration,
             'slides': int(row['slide_count'] or 0), 'charts': int(row['chart_count'] or 0),
             'error': str(row['last_error'] or ''),
             'download_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/download' if ready else None,
             'charts_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts' if charts_ready else None,
+            'charts_api_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json' if charts_ready else None,
             'charts_download_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.zip' if charts_ready else None,
             'retry_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/retry' if str(row['status']) in {'ready', 'failed', 'stopped'} else None,
             'stop_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/stop' if str(row['status']) in {'queued', 'processing'} else None,
@@ -340,6 +398,21 @@ def install_dashboard_routes(core):
         if missing:
             raise ValueError('The Dashboard charts are not ready.')
         return snapshot
+
+    def add_dashboard_chart_picture(slide, png: bytes, placement) -> None:
+        """Fill a chart placeholder without stretching the Canvas typography."""
+        left, top, width, height = placement
+        picture = slide.shapes.add_picture(BytesIO(png), left, top, width, height)
+        image_ratio = 1600 / 900
+        frame_ratio = width / height
+        if frame_ratio > image_ratio:
+            crop = (1 - image_ratio / frame_ratio) / 2
+            picture.crop_top = crop
+            picture.crop_bottom = crop
+        elif frame_ratio < image_ratio:
+            crop = (1 - frame_ratio / image_ratio) / 2
+            picture.crop_left = crop
+            picture.crop_right = crop
 
     def render_dashboard_ppt_job(job_id, run_token, task_repository, snapshot, destination):
         run_key = (str(Path(task_repository.db_path).resolve()), job_id)
@@ -407,15 +480,19 @@ def install_dashboard_routes(core):
                         return
                     file_name = f'slide-{slide_number:03d}-chart-{chart_number:02d}.png'
                     hover_file = f'slide-{slide_number:03d}-chart-{chart_number:02d}.hover.json'
+                    model_file = f'slide-{slide_number:03d}-chart-{chart_number:02d}.model.json'
                     (charts_dir / file_name).write_bytes(png)
                     (charts_dir / hover_file).write_text(
                         json.dumps(hover_targets, ensure_ascii=False), encoding='utf-8',
                     )
-                    slide.shapes.add_picture(BytesIO(png), *placement)
+                    (charts_dir / model_file).write_text(
+                        json.dumps(payload, ensure_ascii=False, separators=(',', ':')), encoding='utf-8',
+                    )
+                    add_dashboard_chart_picture(slide, png, placement)
                     manifest.append({
                         'slide': slide_number, 'title': entry.chart_title or header.slide_title,
                         'source': entry.cdr_source, 'chart_type': entry.chart_type,
-                        'file': file_name, 'hover_file': hover_file,
+                        'file': file_name, 'hover_file': hover_file, 'model_file': model_file,
                     })
                     rendered += 1
                     update_dashboard_ppt_job(
@@ -543,9 +620,10 @@ def install_dashboard_routes(core):
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         dashboard_name = str(raw_definition.get('name') or dashboard_id)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-        safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', dashboard_name).strip('._') or 'Dashboard'
-        output_file = f'{timestamp}_{safe_name}.pptx'
+        filters_json = json.dumps(dashboard_filter_lines(raw_definition, task_repository), ensure_ascii=False)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', dashboard_name).strip() or 'Dashboard'
+        output_file = f'{timestamp}  - {safe_name}.pptx'
         job_dir = Path(task_repository.db_path).parent / 'output' / 'dashboards' / Path(output_file).stem
         destination = job_dir / output_file
         ensure_dashboard_ppt_jobs(task_repository)
@@ -553,11 +631,13 @@ def install_dashboard_routes(core):
             with task_repository.connection() as connection:
                 cursor = connection.execute(
                     f'''INSERT INTO {DASHBOARD_PPT_JOBS_TABLE} (
-                        dashboard_id, dashboard_name, template_name, output_file, output_path,
+                        dashboard_id, dashboard_name, template_name, nr_mode, scope, filters_json, output_file, output_path,
                         created_by, created_at, status, progress
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0)''',
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0)''',
                     (
                         dashboard_id, dashboard_name, str(raw_definition.get('template') or ''),
+                        str(raw_definition.get('technology') or raw_definition.get('template_technology') or 'nsa'),
+                        str(raw_definition.get('scope') or 'single'), filters_json,
                         output_file, str(destination), user.username,
                         datetime.now(timezone.utc).isoformat(),
                     ),
@@ -568,8 +648,10 @@ def install_dashboard_routes(core):
             shutil.rmtree(Path(str(dashboard_ppt_job(task_repository, job_id)['output_path'])).parent, ignore_errors=True)
             update_dashboard_ppt_job(
                 task_repository, job_id, dashboard_name=dashboard_name,
-                template_name=str(raw_definition.get('template') or ''), output_file=output_file,
-                output_path=str(destination), created_at=datetime.now(timezone.utc).isoformat(),
+                template_name=str(raw_definition.get('template') or ''),
+                nr_mode=str(raw_definition.get('technology') or raw_definition.get('template_technology') or 'nsa'),
+                scope=str(raw_definition.get('scope') or 'single'), filters_json=filters_json,
+                output_file=output_file, output_path=str(destination), created_at=datetime.now(timezone.utc).isoformat(),
                 status='queued', progress=0, slide_count=0, chart_count=0,
                 last_error='', finished_at=None,
             )
@@ -615,7 +697,9 @@ def install_dashboard_routes(core):
     @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/charts')
     def open_dashboard_ppt_charts(job_id: int, user=Depends(dashboard_user)):
         row = dashboard_ppt_job(bound_repository(), job_id)
-        charts_dir = Path(str(row['output_path'])).parent / 'dashboard-charts' if row else None
+        if row is None:
+            raise HTTPException(404, 'Dashboard charts are not available.')
+        charts_dir = Path(str(row['output_path'])).parent / 'dashboard-charts'
         try:
             manifest = json.loads((charts_dir / 'manifest.json').read_text(encoding='utf-8'))
         except (AttributeError, OSError, json.JSONDecodeError):
@@ -630,6 +714,55 @@ def install_dashboard_routes(core):
             'body{font-family:Arial;margin:24px;background:#f5f2f8}article{margin:0 0 24px;padding:16px;background:white;border-radius:12px}'
             'img{display:block;width:100%;height:auto}h2{font-size:18px}</style></head><body>' + cards + '</body></html>'
         )
+
+    @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json')
+    def dashboard_ppt_charts_manifest(job_id: int, user=Depends(dashboard_user)):
+        row = dashboard_ppt_job(bound_repository(), job_id)
+        if row is None:
+            raise HTTPException(404, 'Dashboard charts are not available.')
+        charts_dir = Path(str(row['output_path'])).parent / 'dashboard-charts'
+        try:
+            manifest = json.loads((charts_dir / 'manifest.json').read_text(encoding='utf-8'))
+        except (AttributeError, OSError, json.JSONDecodeError):
+            raise HTTPException(404, 'Dashboard charts are not available.')
+        charts = []
+        for item in manifest.get('charts', []):
+            if not isinstance(item, dict):
+                continue
+            chart_file = str(item.get('file') or '')
+            if not re.fullmatch(r'slide-\d+-chart-\d+\.png', chart_file):
+                continue
+            model_file = str(item.get('model_file') or '')
+            model_available = bool(
+                re.fullmatch(r'slide-\d+-chart-\d+\.model\.json', model_file)
+                and (charts_dir / model_file).is_file()
+            )
+            charts.append({
+                'index': len(charts),
+                'slide': int(item.get('slide') or 0),
+                'title': str(item.get('title') or 'Chart'),
+                'source': str(item.get('source') or ''),
+                'chart_type': str(item.get('chart_type') or ''),
+                'image_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts/{chart_file}',
+                'payload_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/chart-models/{model_file}' if model_available else None,
+            })
+        return {
+            'job': serialize_dashboard_ppt_job(row),
+            'generate_tooltips': bool(manifest.get('generate_tooltips')),
+            'charts': charts,
+        }
+
+    @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/chart-models/{model_file}')
+    def dashboard_ppt_chart_model(job_id: int, model_file: str, user=Depends(dashboard_user)):
+        if not re.fullmatch(r'slide-\d+-chart-\d+\.model\.json', model_file):
+            raise HTTPException(404, 'Chart model not found.')
+        row = dashboard_ppt_job(bound_repository(), job_id)
+        path = Path(str(row['output_path'])).parent / 'dashboard-charts' / model_file if row else None
+        try:
+            payload = json.loads(path.read_text(encoding='utf-8'))
+        except (AttributeError, OSError, json.JSONDecodeError):
+            raise HTTPException(404, 'Chart model not found.')
+        return JSONResponse(payload)
 
     @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/charts/{chart_file}')
     def dashboard_ppt_chart(job_id: int, chart_file: str, user=Depends(dashboard_user)):
@@ -678,6 +811,24 @@ def install_dashboard_routes(core):
             raise HTTPException(409, 'This Dashboard export cannot be relaunched.')
         queue_dashboard_ppt_export(str(row['dashboard_id']), user, reuse_job_id=job_id)
         return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
+
+    @app.post('/api/e2e-dashboards/ppt-jobs/delete-all')
+    def delete_all_dashboard_ppts(user=Depends(dashboard_admin_user)):
+        task_repository = bound_repository()
+        ensure_dashboard_ppt_jobs(task_repository)
+        with task_repository.connection() as connection:
+            rows = connection.execute(
+                f'SELECT id, output_path FROM {DASHBOARD_PPT_JOBS_TABLE}'
+            ).fetchall()
+            connection.execute(f'DELETE FROM {DASHBOARD_PPT_JOBS_TABLE}')
+        database_key = str(Path(task_repository.db_path).resolve())
+        with lock:
+            for row in rows:
+                dashboard_ppt_runs.pop((database_key, int(row['id'])), None)
+        for row in rows:
+            shutil.rmtree(Path(str(row['output_path'])).parent, ignore_errors=True)
+        task_repository.add_log(user.username, 'delete_all_dashboard_ppts', json.dumps({'count': len(rows)}))
+        return {'deleted': len(rows)}
 
     @app.post('/api/e2e-dashboards/ppt-jobs/{job_id}/delete')
     def delete_dashboard_ppt(job_id: int, user=Depends(dashboard_admin_user)):

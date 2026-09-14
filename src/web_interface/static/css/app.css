@@ -2173,3 +2173,273 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .module-tab-e2e-dashboards { background:linear-gradient(135deg, #f8ddbc, #f5c98e); border-color:rgba(184, 91, 32, 0.34); color:#9a4a19; }
 .module-tab-e2e-dashboards:hover { background:linear-gradient(135deg, #f2cca0, #edb76f); color:#78370f; }
 .module-tab-e2e-dashboards.active { background:linear-gradient(135deg,#403078,#9678c7);border-color:#7751b9;color:#fff;box-shadow:0 10px 24px #7751b944; }
+
+.excel-filter-table thead th { padding: 0; }
+.excel-column-filter-trigger { display: flex; align-items: center; justify-content: flex-start; gap: .35rem; width: 100%; min-height: 2.65rem; padding: .6rem .7rem; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; font-weight: inherit; text-align: left; box-shadow: none; white-space: nowrap; }
+.excel-column-filter-trigger:hover, .excel-column-filter-trigger:focus-visible { background: rgba(75, 32, 138, .1); color: inherit; box-shadow: inset 0 -3px rgba(108, 70, 168, .65); }
+.excel-column-filter-icon { display: inline-grid; place-items: center; width: 1.05rem; height: 1.05rem; border: 1px solid rgba(75, 32, 138, .32); border-radius: 5px; background: rgba(255,255,255,.75); color: #56338d; font-size: .65rem; line-height: 1; }
+.excel-filter-table th.has-excel-column-filter .excel-column-filter-trigger { background: rgba(108, 70, 168, .16); box-shadow: inset 0 -3px #6d46a8; }
+.excel-filter-table th.has-excel-column-filter .excel-column-filter-icon { border-color: #5f3b91; background: #6d46a8; color: #fff; }
+.excel-column-filter-menu { position: fixed; z-index: 2600; display: grid; gap: .65rem; box-sizing: border-box; max-height: min(430px, calc(100vh - 20px)); padding: .8rem; border: 1px solid rgba(75, 32, 138, .28); border-radius: 13px; background: #fff; color: #38255a; box-shadow: 0 18px 48px rgba(50, 28, 85, .3); }
+.excel-column-filter-menu input[type="search"] { box-sizing: border-box; min-width: 0; width: 100%; padding: .66rem .72rem; border: 1px solid rgba(75, 32, 138, .28); border-radius: 9px; background: #fbf9fe; color: #38255a; font-size: .85rem; }
+.excel-column-filter-toolbar, .excel-column-filter-footer { display: flex; align-items: center; gap: .5rem; }
+.excel-column-filter-toolbar button { padding: .42rem .65rem; border: 1px solid rgba(75, 32, 138, .2); border-radius: 999px; background: #f0eafa; color: #56338d; font-size: .76rem; box-shadow: none; }
+.excel-column-filter-options { min-height: 2.4rem; max-height: 245px; overflow-y: auto; padding: .25rem; border: 1px solid rgba(75, 32, 138, .14); border-radius: 9px; background: #fcfbfe; }
+.excel-column-filter-options label { display: flex; align-items: center; gap: .55rem; padding: .42rem .48rem; border-radius: 7px; color: #38255a; font-size: .82rem; font-weight: 600; cursor: pointer; }
+.excel-column-filter-options label[hidden] { display: none; }.excel-column-filter-options label:hover { background: #f0eafa; }.excel-column-filter-options input { flex: 0 0 auto; width: 1rem; height: 1rem; margin: 0; accent-color: #6d46a8; }.excel-column-filter-options span { min-width: 0; overflow-wrap: anywhere; }
+.excel-column-filter-footer { justify-content: flex-end; padding-top: .1rem; }.excel-column-filter-footer button { padding: .55rem .9rem; border-radius: 999px; font-size: .8rem; font-weight: 800; }.excel-column-filter-footer button:first-child { border: 1px solid rgba(75, 32, 138, .22); background: #f0eafa; color: #56338d; box-shadow: none; }.excel-column-filter-footer button:last-child { border: 1px solid rgba(95, 59, 145, .42); background: linear-gradient(135deg,#6d46a8,#9870d0); color: #fff; }
+
+/* Keep Dashboard PPT and Reporting job headers visually aligned. */
+.ds-ppt-jobs-table thead th, .reporting-jobs-table-wrap .report-jobs-table thead th { background: #e8def5 !important; color: #4c3277; }
+.report-jobs-table.excel-filter-table th:nth-child(8), .report-jobs-table.excel-filter-table td:nth-child(8), .report-jobs-table.excel-filter-table th:nth-child(9), .report-jobs-table.excel-filter-table td:nth-child(9) { min-width: 5.5rem; }
+
+/* Job-table header controls retain the same visual weight in narrow columns. */
+.ds-ppt-jobs-table thead th, .reporting-jobs-table-wrap .report-jobs-table thead th { background: #6d46a8 !important; color: #fff !important; }
+.excel-column-filter-trigger { box-sizing: border-box; height: 2.65rem; min-height: 2.65rem; padding: .55rem .6rem; }
+.excel-column-filter-icon { flex: 0 0 1.05rem; box-sizing: border-box; }
+.ds-ppt-jobs-panel .report-jobs-bulk-actions { margin: 1rem 0 .75rem; }
+
+/* Reports job controls use the same column-header treatment as Dashboard PPT jobs. */
+.ds-ppt-jobs-table thead th,
+.reporting-jobs-table-wrap .report-jobs-table thead th,
+.ds-ppt-jobs-table .excel-column-filter-trigger,
+.reporting-jobs-table-wrap .report-jobs-table .excel-column-filter-trigger {
+  font: inherit;
+  font-weight: 800;
+}
+.reporting-jobs-panel .report-jobs-bulk-actions {
+  margin: 1rem 0 .75rem;
+}
+.ds-ppt-jobs-panel .report-jobs-bulk-actions .danger-button,
+.reporting-jobs-panel .report-jobs-bulk-actions .danger-button {
+  background: linear-gradient(145deg, #8d1d2c, #d24e5b);
+  border-color: rgba(141, 29, 44, .70);
+  color: #fff;
+}
+.ds-ppt-jobs-panel .report-jobs-bulk-actions .danger-button:hover:not(:disabled),
+.reporting-jobs-panel .report-jobs-bulk-actions .danger-button:hover:not(:disabled) {
+  background: linear-gradient(145deg, #711622, #b63a48);
+  border-color: rgba(113, 22, 34, .82);
+  color: #fff;
+}
+
+
+/* Keep every Excel filter arrow visible and keep job-table headers a single solid colour. */
+.excel-column-filter-trigger { justify-content: space-between; }
+.excel-column-filter-caption { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.excel-column-filter-icon { flex: 0 0 1.05rem; }
+.report-jobs-table.excel-filter-table th:nth-child(4),
+.report-jobs-table.excel-filter-table td:nth-child(4) { min-width: 7rem; }
+.report-jobs-table.excel-filter-table th:nth-child(8),
+.report-jobs-table.excel-filter-table td:nth-child(8),
+.report-jobs-table.excel-filter-table th:nth-child(9),
+.report-jobs-table.excel-filter-table td:nth-child(9) { min-width: 5.8rem; }
+
+
+/* Job tables keep their headers visible inside the vertical scroll area. */
+.reporting-jobs-table-wrap,
+.ds-ppt-jobs-table-wrap { position: relative; overflow: auto; }
+.reporting-jobs-table-wrap .report-jobs-table thead th,
+.ds-ppt-jobs-table-wrap .ds-ppt-jobs-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+/* Column titles remain fully visible beside their fixed-width filter controls. */
+.excel-column-filter-caption { overflow: visible; text-overflow: clip; }
+.report-jobs-table.excel-filter-table th:nth-child(5),
+.report-jobs-table.excel-filter-table td:nth-child(5) { min-width: 4.7rem; }
+.report-jobs-table.excel-filter-table th:nth-child(6),
+.report-jobs-table.excel-filter-table td:nth-child(6) { min-width: 6.4rem; }
+.report-jobs-table.excel-filter-table th:nth-child(7),
+.report-jobs-table.excel-filter-table td:nth-child(7) { min-width: 5.6rem; }
+.report-jobs-table.excel-filter-table th:nth-child(10),
+.report-jobs-table.excel-filter-table td:nth-child(10) { min-width: 7rem; }
+.report-jobs-table.excel-filter-table th:nth-child(11),
+.report-jobs-table.excel-filter-table td:nth-child(11) { min-width: 6.3rem; }
+
+
+/* Sticky job headers form the top layer while row actions scroll underneath. */
+.reporting-jobs-table-wrap .report-jobs-table thead,
+.ds-ppt-jobs-table-wrap .ds-ppt-jobs-table thead { position: relative; z-index: 4; }
+.reporting-jobs-table-wrap .report-jobs-table tbody,
+.ds-ppt-jobs-table-wrap .ds-ppt-jobs-table tbody { position: relative; z-index: 0; }
+.reporting-jobs-table-wrap .report-jobs-table thead th,
+.ds-ppt-jobs-table-wrap .ds-ppt-jobs-table thead th { z-index: 5; }
+.reporting-jobs-table-wrap .report-job-actions,
+.ds-ppt-jobs-table-wrap .report-job-actions { position: relative; z-index: 0; }
+
+/* The Reporting header buttons must not inherit the general Reporting gradient. */
+.reporting-jobs-table-wrap .report-jobs-table .excel-column-filter-trigger,
+.reporting-jobs-table-wrap .report-jobs-table .excel-column-filter-trigger:hover:not(:disabled),
+.reporting-jobs-table-wrap .report-jobs-table .excel-column-filter-trigger:focus-visible {
+  background: #6d46a8 !important;
+  border-color: transparent;
+  color: #fff;
+  box-shadow: none;
+}
+.reporting-jobs-table-wrap .report-jobs-table .excel-column-filter-trigger:hover:not(:disabled),
+.reporting-jobs-table-wrap .report-jobs-table .excel-column-filter-trigger:focus-visible {
+  background: #5d398f !important;
+}
+/* Dataset names remain intact and occupy one line per selected CDR. */
+.report-jobs-table.excel-filter-table th:nth-child(10),
+.report-jobs-table.excel-filter-table td:nth-child(10) {
+  width: 20%;
+  min-width: 21rem;
+}
+.report-jobs-table .report-job-datasets > span:not(.report-job-dataset-kind) {
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+/* Compact job headers may use two lines while preserving their filter arrow. */
+.excel-column-filter-trigger {
+  min-height: 2.65rem;
+  white-space: normal;
+}
+.excel-column-filter-caption {
+  display: -webkit-box;
+  overflow: hidden;
+  max-height: 2.2em;
+  line-height: 1.1;
+  text-overflow: clip;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.excel-column-filter-caption {
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+}
+
+
+/* Fixed-layout job columns reserve enough space for whole two-line headings. */
+.excel-column-filter-caption { display: block; max-height: none; overflow: visible; white-space: normal; }
+.report-jobs-table.excel-filter-table th:nth-child(2), .report-jobs-table.excel-filter-table td:nth-child(2) { width: 9rem; min-width: 9rem; }
+.report-jobs-table.excel-filter-table th:nth-child(4), .report-jobs-table.excel-filter-table td:nth-child(4) { width: 7.2rem; min-width: 7.2rem; }
+.report-jobs-table.excel-filter-table th:nth-child(5), .report-jobs-table.excel-filter-table td:nth-child(5) { width: 5.2rem; min-width: 5.2rem; }
+.report-jobs-table.excel-filter-table th:nth-child(6), .report-jobs-table.excel-filter-table td:nth-child(6) { width: 7.2rem; min-width: 7.2rem; }
+.report-jobs-table.excel-filter-table th:nth-child(7), .report-jobs-table.excel-filter-table td:nth-child(7) { width: 6.5rem; min-width: 6.5rem; }
+.report-jobs-table.excel-filter-table th:nth-child(8), .report-jobs-table.excel-filter-table td:nth-child(8),
+.report-jobs-table.excel-filter-table th:nth-child(9), .report-jobs-table.excel-filter-table td:nth-child(9) { width: 6rem; min-width: 6rem; }
+.report-jobs-table.excel-filter-table th:nth-child(10), .report-jobs-table.excel-filter-table td:nth-child(10) { width: 20rem; min-width: 20rem; }
+.report-jobs-table.excel-filter-table th:nth-child(11), .report-jobs-table.excel-filter-table td:nth-child(11) { width: 6.7rem; min-width: 6.7rem; }
+.report-jobs-table.excel-filter-table th:nth-child(12), .report-jobs-table.excel-filter-table td:nth-child(12) { width: 8.2rem; min-width: 8.2rem; }
+
+/* Report datasets use the same compact detail affordance as Dashboard PPT filters. */
+.report-jobs-table.excel-filter-table th:nth-child(1),
+.report-jobs-table.excel-filter-table td:nth-child(1) { width: 5rem; min-width: 5rem; }
+.report-jobs-table.excel-filter-table th:nth-child(3),
+.report-jobs-table.excel-filter-table td:nth-child(3) { width: 9.5rem; min-width: 9.5rem; }
+.report-jobs-table.excel-filter-table td:nth-child(3) { white-space: pre-line; }
+.report-jobs-table.excel-filter-table th:nth-child(7),
+.report-jobs-table.excel-filter-table td:nth-child(7) { width: 7rem; min-width: 7rem; }
+.report-jobs-table.excel-filter-table th:nth-child(6),
+.report-jobs-table.excel-filter-table td:nth-child(6) { width: 10rem; min-width: 10rem; }
+.report-jobs-table.excel-filter-table th:nth-child(10),
+.report-jobs-table.excel-filter-table td:nth-child(10) { width: 6.5rem; min-width: 6.5rem; text-align: center; }
+.report-jobs-table .report-job-datasets-compact { display: table-cell; white-space: normal !important; }
+.reporting-stack .report-job-datasets-button {
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 2rem;
+  min-width: 2rem;
+  height: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  border: 1px solid #b58a2f;
+  border-radius: 999px;
+  background: linear-gradient(145deg, #fff2b6, #ecd166) !important;
+  color: #6f5110;
+  cursor: pointer;
+  box-shadow: 0 5px 12px rgba(145, 105, 17, .16);
+}
+.reporting-stack .report-job-datasets-button::before {
+  content: '';
+  width: 1rem;
+  height: 1rem;
+  background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236f5110' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5h18l-7 8v5l-4 2v-7L3 5Z'/%3E%3C/svg%3E");
+}
+.reporting-stack .report-job-datasets-button:hover:not(:disabled),
+.reporting-stack .report-job-datasets-button:focus-visible {
+  border-color: #947022;
+  background: linear-gradient(145deg, #ffeb92, #dfbd45) !important;
+  color: #533b09;
+  box-shadow: 0 5px 12px rgba(145, 105, 17, .22);
+}
+.reporting-stack .report-job-datasets-button:focus-visible { outline: 3px solid #7751b9; outline-offset: 2px; }
+.report-job-datasets-tooltip {
+  position: fixed;
+  z-index: 2900;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(34rem, calc(100vw - 24px));
+  max-height: min(18rem, calc(100vh - 24px));
+  overflow: auto;
+  padding: .65rem .78rem;
+  border: 1px solid rgba(222, 207, 240, .4);
+  border-radius: .6rem;
+  background: #34264a;
+  color: #fff;
+  font-size: .75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: left;
+  box-shadow: 0 12px 30px rgba(27, 17, 44, .32);
+  pointer-events: none;
+}
+.report-job-datasets-tooltip[hidden],
+.report-job-datasets-overlay[hidden] { display: none !important; }
+.report-job-dataset-groups { display: grid; gap: .55rem; }
+.report-job-dataset-group { display: grid; gap: .12rem; min-width: 0; }
+.report-job-dataset-kind { color: #d9b9ff; font-weight: 800; }
+.report-job-dataset-name { display: block; overflow-wrap: anywhere; }
+.report-job-datasets-overlay { z-index: 2850; }
+.report-job-datasets-dialog {
+  box-sizing: border-box;
+  width: min(38rem, calc(100vw - 2rem));
+  max-height: min(38rem, calc(100vh - 2rem));
+  overflow: auto;
+  padding: 1rem 1.1rem;
+  border: 1px solid #bda4dc;
+  border-radius: .8rem;
+  background: #f8f5fc;
+  color: #293645;
+  box-shadow: 0 22px 58px rgba(31, 20, 54, .34);
+  outline: none;
+}
+.report-job-datasets-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .8rem;
+  margin-bottom: .85rem;
+  padding-bottom: .7rem;
+  border-bottom: 1px solid #dfd2ed;
+}
+.report-job-datasets-dialog-header h3 { margin: 0; color: #4d2d79; font-size: 1rem; }
+.reporting-stack .report-job-datasets-dialog-close,
+.report-job-datasets-dialog-close {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 1.9rem;
+  min-width: 1.9rem;
+  height: 1.9rem;
+  min-height: 1.9rem;
+  padding: 0;
+  border: 1px solid #aa8acd;
+  border-radius: 999px;
+  background: #ede5f8 !important;
+  color: #56338d;
+  font-size: 1.25rem;
+  line-height: 1;
+  box-shadow: none;
+}
+.reporting-stack .report-job-datasets-dialog-close:hover:not(:disabled),
+.report-job-datasets-dialog-close:hover:not(:disabled) { background: #dfd0f1 !important; color: #44266f; }
+.report-job-datasets-dialog .report-job-dataset-kind { color: #5d3b86; }

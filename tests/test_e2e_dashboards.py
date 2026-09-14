@@ -1,4 +1,5 @@
 import json
+import re
 import time
 import zipfile
 from io import BytesIO
@@ -85,6 +86,11 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-dashboards-body"' in page.text
     assert '>PowerPoint Generation Jobs<' in page.text
     assert 'id="ds-ppt-jobs-body"' in page.text
+    assert '>Charts Panel<' in page.text
+    assert 'id="ds-ppt-chart-job"' in page.text
+    assert 'id="ds-ppt-charts-body"' in page.text
+    assert 'id="ds-ppt-chart-viewer"' not in page.text
+    assert page.text.count('id="ds-chart-expanded-overlay"') == 1
     assert page.text.index('<th>Status</th>') < page.text.index('<th>Actions</th>')
     assert 'colspan="5" class="form-note">Loading Dashboards' in page.text
     assert 'id="ds-library"' not in page.text
@@ -336,6 +342,7 @@ def test_dashboards_lifecycle_and_layout(client):
 def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client):
     payload = setup_dashboard(client)
     payload['slide_comments'] = {'1': ['Review city outliers', 'Validate campaign coverage']}
+    payload['filters'] = {'City': ['London']}
     dashboard_id = 'ppt-dashboard'
     assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
 
@@ -359,6 +366,8 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client):
     assert job is not None and job['status'] == 'ready', job
     assert job['slides'] == 2
     assert job['charts'] == 3
+    assert job['nr_mode'] == 'NSA'
+    assert job['filters'] == ['CDR Data: sample.csv', 'City: London']
     assert job['duration_seconds'] is not None
     background_groups = client.get('/api/background-tasks').json()['groups']
     background_task = next(
@@ -375,9 +384,12 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client):
     output_path = Path(row['output_path'])
     charts_dir = output_path.parent / 'dashboard-charts'
     assert output_path.is_file()
+    assert re.fullmatch(r'\d{8}_\d{6}  - Comparison\.pptx', output_path.name)
+    assert output_path.parent.name == output_path.stem
     assert output_path.parent.parent == Path(core.repository.db_path).parent / 'output' / 'dashboards'
     assert len(list(charts_dir.glob('*.png'))) == 3
     assert len(list(charts_dir.glob('*.hover.json'))) == 3
+    assert len(list(charts_dir.glob('*.model.json'))) == 3
     manifest = json.loads((charts_dir / 'manifest.json').read_text(encoding='utf-8'))
     assert manifest['generate_tooltips'] is True
     assert len(manifest['charts']) == 3
@@ -394,10 +406,26 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client):
     assert ppt.status_code == 200
     assert ppt.content.startswith(b'PK')
     assert client.get(job['charts_url']).status_code == 200
+    charts_manifest = client.get(job['charts_api_url'])
+    assert charts_manifest.status_code == 200
+    charts_payload = charts_manifest.json()
+    assert charts_payload['job']['id'] == job_id
+    assert len(charts_payload['charts']) == 3
+    assert client.get(charts_payload['charts'][0]['image_url']).status_code == 200
+    assert charts_payload['charts'][0]['payload_url']
+    chart_model = client.get(charts_payload['charts'][0]['payload_url'])
+    assert chart_model.status_code == 200
+    assert chart_model.json()['title'] == charts_payload['charts'][0]['title']
     archive = client.get(job['charts_download_url'])
     assert archive.status_code == 200
     with zipfile.ZipFile(BytesIO(archive.content)) as bundle:
         assert len([name for name in bundle.namelist() if name.endswith('.png')]) == 3
+
+    deleted = client.post('/api/e2e-dashboards/ppt-jobs/delete-all')
+    assert deleted.status_code == 200
+    assert deleted.json()['deleted'] == 1
+    assert client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] == []
+    assert not output_path.parent.exists()
 
 
 def test_prefetched_dashboard_reuses_completed_server_snapshot(client):

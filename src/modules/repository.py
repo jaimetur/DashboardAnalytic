@@ -2091,11 +2091,12 @@ class Repository:
 
     def retry_report_job(self, report_id: int) -> bool:
         """Reset a completed, failed or stopped report job for reuse."""
+        now = local_now_iso()
         with self.connection() as conn:
             cursor = conn.execute(
-                "UPDATE generated_jobs SET status = 'queued', progress = 0, last_error = '', finished_at = NULL, updated_at = ? "
+                "UPDATE generated_jobs SET status = 'queued', progress = 0, last_error = '', finished_at = NULL, created_at = ?, updated_at = ? "
                 "WHERE id = ? AND job_type = 'report' AND status IN ('failed', 'stopped', 'ready')",
-                (local_now_iso(), report_id),
+                (now, now, report_id),
             )
             return cursor.rowcount == 1
 
@@ -2208,12 +2209,13 @@ class Repository:
 
     def retry_report_chart_job(self, job_id: int) -> bool:
         """Reset one failed, stopped or completed Chart Set job for reuse."""
+        now = local_now_iso()
         with self.connection() as conn:
             cursor = conn.execute(
                 "UPDATE generated_jobs SET status = 'queued', progress = 0, last_error = '', chart_count = 0, "
-                "generation = CASE WHEN status = 'ready' THEN NULL ELSE generation END, finished_at = NULL, updated_at = ? "
+                "generation = CASE WHEN status = 'ready' THEN NULL ELSE generation END, finished_at = NULL, created_at = ?, updated_at = ? "
                 "WHERE id = ? AND job_type = 'chart_set' AND status IN ('failed', 'stopped', 'ready')",
-                (local_now_iso(), job_id),
+                (now, now, job_id),
             )
             return cursor.rowcount == 1
 

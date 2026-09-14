@@ -118,15 +118,6 @@
       <div class="summary-inline-actions"><span class="pill reporting-total-badge" data-report-jobs-count data-total-jobs-badge>Total Jobs: {{ (report_jobs | length) + (report_chart_jobs | length) }}</span><span class="pill reporting-total-badge" data-total-reports-badge>Total Reports: {{ total_reports }}</span><span class="pill reporting-total-badge" data-total-chart-sets-badge>Total Chart Sets: {{ total_chart_sets }}</span><span class="collapse-chip">Collapse</span></div>
     </summary>
     <div class="collapsible-panel-body">
-      <div class="reporting-job-filters" data-reporting-filter-panel="jobs">
-        <label>NR Mode<select data-reporting-job-filter="tech"><option value="">All</option></select></label>
-        <label>Type<select data-reporting-job-filter="type"><option value="">All</option><option value="report">Report</option><option value="charts">Charts</option></select></label>
-        <label>Template<select data-reporting-job-filter="template"><option value="">All</option></select></label>
-        <label>Scope<select data-reporting-job-filter="scope"><option value="">All</option><option value="single">Operator Comparison</option><option value="multivendor">Multivendor Comparison</option></select></label>
-      </div>
-      {% if user.role in ['admin', 'super-admin'] %}
-      <div class="report-jobs-bulk-actions"><button type="button" class="danger-button report-jobs-delete-all" data-report-jobs-delete-all>Delete All Reports</button><button type="button" class="danger-button report-chart-jobs-delete-all" data-report-chart-sets-delete-all-from-jobs>Delete All Charts Sets</button></div>
-      {% endif %}
       <p class="lede">Report and Chart Set generation continues on the server after leaving Reporting or signing out. Each job retains its own download, open, retry, stop and delete actions.</p>
       <div class="table-wrap reporting-jobs-table-wrap">
       <table class="report-jobs-table">
@@ -134,9 +125,9 @@
         <tbody data-report-jobs-body data-report-chart-jobs-body>
           {% for job in report_jobs %}
           <tr data-job-kind="report" data-job-date="{{ job.date }}" data-job-tech="{{ job.type | lower }}" data-job-template="{{ job.template | lower }}" data-job-template-label="{{ job.template }}" data-job-scope="{{ job.scope | lower }}">
-            <td>{{ job.id }}</td><td>{{ job.generated_by }}</td><td>{{ job.date }}</td><td>{{ job.type or '-' }}</td><td>Report</td><td>{{ job.template or '-' }}</td><td>{{ job.scope or '-' }}</td><td>{{ job.slides if job.slides is not none else '-' }}</td><td>{{ job.charts if job.charts is not none else '-' }}</td><td class="report-job-datasets">{% if job.dataset_groups %}{% for group in job.dataset_groups %}<span class="report-job-dataset-kind">{{ group.kind }}:</span>{% for name in group.names %}<span>{{ name }}</span>{% endfor %}{% endfor %}{% else %}Historical report{% endif %}</td>
+            <td>{{ job.id }}</td><td>{{ job.generated_by }}</td><td>{{ job.date }}</td><td>{{ job.type or '-' }}</td><td>Report</td><td>{{ job.template or '-' }}</td><td>{{ job.scope or '-' }}</td><td>{{ job.slides if job.slides is not none else '-' }}</td><td>{{ job.charts if job.charts is not none else '-' }}</td><td class="report-job-datasets report-job-datasets-compact" data-report-job-dataset-groups="{{ (job.dataset_groups or []) | tojson | forceescape }}" data-report-job-dataset-fallback="Historical report" data-report-job-dataset-label="Report #{{ job.id }}"></td>
             <td class="report-job-status"{% if job.error %} title="{{ job.error }}"{% endif %}><span class="queue-status-pill queue-status-{{ job.status | lower | replace('_', '-') }}">{{ job.status | title }}</span>{% if job.error and job.status | lower in ['failed', 'stopped'] %}<p class="report-job-error">{{ job.error }}</p>{% endif %}</td>
-            <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%</span></div></td>
+            <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%{% if job.duration_label %} · {{ job.duration_label }}{% endif %}</span></div></td>
             <td><div class="report-job-actions">
               {% if job.download_url %}<a class="report-job-download-button report-job-report-download-button" href="{{ job.download_url }}" download title="Download PPT Report" aria-label="Download PPT Report"></a>{% else %}<span class="report-job-download-button report-job-report-download-button action-link-disabled" title="PPT Report download unavailable" aria-label="PPT Report download unavailable"></span>{% endif %}
               {% if job.charts_download_url %}<a class="report-job-download-button report-job-charts-download-button" href="{{ job.charts_download_url }}" download title="Download report charts as ZIP" aria-label="Download report charts as ZIP"></a>{% endif %}
@@ -149,19 +140,33 @@
           {% endfor %}
           {% for job in report_chart_jobs %}
           <tr data-job-kind="charts" data-job-date="{{ job.date }}" data-job-tech="{{ job.type | lower }}" data-job-template="{{ job.template | lower }}" data-job-template-label="{{ job.template }}" data-job-scope="{{ job.scope | lower }}">
-            <td>{{ job.id }}</td><td>{{ job.generated_by }}</td><td>{{ job.date }}</td><td>{{ job.type or '-' }}</td><td>Charts</td><td>{{ job.template or '-' }}</td><td>{{ job.scope or '-' }}</td><td>-</td><td>{{ job.charts if job.charts is not none else '-' }}</td><td class="report-job-datasets">{% if job.dataset_groups %}{% for group in job.dataset_groups %}<span class="report-job-dataset-kind">{{ group.kind }}:</span>{% for name in group.names %}<span>{{ name }}</span>{% endfor %}{% endfor %}{% else %}Historical Chart Set{% endif %}</td>
+            <td>{{ job.id }}</td><td>{{ job.generated_by }}</td><td>{{ job.date }}</td><td>{{ job.type or '-' }}</td><td>Charts</td><td>{{ job.template or '-' }}</td><td>{{ job.scope or '-' }}</td><td>-</td><td>{{ job.charts if job.charts is not none else '-' }}</td><td class="report-job-datasets report-job-datasets-compact" data-report-job-dataset-groups="{{ (job.dataset_groups or []) | tojson | forceescape }}" data-report-job-dataset-fallback="Historical Chart Set" data-report-job-dataset-label="Chart Set #{{ job.id }}"></td>
             <td class="report-job-status"{% if job.error %} title="{{ job.error }}"{% endif %}><span class="queue-status-pill queue-status-{{ job.status | lower | replace('_', '-') }}">{{ job.status | title }}</span>{% if job.error and job.status | lower in ['failed', 'stopped'] %}<p class="report-job-error">{{ job.error }}</p>{% endif %}</td>
-            <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%</span></div></td>
+            <td><div class="report-job-progress"><progress value="{{ job.progress }}" max="100"></progress><span>{{ job.progress }}%{% if job.duration_label %} · {{ job.duration_label }}{% endif %}</span></div></td>
 <td><div class="report-job-actions">{% if job.charts_download_url %}<a class="report-job-download-button report-job-charts-download-button" href="{{ job.charts_download_url }}" download title="Download Chart Set PNGs as ZIP" aria-label="Download Chart Set PNGs as ZIP"></a>{% endif %}{% if job.open_url %}<button type="button" class="report-job-charts-button" title="Open generated Chart Set" aria-label="Open generated Chart Set" data-report-chart-job-open="{{ job.open_url }}">📈</button>{% endif %}{% if job.retry_url %}<button type="button" class="report-job-retry-button" title="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry Chart Set' }}" aria-label="{{ 'Relaunch Job' if job.status == 'ready' else 'Retry Chart Set' }}" data-report-chart-job-retry="{{ job.retry_url }}" data-report-chart-job-name="{{ job.template }}" data-report-chart-job-status="{{ job.status }}" data-report-chart-job-generation="{{ job.generation or '' }}">↻</button>{% endif %}{% if job.stop_url %}<button type="button" class="report-job-stop-button" title="Stop Chart Set" aria-label="Stop Chart Set" data-report-chart-job-stop="{{ job.stop_url }}" data-report-chart-job-name="{{ job.template }}">■</button>{% endif %}{% if user.role in ['admin', 'super-admin'] %}<button type="button" class="danger-button" title="Delete Chart Set job" aria-label="Delete Chart Set job" data-report-chart-job-delete="{{ job.delete_url }}" data-report-chart-job-generation="{{ job.generation or '' }}" data-report-chart-job-name="{{ job.template }}">✕</button>{% endif %}</div></td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
       </div>
+      {% if user.role in ['admin', 'super-admin'] %}
+      <div class="report-jobs-bulk-actions"><button type="button" class="danger-button report-jobs-delete-all" data-report-jobs-delete-all>Delete All Reports</button><button type="button" class="danger-button report-chart-jobs-delete-all" data-report-chart-sets-delete-all-from-jobs>Delete All Charts Sets</button></div>
+      {% endif %}
       <p class="form-note" data-report-jobs-empty {% if report_jobs or report_chart_jobs %}hidden{% endif %}>No report or Chart Set jobs have been created in this workspace.</p>
     </div>
   </details>
 </section>
+
+<div id="report-job-datasets-tooltip" class="report-job-datasets-tooltip" data-report-job-datasets-tooltip role="tooltip" hidden></div>
+<div class="confirm-overlay report-job-datasets-overlay" data-report-job-datasets-dialog hidden>
+  <section class="confirm-panel report-job-datasets-dialog" role="dialog" aria-modal="true" aria-labelledby="report-job-datasets-title" tabindex="-1">
+    <header class="report-job-datasets-dialog-header">
+      <h3 id="report-job-datasets-title">Datasets</h3>
+      <button type="button" class="report-job-datasets-dialog-close" data-report-job-datasets-close aria-label="Close datasets">×</button>
+    </header>
+    <div class="report-job-dataset-groups" data-report-job-datasets-content></div>
+  </section>
+</div>
 
 <div class="confirm-overlay report-multicampaign-overlay" data-report-multicampaign-dialog hidden>
   <section class="confirm-panel report-multicampaign-dialog" role="dialog" aria-modal="true" aria-labelledby="report-multicampaign-title" aria-describedby="report-multicampaign-copy">
@@ -630,13 +635,20 @@
     const chartJobsBody = document.querySelector('[data-report-chart-jobs-body]');
     const chartJobsCount = document.querySelector('[data-report-chart-jobs-count]');
     const chartJobsEmpty = document.querySelector('[data-report-chart-jobs-empty]');
+    const reportJobDatasetsDialog = document.querySelector('[data-report-job-datasets-dialog]');
+    const reportJobDatasetsDialogPanel = reportJobDatasetsDialog?.querySelector('.report-job-datasets-dialog');
+    const reportJobDatasetsDialogTitle = document.querySelector('#report-job-datasets-title');
+    const reportJobDatasetsContent = document.querySelector('[data-report-job-datasets-content]');
+    const reportJobDatasetsTooltip = document.querySelector('[data-report-job-datasets-tooltip]');
+    let reportJobsColumnFilters = null;
     const syncCombinedJobSummary = (resetMobilePage = false) => {
       if (!jobsBody) return;
       const rows = Array.from(jobsBody.querySelectorAll('tr[data-job-kind]'));
       rows.sort((left, right) => String(right.dataset.jobDate || '').localeCompare(String(left.dataset.jobDate || '')));
       jobsBody.replaceChildren(...rows);
       rows.forEach((row) => {
-        row.hidden = !matchesReportingFilters({tech: row.dataset.jobTech, type: row.dataset.jobKind, template: row.dataset.jobTemplate, scope: normaliseReportingScope(row.dataset.jobScope)});
+        const matchesColumnFilters = reportJobsColumnFilters?.matches(row) ?? true;
+        row.hidden = !matchesColumnFilters;
       });
       const visibleRows = rows.filter((row) => !row.hidden);
       if (jobsCount) jobsCount.textContent = `Total Jobs: ${visibleRows.length}`;
@@ -730,20 +742,123 @@
       if (title) node.title = title;
       return node;
     };
-    const datasetCell = (job) => {
-      const node = document.createElement('td');
-      node.className = 'report-job-datasets';
-      const groups = Array.isArray(job.dataset_groups) ? job.dataset_groups : [];
-      if (!groups.length) { node.textContent = 'Historical report'; return node; }
+    const formatJobDate = (value) => String(value || '-').replace(
+      /,?\s+(?=\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?$)/i,
+      '\n',
+    );
+    const formatJobDuration = (job) => {
+      if (job.duration_label) return String(job.duration_label);
+      const duration = Number(job.duration_seconds);
+      if (!Number.isFinite(duration)) return '';
+      if (duration < 60) return duration < 10 ? `${duration.toFixed(1)}s` : `${Math.round(duration)}s`;
+      return `${Math.floor(duration / 60)}m ${Math.round(duration % 60)}s`;
+    };
+    const normaliseDatasetGroups = (groups) => (Array.isArray(groups) ? groups : []).map((group) => ({
+      kind: String(group?.kind || 'Datasets').trim() || 'Datasets',
+      names: (Array.isArray(group?.names) ? group.names : []).map((name) => String(name || '').trim()).filter(Boolean),
+    })).filter((group) => group.names.length);
+    const datasetGroupsContent = (groups, fallback) => {
+      const content = document.createElement('div');
+      content.className = 'report-job-dataset-groups';
+      if (!groups.length) {
+        content.append(Object.assign(document.createElement('span'), {textContent: fallback}));
+        return content;
+      }
       groups.forEach((group) => {
-        const kind = document.createElement('span');
-        kind.className = 'report-job-dataset-kind';
-        kind.textContent = `${group.kind}:`;
-        node.append(kind);
-        (group.names || []).forEach((name) => { const item = document.createElement('span'); item.textContent = name; node.append(item); });
+        const section = document.createElement('div');
+        section.className = 'report-job-dataset-group';
+        const heading = document.createElement('strong');
+        heading.className = 'report-job-dataset-kind';
+        heading.textContent = `${group.kind}:`;
+        section.append(heading);
+        group.names.forEach((name) => {
+          const item = document.createElement('span');
+          item.className = 'report-job-dataset-name';
+          item.textContent = name;
+          section.append(item);
+        });
+        content.append(section);
       });
+      return content;
+    };
+    const hideReportJobDatasetsTooltip = () => {
+      if (reportJobDatasetsTooltip) reportJobDatasetsTooltip.hidden = true;
+    };
+    const showReportJobDatasetsTooltip = (trigger, content) => {
+      if (!reportJobDatasetsTooltip) return;
+      reportJobDatasetsTooltip.replaceChildren(content.cloneNode(true));
+      reportJobDatasetsTooltip.hidden = false;
+      requestAnimationFrame(() => {
+        const triggerBounds = trigger.getBoundingClientRect();
+        const tooltipBounds = reportJobDatasetsTooltip.getBoundingClientRect();
+        const margin = 12;
+        const below = triggerBounds.bottom + 8;
+        const top = below + tooltipBounds.height <= window.innerHeight - margin
+          ? below : Math.max(margin, triggerBounds.top - tooltipBounds.height - 8);
+        const centered = triggerBounds.left + (triggerBounds.width - tooltipBounds.width) / 2;
+        reportJobDatasetsTooltip.style.left = `${Math.max(margin, Math.min(centered, window.innerWidth - tooltipBounds.width - margin))}px`;
+        reportJobDatasetsTooltip.style.top = `${top}px`;
+      });
+    };
+    const closeReportJobDatasets = () => {
+      hideReportJobDatasetsTooltip();
+      if (reportJobDatasetsDialog) reportJobDatasetsDialog.hidden = true;
+      reportJobDatasetsContent?.replaceChildren();
+    };
+    const showReportJobDatasets = (label, content) => {
+      hideReportJobDatasetsTooltip();
+      if (!reportJobDatasetsDialog || !reportJobDatasetsContent) return;
+      if (reportJobDatasetsDialogTitle) reportJobDatasetsDialogTitle.textContent = `Datasets: ${label}`;
+      reportJobDatasetsContent.replaceChildren(...Array.from(content.childNodes, (child) => child.cloneNode(true)));
+      reportJobDatasetsDialog.hidden = false;
+      reportJobDatasetsDialogPanel?.focus();
+    };
+    const datasetCell = (job, fallback = 'Historical report') => {
+      const node = document.createElement('td');
+      node.className = 'report-job-datasets report-job-datasets-compact';
+      const groups = normaliseDatasetGroups(job.dataset_groups);
+      const filterValue = groups.length
+        ? groups.map((group) => `${group.kind}: ${group.names.join(', ')}`).join('\n')
+        : fallback;
+      const label = String(job.dataset_label || `${String(job.job_kind || 'Report')} #${job.id || '-'}`);
+      const content = datasetGroupsContent(groups, fallback);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'report-job-datasets-button';
+      button.setAttribute('aria-label', `View datasets used for ${label}`);
+      button.setAttribute('aria-describedby', 'report-job-datasets-tooltip');
+      button.setAttribute('aria-haspopup', 'dialog');
+      button.addEventListener('pointerenter', () => showReportJobDatasetsTooltip(button, content));
+      button.addEventListener('pointerleave', hideReportJobDatasetsTooltip);
+      button.addEventListener('focus', () => showReportJobDatasetsTooltip(button, content));
+      button.addEventListener('blur', hideReportJobDatasetsTooltip);
+      button.addEventListener('click', () => showReportJobDatasets(label, content));
+      node.dataset.filterValue = filterValue;
+      node.append(button);
       return node;
     };
+    jobsBody?.querySelectorAll('tr[data-job-kind]').forEach((row) => {
+      if (row.cells[2]) row.cells[2].textContent = formatJobDate(row.cells[2].textContent);
+      const existing = row.cells[9];
+      if (!existing) return;
+      let groups = [];
+      try { groups = JSON.parse(existing.dataset.reportJobDatasetGroups || '[]'); } catch (_error) { groups = []; }
+      const fallback = existing.dataset.reportJobDatasetFallback || (row.dataset.jobKind === 'charts' ? 'Historical Chart Set' : 'Historical report');
+      const replacement = datasetCell({
+        id: row.cells[0]?.textContent?.trim(),
+        job_kind: row.dataset.jobKind === 'charts' ? 'Chart Set' : 'Report',
+        dataset_groups: groups,
+        dataset_label: existing.dataset.reportJobDatasetLabel,
+      }, fallback);
+      existing.replaceWith(replacement);
+    });
+    document.querySelector('[data-report-job-datasets-close]')?.addEventListener('click', closeReportJobDatasets);
+    reportJobDatasetsDialog?.addEventListener('click', (event) => {
+      if (event.target === reportJobDatasetsDialog) closeReportJobDatasets();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && reportJobDatasetsDialog && !reportJobDatasetsDialog.hidden) closeReportJobDatasets();
+    });
     const reportActionLink = (label, href, primary = false) => {
       const link = document.createElement('a');
       link.textContent = label;
@@ -758,7 +873,7 @@
       jobsBody.append(...jobs.map((job) => {
         const row = document.createElement('tr');
         row.dataset.jobKind = 'report'; row.dataset.jobDate = job.date || ''; row.dataset.jobTech = normaliseReportingFilter(job.type); row.dataset.jobTemplate = normaliseReportingFilter(job.template); row.dataset.jobTemplateLabel = String(job.template || '').trim(); row.dataset.jobScope = normaliseReportingScope(job.scope);
-        row.append(cell(job.id), cell(job.generated_by || '-'), cell(job.date || '-'), cell(job.type || '-'), cell('Report'), cell(job.template || '-'), cell(job.scope || '-'), cell(job.slides ?? '-'), cell(job.charts ?? '-'), datasetCell(job), statusBadgeCell(job));
+        row.append(cell(job.id), cell(job.generated_by || '-'), cell(formatJobDate(job.date)), cell(job.type || '-'), cell('Report'), cell(job.template || '-'), cell(job.scope || '-'), cell(job.slides ?? '-'), cell(job.charts ?? '-'), datasetCell({...job, job_kind: 'Report'}), statusBadgeCell(job));
         const progressCell = document.createElement('td');
         const progress = document.createElement('div');
         progress.className = 'report-job-progress';
@@ -766,7 +881,8 @@
         meter.max = 100;
         meter.value = Number(job.progress || 0);
         const percentage = document.createElement('span');
-        percentage.textContent = `${Number(job.progress || 0)}%`;
+        const durationLabel = formatJobDuration(job);
+        percentage.textContent = `${Number(job.progress || 0)}%${durationLabel ? ` · ${durationLabel}` : ''}`;
         progress.append(meter, percentage);
         progressCell.append(progress);
         const actionsCell = document.createElement('td');
@@ -886,11 +1002,13 @@
       chartJobsBody.append(...jobs.map((job) => {
         const row = document.createElement('tr');
         row.dataset.jobKind = 'charts'; row.dataset.jobDate = job.date || ''; row.dataset.jobTech = normaliseReportingFilter(job.type); row.dataset.jobTemplate = normaliseReportingFilter(job.template); row.dataset.jobTemplateLabel = String(job.template || '').trim(); row.dataset.jobScope = normaliseReportingScope(job.scope);
-        row.append(cell(job.id), cell(job.generated_by || '-'), cell(job.date || '-'), cell(job.type || '-'), cell('Charts'), cell(job.template || '-'), cell(job.scope || '-'), cell('-'), cell(job.charts ?? '-'), datasetCell(job), statusBadgeCell(job));
+        row.append(cell(job.id), cell(job.generated_by || '-'), cell(formatJobDate(job.date)), cell(job.type || '-'), cell('Charts'), cell(job.template || '-'), cell(job.scope || '-'), cell('-'), cell(job.charts ?? '-'), datasetCell({...job, job_kind: 'Chart Set'}, 'Historical Chart Set'), statusBadgeCell(job));
         const progressCell = document.createElement('td');
         const progress = document.createElement('div'); progress.className = 'report-job-progress';
         const meter = document.createElement('progress'); meter.max = 100; meter.value = Number(job.progress || 0);
-        const percentage = document.createElement('span'); percentage.textContent = `${Number(job.progress || 0)}%`;
+        const percentage = document.createElement('span');
+        const durationLabel = formatJobDuration(job);
+        percentage.textContent = `${Number(job.progress || 0)}%${durationLabel ? ` · ${durationLabel}` : ''}`;
         progress.append(meter, percentage); progressCell.append(progress);
         const actionsCell = document.createElement('td'); const actions = document.createElement('div'); actions.className = 'report-job-actions';
         if (job.charts_download_url) { const download = reportActionLink('', job.charts_download_url, true); download.className = 'report-job-download-button report-job-charts-download-button'; download.download = ''; download.title = 'Download Chart Set PNGs as ZIP'; download.setAttribute('aria-label', 'Download Chart Set PNGs as ZIP'); actions.append(download); }
@@ -1946,6 +2064,12 @@
     else { rebuildReportChartSetSelector(reportChartSetSelect?.value || ''); updateChartSetActions(); }
     refreshReportingFilterChoices();
     applyReportingFilters(false);
+    window.requestAnimationFrame(() => {
+      reportJobsColumnFilters = window.enableExcelColumnFilters?.(jobsTableWrap?.querySelector('.report-jobs-table'), {
+        onChange: () => syncCombinedJobSummary(),
+      }) || null;
+      applyReportingFilters(false);
+    });
     jobsBody?.addEventListener('click', async (event) => {
       const charts = event.target.closest('[data-report-job-charts]');
       if (charts) {

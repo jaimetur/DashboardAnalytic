@@ -5809,3 +5809,76 @@ if (queueNode) {
   window.addEventListener('focus', poll);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 })();
+
+/* Reusable Excel-style value filters for compact job tables. */
+window.enableExcelColumnFilters = (table, {onChange, excludeLastColumn = true} = {}) => {
+  if (!table || table._excelColumnFilters) return table?._excelColumnFilters || null;
+  const headers = Array.from(table.tHead?.rows[0]?.cells || []);
+  const selectedByColumn = new Map();
+  let openMenu = null;
+  const valueFor = (row, index) => String(row.cells[index]?.dataset.filterValue ?? row.cells[index]?.textContent ?? '').trim();
+  const rows = () => Array.from(table.tBodies[0]?.rows || []);
+  const matches = (row) => [...selectedByColumn].every(([index, accepted]) => accepted.has(valueFor(row, index)));
+  const apply = () => {
+    if (onChange) { onChange(); return; }
+    rows().forEach((row) => { row.hidden = !matches(row); });
+  };
+  const closeMenu = () => {
+    if (!openMenu) return;
+    openMenu.trigger.setAttribute('aria-expanded', 'false');
+    openMenu.menu.remove(); openMenu = null;
+  };
+  const controller = {matches, apply};
+  table._excelColumnFilters = controller;
+  table.classList.add('excel-filter-table');
+  headers.forEach((header, index) => {
+    if (excludeLastColumn && index === headers.length - 1) return;
+    const label = header.textContent.trim();
+    const trigger = document.createElement('button');
+    trigger.type = 'button'; trigger.className = 'excel-column-filter-trigger';
+    trigger.setAttribute('aria-label', `Filter ${label}`);
+    trigger.setAttribute('aria-haspopup', 'dialog'); trigger.setAttribute('aria-expanded', 'false');
+    const caption = document.createElement('span'); caption.className = 'excel-column-filter-caption'; caption.textContent = label;
+    const icon = document.createElement('span'); icon.className = 'excel-column-filter-icon'; icon.textContent = '▾'; icon.setAttribute('aria-hidden', 'true');
+    trigger.append(caption, icon); header.replaceChildren(trigger);
+    trigger.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (openMenu?.trigger === trigger) { closeMenu(); return; }
+      closeMenu();
+      const values = [...new Set(rows().map((row) => valueFor(row, index)))].sort((left, right) => left.localeCompare(right, undefined, {numeric: true, sensitivity: 'base'}));
+      const selected = new Set(selectedByColumn.get(index) || values);
+      const menu = document.createElement('section'); menu.className = 'excel-column-filter-menu'; menu.setAttribute('role', 'dialog'); menu.setAttribute('aria-label', `Filter ${label}`);
+      const search = document.createElement('input'); search.type = 'search'; search.placeholder = 'Search values'; search.autocomplete = 'off'; search.setAttribute('aria-label', `Search ${label} values`);
+      const toolbar = document.createElement('div'); toolbar.className = 'excel-column-filter-toolbar';
+      const selectAll = document.createElement('button'); selectAll.type = 'button'; selectAll.textContent = 'Select all';
+      const clear = document.createElement('button'); clear.type = 'button'; clear.textContent = 'Clear'; toolbar.append(selectAll, clear);
+      const options = document.createElement('div'); options.className = 'excel-column-filter-options';
+      values.forEach((value) => {
+        const option = document.createElement('label'); const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.value = value; checkbox.checked = selected.has(value);
+        const text = document.createElement('span'); text.textContent = value || '(Blank)'; option.append(checkbox, text); options.append(option);
+      });
+      const footer = document.createElement('div'); footer.className = 'excel-column-filter-footer';
+      const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel';
+      const confirm = document.createElement('button'); confirm.type = 'button'; confirm.textContent = 'Apply'; footer.append(cancel, confirm);
+      menu.append(search, toolbar, options, footer); document.body.append(menu);
+      const bounds = trigger.getBoundingClientRect(), width = Math.min(300, window.innerWidth - 20);
+      menu.style.width = `${width}px`; menu.style.left = `${Math.max(10, Math.min(bounds.left, window.innerWidth - width - 10))}px`;
+      const below = bounds.bottom + 5, height = menu.offsetHeight;
+      menu.style.top = `${below + height <= window.innerHeight - 10 ? below : Math.max(10, bounds.top - height - 5)}px`;
+      openMenu = {menu, trigger}; trigger.setAttribute('aria-expanded', 'true');
+      search.addEventListener('input', () => { const term = search.value.trim().toLocaleLowerCase(); options.querySelectorAll('label').forEach((option) => { option.hidden = Boolean(term) && !option.textContent.toLocaleLowerCase().includes(term); }); });
+      selectAll.addEventListener('click', () => options.querySelectorAll('input').forEach((input) => { input.checked = true; }));
+      clear.addEventListener('click', () => options.querySelectorAll('input').forEach((input) => { input.checked = false; }));
+      cancel.addEventListener('click', closeMenu);
+      confirm.addEventListener('click', () => {
+        const accepted = new Set([...options.querySelectorAll('input:checked')].map((input) => input.value));
+        if (accepted.size === values.length) selectedByColumn.delete(index); else selectedByColumn.set(index, accepted);
+        header.classList.toggle('has-excel-column-filter', selectedByColumn.has(index)); apply(); closeMenu();
+      });
+      menu.addEventListener('click', (menuEvent) => menuEvent.stopPropagation()); requestAnimationFrame(() => search.focus());
+    });
+  });
+  document.addEventListener('click', closeMenu);
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeMenu(); });
+  return controller;
+};

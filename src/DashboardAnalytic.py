@@ -7846,6 +7846,28 @@ def _local_report_date(value: Any) -> str:
         return raw
 
 
+def _report_job_duration(row: Any) -> tuple[float | None, str]:
+    """Return the persisted elapsed time for a completed Reporting job."""
+    if not row['finished_at'] or not row['created_at']:
+        return None, ''
+    try:
+        created_at = datetime.fromisoformat(str(row['created_at']).replace('Z', '+00:00'))
+        finished_at = datetime.fromisoformat(str(row['finished_at']).replace('Z', '+00:00'))
+        duration = round(max(0.0, (finished_at - created_at).total_seconds()), 3)
+    except (TypeError, ValueError):
+        return None, ''
+    if duration < 60:
+        label = f'{duration:.1f}s' if duration < 10 else f'{round(duration)}s'
+    else:
+        minutes, seconds = divmod(duration, 60)
+        rounded_seconds = round(seconds)
+        if rounded_seconds == 60:
+            minutes += 1
+            rounded_seconds = 0
+        label = f'{int(minutes)}m {rounded_seconds}s'
+    return duration, label
+
+
 def serialize_report_job(row: Any) -> dict[str, Any]:
     """Expose a report job without relying on the mutable active workspace."""
     try:
@@ -7865,6 +7887,7 @@ def serialize_report_job(row: Any) -> dict[str, Any]:
     output_available = status_value == 'ready' and _report_job_output_path(row) is not None
     slide_count = int(row['slide_count'] or 0)
     charts_payload = _report_job_charts_payload(row) if output_available else None
+    duration_seconds, duration_label = _report_job_duration(row)
     return {
         'id': report_id,
         'date': _local_report_date(row['created_at']),
@@ -7881,6 +7904,8 @@ def serialize_report_job(row: Any) -> dict[str, Any]:
         'generated_by': str(row['created_by'] or '—'),
         'status': status_value,
         'progress': int(row['progress'] or 0),
+        'duration_seconds': duration_seconds,
+        'duration_label': duration_label,
         'error': str(row['last_error'] or ''),
         'download_url': f'/e2e-reporting/jobs/{report_id}/download' if output_available else None,
         'open_url': f'/e2e-reporting/jobs/{report_id}/open' if output_available else None,
@@ -7909,6 +7934,7 @@ def serialize_report_chart_job(row: Any) -> dict[str, Any]:
     # its manifest.  Reuse it in Charts Jobs rather than showing the earlier
     # queue-creation time alongside the completed set.
     chart_set = load_persisted_report_charts(generation) if status_value == 'ready' and generation else None
+    duration_seconds, duration_label = _report_job_duration(row)
     return {
         'id': job_id,
         'date': str(chart_set['generated_at']) if chart_set else _local_report_date(row['created_at']),
@@ -7920,6 +7946,8 @@ def serialize_report_chart_job(row: Any) -> dict[str, Any]:
         'generated_by': str(row['created_by'] or '—'),
         'status': status_value,
         'progress': int(row['progress'] or 0),
+        'duration_seconds': duration_seconds,
+        'duration_label': duration_label,
         'error': str(row['last_error'] or ''),
         'generation': generation or None,
         'open_url': f'/api/e2e-reporting/chart-sets/{generation}' if status_value == 'ready' and generation else None,
