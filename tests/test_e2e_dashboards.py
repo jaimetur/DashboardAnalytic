@@ -148,7 +148,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'async function restorePrepared(id) {' in dashboard_script
     assert 'const preparedPayloads = new Map();' in dashboard_script
     assert 'const inMemory = preparedPayloads.get(id);' in dashboard_script
-    assert 'if (inMemory) { applyPreparedPayload(inMemory); return true; }' in dashboard_script
+    assert 'if (inMemory?.fingerprint === fingerprint) { applyPreparedPayload(inMemory.payload); return true; }' in dashboard_script
+    assert "api(`/prefetched/${encodeURIComponent(id)}`)" in dashboard_script
     assert "api(`/prepared/${encodeURIComponent(cached.token)}`)" in dashboard_script
     assert 'if (!await restorePrepared(id)) await prepare();' in dashboard_script
     assert 'savedDefinition = definitionFingerprint(definition); updateDirtyState();\n    // Date defaults may be derived' in dashboard_script

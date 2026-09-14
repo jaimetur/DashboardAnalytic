@@ -344,8 +344,9 @@
     facetsRefreshTimer = setTimeout(refreshFacetsAfterMenusClose, 100);
   }
   const rememberPrepared = payload => {
-    preparedPayloads.set(activeId, payload);
-    try { sessionStorage.setItem(preparedStorageKey, JSON.stringify({dashboardId: activeId, token: payload.token})); }
+    const fingerprint = definitionFingerprint(definition);
+    preparedPayloads.set(activeId, {payload, fingerprint});
+    try { sessionStorage.setItem(preparedStorageKey, JSON.stringify({dashboardId: activeId, token: payload.token, fingerprint})); }
     catch (_) { /* Session storage is optional. */ }
   };
   const forgetPrepared = () => {
@@ -368,13 +369,21 @@
   };
   async function restorePrepared(id) {
     const inMemory = preparedPayloads.get(id);
-    if (inMemory) { applyPreparedPayload(inMemory); return true; }
+    const fingerprint = definitionFingerprint(definition);
+    if (inMemory?.fingerprint === fingerprint) { applyPreparedPayload(inMemory.payload); return true; }
     let cached;
     try { cached = JSON.parse(sessionStorage.getItem(preparedStorageKey) || 'null'); }
     catch (_) { return false; }
-    if (!cached || cached.dashboardId !== id || !cached.token) return false;
-    try { applyPreparedPayload(await api(`/prepared/${encodeURIComponent(cached.token)}`)); return true; }
-    catch (error) { if (error.message.includes('expired')) forgetPrepared(); return false; }
+    if (cached?.dashboardId === id && cached.token && cached.fingerprint === fingerprint) {
+      try { applyPreparedPayload(await api(`/prepared/${encodeURIComponent(cached.token)}`)); return true; }
+      catch (error) { if (error.message.includes('expired')) forgetPrepared(); }
+    }
+    try {
+      applyPreparedPayload(await api(`/prefetched/${encodeURIComponent(id)}`));
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
   function filterChanged() {
     updateDirtyState();
@@ -494,7 +503,6 @@
   bind('ds-view',async () => {
     if (!prepared?.slides.length) return;
     setViewEnabled(false);
-    setPreparationState('preparing');
     try {
       // Do not expose the viewer until every Canvas model is locally available.
       // Disk-cached server models make this a lightweight read after warm-up.
@@ -502,7 +510,6 @@
       overlay('ds-viewer', true); renderSlide();
     } finally {
       setViewEnabled(Boolean(prepared?.slides.length));
-      if (prepared?.slides.length) setPreparationState('ready');
     }
   });
   function loadChartPayload(chart, priority = 'high') {

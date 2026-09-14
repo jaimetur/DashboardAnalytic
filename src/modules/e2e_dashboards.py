@@ -674,7 +674,9 @@ def install_dashboard_routes(core):
                 workspace, user.username, entries, {}, definition.scope == 'multivendor',
                 definition.model_copy(deep=True), tuple(dimensions), selection_id, selection_key, selection_materialized, payload,
             )
-            while len(snapshots) > 3:
+            # Background-warmed Dashboards keep only lightweight snapshots so
+            # users can switch between them without rebuilding their filters.
+            while len(snapshots) > 128:
                 snapshots.popitem(last=False)
         return {**payload, 'token': token}
 
@@ -691,6 +693,24 @@ def install_dashboard_routes(core):
             snapshot = snapshots.get(token)
             if snapshot is None or snapshot.workspace != workspace_key() or snapshot.owner != user.username:
                 raise HTTPException(410, 'Dashboard preview expired. Refresh the Dashboard.')
+            return {**snapshot.payload, 'token': token}
+
+    @app.get('/api/e2e-dashboards/prefetched/{dashboard_id}')
+    def prefetched_dashboard(dashboard_id: str, user=Depends(dashboard_user)):
+        workspace = workspace_key()
+        with lock:
+            dashboards = read_dashboards(bound_repository())
+            raw_definition = dashboards.get(dashboard_id)
+            if not isinstance(raw_definition, dict):
+                raise HTTPException(404, 'Dashboard not found.')
+            fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
+            key = f'{workspace}:{dashboard_id}:{fingerprint}:{user.username}'
+            job = prefetch_jobs.get(key)
+            token = str(job.get('token') or '') if job and job.get('status') == 'ready' else ''
+            snapshot = snapshots.get(token)
+            if not token or snapshot is None or snapshot.owner != user.username:
+                raise HTTPException(409, 'Dashboard preparation is still running.')
+            snapshots.move_to_end(token)
             return {**snapshot.payload, 'token': token}
 
     def source_spec(snapshot, kind, task_repository):
@@ -1012,7 +1032,7 @@ def install_dashboard_routes(core):
         """Warm Canvas JSON models only; PNG render caches are intentionally excluded."""
         workspace = workspace_key()
         fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
-        key = f'{workspace}:{dashboard_id}:{fingerprint}'
+        key = f'{workspace}:{dashboard_id}:{fingerprint}:{user.username}'
         with lock:
             existing = prefetch_jobs.get(key)
             if existing and existing.get('status') in {'queued', 'processing', 'ready'}:
@@ -1030,12 +1050,21 @@ def install_dashboard_routes(core):
                 for index in charts:
                     chart_model(preview['token'], index, user, expected_workspace=workspace)
                     with lock: job['completed'] += 1
-                with lock: job['status'] = 'ready'
+                with lock:
+                    snapshot = snapshots.get(preview['token'])
+                    if snapshot is not None:
+                        # Models now live on disk. Discard large frames while
+                        # retaining the selection metadata and reusable token.
+                        snapshot.frames.clear()
+                        snapshot.chart_frames.clear()
+                        snapshot.filtered_frames.clear()
+                        snapshot.chart_payloads.clear()
+                        snapshot.frame_locks.clear()
+                        snapshot.projections.clear()
+                        snapshots.move_to_end(preview['token'])
+                    job.update(status='ready', token=preview['token'])
             except Exception as exc:
                 with lock: job.update(status='failed', error=str(exc))
-            finally:
-                if preview:
-                    with lock: snapshots.pop(preview['token'], None)
         prefetch_executor.submit(run)
 
     def prefetch_task_payloads(workspace):
