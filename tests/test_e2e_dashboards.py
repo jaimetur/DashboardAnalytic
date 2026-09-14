@@ -20,6 +20,43 @@ def test_projection_scan_hint_only_bypasses_index_for_complete_selection():
     assert dashboard_projection_scan_hint([], []) == ''
 
 
+def test_cache_clear_requeues_stale_rendering_as_data_preparation(client, monkeypatch):
+    payload = setup_dashboard(client)
+    import src.modules.e2e_dashboards as dashboards_module
+
+    core.repository.set_workspace_state('e2e_dashboards_v2', json.dumps({'cache-clear-dashboard': payload}))
+    started = Event()
+    release = Event()
+    original = dashboards_module.catalog_chart_payload
+
+    def blocked_payload(*args, **kwargs):
+        started.set()
+        assert release.wait(5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(dashboards_module, 'catalog_chart_payload', blocked_payload)
+    client.get('/api/e2e-dashboards')
+    assert started.wait(5)
+    try:
+        workspace = core.active_workspace
+        assert workspace is not None
+        cleared = client.post(
+            '/workspace/cache/delete', data={'workspace_id': workspace.id},
+            headers={'X-Requested-With': 'XMLHttpRequest'}, follow_redirects=False,
+        )
+        assert cleared.status_code == 200
+        deadline = time.monotonic() + 5
+        status = {}
+        while time.monotonic() < deadline:
+            status = client.get('/api/e2e-dashboards/statuses').json().get('cache-clear-dashboard', {})
+            if status.get('state') == 'data-queued':
+                break
+            time.sleep(0.02)
+        assert status == {'state': 'data-queued', 'label': 'Data queued'}
+    finally:
+        release.set()
+
+
 def setup_dashboard(client):
     client.post('/login', data={'username': 'super', 'password': 'super123'})
     response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={

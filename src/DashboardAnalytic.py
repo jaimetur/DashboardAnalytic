@@ -19,7 +19,7 @@ import sqlite3
 import warnings
 import tempfile
 import zipfile
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
@@ -91,7 +91,6 @@ TRANSFER_OFFERS: dict[str, dict[str, Any]] = {}
 TRANSFER_LOCK = Lock()
 WORKSPACE_LIFECYCLE_JOBS: dict[str, dict[str, Any]] = {}
 WORKSPACE_LIFECYCLE_JOBS_LOCK = Lock()
-WORKSPACE_CACHE_WRITER_STOP_TIMEOUT_SECONDS = 120
 WORKSPACE_DUPLICATION_STOP_REQUESTS: set[str] = set()
 WORKSPACE_DUPLICATION_STOP_REQUESTS_LOCK = Lock()
 BULK_REPORT_DELETION_JOBS: dict[str, dict[str, Any]] = {}
@@ -6668,9 +6667,8 @@ def delete_workspace_cache(
         return RedirectResponse('/workspace?workspace_error=Workspace+not+found.', status_code=status.HTTP_303_SEE_OTHER)
     require_workspace_access(user, workspace_id)
     cancel_dashboard_prefetch = getattr(sys.modules[__name__], 'e2e_dashboard_cancel_prefetch_workspace', None)
-    cancelled_prefetch_workers = []
     if callable(cancel_dashboard_prefetch):
-        cancelled_prefetch_workers = cancel_dashboard_prefetch(workspace.database_path) or []
+        cancel_dashboard_prefetch(workspace.database_path)
     if active_workspace and active_workspace.id == workspace_id:
         ANALYSIS_CACHE.clear()
         DATAFRAME_CACHE.clear()
@@ -6690,25 +6688,12 @@ def delete_workspace_cache(
             if job:
                 job.update(
                     status='processing', progress=15,
-                    message='Stopping Dashboard cache writers',
+                    message='Removing generated Dashboard artifacts',
                 )
         try:
-            # A running warm-up can be inside a projection write when it sees
-            # the cooperative cancellation flag.  Wait for it to leave that
-            # section before deleting the cache, so it cannot recreate files.
-            for worker in cancelled_prefetch_workers:
-                try:
-                    worker.result(timeout=WORKSPACE_CACHE_WRITER_STOP_TIMEOUT_SECONDS)
-                except FutureTimeoutError as exc:
-                    raise RuntimeError(
-                        'Timed out while stopping Dashboard cache writers. Cache files were not removed.'
-                    ) from exc
-                except Exception:
-                    pass
-            with WORKSPACE_LIFECYCLE_JOBS_LOCK:
-                job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
-                if job:
-                    job.update(progress=35, message='Removing generated Dashboard artifacts')
+            # Cancellation invalidates active Dashboard generations before
+            # this thread starts. Writers verify that token before committing
+            # cache artifacts, allowing removal to start immediately.
             workspace_root = workspace.database_path.parent
             cache_directories = (
                 workspace_root / '.dashboard-data-cache',
@@ -6720,7 +6705,7 @@ def delete_workspace_cache(
                     job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
                     if job:
                         job.update(
-                            progress=35 + round(index * 55 / len(cache_directories)),
+                            progress=15 + round(index * 75 / len(cache_directories)),
                             message=f'Removed cache directory {index} of {len(cache_directories)}',
                         )
             invalidate_workspace_size_cache(workspace_root)
@@ -6731,10 +6716,9 @@ def delete_workspace_cache(
                         status='ready', progress=100, message='Cache cleared',
                         finished_at=datetime.now(timezone.utc).timestamp(),
                     )
-            # Queue a new generation only after every cancelled worker has
-            # stopped and the derived files have been removed.  This keeps
-            # clearing observable as its own task and prevents cache writers
-            # from racing the removal.
+            # Queue a fresh generation after removing the derived files. Any
+            # invalidated worker is ignored by the Dashboard queue and cannot
+            # publish cache artifacts after this point.
             prefetch_workspace = getattr(sys.modules[__name__], 'e2e_dashboard_prefetch_workspace', None)
             if callable(prefetch_workspace):
                 prefetch_workspace([workspace])

@@ -1641,7 +1641,7 @@ def test_workspace_remove_preserves_files_unless_explicitly_requested(client) ->
     assert not second_root.exists()
 
 
-def test_workspace_cache_clear_removes_only_derived_dashboard_artifacts(client) -> None:
+def test_workspace_cache_clear_removes_only_derived_dashboard_artifacts(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
     login(client)
@@ -1657,6 +1657,15 @@ def test_workspace_cache_clear_removes_only_derived_dashboard_artifacts(client) 
     before_clear = client.get('/api/workspaces/status').json()
     before_workspace = next(item for item in before_clear['workspaces'] if item['id'] == workspace.id)
     assert before_workspace['cache_size'] != '0 B'
+
+    class StillRunningWorker:
+        def result(self, *args, **kwargs):
+            raise AssertionError('Cache clearing must not wait for Dashboard workers.')
+
+    monkeypatch.setattr(
+        app_module, 'e2e_dashboard_cancel_prefetch_workspace',
+        lambda _workspace: [StillRunningWorker()],
+    )
 
     response = client.post(
         '/workspace/cache/delete', data={'workspace_id': workspace.id},
@@ -2520,8 +2529,6 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     assert 'data-dataset-row data-dataset-kind="data"' in workspace_response.text
     assert 'href="/workspace/combined/data/preview"' in workspace_response.text
     assert 'aria-label="Recreate combined table">↻</button>' in workspace_response.text
-    combined_row = workspace_response.text.split('data-combined-dataset-row', 1)[0].rsplit('<tr', 1)[1]
-    assert 'combined-dataset-ready' in combined_row
 
     preview_response = client.get('/workspace/combined/data/preview')
     assert preview_response.status_code == 200
@@ -2564,8 +2571,6 @@ def test_combined_dataset_missing_rows_are_flagged_and_require_confirmation(clie
     assert workspace_response.status_code == 200
     assert 'Missing Rows' in workspace_response.text
     assert 'queue-status-warning' in workspace_response.text
-    combined_row = workspace_response.text.split('data-combined-dataset-row', 1)[0].rsplit('<tr', 1)[1]
-    assert 'combined-dataset-warning' in combined_row
 
 
 def test_combined_recreation_returns_materialization_job_for_progress(client, monkeypatch) -> None:

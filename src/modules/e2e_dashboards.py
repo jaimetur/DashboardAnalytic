@@ -169,6 +169,7 @@ class Snapshot:
     chart_payloads: dict[int, dict[str, object]] = field(default_factory=dict)
     frame_locks: dict[str, RLock] = field(default_factory=dict)
     projections: dict[str, tuple[Path, str, list[str]]] = field(default_factory=dict)
+    cancelled: object = None
 
 
 def install_dashboard_routes(core):
@@ -704,6 +705,7 @@ def install_dashboard_routes(core):
             snapshots[token] = Snapshot(
                 workspace, user.username, entries, {}, definition.scope == 'multivendor',
                 definition.model_copy(deep=True), tuple(dimensions), selection_id, selection_key, selection_materialized, payload,
+                cancelled=cancelled,
             )
             # Background-warmed Dashboards keep only lightweight snapshots so
             # users can switch between them without rebuilding their filters.
@@ -836,13 +838,19 @@ def install_dashboard_routes(core):
     ):
         preparation_id = preparation_id or f'dashboard-preparation:{uuid4().hex}'
         workspace = workspace_key()
+        cancellation = {'requested': False}
         with lock:
             direct_preparation_tasks[preparation_id] = {
                 'id': preparation_id, 'workspace': workspace, 'name': definition.name,
-                'rendering_only': rendering_only,
+                'rendering_only': rendering_only, 'cancellation': cancellation,
             }
         try:
-            preview = build_preview(definition, user)
+            def preparation_cancelled():
+                return bool(cancellation['requested'])
+
+            preview = build_preview(
+                definition, user, workspace=workspace, cancelled=preparation_cancelled,
+            )
             if dashboard_id:
                 enqueue_prefetch(
                     dashboard_id,
@@ -945,7 +953,12 @@ def install_dashboard_routes(core):
         )
         return connection
 
+    def ensure_snapshot_not_cancelled(snapshot):
+        if callable(snapshot.cancelled) and snapshot.cancelled():
+            raise RuntimeError('Dashboard preparation cancelled.')
+
     def ensure_projection(snapshot, kind, task_repository):
+        ensure_snapshot_not_cancelled(snapshot)
         with lock:
             existing = snapshot.projections.get(kind)
         if existing is not None:
@@ -954,12 +967,14 @@ def install_dashboard_routes(core):
         with lock:
             projection_lock = projection_load_locks.setdefault(cache_key, RLock())
         with projection_lock:
+            ensure_snapshot_not_cancelled(snapshot)
             with lock:
                 existing = snapshot.projections.get(kind)
             if existing is not None:
                 return existing
             cache_dir = Path(snapshot.workspace).parent / '.dashboard-data-cache'
             cache_dir.mkdir(parents=True, exist_ok=True)
+            ensure_snapshot_not_cancelled(snapshot)
             cache_path = cache_dir / 'dashboard-analytics.sqlite3'
             table_name = f'projection_{kind}_{cache_key[:20]}'
             source_columns = task_repository.list_reporting_row_columns(kind)
@@ -1006,6 +1021,7 @@ def install_dashboard_routes(core):
                         f'WHERE dataset_id IN ({placeholders})',
                         dataset_ids,
                     )
+                    ensure_snapshot_not_cancelled(snapshot)
                     connection.execute(
                         f'ALTER TABLE {task_repository._quote_identifier(temporary)} '
                         f'RENAME TO {task_repository._quote_identifier(table_name)}'
@@ -1037,6 +1053,7 @@ def install_dashboard_routes(core):
                         if actual and actual not in indexed_columns:
                             indexed_columns.append(actual)
                 for indexed_column in indexed_columns:
+                    ensure_snapshot_not_cancelled(snapshot)
                     legacy_index_name = f'idx_{table_name}_{sha256(indexed_column.encode()).hexdigest()[:8]}'
                     index_name = f'idx_{table_name}_{sha256(f"nocase:{indexed_column}".encode()).hexdigest()[:8]}'
                     connection.execute(
@@ -1058,10 +1075,12 @@ def install_dashboard_routes(core):
                     (DASHBOARD_PROJECTION_DISK_LIMIT,),
                 ).fetchall()
                 for stale_projection in stale:
+                    ensure_snapshot_not_cancelled(snapshot)
                     connection.execute(
                         f'DROP TABLE IF EXISTS {task_repository._quote_identifier(stale_projection["table_name"])}'
                     )
                     connection.execute('DELETE FROM projection_cache WHERE cache_key = ?', (stale_projection['cache_key'],))
+                ensure_snapshot_not_cancelled(snapshot)
                 connection.commit()
             except Exception:
                 connection.rollback()
@@ -1331,9 +1350,14 @@ def install_dashboard_routes(core):
             with lock:
                 payload = snapshot.chart_payloads.setdefault(index, payload)
             try:
+                if callable(snapshot.cancelled) and snapshot.cancelled():
+                    return payload
                 model_dir.mkdir(parents=True, exist_ok=True)
                 temporary = model_path.with_suffix(f'.{uuid4().hex}.tmp')
                 temporary.write_text(json.dumps(payload, separators=(',', ':')), encoding='utf-8')
+                if callable(snapshot.cancelled) and snapshot.cancelled():
+                    temporary.unlink(missing_ok=True)
+                    return payload
                 temporary.replace(model_path)
                 cached_models = sorted(model_dir.glob('*.json'), key=lambda path: path.stat().st_mtime, reverse=True)
                 for stale in cached_models[DASHBOARD_CHART_MODEL_DISK_LIMIT:]:
@@ -1468,6 +1492,15 @@ def install_dashboard_routes(core):
             if expected_generation is not None and generation != expected_generation:
                 return
             existing = prefetch_jobs.get(key)
+            if existing and (
+                existing.get('cancel_requested')
+                or existing.get('generation') != generation
+            ):
+                # A cache clear invalidates the active job before deleting its
+                # files. Replace that stale job immediately so the new cache
+                # generation begins again with data preparation.
+                existing['cancel_requested'] = True
+                existing = None
             if existing and existing.get('status') in {'queued', 'processing'}:
                 existing_snapshot = snapshots.get(str(existing.get('token') or ''))
                 restored_snapshot = snapshots.get(str(restored_preview.get('token') or '')) if restored_preview else None
@@ -1605,6 +1638,8 @@ def install_dashboard_routes(core):
                 matching_jobs = [
                     job for job in prefetch_jobs.values()
                     if job.get('workspace') == workspace and job.get('dashboard_id') == dashboard_id
+                    and not job.get('cancel_requested')
+                    and job.get('generation') == prefetch_generation.get(workspace, 0)
                 ]
                 latest_jobs[dashboard_id] = dict(max(
                     matching_jobs, key=lambda candidate: float(candidate.get('created_at') or 0), default={}
@@ -1652,11 +1687,16 @@ def install_dashboard_routes(core):
         return JSONResponse(result, headers={'Cache-Control': 'no-store, max-age=0, must-revalidate'})
 
     def cancel_workspace_prefetch(workspace: str | Path) -> list:
-        """Stop warming and return running workers that must finish before cache removal."""
+        """Invalidate Dashboard warming and return any still-running futures."""
         database_path = str(Path(workspace).resolve())
         running_futures = []
         with lock:
             prefetch_generation[database_path] = prefetch_generation.get(database_path, 0) + 1
+            for task in direct_preparation_tasks.values():
+                if task.get('workspace') == database_path:
+                    cancellation = task.get('cancellation')
+                    if isinstance(cancellation, dict):
+                        cancellation['requested'] = True
             for job in prefetch_jobs.values():
                 if job.get('workspace') != database_path or job.get('status') not in {'queued', 'processing'}:
                     continue
@@ -1703,10 +1743,19 @@ def install_dashboard_routes(core):
     def prefetch_task_payloads(workspace):
         database_path = str(workspace.database_path.resolve())
         with lock:
-            direct_tasks = [task for task in direct_preparation_tasks.values() if task['workspace'] == database_path]
+            direct_tasks = [
+                task for task in direct_preparation_tasks.values()
+                if task['workspace'] == database_path
+                and not bool((task.get('cancellation') or {}).get('requested'))
+            ]
             pending = [
                 job for job in prefetch_jobs.values()
-                if job['status'] in {'queued', 'processing'} and not job.get('restoring_cached_models')
+                if (
+                    job['status'] in {'queued', 'processing'}
+                    and not job.get('restoring_cached_models')
+                    and not job.get('cancel_requested')
+                    and job.get('generation') == prefetch_generation.get(job.get('workspace'), 0)
+                )
             ]
             workspace_jobs = [job for job in pending if job['workspace'] == database_path]
             tasks = []
