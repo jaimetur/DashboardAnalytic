@@ -7,7 +7,7 @@ from dataclasses import replace
 from datetime import datetime
 import pandas as pd
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -607,6 +607,20 @@ def test_interactive_mean_model_uses_reporting_aggregation_and_vendor_palette() 
     ]
 
 
+def test_bar_value_label_rotates_when_it_only_fits_vertically() -> None:
+    image = Image.new('RGB', (200, 200), 'white')
+    draw = ImageDraw.Draw(image)
+
+    with patch('src.modules.cdr_reporting._draw_vertical_label') as draw_vertical:
+        drawn = _draw_inside_bar_label(
+            image, draw, '104.62', x=20, y=20, width=30, height=150,
+            fill='white', font=ImageFont.load_default(),
+        )
+
+    assert drawn is True
+    draw_vertical.assert_called_once()
+
+
 def test_top_column_group_separator_is_solid_from_the_header_to_the_plot() -> None:
     draw = MagicMock()
 
@@ -874,6 +888,30 @@ def test_multivendor_rendering_rewrites_display_and_grouping_and_excludes_unreso
     assert prepare_multivendor_catalog_entry(already_filtered).filters == already_filtered.filters
 
 
+def test_vendor_filters_accept_full_or_operator_independent_vendor_values() -> None:
+    frame = pd.DataFrame({
+        'report_vendor': [
+            'VF_Ericsson', 'VF_Huawei', 'VF_Mixed Vendor', '3_Ericsson',
+            '3_Huawei', '3_Samsung', '3_Mixed Vendor', 'O2_NSN',
+        ],
+        'LQ': [4.0] * 8,
+    })
+    bare_entry = CatalogEntry(
+        1, '', '', '', '', 'CDR-Speech', 'LQ', 'Average Vertical Bars',
+        'Vendor IN (Ericsson, Huawei, Samsung, NSN, Mixed Vendor)', '', 'Operator', '',
+    )
+    full_entry = replace(bare_entry, filters='Vendor IN (3_Ericsson, 3_Huawei, 3_Mixed Vendor, VF_Ericsson, VF_Huawei, VF_Mixed Vendor, O2_NSN)')
+
+    bare = _apply_catalog_filters(frame, bare_entry, True, 'LQ')
+    full = _apply_catalog_filters(frame, full_entry, True, 'LQ')
+
+    assert bare['report_vendor'].tolist() == frame['report_vendor'].tolist()
+    assert full['report_vendor'].tolist() == [
+        'VF_Ericsson', 'VF_Huawei', 'VF_Mixed Vendor', '3_Ericsson',
+        '3_Huawei', '3_Mixed Vendor', 'O2_NSN',
+    ]
+
+
 def test_multivendor_operator_filters_match_vendor_prefixes_and_keep_full_grouping_values() -> None:
     entry = parse_catalog_csv(
         ','.join(CATALOG_HEADERS)
@@ -1021,6 +1059,20 @@ def test_cdf_trims_only_a_converged_tail_after_three_curves_reach_98_percent() -
         [[1.0] * 99 + [10.0], [2.0] * 99 + [10.0], [3.0] * 98 + [10.0, 11.0]],
         1.0, 10.0,
     ) == 10.0
+
+
+def test_outcome_series_colours_use_green_for_success_and_red_for_failure() -> None:
+    frame = pd.DataFrame()
+    keys = [('Success',), ('Failure',), ('Completed',), ('Dropped',)]
+
+    colours = _series_colours(keys, ['__catalog_column_0'], frame)
+
+    assert colours == {
+        ('Success',): '#2C9A62',
+        ('Failure',): '#C83E4D',
+        ('Completed',): '#197A4A',
+        ('Dropped',): '#D8555F',
+    }
 
 
 def test_operator_vendor_column_groups_keep_campaign_bars_in_their_operator_palette() -> None:

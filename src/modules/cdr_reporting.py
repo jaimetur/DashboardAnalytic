@@ -1485,7 +1485,9 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
         # example Vodafone against Vodafone_Ericsson), while Vendor filters
         # still retain their native full-value semantics such as excluding
         # Mixed and Other vendor groups.
-        is_operator_filter = _normalise_catalog_name(condition.column) == "operator"
+        normalized_condition = _normalise_catalog_name(condition.column)
+        is_operator_filter = normalized_condition == "operator"
+        is_vendor_filter = normalized_condition in {"vendor", "reportvendor", "vendorv3"}
         column = _group_column(result, True) if multivendor and is_operator_filter else _catalog_column(
             result, condition.column, multivendor, metric, operator_as_vendor=False,
         )
@@ -1495,6 +1497,17 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
         comparison_series = series.map(_report_vendor_operator) if multivendor and is_operator_filter else (
             series.map(_normalise_report_operator) if is_operator_filter else series
         )
+        def vendor_match(target: str, *, contains: bool = False) -> pd.Series:
+            """Match a full Operator_Vendor value or an operator-independent vendor."""
+            text = str(target).strip()
+            # An underscore explicitly selects one materialised operator/vendor
+            # value. A bare name selects that vendor beneath every operator.
+            full_value = "_" in text
+            candidates = series.map(_normalise_report_vendor).astype(str) if full_value else series.map(_vendor_label).astype(str)
+            expected = _normalise_report_vendor(text) if full_value else text
+            if contains:
+                return candidates.str.contains(expected, case=False, na=False, regex=False)
+            return candidates.str.casefold().eq(expected.casefold())
         if condition.operator in {">", ">=", "<", "<=", "=", "!="}:
             target = condition.values[0]
             if (
@@ -1515,22 +1528,32 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
             if pd.notna(target_number):
                 comparison = {">": numeric > target_number, ">=": numeric >= target_number, "<": numeric < target_number, "<=": numeric <= target_number, "=": numeric == target_number, "!=": numeric != target_number}[condition.operator]
             else:
-                comparison = {"=": comparison_series.astype(str).str.casefold() == target.casefold(), "!=": comparison_series.astype(str).str.casefold() != target.casefold()}.get(condition.operator)
+                if is_vendor_filter:
+                    comparison = vendor_match(target)
+                    if condition.operator == "!=":
+                        comparison = ~comparison
+                else:
+                    comparison = {"=": comparison_series.astype(str).str.casefold() == target.casefold(), "!=": comparison_series.astype(str).str.casefold() != target.casefold()}.get(condition.operator)
                 if comparison is None:
                     raise ValueError(f"Slide {entry.slide}: '{condition.operator}' requires a numeric value for '{condition.column}'.")
         elif condition.operator in {"CONTAINS", "NOT CONTAINS"}:
             targets = tuple(_normalise_report_operator(item) if is_operator_filter else item for item in condition.values)
             comparison = pd.Series(False, index=series.index)
             for target in targets:
-                comparison |= comparison_series.astype(str).str.contains(target, case=False, na=False, regex=False)
+                comparison |= vendor_match(target, contains=True) if is_vendor_filter else comparison_series.astype(str).str.contains(target, case=False, na=False, regex=False)
             if condition.operator == "NOT CONTAINS":
                 comparison = ~comparison
         else:  # IN / NOT IN
-            accepted = {
-                (_normalise_report_operator(item) if is_operator_filter else item).casefold()
-                for item in condition.values
-            }
-            comparison = comparison_series.astype(str).str.casefold().isin(accepted)
+            if is_vendor_filter:
+                comparison = pd.Series(False, index=series.index)
+                for target in condition.values:
+                    comparison |= vendor_match(target)
+            else:
+                accepted = {
+                    (_normalise_report_operator(item) if is_operator_filter else item).casefold()
+                    for item in condition.values
+                }
+                comparison = comparison_series.astype(str).str.casefold().isin(accepted)
             if condition.operator == "NOT IN":
                 comparison = ~comparison
         result = result.loc[comparison].copy()
@@ -2152,6 +2175,32 @@ def _colour(label: object, index: int = 0) -> str:
     return NEUTRAL_SERIES_COLORS[index % len(NEUTRAL_SERIES_COLORS)]
 
 
+OUTCOME_COLOUR_VARIANTS = {
+    "success": ("#2C9A62", "#197A4A", "#56B881", "#0F5C35"),
+    "failure": ("#C83E4D", "#D8555F", "#E26A70", "#AE2F42", "#F08A8F", "#8F2035"),
+}
+
+
+def _outcome_kind(value: object) -> str | None:
+    """Classify a result label as a success or failure without fixing its shade."""
+    text = str(value or "").strip().casefold()
+    if not text:
+        return None
+    # Check negative language first because "unsuccessful" also contains
+    # the success token.
+    if re.search(r"fail|error|drop|cutoff|unsuccess|incomplete|abort|cancel|timeout|reject|denied", text):
+        return "failure"
+    if re.search(r"success|complete|pass|\bok\b|healthy|available", text):
+        return "success"
+    return None
+
+
+def _outcome_colour(value: object) -> str | None:
+    """Return the primary conventional colour for a semantic outcome label."""
+    kind = _outcome_kind(value)
+    return OUTCOME_COLOUR_VARIANTS[kind][0] if kind else None
+
+
 def _hierarchy_group_colours(keys: list[tuple[object, ...]], level: int = 0) -> dict[str, str]:
     """Colour one hierarchy level consistently, with readable variants."""
     colours: dict[str, str] = {}
@@ -2231,6 +2280,34 @@ def _series_colours(
     """
     if not keys:
         return {}
+
+    def semantic_outcome(key: tuple[object, ...]) -> tuple[str, str] | None:
+        for value in reversed(key):
+            kind = _outcome_kind(value)
+            if kind:
+                return kind, str(value)
+        return None
+
+    semantic_outcomes = {key: semantic_outcome(key) for key in keys}
+    # Result/Status series have semantic meaning that takes precedence over
+    # the neutral palette, regardless of chart grammar or aggregation axis.
+    # Different outcome labels retain distinct shades within their semantic
+    # family, while repeated labels stay visually stable across campaigns.
+    if all(semantic_outcomes.values()):
+        colours: dict[tuple[object, ...], str] = {}
+        assigned: dict[tuple[str, str], str] = {}
+        offsets = {"success": 0, "failure": 0}
+        for key in keys:
+            outcome = semantic_outcomes[key]
+            assert outcome is not None
+            kind, label = outcome
+            identity = (kind, label.casefold())
+            if identity not in assigned:
+                variants = OUTCOME_COLOUR_VARIANTS[kind]
+                assigned[identity] = variants[offsets[kind] % len(variants)]
+                offsets[kind] += 1
+            colours[key] = assigned[identity]
+        return colours
     roles = _dimension_roles(frame, axis_columns)
     operator_levels = [index for index, role in enumerate(roles) if "operator" in role]
     vendor_levels = [index for index, role in enumerate(roles) if "vendor" in role]
@@ -2469,16 +2546,11 @@ def _resolved_legend_items(
         values = frame[resolved_columns].dropna().drop_duplicates()
         legend_keys = [key if isinstance(key, tuple) else (key,) for key in values.itertuples(index=False, name=None)]
         legend_colours = _series_colours(legend_keys, resolved_columns, frame)
-        semantic_colours = {
-            "completed": "#4E79A7",
-            "dropped": "#F28E2B",
-            "failed": "#E15759",
-        }
         for index, values_tuple in enumerate(values.itertuples(index=False, name=None)):
             caption = " · ".join(str(value) for value in values_tuple)
             colour = (
-                semantic_colours.get(caption.casefold())
-                or legend_colours.get(legend_keys[index])
+                legend_colours.get(legend_keys[index])
+                or _outcome_colour(caption)
                 or _operator_colour(caption)
                 or _colour(caption, index)
             )
@@ -2742,6 +2814,31 @@ def _draw_vertical_label(
     image.paste(rotated, (round(centre_x - rotated.width / 2), round(centre_y - rotated.height / 2)), rotated)
 
 
+def _draw_inside_bar_label(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    value: str,
+    *,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    fill: str,
+    font: ImageFont.ImageFont,
+) -> bool:
+    """Draw a bar value horizontally or vertically when the latter fits better."""
+    label_width = _text_width(draw, value, font)
+    label_box = draw.textbbox((0, 0), value, font=font)
+    label_height = label_box[3] - label_box[1]
+    if label_width + 8 <= width and label_height + 8 <= height:
+        draw.text((x + (width - label_width) / 2, y + (height - label_height) / 2 - label_box[1]), value, fill=fill, font=font)
+        return True
+    if label_height + 8 <= width and label_width + 8 <= height:
+        _draw_vertical_label(image, value, centre_x=x + width / 2, centre_y=y + height / 2, fill=fill, font=font)
+        return True
+    return False
+
+
 def _draw_dashed_vertical_line(
     draw: ImageDraw.ImageDraw,
     x: float,
@@ -2897,10 +2994,11 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
             height = value * chart_height
             y = chart_top + chart_height - running - height
             draw.rectangle((x, y, x + bar_width, y + height), fill=colour)
-            if value >= .08:
-                draw.text((x + 2, y + height / 2 - 8), f"{value:.1%}", fill="white", font=_font(16, True))
+            value_label = f"{value:.1%}"
+            if value >= .08 and _draw_inside_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, fill="white", font=_font(16, True)):
+                pass
             elif value >= .005:
-                draw.text((x + bar_width + 3, max(chart_top, y - 7)), f"{value:.1%}", fill=colour, font=_font(12, True))
+                draw.text((x + bar_width + 3, max(chart_top, y - 7)), value_label, fill=colour, font=_font(12, True))
             running += height
         label = _catalogue_display_label(g, p)[:24]
         label_font = _font(18, True)
@@ -3022,12 +3120,13 @@ def _render_status_100_hierarchy(
                 segment_height = ratio * row_height
                 y = pane_bottom - running - segment_height
                 draw.rectangle((x, y, x + bar_width, y + segment_height), fill=colour)
-                if ratio >= 0.08:
-                    draw.text((x + 3, y + segment_height / 2 - 9), f"{ratio:.1%}", fill="white", font=_font(17, True), stroke_width=1, stroke_fill="#42515C")
+                ratio_label = f"{ratio:.1%}"
+                if ratio >= 0.08 and _draw_inside_bar_label(image, draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height, fill="white", font=_font(17, True)):
+                    pass
                 elif ratio >= 0.005:
                     # Small failure rates still matter. Put their label beside
                     # the narrow segment instead of suppressing it entirely.
-                    draw.text((x + bar_width + 3, max(pane_top, y - 7)), f"{ratio:.1%}", fill=colour, font=_font(12, True))
+                    draw.text((x + bar_width + 3, max(pane_top, y - 7)), ratio_label, fill=colour, font=_font(12, True))
                 running += segment_height
 
     if row_hierarchy:
@@ -3098,7 +3197,7 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
     counts = counts.reindex(comparison_index, fill_value=0)
     counts = counts.head(16)
     image, draw = _canvas(title); maximum = max(int(counts.sum(axis=1).max()), 1)
-    colours = {"Failed": "#E15759", "Dropped": "#F28E2B"}
+    colours = {"Failed": "#C83E4D", "Dropped": "#D8555F"}
     for index, (labels, values) in enumerate(counts.iterrows()):
         labels = labels if isinstance(labels, tuple) else (labels,)
         y = 120 + index * 42; x = 390
@@ -3107,7 +3206,7 @@ def _render_failure_count(title: str, frame: pd.DataFrame, group: str | None, pe
             count = int(values.get(state, 0)); width = int(980 * count / maximum)
             if width:
                 draw.rectangle((x, y, x + width, y + 25), fill=colours[state])
-                if width > 26: draw.text((x + 5, y + 3), str(count), fill="white", font=_font(16, True), stroke_width=1, stroke_fill="#42515C")
+                _draw_inside_bar_label(image, draw, str(count), x=x, y=y, width=width, height=25, fill="white", font=_font(16, True))
             x += width
     _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, state), colours[state], 2) for index, state in enumerate(("Failed", "Dropped"))], legend_position, font_size=13)
     draw.text((390, 820), "# of failed / dropped sessions", fill="#4E6271", font=_font(19, True))
@@ -3152,7 +3251,7 @@ def _render_failure_count_hierarchy(
     leaf_label_y = chart_top - 10
     row_height = chart_height / len(row_keys)
     column_width = chart_width / len(column_keys)
-    colours = {"Failed": "#E15759", "Dropped": "#F28E2B"}
+    colours = {"Failed": "#C83E4D", "Dropped": "#D8555F"}
     for level in range(upper_levels):
         y = header_top + level * header_band_height
         for start, end, caption in _hierarchy_caption_spans(column_keys, level):
@@ -3227,14 +3326,7 @@ def _render_failure_count_hierarchy(
                     draw.rectangle((x, y, x + segment_width, y + bar_height), fill=colours[state])
                     label = str(count)
                     label_width = _text_width(draw, label, count_font)
-                    if segment_width >= label_width + 10:
-                        label_box = draw.textbbox((0, 0), label, font=count_font)
-                        label_height = label_box[3] - label_box[1]
-                        draw.text(
-                            (x + (segment_width - label_width) / 2, y + (bar_height - label_height) / 2 - label_box[1]),
-                            label, fill="white", font=count_font, stroke_width=1, stroke_fill="#42515C",
-                        )
-                    else:
+                    if not _draw_inside_bar_label(image, draw, label, x=x, y=y, width=segment_width, height=bar_height, fill="white", font=count_font):
                         outside_counts.append(label)
                 x += segment_width
             if outside_counts:
@@ -3714,12 +3806,12 @@ def _render_mean_column(
         colour = group_colours.get(keys[index], _colour(label, index))
         value_label = f"{float(value):.2f}"
         draw.rectangle((x, y, x + bar_width, baseline), fill=colour)
-        if height >= 42:
-            label_width = _text_width(draw, value_label, _font(20, True))
-            draw.text((x + (bar_width - label_width) / 2, y + height / 2 - 10), value_label, fill="white", font=_font(20, True))
+        label_font = _font(20, True)
+        if height >= 42 and _draw_inside_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, fill="white", font=label_font):
+            pass
         else:
-            label_width = _text_width(draw, value_label, _font(20, True))
-            draw.text((x + (bar_width - label_width) / 2, y - 25), value_label, fill=colour, font=_font(20, True))
+            label_width = _text_width(draw, value_label, label_font)
+            draw.text((x + (bar_width - label_width) / 2, y - 25), value_label, fill=colour, font=label_font)
     _draw_top_column_group_separators(
         draw,
         keys,
@@ -4173,7 +4265,7 @@ def catalog_chart_payload(
         failed["__catalog_failure_state"] = failed[status].astype(str).map(
             lambda value: "Dropped" if "drop" in value.casefold() else "Failed"
         )
-        state_colours = {"Failed": "#E15759", "Dropped": "#F28E2B"}
+        state_colours = {"Failed": "#C83E4D", "Dropped": "#D8555F"}
         fallback = [
             (_legend_caption(_legend_labels(render_entry.legend), index, state), state_colours[state], 2)
             for index, state in enumerate(("Failed", "Dropped"))

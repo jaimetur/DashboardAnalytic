@@ -180,6 +180,17 @@
     context.fillText(String(value), 0, 0); context.restore();
   }
 
+  function drawInsideBarLabel(context, value, x, y, width, height, colour, size) {
+    const label = String(value); font(context, size, true); const labelWidth = textWidth(context, label);
+    if (labelWidth + 8 <= width && size + 8 <= height) {
+      context.fillStyle = colour; context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText(label, x + width / 2, y + height / 2); context.textBaseline = 'top'; return true;
+    }
+    if (size + 8 <= width && labelWidth + 8 <= height) {
+      verticalLabel(context, label, x + width / 2, y + height / 2, colour, size); return true;
+    }
+    return false;
+  }
+
   function dashedVertical(context, x, top, bottom) {
     context.save(); context.setLineDash([8, 6]); line(context, x, top, x, bottom, '#AEBBC4', 1); context.restore();
   }
@@ -278,8 +289,9 @@
         states.forEach((series, seriesIndex) => {
           const ratio = Number(ratios[seriesIndex] || 0), segmentHeight = ratio * height, y = top + height - running - segmentHeight;
           context.fillStyle = series.colour; context.fillRect(x, y, barWidth, segmentHeight);
-          if (ratio >= .08) { context.fillStyle = '#FFFFFF'; context.textAlign = 'left'; font(context, 16, true); context.fillText(percent(ratio), x + 2, y + segmentHeight / 2 - 8); }
-          else if (ratio >= .005) { context.fillStyle = series.colour; font(context, 12, true); context.fillText(percent(ratio), x + barWidth + 3, Math.max(top, y - 7)); }
+          const label = percent(ratio);
+          if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 16)) {}
+          else if (ratio >= .005) { context.fillStyle = series.colour; font(context, 12, true); context.fillText(label, x + barWidth + 3, Math.max(top, y - 7)); }
           if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: category, series: series.name, value: percent(ratio)});
           running += segmentHeight;
         });
@@ -336,8 +348,9 @@
         states.forEach((series, seriesIndex) => {
           const ratio = Number(ratios[seriesIndex] || 0), segmentHeight = ratio * rowHeight, y = paneBottom - running - segmentHeight;
           context.fillStyle = series.colour; context.fillRect(x, y, barWidth, segmentHeight);
-          if (ratio >= .08) { context.fillStyle = '#FFFFFF'; context.textAlign = 'left'; font(context, 17, true); context.fillText(percent(ratio), x + 3, y + segmentHeight / 2 - 9); }
-          else if (ratio >= .005) { context.fillStyle = series.colour; font(context, 12, true); context.fillText(percent(ratio), x + barWidth + 3, Math.max(paneTop, y - 7)); }
+          const label = percent(ratio);
+          if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 17)) {}
+          else if (ratio >= .005) { context.fillStyle = series.colour; font(context, 12, true); context.fillText(label, x + barWidth + 3, Math.max(paneTop, y - 7)); }
           if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: percent(ratio)});
           running += segmentHeight;
         });
@@ -374,7 +387,7 @@
         context.fillStyle = '#263B4A'; context.textAlign = 'left'; font(context, 17, true); context.fillText(displayKey(row.key).slice(0, 42), 28, y + 4);
         states.forEach((series, seriesIndex) => {
           const value = Number(row.values?.[seriesIndex] || 0), width = 980 * value / Math.max(payload.maximum, 1);
-          if (width) { context.fillStyle = series.colour; context.fillRect(x, y, width, 25); if (width > 26) { context.fillStyle = '#FFFFFF'; font(context, 16, true); context.fillText(String(value), x + 5, y + 3); } pushRectangleHit(state, transform, {x, y, width, height: 25}, {label: displayKey(row.key), series: series.name, value: String(value)}); }
+          if (width) { context.fillStyle = series.colour; context.fillRect(x, y, width, 25); drawInsideBarLabel(context, String(value), x, y, width, 25, '#FFFFFF', 16); pushRectangleHit(state, transform, {x, y, width, height: 25}, {label: displayKey(row.key), series: series.name, value: String(value)}); }
           x += width;
         });
       });
@@ -409,7 +422,7 @@
       columnKeys.forEach((columnKey, columnIndex) => {
         const values = payload.cells[rowIndex]?.[columnIndex] || [], cellLeft = chartLeft + columnIndex * columnWidth, available = Math.max(columnWidth - 10, 1); let x = cellLeft + 4;
         const barHeight = Math.max(12, Math.min(22, rowHeight * .84)), y = rowTop + (rowHeight - barHeight) / 2, outside = [];
-        states.forEach((series, seriesIndex) => { const value = Number(values[seriesIndex] || 0), segmentWidth = available * value / Math.max(payload.maximum, 1); if (segmentWidth) { context.fillStyle = series.colour; context.fillRect(x, y, segmentWidth, barHeight); font(context, 12, true); if (segmentWidth >= textWidth(context, String(value)) + 10) { context.fillStyle = '#FFFFFF'; context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText(String(value), x + segmentWidth / 2, y + barHeight / 2); context.textBaseline = 'top'; } else outside.push(String(value)); pushRectangleHit(state, transform, {x, y, width: segmentWidth, height: barHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: String(value)}); } x += segmentWidth; });
+        states.forEach((series, seriesIndex) => { const value = Number(values[seriesIndex] || 0), segmentWidth = available * value / Math.max(payload.maximum, 1); if (segmentWidth) { context.fillStyle = series.colour; context.fillRect(x, y, segmentWidth, barHeight); if (!drawInsideBarLabel(context, String(value), x, y, segmentWidth, barHeight, '#FFFFFF', 12)) outside.push(String(value)); pushRectangleHit(state, transform, {x, y, width: segmentWidth, height: barHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: String(value)}); } x += segmentWidth; });
         if (outside.length) { context.fillStyle = '#34495A'; context.textAlign = 'left'; context.textBaseline = 'top'; font(context, 12, true); context.fillText(outside.join(' / '), x + 3, y + 1); }
       });
     });
@@ -484,9 +497,7 @@
       const height = (baseline - top) * Number(bar.value) / Math.max(Number(payload.maximum), 1), x = left + (index + .5) * width / bars.length - barWidth / 2, y = baseline - height;
       context.fillStyle = bar.colour; context.fillRect(x, y, barWidth, height);
       const label = Number(bar.value).toFixed(2); font(context, 20, true);
-      if (height >= 42) {
-        context.fillStyle = '#FFFFFF'; context.textAlign = 'center'; context.fillText(label, x + barWidth / 2, y + height / 2 - 10);
-      } else {
+      if (height >= 42 && drawInsideBarLabel(context, label, x, y, barWidth, height, '#FFFFFF', 20)) {} else {
         context.fillStyle = bar.colour; context.textAlign = 'center'; context.fillText(label, x + barWidth / 2, y - 25);
       }
       pushRectangleHit(state, transform, {x, y, width: barWidth, height}, {label: displayKey(bar.key), series: bar.legend, value: Number(bar.value).toFixed(2)});
