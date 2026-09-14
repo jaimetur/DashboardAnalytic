@@ -293,7 +293,8 @@
           {% endif %}
           {% endfor %}
           {% for combined in combined_tables %}
-          <tr class="combined-dataset-row" data-combined-dataset-row data-dataset-row data-dataset-kind="{{ combined.kind }}">
+          {% set combined_warning = combined.has_missing_rows or combined.is_recalculating or combined.needs_recalculation %}
+          <tr class="combined-dataset-row {{ 'combined-dataset-warning' if combined_warning else 'combined-dataset-ready' }}" data-combined-dataset-row data-dataset-row data-dataset-kind="{{ combined.kind }}">
             <td data-label="ID">—</td>
             <td data-label="Dataset">
               <div class="queue-dataset-name">{{ combined.name }}</div>
@@ -302,11 +303,11 @@
             <td data-label="Input Type">CDR-{{ combined.kind|title }} (combined)</td>
             <td data-label="Rows">{{ combined.row_count }}</td>
             <td data-label="Size">—</td>
-            <td data-label="Status"><span class="queue-status-pill queue-status-{{ 'warning' if combined.has_missing_rows else 'ready' }}" data-combined-dataset-status>{% if combined.has_missing_rows %}Missing Rows{% else %}Ready{% endif %}</span></td>
+            <td data-label="Status"><span class="queue-status-pill queue-status-{{ 'warning' if combined_warning else 'ready' }}" data-combined-dataset-status>{% if combined.is_recalculating %}Recalculating{% elif combined.has_missing_rows %}Missing Rows{% elif combined.needs_recalculation %}Recalc Needed{% else %}Ready{% endif %}</span></td>
             <td data-label="Progress">
               <div class="queue-progress-cell">
-                <div class="progress-shell visual-progress-shell"><div class="progress-bar status-ready" data-combined-dataset-progress-bar style="width: 100%"></div></div>
-                <span data-combined-dataset-progress-percent>100%</span>
+                <div class="progress-shell visual-progress-shell"><div class="progress-bar status-{{ 'processing' if combined.is_recalculating else 'ready' }}" data-combined-dataset-progress-bar style="width: {{ '5%' if combined.is_recalculating else '100%' }}"></div></div>
+                <span data-combined-dataset-progress-percent>{{ '5%' if combined.is_recalculating else '100%' }}</span>
               </div>
             </td>
             <td data-label="Uploaded">—</td>

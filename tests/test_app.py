@@ -2520,6 +2520,8 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     assert 'data-dataset-row data-dataset-kind="data"' in workspace_response.text
     assert 'href="/workspace/combined/data/preview"' in workspace_response.text
     assert 'aria-label="Recreate combined table">↻</button>' in workspace_response.text
+    combined_row = workspace_response.text.split('data-combined-dataset-row', 1)[0].rsplit('<tr', 1)[1]
+    assert 'combined-dataset-ready' in combined_row
 
     preview_response = client.get('/workspace/combined/data/preview')
     assert preview_response.status_code == 200
@@ -2562,6 +2564,8 @@ def test_combined_dataset_missing_rows_are_flagged_and_require_confirmation(clie
     assert workspace_response.status_code == 200
     assert 'Missing Rows' in workspace_response.text
     assert 'queue-status-warning' in workspace_response.text
+    combined_row = workspace_response.text.split('data-combined-dataset-row', 1)[0].rsplit('<tr', 1)[1]
+    assert 'combined-dataset-warning' in combined_row
 
 
 def test_combined_recreation_returns_materialization_job_for_progress(client, monkeypatch) -> None:

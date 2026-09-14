@@ -80,6 +80,9 @@ DASHBOARD_SELECTION_ROW_LIMIT = 25_000
 DASHBOARD_PROFILE_SELECTION_THRESHOLD = 100_000
 DASHBOARD_PROJECTION_CACHE_VERSION = 1
 DASHBOARD_PROJECTION_DISK_LIMIT = 6
+DASHBOARD_PROJECTION_PAGE_SIZE = 32_768
+DASHBOARD_PROJECTION_CACHE_KIB = 256 * 1024
+DASHBOARD_PROJECTION_MMAP_SIZE = 4 * 1024 ** 3
 DASHBOARD_CHART_MODEL_CACHE_VERSION = 9
 DASHBOARD_CHART_MODEL_DISK_LIMIT = 500
 DASHBOARD_CHART_RENDER_WORKERS = 3
@@ -96,6 +99,15 @@ def canvas_model_cache_dir(workspace: str | Path) -> Path:
 
 def pil_chart_cache_dir(workspace: str | Path) -> Path:
     return dashboard_cache_dir(workspace) / 'charts-pil'
+
+
+def dashboard_projection_scan_hint(
+    selected_dataset_ids: list[int], available_dataset_ids: list[int],
+) -> str:
+    """Prefer a sequential source scan only when every materialized row is selected."""
+    selected = {int(dataset_id) for dataset_id in selected_dataset_ids}
+    available = {int(dataset_id) for dataset_id in available_dataset_ids}
+    return ' NOT INDEXED' if selected and selected == available else ''
 
 
 def preview_manifest_cache_dir(workspace: str | Path) -> Path:
@@ -625,7 +637,11 @@ def install_dashboard_routes(core):
                 connection.execute('DELETE FROM dashboard_filter_selections WHERE id = ?', (row['id'],))
             return selection_id, cache_key, materialized, options, row_counts, True
 
-    def build_preview(definition, user, *, workspace: str | None = None):
+    def build_preview(definition, user, *, workspace: str | None = None, cancelled=None):
+        def ensure_not_cancelled():
+            if callable(cancelled) and cancelled():
+                raise RuntimeError('Dashboard preparation cancelled.')
+
         workspace = workspace or workspace_key()
         task_repository = Repository(Path(workspace), core.repository.global_db_path)
         entries = validate(definition, task_repository)
@@ -698,7 +714,9 @@ def install_dashboard_routes(core):
         # still in its data-preparation phase. Chart rendering then reads a
         # small indexed table instead of paying this one-time cost per chart.
         for kind in selected_by_kind:
+            ensure_not_cancelled()
             ensure_projection(snapshot, kind, task_repository)
+        ensure_not_cancelled()
         # Load and filter the inputs for uncached Canvas models while the job
         # is still preparing Dashboard data. The rendering phase then only
         # performs the chart aggregation/serialisation work measured by its
@@ -712,14 +730,19 @@ def install_dashboard_routes(core):
             max_workers=DASHBOARD_CHART_RENDER_WORKERS,
             thread_name_prefix='e2e-dashboard-data',
         ) as data_executor:
-            futures = [
-                data_executor.submit(
-                    snapshot_chart, token, index, user, expected_workspace=workspace,
-                )
-                for index in pending_frames
-            ]
-            for future in as_completed(futures):
-                future.result()
+            while pending_frames:
+                ensure_not_cancelled()
+                batch = pending_frames[:DASHBOARD_CHART_RENDER_WORKERS]
+                pending_frames = pending_frames[DASHBOARD_CHART_RENDER_WORKERS:]
+                futures = [
+                    data_executor.submit(
+                        snapshot_chart, token, index, user, expected_workspace=workspace,
+                    )
+                    for index in batch
+                ]
+                for future in as_completed(futures):
+                    future.result()
+                ensure_not_cancelled()
         return {**payload, 'token': token}
 
     def preview_manifest_path(workspace: str, dashboard_id: str, fingerprint: str) -> Path:
@@ -909,9 +932,12 @@ def install_dashboard_routes(core):
     def projection_connection(cache_path):
         connection = sqlite3.connect(cache_path, timeout=120.0)
         connection.row_factory = sqlite3.Row
+        connection.execute(f'PRAGMA page_size={DASHBOARD_PROJECTION_PAGE_SIZE}')
         connection.execute('PRAGMA journal_mode=WAL')
         connection.execute('PRAGMA synchronous=NORMAL')
-        connection.execute('PRAGMA temp_store=FILE')
+        connection.execute('PRAGMA temp_store=MEMORY')
+        connection.execute(f'PRAGMA cache_size=-{DASHBOARD_PROJECTION_CACHE_KIB}')
+        connection.execute(f'PRAGMA mmap_size={DASHBOARD_PROJECTION_MMAP_SIZE}')
         connection.execute(
             'CREATE TABLE IF NOT EXISTS projection_cache ('
             'cache_key TEXT PRIMARY KEY, dataset_kind TEXT NOT NULL, table_name TEXT NOT NULL UNIQUE, '
@@ -953,12 +979,21 @@ def install_dashboard_routes(core):
             temporary = f'building_{kind}_{uuid4().hex}'
             try:
                 connection.execute('ATTACH DATABASE ? AS workspace_source', (snapshot.workspace,))
+                connection.execute(f'PRAGMA workspace_source.cache_size=-{DASHBOARD_PROJECTION_CACHE_KIB}')
+                connection.execute(f'PRAGMA workspace_source.mmap_size={DASHBOARD_PROJECTION_MMAP_SIZE}')
                 connection.execute('BEGIN IMMEDIATE')
                 found = connection.execute(
                     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,),
                 ).fetchone()
                 if not found:
                     dataset_ids = [int(row['id']) for row in selected]
+                    available_dataset_ids = [
+                        int(row['dataset_id']) for row in connection.execute(
+                            f'SELECT DISTINCT dataset_id FROM workspace_source.'
+                            f'{task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))}'
+                        ).fetchall()
+                    ]
+                    scan_hint = dashboard_projection_scan_hint(dataset_ids, available_dataset_ids)
                     placeholders = ', '.join('?' for _ in dataset_ids)
                     select_clause = ', '.join(
                         task_repository._quote_identifier(column) for column in projected_columns
@@ -966,7 +1001,8 @@ def install_dashboard_routes(core):
                     connection.execute(
                         f'CREATE TABLE {task_repository._quote_identifier(temporary)} AS '
                         f'SELECT {select_clause} FROM workspace_source.'
-                        f'{task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))} '
+                        f'{task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))}'
+                        f'{scan_hint} '
                         f'WHERE dataset_id IN ({placeholders})',
                         dataset_ids,
                     )
@@ -1477,7 +1513,16 @@ def install_dashboard_routes(core):
                         return
                     job['status'] = 'processing'
                 if preview is None:
-                    preview = build_preview(definition, user, workspace=workspace)
+                    def preparation_cancelled():
+                        with lock:
+                            return (
+                                bool(job.get('cancel_requested'))
+                                or job.get('generation') != prefetch_generation.get(workspace, 0)
+                            )
+
+                    preview = build_preview(
+                        definition, user, workspace=workspace, cancelled=preparation_cancelled,
+                    )
                 persist_preview_manifest(workspace, dashboard_id, fingerprint, preview['token'])
                 charts = [chart['index'] for slide in preview['slides'] for chart in slide['charts'] if chart['available']]
                 with lock:

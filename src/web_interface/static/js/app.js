@@ -47,6 +47,8 @@ function updateCombinedDatasetRecreationRow(job) {
   const status = row.querySelector('[data-combined-dataset-status]');
   const bar = row.querySelector('[data-combined-dataset-progress-bar]');
   const label = row.querySelector('[data-combined-dataset-progress-percent]');
+  row.classList.toggle('combined-dataset-ready', !processing && !failed);
+  row.classList.toggle('combined-dataset-warning', processing || failed);
   if (status instanceof HTMLElement) {
     status.className = `queue-status-pill queue-status-${failed ? 'failed' : processing ? 'processing' : 'ready'}`;
     status.textContent = job.status === 'stopped' ? 'Stopped' : failed ? 'Failed' : processing ? (job.status === 'queued' ? 'Queued' : 'Recreating') : 'Ready';

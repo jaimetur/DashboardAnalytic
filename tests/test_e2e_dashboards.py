@@ -7,11 +7,17 @@ from threading import Event
 import pandas as pd
 
 import src.DashboardAnalytic as core
-from src.modules.e2e_dashboards import DashboardDefinition, filter_frame
+from src.modules.e2e_dashboards import DashboardDefinition, dashboard_projection_scan_hint, filter_frame
 
 
 def definition(**changes):
     return DashboardDefinition(name='Comparison', template='Dashboard test', datasets={'data': [1]}, **changes)
+
+
+def test_projection_scan_hint_only_bypasses_index_for_complete_selection():
+    assert dashboard_projection_scan_hint([2, 1], [1, 2]) == ' NOT INDEXED'
+    assert dashboard_projection_scan_hint([1], [1, 2]) == ''
+    assert dashboard_projection_scan_hint([], []) == ''
 
 
 def setup_dashboard(client):

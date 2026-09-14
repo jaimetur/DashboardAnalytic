@@ -19,7 +19,7 @@ import sqlite3
 import warnings
 import tempfile
 import zipfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
@@ -91,6 +91,7 @@ TRANSFER_OFFERS: dict[str, dict[str, Any]] = {}
 TRANSFER_LOCK = Lock()
 WORKSPACE_LIFECYCLE_JOBS: dict[str, dict[str, Any]] = {}
 WORKSPACE_LIFECYCLE_JOBS_LOCK = Lock()
+WORKSPACE_CACHE_WRITER_STOP_TIMEOUT_SECONDS = 120
 WORKSPACE_DUPLICATION_STOP_REQUESTS: set[str] = set()
 WORKSPACE_DUPLICATION_STOP_REQUESTS_LOCK = Lock()
 BULK_REPORT_DELETION_JOBS: dict[str, dict[str, Any]] = {}
@@ -2648,9 +2649,24 @@ def build_dataset_view_state(
     return datasets, ready_datasets, input_kind_options, selected_dataset
 
 
-def workspace_combined_tables(task_repository: Repository | None = None) -> list[dict[str, Any]]:
+def workspace_combined_tables(
+    task_repository: Repository | None = None, *, workspace_id: str | None = None,
+) -> list[dict[str, Any]]:
     """Return existing combined CDR tables for the Workspace dataset panel."""
     task_repository = task_repository or repository
+    materialization_state = str(
+        task_repository.get_workspace_state('calculated_dimensions_need_materialization') or '0'
+    )
+    with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        active_recreations = {
+            str(job.get('combined_kind') or '').casefold()
+            for job in AUTO_CALCULATED_FIELD_JOBS.values()
+            if (
+                job.get('operation') == 'combined_recreation'
+                and job.get('status') in {'queued', 'processing'}
+                and (workspace_id is None or str(job.get('workspace_id') or '') == workspace_id)
+            )
+        }
     combined: list[dict[str, Any]] = []
     with task_repository.connection() as connection:
         for kind in ('data', 'voice', 'speech'):
@@ -2676,6 +2692,8 @@ def workspace_combined_tables(task_repository: Repository | None = None) -> list
                 if dataset['status'] == 'ready' and str(dataset['dataset_kind'] or '').casefold() == kind
             ]
             expected_row_count = sum(int(dataset['row_count'] or 0) for dataset in source_datasets)
+            is_recalculating = kind in active_recreations or materialization_state == 'processing'
+            needs_recalculation = materialization_state in {'1', 'stopped'}
             combined.append({
                 'name': f'CDR-{kind.title()} (combined)',
                 'kind': kind,
@@ -2683,6 +2701,8 @@ def workspace_combined_tables(task_repository: Repository | None = None) -> list
                 'row_count': int(row_count or 0),
                 'expected_row_count': expected_row_count,
                 'has_missing_rows': int(row_count or 0) != expected_row_count,
+                'is_recalculating': is_recalculating,
+                'needs_recalculation': needs_recalculation,
                 'updated_at_label': format_local_timestamp(updated_at) if updated_at else '—',
             })
     return combined
@@ -5805,7 +5825,7 @@ def workspace(
     mappable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_map_vendors')]
     clearable_cdr_datasets = [dataset for dataset in datasets if dataset.get('can_clear_vendors')]
     calculated_dimensions = calculated_dimensions_json(load_workspace_calculated_dimensions())
-    combined_tables = workspace_combined_tables()
+    combined_tables = workspace_combined_tables(workspace_id=active_workspace.id)
     queue_workspace_dimension_materialization(active_workspace)
 
     return render_template(
@@ -6170,7 +6190,9 @@ def background_tasks_status(user: SessionUser = Depends(current_user)) -> JSONRe
                 'id': f'workspace-{job.get("operation")}:{job.get("id")}',
                 'label': 'Clearing workspace cache' if clearing_cache else 'Deleting workspace',
                 'detail': (
-                    'Cache cleared' if job.get('status') == 'ready' else 'Removing generated Dashboard artifacts'
+                    'Cache cleared' if job.get('status') == 'ready' else str(
+                        job.get('message') or 'Preparing to clear Dashboard cache'
+                    )
                 ) if clearing_cache else (
                     'Removing workspace database and files' if job.get('delete_files') else 'Removing workspace database'
                 ),
@@ -6658,6 +6680,7 @@ def delete_workspace_cache(
         WORKSPACE_LIFECYCLE_JOBS[job_id] = {
             'id': job_id, 'operation': 'cache-clear', 'workspace_id': workspace_id,
             'workspace_name': workspace.name, 'owner': user.username, 'status': 'queued', 'progress': 0,
+            'message': 'Waiting to clear Dashboard cache',
             'created_at': datetime.now(timezone.utc).timestamp(),
         }
 
@@ -6665,16 +6688,27 @@ def delete_workspace_cache(
         with WORKSPACE_LIFECYCLE_JOBS_LOCK:
             job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
             if job:
-                job.update(status='processing', progress=15)
+                job.update(
+                    status='processing', progress=15,
+                    message='Stopping Dashboard cache writers',
+                )
         try:
             # A running warm-up can be inside a projection write when it sees
             # the cooperative cancellation flag.  Wait for it to leave that
             # section before deleting the cache, so it cannot recreate files.
             for worker in cancelled_prefetch_workers:
                 try:
-                    worker.result()
+                    worker.result(timeout=WORKSPACE_CACHE_WRITER_STOP_TIMEOUT_SECONDS)
+                except FutureTimeoutError as exc:
+                    raise RuntimeError(
+                        'Timed out while stopping Dashboard cache writers. Cache files were not removed.'
+                    ) from exc
                 except Exception:
                     pass
+            with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+                job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
+                if job:
+                    job.update(progress=35, message='Removing generated Dashboard artifacts')
             workspace_root = workspace.database_path.parent
             cache_directories = (
                 workspace_root / '.dashboard-data-cache',
@@ -6685,12 +6719,18 @@ def delete_workspace_cache(
                 with WORKSPACE_LIFECYCLE_JOBS_LOCK:
                     job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
                     if job:
-                        job['progress'] = 15 + round(index * 75 / len(cache_directories))
+                        job.update(
+                            progress=35 + round(index * 55 / len(cache_directories)),
+                            message=f'Removed cache directory {index} of {len(cache_directories)}',
+                        )
             invalidate_workspace_size_cache(workspace_root)
             with WORKSPACE_LIFECYCLE_JOBS_LOCK:
                 job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
                 if job:
-                    job.update(status='ready', progress=100, finished_at=datetime.now(timezone.utc).timestamp())
+                    job.update(
+                        status='ready', progress=100, message='Cache cleared',
+                        finished_at=datetime.now(timezone.utc).timestamp(),
+                    )
             # Queue a new generation only after every cancelled worker has
             # stopped and the derived files have been removed.  This keeps
             # clearing observable as its own task and prevents cache writers
@@ -6702,7 +6742,10 @@ def delete_workspace_cache(
             with WORKSPACE_LIFECYCLE_JOBS_LOCK:
                 job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
                 if job:
-                    job.update(status='failed', error=str(exc), finished_at=datetime.now(timezone.utc).timestamp())
+                    job.update(
+                        status='failed', error=str(exc), message=str(exc),
+                        finished_at=datetime.now(timezone.utc).timestamp(),
+                    )
 
     Thread(target=run_cache_clear, name=f'workspace-cache-clear-{workspace_id}', daemon=True).start()
     notice = 'Workspace cache clearing started. Dashboard data and chart models will be rebuilt when needed.'
