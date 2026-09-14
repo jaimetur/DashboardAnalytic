@@ -1099,12 +1099,8 @@ def install_dashboard_routes(core):
         snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False, expected_workspace=expected_workspace)
         with lock:
             payload = snapshot.chart_payloads.get(index)
-        model_dir = canvas_model_cache_dir(snapshot.workspace)
-        entry_key = sha256(repr(entry).encode()).hexdigest()
-        model_path = model_dir / sha256(
-            f'{DASHBOARD_CHART_MODEL_CACHE_VERSION}:{snapshot.selection_key}:{entry_key}'.encode()
-        ).hexdigest()
-        model_path = model_path.with_suffix('.json')
+        model_path = canvas_model_path(snapshot, entry)
+        model_dir = model_path.parent
         if payload is None and model_path.is_file():
             try:
                 payload = json.loads(model_path.read_text(encoding='utf-8'))
@@ -1132,6 +1128,32 @@ def install_dashboard_routes(core):
         with lock:
             snapshot.chart_payloads.setdefault(index, payload)
         return payload
+
+    def canvas_model_path(snapshot, entry) -> Path:
+        """Return the persistent Canvas-model location for one chart entry."""
+        entry_key = sha256(repr(entry).encode()).hexdigest()
+        filename = sha256(
+            f'{DASHBOARD_CHART_MODEL_CACHE_VERSION}:{snapshot.selection_key}:{entry_key}'.encode()
+        ).hexdigest()
+        return canvas_model_cache_dir(snapshot.workspace) / f'{filename}.json'
+
+    def cached_canvas_model_indexes(token: str) -> set[int]:
+        """Return Canvas models already available for a restored snapshot."""
+        with lock:
+            snapshot = snapshots.get(token)
+            if snapshot is None:
+                return set()
+            indexes = {
+                int(chart['index'])
+                for slide in snapshot.payload.get('slides', [])
+                for chart in slide.get('charts', [])
+                if chart.get('available')
+            }
+            return {
+                index for index in indexes
+                if 0 <= index < len(snapshot.entries)
+                and canvas_model_path(snapshot, snapshot.entries[index]).is_file()
+            }
 
     def cached_models_complete(definition, workspace: str) -> bool:
         """Check the persistent Canvas cache without materialising chart frames."""
@@ -1172,14 +1194,11 @@ def install_dashboard_routes(core):
         fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
         key = f'{workspace}:{dashboard_id}:{fingerprint}'
         definition = DashboardDefinition.model_validate(raw_definition)
-        try:
-            restoring_cached_models = cached_models_complete(definition, workspace)
-        except (HTTPException, OSError, sqlite3.Error, ValueError):
-            restoring_cached_models = False
-        restored_preview = (
-            restore_preview_manifest(workspace, dashboard_id, fingerprint)
-            if restoring_cached_models else None
-        )
+        # The manifest is itself enough to restore the filtered selection and
+        # slide metadata. Do not gate it on a separate all-models check: an
+        # interrupted warm-up can have a valid partial cache, which should be
+        # served immediately while this worker fills its remaining models.
+        restored_preview = restore_preview_manifest(workspace, dashboard_id, fingerprint)
         with lock:
             generation = prefetch_generation.get(workspace, 0)
             if expected_generation is not None and generation != expected_generation:
@@ -1189,34 +1208,40 @@ def install_dashboard_routes(core):
                 return
             job = prefetch_jobs[key] = {'id': key, 'workspace': workspace, 'dashboard_id': dashboard_id,
                 'name': str(raw_definition.get('name') or dashboard_id), 'status': 'queued', 'completed': 0, 'total': 0,
-                'restoring_cached_models': restoring_cached_models, 'generation': generation, 'cancel_requested': False}
+                'restoring_cached_models': False, 'generation': generation, 'cancel_requested': False}
             if restored_preview is not None:
                 total = sum(
                     1 for slide in restored_preview['slides'] for chart in slide['charts'] if chart['available']
                 )
+                completed = len(cached_canvas_model_indexes(restored_preview['token']))
                 job.update(
-                    status='ready', completed=total, total=total,
+                    status='ready' if completed >= total else 'queued', completed=completed, total=total,
                     token=restored_preview['token'], restored_from_manifest=True,
                 )
-                return
+                if completed >= total:
+                    return
         def run():
-            preview = None
+            preview = restored_preview
             try:
                 with lock:
                     if job.get('cancel_requested') or job.get('generation') != prefetch_generation.get(workspace, 0):
                         job['status'] = 'cancelled'
                         return
                     job['status'] = 'processing'
-                preview = build_preview(definition, user, workspace=workspace)
-                persist_preview_manifest(workspace, dashboard_id, fingerprint, preview['token'])
+                if preview is None:
+                    preview = build_preview(definition, user, workspace=workspace)
+                    persist_preview_manifest(workspace, dashboard_id, fingerprint, preview['token'])
                 charts = [chart['index'] for slide in preview['slides'] for chart in slide['charts'] if chart['available']]
                 with lock:
                     job.update(token=preview['token'], total=len(charts))
+                cached_indexes = cached_canvas_model_indexes(preview['token'])
                 for index in charts:
                     with lock:
                         if job.get('cancel_requested') or job.get('generation') != prefetch_generation.get(workspace, 0):
                             job['status'] = 'cancelled'
                             return
+                    if index in cached_indexes:
+                        continue
                     chart_model(preview['token'], index, user, expected_workspace=workspace)
                     with lock: job['completed'] += 1
                 with lock:

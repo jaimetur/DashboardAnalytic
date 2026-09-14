@@ -73,6 +73,8 @@ DATASET_PROCESSING_LOCKS_LOCK = Lock()
 REPORT_CHART_JOB_LOCKS: dict[str, Lock] = {}
 REPORT_CHART_JOB_LOCKS_LOCK = Lock()
 TEMPLATE_SAVE_LOCK = Lock()
+CATALOGUE_LAYOUT_NAMES_CACHE: dict[str, tuple[int, int, list[str]]] = {}
+CATALOGUE_LAYOUT_NAMES_CACHE_LOCK = Lock()
 EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 EXPORT_JOBS_LOCK = Lock()
 IMPORT_UPLOADS: dict[str, dict[str, Any]] = {}
@@ -1230,8 +1232,18 @@ def catalogue_layout_names(technology: str) -> list[str]:
     if not template.exists():
         return []
     try:
+        stat = template.stat()
+        cache_key = str(template.resolve())
+        signature = (stat.st_mtime_ns, stat.st_size)
+        with CATALOGUE_LAYOUT_NAMES_CACHE_LOCK:
+            cached = CATALOGUE_LAYOUT_NAMES_CACHE.get(cache_key)
+            if cached and cached[:2] == signature:
+                return list(cached[2])
         from pptx import Presentation
-        return sorted({layout.name for layout in Presentation(template).slide_layouts if layout.name.strip()}, key=str.casefold)
+        layouts = sorted({layout.name for layout in Presentation(template).slide_layouts if layout.name.strip()}, key=str.casefold)
+        with CATALOGUE_LAYOUT_NAMES_CACHE_LOCK:
+            CATALOGUE_LAYOUT_NAMES_CACHE[cache_key] = (*signature, layouts)
+        return list(layouts)
     except Exception:
         return []
 

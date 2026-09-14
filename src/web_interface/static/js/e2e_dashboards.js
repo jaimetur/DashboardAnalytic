@@ -15,7 +15,7 @@
   const preparedPayloads = new Map();
   let expandedChartRequest = 0;
   let backgroundPreparationToken = '';
-  let dateBounds = null, templateEditorSaved = false;
+  let dateBounds = null, templateEditorSaved = false, templateEditorPreloadTimer = 0;
   const openStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:open`;
   const libraryStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:library`;
   const preparedStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:prepared`;
@@ -140,6 +140,7 @@
     if (show) { focusReturn.set(id, document.activeElement); el.hidden = false; el.querySelector('[role=dialog]').focus(); }
     else { el.hidden = true; focusReturn.get(id)?.focus(); }
     if (id === 'ds-viewer') $('ds-viewer-preparing').hidden = !show || $('ds-preparing').dataset.state !== 'preparing';
+    if (id === 'ds-viewer' && show) scheduleTemplateEditorPreload();
     document.body.style.overflow = [...document.querySelectorAll('.ds-overlay')].some(el => !el.hidden) ? 'hidden' : '';
   }
   function library() {
@@ -637,6 +638,33 @@
       return false;
     }
   };
+  const templateEditorBaseUrl = () => definition
+    ? `/admin/report-templates/${encodeURIComponent(definition.template_technology)}/${encodeURIComponent(definition.template)}/editor`
+    : '';
+  const focusTemplateEditorRow = row => {
+    const frame = $('ds-editor-frame');
+    frame.dataset.editorFocusRow = String(row);
+    if (frame.contentDocument?.readyState === 'complete') {
+      frame.contentWindow?.postMessage({type: 'dashboard-analytic:focus-template-row', row}, window.location.origin);
+    }
+  };
+  function scheduleTemplateEditorPreload() {
+    clearTimeout(templateEditorPreloadTimer);
+    templateEditorPreloadTimer = window.setTimeout(() => {
+      if ($('ds-viewer').hidden || !definition) return;
+      const frame = $('ds-editor-frame');
+      const url = templateEditorBaseUrl();
+      if (url && frame.dataset.editorUrl !== url) {
+        frame.dataset.editorUrl = url;
+        frame.removeAttribute('data-editor-focus-row');
+        frame.src = url;
+      }
+    }, 250);
+  }
+  $('ds-editor-frame').addEventListener('load', () => {
+    const row = Number($('ds-editor-frame').dataset.editorFocusRow);
+    if (Number.isInteger(row) && row >= 0) focusTemplateEditorRow(row);
+  });
   const closeTemplateEditor = async () => {
     const hasUnsavedChanges = templateEditorHasUnsavedChanges();
     if (hasUnsavedChanges && !await window.showConfirmDialog(
@@ -644,14 +672,24 @@
       {title: 'Unsaved Report Template changes', confirmLabel: 'Close editor', cancelLabel: 'Keep editing', tone: 'warning'},
     )) return false;
     const templateChanged = templateEditorSaved;
-    overlay('ds-editor-overlay', false); $('ds-editor-frame').removeAttribute('src'); templateEditorSaved = false;
+    // Keep the already initialized editor alive. Recreating its iframe makes
+    // every reopening parse the template and rebuild the complete table.
+    overlay('ds-editor-overlay', false); templateEditorSaved = false;
     if (templateChanged) await prepare();
     return true;
   };
   const openTemplateEditor = focusRow => {
     if (!definition || !Number.isInteger(focusRow)) return;
     templateEditorSaved = false;
-    $('ds-editor-frame').src = `/admin/report-templates/${encodeURIComponent(definition.template_technology)}/${encodeURIComponent(definition.template)}/editor?focus_row=${focusRow}`;
+    const frame = $('ds-editor-frame');
+    const url = templateEditorBaseUrl();
+    if (frame.dataset.editorUrl === url) {
+      focusTemplateEditorRow(focusRow);
+    } else {
+      frame.dataset.editorUrl = url;
+      frame.dataset.editorFocusRow = String(focusRow);
+      frame.src = `${url}?focus_row=${focusRow}`;
+    }
     overlay('ds-editor-overlay', true);
   };
   $('ds-chart-expanded-refresh').onclick = safe(prepare);

@@ -2160,9 +2160,10 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     renderCatalogueRows(renumberBlocks(blocks));
   });
   normaliseCatalogueRows();
-  if (Number.isInteger(requestedRowIndex) && requestedRowIndex >= 0) {
+  const focusCatalogueRow = (rowIndex) => {
+    if (!Number.isInteger(rowIndex) || rowIndex < 0) return;
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      const row = table.querySelector(`tbody tr[data-catalogue-row-index="${requestedRowIndex}"]`);
+      const row = table.querySelector(`tbody tr[data-catalogue-row-index="${rowIndex}"]`);
       const viewport = table.closest('.table-wrap');
       if (!row || !viewport) return;
       row.classList.add('catalogue-editor-focus-row');
@@ -2171,7 +2172,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       if (chartTitle) viewport.scrollLeft = Math.max(0, chartTitle.offsetLeft - viewport.clientWidth / 3);
       (chartTitle || row.querySelector('[data-catalogue-field="Slide Tittle"]'))?.focus({preventScroll: true});
     }));
-  }
+  };
+  focusCatalogueRow(requestedRowIndex);
+  window.addEventListener('message', (event) => {
+    if (event.origin !== window.location.origin || event.data?.type !== 'dashboard-analytic:focus-template-row') return;
+    focusCatalogueRow(Number(event.data.row));
+  });
   reenumerate?.addEventListener('click', () => {
     const body = table.querySelector('tbody');
     if (!body) return;
