@@ -2308,6 +2308,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       // edited-cell tint and any inline added-text marks; subsequent edits are
       // compared with these newly saved values.
       acceptCurrentCatalogueAsBaseline();
+      if (window.parent !== window) window.parent.postMessage({type: 'dashboard-analytic:template-saved'}, window.location.origin);
       hideLoadingOverlay();
       showInfoDialog(`Report Template '${payload.template || 'selected template'}' has been saved.`, {
         title: 'Report Template saved',

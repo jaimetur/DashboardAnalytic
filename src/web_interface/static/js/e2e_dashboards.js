@@ -12,9 +12,10 @@
   const completedFieldJobs = new Set();
   const chartPayloads = new Map();
   const renderedChartPayloads = new Map();
+  const preparedPayloads = new Map();
   let expandedChartRequest = 0;
   let backgroundChartPrefetchToken = '';
-  let dateBounds = null;
+  let dateBounds = null, templateEditorSaved = false;
   const openStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:open`;
   const libraryStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:library`;
   const preparedStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:prepared`;
@@ -80,6 +81,8 @@
   };
   const sameFilterValues = (left, right) => JSON.stringify([...(left || [])].sort()) === JSON.stringify([...(right || [])].sort());
   const hasUnsavedFilter = field => !sameFilterValues(definition?.filters?.[field], savedDashboardDefinition().filters?.[field]);
+  const hasUnsavedSource = kind => !sameFilterValues(definition?.datasets?.[kind], savedDashboardDefinition().datasets?.[kind]);
+  const hasUnsavedScope = () => String(definition?.scope || '') !== String(savedDashboardDefinition().scope || '');
   const hasUnsavedDate = key => String(definition?.[key] || '') !== String(savedDashboardDefinition()[key] || '');
   const filterStateFingerprint = value => JSON.stringify(canonicalize({
     datasets: value?.datasets || {}, scope: value?.scope || 'single', filters: value?.filters || {},
@@ -205,12 +208,14 @@
     $('ds-nr-mode').value = normalized;
     return templateOptions(normalized, selectedName);
   }
-  function selectControl(label, values, selected, change, multiple = false) {
-    const host = node('label', label), select = document.createElement('select');
+  function selectControl(label, values, selected, change, multiple = false, isUnsaved = () => false) {
+    const host = node('label', label, 'ds-source-filter'), select = document.createElement('select');
+    const updateUnsavedState = () => host.classList.toggle('ds-filter-unsaved', isUnsaved());
     select.multiple = multiple; if (multiple) { select.size = Math.max(2, Math.min(4, values.length)); select.dataset.multiselectAutoClose = '1000'; }
     if (!values.length) { select.disabled = true; select.multiple = false; select.size = 1; select.append(option('', 'No datasets available')); }
     for (const [value, text] of values) { const opt = option(value, text); opt.selected = multiple ? selected.map(String).includes(String(value)) : value === selected; select.append(opt); }
-    select.addEventListener('change', () => { change(multiple ? [...select.selectedOptions].map(opt => opt.value) : select.value); filterChanged(); });
+    updateUnsavedState();
+    select.addEventListener('change', () => { change(multiple ? [...select.selectedOptions].map(opt => opt.value) : select.value); updateUnsavedState(); filterChanged(); });
     host.append(select); return host;
   }
   function applyDateBounds(bounds) {
@@ -271,8 +276,8 @@
   }
   function sources() {
     const host = $('ds-sources'); host.replaceChildren();
-    for (const kind of ['data','voice','speech']) host.append(selectControl(`CDR ${kind[0].toUpperCase()+kind.slice(1)}`, config.datasets[kind].map(row => [String(row.id), `${row.file_name} · ${row.row_count} rows`]), definition.datasets[kind] || [], values => { definition.datasets[kind] = values.map(Number); }, true));
-    host.append(selectControl('Scope', [['single','Operator Comparison'],['multivendor','Multivendor Comparison']], definition.scope, value => { definition.scope = value; }));
+    for (const kind of ['data','voice','speech']) host.append(selectControl(`CDR ${kind[0].toUpperCase()+kind.slice(1)}`, config.datasets[kind].map(row => [String(row.id), `${row.file_name} · ${row.row_count} rows`]), definition.datasets[kind] || [], values => { definition.datasets[kind] = values.map(Number); }, true, () => hasUnsavedSource(kind)));
+    host.append(selectControl('Scope', [['single','Operator Comparison'],['multivendor','Multivendor Comparison']], definition.scope, value => { definition.scope = value; }, false, hasUnsavedScope));
     for (const [key, label] of [['date_from', 'Date from'], ['date_to', 'Date to']]) host.append(datePicker(key, label));
     globalThis.setupCustomMultiSelects?.();
   }
@@ -334,10 +339,14 @@
     facetsRefreshTimer = setTimeout(refreshFacetsAfterMenusClose, 100);
   }
   const rememberPrepared = payload => {
+    preparedPayloads.set(activeId, payload);
     try { sessionStorage.setItem(preparedStorageKey, JSON.stringify({dashboardId: activeId, token: payload.token})); }
     catch (_) { /* Session storage is optional. */ }
   };
-  const forgetPrepared = () => { try { sessionStorage.removeItem(preparedStorageKey); } catch (_) { /* Session storage is optional. */ } };
+  const forgetPrepared = () => {
+    preparedPayloads.delete(activeId);
+    try { sessionStorage.removeItem(preparedStorageKey); } catch (_) { /* Session storage is optional. */ }
+  };
   const applyPreparedPayload = payload => {
     prepared = payload; facetOptions = payload.options; facetFields = payload.filter_fields || facetFields; availableFields = payload.available_fields || payload.custom_fields || []; const datesChanged = applyDateBounds(payload.date_bounds); if (datesChanged) sources(); facetsLoading = false;
     if (hasOpenFacetMenu()) refreshFacetsAfterMenusClose(); else facets();
@@ -353,6 +362,8 @@
     if (!$('ds-viewer').hidden) renderSlide();
   };
   async function restorePrepared(id) {
+    const inMemory = preparedPayloads.get(id);
+    if (inMemory) { applyPreparedPayload(inMemory); return true; }
     let cached;
     try { cached = JSON.parse(sessionStorage.getItem(preparedStorageKey) || 'null'); }
     catch (_) { return false; }
@@ -624,15 +635,19 @@
     }
   };
   const closeTemplateEditor = async () => {
-    if (templateEditorHasUnsavedChanges() && !await window.showConfirmDialog(
+    const hasUnsavedChanges = templateEditorHasUnsavedChanges();
+    if (hasUnsavedChanges && !await window.showConfirmDialog(
       'This Report Template has unsaved changes. Close the editor without saving them?',
       {title: 'Unsaved Report Template changes', confirmLabel: 'Close editor', cancelLabel: 'Keep editing', tone: 'warning'},
     )) return false;
-    overlay('ds-editor-overlay', false); $('ds-editor-frame').removeAttribute('src'); await prepare();
+    const templateChanged = templateEditorSaved;
+    overlay('ds-editor-overlay', false); $('ds-editor-frame').removeAttribute('src'); templateEditorSaved = false;
+    if (templateChanged) await prepare();
     return true;
   };
   const openTemplateEditor = focusRow => {
     if (!definition || !Number.isInteger(focusRow)) return;
+    templateEditorSaved = false;
     $('ds-editor-frame').src = `/admin/report-templates/${encodeURIComponent(definition.template_technology)}/${encodeURIComponent(definition.template)}/editor?focus_row=${focusRow}`;
     overlay('ds-editor-overlay', true);
   };
@@ -899,7 +914,9 @@
     if (event.key === 'Tab') { const controls = [...$(visible).querySelectorAll('button:not(:disabled),a[href],input,select,summary,[tabindex="0"]')].filter(el=>el.getClientRects().length); if (!controls.length) return; const first = controls[0], last = controls.at(-1); if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
   });
   window.addEventListener('message', event => {
-    if (event.origin === window.location.origin && event.source === $('ds-editor-frame').contentWindow && event.data?.type === 'dashboard-analytic:close-template-editor') void closeTemplateEditor();
+    if (event.origin !== window.location.origin || event.source !== $('ds-editor-frame').contentWindow) return;
+    if (event.data?.type === 'dashboard-analytic:template-saved') templateEditorSaved = true;
+    if (event.data?.type === 'dashboard-analytic:close-template-editor') void closeTemplateEditor();
   });
   window.addEventListener('beforeunload',event=>{ if (dirty) { event.preventDefault(); event.returnValue = ''; } });
   window.addEventListener('auto-calculated-field-job-status',event=>{ const job = event.detail; if (definition && job?.id && ['ready','completed'].includes(job.status) && !completedFieldJobs.has(job.id)) { completedFieldJobs.add(job.id); changed(); } });

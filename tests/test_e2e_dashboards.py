@@ -66,6 +66,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'title="Remove all filter restrictions and dates"' in page.text
     assert 'title="Restore filters, additional fields and dates from the last saved Dashboard"' in page.text
     assert 'id="ds-preparing-rows"' in page.text
+    assert 'class="form-note ds-filter-help"' in page.text
     assert 'id="ds-default-facets"' in page.text
     assert 'id="ds-additional-facets"' in page.text
     assert 'Select field to add new filter' in page.text
@@ -104,6 +105,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert task_listener > task_panel_start
     assert "This Auto-calculated Field has unsaved changes. Close without saving them?" in app_script
     assert "overlay.addEventListener('click', (event) => { if (event.target === overlay) void requestFinish(); });" in app_script
+    assert "window.parent.postMessage({type: 'dashboard-analytic:template-saved'}, window.location.origin);" in app_script
     assert "openTemplateEditor(expandedChart?.focus_row)" in dashboard_script
     assert "card.ondblclick = safe(async event =>" in dashboard_script
     assert "const syncExpandedChartNavigation" in dashboard_script
@@ -116,6 +118,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "closeOnOutsidePointer('ds-editor-overlay', closeTemplateEditor);" in dashboard_script
     assert "This Dashboard has unsaved changes. Close Adaptative Filters without saving them?" in dashboard_script
     assert "This Report Template has unsaved changes. Close the editor without saving them?" in dashboard_script
+    assert 'const templateChanged = templateEditorSaved;' in dashboard_script
+    assert 'if (templateChanged) await prepare();' in dashboard_script
+    assert "event.data?.type === 'dashboard-analytic:template-saved'" in dashboard_script
     chart_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/dashboard_charts.js').read_text(encoding='utf-8')
     assert 'function selectionStartAllowed(canvas, event)' in chart_script
     assert 'return logicalY >= 90;' in chart_script
@@ -128,6 +133,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "button.addEventListener('click', () => { input.value = iso; definition[key] = iso; wrapper.classList.toggle('ds-date-picker-unsaved', hasUnsavedDate(key)); menu.hidden = true; filterChanged(); });" in dashboard_script
     assert 'const current = (selected || available).filter(Boolean);' in dashboard_script
     assert "const hasUnsavedFilter = field => !sameFilterValues(definition?.filters?.[field], savedDashboardDefinition().filters?.[field]);" in dashboard_script
+    assert "const hasUnsavedSource = kind => !sameFilterValues(definition?.datasets?.[kind], savedDashboardDefinition().datasets?.[kind]);" in dashboard_script
+    assert "const hasUnsavedScope = () => String(definition?.scope || '') !== String(savedDashboardDefinition().scope || '');" in dashboard_script
+    assert "const host = node('label', label, 'ds-source-filter')" in dashboard_script
     assert "facet.classList.toggle('ds-filter-unsaved', hasUnsavedFilter(field));" in dashboard_script
     assert "wrapper.classList.toggle('ds-date-picker-unsaved', hasUnsavedDate(key));" in dashboard_script
     assert 'savedDefinition = definitionFingerprint(definition); updateDirtyState(); sources(); facets(); library();' in dashboard_script
@@ -138,6 +146,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "bind('ds-apply-filters', async () => { if (hasUnsavedFilterChanges()) await prepare(); });" in dashboard_script
     assert "bind('ds-viewer-refresh',prepare);" in dashboard_script
     assert 'async function restorePrepared(id) {' in dashboard_script
+    assert 'const preparedPayloads = new Map();' in dashboard_script
+    assert 'const inMemory = preparedPayloads.get(id);' in dashboard_script
+    assert 'if (inMemory) { applyPreparedPayload(inMemory); return true; }' in dashboard_script
     assert "api(`/prepared/${encodeURIComponent(cached.token)}`)" in dashboard_script
     assert 'if (!await restorePrepared(id)) await prepare();' in dashboard_script
     assert "setPreparationState('preparing');" in dashboard_script
@@ -151,8 +162,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "definition.hidden_filters = structuredClone(saved.hidden_filters || []);" in dashboard_script
     dashboard_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
     assert '.ds-chart-controls button:not(:disabled){cursor:pointer!important}' in dashboard_css
+    assert '.ds-source-filter.ds-filter-unsaved select,.ds-source-filter.ds-filter-unsaved .multiselect-trigger' in dashboard_css
     assert '.ds-date-picker.ds-date-picker-unsaved>input,.ds-facet.ds-filter-unsaved .multiselect-trigger' in dashboard_css
     assert '.e2e-dashboards .ds-view-dashboard-action{margin-left:auto;' in dashboard_css
+    assert '#ds-filter-float .ds-filter-help{margin:26px 0 5px}' in dashboard_css
     assert '.ds-chart-expanded-canvas.ds-hover .ds-chart-controls,.ds-chart-expanded-canvas:focus-within .ds-chart-controls{opacity:1;visibility:visible;transform:translateY(0);transition-delay:0s;pointer-events:auto}' in dashboard_css
     saved = client.put('/api/e2e-dashboards/test', json=payload)
     assert saved.status_code == 200
