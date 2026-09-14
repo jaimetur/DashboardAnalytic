@@ -13,6 +13,8 @@
   const chartPayloads = new Map();
   const renderedChartPayloads = new Map();
   const preparedPayloads = new Map();
+  const dashboardStatuses = new Map();
+  let dashboardStatusRefreshing = false;
   let expandedChartRequest = 0;
   let backgroundPreparationToken = '';
   let dateBounds = null, templateEditorSaved = false, templateEditorPreloadTimer = 0;
@@ -148,7 +150,7 @@
     $('ds-count').textContent = `Total Dashboards: ${Object.keys(dashboards).length}`;
     const body = $('ds-dashboards-body'); body.replaceChildren();
     const rows = Object.entries(dashboards).sort(([, left], [, right]) => left.name.localeCompare(right.name));
-    if (!rows.length) { const row = node('tr'), cell = node('td', 'No Dashboards have been created yet.', 'form-note'); cell.colSpan = 4; row.append(cell); body.append(row); return; }
+    if (!rows.length) { const row = node('tr'), cell = node('td', 'No Dashboards have been created yet.', 'form-note'); cell.colSpan = 5; row.append(cell); body.append(row); return; }
     for (const [id, item] of rows) {
       const row = node('tr'); if (id === activeId) row.classList.add('ds-dashboard-active');
       const nameCell = node('td');
@@ -172,6 +174,12 @@
       });
       nameEditor.append(nameInput, nameSave); nameCell.append(nameEditor);
       row.append(nameCell, node('td', (item.technology || item.template_technology || 'nsa').toUpperCase()), node('td', item.template));
+      const statusCell = node('td');
+      const dashboardStatus = dashboardStatuses.get(id) || {state: 'checking', label: 'Checking'};
+      const statusBadge = node('span', dashboardStatus.label, `ds-dashboard-status ds-dashboard-status-${dashboardStatus.state}`);
+      statusBadge.dataset.dashboardStatusId = id;
+      statusBadge.title = dashboardStatus.detail || dashboardStatus.label;
+      statusCell.append(statusBadge); row.append(statusCell);
       const actions = node('div', undefined, 'ds-dashboard-actions');
       const action = (label, glyph, handler, tone = '') => {
         const button = node('button', glyph, `icon-action ds-dashboard-action ${tone}`); button.type = 'button'; button.title = label; button.setAttribute('aria-label', label); button.onclick = safe(handler); actions.append(button);
@@ -198,6 +206,30 @@
       const cell = node('td'); cell.append(actions); row.append(cell); body.append(row);
     }
   }
+  const renderDashboardStatuses = () => {
+    document.querySelectorAll('[data-dashboard-status-id]').forEach(badge => {
+      const value = dashboardStatuses.get(badge.dataset.dashboardStatusId) || {state: 'checking', label: 'Checking'};
+      badge.className = `ds-dashboard-status ds-dashboard-status-${value.state}`;
+      badge.textContent = value.label;
+      badge.title = value.detail || value.label;
+    });
+  };
+  const setDashboardStatus = (id, state, label) => {
+    if (!id) return;
+    dashboardStatuses.set(id, {state, label});
+    renderDashboardStatuses();
+  };
+  const refreshDashboardStatuses = async () => {
+    if (dashboardStatusRefreshing) return;
+    dashboardStatusRefreshing = true;
+    try {
+      const payload = await api('/statuses');
+      for (const [id, value] of Object.entries(payload || {})) dashboardStatuses.set(id, value);
+      for (const id of [...dashboardStatuses.keys()]) if (!dashboards[id]) dashboardStatuses.delete(id);
+      renderDashboardStatuses();
+    } catch (_error) { /* A status refresh must not interrupt Dashboard work. */ }
+    finally { dashboardStatusRefreshing = false; }
+  };
   function templateOptions(technology, selectedName = '') {
     const select = $('ds-template'), rows = config.templates[technology] || [];
     select.replaceChildren(...rows.map(row => option(row.identifier, row.name)));
@@ -412,6 +444,7 @@
     clearTimeout(timer); const current = ++sequence; controller?.abort(); controller = new AbortController();
     dismissPreparationStatus(); backgroundPreparationToken = `prepare-${current}`;
     emitPreparationStatus('processing', 'Building the filtered Dashboard selection');
+    setDashboardStatus(activeId, 'loading-data', 'Loading data');
     filterActionBusy = true; updateFilterActionState();
     facetsLoading = true;
     if (!hasOpenFacetMenu()) facets();
@@ -423,7 +456,7 @@
       if (current !== sequence) return;
       applyPreparedPayload(payload);
       window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
-    } catch (error) { if (current === sequence && error.name !== 'AbortError') { facetsLoading = false; facets(); setViewEnabled(false); setPreparationState('hidden'); $('ds-rows').textContent = error.message; if (!$('ds-viewer').hidden) $('ds-charts').replaceChildren(node('div',error.message,'ds-empty')); } throw error; }
+    } catch (error) { if (current === sequence && error.name !== 'AbortError') { setDashboardStatus(activeId, 'error', 'Error'); facetsLoading = false; facets(); setViewEnabled(false); setPreparationState('hidden'); $('ds-rows').textContent = error.message; if (!$('ds-viewer').hidden) $('ds-charts').replaceChildren(node('div',error.message,'ds-empty')); } throw error; }
     })();
     preparing = pending;
     try { return await pending; }
@@ -487,7 +520,7 @@
     const item = dashboards[id]; if (!item || !await window.showConfirmDialog(`Delete “${item.name}”?`,{title:'Delete Dashboard',confirmLabel:'Delete',tone:'danger'})) return;
     if (id === activeId && !await confirmDiscard()) return;
     status(`Deleting “${item.name}”…`);
-    await api(`/${id}`,'DELETE'); delete dashboards[id]; if (id === activeId) closeDashboard(); else { library(); status(`Deleted “${item.name}”.`); }
+    await api(`/${id}`,'DELETE'); delete dashboards[id]; dashboardStatuses.delete(id); if (id === activeId) closeDashboard(); else { library(); status(`Deleted “${item.name}”.`); }
   }
   bind('ds-import',() => $('ds-import-file').click());
   $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name); const id = dashboardId(), result = await api(`/${id}`,'PUT',payload.definition); dashboards[id] = result.definition; await openDashboard(id); $('ds-import-file').value = ''; });
@@ -992,7 +1025,10 @@
         && Object.values(cached).every(item => item && typeof item === 'object' && typeof item.name === 'string') ? cached : {};
       if (Object.keys(dashboards).length) library();
     } catch (_) { dashboards = {}; }
-    dashboards = await api(); library();
+    dashboards = await api(); library(); await refreshDashboardStatuses();
     if (dashboards[last]) await openDashboard(last);
   })();
+  window.setInterval(refreshDashboardStatuses, 2000);
+  window.addEventListener('dashboard-analytic:refresh-background-tasks', refreshDashboardStatuses);
+  window.addEventListener('focus', refreshDashboardStatuses);
 })();

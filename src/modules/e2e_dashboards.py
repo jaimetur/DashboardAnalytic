@@ -11,6 +11,7 @@ from datetime import date, timedelta
 from hashlib import sha256
 from pathlib import Path
 from threading import RLock
+from time import monotonic
 from types import SimpleNamespace
 from typing import Literal
 from uuid import uuid4
@@ -1176,6 +1177,19 @@ def install_dashboard_routes(core):
                 and canvas_model_path(snapshot, snapshot.entries[index]).is_file()
             }
 
+    def snapshot_canvas_model_paths(snapshot: Snapshot) -> list[str]:
+        indexes = {
+            int(chart['index'])
+            for slide in snapshot.payload.get('slides', [])
+            for chart in slide.get('charts', [])
+            if chart.get('available')
+        }
+        return [
+            str(canvas_model_path(snapshot, snapshot.entries[index]))
+            for index in sorted(indexes)
+            if 0 <= index < len(snapshot.entries)
+        ]
+
     def cached_models_complete(definition, workspace: str) -> bool:
         """Check the persistent Canvas cache without materialising chart frames."""
         candidate = definition.model_copy(deep=True)
@@ -1280,15 +1294,20 @@ def install_dashboard_routes(core):
             job = prefetch_jobs[key] = {'id': key, 'workspace': workspace, 'dashboard_id': dashboard_id,
                 'name': str(raw_definition.get('name') or dashboard_id), 'status': 'queued', 'completed': 0, 'total': 0,
                 'restoring_cached_models': False, 'generation': generation, 'cancel_requested': False, 'priority_indexes': [],
-                'task_id': f'dashboard-prefetch:{dashboard_id}' if prepared_preview is None else f'dashboard-prefetch:{dashboard_id}:{fingerprint[:12]}'}
+                'task_id': f'dashboard-prefetch:{dashboard_id}' if prepared_preview is None else f'dashboard-prefetch:{dashboard_id}:{fingerprint[:12]}',
+                'created_at': monotonic()}
             if restored_preview is not None:
                 total = sum(
                     1 for slide in restored_preview['slides'] for chart in slide['charts'] if chart['available']
                 )
                 completed = len(cached_canvas_model_indexes(restored_preview['token']))
+                restored_snapshot = snapshots.get(restored_preview['token'])
                 job.update(
                     status='ready' if completed >= total else 'queued', completed=completed, total=total,
                     token=restored_preview['token'], restored_from_manifest=prepared_preview is None,
+                    selection_key=restored_snapshot.selection_key if restored_snapshot else '',
+                    definition=restored_snapshot.definition.model_dump(mode='json') if restored_snapshot else raw_definition,
+                    model_paths=snapshot_canvas_model_paths(restored_snapshot) if restored_snapshot else [],
                 )
                 if completed >= total:
                     return
@@ -1305,7 +1324,13 @@ def install_dashboard_routes(core):
                 persist_preview_manifest(workspace, dashboard_id, fingerprint, preview['token'])
                 charts = [chart['index'] for slide in preview['slides'] for chart in slide['charts'] if chart['available']]
                 with lock:
-                    job.update(token=preview['token'], total=len(charts))
+                    preview_snapshot = snapshots.get(preview['token'])
+                    job.update(
+                        token=preview['token'], total=len(charts),
+                        selection_key=preview_snapshot.selection_key if preview_snapshot else '',
+                        definition=preview_snapshot.definition.model_dump(mode='json') if preview_snapshot else raw_definition,
+                        model_paths=snapshot_canvas_model_paths(preview_snapshot) if preview_snapshot else [],
+                    )
                 cached_indexes = cached_canvas_model_indexes(preview['token'])
                 pending_indexes = list(dict.fromkeys(charts))
                 while pending_indexes:
@@ -1350,6 +1375,64 @@ def install_dashboard_routes(core):
         future = prefetch_executor.submit(run)
         with lock:
             job['future'] = future
+
+    @app.get('/api/e2e-dashboards/statuses')
+    def dashboard_statuses(user=Depends(dashboard_user)):
+        """Return short cache and rendering states for the Dashboard library."""
+        workspace = workspace_key()
+        dashboards = read_dashboards(bound_repository())
+        result = {}
+        with lock:
+            latest_jobs = {}
+            for dashboard_id in dashboards:
+                matching_jobs = [
+                    job for job in prefetch_jobs.values()
+                    if job.get('workspace') == workspace and job.get('dashboard_id') == dashboard_id
+                ]
+                latest_jobs[dashboard_id] = dict(max(
+                    matching_jobs, key=lambda candidate: float(candidate.get('created_at') or 0), default={}
+                ))
+        for dashboard_id, job in latest_jobs.items():
+            if not job or job.get('status') == 'cancelled':
+                result[dashboard_id] = {'state': 'not-cached', 'label': 'Not cached'}
+                continue
+            if job.get('status') == 'failed':
+                result[dashboard_id] = {
+                    'state': 'error', 'label': 'Error',
+                    'detail': str(job.get('error') or 'Dashboard rendering failed.'),
+                }
+                continue
+            if job.get('status') == 'processing':
+                result[dashboard_id] = {
+                    'state': 'rendering' if job.get('total') else 'loading-data',
+                    'label': 'Rendering' if job.get('total') else 'Loading data',
+                }
+                continue
+            if job.get('status') == 'queued':
+                result[dashboard_id] = {
+                    'state': 'charts-queued' if job.get('token') else 'data-queued',
+                    'label': 'Charts queued' if job.get('token') else 'Data queued',
+                }
+                continue
+            try:
+                definition = DashboardDefinition.model_validate(job.get('definition') or dashboards[dashboard_id])
+                task_repository = Repository(Path(workspace), core.repository.global_db_path)
+                dimensions = core.load_repository_calculated_dimensions(task_repository)
+                selected_by_kind = selected_sources(definition, task_repository)
+                selection_current = persistent_selection_key(
+                    definition, task_repository, dimensions, selected_by_kind,
+                ) == job.get('selection_key')
+            except (HTTPException, KeyError, OSError, sqlite3.Error, TypeError, ValueError):
+                selection_current = False
+            if not selection_current:
+                result[dashboard_id] = {'state': 'data-needed', 'label': 'Data needed'}
+                continue
+            models_complete = all(Path(path).is_file() for path in job.get('model_paths', []))
+            if not models_complete:
+                result[dashboard_id] = {'state': 'charts-needed', 'label': 'Charts needed'}
+            else:
+                result[dashboard_id] = {'state': 'ready', 'label': 'Ready'}
+        return JSONResponse(result, headers={'Cache-Control': 'no-store, max-age=0, must-revalidate'})
 
     def cancel_workspace_prefetch(workspace: str | Path) -> list:
         """Stop warming and return running workers that must finish before cache removal."""

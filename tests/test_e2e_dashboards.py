@@ -50,6 +50,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert legacy_reporting.headers['location'] == '/e2e-reporting'
     assert 'id="ds-nr-mode"' in page.text
     assert 'id="ds-dashboards-body"' in page.text
+    assert page.text.index('<th>Status</th>') < page.text.index('<th>Actions</th>')
+    assert 'colspan="5" class="form-note">Loading Dashboards' in page.text
     assert 'id="ds-library"' not in page.text
     assert 'id="ds-save"' in page.text
     assert '>Save Filters<' in page.text
@@ -149,6 +151,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "api(`/prepare${activeId ? `?dashboard_id=${encodeURIComponent(activeId)}` : ''}`,'POST',definition,controller.signal)" in dashboard_script
     assert "window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));" in dashboard_script
     assert "$('ds-apply-filters').disabled = !definition || filterStateFingerprint(definition) === appliedFilterState || filterActionBusy;" in dashboard_script
+    assert "const dashboardStatuses = new Map();" in dashboard_script
+    assert "window.setInterval(refreshDashboardStatuses, 2000);" in dashboard_script
     assert "bind('ds-viewer-refresh',prepare);" in dashboard_script
     assert 'async function restorePrepared(id) {' in dashboard_script
     assert 'const preparedPayloads = new Map();' in dashboard_script
@@ -171,6 +175,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "definition.custom_fields = structuredClone(saved.custom_fields || []);" in dashboard_script
     assert "definition.hidden_filters = structuredClone(saved.hidden_filters || []);" in dashboard_script
     dashboard_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+    assert '.ds-dashboard-status-ready{' in dashboard_css
+    assert '.ds-dashboard-status-rendering{' in dashboard_css
     assert '.ds-chart-controls button:not(:disabled){cursor:pointer!important}' in dashboard_css
     assert '.ds-source-filter.ds-filter-unsaved select,.ds-source-filter.ds-filter-unsaved .multiselect-trigger' in dashboard_css
     assert '.ds-date-picker.ds-date-picker-unsaved>input,.ds-facet.ds-filter-unsaved .multiselect-trigger' in dashboard_css
@@ -258,6 +264,11 @@ def test_applying_filters_queues_all_chart_models_and_reuses_previous_cache(clie
     payload = setup_dashboard(client)
     import src.modules.e2e_dashboards as dashboards_module
 
+    core.repository.set_workspace_state('e2e_dashboards_v2', json.dumps({'filtered-dashboard': payload}))
+    uncached = client.get('/api/e2e-dashboards/statuses')
+    assert uncached.status_code == 200
+    assert uncached.json()['filtered-dashboard'] == {'state': 'not-cached', 'label': 'Not cached'}
+
     started = Event()
     release = Event()
     calls = []
@@ -281,6 +292,7 @@ def test_applying_filters_queues_all_chart_models_and_reuses_previous_cache(clie
             and task['label'] == 'Rendering Dashboard Charts: Comparison'
             for task in tasks
         )
+        assert client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard']['label'] == 'Rendering'
     finally:
         release.set()
 
@@ -290,6 +302,9 @@ def test_applying_filters_queues_all_chart_models_and_reuses_previous_cache(clie
         time.sleep(0.05)
     first_models = {path.name for path in cache_dir.glob('*.json')}
     assert len(first_models) == 3
+    assert client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard'] == {
+        'state': 'ready', 'label': 'Ready',
+    }
 
     payload['filters'] = {'City': ['London']}
     filtered = client.post('/api/e2e-dashboards/prepare?dashboard_id=filtered-dashboard', json=payload)
@@ -309,6 +324,9 @@ def test_applying_filters_queues_all_chart_models_and_reuses_previous_cache(clie
     assert {path.name for path in cache_dir.glob('*.json')} == filtered_models
 
     core.repository.update_dataset_profile(1, progress=100)
+    assert client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard'] == {
+        'state': 'data-needed', 'label': 'Data needed',
+    }
     calls_before_revision = len(calls)
     refreshed = client.post('/api/e2e-dashboards/prepare?dashboard_id=filtered-dashboard', json=payload)
     assert refreshed.status_code == 200, refreshed.text
@@ -318,6 +336,11 @@ def test_applying_filters_queues_all_chart_models_and_reuses_previous_cache(clie
     refreshed_models = {path.name for path in cache_dir.glob('*.json')}
     assert filtered_models < refreshed_models
     assert len(calls) == calls_before_revision + 3
+
+    (cache_dir / next(iter(refreshed_models - filtered_models))).unlink()
+    assert client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard'] == {
+        'state': 'charts-needed', 'label': 'Charts needed',
+    }
 
 
 def test_dashboard_api_session_expires_on_application_process_restart(client):
