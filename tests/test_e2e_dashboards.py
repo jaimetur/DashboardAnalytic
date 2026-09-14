@@ -96,7 +96,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-view" class="ds-view-dashboard-action" title="Open the Dashboard viewer" disabled' in page.text
     assert 'id="ds-preparing"' in page.text
     assert 'id="ds-preparing-title"' in page.text
-    assert '>Preparing Dashboard data<' in page.text
+    assert '>Preparing Dashboard dataset<' in page.text
     assert 'id="ds-viewer-preparing"' in page.text
     assert '>Auto-Calculated Fields<' in page.text
     assert 'class="ds-viewer-icon-action ds-viewer-refresh-action"' in page.text
@@ -181,11 +181,11 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));" in dashboard_script
     dashboard_module = (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     assert "'dashboard_name': task['name']," in dashboard_module
-    assert "'label': 'Rendering Dashboard Charts' if task.get('rendering_only') else 'Preparing Dashboard data'," in dashboard_module
+    assert "'label': 'Rendering Dashboard Charts' if task.get('rendering_only') else 'Preparing Dashboard dataset'," in dashboard_module
     assert 'direct_preparation_tasks: dict[str, dict] = {}' in dashboard_module
     assert "preparation_id: str | None = None," in dashboard_module
-    assert "'label': 'Rendering Dashboard Charts' if job['total'] else 'Preparing Dashboard data'," in dashboard_module
-    assert "phase === 'rendering' ? 'Rendering Dashboard Charts' : 'Preparing Dashboard data'" in dashboard_script
+    assert "'label': 'Rendering Dashboard Charts' if job['total'] else 'Preparing Dashboard dataset'," in dashboard_module
+    assert "phase === 'rendering' ? 'Rendering Dashboard Charts' : 'Preparing Dashboard dataset'" in dashboard_script
     assert "if (preparingFilterState === requestedFilterState) return preparing;" in dashboard_script
     assert "if (backgroundPreparationToken === preparationToken) dismissPreparationStatus();" in dashboard_script
     assert "bind('ds-apply-filters', async () => {" in dashboard_script

@@ -7,7 +7,7 @@ import sqlite3
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 from pathlib import Path
 from threading import RLock
@@ -1521,7 +1521,7 @@ def install_dashboard_routes(core):
                 'name': str(raw_definition.get('name') or dashboard_id), 'status': 'queued', 'completed': 0, 'total': 0,
                 'restoring_cached_models': False, 'generation': generation, 'cancel_requested': False, 'priority_indexes': [],
                 'task_id': f'dashboard-prefetch:{dashboard_id}' if prepared_preview is None else f'dashboard-prefetch:{dashboard_id}:{fingerprint[:12]}',
-                'created_at': monotonic()}
+                'created_at': monotonic(), 'started_at': datetime.now(timezone.utc).timestamp()}
             if restored_preview is not None:
                 total = sum(
                     1 for slide in restored_preview['slides'] for chart in slide['charts'] if chart['available']
@@ -1615,7 +1615,11 @@ def install_dashboard_routes(core):
                         snapshot.frame_locks.clear()
                         snapshot.projections.clear()
                         snapshots.move_to_end(preview['token'])
-                    job.update(status='ready', token=preview['token'])
+                    job.update(
+                        status='ready', token=preview['token'],
+                        completed_at=datetime.now(timezone.utc).timestamp(),
+                        duration_seconds=round(monotonic() - float(job['created_at']), 3),
+                    )
             except Exception as exc:
                 with lock:
                     if job.get('cancel_requested') or job.get('generation') != prefetch_generation.get(workspace, 0):
@@ -1764,25 +1768,27 @@ def install_dashboard_routes(core):
                     tasks.append({
                         'id': job['task_id'],
                         'dashboard_name': job['name'],
-                        'label': 'Rendering Dashboard Charts' if job['total'] else 'Preparing Dashboard data',
+                        'label': 'Rendering Dashboard Charts' if job['total'] else 'Preparing Dashboard dataset',
                         'detail': (
                             f'{job["completed"]} of {job["total"]} Canvas models'
                             if job['total'] else 'Preparing filtered Dashboard selection'
                         ),
+                        'started_at': job.get('started_at'),
                         'progress': round(job['completed'] * 100 / job['total']) if job['total'] else None,
                     })
                 else:
                     tasks.append({
                         'id': job['task_id'],
                         'dashboard_name': job['name'],
-                        'label': 'Queued Dashboard Charts' if job['total'] else 'Queued Dashboard data',
+                        'label': 'Queued Dashboard Charts' if job['total'] else 'Queued Dashboard dataset',
                         'detail': 'Queued',
+                        'started_at': job.get('started_at'),
                         'progress': 0,
                     })
             tasks.extend({
                 'id': task['id'],
                 'dashboard_name': task['name'],
-                'label': 'Rendering Dashboard Charts' if task.get('rendering_only') else 'Preparing Dashboard data',
+                'label': 'Rendering Dashboard Charts' if task.get('rendering_only') else 'Preparing Dashboard dataset',
                 'detail': (
                     'Rendering charts with the current Dashboard scope'
                     if task.get('rendering_only')

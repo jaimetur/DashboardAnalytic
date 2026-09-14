@@ -43,7 +43,7 @@
     window.dispatchEvent(new CustomEvent('dashboard-analytic:background-task', {detail: {
       id: token, workspace_id: config.workspace, workspace_name: backgroundWorkspaceName(), is_active: true,
       dashboard_name: definition?.name || 'Dashboard',
-      label: rendering ? 'Rendering Dashboard Charts' : 'Preparing Dashboard data',
+      label: rendering ? 'Rendering Dashboard Charts' : 'Preparing Dashboard dataset',
       detail, progress: null, status: statusValue,
     }}));
     window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
@@ -136,14 +136,14 @@
     const ready = state === 'ready';
     const floatingFilters = $('ds-filter-panel').parentElement?.id === 'ds-filter-float';
     notice.dataset.state = state;
-    $('ds-preparing-title').textContent = ready ? 'Dashboard is ready' : phase === 'rendering' ? 'Rendering Dashboard Charts' : 'Preparing Dashboard data';
+    $('ds-preparing-title').textContent = ready ? 'Dashboard is ready' : phase === 'rendering' ? 'Rendering Dashboard Charts' : 'Preparing Dashboard dataset';
     $('ds-preparing-detail').textContent = floatingFilters
       ? (ready
         ? 'Data and filters are ready. The Dashboard is ready to use.'
-        : phase === 'rendering' ? 'Charts are rendering with the current Dashboard scope.' : 'Data and filters are still loading. The Dashboard will update when preparation is complete.')
+        : phase === 'rendering' ? 'Charts are rendering with the current Dashboard scope.' : 'Dataset and filters are still loading. The Dashboard will update when preparation is complete.')
       : (ready
         ? 'Data and filters are ready. You can now open View Dashboard.'
-        : phase === 'rendering' ? 'Charts are rendering with the current Dashboard scope. View Dashboard will become available when rendering is complete.' : 'Data and filters are still loading. View Dashboard will become available when preparation is complete.');
+        : phase === 'rendering' ? 'Charts are rendering with the current Dashboard scope. View Dashboard will become available when rendering is complete.' : 'Dataset and filters are still loading. View Dashboard will become available when preparation is complete.');
   };
   function overlay(id, show) {
     const el = $(id);

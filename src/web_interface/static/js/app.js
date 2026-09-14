@@ -5524,14 +5524,38 @@ if (queueNode) {
   const transientTasks = new Map();
   const completedTaskRetentionMs = 5000;
   let completedTaskExpiryTimer = null;
+  const formatTaskDuration = (seconds) => {
+    if (!Number.isFinite(seconds) || seconds < 0) return '';
+    if (seconds < 60) return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes}m ${Math.round(seconds % 60)}s`;
+  };
 
   window.addEventListener('dashboard-analytic:background-task', (event) => {
     const task = event.detail;
     if (!task || !task.id) return;
     if (['complete', 'completed', 'cancelled'].includes(String(task.status || '').toLowerCase())) {
+      const previous = transientTasks.get(String(task.id));
+      if (previous && String(task.status || '').toLowerCase() !== 'cancelled') {
+        const completedAt = Date.now();
+        const startedAt = Number(previous.started_at) * 1000 || completedAt;
+        completedServerTasks.set(String(task.id), {
+          group: {
+            workspace_id: previous.workspace_id || '__client__',
+            workspace_name: previous.workspace_name || 'Active workspace',
+            is_active: Boolean(previous.is_active), tasks: [],
+          },
+          task: {...previous, detail: 'Completed', progress: 100, completed_at: completedAt / 1000,
+            duration_seconds: Math.max(0, (completedAt - startedAt) / 1000)},
+          position: 0, expiresAt: completedAt + completedTaskRetentionMs,
+        });
+      }
       transientTasks.delete(String(task.id));
     } else {
-      transientTasks.set(String(task.id), {...task});
+      const previous = transientTasks.get(String(task.id));
+      transientTasks.set(String(task.id), {
+        ...task, started_at: task.started_at || previous?.started_at || Date.now() / 1000,
+      });
     }
     render(mergedGroups());
   });
@@ -5579,19 +5603,29 @@ if (queueNode) {
     (Array.isArray(groups) ? groups : []).forEach((group) => {
       (Array.isArray(group.tasks) ? group.tasks : []).forEach((task, position) => {
         if (!task?.id) return;
-        nextTasks.set(String(task.id), {group: {...group, tasks: []}, task: {...task}, position});
+        const previous = previousServerTasks.get(String(task.id));
+        nextTasks.set(String(task.id), {
+          group: {...group, tasks: []}, task: {...task}, position,
+          observedAt: Number(task.started_at) * 1000 || previous?.observedAt || now,
+        });
       });
     });
     previousServerTasks.forEach((previous, taskId) => {
       if (nextTasks.has(taskId)) return;
-      const completedAt = Number(previous.task.completed_at) * 1000;
+      const completedAt = Number(previous.task.completed_at) * 1000 || now;
       const expiresAt = Number.isFinite(completedAt) && completedAt > 0
-        ? completedAt + completedTaskRetentionMs
+        ? Math.max(now, completedAt) + completedTaskRetentionMs
         : now + completedTaskRetentionMs;
+      const durationSeconds = Number(previous.task.duration_seconds);
       if (expiresAt <= now) return;
       completedServerTasks.set(taskId, {
         group: previous.group,
-        task: {...previous.task, detail: 'Completed', progress: 100},
+        task: {
+          ...previous.task, detail: 'Completed', progress: 100, completed_at: completedAt / 1000,
+          duration_seconds: Number.isFinite(durationSeconds)
+            ? durationSeconds
+            : Math.max(0, (completedAt - previous.observedAt) / 1000),
+        },
         position: previous.position,
         expiresAt,
       });
@@ -5706,7 +5740,8 @@ if (queueNode) {
       detail.className = 'background-task-detail';
       const numericProgress = Number(task.progress);
       const hasProgress = task.progress !== null && task.progress !== undefined && Number.isFinite(numericProgress);
-      detail.textContent = `${String(task.detail || 'Processing')}${hasProgress ? ` · ${Math.round(Math.max(0, Math.min(100, numericProgress)))}%` : ''}`;
+      const duration = Number(task.duration_seconds);
+      detail.textContent = `${String(task.detail || 'Processing')}${hasProgress ? ` · ${Math.round(Math.max(0, Math.min(100, numericProgress)))}%` : ''}${formatTaskDuration(duration) ? ` · ${formatTaskDuration(duration)}` : ''}`;
       item.append(detail);
 
       const progress = document.createElement('div');
