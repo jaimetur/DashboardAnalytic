@@ -83,7 +83,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert legacy_reporting.headers['location'] == '/e2e-reporting'
     assert 'id="ds-nr-mode"' in page.text
     assert 'id="ds-dashboards-body"' in page.text
-    assert '>Dashboards PPT Export Jobs<' in page.text
+    assert '>PowerPoint Generation Jobs<' in page.text
     assert 'id="ds-ppt-jobs-body"' in page.text
     assert page.text.index('<th>Status</th>') < page.text.index('<th>Actions</th>')
     assert 'colspan="5" class="form-note">Loading Dashboards' in page.text

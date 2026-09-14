@@ -142,7 +142,7 @@
         ? 'Dataset and filters are ready. The Dashboard dataset is ready to use.'
         : phase === 'rendering' ? 'Charts are rendering with the current Dashboard scope.' : 'Dataset and filters are still loading. The Dashboard will update when preparation is complete.')
       : (ready
-        ? 'Datasets and filters are ready. You can now open the dashboard using 'View Dashboard' button below.'
+        ? "Datasets and filters are ready. You can now open the dashboard using 'View Dashboard' button below."
         : phase === 'rendering' ? 'Charts are rendering with the current Dashboard scope. View Dashboard will become available when rendering is complete.' : 'Dataset and filters are still loading. View Dashboard will become available when preparation is complete.');
   };
   function overlay(id, show) {
