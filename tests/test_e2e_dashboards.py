@@ -55,6 +55,13 @@ def test_cache_clear_requeues_stale_rendering_as_data_preparation(client, monkey
         assert status == {'state': 'data-queued', 'label': 'Data queued'}
     finally:
         release.set()
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        status = client.get('/api/e2e-dashboards/statuses').json().get('cache-clear-dashboard', {})
+        if status.get('state') == 'ready':
+            break
+        time.sleep(0.02)
+    assert status == {'state': 'ready', 'label': 'Ready'}
 
 
 def setup_dashboard(client):
