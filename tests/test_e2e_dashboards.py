@@ -196,6 +196,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '{snapshot.selection_key}:{snapshot.definition.scope}:{entry_key}' in dashboard_module
     assert '{selection_key}:{candidate.scope}:{entry_key}' in dashboard_module
     assert "'rendering_only': rendering_only," in dashboard_module
+    assert 'def materialize_selection(definition, task_repository, dimensions, selected_by_kind, fields, *, use_profile_options=False):' in dashboard_module
+    assert 'use_profile_options=use_profile_options,' in dashboard_module
     dashboard_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
     assert '.e2e-dashboards .ds-unsaved-filters-badge' in dashboard_css
     assert '.e2e-dashboards .ds-dashboard-close::after' in dashboard_css

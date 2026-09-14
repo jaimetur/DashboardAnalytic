@@ -508,10 +508,10 @@ def install_dashboard_routes(core):
             options[field_name].update(str(value) for value in definition.filters.get(field_name, ()) if value is not None)
         return {field_name: sorted(values, key=str.casefold) for field_name, values in options.items()}
 
-    def materialize_selection(definition, task_repository, dimensions, selected_by_kind, fields):
+    def materialize_selection(definition, task_repository, dimensions, selected_by_kind, fields, *, use_profile_options=False):
         cache_key = persistent_selection_key(definition, task_repository, dimensions, selected_by_kind)
         estimated_rows = sum(sum(int(row.get('row_count') or 0) for row in selected) for selected in selected_by_kind.values())
-        profile_only = estimated_rows > DASHBOARD_PROFILE_SELECTION_THRESHOLD
+        use_profile_options = use_profile_options or estimated_rows > DASHBOARD_PROFILE_SELECTION_THRESHOLD
         with lock, task_repository.connection() as connection:
             cached = connection.execute(
                 'SELECT id, options_json, row_counts_json, materialized FROM dashboard_filter_selections WHERE cache_key = ?',
@@ -535,19 +535,6 @@ def install_dashboard_routes(core):
                 row_counts[kind] = int(connection.execute(
                     f'SELECT COUNT(*) AS count FROM {table} WHERE {where}', params,
                 ).fetchone()['count'])
-            if profile_only:
-                options = profile_filter_options(definition, dimensions, selected_by_kind, fields)
-                connection.execute(
-                    'UPDATE dashboard_filter_selections SET options_json = ?, row_counts_json = ?, materialized = 0 WHERE id = ?',
-                    (json.dumps(options), json.dumps(row_counts), selection_id),
-                )
-                stale = connection.execute(
-                    'SELECT id FROM dashboard_filter_selections ORDER BY last_accessed_at DESC, id DESC LIMIT -1 OFFSET 8'
-                ).fetchall()
-                for row in stale:
-                    connection.execute('DELETE FROM dashboard_filter_selection_rows WHERE selection_id = ?', (row['id'],))
-                    connection.execute('DELETE FROM dashboard_filter_selections WHERE id = ?', (row['id'],))
-                return selection_id, cache_key, False, options, row_counts, True
             materialized = sum(row_counts.values()) <= DASHBOARD_SELECTION_ROW_LIMIT
             if materialized:
                 for kind, (where, params, table) in predicates.items():
@@ -556,37 +543,41 @@ def install_dashboard_routes(core):
                         f'SELECT ?, ?, dataset_id, source_row_id FROM {table} WHERE {where}',
                         (selection_id, kind, *params),
                     )
-            # Most Dashboard openings have no active categorical filter.  The
-            # former implementation scanned a combined CDR table once per
-            # facet in that case.  Aggregate all facets sharing a predicate in
-            # one pass, keeping individual passes only for selected facets
-            # whose own filter must be excluded from their available values.
-            options = {field_name: set() for field_name in fields}
-            active_filter_keys = {identity(field_name) for field_name in definition.filters}
-            facet_groups: dict[str | None, list[str]] = {None: []}
-            for field_name in fields:
-                excluded = field_name if identity(field_name) in active_filter_keys else None
-                facet_groups.setdefault(excluded, []).append(field_name)
-            for kind, selected in selected_by_kind.items():
-                columns = task_repository.list_reporting_row_columns(kind)
-                table = task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))
-                for excluded, group_fields in facet_groups.items():
-                    available = [(field_name, resolve_sql_column(columns, field_name)) for field_name in group_fields]
-                    available = [(field_name, column) for field_name, column in available if column is not None]
-                    if not available:
-                        continue
-                    where, params = selection_where(
-                        task_repository, kind, [int(row['id']) for row in selected], definition, exclude=excluded,
-                    )
-                    select_clause = ', '.join(
-                        f"json_group_array(DISTINCT COALESCE(CAST({task_repository._quote_identifier(column)} AS TEXT), '')) AS facet_{index}"
-                        for index, (_field_name, column) in enumerate(available)
-                    )
-                    row = connection.execute(f'SELECT {select_clause} FROM {table} WHERE {where}', params).fetchone()
-                    for index, (field_name, _column) in enumerate(available):
-                        encoded_values = row[f'facet_{index}'] if row else '[]'
-                        options[field_name].update(str(value) for value in json.loads(encoded_values or '[]'))
-            options = {field_name: sorted(values, key=str.casefold) for field_name, values in options.items()}
+            # A full, unfiltered CDR selection can use its upload-time profile
+            # catalogue. This avoids wide DISTINCT scans while row counts and
+            # chart previews remain exact from the combined reporting tables.
+            if use_profile_options:
+                options = profile_filter_options(definition, dimensions, selected_by_kind, fields)
+            else:
+                # Active filters need facet values that exclude each field's
+                # own restriction. Aggregate fields sharing a predicate in one
+                # pass, keeping individual passes only where necessary.
+                options = {field_name: set() for field_name in fields}
+                active_filter_keys = {identity(field_name) for field_name in definition.filters}
+                facet_groups: dict[str | None, list[str]] = {None: []}
+                for field_name in fields:
+                    excluded = field_name if identity(field_name) in active_filter_keys else None
+                    facet_groups.setdefault(excluded, []).append(field_name)
+                for kind, selected in selected_by_kind.items():
+                    columns = task_repository.list_reporting_row_columns(kind)
+                    table = task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))
+                    for excluded, group_fields in facet_groups.items():
+                        available = [(field_name, resolve_sql_column(columns, field_name)) for field_name in group_fields]
+                        available = [(field_name, column) for field_name, column in available if column is not None]
+                        if not available:
+                            continue
+                        where, params = selection_where(
+                            task_repository, kind, [int(row['id']) for row in selected], definition, exclude=excluded,
+                        )
+                        select_clause = ', '.join(
+                            f"json_group_array(DISTINCT COALESCE(CAST({task_repository._quote_identifier(column)} AS TEXT), '')) AS facet_{index}"
+                            for index, (_field_name, column) in enumerate(available)
+                        )
+                        row = connection.execute(f'SELECT {select_clause} FROM {table} WHERE {where}', params).fetchone()
+                        for index, (field_name, _column) in enumerate(available):
+                            encoded_values = row[f'facet_{index}'] if row else '[]'
+                            options[field_name].update(str(value) for value in json.loads(encoded_values or '[]'))
+                options = {field_name: sorted(values, key=str.casefold) for field_name, values in options.items()}
             connection.execute(
                 'UPDATE dashboard_filter_selections SET options_json = ?, row_counts_json = ?, materialized = ? WHERE id = ?',
                 (json.dumps(options), json.dumps(row_counts), int(materialized), selection_id),
@@ -615,8 +606,14 @@ def install_dashboard_routes(core):
         fields = {field for field in ADAPTATIVE_FILTER_FIELDS if identity(field) not in hidden_filter_keys}
         fields.update(definition.custom_fields)
         fields = sorted(fields, key=str.casefold)
+        use_profile_options = bool(
+            date_bounds
+            and not definition.filters
+            and str(definition.date_from) == date_bounds['min']
+            and str(definition.date_to) == date_bounds['max']
+        )
         selection_id, selection_key, selection_materialized, options, row_counts, rows_exact = materialize_selection(
-            definition, task_repository, dimensions, selected_by_kind, fields,
+            definition, task_repository, dimensions, selected_by_kind, fields, use_profile_options=use_profile_options,
         )
         slides = OrderedDict()
         deck = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
