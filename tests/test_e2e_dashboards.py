@@ -7,7 +7,9 @@ from pathlib import Path
 from threading import Event
 
 import pandas as pd
+from PIL import Image
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 import src.DashboardAnalytic as core
 from src.modules.e2e_dashboards import DashboardDefinition, dashboard_projection_scan_hint, filter_frame
@@ -105,6 +107,11 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '>Import Dashboard<' in page.text
     assert 'Total Dashboards: 0' in page.text
     assert '>Dashboard Datasets & Filters<' in page.text
+    assert '>Universe Dataset<' in page.text
+    assert '>Select Dataset Universe<' in page.text
+    assert '>Dashboard Scope<' in page.text
+    assert '>Select Comparison Scope<' in page.text
+    assert page.text.index('class="ds-scope-control"') < page.text.index('id="ds-sources"')
     assert '>Default Filters<' in page.text
     assert '>Additional Filters<' in page.text
     assert '>Clear Filters<' in page.text
@@ -138,9 +145,22 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-chart-expanded-last"' in page.text
     assert 'id="ds-chart-expanded-canvas-shell"' in page.text
     assert 'id="ds-chart-expanded-position"' in page.text
+    assert 'id="ds-data-filter-count"' in page.text
+    assert 'id="ds-data-clear-filters"' in page.text
+    assert 'id="ds-data-close-bottom"' in page.text
     assert 'class="ds-chart-expanded-footer"' in page.text
     assert 'id="ds-chart-expanded-controls"' in page.text
     assert 'id="ds-chart-expanded-controls"><button type="button" id="ds-chart-expanded-data"' in page.text
+    assert 'data-dashboard-ppt-chart-filter="nr_mode"' in page.text
+    assert 'data-dashboard-ppt-chart-filter="dashboard"' in page.text
+    assert 'data-dashboard-ppt-chart-filter="template"' in page.text
+    assert 'data-dashboard-ppt-chart-filter="scope"' in page.text
+    assert 'id="ds-ppt-charts-filters"' in page.text
+    assert '>View Filters</button>' in page.text
+    assert 'id="ds-ppt-chart-job-picker"' in page.text
+    assert 'id="ds-multivendor-overlay"' in page.text
+    assert '>Use Current Selection</button>' in page.text
+    assert '>Use Latest Datasets</button>' in page.text
     assert 'ds-viewer-refresh-action' in page.text
     dashboard_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
     assert "controls.append(data, expand, zoom)" in dashboard_script
@@ -155,7 +175,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "This Auto-calculated Field has unsaved changes. Close without saving them?" in app_script
     assert "overlay.addEventListener('click', (event) => { if (event.target === overlay) void requestFinish(); });" in app_script
     assert "window.parent.postMessage({type: 'dashboard-analytic:template-saved'}, window.location.origin);" in app_script
-    assert "openTemplateEditor(expandedChart?.focus_row)" in dashboard_script
+    assert "openTemplateEditor(expandedChart?.focus_row, sourceDefinition)" in dashboard_script
     assert "card.ondblclick = safe(async event =>" in dashboard_script
     assert "const syncExpandedChartNavigation" in dashboard_script
     assert "navigateExpandedChart(expandedCharts().length - 1)" in dashboard_script
@@ -170,7 +190,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "This Dashboard has unsaved changes. Close Adaptative Filters without saving them?" not in dashboard_script
     assert "This Report Template has unsaved changes. Close the editor without saving them?" in dashboard_script
     assert 'const templateChanged = templateEditorSaved;' in dashboard_script
-    assert 'if (templateChanged) await prepare();' in dashboard_script
+    assert "if (templateChanged && expandedChartMode !== 'ppt') await prepare();" in dashboard_script
     assert "event.data?.type === 'dashboard-analytic:template-saved'" in dashboard_script
     chart_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/dashboard_charts.js').read_text(encoding='utf-8')
     assert 'function selectionStartAllowed(canvas, event)' in chart_script
@@ -271,7 +291,15 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'const setPreparationRows = payload =>' in dashboard_script
     assert 'setPreparationRows(payload);' in dashboard_script
     assert 'setPreparationRows(prepared);' in dashboard_script
-    assert "$('ds-preparing-rows').hidden = !$('ds-preparing-rows').textContent;" in dashboard_script
+    assert "['Universe Dataset', universe, 'ds-preparing-universe-label']" in dashboard_script
+    assert "['Filtered Universe', filtered, 'ds-preparing-filtered-label']" in dashboard_script
+    assert 'rows.hidden = !rows.textContent;' in dashboard_script
+    assert 'const zoomResetIcon = () =>' in dashboard_script
+    assert "Object.keys(payload.filter_values).length" in dashboard_script
+    assert "bind('ds-data-clear-filters', async () =>" in dashboard_script
+    assert "Clear ${dataColumnFilters.size} filter${dataColumnFilters.size === 1 ? '' : 's'}" in dashboard_script
+    assert "bind('ds-data-close-bottom',()=>" in dashboard_script
+    assert "const reset = node('button', undefined, 'ds-chart-zoom-button ds-chart-zoom-reset');" in dashboard_script
     assert "bind('ds-clear-filters', () => { definition.filters = {}; definition.date_from = definition.date_to = null; sources(); facets(); filterChanged(); });" in dashboard_script
     assert "bind('ds-last-saved-filters', () => {" in dashboard_script
     assert "definition.datasets = structuredClone(saved.datasets || {});" in dashboard_script
@@ -283,6 +311,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '.ds-dashboard-status-ready{' in dashboard_css
     assert '.ds-dashboard-status-rendering{' in dashboard_css
     assert '.ds-chart-controls button:not(:disabled){cursor:pointer!important}' in dashboard_css
+    assert '.ds-preparing .ds-preparing-universe-label{color:#60408d}' in dashboard_css
+    assert '.ds-preparing .ds-preparing-filtered-label{color:#086b71}' in dashboard_css
+    assert '.e2e-dashboards .ds-chart-zoom-reset svg' in dashboard_css
+    assert '.e2e-dashboards .ds-chart-data{width:2rem;min-width:2rem;height:2rem;min-height:2rem}' in dashboard_css
     assert '.ds-source-filter.ds-filter-unsaved select,.ds-source-filter.ds-filter-unsaved .multiselect-trigger' in dashboard_css
     assert '.ds-date-picker.ds-date-picker-unsaved>input,.ds-facet.ds-filter-unsaved .multiselect-trigger' in dashboard_css
     assert '.e2e-dashboards .ds-view-dashboard-action{margin-left:auto;' in dashboard_css
@@ -339,7 +371,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert client.get('/api/e2e-dashboards').json() == {}
 
 
-def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client):
+def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypatch):
     payload = setup_dashboard(client)
     payload['slide_comments'] = {'1': ['Review city outliers', 'Validate campaign coverage']}
     payload['filters'] = {'City': ['London']}
@@ -367,6 +399,8 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client):
     assert job['slides'] == 2
     assert job['charts'] == 3
     assert job['nr_mode'] == 'NSA'
+    assert job['template'] == 'Dashboard test'
+    assert re.fullmatch(r'\d{8}_\d{6}', job['timestamp'])
     assert job['filters'] == ['CDR Data: sample.csv', 'City: London']
     assert job['duration_seconds'] is not None
     background_groups = client.get('/api/background-tasks').json()['groups']
@@ -392,8 +426,24 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client):
     assert len(list(charts_dir.glob('*.model.json'))) == 3
     manifest = json.loads((charts_dir / 'manifest.json').read_text(encoding='utf-8'))
     assert manifest['generate_tooltips'] is True
+    assert manifest['dashboard_id'] == dashboard_id
+    assert re.fullmatch(r'[0-9a-f]{64}', manifest['preview_fingerprint'])
+    assert manifest['definition']['filters'] == {'City': ['London']}
     assert len(manifest['charts']) == 3
+    assert manifest['charts'][0]['entry_index'] == 0
+    assert manifest['charts'][0]['focus_row'] == 0
     presentation = Presentation(output_path)
+    assert not [
+        shape for slide in presentation.slides for shape in slide.shapes
+        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE
+        and any((shape.crop_left, shape.crop_right, shape.crop_top, shape.crop_bottom))
+    ]
+    for shape in (
+        shape for slide in presentation.slides for shape in slide.shapes
+        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE
+    ):
+        with Image.open(BytesIO(shape.image.blob)) as chart_image:
+            assert abs(chart_image.width / chart_image.height - shape.width / shape.height) < 0.01
     commentary = next(
         shape for shape in presentation.slides[0].shapes
         if shape.is_placeholder and shape.placeholder_format.idx == 10
@@ -413,8 +463,37 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client):
     assert len(charts_payload['charts']) == 3
     assert client.get(charts_payload['charts'][0]['image_url']).status_code == 200
     assert charts_payload['charts'][0]['payload_url']
+    assert charts_payload['charts'][0]['data_url']
+    assert charts_payload['charts'][0]['focus_row'] == 0
     chart_model = client.get(charts_payload['charts'][0]['payload_url'])
     assert chart_model.status_code == 200
+    import src.modules.e2e_dashboards as dashboards_module
+    monkeypatch.setattr(
+        dashboards_module, 'prepare_catalog_chart_preview_frame',
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('The cached projection should serve dataset pages.')),
+    )
+    chart_data = client.get(f"/api/e2e-dashboards{charts_payload['charts'][0]['data_url']}")
+    assert chart_data.status_code == 200
+    assert chart_data.json()['total'] == 2
+    filtered_data = client.get(
+        f"/api/e2e-dashboards{charts_payload['charts'][0]['data_url']}",
+        params={
+            'column_filters': json.dumps({'Operator': ['A']}),
+            'include_filter_values': 'true',
+        },
+    )
+    assert filtered_data.status_code == 200
+    assert filtered_data.json()['chart_total'] == 2
+    assert filtered_data.json()['total'] == 2
+    assert filtered_data.json()['filter_values']['Operator'] == ['A']
+    empty_data = client.get(
+        f"/api/e2e-dashboards{charts_payload['charts'][0]['data_url']}",
+        params={'column_filters': json.dumps({'Operator': ['B']})},
+    )
+    assert empty_data.status_code == 200
+    assert empty_data.json()['chart_total'] == 2
+    assert empty_data.json()['total'] == 0
+    assert empty_data.json()['rows'] == []
     assert chart_model.json()['title'] == charts_payload['charts'][0]['title']
     archive = client.get(job['charts_download_url'])
     assert archive.status_code == 200
@@ -590,6 +669,7 @@ def test_dashboard_custom_fields_and_snapshot_filters(client):
     payload['filters'] = {'7-cities': ['Yes']}
     preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
     assert preview['rows']['data'] == 2
+    assert preview['universe_rows']['data'] == 3
     assert preview['options']['7-cities'] == ['No', 'Yes']
     for index in (0, 1, 2):
         assert client.get(f"/api/e2e-dashboards/data/{preview['token']}/{index}").json()['total'] == 2

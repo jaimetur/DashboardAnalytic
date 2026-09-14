@@ -29,7 +29,7 @@ from pptx import Presentation
 from starlette.background import BackgroundTask
 
 from src.modules.cdr_reporting import (
-    _clear_commentary, _layout_chart_frames, _legend_dimensions, _named_slide_layout,
+    _catalog_spec, _clear_commentary, _layout_chart_frames, _legend_dimensions, _named_slide_layout,
     _remove_all_slides, _remove_template_chart_placeholders, _render_dashboard_payload,
     _set_commentary, _set_slide_header, _set_structural_slide_text, catalog_chart_payload,
     ensure_report_vendor_group, normalise_report_operator_aliases, parse_catalog_filters,
@@ -191,6 +191,7 @@ def install_dashboard_routes(core):
     direct_preparation_tasks: dict[str, dict] = {}
     initialized_ppt_job_databases: set[str] = set()
     dashboard_ppt_runs: dict[tuple[str, int], str] = {}
+    dashboard_ppt_data_tokens: dict[tuple[str, int, str], str] = {}
     prefetch_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='e2e-dashboard-models')
     prefetch_dispatch_active = False
     prefetch_generation: dict[str, int] = {}
@@ -340,6 +341,8 @@ def install_dashboard_routes(core):
 
     def serialize_dashboard_ppt_job(row):
         output_path = Path(str(row['output_path'] or ''))
+        output_file = str(row['output_file'] or '')
+        timestamp_match = re.match(r'^(\d{8}_\d{6})', output_file)
         charts_dir = output_path.parent / 'dashboard-charts'
         ready = str(row['status']) == 'ready' and output_path.is_file()
         charts_ready = ready and (charts_dir / 'manifest.json').is_file()
@@ -361,6 +364,8 @@ def install_dashboard_routes(core):
         return {
             'id': job_id, 'dashboard_id': str(row['dashboard_id']),
             'dashboard_name': str(row['dashboard_name']),
+            'timestamp': timestamp_match.group(1) if timestamp_match else '',
+            'template': str(row['template_name'] or ''),
             'nr_mode': str(row['nr_mode'] or 'nsa').upper(),
             'scope': 'Multivendor Comparison' if str(row['scope'] or '').casefold() == 'multivendor' else 'Operator Comparison',
             'filters': filters,
@@ -399,22 +404,22 @@ def install_dashboard_routes(core):
             raise ValueError('The Dashboard charts are not ready.')
         return snapshot
 
-    def add_dashboard_chart_picture(slide, png: bytes, placement) -> None:
-        """Fill a chart placeholder without stretching the Canvas typography."""
-        left, top, width, height = placement
-        picture = slide.shapes.add_picture(BytesIO(png), left, top, width, height)
-        image_ratio = 1600 / 900
-        frame_ratio = width / height
-        if frame_ratio > image_ratio:
-            crop = (1 - image_ratio / frame_ratio) / 2
-            picture.crop_top = crop
-            picture.crop_bottom = crop
-        elif frame_ratio < image_ratio:
-            crop = (1 - frame_ratio / image_ratio) / 2
-            picture.crop_left = crop
-            picture.crop_right = crop
+    def dashboard_chart_render_size(placement) -> tuple[int, int]:
+        """Return a placeholder-ratio Canvas size with one unchanged logical axis."""
+        _left, _top, width, height = placement
+        frame_ratio = float(width) / float(height)
+        if frame_ratio >= 1600 / 900:
+            return min(4096, max(320, round(900 * frame_ratio))), 900
+        return 1600, min(4096, max(240, round(1600 / frame_ratio)))
 
-    def render_dashboard_ppt_job(job_id, run_token, task_repository, snapshot, destination):
+    def add_dashboard_chart_picture(slide, png: bytes, placement) -> None:
+        """Fill a same-ratio chart placeholder without PowerPoint cropping or distortion."""
+        left, top, width, height = placement
+        slide.shapes.add_picture(BytesIO(png), left, top, width, height)
+
+    def render_dashboard_ppt_job(
+        job_id, run_token, task_repository, snapshot, destination, dashboard_id, preview_fingerprint,
+    ):
         run_key = (str(Path(task_repository.db_path).resolve()), job_id)
 
         def run_is_active():
@@ -436,6 +441,12 @@ def install_dashboard_routes(core):
             charts_dir = destination.parent / 'dashboard-charts'
             charts_dir.mkdir(parents=True, exist_ok=True)
             manifest = []
+            focus_rows = {
+                entry_index: editor_index
+                for editor_index, (entry_index, _entry) in enumerate(
+                    sorted(enumerate(snapshot.entries), key=lambda item: (item[1].slide, item[0]))
+                )
+            }
             chart_total = sum(
                 1 for entries in grouped.values() for _index, entry in entries
                 if entry.source_kind and snapshot.definition.datasets.get(entry.source_kind)
@@ -475,7 +486,10 @@ def install_dashboard_routes(core):
                         return
                     model_path = canvas_model_path(snapshot, entry)
                     payload = json.loads(model_path.read_text(encoding='utf-8'))
-                    png, hover_targets = _render_dashboard_payload(payload)
+                    render_width, render_height = dashboard_chart_render_size(placement)
+                    png, hover_targets = _render_dashboard_payload(
+                        payload, width=render_width, height=render_height,
+                    )
                     if not run_is_active():
                         return
                     file_name = f'slide-{slide_number:03d}-chart-{chart_number:02d}.png'
@@ -492,6 +506,7 @@ def install_dashboard_routes(core):
                     manifest.append({
                         'slide': slide_number, 'title': entry.chart_title or header.slide_title,
                         'source': entry.cdr_source, 'chart_type': entry.chart_type,
+                        'entry_index': index, 'focus_row': focus_rows[index],
                         'file': file_name, 'hover_file': hover_file, 'model_file': model_file,
                     })
                     rendered += 1
@@ -502,7 +517,13 @@ def install_dashboard_routes(core):
             if not run_is_active():
                 return
             (charts_dir / 'manifest.json').write_text(
-                json.dumps({'generate_tooltips': True, 'charts': manifest}, ensure_ascii=False),
+                json.dumps({
+                    'generate_tooltips': True,
+                    'dashboard_id': dashboard_id,
+                    'preview_fingerprint': preview_fingerprint,
+                    'definition': snapshot.definition.model_dump(mode='json'),
+                    'charts': manifest,
+                }, ensure_ascii=False),
                 encoding='utf-8',
             )
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -620,6 +641,7 @@ def install_dashboard_routes(core):
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         dashboard_name = str(raw_definition.get('name') or dashboard_id)
+        preview_fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
         filters_json = json.dumps(dashboard_filter_lines(raw_definition, task_repository), ensure_ascii=False)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', dashboard_name).strip() or 'Dashboard'
@@ -658,9 +680,15 @@ def install_dashboard_routes(core):
         run_token = uuid4().hex
         with lock:
             dashboard_ppt_runs[(str(Path(task_repository.db_path).resolve()), job_id)] = run_token
+            snapshot_token = next((token for token, value in snapshots.items() if value is snapshot), '')
+            if snapshot_token:
+                dashboard_ppt_data_tokens[(str(Path(task_repository.db_path).resolve()), job_id, user.username)] = snapshot_token
         Thread(
             target=render_dashboard_ppt_job,
-            args=(job_id, run_token, task_repository, snapshot, destination),
+            args=(
+                job_id, run_token, task_repository, snapshot, destination,
+                dashboard_id, preview_fingerprint,
+            ),
             name=f'dashboard-ppt-{job_id}', daemon=True,
         ).start()
         task_repository.add_log(user.username, 'export_dashboard_ppt', json.dumps({
@@ -726,7 +754,39 @@ def install_dashboard_routes(core):
         except (AttributeError, OSError, json.JSONDecodeError):
             raise HTTPException(404, 'Dashboard charts are not available.')
         charts = []
-        for item in manifest.get('charts', []):
+        definition_available = isinstance(manifest.get('definition'), dict)
+        fallback_focus_rows = []
+        if any(not isinstance(item.get('focus_row'), int) for item in manifest.get('charts', []) if isinstance(item, dict)):
+            try:
+                nr_mode = str(row['nr_mode'] or 'nsa').casefold()
+                definition = DashboardDefinition(
+                    name=str(row['dashboard_name']), template=str(row['template_name']),
+                    template_technology=nr_mode, technology=nr_mode,
+                    scope='multivendor' if str(row['scope']).casefold() == 'multivendor' else 'single',
+                )
+                entries = validate(definition, bound_repository())
+                focus_by_index = {
+                    entry_index: editor_index
+                    for editor_index, (entry_index, _entry) in enumerate(
+                        sorted(enumerate(entries), key=lambda value: (value[1].slide, value[0]))
+                    )
+                }
+                unused = set(range(len(entries)))
+                for item in manifest.get('charts', []):
+                    matched = next((
+                        entry_index for entry_index, entry in enumerate(entries)
+                        if entry_index in unused
+                        and entry.slide == int(item.get('slide') or 0)
+                        and str(entry.chart_title or entry.slide_title) == str(item.get('title') or '')
+                        and str(entry.cdr_source) == str(item.get('source') or '')
+                        and str(entry.chart_type) == str(item.get('chart_type') or '')
+                    ), None)
+                    fallback_focus_rows.append(focus_by_index.get(matched) if matched is not None else None)
+                    if matched is not None:
+                        unused.discard(matched)
+            except (TypeError, ValueError):
+                fallback_focus_rows = []
+        for chart_index, item in enumerate(manifest.get('charts', [])):
             if not isinstance(item, dict):
                 continue
             chart_file = str(item.get('file') or '')
@@ -743,8 +803,12 @@ def install_dashboard_routes(core):
                 'title': str(item.get('title') or 'Chart'),
                 'source': str(item.get('source') or ''),
                 'chart_type': str(item.get('chart_type') or ''),
+                'focus_row': int(item['focus_row']) if isinstance(item.get('focus_row'), int) else (
+                    fallback_focus_rows[chart_index] if chart_index < len(fallback_focus_rows) else None
+                ),
                 'image_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts/{chart_file}',
                 'payload_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/chart-models/{model_file}' if model_available else None,
+                'data_url': f'/ppt-jobs/{job_id}/data/{chart_index}' if definition_available and isinstance(item.get('entry_index'), int) else None,
             })
         return {
             'job': serialize_dashboard_ppt_job(row),
@@ -763,6 +827,72 @@ def install_dashboard_routes(core):
         except (AttributeError, OSError, json.JSONDecodeError):
             raise HTTPException(404, 'Chart model not found.')
         return JSONResponse(payload)
+
+    @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/data/{chart_index}')
+    def dashboard_ppt_chart_data(
+        job_id: int, chart_index: int, page: int = 0, download: bool = False,
+        column_filters: str = '', include_filter_values: bool = False,
+        user=Depends(dashboard_user),
+    ):
+        task_repository = bound_repository()
+        row = dashboard_ppt_job(task_repository, job_id)
+        charts_dir = Path(str(row['output_path'])).parent / 'dashboard-charts' if row else None
+        try:
+            manifest = json.loads((charts_dir / 'manifest.json').read_text(encoding='utf-8'))
+            chart = manifest['charts'][chart_index]
+            definition = DashboardDefinition.model_validate(manifest['definition'])
+            entry_index = int(chart['entry_index'])
+        except (AttributeError, IndexError, KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+            raise HTTPException(404, 'The filtered dataset is not available for this PowerPoint Job.')
+        workspace = str(Path(task_repository.db_path).resolve())
+        token_key = (workspace, job_id, user.username)
+        with lock:
+            token = dashboard_ppt_data_tokens.get(token_key)
+            cached_snapshot = snapshots.get(token) if token else None
+        if cached_snapshot is None:
+            preview = restore_preview_manifest(
+                workspace,
+                str(manifest.get('dashboard_id') or row['dashboard_id']),
+                str(manifest.get('preview_fingerprint') or ''),
+            )
+            if preview is None:
+                preview = build_preview(definition, user, workspace=workspace)
+            token = str(preview['token'])
+            with lock:
+                dashboard_ppt_data_tokens[token_key] = token
+        snapshot, entry, _ = snapshot_chart(
+            token, entry_index, user, include_frame=False, expected_workspace=workspace,
+        )
+        selected_column_filters = parse_chart_column_filters(column_filters)
+        if not download:
+            projected_page = projection_chart_data_page(
+                snapshot, entry, page, selected_column_filters, include_filter_values,
+            )
+            if projected_page is not None:
+                visible, total, chart_total, filter_values = projected_page
+                return {
+                    'columns': list(visible.columns),
+                    'rows': visible.fillna('').astype(str).values.tolist(),
+                    'total': total, 'chart_total': chart_total,
+                    'filter_values': filter_values, 'page': max(page, 0),
+                }
+        _, _, frame = snapshot_chart(token, entry_index, user, expected_workspace=workspace)
+        frame = unique_chart_dataset_rows(snapshot, entry, frame)
+        chart_total = len(frame)
+        filter_values = chart_dataset_filter_values(frame) if include_filter_values else {}
+        frame = apply_chart_column_filters(frame, selected_column_filters)
+        if download:
+            return Response(
+                frame.to_csv(index=False), media_type='text/csv',
+                headers={'Content-Disposition': 'attachment; filename="dashboard-chart-data.csv"'},
+            )
+        page = max(page, 0)
+        visible = frame.iloc[page * 100:(page + 1) * 100].fillna('').astype(str)
+        return {
+            'columns': list(visible.columns), 'rows': visible.values.tolist(),
+            'total': len(frame), 'chart_total': chart_total,
+            'filter_values': filter_values, 'page': page,
+        }
 
     @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/charts/{chart_file}')
     def dashboard_ppt_chart(job_id: int, chart_file: str, user=Depends(dashboard_user)):
@@ -1215,6 +1345,10 @@ def install_dashboard_routes(core):
         entries = validate(definition, task_repository)
         dimensions = core.load_repository_calculated_dimensions(task_repository)
         selected_by_kind = selected_sources(definition, task_repository)
+        universe_rows = {
+            kind: sum(int(dataset.get('row_count') or 0) for dataset in selected)
+            for kind, selected in selected_by_kind.items()
+        }
         ensure_filter_projection(definition, task_repository, dimensions, selected_by_kind, entries)
         date_bounds = selected_date_bounds(task_repository, selected_by_kind)
         apply_selected_date_bounds(definition, date_bounds)
@@ -1265,6 +1399,7 @@ def install_dashboard_routes(core):
             'filter_fields': list(ADAPTATIVE_FILTER_FIELDS),
             'available_fields': sorted(available_fields, key=str.casefold),
             'rows': row_counts,
+            'universe_rows': universe_rows,
             'rows_exact': rows_exact,
             'date_bounds': date_bounds,
         }
@@ -1810,6 +1945,186 @@ def install_dashboard_routes(core):
             return pd.read_sql_query(query, connection, params=parameters)
         finally:
             connection.close()
+
+    def parse_chart_column_filters(encoded):
+        try:
+            payload = json.loads(encoded or '{}')
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        return {
+            str(column): [str(value) for value in values]
+            for column, values in payload.items() if isinstance(values, list)
+        }
+
+    def chart_dataset_filter_values(frame):
+        return {
+            str(column): sorted(
+                {'' if pd.isna(value) else str(value) for value in frame[column]},
+                key=lambda value: value.casefold(),
+            )
+            for column in frame.columns
+        }
+
+    def apply_chart_column_filters(frame, column_filters):
+        result = frame
+        lookup = {identity(column): column for column in frame.columns}
+        for requested, values in column_filters.items():
+            column = lookup.get(identity(requested))
+            if column is None or not values:
+                return result.iloc[0:0]
+            accepted = set(values)
+            result = result.loc[
+                result[column].map(lambda value: '' if pd.isna(value) else str(value)).isin(accepted)
+            ]
+        return result
+
+    def chart_row_universe(snapshot, entry, selected=None):
+        """Return the strongest known upper bound for one chart's source rows."""
+        if selected is None:
+            task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
+            selected = core._optional_reporting_datasets(
+                snapshot.definition.datasets.get(entry.source_kind, []), entry.source_kind, task_repository,
+            )
+        limits = []
+        source_total = sum(int(row.get('row_count') or 0) for row in selected)
+        if source_total:
+            limits.append(source_total)
+        filtered_rows = (snapshot.payload.get('rows') or {}).get(entry.source_kind)
+        if filtered_rows is not None:
+            limits.append(max(0, int(filtered_rows)))
+        return min(limits) if limits else 0
+
+    def projection_chart_data_page(
+        snapshot, entry, page, column_filters=None, include_filter_values=False,
+    ):
+        """Read one exact chart-data page without rebuilding its full DataFrame."""
+        spec = _catalog_spec(entry)
+        if spec.get('operators'):
+            return None
+        task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
+        selected = core._optional_reporting_datasets(
+            snapshot.definition.datasets.get(entry.source_kind, []), entry.source_kind, task_repository,
+        )
+        cache_path, table_name, projection_columns = ensure_projection(
+            snapshot, entry.source_kind, task_repository,
+        )
+        where, parameters = selection_where(
+            task_repository, entry.source_kind, [int(row['id']) for row in selected], snapshot.definition,
+            columns=projection_columns, include_dataset_scope=False,
+        )
+        source_filters = (
+            (spec.get('sessions'), ('Session_Type', 'session_type', 'Test_Name', 'Test_Type')),
+            (spec.get('tests'), ('Test_Name', 'test_name', 'Type_of_Test', 'Test_Type')),
+            (spec.get('directions'), ('Direction', 'direction', 'Call_Direction')),
+            ((spec.get('city_scope'),) if spec.get('city_scope') else None, ('city', 'City', 'G_Level_1', 'G_Level_2')),
+        )
+        for values, candidates in source_filters:
+            if not values:
+                continue
+            column = next((resolve_sql_column(projection_columns, name) for name in candidates if resolve_sql_column(projection_columns, name)), None)
+            if not column:
+                continue
+            expression = ' OR '.join(
+                f'LOWER(COALESCE(CAST({task_repository._quote_identifier(column)} AS TEXT), \'\')) LIKE ?'
+                for _value in values
+            )
+            where = f'({where}) AND ({expression})'
+            parameters.extend(f'%{str(value).casefold()}%' for value in values)
+        template_where, template_parameters, filters_applied = chart_filter_sql(
+            entry, projection_columns, snapshot.multivendor,
+        )
+        if not filters_applied:
+            return None
+        if template_where:
+            where = f'({where}) AND ({template_where})'
+            parameters.extend(template_parameters)
+        lookup = {identity(column): column for column in projection_columns}
+        selected_columns = []
+        for requested in chart_query_columns(entry, snapshot.multivendor):
+            actual = lookup.get(identity(requested))
+            if actual and actual not in selected_columns:
+                selected_columns.append(actual)
+        dataset_column = lookup.get(identity('dataset_id'))
+        source_row_column = lookup.get(identity('source_row_id'))
+        if not selected_columns or not dataset_column or not source_row_column:
+            return None
+        quote = lambda column: '"' + str(column).replace('"', '""') + '"'
+        identity_columns = f'{quote(dataset_column)}, {quote(source_row_column)}'
+        page = max(0, int(page))
+        connection = sqlite3.connect(cache_path, timeout=120.0)
+        try:
+            chart_total = int(connection.execute(
+                f'SELECT COUNT(*) FROM ('
+                f'SELECT 1 FROM {quote(table_name)} WHERE {where} GROUP BY {identity_columns}'
+                f')',
+                parameters,
+            ).fetchone()[0])
+            chart_total = min(chart_total, chart_row_universe(snapshot, entry, selected))
+            filter_values = {}
+            if include_filter_values:
+                values_query = ', '.join(
+                    f'json_group_array(DISTINCT COALESCE(CAST({quote(column)} AS TEXT), \'\')) AS filter_{index}'
+                    for index, column in enumerate(selected_columns)
+                )
+                values_row = connection.execute(
+                    f'SELECT {values_query} FROM {quote(table_name)} WHERE {where}', parameters,
+                ).fetchone()
+                filter_values = {
+                    column: sorted(
+                        (str(value) for value in json.loads(values_row[index] or '[]')),
+                        key=lambda value: value.casefold(),
+                    )
+                    for index, column in enumerate(selected_columns)
+                }
+            filtered_where = where
+            filtered_parameters = list(parameters)
+            for requested, values in (column_filters or {}).items():
+                column = lookup.get(identity(requested))
+                if column is None or not values:
+                    filtered_where = f'({filtered_where}) AND 0'
+                    continue
+                placeholders = ', '.join('?' for _value in values)
+                filtered_where = (
+                    f'({filtered_where}) AND '
+                    f'COALESCE(CAST({quote(column)} AS TEXT), \'\') IN ({placeholders})'
+                )
+                filtered_parameters.extend(values)
+            total = chart_total
+            if column_filters:
+                total = int(connection.execute(
+                    f'SELECT COUNT(*) FROM ('
+                    f'SELECT 1 FROM {quote(table_name)} WHERE {filtered_where} GROUP BY {identity_columns}'
+                    f')',
+                    filtered_parameters,
+                ).fetchone()[0])
+                total = min(total, chart_total)
+            page_size = min(100, max(0, total - page * 100))
+            query = (
+                f'SELECT {", ".join(quote(column) for column in selected_columns)} '
+                f'FROM {quote(table_name)} WHERE {filtered_where} GROUP BY {identity_columns} '
+                f'ORDER BY {identity_columns} LIMIT ? OFFSET ?'
+            )
+            visible = pd.read_sql_query(
+                query, connection, params=(*filtered_parameters, page_size, page * 100),
+            )
+        finally:
+            connection.close()
+        if snapshot.multivendor:
+            visible = ensure_report_vendor_group(visible)
+        visible = normalise_report_operator_aliases(visible)
+        return visible, total, chart_total, filter_values
+
+    def unique_chart_dataset_rows(snapshot, entry, frame):
+        """Keep one preview row per source row and never exceed its filtered CDR universe."""
+        lookup = {identity(column): column for column in frame.columns}
+        identity_columns = [
+            lookup[key] for key in (identity('dataset_id'), identity('source_row_id')) if key in lookup
+        ]
+        result = frame.drop_duplicates(subset=identity_columns, keep='first') if identity_columns else frame
+        universe = chart_row_universe(snapshot, entry)
+        return result.iloc[:universe] if len(result) > universe else result
 
     def snapshot_chart(token, index, user, *, include_frame=True, expected_workspace: str | None = None):
         with lock:
@@ -2414,10 +2729,36 @@ def install_dashboard_routes(core):
         return Response(png, media_type='image/png', headers={'Cache-Control': 'private, max-age=3600'})
 
     @app.get('/api/e2e-dashboards/data/{token}/{index}')
-    def chart_data(token: str, index: int, page: int = 0, download: bool = False, user=Depends(dashboard_user)):
+    def chart_data(
+        token: str, index: int, page: int = 0, download: bool = False,
+        column_filters: str = '', include_filter_values: bool = False,
+        user=Depends(dashboard_user),
+    ):
+        snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False)
+        selected_column_filters = parse_chart_column_filters(column_filters)
+        if not download:
+            projected_page = projection_chart_data_page(
+                snapshot, entry, page, selected_column_filters, include_filter_values,
+            )
+            if projected_page is not None:
+                visible, total, chart_total, filter_values = projected_page
+                return {
+                    'columns': list(visible.columns),
+                    'rows': visible.fillna('').astype(str).values.tolist(),
+                    'total': total, 'chart_total': chart_total,
+                    'filter_values': filter_values, 'page': max(page, 0),
+                }
         _, _, frame = snapshot_chart(token, index, user)
+        frame = unique_chart_dataset_rows(snapshot, entry, frame)
+        chart_total = len(frame)
+        filter_values = chart_dataset_filter_values(frame) if include_filter_values else {}
+        frame = apply_chart_column_filters(frame, selected_column_filters)
         if download:
             return Response(frame.to_csv(index=False), media_type='text/csv', headers={'Content-Disposition': 'attachment; filename="dashboard-chart-data.csv"'})
         page = max(page, 0)
         visible = frame.iloc[page*100:(page+1)*100].fillna('').astype(str)
-        return {'columns': list(visible.columns), 'rows': visible.values.tolist(), 'total': len(frame), 'page': page}
+        return {
+            'columns': list(visible.columns), 'rows': visible.values.tolist(),
+            'total': len(frame), 'chart_total': chart_total,
+            'filter_values': filter_values, 'page': page,
+        }

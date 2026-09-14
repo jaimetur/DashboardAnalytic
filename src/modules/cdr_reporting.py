@@ -100,11 +100,15 @@ class _DashboardCanvasRenderer:
             raise RuntimeError(ready.get("error") or "Unable to start the Dashboard Canvas renderer.")
         self.request_id = 0
 
-    def render(self, payload: dict[str, object]) -> tuple[bytes, list[dict[str, object]]]:
+    def render(
+        self, payload: dict[str, object], *, width: int = 1600, height: int = 900,
+    ) -> tuple[bytes, list[dict[str, object]]]:
         if not self.process.stdin or not self.process.stdout or self.process.poll() is not None:
             raise RuntimeError("The Dashboard Canvas renderer is not running.")
         self.request_id += 1
-        self.process.stdin.write(json.dumps({"id": self.request_id, "payload": payload}, separators=(",", ":")) + "\n")
+        self.process.stdin.write(json.dumps({
+            "id": self.request_id, "payload": payload, "width": width, "height": height,
+        }, separators=(",", ":")) + "\n")
         self.process.stdin.flush()
         response = json.loads(self.process.stdout.readline() or "{}")
         if response.get("error"):
@@ -127,13 +131,13 @@ class _DashboardCanvasRenderer:
 
 
 def _render_dashboard_payload(
-    payload: dict[str, object],
+    payload: dict[str, object], *, width: int = 1600, height: int = 900,
 ) -> tuple[bytes, list[dict[str, object]]]:
     global _DASHBOARD_CANVAS_RENDERER
     with _DASHBOARD_CANVAS_RENDERER_LOCK:
         if _DASHBOARD_CANVAS_RENDERER is None or _DASHBOARD_CANVAS_RENDERER.process.poll() is not None:
             _DASHBOARD_CANVAS_RENDERER = _DashboardCanvasRenderer()
-        return _DASHBOARD_CANVAS_RENDERER.render(payload)
+        return _DASHBOARD_CANVAS_RENDERER.render(payload, width=width, height=height)
 
 
 def _render_dashboard_payload_png(payload: dict[str, object]) -> bytes:

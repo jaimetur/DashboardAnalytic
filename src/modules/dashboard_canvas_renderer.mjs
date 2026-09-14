@@ -152,10 +152,20 @@ for await (const line of lines) {
   if (!line.trim()) continue;
   try {
     const request = JSON.parse(line);
+    const width = Math.max(320, Math.min(4096, Math.round(Number(request.width) || 1600)));
+    const height = Math.max(240, Math.min(4096, Math.round(Number(request.height) || 900)));
+    await renderer.devtools.call('Emulation.setDeviceMetricsOverride', {
+      width, height, deviceScaleFactor: 1, mobile: false,
+    });
     const expression = `(() => {
       const previous = document.getElementById('chart');
       const canvas = document.createElement('canvas');
-      canvas.id = 'chart'; previous.replaceWith(canvas);
+      canvas.id = 'chart';
+      canvas.style.width = ${JSON.stringify(`${width}px`)};
+      canvas.style.height = ${JSON.stringify(`${height}px`)};
+      document.documentElement.style.width = document.body.style.width = ${JSON.stringify(`${width}px`)};
+      document.documentElement.style.height = document.body.style.height = ${JSON.stringify(`${height}px`)};
+      previous.replaceWith(canvas);
       globalThis.renderDashboardChart(canvas, ${JSON.stringify(request.payload)});
       return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
         resolve(globalThis.getDashboardChartHits(canvas));
@@ -167,7 +177,7 @@ for await (const line of lines) {
     if (request.payload?.type === 'map') await delay(600);
     const screenshot = await renderer.devtools.call('Page.captureScreenshot', {
       format: 'png', fromSurface: true, captureBeyondViewport: false,
-      clip: {x: 0, y: 0, width: 1600, height: 900, scale: 1},
+      clip: {x: 0, y: 0, width, height, scale: 1},
     });
     process.stdout.write(`${JSON.stringify({
       id: request.id,

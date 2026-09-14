@@ -491,7 +491,11 @@
   }
 
   function drawMeanBars(context, payload, state, transform) {
-    const bars = payload.bars || [], keys = bars.map(bar => bar.key), left = 155, top = 280, width = 1165, baseline = 680;
+    const bars = payload.bars || [], keys = bars.map(bar => bar.key);
+    // A bottom legend needs a protected lower band. With a side legend, use
+    // that space for the plot instead of leaving a large blank rectangle.
+    const bottomLegend = String(payload.legend?.position || '').toLowerCase() === 'bottom';
+    const left = 155, top = bottomLegend ? 280 : 210, width = 1165, baseline = bottomLegend ? 680 : 775;
     const barWidth = Math.min(150, Math.max(30, width / Math.max(bars.length * 1.7, 1)));
     bars.forEach((bar, index) => {
       const height = (baseline - top) * Number(bar.value) / Math.max(Number(payload.maximum), 1), x = left + (index + .5) * width / bars.length - barWidth / 2, y = baseline - height;
