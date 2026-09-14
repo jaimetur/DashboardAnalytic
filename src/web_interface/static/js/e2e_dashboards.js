@@ -538,7 +538,7 @@
     if (!prepared) return; slideIndex = Math.max(0,Math.min(slideIndex,prepared.slides.length-1));
     const slide = prepared.slides[slideIndex]; if (!slide) return;
     $('ds-title').textContent = slide.title || `Dashboard ${slide.number}`; $('ds-subtitle').textContent = slide.subtitle;
-    $('ds-position').textContent = `${definition.name} · Dashboard ${slideIndex+1} / ${prepared.slides.length}`;
+    $('ds-position').textContent = `${definition.name} · Slide ${slideIndex+1} / ${prepared.slides.length}`;
     $('ds-slide').replaceChildren(...prepared.slides.map((item,index)=>option(String(index),`${item.number} · ${item.title || 'Dashboard'}`))); $('ds-slide').value = String(slideIndex);
     $('ds-first').disabled = $('ds-prev').disabled = slideIndex === 0;
     $('ds-next').disabled = $('ds-last').disabled = slideIndex === prepared.slides.length - 1;

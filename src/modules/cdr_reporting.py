@@ -756,6 +756,10 @@ VENDOR_COLOUR_VARIANTS = {
     "blank": ("#7A8791", "#58656F", "#A8B1B8", "#687580"),
 }
 
+# Charts use one operator sequence everywhere. Unknown operators remain after
+# the UK comparison operators and are ordered by their display label.
+OPERATOR_DISPLAY_ORDER = ("VF", "3", "EE", "O2")
+
 # A consistent vendor sequence makes Vendor Comparison charts comparable from
 # one operator to another. Unknown vendors remain after this canonical set.
 VENDOR_DISPLAY_ORDER = ("ericsson", "huawei", "samsung", "nsn")
@@ -1707,37 +1711,43 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         _normalise_catalog_name(dimension) == "operator" for _column_name, dimension in hierarchy
     )
 
-    def vendor_sort_key(value: object, operator_ranks: dict[str, int]) -> tuple[int, int, str]:
+    def vendor_sort_key(value: object) -> tuple[int, str, int, str]:
         if split_vendor_hierarchy:
             normalized_vendor = _vendor_label(value).casefold()
             vendor_rank = next(
                 (index for index, name in enumerate(VENDOR_DISPLAY_ORDER) if name in normalized_vendor),
                 len(VENDOR_DISPLAY_ORDER),
             )
-            return 0, vendor_rank, normalized_vendor
-        return _vendor_display_sort_key(value, operator_ranks)
+            return 0, "", vendor_rank, normalized_vendor
+        return _vendor_display_sort_key(value)
+
+    operator_columns = [
+        column for column, dimension in hierarchy
+        if _normalise_catalog_name(dimension) == "operator"
+    ]
     needs_campaign_sort = any(
         (observed := frame[column].drop_duplicates().tolist()) != sorted(observed, key=_campaign_sort_key)
         for column in campaign_columns
     ) if not frame.empty else False
-    needs_vendor_sort = False
-    if not frame.empty:
-        for column in vendor_columns:
-            operator_ranks: dict[str, int] = {}
-            observed = frame[column].drop_duplicates().tolist()
-            expected = sorted(observed, key=lambda value: vendor_sort_key(value, operator_ranks))
-            if observed != expected:
-                needs_vendor_sort = True
-                break
-    if needs_campaign_sort or needs_vendor_sort:
+    needs_vendor_sort = any(
+        (observed := frame[column].drop_duplicates().tolist()) != sorted(observed, key=vendor_sort_key)
+        for column in vendor_columns
+    ) if not frame.empty else False
+    needs_operator_sort = any(
+        (observed := frame[column].drop_duplicates().tolist()) != sorted(observed, key=_operator_display_sort_key)
+        for column in operator_columns
+    ) if not frame.empty else False
+    if needs_campaign_sort or needs_vendor_sort or needs_operator_sort:
         sort_columns: list[str] = []
-        vendor_operator_ranks: dict[str, int] = {}
         for index, (column, dimension) in enumerate(hierarchy):
             values = frame[column].drop_duplicates().tolist()
-            if _normalise_catalog_name(dimension) == "campaign":
+            normalized_dimension = _normalise_catalog_name(dimension)
+            if normalized_dimension == "campaign":
                 values = sorted(values, key=_campaign_sort_key)
-            elif _normalise_catalog_name(dimension) in {"vendor", "reportvendor"}:
-                values = sorted(values, key=lambda value: vendor_sort_key(value, vendor_operator_ranks))
+            elif normalized_dimension in {"vendor", "reportvendor"}:
+                values = sorted(values, key=vendor_sort_key)
+            elif normalized_dimension == "operator":
+                values = sorted(values, key=_operator_display_sort_key)
             configured_dimension_values[column] = list(values)
             ranks = {value: rank for rank, value in enumerate(values)}
             sort_column = f"__catalog_sort_{index}"
@@ -2251,18 +2261,28 @@ def _vendor_colour_family(vendor: str) -> str | None:
     return next((family for family in VENDOR_COLOUR_VARIANTS if family in normalized), None)
 
 
-def _vendor_display_sort_key(value: object, operator_ranks: dict[str, int]) -> tuple[int, int, str]:
+def _operator_display_sort_key(value: object) -> tuple[int, str]:
+    """Order recognised operators before all other operators by display label."""
+    normalized = _normalise_report_operator(value)
+    rank = next(
+        (index for index, operator in enumerate(OPERATOR_DISPLAY_ORDER) if normalized.casefold() == operator.casefold()),
+        len(OPERATOR_DISPLAY_ORDER),
+    )
+    return rank, normalized.casefold()
+
+
+def _vendor_display_sort_key(value: object) -> tuple[int, str, int, str]:
     """Order ``Operator_Vendor`` values by operator then canonical vendor rank."""
     text = str(value).strip()
     operator, _separator, vendor = text.partition("_")
     normalized_operator = _normalise_report_operator(operator or text)
-    operator_rank = operator_ranks.setdefault(normalized_operator, len(operator_ranks))
     normalized_vendor = _vendor_label(vendor or text).casefold()
     vendor_rank = next(
         (index for index, name in enumerate(VENDOR_DISPLAY_ORDER) if name in normalized_vendor),
         len(VENDOR_DISPLAY_ORDER),
     )
-    return operator_rank, vendor_rank, normalized_vendor
+    operator_rank, operator_label = _operator_display_sort_key(normalized_operator)
+    return operator_rank, operator_label, vendor_rank, normalized_vendor
 
 
 def _series_colours(

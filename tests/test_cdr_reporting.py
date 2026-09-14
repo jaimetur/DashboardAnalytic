@@ -940,6 +940,24 @@ def test_multivendor_operator_filters_match_vendor_prefixes_and_keep_full_groupi
     ]
 
 
+def test_grouping_orders_operators_vf_three_ee_o2_then_unknown_operators() -> None:
+    entry = CatalogEntry(
+        1, "", "", "", "", "CDR-Speech", "LQ", "Average Vertical Bars",
+        "", "", "Operator", "Campaign", "Top",
+    )
+    frame = pd.DataFrame({
+        "report_vendor": ["O2_NSN", "Lebara_NSN", "EE_NSN", "3_Ericsson", "VF_Huawei"],
+        "Campaign": ["2026 Q2"] * 5,
+        "LQ": [4.0] * 5,
+    })
+
+    grouped, primary, _series = _apply_catalog_grouping(
+        frame, prepare_multivendor_catalog_entry(entry), True, "LQ",
+    )
+
+    assert grouped["__catalog_row_0"].tolist() == ["VF", "3", "EE", "O2", "Lebara"]
+
+
 def test_multivendor_grouping_uses_the_same_vendor_order_for_each_operator() -> None:
     entry = CatalogEntry(
         1, "", "", "", "", "CDR-Speech", "LQ", "Average Vertical Bars",
@@ -1010,9 +1028,9 @@ def test_campaign_grouping_displays_only_year_and_quarter() -> None:
 
     grouped, _primary, series = _apply_catalog_grouping(frame, entry, False, 'LQ')
 
-    assert grouped['Campaign'].tolist() == ['UK_Q2_SA_2026', 'UK_Q4_2025', '2024 Q3 NSA']
-    assert grouped['__catalog_column_0'].tolist() == ['2026-Q2', '2025-Q4', '2024-Q3']
-    assert grouped[series].tolist() == ['2026-Q2', '2025-Q4', '2024-Q3']
+    assert grouped['Campaign'].tolist() == ['2024 Q3 NSA', 'UK_Q4_2025', 'UK_Q2_SA_2026']
+    assert grouped['__catalog_column_0'].tolist() == ['2024-Q3', '2025-Q4', '2026-Q2']
+    assert grouped[series].tolist() == ['2024-Q3', '2025-Q4', '2026-Q2']
 
 
 def test_cdf_renders_a_curve_for_each_complete_rows_and_columns_combination() -> None:
@@ -1568,8 +1586,8 @@ def test_campaign_aggregation_is_ordered_oldest_to_newest_for_every_chart_render
     keys = _hierarchical_unique_keys(grouped, ['__catalog_column_0', '__catalog_column_1'])
 
     assert keys == [
-        ('EE', '2026-Q1'), ('EE', '2026-Q2'),
         ('VF', '2026-Q1'), ('VF', '2026-Q2'),
+        ('EE', '2026-Q1'), ('EE', '2026-Q2'),
     ]
 
 
