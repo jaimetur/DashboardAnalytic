@@ -1410,7 +1410,7 @@ def install_dashboard_routes(core):
                 if job['status'] == 'processing':
                     tasks.append({
                         'id': job['task_id'],
-                        'label': f'Preparing Dashboard charts: {job["name"]}',
+                        'label': f'Rendering Dashboard Charts: {job["name"]}',
                         'detail': (
                             f'{job["completed"]} of {job["total"]} Canvas models'
                             if job['total'] else 'Preparing filtered Dashboard selection'
@@ -1422,7 +1422,7 @@ def install_dashboard_routes(core):
                     suffix = '' if ahead == 1 else 's'
                     tasks.append({
                         'id': job['task_id'],
-                        'label': f'Queued Dashboard charts: {job["name"]}',
+                        'label': f'Queued Dashboard Charts: {job["name"]}',
                         'detail': f'Queued behind {ahead} Dashboard preparation{suffix}',
                         'progress': 0,
                     })

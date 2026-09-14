@@ -278,7 +278,7 @@ def test_applying_filters_queues_all_chart_models_and_reuses_previous_cache(clie
         tasks = [task for group in groups for task in group['tasks']]
         assert any(
             task['id'].startswith('dashboard-prefetch:filtered-dashboard:')
-            and task['label'] == 'Preparing Dashboard charts: Comparison'
+            and task['label'] == 'Rendering Dashboard Charts: Comparison'
             for task in tasks
         )
     finally:
