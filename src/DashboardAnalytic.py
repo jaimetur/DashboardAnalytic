@@ -2786,7 +2786,7 @@ ARCHIVE_COMPONENTS = frozenset({
     'app_database', 'workspace_components',
 })
 WORKSPACE_ARCHIVE_COMPONENTS = frozenset({
-    'workspace_database', 'input', 'output', 'report_templates', 'auto_calculated_fields',
+    'workspace_database', 'input', 'output', 'dashboards', 'report_templates', 'auto_calculated_fields',
 })
 ARCHIVE_KIND_COMPONENTS = {
     'config': ('app_database',),
@@ -2794,6 +2794,7 @@ ARCHIVE_KIND_COMPONENTS = {
     'full-environment': ('app_database', 'workspace_components'),
     'slides-templates': ('workspace_components',),
     'auto-calculated-fields': ('workspace_components',),
+    'dashboards': ('workspace_components',),
 }
 UNCOMPRESSED_ARCHIVE_SUFFIXES = frozenset({
     '.7z', '.avi', '.docx', '.gif', '.gz', '.jpeg', '.jpg', '.mp3', '.mp4', '.pdf', '.png', '.pptx', '.rar',
@@ -2841,6 +2842,7 @@ def archive_workspace_components(manifest: dict[str, Any]) -> list[str]:
         'full-environment': ('workspace_database', 'input', 'output', 'report_templates', 'auto_calculated_fields'),
         'slides-templates': ('report_templates',),
         'auto-calculated-fields': ('auto_calculated_fields',),
+        'dashboards': ('dashboards',),
     }
     return list(fallback.get(str(manifest.get('kind') or ''), ()))
 
@@ -2861,7 +2863,7 @@ def full_workspace_archive_components(*, include_input_files: bool = True, inclu
         components.append('input')
     if include_generated_outputs:
         components.append('output')
-    return [*components, 'report_templates', 'auto_calculated_fields']
+    return [*components, 'dashboards', 'report_templates', 'auto_calculated_fields']
 
 
 def archive_workspace_components_for_target(target: str, *, include_generated_outputs: bool = True) -> list[str]:
@@ -2870,6 +2872,8 @@ def archive_workspace_components_for_target(target: str, *, include_generated_ou
         return ['report_templates']
     if target == 'auto-calculated-fields':
         return ['auto_calculated_fields']
+    if target == 'dashboards':
+        return ['dashboards']
     if target.startswith('workspace:') or target in {'workspace', 'full-environment'}:
         return full_workspace_archive_components(include_generated_outputs=include_generated_outputs)
     return []
@@ -2942,7 +2946,7 @@ def recurring_backup_settings() -> dict[str, Any]:
     """Load the persistent recurring-backup configuration with safe defaults."""
     defaults = {
         'enabled': False,
-        'components': ['app_database', 'workspace_database', 'report_templates', 'auto_calculated_fields'],
+        'components': ['app_database', 'workspace_database', 'dashboards', 'report_templates', 'auto_calculated_fields'],
         'workspace_ids': [],
         'recurrence': 'daily', 'execution_time': '02:00', 'weekly_day': 0, 'monthly_day': 1, 'max_backups': 30,
         'backup_path': str(application_data_dir / 'scheduled-backups'), 'last_run_period': '',
@@ -3126,6 +3130,9 @@ def create_recurring_database_backup(
             if 'workspace_database' in components:
                 report_progress(f'Creating workspace database snapshot for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                 _archive_database(archive, workspace.database_path, f'{archive_workspace_root}/database.sqlite', backup_root, archived_bytes)
+            if 'dashboards' in components:
+                report_progress(f'Exporting Dashboards for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                _archive_workspace_dashboards(archive, workspace, archive_workspace_root, archived_bytes)
             if 'report_templates' in components:
                 report_progress(f'Archiving Report Templates for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                 _archive_workspace_report_templates(archive, workspace, f'{archive_workspace_root}/report-templates', archived_bytes)
@@ -3317,6 +3324,8 @@ def _backup_archive_components(archive_path: Path) -> list[str]:
         components.append('app_database')
     if any(name.startswith('workspaces/') and name.endswith('/database.sqlite') for name in names):
         components.append('workspace_database')
+    if any(name.startswith('workspaces/') and '/dashboards/dashboards.json' in name for name in names):
+        components.append('dashboards')
     if any(name.startswith('workspaces/') and '/report-templates/' in name for name in names):
         components.append('report_templates')
     if any(name.startswith('workspaces/') and '/auto-calculated-fields/' in name and name.endswith('.json') for name in names):
@@ -3386,6 +3395,10 @@ def restore_database_backup(archive_path: Path, components: Iterable[str]) -> No
                     for sidecar in (workspace.database_path, workspace.database_path.with_name(f'{workspace.database_path.name}-wal'), workspace.database_path.with_name(f'{workspace.database_path.name}-shm')):
                         sidecar.unlink(missing_ok=True)
                     shutil.copy2(payload, workspace.database_path)
+            if 'dashboards' in selected:
+                member = f'{prefix}dashboards/dashboards.json'
+                if member in names:
+                    _restore_workspace_dashboards(workspace, archive.read(member))
             if 'report_templates' in selected:
                 template_members = [name for name in names if name.startswith(f'{prefix}report-templates/')]
                 if template_members:
@@ -3484,6 +3497,40 @@ def _workspace_archive_metadata(workspace: Workspace) -> dict[str, Any]:
     }
 
 
+DASHBOARD_STATE_KEY = 'e2e_dashboards_v2'
+
+def _dashboard_archive_payload(workspace: Workspace) -> bytes:
+    """Serialize saved Dashboard definitions only; generated chart caches are excluded."""
+    task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
+    raw = task_repository.get_workspace_state(DASHBOARD_STATE_KEY) or '{}'
+    try:
+        dashboards = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        dashboards = {}
+    if not isinstance(dashboards, dict):
+        dashboards = {}
+    return json.dumps({'format': 'dashboard-analytic-dashboards', 'version': 1, 'dashboards': dashboards}, ensure_ascii=False, indent=2).encode('utf-8')
+
+def _archive_workspace_dashboards(archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str, progress_callback: Callable[[int], None] | None = None) -> None:
+    payload = _dashboard_archive_payload(workspace)
+    archive.writestr(f'{archive_prefix}/dashboards/dashboards.json', payload)
+    if progress_callback:
+        progress_callback(len(payload))
+
+def _restore_workspace_dashboards(workspace: Workspace, payload: bytes) -> None:
+    try:
+        document = json.loads(payload.decode('utf-8'))
+        dashboards = document.get('dashboards') if isinstance(document, dict) else None
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f'Dashboard definitions for "{workspace.name}" are invalid.') from exc
+    if not isinstance(dashboards, dict):
+        raise ValueError(f'Dashboard definitions for "{workspace.name}" are invalid.')
+    # A Dashboard import replaces the saved definitions, just as restoring the
+    # Dashboard component does, while deliberately retaining generated caches.
+    task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
+    task_repository.set_workspace_state(DASHBOARD_STATE_KEY, json.dumps(dashboards, ensure_ascii=False))
+
+
 def _archive_workspace(
     archive: zipfile.ZipFile, workspace: Workspace, archive_prefix: str, scratch_dir: Path | None = None,
     progress_callback: Callable[[int], None] | None = None, include_generated_outputs: bool = True,
@@ -3498,6 +3545,7 @@ def _archive_workspace(
         archive, workspace.database_path, f'{archive_prefix}/database.sqlite', scratch_dir, progress_callback,
         exclude_tables=() if include_generated_outputs else ('generated_jobs',),
     )
+    _archive_workspace_dashboards(archive, workspace, archive_prefix, progress_callback)
     _archive_workspace_report_templates(archive, workspace, f'{archive_prefix}/report-templates', progress_callback)
     archive.writestr(
         f'{archive_prefix}/auto-calculated-fields/auto-calculated-fields.json',
@@ -3521,6 +3569,9 @@ def export_archive_filename(target: str) -> str:
     if target == 'auto-calculated-fields':
         workspace_name = active_workspace.name if active_workspace else 'workspace'
         return f'{workspace_name}_auto-calculated-fields_{generated_at}.zip'
+    if target == 'dashboards':
+        workspace_name = active_workspace.name if active_workspace else 'workspace'
+        return f'{workspace_name}_dashboards_{generated_at}.zip'
     if target == 'config-with-templates':
         return f'dashboard-analytic-config-with-slides-templates_{generated_at}.zip'
     if target == 'full-environment':
@@ -3605,6 +3656,18 @@ def build_export_archive_file(
             )
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             _archive_workspace_report_templates(archive, source_workspace, archive_path, progress_callback)
+        elif target == 'dashboards':
+            source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
+            source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
+            if not source_workspace:
+                raise ValueError('Open a workspace before exporting Dashboards.')
+            archive_path = f'workspaces/{source_workspace.name}/dashboards/dashboards.json'
+            manifest = archive_manifest(
+                'dashboards', source_workspace={'id': source_workspace.id, 'name': source_workspace.name},
+                workspace_components=archive_workspace_components_for_target(target), archive_path=archive_path,
+            )
+            archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
+            _archive_workspace_dashboards(archive, source_workspace, f'workspaces/{source_workspace.name}', progress_callback)
         elif target == 'auto-calculated-fields':
             source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
             source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
@@ -3853,7 +3916,7 @@ def _recover_unimported_transfer_packages() -> None:
         try:
             manifest = read_import_manifest(package_path)
             kind = str(manifest.get('kind') or '')
-            if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields', 'database-backup'}:
+            if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields', 'dashboards', 'database-backup'}:
                 raise ValueError('Unsupported transfer package.')
         except (OSError, ValueError, zipfile.BadZipFile):
             package_path.unlink(missing_ok=True)
@@ -3958,7 +4021,7 @@ def start_export_job(
     job_id = uuid4().hex
     destination = package_dir / f'{job_id}.zip'
     selected_workspace_ids = list(workspace_ids) if workspace_ids is not None else None
-    if target in {'auto-calculated-fields', 'slides-templates'}:
+    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards'}:
         if not active_workspace:
             raise ValueError('Open a workspace before exporting workspace templates or fields.')
         if target == 'auto-calculated-fields':
@@ -4464,6 +4527,23 @@ def _apply_import_archive(
             if progress_callback:
                 progress_callback('finalising', 100.0)
             return 'Report Templates imported successfully.'
+        if kind == 'dashboards':
+            member = str(manifest.get('archive_path') or '')
+            if member not in archive.namelist() or not re.fullmatch(r'workspaces/[^/]+/dashboards/dashboards\.json', member):
+                raise ValueError('The package does not contain valid Dashboard definitions.')
+            destinations = [workspace_registry.get(workspace_id) for workspace_id in destination_workspace_ids]
+            destinations = [workspace for workspace in destinations if workspace]
+            if not destinations:
+                source = manifest.get('source_workspace')
+                if isinstance(source, dict) and source.get('id'):
+                    candidate = workspace_registry.get(str(source['id']))
+                    destinations = [candidate] if candidate else []
+            if not destinations:
+                raise ValueError('Select at least one destination workspace.')
+            payload = archive.read(member)
+            for workspace in destinations:
+                _restore_workspace_dashboards(workspace, payload)
+            return f'Imported Dashboards into {len(destinations)} workspaces.'
         if kind == 'auto-calculated-fields':
             try:
                 member = next((candidate for candidate in (
@@ -4628,7 +4708,7 @@ def _transfer_workspace_names(workspace_ids: list[str] | None) -> list[str]:
 
 
 def _transfer_offer_workspace_names(target: str, workspace_ids: list[str] | None) -> list[str]:
-    if target in {'auto-calculated-fields', 'slides-templates'}:
+    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards'}:
         return _transfer_workspace_names(workspace_ids)
     if target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
@@ -4643,6 +4723,7 @@ def _transfer_content_label(target: str) -> str:
         'config-with-templates': 'Config + Report Templates',
         'full-environment': 'Full Environment',
         'auto-calculated-fields': 'Auto-calculated Fields',
+        'dashboards': 'Dashboards',
     }
     if target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
@@ -4934,7 +5015,7 @@ def start_transfer_job(
     destination = normalize_transfer_destination(destination_url, destination_port)
     _cleanup_expired_export_packages()
     selected_workspace_ids = list(workspace_ids) if workspace_ids is not None else None
-    if target in {'auto-calculated-fields', 'slides-templates'}:
+    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards'}:
         if not active_workspace:
             raise ValueError('Open a workspace before transferring workspace templates or fields.')
         if target == 'auto-calculated-fields':
@@ -4978,7 +5059,7 @@ def transfer_job_payload(job_id: str, user: SessionUser) -> dict[str, Any] | Non
 
 def require_import_export_permission(user: SessionUser, target: str) -> None:
     """Authorize imports; admins may restore templates and fields into accessible workspaces."""
-    if user.role == 'super-admin' or target in {'slides-templates', 'auto-calculated-fields'}:
+    if user.role == 'super-admin' or target in {'slides-templates', 'auto-calculated-fields', 'dashboards'}:
         return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -4990,7 +5071,7 @@ def require_export_permission(user: SessionUser, target: str) -> None:
     """Authorize exports and transfers without exposing other workspaces."""
     if user.role == 'super-admin':
         return
-    if target in {'auto-calculated-fields', 'slides-templates'}:
+    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards'}:
         if active_workspace and repository.user_has_workspace_access(user.username, active_workspace.id):
             return
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Open a workspace you can access first.')
@@ -5106,6 +5187,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             })
     export_options = [
         {'value': 'config', 'label': 'App Config'},
+        {'value': 'dashboards', 'label': 'Dashboards (from active workspace)', 'disabled': not active_workspace},
         {'value': 'slides-templates', 'label': 'Report Templates (from active workspace)', 'disabled': not active_workspace},
         {'value': 'auto-calculated-fields', 'label': 'Auto-calculated Fields (from active workspace)', 'disabled': not active_workspace},
         {'value': 'full-environment', 'label': 'Full Environment (App Config + Report Templates + Auto-calculated Fields + Selected Workspaces)'},
@@ -5120,7 +5202,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         # admin's first export/transfer request had no export_target at all.
         export_options = [
             option for option in export_options
-            if option['value'] in {'slides-templates', 'auto-calculated-fields'} or option['value'].startswith('workspace:')
+            if option['value'] in {'slides-templates', 'auto-calculated-fields', 'dashboards'} or option['value'].startswith('workspace:')
         ]
     admin_users = [
         {**dict(row), 'created_at': format_local_timestamp(row['created_at']), 'workspace_ids': repository.list_user_workspace_ids(int(row['id']))}
@@ -5814,6 +5896,9 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
         # A worker may briefly hold the database while publishing a progress
         # update. The next browser poll will retry without disrupting the page.
         pass
+    task_provider = getattr(sys.modules[__name__], 'e2e_dashboard_prefetch_tasks', None)
+    if callable(task_provider):
+        tasks.extend(task_provider(workspace))
     return tasks
 
 
@@ -9561,7 +9646,7 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='The transfer offer is invalid.')
     kind = str(payload.get('kind') or '')
-    if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields', 'database-backup'}:
+    if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields', 'dashboards', 'database-backup'}:
         raise HTTPException(status_code=400, detail='The offered export type is not supported.')
     if payload.get('archive_version') != ARCHIVE_VERSION:
         raise HTTPException(status_code=409, detail='The source server uses an incompatible export package version.')
@@ -9826,7 +9911,7 @@ async def accept_transfer_offer(
         if not offer:
             raise HTTPException(status_code=404, detail='The pending transfer offer no longer exists.')
         if offer.get('status') == 'pending':
-            if offer.get('kind') in {'auto-calculated-fields', 'slides-templates'}:
+            if offer.get('kind') in {'auto-calculated-fields', 'slides-templates', 'dashboards'}:
                 available = {workspace.id for workspace in workspace_registry.list()}
                 if not destination_workspace_ids:
                     raise HTTPException(status_code=400, detail='Select at least one destination workspace.')
@@ -10019,7 +10104,7 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
     """Validate and retain an already disk-backed import upload."""
     manifest = read_import_manifest(package_path)
     kind = str(manifest.get('kind') or '')
-    if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields', 'database-backup'}:
+    if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields', 'dashboards', 'database-backup'}:
         raise ValueError('The export package type is not supported.')
     require_import_export_permission(user, kind)
     with IMPORT_JOBS_LOCK:
@@ -10035,7 +10120,7 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
         'includes_slides_templates': bool(manifest.get('includes_slides_templates')),
         'workspace_collisions': import_workspace_collisions(manifest),
     }
-    if kind in {'auto-calculated-fields', 'slides-templates'}:
+    if kind in {'auto-calculated-fields', 'slides-templates', 'dashboards'}:
         response_payload['selected_workspace_ids'] = matching_template_workspaces(manifest, accessible_workspaces(user))
         response_payload['destination_workspaces'] = [
             {'id': workspace.id, 'name': workspace.name} for workspace in accessible_workspaces(user)
@@ -10105,7 +10190,7 @@ def create_admin_import_job(
         kind = str(upload['manifest'].get('kind') or '')
     require_import_export_permission(user, kind)
     selected_workspaces = list(dict.fromkeys(workspace_ids or []))
-    if kind in {'auto-calculated-fields', 'slides-templates'}:
+    if kind in {'auto-calculated-fields', 'slides-templates', 'dashboards'}:
         if not selected_workspaces and kind == 'slides-templates':
             selected_workspaces = matching_template_workspaces(upload['manifest'], accessible_workspaces(user))
         allowed = {workspace.id for workspace in accessible_workspaces(user)}

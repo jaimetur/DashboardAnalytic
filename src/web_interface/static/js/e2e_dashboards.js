@@ -120,11 +120,16 @@
     if (state !== 'ready') { $('ds-preparing-rows').hidden = true; $('ds-preparing-rows').textContent = ''; }
     if (state === 'hidden') return;
     const ready = state === 'ready';
+    const floatingFilters = $('ds-filter-panel').parentElement?.id === 'ds-filter-float';
     notice.dataset.state = state;
     $('ds-preparing-title').textContent = ready ? 'Dashboard is ready' : 'Dashboard is being prepared';
-    $('ds-preparing-detail').textContent = ready
-      ? 'Data and filters are ready. You can now open View Dashboard.'
-      : 'Data and filters are still loading. View Dashboard will become available when preparation is complete.';
+    $('ds-preparing-detail').textContent = floatingFilters
+      ? (ready
+        ? 'Data and filters are ready. The Dashboard is ready to use.'
+        : 'Data and filters are still loading. The Dashboard will update when preparation is complete.')
+      : (ready
+        ? 'Data and filters are ready. You can now open View Dashboard.'
+        : 'Data and filters are still loading. View Dashboard will become available when preparation is complete.');
   };
   function overlay(id, show) {
     const el = $(id);
@@ -624,13 +629,13 @@
   $('ds-chart-expanded-prev').onclick = safe(async () => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) - 1));
   $('ds-chart-expanded-next').onclick = safe(async () => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) + 1));
   $('ds-chart-expanded-last').onclick = safe(async () => navigateExpandedChart(expandedCharts().length - 1));
-  const openFloatingFilters = () => { $('ds-filter-float').append($('ds-filter-panel')); $('ds-view').hidden = true; $('ds-filter-close-action').hidden = false; overlay('ds-filter-overlay', true); };
+  const openFloatingFilters = () => { $('ds-filter-float').append($('ds-filter-panel')); setPreparationState($('ds-preparing').dataset.state || 'hidden'); $('ds-view').hidden = true; $('ds-filter-close-action').hidden = false; overlay('ds-filter-overlay', true); };
   const closeFilters = async () => {
     if (hasUnsavedDashboardChanges() && !await window.showConfirmDialog(
       'This Dashboard has unsaved changes. Close Adaptative Filters without saving them?',
       {title: 'Unsaved Dashboard changes', confirmLabel: 'Close filters', cancelLabel: 'Keep editing', tone: 'warning'},
     )) return false;
-    $('ds-filter-home').append($('ds-filter-panel')); $('ds-view').hidden = false; $('ds-filter-close-action').hidden = true; overlay('ds-filter-overlay', false);
+    $('ds-filter-home').append($('ds-filter-panel')); setPreparationState($('ds-preparing').dataset.state || 'hidden'); $('ds-view').hidden = false; $('ds-filter-close-action').hidden = true; overlay('ds-filter-overlay', false);
     return true;
   };
   const templateEditorHasUnsavedChanges = () => {

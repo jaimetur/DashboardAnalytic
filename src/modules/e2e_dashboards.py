@@ -5,6 +5,7 @@ import json
 import re
 import sqlite3
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from hashlib import sha256
@@ -139,6 +140,8 @@ def install_dashboard_routes(core):
     snapshots = OrderedDict()
     images = OrderedDict()
     projection_load_locks: dict[str, RLock] = {}
+    prefetch_jobs: dict[str, dict] = {}
+    prefetch_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='e2e-dashboard-models')
 
     def workspace_key():
         if not core.active_workspace:
@@ -196,8 +199,11 @@ def install_dashboard_routes(core):
     @app.get('/api/e2e-dashboards')
     def list_dashboards(user=Depends(dashboard_user)):
         with lock:
-            return JSONResponse(
-                read_dashboards(bound_repository()),
+            dashboards = read_dashboards(bound_repository())
+        for dashboard_id, definition in dashboards.items():
+            enqueue_prefetch(dashboard_id, definition, user)
+        return JSONResponse(
+                dashboards,
                 headers={'Cache-Control': 'no-store, max-age=0, must-revalidate'},
             )
 
@@ -214,6 +220,7 @@ def install_dashboard_routes(core):
             dashboards[dashboard_id] = saved_definition
             task_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
             task_repository.add_log(user.username, 'save_dashboard', json.dumps({'id': dashboard_id, 'name': definition.name}))
+        enqueue_prefetch(dashboard_id, saved_definition, user)
         return {'id': dashboard_id, 'definition': saved_definition}
 
     @app.patch('/api/e2e-dashboards/{dashboard_id}/name')
@@ -609,8 +616,8 @@ def install_dashboard_routes(core):
                 connection.execute('DELETE FROM dashboard_filter_selections WHERE id = ?', (row['id'],))
             return selection_id, cache_key, materialized, options, row_counts, True
 
-    def build_preview(definition, user):
-        workspace = workspace_key()
+    def build_preview(definition, user, *, workspace: str | None = None):
+        workspace = workspace or workspace_key()
         task_repository = Repository(Path(workspace), core.repository.global_db_path)
         entries = validate(definition, task_repository)
         dimensions = core.load_repository_calculated_dimensions(task_repository)
@@ -885,10 +892,10 @@ def install_dashboard_routes(core):
         finally:
             connection.close()
 
-    def snapshot_chart(token, index, user, *, include_frame=True):
+    def snapshot_chart(token, index, user, *, include_frame=True, expected_workspace: str | None = None):
         with lock:
             snapshot = snapshots.get(token)
-        if snapshot is None or snapshot.workspace != workspace_key() or snapshot.owner != user.username:
+        if snapshot is None or snapshot.workspace != (expected_workspace or workspace_key()) or snapshot.owner != user.username:
             raise HTTPException(410, 'Dashboard preview expired. Refresh the Dashboard.')
         if index < 0 or index >= len(snapshot.entries):
             raise HTTPException(404, 'Chart not found.')
@@ -958,9 +965,8 @@ def install_dashboard_routes(core):
                 frame = snapshot.chart_frames.setdefault(index, prepared_frame)
         return snapshot, entry, frame
 
-    @app.get('/api/e2e-dashboards/chart/{token}/{index}')
-    def interactive_chart(token: str, index: int, user=Depends(dashboard_user)):
-        snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False)
+    def chart_model(token: str, index: int, user, *, expected_workspace: str | None = None):
+        snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False, expected_workspace=expected_workspace)
         with lock:
             payload = snapshot.chart_payloads.get(index)
         model_dir = Path(snapshot.workspace).parent / '.dashboard-data-cache' / 'charts'
@@ -977,7 +983,7 @@ def install_dashboard_routes(core):
                 model_path.unlink(missing_ok=True)
                 payload = None
         if payload is None:
-            snapshot, entry, frame = snapshot_chart(token, index, user)
+            snapshot, entry, frame = snapshot_chart(token, index, user, expected_workspace=expected_workspace)
             payload = catalog_chart_payload(
                 frame, entry, multivendor=snapshot.multivendor, prefiltered=True,
             )
@@ -995,7 +1001,53 @@ def install_dashboard_routes(core):
                 pass
         with lock:
             snapshot.chart_payloads.setdefault(index, payload)
+        return payload
+
+    @app.get('/api/e2e-dashboards/chart/{token}/{index}')
+    def interactive_chart(token: str, index: int, user=Depends(dashboard_user)):
+        payload = chart_model(token, index, user)
         return JSONResponse(payload, headers={'Cache-Control': 'private, max-age=3600'})
+
+    def enqueue_prefetch(dashboard_id: str, raw_definition: dict, user) -> None:
+        """Warm Canvas JSON models only; PNG render caches are intentionally excluded."""
+        workspace = workspace_key()
+        fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
+        key = f'{workspace}:{dashboard_id}:{fingerprint}'
+        with lock:
+            existing = prefetch_jobs.get(key)
+            if existing and existing.get('status') in {'queued', 'processing', 'ready'}:
+                return
+            job = prefetch_jobs[key] = {'id': key, 'workspace': workspace, 'dashboard_id': dashboard_id,
+                'name': str(raw_definition.get('name') or dashboard_id), 'status': 'queued', 'completed': 0, 'total': 0}
+        definition = DashboardDefinition.model_validate(raw_definition)
+        def run():
+            preview = None
+            try:
+                with lock: job['status'] = 'processing'
+                preview = build_preview(definition, user, workspace=workspace)
+                charts = [chart['index'] for slide in preview['slides'] for chart in slide['charts'] if chart['available']]
+                with lock: job['total'] = len(charts)
+                for index in charts:
+                    chart_model(preview['token'], index, user, expected_workspace=workspace)
+                    with lock: job['completed'] += 1
+                with lock: job['status'] = 'ready'
+            except Exception as exc:
+                with lock: job.update(status='failed', error=str(exc))
+            finally:
+                if preview:
+                    with lock: snapshots.pop(preview['token'], None)
+        prefetch_executor.submit(run)
+
+    def prefetch_task_payloads(workspace):
+        database_path = str(workspace.database_path)
+        with lock:
+            return [
+                {'id': f'dashboard-prefetch:{job["dashboard_id"]}', 'label': f'Preparing Dashboard charts: {job["name"]}',
+                 'detail': f'{job["completed"]} of {job["total"] or "?"} Canvas models',
+                 'progress': round(job['completed'] * 100 / job['total']) if job['total'] else None}
+                for job in prefetch_jobs.values() if job['workspace'] == database_path and job['status'] in {'queued', 'processing'}
+            ]
+    core.e2e_dashboard_prefetch_tasks = prefetch_task_payloads
 
     @app.get('/api/e2e-dashboards/preview/{token}/{index}.png')
     def chart(token: str, index: int, user=Depends(dashboard_user)):
