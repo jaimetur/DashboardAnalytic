@@ -211,10 +211,10 @@
       }, id === activeId ? 'ds-dashboard-close' : 'ds-dashboard-open');
       action('Duplicate Dashboard', '⧉', async () => { if (await confirmDiscard()) await duplicateDashboard(id); });
       action('Export Dashboard', '', () => exportDashboard(id, item), 'ds-dashboard-export');
-      const ppt = action('Generate Dashboard PPT', '', async () => {
+      const ppt = action('Generate PPT Dashboard', '', async () => {
         const accepted = await window.showConfirmDialog(
           `Generate a PowerPoint presentation for “${item.name}”?`,
-          {title: 'Generate Dashboard PPT', confirmLabel: 'Generate PPT'},
+          {title: 'Generate PPT Dashboard', confirmLabel: 'Generate PPT'},
         );
         if (!accepted) return;
         await api(`/${encodeURIComponent(id)}/export-ppt`, 'POST');
