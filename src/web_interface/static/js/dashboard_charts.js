@@ -168,8 +168,8 @@
     return `${result.trimEnd()}…`;
   }
 
-  function rotatedLabel(context, value, centreX, bottomY, colour, size, bold = true) {
-    context.save(); context.translate(centreX, bottomY); context.rotate(-Math.PI / 4);
+  function rotatedLabel(context, value, centreX, bottomY, colour, size, bold = true, angle = 45) {
+    context.save(); context.translate(centreX, bottomY); context.rotate(-Math.PI * angle / 180);
     context.fillStyle = colour; context.textAlign = 'center'; context.textBaseline = 'bottom'; font(context, size, bold);
     context.fillText(String(value), 0, 0); context.restore();
   }
@@ -200,35 +200,41 @@
 
   function drawTopColumnSeparators(context, keys, axisColumns, left, width, top, bottom) {
     if (keys.length < 2) return;
-    const level = axisColumns.findIndex(column => String(column).startsWith('__catalog_column_'));
-    if (level < 0) return;
+    // The x-axis can begin with row aggregation fields. They are still visible
+    // header levels in bar charts, so the first hierarchy field is the outer
+    // boundary and each child boundary begins below its parent header.
+    const outerLevel = 0, headerTop = top - 30 * (keys[0]?.length || 1) - 8;
     for (let index = 1; index < keys.length; index += 1) {
-      if (String(keys[index][level]) !== String(keys[index - 1][level])) dashedVertical(context, left + index * width / keys.length, top, bottom);
+      let changed = keys[index - 1].findIndex((value, level) => String(value) !== String(keys[index][level]));
+      if (changed < 0) continue;
+      const x = left + index * width / keys.length;
+      if (changed === outerLevel) line(context, x, headerTop, x, bottom, '#AEBBC4', 2);
+      else dashedVertical(context, x, headerTop + changed * 30, bottom);
     }
   }
 
   function drawHierarchicalAxisLabels(context, keys, left, width, top, bottom) {
     if (!keys.length) return;
     const levels = keys[0].length, itemWidth = width / keys.length;
-    let rotate = false; font(context, 18, true);
-    for (let level = 0; level < Math.max(levels - 1, 0); level += 1) {
-      for (const [start, end, value] of hierarchySpans(keys, level)) {
-        if (textWidth(context, value.slice(0, 20)) + 12 > (end - start) * itemWidth) rotate = true;
-      }
-    }
-    font(context, 16, true);
-    if (keys.some(key => textWidth(context, String(key.at(-1)).slice(0, 18)) + 8 > itemWidth)) rotate = true;
+    const labelAngle = (value, availableWidth, size) => {
+      font(context, size, true); const measured = textWidth(context, value);
+      if (measured + 8 <= availableWidth) return 0;
+      // A 45° label occupies its text width and height projected onto the
+      // column. Use 90° only when that diagonal footprint still overflows.
+      return (measured + size) * Math.SQRT1_2 + 8 <= availableWidth ? 45 : 90;
+    };
     for (let level = 0; level < Math.max(levels - 1, 0); level += 1) {
       for (const [start, end, rawValue] of hierarchySpans(keys, level)) {
-        const centre = left + ((start + end) / 2) * itemWidth, value = rawValue.slice(0, 20), y = top - 30 * (levels - level);
-        if (rotate) rotatedLabel(context, value, centre, y + 24, '#566A78', 18);
+        const centre = left + ((start + end) / 2) * itemWidth, value = rawValue.slice(0, 20), y = top - 30 * (levels - level), available = (end - start) * itemWidth;
+        const angle = labelAngle(value, available, 18);
+        if (angle) rotatedLabel(context, value, centre, y + 24, '#566A78', 18, true, angle);
         else { context.fillStyle = '#566A78'; context.textAlign = 'center'; context.textBaseline = 'top'; font(context, 18, true); context.fillText(value, centre, y); }
         line(context, left + start * itemWidth, y + 24, left + end * itemWidth, y + 24, '#CDD7DE', 1);
       }
     }
     keys.forEach((key, index) => {
-      const value = String(key.at(-1) ?? '').slice(0, 18), centre = left + (index + .5) * itemWidth;
-      if (rotate) rotatedLabel(context, value, centre, bottom + 78, '#62727E', 16);
+      const value = String(key.at(-1) ?? '').slice(0, 18), centre = left + (index + .5) * itemWidth, angle = labelAngle(value, itemWidth, 16);
+      if (angle) rotatedLabel(context, value, centre, angle === 45 ? bottom + 78 : bottom + 106, '#62727E', 16, true, angle);
       else { context.fillStyle = '#62727E'; context.textAlign = 'center'; context.textBaseline = 'top'; font(context, 16, true); context.fillText(value, centre, bottom + 11); }
     });
   }
@@ -295,7 +301,11 @@
     const chartTop = 245, chartRight = 1395, chartHeight = 510, chartWidth = chartRight - chartLeft;
     const rowHeight = chartHeight / rowKeys.length, columnWidth = chartWidth / columnKeys.length, barWidth = Math.max(18, Math.min(86, columnWidth * .68));
     const upperLevels = Math.max((columnKeys[0]?.length || 1) - 1, 0), headerBandHeight = Math.min(32, 112 / Math.max(upperLevels, 1));
-    const headerTop = chartTop - upperLevels * headerBandHeight - 8; font(context, 15, true);
+    const headerTop = chartTop - upperLevels * headerBandHeight - 8;
+    const rowLabelTotal = Math.max(rowLabelWidths.reduce((sum, value) => sum + value, 0), 1);
+    const rowLabelFactor = Math.min((chartLeft - 92) / rowLabelTotal, 1);
+    const nestedRowStart = level => 24 + rowLabelWidths.slice(0, level).reduce((sum, value) => sum + value * rowLabelFactor, 0);
+    font(context, 15, true);
     for (let level = 0; level < upperLevels; level += 1) {
       const bandTop = headerTop + level * headerBandHeight;
       hierarchySpans(columnKeys, level).forEach(([start, end, value]) => {
@@ -312,8 +322,9 @@
     }
     rowKeys.forEach((rowKey, rowIndex) => {
       const paneTop = chartTop + rowIndex * rowHeight, paneBottom = paneTop + rowHeight, next = rowKeys[rowIndex + 1];
-      if (!next || !rowKey.length || rowKey[0] !== next[0]) line(context, 24, paneBottom, chartLeft + chartWidth, paneBottom, '#AEBBC4', 2);
-      else dashedHorizontal(context, paneBottom, 24, chartLeft + chartWidth);
+      const changed = next ? rowKey.findIndex((value, level) => value !== next[level]) : 0;
+      if (!next || changed === 0) line(context, 24, paneBottom, chartLeft + chartWidth, paneBottom, '#AEBBC4', 2);
+      else dashedHorizontal(context, paneBottom, nestedRowStart(changed), chartLeft + chartWidth);
       (rowIndex === rowKeys.length - 1 ? [0, 50, 100] : [50, 100]).forEach(tick => {
         const y = paneBottom - tick / 100 * rowHeight; line(context, chartLeft, y, chartLeft + chartWidth, y, '#E8ECEF');
         context.fillStyle = '#566A78'; context.textAlign = 'left'; font(context, 15, true); context.fillText(`${tick}%`, chartLeft - 50, y - 9);
@@ -333,7 +344,7 @@
       });
     });
     if (rowKeys[0]?.length) {
-      const total = Math.max(rowLabelWidths.reduce((sum, value) => sum + value, 0), 1), factor = Math.min((chartLeft - 92) / total, 1); let x = 24;
+      const factor = rowLabelFactor; let x = 24;
       rowLabelWidths.forEach((width, level) => {
         const visible = width * factor;
         hierarchySpans(rowKeys, level).forEach(([start, end, value]) => {
@@ -363,68 +374,46 @@
         context.fillStyle = '#263B4A'; context.textAlign = 'left'; font(context, 17, true); context.fillText(displayKey(row.key).slice(0, 42), 28, y + 4);
         states.forEach((series, seriesIndex) => {
           const value = Number(row.values?.[seriesIndex] || 0), width = 980 * value / Math.max(payload.maximum, 1);
-          if (width) {
-            context.fillStyle = series.colour; context.fillRect(x, y, width, 25);
-            if (width > 26) { context.fillStyle = '#FFFFFF'; font(context, 16, true); context.fillText(String(value), x + 5, y + 3); }
-            pushRectangleHit(state, transform, {x, y, width, height: 25}, {label: displayKey(row.key), series: series.name, value: String(value)});
-          }
+          if (width) { context.fillStyle = series.colour; context.fillRect(x, y, width, 25); if (width > 26) { context.fillStyle = '#FFFFFF'; font(context, 16, true); context.fillText(String(value), x + 5, y + 3); } pushRectangleHit(state, transform, {x, y, width, height: 25}, {label: displayKey(row.key), series: series.name, value: String(value)}); }
           x += width;
         });
       });
-      drawLegend(context, payload.legend, {fontSize: 13});
-      context.fillStyle = '#4E6271'; context.textAlign = 'left'; font(context, 19, true); context.fillText('# of failed / dropped sessions', 390, 820); return;
+      drawLegend(context, payload.legend, {fontSize: 13}); context.fillStyle = '#4E6271'; context.textAlign = 'left'; font(context, 19, true); context.fillText('# of failed / dropped sessions', 390, 820); return;
     }
     const rowKeys = payload.row_keys || [[]], columnKeys = payload.column_keys || [];
+    if (!columnKeys.length) return;
     const hasRightLegend = payload.plot_legend_position === 'right' || (payload.legend?.position === 'right' && payload.legend.items?.length);
     const chartLeft = 285, chartTop = 245, chartHeight = 510, chartWidth = hasRightLegend ? 980 : 1250;
-    const outerTop = chartTop - 64, rowHeight = chartHeight / rowKeys.length, columnWidth = chartWidth / columnKeys.length;
-    const groups = hierarchySpans(columnKeys, 0); font(context, 18, true);
-    const rotate = groups.some(([start, end, value]) => textWidth(context, value.slice(0, 20)) + 14 > (end - start) * columnWidth);
-    groups.forEach(([start, end, raw]) => {
-      const centre = chartLeft + (start + end) / 2 * columnWidth, value = raw.slice(0, 20);
-      if (rotate) rotatedLabel(context, value, centre, chartTop - 27, '#566A78', 18);
-      else { context.fillStyle = '#566A78'; context.textAlign = 'center'; font(context, 18, true); context.fillText(value, centre, chartTop - 58); }
-      line(context, chartLeft + start * columnWidth, chartTop - 24, chartLeft + end * columnWidth, chartTop - 24, '#C8D2D9');
-    });
-    columnKeys.forEach((key, index) => {
-      const lower = (key.slice(1).join(' · ') || key[0] || '').slice(0, 18), centre = chartLeft + (index + .5) * columnWidth;
-      context.fillStyle = '#4E6271'; context.textAlign = 'center'; font(context, 15, true); context.fillText(lower, centre, chartTop - 23);
-      const cellLeft = chartLeft + index * columnWidth;
-      if (index && key[0] === columnKeys[index - 1][0]) dashedVertical(context, cellLeft, chartTop - 24, chartTop + chartHeight + 25);
-      else line(context, cellLeft, outerTop, cellLeft, chartTop + chartHeight + 25, '#AEBBC4', 2);
-      context.fillStyle = '#566A78'; context.textAlign = 'left'; font(context, 13, true); context.fillText('0', cellLeft + 3, chartTop + chartHeight + 7);
-      context.textAlign = 'right'; context.fillText(String(payload.maximum), cellLeft + columnWidth - 3, chartTop + chartHeight + 7);
-    });
-    const rowLevels = rowKeys[0]?.length || 0, labelWidth = rowLevels ? Math.max((chartLeft - 28) / rowLevels, 65) : 0;
-    for (let level = 0; level < rowLevels; level += 1) {
-      hierarchySpans(rowKeys, level).forEach(([start, end, value]) => {
-        context.fillStyle = '#405765'; context.textAlign = 'left'; font(context, 14, true);
-        context.fillText(value.slice(0, 22), 20 + level * labelWidth, chartTop + (start + end) / 2 * rowHeight - 9);
+    const upperLevels = Math.max((columnKeys[0]?.length || 1) - 1, 0), headerBandHeight = upperLevels ? Math.min(34, 120 / upperLevels) : 0;
+    const headerTop = chartTop - upperLevels * headerBandHeight - 8, leafLabelY = chartTop - 10, rowHeight = chartHeight / rowKeys.length, columnWidth = chartWidth / columnKeys.length;
+    for (let level = 0; level < upperLevels; level += 1) {
+      const y = headerTop + level * headerBandHeight;
+      hierarchySpans(columnKeys, level).forEach(([start, end, value]) => {
+        const centre = chartLeft + (start + end) / 2 * columnWidth;
+        context.fillStyle = '#566A78'; context.textAlign = 'center'; font(context, 17, true); context.fillText(fittedText(context, value.slice(0, 20), (end - start) * columnWidth - 8), centre, y);
+        line(context, chartLeft + start * columnWidth, y + headerBandHeight - 4, chartLeft + end * columnWidth, y + headerBandHeight - 4, '#C8D2D9');
       });
     }
+    columnKeys.forEach((key, index) => {
+      const centre = chartLeft + (index + .5) * columnWidth, cellLeft = chartLeft + index * columnWidth;
+      context.fillStyle = '#4E6271'; context.textAlign = 'center'; font(context, 15, true); context.fillText(fittedText(context, String(key.at(-1) ?? ''), columnWidth - 8), centre, leafLabelY);
+      if (index) { let changed = columnKeys[index - 1].findIndex((value, level) => value !== key[level]); if (changed < 0) changed = key.length - 1; const lineTop = changed === 0 ? headerTop : headerTop + Math.min(changed, upperLevels) * headerBandHeight; if (changed === 0) line(context, cellLeft, lineTop, cellLeft, chartTop + chartHeight + 25, '#AEBBC4', 2); else dashedVertical(context, cellLeft, lineTop, chartTop + chartHeight + 25); } else line(context, cellLeft, headerTop, cellLeft, chartTop + chartHeight + 25, '#AEBBC4', 2);
+      context.fillStyle = '#566A78'; context.textAlign = 'left'; font(context, 13, true); context.fillText('0', cellLeft + 3, chartTop + chartHeight + 7); context.textAlign = 'right'; context.fillText(String(payload.maximum), cellLeft + columnWidth - 3, chartTop + chartHeight + 7);
+    });
+    const rowLevels = rowKeys[0]?.length || 0, labelWidth = rowLevels ? Math.max((chartLeft - 28) / rowLevels, 65) : 0;
+    for (let level = 0; level < rowLevels; level += 1) hierarchySpans(rowKeys, level).forEach(([start, end, value]) => { context.fillStyle = '#405765'; context.textAlign = 'left'; font(context, 14, true); context.fillText(value.slice(0, 22), 20 + level * labelWidth, chartTop + (start + end) / 2 * rowHeight - 9); });
     rowKeys.forEach((rowKey, rowIndex) => {
       const rowTop = chartTop + rowIndex * rowHeight, rowBottom = rowTop + rowHeight, next = rowKeys[rowIndex + 1];
-      if (next && rowLevels > 1 && rowKey[0] === next[0]) dashedHorizontal(context, rowBottom, 20, chartLeft + chartWidth);
-      else line(context, 20, rowBottom, chartLeft + chartWidth, rowBottom, '#AEBBC4', 2);
+      const changed = next ? rowKey.findIndex((value, level) => value !== next[level]) : 0;
+      if (next && changed > 0) dashedHorizontal(context, rowBottom, 20 + labelWidth * changed, chartLeft + chartWidth); else line(context, 20, rowBottom, chartLeft + chartWidth, rowBottom, '#AEBBC4', 2);
       columnKeys.forEach((columnKey, columnIndex) => {
-        const values = payload.cells[rowIndex]?.[columnIndex] || [], cellLeft = chartLeft + columnIndex * columnWidth;
-        const available = Math.max(columnWidth - 10, 1); let x = cellLeft + 4;
+        const values = payload.cells[rowIndex]?.[columnIndex] || [], cellLeft = chartLeft + columnIndex * columnWidth, available = Math.max(columnWidth - 10, 1); let x = cellLeft + 4;
         const barHeight = Math.max(12, Math.min(22, rowHeight * .84)), y = rowTop + (rowHeight - barHeight) / 2, outside = [];
-        states.forEach((series, seriesIndex) => {
-          const value = Number(values[seriesIndex] || 0), segmentWidth = available * value / Math.max(payload.maximum, 1);
-          if (segmentWidth) {
-            context.fillStyle = series.colour; context.fillRect(x, y, segmentWidth, barHeight); font(context, 12, true);
-            if (segmentWidth >= textWidth(context, String(value)) + 10) { context.fillStyle = '#FFFFFF'; context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText(String(value), x + segmentWidth / 2, y + barHeight / 2); context.textBaseline = 'top'; }
-            else outside.push(String(value));
-            pushRectangleHit(state, transform, {x, y, width: segmentWidth, height: barHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: String(value)});
-          }
-          x += segmentWidth;
-        });
+        states.forEach((series, seriesIndex) => { const value = Number(values[seriesIndex] || 0), segmentWidth = available * value / Math.max(payload.maximum, 1); if (segmentWidth) { context.fillStyle = series.colour; context.fillRect(x, y, segmentWidth, barHeight); font(context, 12, true); if (segmentWidth >= textWidth(context, String(value)) + 10) { context.fillStyle = '#FFFFFF'; context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText(String(value), x + segmentWidth / 2, y + barHeight / 2); context.textBaseline = 'top'; } else outside.push(String(value)); pushRectangleHit(state, transform, {x, y, width: segmentWidth, height: barHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: String(value)}); } x += segmentWidth; });
         if (outside.length) { context.fillStyle = '#34495A'; context.textAlign = 'left'; context.textBaseline = 'top'; font(context, 12, true); context.fillText(outside.join(' / '), x + 3, y + 1); }
       });
     });
-    line(context, chartLeft + chartWidth, outerTop, chartLeft + chartWidth, chartTop + chartHeight + 25, '#AEBBC4', 2);
-    drawLegend(context, payload.legend, {fontSize: 13, sideX: hasRightLegend ? chartLeft + chartWidth + 24 : undefined});
+    line(context, chartLeft + chartWidth, headerTop, chartLeft + chartWidth, chartTop + chartHeight + 25, '#AEBBC4', 2); drawLegend(context, payload.legend, {fontSize: 13, sideX: hasRightLegend ? chartLeft + chartWidth + 24 : undefined});
   }
 
   function drawDistribution(context, payload, state, transform) {
@@ -494,7 +483,12 @@
     bars.forEach((bar, index) => {
       const height = (baseline - top) * Number(bar.value) / Math.max(Number(payload.maximum), 1), x = left + (index + .5) * width / bars.length - barWidth / 2, y = baseline - height;
       context.fillStyle = bar.colour; context.fillRect(x, y, barWidth, height);
-      context.fillStyle = '#263B4A'; context.textAlign = 'left'; font(context, 20, true); context.fillText(Number(bar.value).toFixed(2), x, y - 31);
+      const label = Number(bar.value).toFixed(2); font(context, 20, true);
+      if (height >= 42) {
+        context.fillStyle = '#FFFFFF'; context.textAlign = 'center'; context.fillText(label, x + barWidth / 2, y + height / 2 - 10);
+      } else {
+        context.fillStyle = bar.colour; context.textAlign = 'center'; context.fillText(label, x + barWidth / 2, y - 25);
+      }
       pushRectangleHit(state, transform, {x, y, width: barWidth, height}, {label: displayKey(bar.key), series: bar.legend, value: Number(bar.value).toFixed(2)});
     });
     drawTopColumnSeparators(context, keys, payload.axis_columns || [], left, width, top, baseline);

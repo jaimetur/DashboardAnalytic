@@ -1131,11 +1131,19 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
     against the operator prefix of the materialised ``Operator_Vendor`` value.
     """
     def vendor_grouping(value: str) -> str:
+        """Expand the materialised vendor group into operator and vendor levels."""
         dimensions = parse_catalog_grouping(value).dimensions
-        return " × ".join(
-            "Vendor" if _normalise_catalog_name(dimension) == "operator" else dimension
-            for dimension in dimensions
-        )
+        expanded: list[str] = []
+        for dimension in dimensions:
+            normalized = _normalise_catalog_name(dimension)
+            if normalized in {"operator", "vendor", "reportvendor"}:
+                if not any(_normalise_catalog_name(item) == "operator" for item in expanded):
+                    expanded.append("Operator")
+                if not any(_normalise_catalog_name(item) in {"vendor", "reportvendor"} for item in expanded):
+                    expanded.append("Vendor")
+            else:
+                expanded.append(dimension)
+        return " × ".join(expanded)
 
     filters = entry.filters.strip()
     vendor_exclusion = "vendor NOT CONTAINS (Mixed, Other)"
@@ -1153,10 +1161,9 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
         slide_title=_replace_operator_label(entry.slide_title, "Vendor"),
         slide_subtitle=_replace_operator_label(entry.slide_subtitle, "Vendor"),
         chart_title=_replace_operator_label(entry.chart_title, "Vendor"),
-        # Vendor Comparison legends identify the concrete materialised vendor
-        # group.  Thus an Operator legend from the reusable template becomes a
-        # Vendor legend and displays values such as Vodafone_Ericsson.
-        legend=_replace_operator_label(entry.legend, "Vendor"),
+        # Keep both levels in a comparison legend so the same vendor used by two
+        # operators remains distinguishable and retains its plotted colour.
+        legend=("Operator, Vendor" if _normalise_catalog_name(entry.legend) == "operator" else entry.legend),
         grouping_rows=vendor_grouping(entry.grouping_rows),
         grouping_columns=vendor_grouping(entry.grouping_columns),
         filters=filters,
@@ -1560,10 +1567,25 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
     row_spec = parse_catalog_grouping(entry.grouping_rows)
     column_spec = parse_catalog_grouping(entry.grouping_columns)
     bucket_edges = _catalog_bucket_edges(entry)
+    # Multivendor data stores the effective comparison identity as one
+    # ``Operator_Vendor`` field. Materialise its two display levels here so
+    # every bar chart can render Operator above its individual vendors.
+    if multivendor:
+        report_vendor = _group_column(frame, True)
+        if report_vendor:
+            frame["__catalog_multivendor_operator"] = frame[report_vendor].map(_report_vendor_operator)
+            frame["__catalog_multivendor_vendor"] = frame[report_vendor].map(_vendor_label)
+
     def resolve_dimensions(dimensions: tuple[str, ...], axis: str) -> list[str]:
         resolved: list[str] = []
         for dimension in dimensions:
-            column = _catalog_column(frame, dimension, multivendor, metric, bucket_edges)
+            normalized = _normalise_catalog_name(dimension)
+            if multivendor and normalized == "operator":
+                column = "__catalog_multivendor_operator" if "__catalog_multivendor_operator" in frame else None
+            elif multivendor and normalized in {"vendor", "reportvendor"}:
+                column = "__catalog_multivendor_vendor" if "__catalog_multivendor_vendor" in frame else None
+            else:
+                column = _catalog_column(frame, dimension, multivendor, metric, bucket_edges)
             if not column:
                 raise ValueError(f"Slide {entry.slide}: {axis} grouping dimension '{dimension}' does not exist in {entry.cdr_source}.")
             resolved.append(column)
@@ -1656,8 +1678,21 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
     ]
     vendor_columns = [
         column for column, dimension in hierarchy
-        if multivendor and _normalise_catalog_name(dimension) in {"vendor", "reportvendor"}
+        if _normalise_catalog_name(dimension) in {"vendor", "reportvendor"}
     ]
+    split_vendor_hierarchy = multivendor and any(
+        _normalise_catalog_name(dimension) == "operator" for _column_name, dimension in hierarchy
+    )
+
+    def vendor_sort_key(value: object, operator_ranks: dict[str, int]) -> tuple[int, int, str]:
+        if split_vendor_hierarchy:
+            normalized_vendor = _vendor_label(value).casefold()
+            vendor_rank = next(
+                (index for index, name in enumerate(VENDOR_DISPLAY_ORDER) if name in normalized_vendor),
+                len(VENDOR_DISPLAY_ORDER),
+            )
+            return 0, vendor_rank, normalized_vendor
+        return _vendor_display_sort_key(value, operator_ranks)
     needs_campaign_sort = any(
         (observed := frame[column].drop_duplicates().tolist()) != sorted(observed, key=_campaign_sort_key)
         for column in campaign_columns
@@ -1667,7 +1702,7 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         for column in vendor_columns:
             operator_ranks: dict[str, int] = {}
             observed = frame[column].drop_duplicates().tolist()
-            expected = sorted(observed, key=lambda value: _vendor_display_sort_key(value, operator_ranks))
+            expected = sorted(observed, key=lambda value: vendor_sort_key(value, operator_ranks))
             if observed != expected:
                 needs_vendor_sort = True
                 break
@@ -1678,8 +1713,9 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
             values = frame[column].drop_duplicates().tolist()
             if _normalise_catalog_name(dimension) == "campaign":
                 values = sorted(values, key=_campaign_sort_key)
-            elif multivendor and _normalise_catalog_name(dimension) in {"vendor", "reportvendor"}:
-                values = sorted(values, key=lambda value: _vendor_display_sort_key(value, vendor_operator_ranks))
+            elif _normalise_catalog_name(dimension) in {"vendor", "reportvendor"}:
+                values = sorted(values, key=lambda value: vendor_sort_key(value, vendor_operator_ranks))
+            configured_dimension_values[column] = list(values)
             ranks = {value: rank for rank, value in enumerate(values)}
             sort_column = f"__catalog_sort_{index}"
             frame[sort_column] = frame[column].map(ranks)
@@ -2581,22 +2617,42 @@ def _hierarchical_unique_keys(frame: pd.DataFrame, columns: list[str]) -> list[t
 
 
 def _hierarchical_complete_keys(frame: pd.DataFrame, columns: list[str]) -> list[tuple[object, ...]]:
-    """Return the complete, first-seen Cartesian grid for hierarchy columns.
+    """Return a complete hierarchy grid without inventing cross-parent children.
 
-    A comparison axis must remain stable even where a source has no samples
-    for one child value.  For example, every Operator/Vendor retains both
-    Campaign columns even if it has no failures in one campaign.
+    Explicit values still complete the leaf level (for example every Campaign
+    for a Vendor), while observed parent-child relationships keep vendors under
+    their own Operator instead of producing empty combinations for every pair.
     """
     if not columns:
         return [()]
     configured_values = frame.attrs.get("catalogue_dimension_values", {})
-    values_by_level = [
-        list(configured_values.get(column) or frame[column].drop_duplicates())
-        for column in columns
-    ]
-    if any(not values for values in values_by_level):
+    labels = frame.attrs.get("catalogue_dimension_labels", {})
+    observed = list(frame[columns].drop_duplicates().itertuples(index=False, name=None))
+    if not observed:
         return []
-    return [tuple(key) for key in product(*values_by_level)]
+    keys: list[tuple[object, ...]] = []
+
+    def children(prefix: tuple[object, ...], level: int) -> list[object]:
+        matching = [key[level] for key in observed if key[:level] == prefix]
+        observed_values = list(dict.fromkeys(matching))
+        configured = list(configured_values.get(columns[level]) or ())
+        # A configured terminal dimension represents expected comparison slots
+        # (normally Campaign). Parent levels must remain tied to their source
+        # branch so Operator/Vendor nesting is always truthful.
+        if level == len(columns) - 1 and configured:
+            return configured
+        return observed_values or configured
+
+    def visit(prefix: tuple[object, ...], level: int) -> None:
+        for value in children(prefix, level):
+            key = (*prefix, value)
+            if level == len(columns) - 1:
+                keys.append(key)
+            else:
+                visit(key, level + 1)
+
+    visit((), 0)
+    return keys
 
 
 def _hierarchy_caption_spans(
@@ -2651,8 +2707,9 @@ def _draw_rotated_label(
     bottom_y: float,
     fill: str,
     font: ImageFont.ImageFont,
+    angle: int = 45,
 ) -> None:
-    """Draw a 45° label centred on ``centre_x`` with its bottom at ``bottom_y``.
+    """Draw a rotated label centred on ``centre_x`` with its bottom at ``bottom_y``.
 
     Axis captions are deliberately rotated only when their measured text no
     longer fits the space assigned to a group.  Rendering to a transparent
@@ -2663,7 +2720,7 @@ def _draw_rotated_label(
     label = Image.new("RGBA", (bbox[2] - bbox[0] + 8, bbox[3] - bbox[1] + 8), (0, 0, 0, 0))
     label_draw = ImageDraw.Draw(label)
     label_draw.text((4 - bbox[0], 4 - bbox[1]), value, fill=fill, font=font)
-    rotated = label.rotate(45, expand=True, resample=Image.Resampling.BICUBIC)
+    rotated = label.rotate(angle, expand=True, resample=Image.Resampling.BICUBIC)
     image.paste(rotated, (round(centre_x - rotated.width / 2), round(bottom_y - rotated.height)), rotated)
 
 
@@ -2729,25 +2786,26 @@ def _draw_top_column_group_separators(
     top: float,
     bottom: float,
 ) -> None:
-    """Separate only adjacent values of the first column aggregation level.
+    """Draw solid outer and dashed nested boundaries for bar hierarchies.
 
-    Row aggregations may precede the column hierarchy in ``keys``.  The first
-    ``__catalog_column_*`` field is therefore the only level that defines a
-    visual group boundary; lower column levels (for example Campaign) must
-    remain together without their own vertical separators.
+    Every declared x-axis dimension is visible in the nested header, including
+    row aggregation fields. A change in its first level starts a continuous
+    outer boundary. Child changes use a dashed line that starts below the
+    corresponding parent header, preserving the grouping structure.
     """
     if len(keys) < 2:
         return
-    top_column_level = next(
-        (index for index, column in enumerate(axis_columns) if column.startswith("__catalog_column_")),
-        None,
-    )
-    if top_column_level is None:
-        return
-    values = [str(key[top_column_level]) if len(key) > top_column_level else "" for key in keys]
-    for index in range(1, len(values)):
-        if values[index] != values[index - 1]:
-            _draw_dashed_vertical_line(draw, left + index * width / len(keys), top, bottom)
+    header_top = top - 30 * (len(keys[0]) if keys else 1) - 8
+    for index in range(1, len(keys)):
+        previous, current = keys[index - 1], keys[index]
+        changed = next((level for level, value in enumerate(current) if value != previous[level]), None)
+        if changed is None:
+            continue
+        x = left + index * width / len(keys)
+        if changed == 0:
+            draw.line((x, header_top, x, bottom), fill="#AEBBC4", width=2)
+        else:
+            _draw_dashed_vertical_line(draw, x, header_top + changed * 30, bottom)
 
 
 def _empty_chart(title: str) -> BytesIO:
@@ -2898,6 +2956,10 @@ def _render_status_100_hierarchy(
     upper_levels = max(len(column_hierarchy) - 1, 0)
     header_band_height = min(32.0, 112.0 / max(upper_levels, 1))
     header_top = chart_top - upper_levels * header_band_height - 8
+    total_label_width = max(sum(row_label_widths), 1)
+    row_label_scale = min((chart_left - 92) / total_label_width, 1.0)
+    def nested_row_start(level: int) -> float:
+        return 24 + sum(row_label_widths[:level]) * row_label_scale
     header_font = _font(15, True)
     for level in range(upper_levels):
         band_top = header_top + level * header_band_height
@@ -2925,10 +2987,11 @@ def _render_status_100_hierarchy(
         pane_top = chart_top + row_index * row_height
         pane_bottom = pane_top + row_height
         next_row_key = row_keys[row_index + 1] if row_index + 1 < len(row_keys) else None
-        if next_row_key is None or not row_hierarchy or row_key[0] != next_row_key[0]:
+        changed_level = next((level for level, value in enumerate(row_key) if next_row_key is not None and value != next_row_key[level]), 0)
+        if next_row_key is None or changed_level == 0:
             draw.line((24, pane_bottom, chart_left + chart_width, pane_bottom), fill="#AEBBC4", width=2)
         else:
-            _draw_dashed_horizontal_line(draw, pane_bottom, 24, chart_left + chart_width)
+            _draw_dashed_horizontal_line(draw, pane_bottom, nested_row_start(changed_level), chart_left + chart_width)
         ticks = (0, 50, 100) if row_index == len(row_keys) - 1 else (50, 100)
         for tick in ticks:
             tick_y = pane_bottom - tick / 100 * row_height
@@ -2968,9 +3031,7 @@ def _render_status_100_hierarchy(
                 running += segment_height
 
     if row_hierarchy:
-        total_label_width = max(sum(row_label_widths), 1)
-        usable_label_width = chart_left - 92
-        scale = min(usable_label_width / total_label_width, 1.0)
+        scale = row_label_scale
         x = 24.0
         for level, width in enumerate(row_label_widths):
             visible_width = width * scale
@@ -3085,46 +3146,36 @@ def _render_failure_count_hierarchy(
     # diagonal outer column captions extend into the legend area on dense
     # hierarchy charts (for example Operator × Campaign failure matrices).
     chart_width = 980 if legend_position == "right" else 1250
-    outer_separator_top = chart_top - 64
+    upper_levels = max(len(column_keys[0]) - 1, 0)
+    header_band_height = min(34, 120 / upper_levels) if upper_levels else 0
+    header_top = chart_top - upper_levels * header_band_height - 8
+    leaf_label_y = chart_top - 10
     row_height = chart_height / len(row_keys)
     column_width = chart_width / len(column_keys)
     colours = {"Failed": "#E15759", "Dropped": "#F28E2B"}
-
-    outer_values = [str(key[0]) for key in column_keys]
-    outer_groups: list[tuple[int, int, str]] = []
-    start = 0
-    while start < len(column_keys):
-        end = start + 1
-        while end < len(column_keys) and outer_values[end] == outer_values[start]:
-            end += 1
-        outer_groups.append((start, end, outer_values[start]))
-        start = end
-    header_font = _font(18, True)
-    rotate_outer_headers = any(
-        _text_width(draw, caption[:20], header_font) + 14 > (end - start) * column_width
-        for start, end, caption in outer_groups
-    )
-    for start, end, caption in outer_groups:
-        centre = chart_left + ((start + end) / 2) * column_width
-        caption = caption[:20]
-        if rotate_outer_headers:
-            _draw_rotated_label(image, caption, centre_x=centre, bottom_y=chart_top - 27, fill="#566A78", font=header_font)
-        else:
-            draw.text((centre - min(len(caption) * 4, 64), chart_top - 58), caption, fill="#566A78", font=header_font)
-        draw.line((chart_left + start * column_width, chart_top - 24, chart_left + end * column_width, chart_top - 24), fill="#C8D2D9", width=1)
+    for level in range(upper_levels):
+        y = header_top + level * header_band_height
+        for start, end, caption in _hierarchy_caption_spans(column_keys, level):
+            centre = chart_left + ((start + end) / 2) * column_width
+            caption = caption[:20]
+            font = _font(17, True)
+            draw.text((centre - min(_text_width(draw, caption, font) / 2, (end - start) * column_width / 2 - 4), y), caption, fill="#566A78", font=font)
+            draw.line((chart_left + start * column_width, y + header_band_height - 4, chart_left + end * column_width, y + header_band_height - 4), fill="#C8D2D9", width=1)
 
     for column_index, column_key in enumerate(column_keys):
-        lower_caption = " · ".join(str(value) for value in column_key[1:]) or str(column_key[0])
+        lower_caption = str(column_key[-1])
         centre = chart_left + (column_index + 0.5) * column_width
-        draw.text((centre - min(len(lower_caption) * 4, 68), chart_top - 23), lower_caption[:18], fill="#4E6271", font=_font(15, True))
+        draw.text((centre - min(len(lower_caption) * 4, 68), leaf_label_y), lower_caption[:18], fill="#4E6271", font=_font(15, True))
         cell_left = chart_left + column_index * column_width
-        if column_index and column_key[0] == column_keys[column_index - 1][0]:
-            # Campaigns/child values under one Operator/Vendor are related,
-            # but need a lighter dashed division to remain readable.
-            _draw_dashed_vertical_line(draw, cell_left, chart_top - 24, chart_top + chart_height + 25)
+        if column_index:
+            changed = next((level for level, value in enumerate(column_key) if value != column_keys[column_index - 1][level]), len(column_key) - 1)
+            line_top = header_top if changed == 0 else header_top + min(changed, upper_levels) * header_band_height
+            if changed == 0:
+                draw.line((cell_left, line_top, cell_left, chart_top + chart_height + 25), fill="#AEBBC4", width=2)
+            else:
+                _draw_dashed_vertical_line(draw, cell_left, line_top, chart_top + chart_height + 25)
         else:
-            # A new first-level aggregation value begins a new solid group.
-            draw.line((cell_left, outer_separator_top, cell_left, chart_top + chart_height + 25), fill="#AEBBC4", width=2)
+            draw.line((cell_left, header_top, cell_left, chart_top + chart_height + 25), fill="#AEBBC4", width=2)
         draw.text((cell_left + 3, chart_top + chart_height + 7), "0", fill="#566A78", font=_font(13, True))
         draw.text((cell_left + column_width - 25, chart_top + chart_height + 7), str(maximum), fill="#566A78", font=_font(13, True))
 
@@ -3147,11 +3198,10 @@ def _render_failure_count_hierarchy(
         row_top = chart_top + row_index * row_height
         row_bottom = row_top + row_height
         next_row_key = row_keys[row_index + 1] if row_index + 1 < len(row_keys) else None
-        if next_row_key is not None and len(row_hierarchy) > 1 and row_key[0] == next_row_key[0]:
-            # Child values of the same first row dimension (for example the
-            # cities inside one Call Family) use the same dashed hierarchy
-            # convention as Campaign columns inside one Operator.
-            _draw_dashed_horizontal_line(draw, row_bottom, 20, chart_left + chart_width)
+        changed_level = next((level for level, value in enumerate(row_key) if next_row_key is not None and value != next_row_key[level]), 0)
+        if next_row_key is not None and changed_level > 0:
+            # Nested row separators start below their parent label column.
+            _draw_dashed_horizontal_line(draw, row_bottom, 20 + label_width * changed_level, chart_left + chart_width)
         else:
             draw.line((20, row_bottom, chart_left + chart_width, row_bottom), fill="#AEBBC4", width=2)
         for column_index, column_key in enumerate(column_keys):
@@ -3193,7 +3243,7 @@ def _render_failure_count_hierarchy(
                 # Dropped as documented by the legend.
                 draw.text((x + 3, y + 1), " / ".join(outside_counts), fill="#34495A", font=count_font)
 
-    draw.line((chart_left + chart_width, outer_separator_top, chart_left + chart_width, chart_top + chart_height + 25), fill="#AEBBC4", width=2)
+    draw.line((chart_left + chart_width, header_top, chart_left + chart_width, chart_top + chart_height + 25), fill="#AEBBC4", width=2)
     _draw_chart_legend(
         draw,
         [(_legend_caption(legend_labels, index, state), colours[state], 2) for index, state in enumerate(("Failed", "Dropped"))],
@@ -3242,41 +3292,44 @@ def _draw_hierarchical_axis_labels(
     top: float,
     bottom: float,
 ) -> None:
-    """Draw each grouping level, keeping child labels under its parent group."""
+    """Draw hierarchy captions using the least rotation each label needs."""
     if not keys:
         return
     levels = len(keys[0])
     item_width = width / len(keys)
-    # One chart must use one axis-caption orientation. Mixing horizontal and
-    # diagonal captions makes adjacent columns look misaligned and obscures
-    # the grouping hierarchy.
-    rotate_all_labels = any(
-        _text_width(draw, str(keys[start][level])[:20], _font(18, True)) + 12 > (end - start) * item_width
-        for level in range(max(levels - 1, 0))
-        for start, end in _hierarchy_spans(keys, level)
-    ) or any(
-        _text_width(draw, str(key[-1])[:18], _font(16, True)) + 8 > item_width
-        for key in keys
-    )
+
+    def label_angle(value: str, available_width: float, font: ImageFont.ImageFont) -> int:
+        measured = _text_width(draw, value, font)
+        if measured + 8 <= available_width:
+            return 0
+        # At 45° both the text width and height consume horizontal space. A
+        # vertical caption is reserved for labels that still cannot fit there.
+        height = draw.textbbox((0, 0), value, font=font)[3]
+        return 45 if (measured + height) * math.sqrt(0.5) + 8 <= available_width else 90
+
     for level in range(max(levels - 1, 0)):
         for start, end in _hierarchy_spans(keys, level):
             centre = left + ((start + end) / 2) * item_width
             text = str(keys[start][level])[:20]
             y = top - 30 * (levels - level)
             font = _font(18, True)
-            if rotate_all_labels:
-                _draw_rotated_label(image, text, centre_x=centre, bottom_y=y + 24, fill="#566A78", font=font)
+            angle = label_angle(text, (end - start) * item_width, font)
+            if angle:
+                _draw_rotated_label(image, text, centre_x=centre, bottom_y=y + 24, fill="#566A78", font=font, angle=angle)
             else:
-                draw.text((centre - min(len(text) * 4.5, 86), y), text, fill="#566A78", font=font)
+                text_width = _text_width(draw, text, font)
+                draw.text((centre - text_width / 2, y), text, fill="#566A78", font=font)
             draw.line((left + start * item_width, y + 24, left + end * item_width, y + 24), fill="#CDD7DE", width=1)
     for index, key in enumerate(keys):
         text = str(key[-1])[:18]
         centre = left + (index + .5) * item_width
         font = _font(16, True)
-        if rotate_all_labels:
-            _draw_rotated_label(image, text, centre_x=centre, bottom_y=bottom + 78, fill="#62727E", font=font)
+        angle = label_angle(text, item_width, font)
+        if angle:
+            _draw_rotated_label(image, text, centre_x=centre, bottom_y=bottom + (78 if angle == 45 else 106), fill="#62727E", font=font, angle=angle)
         else:
-            draw.text((centre - min(len(text) * 4, 68), bottom + 11), text, fill="#62727E", font=font)
+            text_width = _text_width(draw, text, font)
+            draw.text((centre - text_width / 2, bottom + 11), text, fill="#62727E", font=font)
 
 
 def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | None, series: str | None, stack: str, legend_labels: tuple[str, ...] = (), legend_position: str = "top") -> BytesIO:
@@ -3657,8 +3710,16 @@ def _render_mean_column(
     for index, (label, value) in enumerate(means.items()):
         height = (baseline - top) * float(value) / maximum
         x = left + (index + .5) * chart_width / len(means) - bar_width / 2
-        draw.rectangle((x, baseline - height, x + bar_width, baseline), fill=group_colours.get(keys[index], _colour(label, index)))
-        draw.text((x, baseline - height - 31), f"{float(value):.2f}", fill="#263B4A", font=_font(20, True))
+        y = baseline - height
+        colour = group_colours.get(keys[index], _colour(label, index))
+        value_label = f"{float(value):.2f}"
+        draw.rectangle((x, y, x + bar_width, baseline), fill=colour)
+        if height >= 42:
+            label_width = _text_width(draw, value_label, _font(20, True))
+            draw.text((x + (bar_width - label_width) / 2, y + height / 2 - 10), value_label, fill="white", font=_font(20, True))
+        else:
+            label_width = _text_width(draw, value_label, _font(20, True))
+            draw.text((x + (bar_width - label_width) / 2, y - 25), value_label, fill=colour, font=_font(20, True))
     _draw_top_column_group_separators(
         draw,
         keys,
@@ -3819,10 +3880,24 @@ def _chart_payload_legend(
     metric: str | None,
     fallback: list[tuple[str, str, int]] | None = None,
     *,
+    chart_type: str,
     line_markers: bool = False,
 ) -> dict[str, object]:
     """Resolve the browser legend with the same rules as the PNG renderer."""
-    items = (fallback or []) if _legend_labels(entry.legend) else _resolved_legend_items(entry, frame, metric)
+    plotted_series_types = {"cdf", "status_100", "failure_count", "distribution", "map", "scatter"}
+    if fallback and chart_type in plotted_series_types:
+        # These charts colour segments or points from their renderer-specific
+        # series. A grouping field can describe the axis, but it cannot safely
+        # replace the colour key for those plotted values.
+        items = fallback
+        manual_labels = _legend_labels(entry.legend)
+        if manual_labels and len(manual_labels) == len(fallback):
+            items = [
+                (manual_labels[index], colour, width)
+                for index, (_label, colour, width) in enumerate(fallback)
+            ]
+    else:
+        items = (fallback or []) if _legend_labels(entry.legend) else _resolved_legend_items(entry, frame, metric)
     return {
         "position": parse_legend_position(entry.legend_position),
         "line_markers": line_markers,
@@ -3851,7 +3926,7 @@ def _chart_payload_base(
         "type": chart_type,
         "title": title,
         "legend": _chart_payload_legend(
-            entry, frame, metric, fallback_legend, line_markers=line_markers,
+            entry, frame, metric, fallback_legend, chart_type=chart_type, line_markers=line_markers,
         ),
     }
 
@@ -3975,7 +4050,10 @@ def catalog_chart_payload(
             campaigns = subset["__cdf_campaign"].astype(str).unique() if latest_campaign else ()
             line_width = 4 if campaign_count <= 1 or (latest_campaign and latest_campaign in campaigns) else 1
             full_label = _legend_key_caption(combination, grouping_columns, numeric, ())
-            tooltip_label = _legend_key_caption(combination, grouping_columns, numeric, requested_legend)
+            # A CDF legend and tooltip identify a concrete curve. Retaining
+            # the full hierarchy prevents Operator-only captions when Vendor
+            # is represented by its own multivendor aggregation level.
+            tooltip_label = full_label
             colour = colours.get(combination, _colour(full_label, index))
             payload_series.append({
                 "key": serialise_key(combination),
@@ -4179,7 +4257,7 @@ def catalog_chart_payload(
                 _legend_caption(_legend_labels(render_entry.legend), index, bucket),
                 colours.get((bucket,), _colour(bucket, index)), 2,
             )
-            for index, bucket in enumerate(buckets[:8])
+            for index, bucket in enumerate(buckets)
         ]
         model = _chart_payload_base("distribution", title, render_entry, distribution, metric, fallback)
         model.update({
@@ -4241,7 +4319,7 @@ def catalog_chart_payload(
                 "name": label, "colour": colour,
                 "points": [[longitude_value, latitude_value] for _source_index, (longitude_value, latitude_value) in sampled],
             })
-            fallback.append((_legend_caption(_legend_labels(render_entry.legend), index, label), colour, 2))
+            fallback.append((label, colour, 2))
         lon_low, lon_high = float(points[longitude].min()), float(points[longitude].max())
         lat_low, lat_high = float(points[metric].min()), float(points[metric].max())
         lon_padding = max((lon_high - lon_low) * .06, .004)
@@ -4254,7 +4332,7 @@ def catalog_chart_payload(
         return {
             **_chart_payload_base(
                 "map", title, render_entry, data, metric,
-                fallback[:10] if _legend_labels(render_entry.legend) else fallback,
+                fallback,
             ),
             "x_label": longitude.replace("_", " "),
             "y_label": metric.replace("_", " "),
@@ -4363,7 +4441,7 @@ def catalog_chart_payload(
                 "name": str(label), "colour": colour,
                 "points": [[float(x), float(y)] for _source_index, (x, y) in sampled],
             })
-            fallback.append((_legend_caption(_legend_labels(render_entry.legend), index, label), colour, 2))
+            fallback.append((label, colour, 2))
         return {
             **_chart_payload_base("scatter", title, render_entry, data, metric, fallback),
             "x_label": x_metric.replace("_", " "),

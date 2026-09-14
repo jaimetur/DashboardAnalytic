@@ -10,12 +10,12 @@ import pytest
 from PIL import Image
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -477,6 +477,24 @@ def test_interactive_cdf_model_uses_reporting_hierarchy_palette_and_legend() -> 
     assert all(series['x'] and series['y'] and series['samples'] == 2 for series in model['series'])
 
 
+def test_multivendor_cdf_legend_keeps_operator_and_vendor_for_each_curve() -> None:
+    entry = CatalogEntry(
+        1, 'Speech', '', '', 'Interactivity', 'CDR-Speech', 'LQ', 'CDF Line',
+        'Operator', '', 'Operator', 'Campaign', 'Bottom',
+    )
+    frame = pd.DataFrame({
+        'report_vendor': ['VF_Ericsson'] * 3 + ['VF_Huawei'] * 3 + ['3_Ericsson'] * 3,
+        'Campaign': ['2026 Q1'] * 9,
+        'LQ': [1.0, 2.0, 3.0] * 3,
+    })
+
+    model = catalog_chart_payload(frame, entry, multivendor=True, prefiltered=True)
+
+    labels = [item['label'] for item in model['legend']['items']]
+    assert labels == ['VF · Ericsson · 2026-Q1', 'VF · Huawei · 2026-Q1', '3 · Ericsson · 2026-Q1']
+    assert [series['name'] for series in model['series']] == labels
+
+
 def test_interactive_status_model_preserves_reporting_row_and_column_aggregation() -> None:
     entry = CatalogEntry(
         1, 'Voice', '', '', 'Completed Ratio', 'CDR-Voice', 'Test_Result',
@@ -511,6 +529,25 @@ def test_interactive_status_model_preserves_reporting_row_and_column_aggregation
     assert model['legend']['items'] == [
         {'label': 'Completed', 'colour': '#2C9A62', 'width': 2},
         {'label': 'Failed', 'colour': '#D8555F', 'width': 2},
+    ]
+
+
+def test_interactive_status_legend_uses_the_colours_of_its_plotted_states() -> None:
+    entry = CatalogEntry(
+        1, 'Voice', '', '', 'Failed ratio', 'CDR-Voice', 'Test_Result',
+        '100% Stacked Vertical Bars', 'Operator', '', 'Test Name', 'Operator', 'Right',
+    )
+    frame = pd.DataFrame({
+        'Test Name': ['httpBrowser', 'httpBrowser', 'VideoStreaming', 'VideoStreaming'],
+        'Operator': ['O2', 'O2', 'VF', 'VF'],
+        'Test_Result': ['Completed', 'Failed', 'Completed', 'Failed'],
+    })
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert model['legend']['items'] == [
+        {'label': state['name'], 'colour': state['colour'], 'width': 2}
+        for state in model['states']
     ]
 
 
@@ -570,6 +607,34 @@ def test_interactive_mean_model_uses_reporting_aggregation_and_vendor_palette() 
     ]
 
 
+def test_top_column_group_separator_is_solid_from_the_header_to_the_plot() -> None:
+    draw = MagicMock()
+
+    _draw_top_column_group_separators(
+        draw,
+        [('VF', '2026-Q1'), ('VF', '2026-Q2'), ('3', '2026-Q1')],
+        ['__catalog_column_0', '__catalog_column_1'],
+        left=155, width=1165, top=280, bottom=680,
+    )
+
+    assert call((155 + 2 * 1165 / 3, 212, 155 + 2 * 1165 / 3, 680), fill='#AEBBC4', width=2) in draw.line.call_args_list
+    assert call((155 + 1165 / 3, 242, 155 + 1165 / 3, 250), fill='#AEBBC4', width=1) in draw.line.call_args_list
+
+
+def test_nested_column_group_separator_is_dashed_below_its_parent_header() -> None:
+    draw = MagicMock()
+
+    _draw_top_column_group_separators(
+        draw,
+        [('VF', 'Ericsson', '2026-Q1'), ('VF', 'Ericsson', '2026-Q2')],
+        ['__catalog_row_0', '__catalog_row_1', '__catalog_column_0'],
+        left=155, width=1165, top=280, bottom=680,
+    )
+
+    assert draw.line.call_args_list[0] == call.line((155 + 1165 / 2, 242, 155 + 1165 / 2, 250), fill='#AEBBC4', width=1)
+    assert all(item.kwargs.get('width') == 1 for item in draw.line.call_args_list)
+
+
 def test_interactive_failure_model_matches_reporting_legend_plot_geometry() -> None:
     entry = CatalogEntry(
         1, 'Failures', '', '', 'Voice failures', 'CDR-Voice', 'Call_Status',
@@ -616,6 +681,24 @@ def test_interactive_map_model_preserves_operator_colours_and_osm_geometry() -> 
     tile_left, tile_top, tile_right, tile_bottom = model['basemap']['tile_range']
     assert (tile_right - tile_left + 1) * (tile_bottom - tile_top + 1) <= 48
     assert len(model['basemap']['world_bounds']) == 4
+
+
+def test_interactive_map_keeps_manual_legend_labels_only_when_they_cover_every_series() -> None:
+    entry = CatalogEntry(
+        1, 'Map', '', '', 'Coverage', 'CDR-Data', 'Latitude vs Longitude',
+        'Map', 'Success/Failure', '', 'Operator', '', 'Right',
+    )
+    frame = pd.DataFrame({
+        'Latitude': [51.5, 51.51, 53.8],
+        'Longitude': [-.12, -.11, -1.55],
+        'Operator': ['VF', '3', 'EE'],
+    })
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert [(item['label'], item['colour']) for item in model['legend']['items']] == [
+        (series['name'], series['colour']) for series in model['series']
+    ]
 
 
 def test_cdf_plot_reserves_space_for_side_legends() -> None:
@@ -771,9 +854,9 @@ def test_multivendor_rendering_rewrites_display_and_grouping_and_excludes_unreso
     assert rendered.slide_title == 'Vendor comparison'
     assert rendered.slide_subtitle == 'Vendor subtitle'
     assert rendered.chart_title == 'Vendor chart'
-    assert rendered.legend == 'Vendor'
-    assert rendered.grouping_rows == 'Vendor'
-    assert rendered.grouping_columns == 'Vendor × Campaign'
+    assert rendered.legend == 'Operator, Vendor'
+    assert rendered.grouping_rows == 'Operator × Vendor'
+    assert rendered.grouping_columns == 'Operator × Vendor × Campaign'
     assert rendered.filters == 'Operator = Vodafone UK; vendor NOT CONTAINS (Mixed, Other)'
 
     frame = pd.DataFrame({
@@ -784,8 +867,8 @@ def test_multivendor_rendering_rewrites_display_and_grouping_and_excludes_unreso
     })
     filtered = _apply_catalog_filters(frame, rendered, True, 'LQ')
     grouped, primary, series = _apply_catalog_grouping(filtered, rendered, True, 'LQ')
-    assert grouped[primary].tolist() == ['Vodafone_Ericsson']
-    assert grouped[series].tolist() == ['Vodafone_Ericsson · 2026-Q2']
+    assert grouped[primary].tolist() == ['VF · Ericsson']
+    assert grouped[series].tolist() == ['VF · Ericsson · 2026-Q2']
 
     already_filtered = replace(entry, filters='vendor NOT CONTAINS (Mixed, Other)')
     assert prepare_multivendor_catalog_entry(already_filtered).filters == already_filtered.filters
@@ -809,13 +892,13 @@ def test_multivendor_operator_filters_match_vendor_prefixes_and_keep_full_groupi
     grouped, primary, series = _apply_catalog_grouping(filtered, rendered, True, 'LQ')
 
     assert filtered['report_vendor'].tolist() == ['Vodafone_Ericsson', 'Vodafone_Huawei', '3_Nokia', 'O2_Ericsson']
-    assert grouped[primary].tolist() == ['Vodafone_Ericsson', 'Vodafone_Huawei', '3_Nokia', 'O2_Ericsson']
+    assert grouped[primary].tolist() == ['VF · Ericsson', 'VF · Huawei', '3 · Nokia', 'O2 · Ericsson']
     assert grouped[series].tolist() == [
-        'Vodafone_Ericsson · 2025-Q4', 'Vodafone_Huawei · 2026-Q1',
-        '3_Nokia · 2025-Q4', 'O2_Ericsson · 2026-Q1',
+        'VF · Ericsson · 2025-Q4', 'VF · Huawei · 2026-Q1',
+        '3 · Nokia · 2025-Q4', 'O2 · Ericsson · 2026-Q1',
     ]
     assert [caption for caption, _colour, _width in _resolved_legend_items(rendered, grouped, 'LQ')] == [
-        'Vodafone_Ericsson', 'Vodafone_Huawei', '3_Nokia', 'O2_Ericsson',
+        'VF · Ericsson', 'VF · Huawei', '3 · Nokia', 'O2 · Ericsson',
     ]
 
 
@@ -833,7 +916,29 @@ def test_multivendor_grouping_uses_the_same_vendor_order_for_each_operator() -> 
         "LQ": [4.0] * 7,
     })
 
-    grouped, primary, _series = _apply_catalog_grouping(frame, entry, True, "LQ")
+    grouped, primary, _series = _apply_catalog_grouping(frame, prepare_multivendor_catalog_entry(entry), True, "LQ")
+
+    assert grouped[primary].drop_duplicates().tolist() == [
+        "VF · Ericsson", "VF · Huawei", "VF · Samsung", "VF · NSN",
+        "3 · Ericsson", "3 · Huawei", "3 · Samsung",
+    ]
+
+
+def test_vendor_grouping_keeps_each_operator_together_outside_multivendor_mode() -> None:
+    entry = CatalogEntry(
+        1, "", "", "", "", "CDR-Speech", "LQ", "Average Vertical Bars",
+        "Vendor", "", "Vendor", "Campaign", "Top",
+    )
+    frame = pd.DataFrame({
+        "Vendor": [
+            "VF_Ericsson", "VF_Huawei", "3_Ericsson", "3_Huawei",
+            "3_Samsung", "VF_Samsung", "VF_NSN",
+        ],
+        "Campaign": ["2026 Q2"] * 7,
+        "LQ": [4.0] * 7,
+    })
+
+    grouped, primary, _series = _apply_catalog_grouping(frame, entry, False, "LQ")
 
     assert grouped[primary].drop_duplicates().tolist() == [
         "VF_Ericsson", "VF_Huawei", "VF_Samsung", "VF_NSN",
@@ -1681,7 +1786,8 @@ def test_failure_hierarchy_uses_dashed_child_boundaries_within_one_row_group() -
             ['__catalog_row_0', '__catalog_row_1'], ['__catalog_column_0'],
         )
 
-    assert draw_dashed.call_count == 2
+    assert draw_dashed.call_count == 1
+    assert draw_dashed.call_args.args[2] == 20 + (285 - 28) / 2
 
 
 def test_nsa_catalogue_splits_template_screenshots_into_individual_charts() -> None:
