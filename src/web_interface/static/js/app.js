@@ -5536,13 +5536,23 @@ if (queueNode) {
 
   const mergedGroups = () => {
     const groups = serverGroups.map(group => ({...group, tasks: [...(group.tasks || [])]}));
-    completedServerTasks.forEach(({group: completedGroup, task}) => {
+    const completedByWorkspace = new Map();
+    completedServerTasks.forEach((completed) => {
+      const completedGroup = completed.group;
       let group = groups.find(candidate => String(candidate.workspace_id) === String(completedGroup.workspace_id));
       if (!group) {
         group = {...completedGroup, tasks: []};
         groups.push(group);
       }
-      group.tasks.push(task);
+      const workspaceId = String(completedGroup.workspace_id);
+      const entries = completedByWorkspace.get(workspaceId) || [];
+      entries.push({group, ...completed});
+      completedByWorkspace.set(workspaceId, entries);
+    });
+    completedByWorkspace.forEach((entries) => {
+      entries.sort((left, right) => left.position - right.position).forEach((entry, offset) => {
+        entry.group.tasks.splice(Math.min(entry.position + offset, entry.group.tasks.length), 0, entry.task);
+      });
     });
     transientTasks.forEach((task) => {
       const workspaceId = String(task.workspace_id || '__client__');
@@ -5556,7 +5566,7 @@ if (queueNode) {
         };
         groups.push(group);
       }
-      group.tasks.push(task);
+      if (!(group.tasks || []).some(candidate => String(candidate.id) === String(task.id))) group.tasks.push(task);
     });
     return groups;
   };
@@ -5565,9 +5575,9 @@ if (queueNode) {
     const now = Date.now();
     const nextTasks = new Map();
     (Array.isArray(groups) ? groups : []).forEach((group) => {
-      (Array.isArray(group.tasks) ? group.tasks : []).forEach((task) => {
+      (Array.isArray(group.tasks) ? group.tasks : []).forEach((task, position) => {
         if (!task?.id) return;
-        nextTasks.set(String(task.id), {group: {...group, tasks: []}, task: {...task}});
+        nextTasks.set(String(task.id), {group: {...group, tasks: []}, task: {...task}, position});
       });
     });
     previousServerTasks.forEach((previous, taskId) => {
@@ -5580,6 +5590,7 @@ if (queueNode) {
       completedServerTasks.set(taskId, {
         group: previous.group,
         task: {...previous.task, detail: 'Completed', progress: 100},
+        position: previous.position,
         expiresAt,
       });
     });
@@ -5636,7 +5647,16 @@ if (queueNode) {
 
     const list = document.createElement('div');
     list.className = 'background-task-list';
+    let previousDashboardName = '';
     (Array.isArray(group.tasks) ? group.tasks : []).forEach((task) => {
+      const dashboardName = String(task.dashboard_name || '');
+      if (dashboardName && dashboardName !== previousDashboardName) {
+        const dashboard = document.createElement('span');
+        dashboard.className = 'background-task-dashboard';
+        dashboard.textContent = `Dashboard - “${dashboardName}”:`;
+        list.append(dashboard);
+      }
+      previousDashboardName = dashboardName;
       const item = document.createElement('div');
       item.className = 'background-task-item';
 

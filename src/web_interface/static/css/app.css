@@ -1602,6 +1602,11 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .background-task-panel-system .background-task-workspace { color: #962f3c; }
 .background-task-list { display: grid; gap: 0.7rem; }
 .background-task-item { min-width: 0; }
+.background-task-dashboard { display: table; max-width: 100%; margin-bottom: 0.14rem; padding: 0.18rem 0.42rem; border: 1px solid #8b1d24; border-radius: 0.35rem; background: #a8323d; color: #fff; font-size: 0.7rem; font-weight: 800; line-height: 1.2; overflow-wrap: anywhere; }
+.background-task-dashboard + .background-task-item { margin-top: -0.48rem; }
+.background-task-panel-other .background-task-dashboard { border-color: #1f5f91; background: #327caf; color: #fff; }
+.background-task-panel-active .background-task-dashboard { border-color: #94700c; background: #ad8618; color: #fff; }
+.background-task-panel-system .background-task-dashboard { border-color: #8b1d24; background: #a8323d; color: #fff; }
 .background-task-head { display: flex; align-items: flex-start; gap: 0.45rem; }
 .background-task-label { display: block; margin-bottom: 0.13rem; font-size: 0.84rem; font-weight: 760; line-height: 1.25; overflow-wrap: anywhere; }
 .background-task-head .background-task-label { flex: 1 1 auto; min-width: 0; }

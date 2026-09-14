@@ -82,7 +82,7 @@ DASHBOARD_PROJECTION_CACHE_VERSION = 1
 DASHBOARD_PROJECTION_DISK_LIMIT = 6
 DASHBOARD_CHART_MODEL_CACHE_VERSION = 9
 DASHBOARD_CHART_MODEL_DISK_LIMIT = 500
-DASHBOARD_PREVIEW_MANIFEST_VERSION = 1
+DASHBOARD_PREVIEW_MANIFEST_VERSION = 3
 
 
 def dashboard_cache_dir(workspace: str | Path) -> Path:
@@ -165,6 +165,7 @@ def install_dashboard_routes(core):
     images = OrderedDict()
     projection_load_locks: dict[str, RLock] = {}
     prefetch_jobs: dict[str, dict] = {}
+    direct_preparation_tasks: dict[str, dict] = {}
     prefetch_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='e2e-dashboard-models')
     prefetch_generation: dict[str, int] = {}
 
@@ -422,7 +423,6 @@ def install_dashboard_routes(core):
         revisions = {kind: task_repository.get_workspace_state(f'combined_reporting_updated_{kind}') for kind in selected_by_kind}
         selection_definition = {
             'technology': definition.technology,
-            'scope': definition.scope,
             'datasets': definition.datasets,
             'filters': definition.filters,
             'custom_fields': definition.custom_fields,
@@ -431,7 +431,9 @@ def install_dashboard_routes(core):
             'date_to': definition.date_to,
         }
         payload = {
-            'schema': 1,
+            # Scope changes only how charts group the already selected rows.
+            # Keep that presentation setting out of the selection cache key.
+            'schema': 4,
             'definition': selection_definition,
             'versions': versions,
             'combined_revisions': revisions,
@@ -480,80 +482,36 @@ def install_dashboard_routes(core):
         definition.date_from = lower if definition.date_from is None or not lower <= definition.date_from <= upper else definition.date_from
         definition.date_to = upper if definition.date_to is None or not lower <= definition.date_to <= upper else definition.date_to
 
-    def profile_filter_options(definition, dimensions, selected_by_kind, fields, connection):
-        """Resolve large-dashboard facets without scanning wide combined CDR tables."""
+    def profile_filter_options(definition, dimensions, selected_by_kind, fields):
+        """Load large-dashboard facet values from selected CDR profiles."""
         options = {field_name: set() for field_name in fields}
         for selected in selected_by_kind.values():
             for dataset in selected:
-                stored = dataset.get('filter_options')
-                if not isinstance(stored, dict):
-                    try:
-                        stored = json.loads(dataset.get('filter_options_json') or '{}')
-                    except (TypeError, json.JSONDecodeError):
-                        stored = {}
-                stored_lookup = {identity(column): values for column, values in stored.items()}
+                try:
+                    stored = dataset.get('filter_options') or json.loads(dataset.get('filter_options_json') or '{}')
+                except (TypeError, json.JSONDecodeError):
+                    stored = {}
+                lookup = {identity(column): values for column, values in stored.items()} if isinstance(stored, dict) else {}
                 for field_name in fields:
-                    aliases = next(
-                        (values for label, values in FILTER_COLUMNS.items() if identity(label) == identity(field_name)),
-                        (field_name,),
-                    )
+                    aliases = next((values for label, values in FILTER_COLUMNS.items() if identity(label) == identity(field_name)), (field_name,))
                     for alias in aliases:
-                        values = stored_lookup.get(identity(alias), ())
+                        values = lookup.get(identity(alias), ())
                         if isinstance(values, list):
                             options[field_name].update(str(value) for value in values if value is not None)
-
-        # Auto-calculated fields have a finite result domain in their rules,
-        # so their filter values are available immediately from the saved
-        # definitions even before any CDR rows are loaded.
-        dimension_lookup = {identity(dimension.name): dimension for dimension in dimensions}
+        dimensions_by_name = {identity(dimension.name): dimension for dimension in dimensions}
         for field_name in fields:
-            dimension = dimension_lookup.get(identity(field_name))
-            if not dimension:
-                continue
-            options[field_name].update(
-                str(rule.value) for rule in dimension.rules if str(rule.value).strip()
-            )
-            if str(dimension.default).strip():
-                options[field_name].add(str(dimension.default))
-
-        # Older processed datasets may not yet have RAT or an arbitrary field
-        # in their profile. Reuse a previously persisted value catalogue when
-        # available instead of reopening the combined table.
-        missing = {field_name for field_name, values in options.items() if not values}
-        if missing:
-            rows = connection.execute(
-                'SELECT options_json FROM dashboard_filter_selections '
-                'ORDER BY last_accessed_at DESC, id DESC LIMIT 8'
-            ).fetchall()
-            for row in rows:
-                try:
-                    cached_options = json.loads(row['options_json'] or '{}')
-                except (TypeError, json.JSONDecodeError):
-                    continue
-                cached_lookup = {identity(column): values for column, values in cached_options.items()}
-                for field_name in tuple(missing):
-                    values = cached_lookup.get(identity(field_name), ())
-                    if isinstance(values, list):
-                        options[field_name].update(str(value) for value in values if value is not None)
-                    if options[field_name]:
-                        missing.discard(field_name)
-
-        for field_name, selected_values in definition.filters.items():
-            matching = next((field for field in fields if identity(field) == identity(field_name)), None)
-            if matching:
-                options[matching].update(str(value) for value in selected_values)
-        return {
-            field_name: sorted(values, key=str.casefold)
-            for field_name, values in options.items()
-        }
+            dimension = dimensions_by_name.get(identity(field_name))
+            if dimension:
+                options[field_name].update(str(rule.value) for rule in dimension.rules if str(rule.value).strip())
+                if str(dimension.default).strip():
+                    options[field_name].add(str(dimension.default))
+            options[field_name].update(str(value) for value in definition.filters.get(field_name, ()) if value is not None)
+        return {field_name: sorted(values, key=str.casefold) for field_name, values in options.items()}
 
     def materialize_selection(definition, task_repository, dimensions, selected_by_kind, fields):
         cache_key = persistent_selection_key(definition, task_repository, dimensions, selected_by_kind)
-        estimated_rows = {
-            kind: sum(int(row.get('row_count') or 0) for row in selected)
-            for kind, selected in selected_by_kind.items()
-        }
-        profile_only = sum(estimated_rows.values()) > DASHBOARD_PROFILE_SELECTION_THRESHOLD
+        estimated_rows = sum(sum(int(row.get('row_count') or 0) for row in selected) for selected in selected_by_kind.values())
+        profile_only = estimated_rows > DASHBOARD_PROFILE_SELECTION_THRESHOLD
         with lock, task_repository.connection() as connection:
             cached = connection.execute(
                 'SELECT id, options_json, row_counts_json, materialized FROM dashboard_filter_selections WHERE cache_key = ?',
@@ -563,23 +521,10 @@ def install_dashboard_routes(core):
                 connection.execute('UPDATE dashboard_filter_selections SET last_accessed_at = CURRENT_TIMESTAMP WHERE id = ?', (cached['id'],))
                 return (
                     int(cached['id']), cache_key, bool(cached['materialized']),
-                    json.loads(cached['options_json']), json.loads(cached['row_counts_json']), not profile_only,
+                    json.loads(cached['options_json']), json.loads(cached['row_counts_json']), True,
                 )
             cursor = connection.execute('INSERT INTO dashboard_filter_selections (cache_key) VALUES (?)', (cache_key,))
             selection_id = int(cursor.lastrowid)
-            if profile_only:
-                options = profile_filter_options(definition, dimensions, selected_by_kind, fields, connection)
-                connection.execute(
-                    'UPDATE dashboard_filter_selections SET options_json = ?, row_counts_json = ?, materialized = 0 WHERE id = ?',
-                    (json.dumps(options), json.dumps(estimated_rows), selection_id),
-                )
-                stale = connection.execute(
-                    'SELECT id FROM dashboard_filter_selections ORDER BY last_accessed_at DESC, id DESC LIMIT -1 OFFSET 8'
-                ).fetchall()
-                for row in stale:
-                    connection.execute('DELETE FROM dashboard_filter_selection_rows WHERE selection_id = ?', (row['id'],))
-                    connection.execute('DELETE FROM dashboard_filter_selections WHERE id = ?', (row['id'],))
-                return selection_id, cache_key, False, options, estimated_rows, False
             predicates = {}
             row_counts = {}
             for kind, selected in selected_by_kind.items():
@@ -590,6 +535,19 @@ def install_dashboard_routes(core):
                 row_counts[kind] = int(connection.execute(
                     f'SELECT COUNT(*) AS count FROM {table} WHERE {where}', params,
                 ).fetchone()['count'])
+            if profile_only:
+                options = profile_filter_options(definition, dimensions, selected_by_kind, fields)
+                connection.execute(
+                    'UPDATE dashboard_filter_selections SET options_json = ?, row_counts_json = ?, materialized = 0 WHERE id = ?',
+                    (json.dumps(options), json.dumps(row_counts), selection_id),
+                )
+                stale = connection.execute(
+                    'SELECT id FROM dashboard_filter_selections ORDER BY last_accessed_at DESC, id DESC LIMIT -1 OFFSET 8'
+                ).fetchall()
+                for row in stale:
+                    connection.execute('DELETE FROM dashboard_filter_selection_rows WHERE selection_id = ?', (row['id'],))
+                    connection.execute('DELETE FROM dashboard_filter_selections WHERE id = ?', (row['id'],))
+                return selection_id, cache_key, False, options, row_counts, True
             materialized = sum(row_counts.values()) <= DASHBOARD_SELECTION_ROW_LIMIT
             if materialized:
                 for kind, (where, params, table) in predicates.items():
@@ -790,8 +748,17 @@ def install_dashboard_routes(core):
     def prepare(
         definition: DashboardDefinition,
         dashboard_id: str | None = None,
+        rendering_only: bool = False,
+        preparation_id: str | None = None,
         user=Depends(dashboard_user),
     ):
+        preparation_id = preparation_id or f'dashboard-preparation:{uuid4().hex}'
+        workspace = workspace_key()
+        with lock:
+            direct_preparation_tasks[preparation_id] = {
+                'id': preparation_id, 'workspace': workspace, 'name': definition.name,
+                'rendering_only': rendering_only,
+            }
         try:
             preview = build_preview(definition, user)
             if dashboard_id:
@@ -804,6 +771,9 @@ def install_dashboard_routes(core):
             return preview
         except (ValueError, KeyError) as exc:
             raise HTTPException(400, str(exc)) from exc
+        finally:
+            with lock:
+                direct_preparation_tasks.pop(preparation_id, None)
 
     @app.get('/api/e2e-dashboards/prepared/{token}')
     def prepared_preview(token: str, user=Depends(dashboard_user)):
@@ -1155,7 +1125,7 @@ def install_dashboard_routes(core):
         """Return the persistent Canvas-model location for one chart entry."""
         entry_key = sha256(repr(entry).encode()).hexdigest()
         filename = sha256(
-            f'{DASHBOARD_CHART_MODEL_CACHE_VERSION}:{snapshot.selection_key}:{entry_key}'.encode()
+            f'{DASHBOARD_CHART_MODEL_CACHE_VERSION}:{snapshot.selection_key}:{snapshot.definition.scope}:{entry_key}'.encode()
         ).hexdigest()
         return canvas_model_cache_dir(snapshot.workspace) / f'{filename}.json'
 
@@ -1205,7 +1175,7 @@ def install_dashboard_routes(core):
                 continue
             entry_key = sha256(repr(entry).encode()).hexdigest()
             model_path = model_dir / sha256(
-                f'{DASHBOARD_CHART_MODEL_CACHE_VERSION}:{selection_key}:{entry_key}'.encode()
+                f'{DASHBOARD_CHART_MODEL_CACHE_VERSION}:{selection_key}:{candidate.scope}:{entry_key}'.encode()
             ).hexdigest()
             if not model_path.with_suffix('.json').is_file():
                 return False
@@ -1482,18 +1452,19 @@ def install_dashboard_routes(core):
     def prefetch_task_payloads(workspace):
         database_path = str(workspace.database_path.resolve())
         with lock:
+            direct_tasks = [task for task in direct_preparation_tasks.values() if task['workspace'] == database_path]
             pending = [
                 job for job in prefetch_jobs.values()
                 if job['status'] in {'queued', 'processing'} and not job.get('restoring_cached_models')
             ]
-            queue_positions = {id(job): index for index, job in enumerate(pending)}
             workspace_jobs = [job for job in pending if job['workspace'] == database_path]
             tasks = []
             for job in workspace_jobs:
                 if job['status'] == 'processing':
                     tasks.append({
                         'id': job['task_id'],
-                        'label': f'Rendering Dashboard Charts: {job["name"]}',
+                        'dashboard_name': job['name'],
+                        'label': 'Rendering Dashboard Charts' if job['total'] else 'Preparing Dashboard data',
                         'detail': (
                             f'{job["completed"]} of {job["total"]} Canvas models'
                             if job['total'] else 'Preparing filtered Dashboard selection'
@@ -1501,14 +1472,28 @@ def install_dashboard_routes(core):
                         'progress': round(job['completed'] * 100 / job['total']) if job['total'] else None,
                     })
                 else:
-                    ahead = queue_positions[id(job)]
-                    suffix = '' if ahead == 1 else 's'
                     tasks.append({
                         'id': job['task_id'],
-                        'label': f'Queued Dashboard Charts: {job["name"]}',
-                        'detail': f'Queued behind {ahead} Dashboard preparation{suffix}',
+                        'dashboard_name': job['name'],
+                        'label': 'Queued Dashboard Charts' if job['total'] else 'Queued Dashboard data',
+                        'detail': 'Queued',
                         'progress': 0,
                     })
+            tasks.extend({
+                'id': task['id'],
+                'dashboard_name': task['name'],
+                'label': 'Rendering Dashboard Charts' if task.get('rendering_only') else 'Preparing Dashboard data',
+                'detail': (
+                    'Rendering charts with the current Dashboard scope'
+                    if task.get('rendering_only')
+                    else 'Building filtered Dashboard selection'
+                ),
+                'progress': None,
+            } for task in direct_tasks)
+            tasks.sort(key=lambda task: (
+                str(task.get('dashboard_name') or '').casefold(),
+                str(task.get('label') or '').casefold(),
+            ))
             return tasks
     core.e2e_dashboard_prefetch_tasks = prefetch_task_payloads
     core.e2e_dashboard_prefetch_workspace = prefetch_workspace_dashboards
@@ -1518,10 +1503,10 @@ def install_dashboard_routes(core):
     def chart(token: str, index: int, user=Depends(dashboard_user)):
         snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False)
         entry_key = sha256(repr(entry).encode()).hexdigest()
-        key = (snapshot.selection_key, entry_key)
+        key = (snapshot.selection_key, snapshot.definition.scope, entry_key)
         cache_dir = pil_chart_cache_dir(snapshot.workspace)
         cache_path = cache_dir / sha256(
-            f'{DASHBOARD_RENDER_CACHE_VERSION}:{snapshot.selection_key}:{entry_key}'.encode()
+            f'{DASHBOARD_RENDER_CACHE_VERSION}:{snapshot.selection_key}:{snapshot.definition.scope}:{entry_key}'.encode()
         ).hexdigest()
         cache_path = cache_path.with_suffix('.png')
         # PIL chart renderers have no shared global canvas. Let browser image
