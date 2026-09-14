@@ -691,14 +691,15 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .report-jobs-table tbody tr:hover { background: rgba(211, 198, 237, 0.62); }
 .report-chart-jobs-table tbody tr:hover { background: rgba(211, 198, 237, 0.62); }
 .report-jobs-table th:nth-child(1), .report-jobs-table td:nth-child(1) { width: 6%; min-width: 76px; white-space: nowrap; }
-.report-jobs-table th:nth-child(2), .report-jobs-table td:nth-child(2) { width: 11%; min-width: 145px; white-space: normal; overflow-wrap: anywhere; }
+.report-jobs-table th:nth-child(2), .report-jobs-table td:nth-child(2) { width: 10%; min-width: 130px; white-space: normal; overflow-wrap: anywhere; }
 .report-jobs-table th:nth-child(3), .report-jobs-table td:nth-child(3) { width: 9%; min-width: 132px; max-width: none; white-space: normal; overflow-wrap: anywhere; }
-.report-jobs-table th:nth-child(4), .report-jobs-table td:nth-child(4) { width: 6.5%; min-width: 82px; white-space: nowrap; }
+.report-jobs-table th:nth-child(4), .report-jobs-table td:nth-child(4) { width: 7.5%; min-width: 96px; white-space: nowrap; }
 .report-jobs-table th:nth-child(5), .report-jobs-table td:nth-child(5) { width: 6%; min-width: 68px; }
-.report-jobs-table th:nth-child(6), .report-jobs-table td:nth-child(6) { width: 13%; min-width: 0; max-width: none; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.report-jobs-table th:nth-child(6), .report-jobs-table td:nth-child(6) { width: 10.5%; min-width: 0; max-width: none; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .report-jobs-table th:nth-child(7), .report-jobs-table td:nth-child(7) { width: 9%; min-width: 0; max-width: none; white-space: normal; }
 .report-jobs-table th:nth-child(8), .report-jobs-table td:nth-child(8),
 .report-jobs-table th:nth-child(9), .report-jobs-table td:nth-child(9) { width: 6%; min-width: 72px; }
+.report-jobs-table th:nth-child(9), .report-jobs-table td:nth-child(9) { width: 7%; min-width: 84px; }
 .report-jobs-table th:nth-child(10), .report-jobs-table td:nth-child(10) { width: 20%; min-width: 240px; max-width: none; white-space: normal; }
 .report-jobs-table th:nth-child(11), .report-jobs-table td:nth-child(11) { width: 11%; min-width: 0; max-width: none; }
 .report-job-datasets { display: flex; flex-direction: column; align-items: flex-start; gap: 0.12rem; white-space: normal !important; }

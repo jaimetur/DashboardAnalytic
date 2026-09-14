@@ -651,13 +651,13 @@
       }));
       requestAnimationFrame(() => {
         if (!jobsTableWrap) return;
-        if (window.matchMedia('(max-width: 480px)').matches || visibleRows.length <= 5) {
+        if (window.matchMedia('(max-width: 480px)').matches || visibleRows.length <= 3) {
           jobsTableWrap.style.maxHeight = '';
           return;
         }
         const table = jobsTableWrap.querySelector('.report-jobs-table');
         const headerHeight = table?.querySelector('thead')?.getBoundingClientRect().height || 0;
-        const rowsHeight = visibleRows.slice(0, 5).reduce(
+        const rowsHeight = visibleRows.slice(0, 3).reduce(
           (height, row) => height + row.getBoundingClientRect().height, 0,
         );
         jobsTableWrap.style.maxHeight = `${Math.ceil(headerHeight + rowsHeight + 2)}px`;
