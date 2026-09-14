@@ -3822,6 +3822,12 @@ function importWarningDetails(payload) {
       message: 'Choose the destination workspaces next. Templates with matching names will be overwritten only in those workspaces. Importing templates does not rebuild CDR tables.',
     };
   }
+  if (kind === 'dashboards') {
+    return {
+      title: 'Import Dashboards?',
+      message: 'Choose the destination workspaces next. The original workspace is preselected when it exists. Dashboard definitions and saved filters will be replaced in those workspaces; generated caches are not imported.',
+    };
+  }
   if (kind === 'auto-calculated-fields') {
     return {
       title: 'Import Auto-calculated Fields?',
@@ -3860,7 +3866,9 @@ function selectAutoCalculatedFieldWorkspaces(workspaces, kind = 'auto-calculated
   const title = document.createElement('h3'); title.textContent = 'Select destination workspaces';
   const copy = document.createElement('p'); copy.textContent = kind === 'slides-templates'
     ? 'Templates will be imported into every selected workspace. The original workspace is preselected when it exists. Matching template names will be overwritten.'
-    : 'The original workspace is preselected when present. Fields will be merged into every selected workspace; matching field names will be replaced.';
+    : kind === 'dashboards'
+      ? 'Dashboard definitions and their saved filters will replace the Dashboard list in every selected workspace. The original workspace is preselected when present; generated caches are not imported.'
+      : 'The original workspace is preselected when present. Fields will be merged into every selected workspace; matching field names will be replaced.';
   const toolbar = document.createElement('div'); toolbar.className = 'full-environment-workspace-toolbar';
   const selectAll = document.createElement('button'); selectAll.type = 'button'; selectAll.className = 'ghost-link'; selectAll.textContent = 'Select all';
   const selectNone = document.createElement('button'); selectNone.type = 'button'; selectNone.className = 'ghost-link'; selectNone.textContent = 'Select none'; toolbar.append(selectAll, selectNone);
@@ -3968,10 +3976,10 @@ document.querySelectorAll('[data-import-package-form]').forEach((form) => {
         }).catch(() => {});
         return;
       }
-      const destinationWorkspaceIds = ['auto-calculated-fields', 'slides-templates'].includes(payload.kind)
+      const destinationWorkspaceIds = ['auto-calculated-fields', 'slides-templates', 'dashboards'].includes(payload.kind)
         ? await selectAutoCalculatedFieldWorkspaces(payload.destination_workspaces, payload.kind, payload.selected_workspace_ids || [])
         : [];
-      if (['auto-calculated-fields', 'slides-templates'].includes(payload.kind) && !destinationWorkspaceIds) {
+      if (['auto-calculated-fields', 'slides-templates', 'dashboards'].includes(payload.kind) && !destinationWorkspaceIds) {
         await fetch(`/admin/import-export/import/uploads/${encodeURIComponent(uploadId)}`, {
           method: 'DELETE', credentials: 'same-origin',
         }).catch(() => {});
@@ -4421,6 +4429,8 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
           ? 'Next, choose the destination workspaces. After reception, matching field names will be updated and their applicable CDR tables will be materialized in the background.'
           : offer.kind === 'slides-templates'
             ? 'Next, choose the destination workspaces. The original workspace will be preselected when present. Matching templates will be overwritten; CDR tables will not be rebuilt.'
+            : offer.kind === 'dashboards'
+              ? 'Next, choose the destination workspaces. The original workspace will be preselected when present. Dashboard definitions and saved filters will be restored; generated caches are not transferred.'
           : 'After the complete package is received, it will be imported automatically and may overwrite matching configuration or workspaces.';
         accepted = await showConfirmDialog(
           `${offer.source}${sourceAddress} wants to transfer “${offer.content}” to this server.${workspaceCopy}\n\n${importEffect}`,
@@ -4430,7 +4440,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         confirmOverlay?.classList.remove('incoming-transfer-confirm');
       }
       let destinationWorkspaceIds = [];
-      if (accepted && ['auto-calculated-fields', 'slides-templates'].includes(offer.kind)) {
+      if (accepted && ['auto-calculated-fields', 'slides-templates', 'dashboards'].includes(offer.kind)) {
         const matchingIds = (payload.destination_workspaces || []).filter((workspace) =>
           (offer.workspaces || []).some((name) => String(name).toLowerCase() === workspace.name.toLowerCase())
         ).map((workspace) => workspace.id);

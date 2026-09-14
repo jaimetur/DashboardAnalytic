@@ -491,7 +491,20 @@
     sources(); facets(); filterChanged();
   });
   bind('ds-viewer-refresh',prepare);
-  bind('ds-view',async () => { if (!prepared?.slides.length) return; overlay('ds-viewer',true); renderSlide(); });
+  bind('ds-view',async () => {
+    if (!prepared?.slides.length) return;
+    setViewEnabled(false);
+    setPreparationState('preparing');
+    try {
+      // Do not expose the viewer until every Canvas model is locally available.
+      // Disk-cached server models make this a lightweight read after warm-up.
+      await warmDashboardModels();
+      overlay('ds-viewer', true); renderSlide();
+    } finally {
+      setViewEnabled(Boolean(prepared?.slides.length));
+      if (prepared?.slides.length) setPreparationState('ready');
+    }
+  });
   function loadChartPayload(chart, priority = 'high') {
     const url = `/api/e2e-dashboards/chart/${prepared.token}/${chart.index}`;
     const rendered = renderedChartPayloads.get(url);
@@ -524,6 +537,19 @@
       requests.push(loadChartPayload(chart, priority));
     }
     return Promise.allSettled(requests);
+  }
+  async function warmDashboardModels() {
+    const token = prepared?.token;
+    if (!token) return;
+    const charts = prepared.slides.flatMap(slide => slide.charts).filter(chart => chart.available);
+    let next = 0;
+    const workers = Array.from({length: Math.min(4, charts.length)}, async () => {
+      while (prepared?.token === token && next < charts.length) {
+        const chart = charts[next++];
+        await loadChartPayload(chart, 'high');
+      }
+    });
+    await Promise.all(workers);
   }
   function prefetchRemainingCharts(priorityReady = Promise.resolve(), prioritySlide = slideIndex) {
     const token = prepared?.token;

@@ -9912,7 +9912,14 @@ async def accept_transfer_offer(
             raise HTTPException(status_code=404, detail='The pending transfer offer no longer exists.')
         if offer.get('status') == 'pending':
             if offer.get('kind') in {'auto-calculated-fields', 'slides-templates', 'dashboards'}:
-                available = {workspace.id for workspace in workspace_registry.list()}
+                workspaces = workspace_registry.list()
+                available = {workspace.id for workspace in workspaces}
+                # The browser normally opens the destination picker. Retain a
+                # server-side name match as a safe fallback for an interrupted
+                # or cached client script, matching Report Template behaviour.
+                if not destination_workspace_ids:
+                    source_names = {str(name).strip().casefold() for name in offer.get('workspaces', []) if str(name).strip()}
+                    destination_workspace_ids = [workspace.id for workspace in workspaces if workspace.name.casefold() in source_names]
                 if not destination_workspace_ids:
                     raise HTTPException(status_code=400, detail='Select at least one destination workspace.')
                 if any(workspace_id not in available for workspace_id in destination_workspace_ids):
@@ -10191,7 +10198,7 @@ def create_admin_import_job(
     require_import_export_permission(user, kind)
     selected_workspaces = list(dict.fromkeys(workspace_ids or []))
     if kind in {'auto-calculated-fields', 'slides-templates', 'dashboards'}:
-        if not selected_workspaces and kind == 'slides-templates':
+        if not selected_workspaces and kind in {'slides-templates', 'dashboards'}:
             selected_workspaces = matching_template_workspaces(upload['manifest'], accessible_workspaces(user))
         allowed = {workspace.id for workspace in accessible_workspaces(user)}
         if not selected_workspaces:
@@ -10232,7 +10239,7 @@ async def import_admin_package(
             raise ValueError('Confirm the import warning before applying this package.')
         require_import_export_permission(user, str(manifest.get('kind')))
         destinations = []
-        if manifest.get('kind') == 'slides-templates':
+        if manifest.get('kind') in {'slides-templates', 'dashboards'}:
             destinations = matching_template_workspaces(manifest, accessible_workspaces(user))
             if not destinations:
                 raise ValueError('Select destination workspaces using the Import / Export / Transfer panel.')
