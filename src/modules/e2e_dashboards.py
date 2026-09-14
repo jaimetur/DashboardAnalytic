@@ -146,7 +146,7 @@ def install_dashboard_routes(core):
     def workspace_key():
         if not core.active_workspace:
             raise HTTPException(400, 'Open a workspace before using E2E Dashboards.')
-        return str(core.repository.db_path)
+        return str(Path(core.repository.db_path).resolve())
 
     def dashboard_user(user=Depends(core.current_user)):
         if core.active_workspace and user.role != 'super-admin' and not core.repository.user_has_workspace_access(user.username, core.active_workspace.id):
@@ -1068,7 +1068,7 @@ def install_dashboard_routes(core):
         prefetch_executor.submit(run)
 
     def prefetch_task_payloads(workspace):
-        database_path = str(workspace.database_path)
+        database_path = str(workspace.database_path.resolve())
         with lock:
             return [
                 {'id': f'dashboard-prefetch:{job["dashboard_id"]}', 'label': f'Preparing Dashboard charts: {job["name"]}',

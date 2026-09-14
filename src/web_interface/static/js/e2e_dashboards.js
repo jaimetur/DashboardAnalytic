@@ -15,6 +15,7 @@
   const preparedPayloads = new Map();
   let expandedChartRequest = 0;
   let backgroundChartPrefetchToken = '';
+  let backgroundPreparationToken = '';
   let dateBounds = null, templateEditorSaved = false;
   const openStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:open`;
   const libraryStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:library`;
@@ -46,6 +47,18 @@
     if (!backgroundChartPrefetchToken) return;
     emitChartPrefetchStatus('complete');
     backgroundChartPrefetchToken = '';
+  };
+  const emitPreparationStatus = (statusValue, detail = '', token = backgroundPreparationToken) => {
+    if (!token || token !== backgroundPreparationToken) return;
+    window.dispatchEvent(new CustomEvent('dashboard-analytic:background-task', {detail: {
+      id: 'e2e-dashboard-preparation', workspace_id: config.workspace, workspace_name: backgroundWorkspaceName(), is_active: true,
+      label: 'Preparing Dashboard data and filters', detail, progress: null, status: statusValue,
+    }}));
+  };
+  const dismissPreparationStatus = () => {
+    if (!backgroundPreparationToken) return;
+    emitPreparationStatus('complete');
+    backgroundPreparationToken = '';
   };
   const node = (tag, text, className) => { const el = document.createElement(tag); if (text !== undefined) el.textContent = text; if (className) el.className = className; return el; };
   const option = (value, label) => { const el = node('option', label); el.value = value; return el; };
@@ -390,7 +403,7 @@
     status('Filter changes are ready to apply.');
   }
   function changed() {
-    dismissChartPrefetchStatus(); forgetPrepared();
+    dismissChartPrefetchStatus(); dismissPreparationStatus(); forgetPrepared();
     updateDirtyState(); prepared = null; ++sequence; controller?.abort(); preparing = null;
     setViewEnabled(false);
     setPreparationState('preparing');
@@ -403,6 +416,8 @@
     if (preparing) return preparing;
     const pending = (async () => {
     clearTimeout(timer); const current = ++sequence; dismissChartPrefetchStatus(); controller?.abort(); controller = new AbortController();
+    dismissPreparationStatus(); backgroundPreparationToken = `prepare-${current}`;
+    emitPreparationStatus('processing', 'Building the filtered Dashboard selection');
     filterActionBusy = true; updateFilterActionState();
     facetsLoading = true;
     if (!hasOpenFacetMenu()) facets();
@@ -417,10 +432,15 @@
     })();
     preparing = pending;
     try { return await pending; }
-    finally { if (preparing === pending) preparing = null; filterActionBusy = false; updateFilterActionState(); }
+    finally {
+      dismissPreparationStatus();
+      if (preparing === pending) preparing = null;
+      filterActionBusy = false; updateFilterActionState();
+    }
   }
   async function openDashboard(id) {
     clearTimeout(facetsRefreshTimer);
+    dismissPreparationStatus();
     clearTimeout(timer); ++sequence; controller?.abort(); preparing = null;
     stopPresentation();
     activeId = id; definition = canonicalDashboardDefinition(dashboards[id]); savedDefinition = definitionFingerprint(definition); dirty = false; prepared = null; facetOptions = {}; availableFields = []; slideIndex = 0; setViewEnabled(false); rememberOpen(id);
@@ -475,7 +495,7 @@
   }
   bind('ds-import',() => $('ds-import-file').click());
   $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name); const id = dashboardId(), result = await api(`/${id}`,'PUT',payload.definition); dashboards[id] = result.definition; await openDashboard(id); $('ds-import-file').value = ''; });
-  function closeDashboard() { clearTimeout(facetsRefreshTimer); dismissChartPrefetchStatus(); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; savedDefinition = ''; prepared = null; dirty = false; setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard Name: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
+  function closeDashboard() { clearTimeout(facetsRefreshTimer); dismissChartPrefetchStatus(); dismissPreparationStatus(); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; savedDefinition = ''; prepared = null; dirty = false; setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard Name: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
   $('ds-name').oninput = () => { if (definition) { definition.name = $('ds-name').value; updateDirtyState(); } };
   $('ds-nr-mode').onchange = () => {
     const selected = setNrMode($('ds-nr-mode').value);
