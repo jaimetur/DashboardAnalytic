@@ -415,6 +415,10 @@
     // UI setup may fill omitted legacy defaults. Treat that normalization as the
     // persisted baseline, so opening another Dashboard does not prompt to discard it.
     savedDefinition = definitionFingerprint(definition); updateDirtyState();
+    // Date defaults may be derived while the prepared payload is restored. Rebuild
+    // the controls after making them the saved baseline so their amber state agrees
+    // with the disabled Apply and Save buttons.
+    sources(); facets();
   }
   async function save() {
     if (!activeId || !definition || !hasUnsavedFilterChanges()) return;

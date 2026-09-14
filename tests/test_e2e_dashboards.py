@@ -151,6 +151,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'if (inMemory) { applyPreparedPayload(inMemory); return true; }' in dashboard_script
     assert "api(`/prepared/${encodeURIComponent(cached.token)}`)" in dashboard_script
     assert 'if (!await restorePrepared(id)) await prepare();' in dashboard_script
+    assert 'savedDefinition = definitionFingerprint(definition); updateDirtyState();\n    // Date defaults may be derived' in dashboard_script
+    assert 'with the disabled Apply and Save buttons.\n    sources(); facets();' in dashboard_script
     assert "setPreparationState('preparing');" in dashboard_script
     assert "bind('ds-refresh',prepare);" not in dashboard_script
     assert "$('ds-preparing-rows').textContent = Object.entries(payload.rows)" in dashboard_script
