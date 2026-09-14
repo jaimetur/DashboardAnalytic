@@ -655,6 +655,7 @@
     camera.zoom = requestedZoom;
     constrainCamera(camera);
     canvas.classList.toggle('ds-chart-zoomed', camera.zoom > 1);
+    if (camera.zoom > 1) canvas.classList.remove('ds-chart-selection-blocked');
     const payload = models.get(canvas);
     if (payload) draw(canvas, payload);
     canvas.dispatchEvent(new CustomEvent('dashboardchartzoom', {detail: {zoom: camera.zoom}}));
@@ -693,9 +694,20 @@
     camera.panY = zoom * (LOGICAL_HEIGHT / 2 - centreY);
     constrainCamera(camera);
     canvas.classList.toggle('ds-chart-zoomed', camera.zoom > 1);
+    if (camera.zoom > 1) canvas.classList.remove('ds-chart-selection-blocked');
     const payload = models.get(canvas);
     if (payload) draw(canvas, payload);
     canvas.dispatchEvent(new CustomEvent('dashboardchartzoom', {detail: {zoom: camera.zoom}}));
+  }
+
+  function selectionStartAllowed(canvas, event) {
+    const view = views.get(canvas);
+    const bounds = canvas.getBoundingClientRect();
+    if (!view || !bounds.height) return false;
+    const logicalY = (event.clientY - bounds.top) / view.scaleY;
+    // The chart title occupies the top band. Selection zoom starts only in
+    // the plot and data-label area, never under titles or floating controls.
+    return logicalY >= 90;
   }
 
   function attachPan(canvas) {
@@ -715,7 +727,7 @@
     };
     canvas.addEventListener('pointerdown', event => {
       if (event.button !== 0) return;
-      const selecting = cameraFor(canvas).zoom <= 1 && event.pointerType === 'mouse';
+      const selecting = cameraFor(canvas).zoom <= 1 && event.pointerType === 'mouse' && selectionStartAllowed(canvas, event);
       if (!selecting && cameraFor(canvas).zoom <= 1) return;
       drag = {pointerId: event.pointerId, x: event.clientX, y: event.clientY, selecting, startX: event.clientX, startY: event.clientY};
       canvas.classList.add(selecting ? 'is-selecting' : 'is-panning');
@@ -724,6 +736,9 @@
       if (!selecting) event.preventDefault();
     });
     canvas.addEventListener('pointermove', event => {
+      if (!drag && cameraFor(canvas).zoom <= 1) {
+        canvas.classList.toggle('ds-chart-selection-blocked', !selectionStartAllowed(canvas, event));
+      }
       if (!drag || event.pointerId !== drag.pointerId) return;
       if (drag.selecting) {
         drag.endX = event.clientX; drag.endY = event.clientY;
@@ -756,6 +771,7 @@
       canvas.releasePointerCapture?.(event.pointerId);
       canvas.classList.remove('is-panning', 'is-selecting');
       drag = null;
+      if (cameraFor(canvas).zoom <= 1) canvas.classList.toggle('ds-chart-selection-blocked', !selectionStartAllowed(canvas, event));
     };
     canvas.addEventListener('pointerup', stopPan);
     canvas.addEventListener('pointercancel', stopPan);

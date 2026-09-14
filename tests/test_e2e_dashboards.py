@@ -71,8 +71,36 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-chart-expanded-canvas"' in page.text
     assert 'id="ds-chart-expanded-data"' in page.text
     assert 'id="ds-chart-expanded-zoom"' in page.text
+    assert 'id="ds-chart-expanded-filters"' in page.text
+    assert 'id="ds-chart-expanded-edit"' in page.text
+    assert 'id="ds-chart-expanded-first"' in page.text
+    assert 'id="ds-chart-expanded-last"' in page.text
+    assert 'id="ds-chart-expanded-canvas-shell"' in page.text
+    assert 'id="ds-chart-expanded-position"' in page.text
+    assert 'class="ds-chart-expanded-footer"' in page.text
+    assert 'id="ds-chart-expanded-controls"' in page.text
+    assert 'id="ds-chart-expanded-controls"><button type="button" id="ds-chart-expanded-data"' in page.text
+    assert 'ds-viewer-refresh-action' in page.text
     dashboard_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
     assert "controls.append(data, expand, zoom)" in dashboard_script
+    assert "const prioritySlide = !$('ds-viewer').hidden ? slideIndex : 0;" in dashboard_script
+    assert "prefetchRemainingCharts(priorityReady, prioritySlide);" in dashboard_script
+    assert "savedDefinition = definitionFingerprint(definition); dirty = false;" in dashboard_script
+    assert "emitChartPrefetchStatus('processing'" in dashboard_script
+    assert "openTemplateEditor(expandedChart?.focus_row)" in dashboard_script
+    assert "card.ondblclick = safe(async event =>" in dashboard_script
+    assert "const syncExpandedChartNavigation" in dashboard_script
+    assert "navigateExpandedChart(expandedCharts().length - 1)" in dashboard_script
+    assert "expandedCanvasShell.classList.add('ds-hover')" in dashboard_script
+    assert "`Chart ${index + 1} / ${charts.length}`" in dashboard_script
+    assert "if (event.target === event.currentTarget) expandedChartOverlay(false);" in dashboard_script
+    chart_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/dashboard_charts.js').read_text(encoding='utf-8')
+    assert 'function selectionStartAllowed(canvas, event)' in chart_script
+    assert 'return logicalY >= 90;' in chart_script
+    assert "canvas.classList.toggle('ds-chart-selection-blocked', !selectionStartAllowed(canvas, event));" in chart_script
+    dashboard_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+    assert '.ds-chart-controls button:not(:disabled){cursor:pointer!important}' in dashboard_css
+    assert '.ds-chart-expanded-canvas.ds-hover .ds-chart-controls,.ds-chart-expanded-canvas:focus-within .ds-chart-controls{opacity:1;visibility:visible;transform:translateY(0);transition-delay:0s;pointer-events:auto}' in dashboard_css
     saved = client.put('/api/e2e-dashboards/test', json=payload)
     assert saved.status_code == 200
     assert saved.json()['definition']['hidden_filters'] == []
@@ -96,6 +124,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert preview['options']['City'] == ['Leeds', 'London']
     assert len(preview['slides']) == 2
     assert len(preview['slides'][0]['charts']) == 2
+    assert preview['slides'][0]['charts'][0]['focus_row'] == 0
+    assert preview['slides'][0]['charts'][1]['focus_row'] == 1
     assert preview['slides'][0]['charts'][0]['position'][0] < preview['slides'][0]['charts'][1]['position'][0]
     token = preview['token']
     image = client.get(f'/api/e2e-dashboards/preview/{token}/0.png')

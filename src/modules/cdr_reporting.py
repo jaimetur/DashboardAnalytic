@@ -2193,7 +2193,9 @@ OUTCOME_COLOUR_VARIANTS = {
 
 def _outcome_kind(value: object) -> str | None:
     """Classify a result label as a success or failure without fixing its shade."""
-    text = str(value or "").strip().casefold()
+    if value is None or value is pd.NA:
+        return None
+    text = str(value).strip().casefold()
     if not text:
         return None
     # Check negative language first because "unsuccessful" also contains
@@ -2944,25 +2946,27 @@ def _status_chart_categories(
         return result, ("< 1.6", "≥ 1.6"), ("#C83E4D", "#2C9A62")
     values = result[state_column].astype("string").str.strip()
     normalised = values.str.casefold()
-    semantic = normalised.map({
+    canonical_outcomes = normalised.map({
         "completed": "Completed", "drop": "Dropped", "dropped": "Dropped", "failed": "Failed", "cutoff": "Cutoff",
     })
+    semantic = canonical_outcomes.where(canonical_outcomes.notna(), values.where(values.map(_outcome_kind).notna()))
     # Status KPIs intentionally ignore unknown outcomes. Other categorical
     # KPIs (RAT, CA state, ARFCN, threshold buckets) retain their native values.
     result["state"] = (
         semantic if semantic.notna().any() else values
     ).replace({"": pd.NA, "<NA>": pd.NA, "NaN": pd.NA, "nan": pd.NA})
     present = [str(value) for value in result["state"].dropna().drop_duplicates()]
-    preferred = [state for state in ("Completed", "Cutoff", "Dropped", "Failed") if state in present]
+    preferred = [state for state in ("Completed", "Success", "Cutoff", "Dropped", "Failed", "Failure") if state in present]
     states = tuple([*preferred, *sorted((state for state in present if state not in preferred), key=str.casefold)])
-    failure_colours = ("#C83E4D", "#D8555F", "#E26A70", "#AE2F42", "#F08A8F", "#8F2035")
+    offsets = {"success": 0, "failure": 0}
     neutral_index = 0
     colours_list: list[str] = []
-    for state_index, state in enumerate(states):
-        if state == "Completed":
-            colours_list.append("#2C9A62")
-        elif state in {"Cutoff", "Dropped", "Failed"}:
-            colours_list.append(failure_colours[state_index % len(failure_colours)])
+    for state in states:
+        kind = _outcome_kind(state)
+        if kind:
+            variants = OUTCOME_COLOUR_VARIANTS[kind]
+            colours_list.append(variants[offsets[kind] % len(variants)])
+            offsets[kind] += 1
         else:
             colours_list.append(_colour(state, neutral_index))
             neutral_index += 1

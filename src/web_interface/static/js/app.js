@@ -64,6 +64,17 @@ function monitorAutoCalculatedFieldJob(statusUrl, notice = '') {
   saved.add(statusUrl);
   window.localStorage.setItem(autoCalculatedFieldJobStorageKey, JSON.stringify([...saved]));
   if (notice) showInfoDialog(notice, {title: 'Auto-calculated Fields'});
+  window.addEventListener('dashboard-analytic:background-task', (event) => {
+    const task = event.detail;
+    if (!task || !task.id) return;
+    if (['complete', 'completed', 'cancelled'].includes(String(task.status || '').toLowerCase())) {
+      transientTasks.delete(String(task.id));
+    } else {
+      transientTasks.set(String(task.id), {...task});
+    }
+    render(mergedGroups());
+  });
+
   const poll = async () => {
     try {
       const response = await fetch(statusUrl, {credentials: 'same-origin'});
@@ -5474,6 +5485,27 @@ if (queueNode) {
   if (!(activeDock instanceof HTMLElement) || !(otherDock instanceof HTMLElement)) return;
   let polling = false;
   let renderedSignature = '';
+  let serverGroups = [];
+  const transientTasks = new Map();
+
+  const mergedGroups = () => {
+    const groups = serverGroups.map(group => ({...group, tasks: [...(group.tasks || [])]}));
+    transientTasks.forEach((task) => {
+      const workspaceId = String(task.workspace_id || '__client__');
+      let group = groups.find(candidate => String(candidate.workspace_id) === workspaceId);
+      if (!group) {
+        group = {
+          workspace_id: workspaceId,
+          workspace_name: String(task.workspace_name || 'Active workspace'),
+          is_active: Boolean(task.is_active),
+          tasks: [],
+        };
+        groups.push(group);
+      }
+      group.tasks.push(task);
+    });
+    return groups;
+  };
 
   const createTaskPanel = (group) => {
     const panel = document.createElement('section');
@@ -5602,7 +5634,8 @@ if (queueNode) {
       });
       if (!response.ok) return;
       const payload = await response.json();
-      render(payload.groups);
+      serverGroups = Array.isArray(payload.groups) ? payload.groups : [];
+      render(mergedGroups());
     } catch (_error) {
       // A transient polling failure must not interfere with the current page.
     } finally {

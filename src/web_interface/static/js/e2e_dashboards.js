@@ -13,6 +13,7 @@
   const chartPayloads = new Map();
   const renderedChartPayloads = new Map();
   let expandedChartRequest = 0;
+  let backgroundChartPrefetchToken = '';
   const openStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:open`;
   const libraryStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:library`;
   const dashboardId = () => {
@@ -30,6 +31,19 @@
   const nextName = value => { let name = value, number = 2; while (Object.values(dashboards).some(item => item.name.toLowerCase() === name.toLowerCase())) name = `${value.slice(0, 108)} (${number++})`; return name; };
   const focusReturn = new Map();
   const status = message => { $('ds-status').textContent = message; };
+  const backgroundWorkspaceName = () => document.querySelector('[data-header-active-workspace-name]')?.textContent?.trim() || 'Active workspace';
+  const emitChartPrefetchStatus = (statusValue, detail = '', progress = null, token = backgroundChartPrefetchToken) => {
+    if (!token || token !== backgroundChartPrefetchToken) return;
+    window.dispatchEvent(new CustomEvent('dashboard-analytic:background-task', {detail: {
+      id: 'e2e-dashboard-chart-prefetch', workspace_id: config.workspace, workspace_name: backgroundWorkspaceName(), is_active: true,
+      label: 'Rendering Dashboard charts', detail, progress, status: statusValue,
+    }}));
+  };
+  const dismissChartPrefetchStatus = () => {
+    if (!backgroundChartPrefetchToken) return;
+    emitChartPrefetchStatus('complete');
+    backgroundChartPrefetchToken = '';
+  };
   const node = (tag, text, className) => { const el = document.createElement(tag); if (text !== undefined) el.textContent = text; if (className) el.className = className; return el; };
   const option = (value, label) => { const el = node('option', label); el.value = value; return el; };
   const identity = value => String(value).toLocaleLowerCase().replace(/[^a-z0-9]/g, '');
@@ -240,6 +254,7 @@
     facetsRefreshTimer = setTimeout(refreshFacetsAfterMenusClose, 100);
   }
   function changed() {
+    dismissChartPrefetchStatus();
     updateDirtyState(); prepared = null; ++sequence; controller?.abort(); preparing = null;
     setViewEnabled(false);
     setPreparationState('preparing');
@@ -251,7 +266,7 @@
   async function prepare() {
     if (preparing) return preparing;
     const pending = (async () => {
-    clearTimeout(timer); const current = ++sequence; controller?.abort(); controller = new AbortController();
+    clearTimeout(timer); const current = ++sequence; dismissChartPrefetchStatus(); controller?.abort(); controller = new AbortController();
     facetsLoading = true;
     if (!hasOpenFacetMenu()) facets();
     setViewEnabled(false);
@@ -265,7 +280,10 @@
       setViewEnabled(Boolean(payload.slides?.length)); setPreparationState('ready');
       const rowLabel = payload.rows_exact === false ? 'source rows' : 'rows';
       $('ds-rows').textContent = Object.entries(payload.rows).map(([kind,count]) => `${kind.toUpperCase()}: ${count.toLocaleString()} ${rowLabel}`).join(' · ');
-      chartPayloads.clear(); renderedChartPayloads.clear(); const firstSlideReady = prefetchSlide(0); prefetchRemainingCharts(firstSlideReady);
+      chartPayloads.clear(); renderedChartPayloads.clear();
+      const prioritySlide = !$('ds-viewer').hidden ? slideIndex : 0;
+      const priorityReady = prefetchSlide(prioritySlide, 'high');
+      prefetchRemainingCharts(priorityReady, prioritySlide);
       if (!$('ds-viewer').hidden) renderSlide();
     } catch (error) { if (current === sequence && error.name !== 'AbortError') { facetsLoading = false; facets(); setViewEnabled(false); setPreparationState('hidden'); $('ds-rows').textContent = error.message; if (!$('ds-viewer').hidden) $('ds-charts').replaceChildren(node('div',error.message,'ds-empty')); } throw error; }
     })();
@@ -280,6 +298,9 @@
     activeId = id; definition = canonicalDashboardDefinition(dashboards[id]); savedDefinition = definitionFingerprint(definition); dirty = false; prepared = null; facetOptions = {}; availableFields = []; slideIndex = 0; setViewEnabled(false); rememberOpen(id);
     $('ds-name').value = definition.name; setNrMode(definition.technology || definition.template_technology, definition.template);
     $('ds-filter-panel').hidden = false; $('ds-dashboard-name').textContent = `Dashboard Name: ${definition.name}`; sources(); facets(); library(); status(''); await prepare();
+    // UI setup may fill omitted legacy defaults. Treat that normalization as the
+    // persisted baseline, so opening another Dashboard does not prompt to discard it.
+    savedDefinition = definitionFingerprint(definition); dirty = false;
   }
   async function save() {
     if (!activeId || !definition) return;
@@ -314,7 +335,7 @@
   }
   bind('ds-import',() => $('ds-import-file').click());
   $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name); const id = dashboardId(), result = await api(`/${id}`,'PUT',payload.definition); dashboards[id] = result.definition; await openDashboard(id); $('ds-import-file').value = ''; });
-  function closeDashboard() { clearTimeout(facetsRefreshTimer); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; savedDefinition = ''; prepared = null; dirty = false; setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard Name: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
+  function closeDashboard() { clearTimeout(facetsRefreshTimer); dismissChartPrefetchStatus(); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; savedDefinition = ''; prepared = null; dirty = false; setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard Name: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
   $('ds-name').oninput = () => { if (definition) { definition.name = $('ds-name').value; updateDirtyState(); } };
   $('ds-nr-mode').onchange = () => {
     const selected = setNrMode($('ds-nr-mode').value);
@@ -325,13 +346,13 @@
   bind('ds-reset',() => { definition.filters = {}; definition.date_from = definition.date_to = null; changed(); });
   bind('ds-refresh',prepare); bind('ds-viewer-refresh',prepare);
   bind('ds-view',async () => { if (!prepared?.slides.length) return; overlay('ds-viewer',true); renderSlide(); });
-  function loadChartPayload(chart) {
+  function loadChartPayload(chart, priority = 'high') {
     const url = `/api/e2e-dashboards/chart/${prepared.token}/${chart.index}`;
     const rendered = renderedChartPayloads.get(url);
     if (rendered) return Promise.resolve(rendered);
     let request = chartPayloads.get(url);
     if (!request) {
-      request = fetch(url, {cache: 'no-store', credentials: 'same-origin'}).then(async response => {
+      request = fetch(url, {cache: 'no-store', credentials: 'same-origin', priority}).then(async response => {
         const contentType = response.headers.get('content-type') || '';
         if (!contentType.includes('application/json')) {
           if (response.redirected || response.url.includes('/login')) throw new Error('Your session has expired. Please sign in again.');
@@ -349,31 +370,42 @@
     }
     return request;
   }
-  function prefetchSlide(index) {
+  function prefetchSlide(index, priority = 'low') {
     const slide = prepared?.slides[index]; if (!slide) return Promise.resolve([]);
     const requests = [];
     for (const chart of slide.charts) {
       if (!chart.available) continue;
-      requests.push(loadChartPayload(chart));
+      requests.push(loadChartPayload(chart, priority));
     }
     return Promise.allSettled(requests);
   }
-  function prefetchRemainingCharts(firstSlideReady = Promise.resolve()) {
+  function prefetchRemainingCharts(priorityReady = Promise.resolve(), prioritySlide = slideIndex) {
     const token = prepared?.token;
     if (!token) return;
-    const pendingCharts = prepared.slides.flatMap((slide, index) => index === slideIndex ? [] : slide.charts)
+    const pendingCharts = prepared.slides.flatMap((slide, index) => index === prioritySlide ? [] : slide.charts)
       .filter(chart => chart.available);
     let nextChart = 0;
+    const total = pendingCharts.length;
     const warmNextChart = async () => {
-      while (prepared?.token === token && nextChart < pendingCharts.length) {
-        const chart = pendingCharts[nextChart++];
-        await loadChartPayload(chart).catch(() => undefined);
-        await new Promise(resolve => setTimeout(resolve, 0));
+      try {
+        while (prepared?.token === token && nextChart < total) {
+          const chart = pendingCharts[nextChart++];
+          emitChartPrefetchStatus('processing', `Rendering chart ${nextChart} of ${total}`, Math.round((nextChart - 1) * 100 / total), token);
+          await loadChartPayload(chart, 'low').catch(() => undefined);
+          emitChartPrefetchStatus('processing', `Rendered ${nextChart} of ${total} charts`, Math.round(nextChart * 100 / total), token);
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+      } finally {
+        if (prepared?.token === token && backgroundChartPrefetchToken === token) dismissChartPrefetchStatus();
       }
     };
-    firstSlideReady.finally(() => {
-      const workers = Math.min(4, pendingCharts.length);
-      for (let index = 0; index < workers; index += 1) setTimeout(() => { void warmNextChart(); }, 60 + index * 20);
+    priorityReady.finally(() => {
+      // Keep background work deliberately narrow so a newly visible slide can
+      // start rendering without competing with a pool of older slides.
+      if (prepared?.token !== token || !total) return;
+      backgroundChartPrefetchToken = token;
+      emitChartPrefetchStatus('processing', `Rendering 0 of ${total} charts`, 0, token);
+      setTimeout(() => { void warmNextChart(); }, 60);
     });
   }
   function structuralDashboard(stage, slide) {
@@ -409,12 +441,58 @@
   }
   const expandedZoom = chartZoomControls($('ds-chart-expanded-canvas'));
   $('ds-chart-expanded-zoom').append(expandedZoom);
+  const expandedCanvasShell = $('ds-chart-expanded-canvas-shell');
+  let expandedControlsTimer;
+  const showExpandedCanvasControls = () => {
+    clearTimeout(expandedControlsTimer);
+    expandedControlsTimer = null;
+    expandedCanvasShell.classList.add('ds-hover');
+  };
+  const hideExpandedCanvasControls = () => {
+    if (expandedControlsTimer) return;
+    expandedControlsTimer = setTimeout(() => {
+      expandedCanvasShell.classList.remove('ds-hover');
+      expandedControlsTimer = null;
+    }, 500);
+  };
+  expandedCanvasShell.onpointerenter = showExpandedCanvasControls;
+  expandedCanvasShell.onpointerleave = hideExpandedCanvasControls;
+  expandedCanvasShell.onfocusin = showExpandedCanvasControls;
+  expandedCanvasShell.onfocusout = () => { if (!expandedCanvasShell.contains(document.activeElement)) hideExpandedCanvasControls(); };
   let expandedChart = null;
   async function openChartDataset(chart) {
     dataIndex = chart.index; dataPage = 0; dataToken = prepared.token; dataPages.clear();
     overlay('ds-data-overlay', true); await renderData();
   }
   $('ds-chart-expanded-data').onclick = safe(async () => { if (expandedChart) await openChartDataset(expandedChart); });
+  const expandedCharts = () => prepared?.slides.flatMap(slide => slide.charts).filter(chart => chart.available) || [];
+  const syncExpandedChartNavigation = () => {
+    const charts = expandedCharts();
+    const index = charts.findIndex(chart => chart.index === expandedChart?.index);
+    $('ds-chart-expanded-position').textContent = index < 0 ? 'Chart —' : `Chart ${index + 1} / ${charts.length}`;
+    $('ds-chart-expanded-first').disabled = $('ds-chart-expanded-prev').disabled = index <= 0;
+    $('ds-chart-expanded-next').disabled = $('ds-chart-expanded-last').disabled = index < 0 || index >= charts.length - 1;
+  };
+  const navigateExpandedChart = async target => {
+    const charts = expandedCharts();
+    const current = charts.findIndex(chart => chart.index === expandedChart?.index);
+    if (current < 0 || target < 0 || target >= charts.length || target === current) return;
+    await openExpandedChart(charts[target]);
+  };
+  $('ds-chart-expanded-first').onclick = safe(async () => navigateExpandedChart(0));
+  $('ds-chart-expanded-prev').onclick = safe(async () => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) - 1));
+  $('ds-chart-expanded-next').onclick = safe(async () => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) + 1));
+  $('ds-chart-expanded-last').onclick = safe(async () => navigateExpandedChart(expandedCharts().length - 1));
+  const openFloatingFilters = () => { $('ds-filter-float').append($('ds-filter-panel')); $('ds-view').hidden = true; $('ds-filter-close-action').hidden = false; overlay('ds-filter-overlay', true); };
+  const openTemplateEditor = focusRow => {
+    if (!definition || !Number.isInteger(focusRow)) return;
+    $('ds-editor-frame').src = `/admin/report-templates/${encodeURIComponent(definition.template_technology)}/${encodeURIComponent(definition.template)}/editor?focus_row=${focusRow}`;
+    overlay('ds-editor-overlay', true);
+  };
+  $('ds-chart-expanded-refresh').onclick = safe(prepare);
+  $('ds-chart-expanded-filters').onclick = openFloatingFilters;
+  $('ds-chart-expanded-auto-fields')?.addEventListener('click', () => document.querySelector('.ds-viewer-panel [data-workspace-manage-calculated-dimensions]')?.click());
+  $('ds-chart-expanded-edit')?.addEventListener('click', () => openTemplateEditor(expandedChart?.focus_row));
   function expandedChartOverlay(show) {
     const overlay = $('ds-chart-expanded-overlay');
     if (show) {
@@ -429,6 +507,9 @@
       focusReturn.get('ds-chart-expanded-overlay')?.focus();
     }
   }
+  $('ds-chart-expanded-overlay').addEventListener('click', event => {
+    if (event.target === event.currentTarget) expandedChartOverlay(false);
+  });
   async function openExpandedChart(chart, renderedPayload = null) {
     stopPresentation();
     const request = ++expandedChartRequest;
@@ -436,6 +517,8 @@
     const canvas = $('ds-chart-expanded-canvas');
     const message = $('ds-chart-expanded-message');
     expandedChart = chart;
+    syncExpandedChartNavigation();
+    if ($('ds-chart-expanded-edit')) $('ds-chart-expanded-edit').disabled = !Number.isInteger(chart.focus_row);
     expandedZoom.reset(); expandedZoom.hidden = true;
     const initialTitle = renderedPayload?.title || chart.title || 'Expanded chart';
     $('ds-chart-expanded-title').textContent = initialTitle;
@@ -568,6 +651,10 @@
       } else message.textContent = `Unavailable source type: select a ${chart.source ? chart.source.toUpperCase() : 'supported'} CDR dataset.`;
       const data = node('button','', 'ds-chart-data'); data.type = 'button'; data.title = 'View dataset'; data.setAttribute('aria-label', 'View dataset'); data.disabled = !chart.available; data.onclick = safe(async () => { await openChartDataset(chart); });
       const expand = node('button', '', 'ds-chart-expand'); expand.type = 'button'; expand.title = 'Expand chart'; expand.setAttribute('aria-label', 'Expand chart'); expand.disabled = !chart.available; expand.onclick = safe(async event => { event.stopPropagation(); await openExpandedChart(chart, renderedPayload); });
+      card.ondblclick = safe(async event => {
+        if (!chart.available || event.target.closest('button, a, input, select, label')) return;
+        await openExpandedChart(chart, renderedPayload);
+      });
       const controls = node('div', undefined, 'ds-chart-controls'); controls.append(data, expand, zoom); card.append(controls);
       let hideTimer;
       const showControls = () => { clearTimeout(hideTimer); hideTimer = null; card.classList.add('ds-hover'); };
@@ -579,7 +666,7 @@
       stage.append(card);
     }
     if (presentation.running) { stage.dataset.presentationEffect = presentation.effect; void stage.offsetWidth; stage.classList.add('ds-slide-transition'); }
-    renderComments(); prefetchSlide(slideIndex + 1);
+    renderComments(); prefetchSlide(slideIndex + 1, 'low');
   }
   bind('ds-first',()=>{ stopPresentation(); slideIndex = 0; renderSlide(); });
   bind('ds-prev',()=>{ stopPresentation(); slideIndex--; renderSlide(); });
@@ -593,7 +680,7 @@
   bind('ds-presentation-start', startPresentation);
   bind('ds-presentation-stop', stopPresentation);
   const closeFilters = () => { $('ds-filter-home').append($('ds-filter-panel')); $('ds-view').hidden = false; $('ds-filter-close-action').hidden = true; overlay('ds-filter-overlay',false); };
-  bind('ds-floating-filters',()=>{ $('ds-filter-float').append($('ds-filter-panel')); $('ds-view').hidden = true; $('ds-filter-close-action').hidden = false; overlay('ds-filter-overlay',true); });
+  bind('ds-floating-filters', openFloatingFilters);
   bind('ds-filter-close',closeFilters);
   bind('ds-filter-close-action',closeFilters);
   bind('ds-viewer-close',()=>{ stopPresentation(); if (!$('ds-chart-expanded-overlay').hidden) expandedChartOverlay(false); if (!$('ds-filter-overlay').hidden) closeFilters(); overlay('ds-viewer',false); });
@@ -642,7 +729,7 @@
   bind('ds-data-last', async () => { const label = $('ds-data-page').textContent; const pages = Number(label.match(/\/ (\d+)$/)?.[1]) || 1; dataPage = pages - 1; await renderData(); });
   bind('ds-data-close',()=>overlay('ds-data-overlay',false));
   bind('ds-chart-expanded-close',()=>expandedChartOverlay(false));
-  if ($('ds-edit')) bind('ds-edit',()=>{ const slide = prepared?.slides[slideIndex]; if (!slide) return; $('ds-editor-frame').src = `/admin/report-templates/${encodeURIComponent(definition.template_technology)}/${encodeURIComponent(definition.template)}/editor?focus_row=${slide.focus_row}`; overlay('ds-editor-overlay',true); });
+  if ($('ds-edit')) bind('ds-edit',()=>{ const slide = prepared?.slides[slideIndex]; if (slide) openTemplateEditor(slide.focus_row); });
   bind('ds-editor-close',async ()=>{ overlay('ds-editor-overlay',false); $('ds-editor-frame').removeAttribute('src'); await prepare(); });
   document.addEventListener('keydown',event=>{
     const visible = ['ds-chart-expanded-overlay','ds-editor-overlay','ds-data-overlay','ds-filter-overlay','ds-presentation-overlay','ds-viewer'].find(id=>!$(id).hidden && $(id).contains(document.activeElement)); if (!visible) return;

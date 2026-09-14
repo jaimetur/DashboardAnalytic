@@ -72,7 +72,7 @@ DASHBOARD_SELECTION_ROW_LIMIT = 25_000
 DASHBOARD_PROFILE_SELECTION_THRESHOLD = 100_000
 DASHBOARD_PROJECTION_CACHE_VERSION = 1
 DASHBOARD_PROJECTION_DISK_LIMIT = 6
-DASHBOARD_CHART_MODEL_CACHE_VERSION = 8
+DASHBOARD_CHART_MODEL_CACHE_VERSION = 9
 DASHBOARD_CHART_MODEL_DISK_LIMIT = 500
 
 
@@ -599,7 +599,10 @@ def install_dashboard_routes(core):
                 'focus_row': editor_index,
             })
             if not entry.structural_type:
-                slide['charts'].append({'index': index, 'title': entry.chart_title, 'source': entry.source_kind, 'available': entry.source_kind in selected_by_kind})
+                slide['charts'].append({
+                    'index': index, 'title': entry.chart_title, 'source': entry.source_kind,
+                    'available': entry.source_kind in selected_by_kind, 'focus_row': editor_index,
+                })
         for slide in slides.values():
             bounds = _layout_chart_frames(_named_slide_layout(deck, slide['layout']))
             if bounds and len(bounds) >= len(slide['charts']):
