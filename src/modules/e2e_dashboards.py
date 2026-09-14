@@ -58,6 +58,11 @@ class DashboardName(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
 
+class DashboardPrefetchPriority(BaseModel):
+    token: str = Field(min_length=1)
+    indexes: list[int] = Field(default_factory=list)
+
+
 def identity(value):
     return re.sub(r'[^a-z0-9]', '', str(value).casefold())
 
@@ -816,7 +821,11 @@ def install_dashboard_routes(core):
             # It remains safe to serve while the worker fills missing Canvas
             # models because chart_model reads a disk hit when present and
             # computes only the chart requested by the viewer when absent.
-            token = str(job.get('token') or '') if job and job.get('status') in {'processing', 'ready'} else ''
+            # A restored partial manifest already has a usable snapshot while
+            # its remaining Canvas models wait behind another dashboard in the
+            # serial worker queue. Serve it immediately instead of returning
+            # 409 until that queue position starts.
+            token = str(job.get('token') or '') if job and job.get('status') in {'queued', 'processing', 'ready'} else ''
             snapshot = snapshots.get(token)
             if not token or snapshot is None or snapshot.owner not in {user.username, '*'}:
                 raise HTTPException(409, 'Dashboard preparation is still running.')
@@ -1181,6 +1190,34 @@ def install_dashboard_routes(core):
         payload = chart_model(token, index, user)
         return JSONResponse(payload, headers={'Cache-Control': 'private, max-age=3600'})
 
+    @app.post('/api/e2e-dashboards/prefetched/{dashboard_id}/priority')
+    def prioritize_prefetched_dashboard(
+        dashboard_id: str, payload: DashboardPrefetchPriority, user=Depends(dashboard_user),
+    ):
+        """Move models from the currently visible slide ahead of later work."""
+        workspace = workspace_key()
+        with lock:
+            raw_definition = read_dashboards(bound_repository()).get(dashboard_id)
+            if not isinstance(raw_definition, dict):
+                raise HTTPException(404, 'Dashboard not found.')
+            fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
+            job = prefetch_jobs.get(f'{workspace}:{dashboard_id}:{fingerprint}')
+            if not job or job.get('status') not in {'queued', 'processing'} or job.get('token') != payload.token:
+                return Response(status_code=204)
+            snapshot = snapshots.get(payload.token)
+            if snapshot is None or snapshot.workspace != workspace:
+                return Response(status_code=204)
+            available = {
+                int(chart['index'])
+                for slide in snapshot.payload.get('slides', [])
+                for chart in slide.get('charts', [])
+                if chart.get('available')
+            }
+            requested = [index for index in payload.indexes if index in available]
+            queued = [index for index in job.get('priority_indexes', []) if index in available]
+            job['priority_indexes'] = list(dict.fromkeys([*requested, *queued]))
+        return Response(status_code=204)
+
     def enqueue_prefetch(
         dashboard_id: str,
         raw_definition: dict,
@@ -1208,7 +1245,7 @@ def install_dashboard_routes(core):
                 return
             job = prefetch_jobs[key] = {'id': key, 'workspace': workspace, 'dashboard_id': dashboard_id,
                 'name': str(raw_definition.get('name') or dashboard_id), 'status': 'queued', 'completed': 0, 'total': 0,
-                'restoring_cached_models': False, 'generation': generation, 'cancel_requested': False}
+                'restoring_cached_models': False, 'generation': generation, 'cancel_requested': False, 'priority_indexes': []}
             if restored_preview is not None:
                 total = sum(
                     1 for slide in restored_preview['slides'] for chart in slide['charts'] if chart['available']
@@ -1235,11 +1272,20 @@ def install_dashboard_routes(core):
                 with lock:
                     job.update(token=preview['token'], total=len(charts))
                 cached_indexes = cached_canvas_model_indexes(preview['token'])
-                for index in charts:
+                pending_indexes = list(dict.fromkeys(charts))
+                while pending_indexes:
                     with lock:
                         if job.get('cancel_requested') or job.get('generation') != prefetch_generation.get(workspace, 0):
                             job['status'] = 'cancelled'
                             return
+                        priority_indexes = [
+                            index for index in job.get('priority_indexes', []) if index in pending_indexes
+                        ]
+                        index = priority_indexes[0] if priority_indexes else pending_indexes[0]
+                        pending_indexes.remove(index)
+                        job['priority_indexes'] = [
+                            candidate for candidate in job.get('priority_indexes', []) if candidate != index
+                        ]
                     if index in cached_indexes:
                         continue
                     chart_model(preview['token'], index, user, expected_workspace=workspace)

@@ -438,6 +438,7 @@
     clearTimeout(timer); ++sequence; controller?.abort(); preparing = null;
     stopPresentation();
     activeId = id; definition = canonicalDashboardDefinition(dashboards[id]); savedDefinition = definitionFingerprint(definition); dirty = false; prepared = null; facetOptions = {}; availableFields = []; slideIndex = 0; setViewEnabled(false); rememberOpen(id);
+    resetViewerForDashboard();
     $('ds-name').value = definition.name; setNrMode(definition.technology || definition.template_technology, definition.template);
     $('ds-filter-panel').hidden = false; $('ds-dashboard-name').textContent = `Dashboard Name: ${definition.name}`; sources(); facets(); library(); status(''); if (!await restorePrepared(id)) await prepare();
     // UI setup may fill omitted legacy defaults. Treat that normalization as the
@@ -820,12 +821,32 @@
     presentation.effect = $('ds-presentation-effect').value;
     presentation.running = true; syncPresentationControls(); overlay('ds-presentation-overlay', false); renderSlide(); schedulePresentationAdvance(); status(`Presentation started: ${presentation.delay / 1000} seconds per slide.`);
   }
+  function resetViewerForDashboard() {
+    // A new Dashboard can be opened while its server snapshot is still being
+    // restored. Never leave the previous Dashboard's title, slide or comments
+    // visible during that short wait.
+    $('ds-position').textContent = definition ? `${definition.name} · Loading slides` : '';
+    $('ds-title').textContent = 'Loading Dashboard…';
+    $('ds-subtitle').textContent = '';
+    $('ds-slide').replaceChildren(option('', 'Loading slides…'));
+    $('ds-slide').disabled = true;
+    $('ds-first').disabled = $('ds-prev').disabled = $('ds-next').disabled = $('ds-last').disabled = true;
+    const stage = $('ds-charts');
+    stage.classList.remove('ds-positioned', 'ds-structural-stage', 'ds-slide-transition');
+    stage.replaceChildren(node('div', 'Loading available Dashboard charts…', 'ds-empty'));
+    $('ds-comments-list').replaceChildren();
+    $('ds-comments-status').textContent = '';
+  }
   function renderSlide() {
     if (!prepared) return; slideIndex = Math.max(0,Math.min(slideIndex,prepared.slides.length-1));
     const slide = prepared.slides[slideIndex]; if (!slide) return;
+    const visibleIndexes = slide.charts.filter(chart => chart.available).map(chart => chart.index);
+    if (activeId && prepared.token && visibleIndexes.length) {
+      void api(`/prefetched/${encodeURIComponent(activeId)}/priority`, 'POST', {token: prepared.token, indexes: visibleIndexes}).catch(() => undefined);
+    }
     $('ds-title').textContent = slide.title || `Dashboard ${slide.number}`; $('ds-subtitle').textContent = slide.subtitle;
     $('ds-position').textContent = `${definition.name} · Slide ${slideIndex+1} / ${prepared.slides.length}`;
-    $('ds-slide').replaceChildren(...prepared.slides.map((item,index)=>option(String(index),`${item.number} · ${item.title || 'Dashboard'}`))); $('ds-slide').value = String(slideIndex);
+    $('ds-slide').replaceChildren(...prepared.slides.map((item,index)=>option(String(index),`${item.number} · ${item.title || 'Dashboard'}`))); $('ds-slide').disabled = false; $('ds-slide').value = String(slideIndex);
     $('ds-first').disabled = $('ds-prev').disabled = slideIndex === 0;
     $('ds-next').disabled = $('ds-last').disabled = slideIndex === prepared.slides.length - 1;
     $('ds-slide-content').classList.toggle('ds-comments-right', /\bcomments\s+right\b/i.test(slide.layout || ''));
