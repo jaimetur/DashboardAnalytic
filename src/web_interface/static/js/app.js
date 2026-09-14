@@ -5489,7 +5489,8 @@ if (queueNode) {
   if (!(root instanceof HTMLElement)) return;
   const activeDock = root.querySelector('[data-background-task-dock="active"]');
   const otherDock = root.querySelector('[data-background-task-dock="other"]');
-  if (!(activeDock instanceof HTMLElement) || !(otherDock instanceof HTMLElement)) return;
+  const systemDock = root.querySelector('[data-background-task-dock="system"]');
+  if (!(activeDock instanceof HTMLElement) || !(otherDock instanceof HTMLElement) || !(systemDock instanceof HTMLElement)) return;
   let polling = false;
   let renderedSignature = '';
   let serverGroups = [];
@@ -5527,7 +5528,8 @@ if (queueNode) {
 
   const createTaskPanel = (group) => {
     const panel = document.createElement('section');
-    panel.className = `background-task-panel background-task-panel-${group.is_active ? 'active' : 'other'}`;
+    const panelKind = group.workspace_id === '__server__' ? 'system' : (group.is_active ? 'active' : 'other');
+    panel.className = `background-task-panel background-task-panel-${panelKind}`;
     panel.setAttribute('aria-label', `Background tasks for ${group.workspace_name || 'workspace'}`);
 
     const minimizedKey = `dashboard-analytic:background-task-panel:${group.workspace_id}:minimized`;
@@ -5548,7 +5550,9 @@ if (queueNode) {
 
     const heading = document.createElement('h3');
     heading.className = 'background-task-workspace';
-    heading.textContent = group.is_active && group.workspace_id !== '__server__'
+    heading.textContent = group.workspace_id === '__server__'
+      ? 'System tasks'
+      : group.is_active
       ? `Active workspace · ${group.workspace_name}`
       : String(group.workspace_name || 'Workspace');
     panel.append(heading);
@@ -5636,10 +5640,13 @@ if (queueNode) {
     if (signature === renderedSignature) return;
     renderedSignature = signature;
     const activeGroups = normalized.filter((group) => Boolean(group.is_active) || group.dock === 'right');
-    const otherGroups = normalized.filter((group) => !group.is_active && group.dock !== 'right');
+    const systemGroups = normalized.filter((group) => String(group.workspace_id) === '__server__');
+    const otherGroups = normalized.filter((group) => !group.is_active && group.dock !== 'right' && String(group.workspace_id) !== '__server__');
     activeDock.replaceChildren(...activeGroups.map(createTaskPanel));
     otherDock.replaceChildren(...otherGroups.map(createTaskPanel));
+    systemDock.replaceChildren(...systemGroups.map(createTaskPanel));
     root.classList.toggle('has-both-sides', activeGroups.length > 0 && otherGroups.length > 0);
+    root.classList.toggle('has-three-docks', activeGroups.length > 0 && otherGroups.length > 0 && systemGroups.length > 0);
     root.hidden = normalized.length === 0;
   };
 

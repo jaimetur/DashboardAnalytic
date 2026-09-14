@@ -11,6 +11,7 @@ from datetime import date, timedelta
 from hashlib import sha256
 from pathlib import Path
 from threading import RLock
+from types import SimpleNamespace
 from typing import Literal
 from uuid import uuid4
 
@@ -691,7 +692,7 @@ def install_dashboard_routes(core):
     def prepared_preview(token: str, user=Depends(dashboard_user)):
         with lock:
             snapshot = snapshots.get(token)
-            if snapshot is None or snapshot.workspace != workspace_key() or snapshot.owner != user.username:
+            if snapshot is None or snapshot.workspace != workspace_key() or snapshot.owner not in {user.username, '*'}:
                 raise HTTPException(410, 'Dashboard preview expired. Refresh the Dashboard.')
             return {**snapshot.payload, 'token': token}
 
@@ -708,7 +709,7 @@ def install_dashboard_routes(core):
             job = prefetch_jobs.get(key)
             token = str(job.get('token') or '') if job and job.get('status') == 'ready' else ''
             snapshot = snapshots.get(token)
-            if not token or snapshot is None or snapshot.owner != user.username:
+            if not token or snapshot is None or snapshot.owner not in {user.username, '*'}:
                 raise HTTPException(409, 'Dashboard preparation is still running.')
             snapshots.move_to_end(token)
             return {**snapshot.payload, 'token': token}
@@ -915,7 +916,7 @@ def install_dashboard_routes(core):
     def snapshot_chart(token, index, user, *, include_frame=True, expected_workspace: str | None = None):
         with lock:
             snapshot = snapshots.get(token)
-        if snapshot is None or snapshot.workspace != (expected_workspace or workspace_key()) or snapshot.owner != user.username:
+        if snapshot is None or snapshot.workspace != (expected_workspace or workspace_key()) or snapshot.owner not in {user.username, '*'}:
             raise HTTPException(410, 'Dashboard preview expired. Refresh the Dashboard.')
         if index < 0 or index >= len(snapshot.entries):
             raise HTTPException(404, 'Chart not found.')
@@ -1023,23 +1024,49 @@ def install_dashboard_routes(core):
             snapshot.chart_payloads.setdefault(index, payload)
         return payload
 
+    def cached_models_complete(definition, workspace: str) -> bool:
+        """Check the persistent Canvas cache without materialising chart frames."""
+        candidate = definition.model_copy(deep=True)
+        task_repository = Repository(Path(workspace), core.repository.global_db_path)
+        entries = validate(candidate, task_repository)
+        dimensions = core.load_repository_calculated_dimensions(task_repository)
+        selected_by_kind = selected_sources(candidate, task_repository)
+        apply_selected_date_bounds(candidate, selected_date_bounds(task_repository, selected_by_kind))
+        selection_key = persistent_selection_key(candidate, task_repository, dimensions, selected_by_kind)
+        model_dir = Path(workspace).parent / '.dashboard-data-cache' / 'charts'
+        for entry in entries:
+            if entry.structural_type or entry.source_kind not in selected_by_kind:
+                continue
+            entry_key = sha256(repr(entry).encode()).hexdigest()
+            model_path = model_dir / sha256(
+                f'{DASHBOARD_CHART_MODEL_CACHE_VERSION}:{selection_key}:{entry_key}'.encode()
+            ).hexdigest()
+            if not model_path.with_suffix('.json').is_file():
+                return False
+        return True
+
     @app.get('/api/e2e-dashboards/chart/{token}/{index}')
     def interactive_chart(token: str, index: int, user=Depends(dashboard_user)):
         payload = chart_model(token, index, user)
         return JSONResponse(payload, headers={'Cache-Control': 'private, max-age=3600'})
 
-    def enqueue_prefetch(dashboard_id: str, raw_definition: dict, user) -> None:
+    def enqueue_prefetch(dashboard_id: str, raw_definition: dict, user, *, workspace: str | None = None) -> None:
         """Warm Canvas JSON models only; PNG render caches are intentionally excluded."""
-        workspace = workspace_key()
+        workspace = workspace or workspace_key()
         fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
-        key = f'{workspace}:{dashboard_id}:{fingerprint}:{user.username}'
+        key = f'{workspace}:{dashboard_id}:{fingerprint}'
+        definition = DashboardDefinition.model_validate(raw_definition)
+        try:
+            restoring_cached_models = cached_models_complete(definition, workspace)
+        except (HTTPException, OSError, sqlite3.Error, ValueError):
+            restoring_cached_models = False
         with lock:
             existing = prefetch_jobs.get(key)
             if existing and existing.get('status') in {'queued', 'processing', 'ready'}:
                 return
             job = prefetch_jobs[key] = {'id': key, 'workspace': workspace, 'dashboard_id': dashboard_id,
-                'name': str(raw_definition.get('name') or dashboard_id), 'status': 'queued', 'completed': 0, 'total': 0}
-        definition = DashboardDefinition.model_validate(raw_definition)
+                'name': str(raw_definition.get('name') or dashboard_id), 'status': 'queued', 'completed': 0, 'total': 0,
+                'restoring_cached_models': restoring_cached_models}
         def run():
             preview = None
             try:
@@ -1067,16 +1094,40 @@ def install_dashboard_routes(core):
                 with lock: job.update(status='failed', error=str(exc))
         prefetch_executor.submit(run)
 
+    def prefetch_workspace_dashboards(workspaces) -> None:
+        """Queue saved Dashboards at application start without requiring the page."""
+        system_user = SimpleNamespace(username='*')
+        for workspace in workspaces:
+            try:
+                task_repository = Repository(workspace.database_path, core.repository.global_db_path)
+                # Do not create an empty canonical state during startup: that
+                # would mask a legacy state written by an older application.
+                stored = task_repository.get_workspace_state(STATE_KEY)
+                if stored is None:
+                    stored = task_repository.get_workspace_state(LEGACY_STATE_KEY)
+                dashboards = json.loads(stored or '{}')
+                if not isinstance(dashboards, dict):
+                    continue
+                for dashboard_id, definition in dashboards.items():
+                    enqueue_prefetch(
+                        dashboard_id, definition, system_user,
+                        workspace=str(workspace.database_path.resolve()),
+                    )
+            except (OSError, sqlite3.Error, json.JSONDecodeError):
+                continue
+
     def prefetch_task_payloads(workspace):
         database_path = str(workspace.database_path.resolve())
         with lock:
             return [
                 {'id': f'dashboard-prefetch:{job["dashboard_id"]}', 'label': f'Preparing Dashboard charts: {job["name"]}',
-                 'detail': f'{job["completed"]} of {job["total"] or "?"} Canvas models',
+                 'detail': (f'{job["completed"]} of {job["total"]} Canvas models' if job['total'] else 'Preparing filtered Dashboard selection'),
                  'progress': round(job['completed'] * 100 / job['total']) if job['total'] else None}
-                for job in prefetch_jobs.values() if job['workspace'] == database_path and job['status'] in {'queued', 'processing'}
+                for job in prefetch_jobs.values()
+                if job['workspace'] == database_path and job['status'] in {'queued', 'processing'} and not job.get('restoring_cached_models')
             ]
     core.e2e_dashboard_prefetch_tasks = prefetch_task_payloads
+    core.e2e_dashboard_prefetch_workspace = prefetch_workspace_dashboards
 
     @app.get('/api/e2e-dashboards/preview/{token}/{index}.png')
     def chart(token: str, index: int, user=Depends(dashboard_user)):

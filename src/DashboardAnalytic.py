@@ -1464,6 +1464,14 @@ async def lifespan(_: FastAPI):
                     'chart_jobs': interrupted_chart_jobs,
                 }),
             )
+    dashboard_prefetch = getattr(sys.modules[__name__], 'e2e_dashboard_prefetch_workspace', None)
+    if callable(dashboard_prefetch):
+        Thread(
+            target=dashboard_prefetch,
+            args=(workspace_registry.list(),),
+            name='e2e-dashboard-startup-prefetch',
+            daemon=True,
+        ).start()
     yield
 
 
