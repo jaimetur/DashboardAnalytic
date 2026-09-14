@@ -78,6 +78,18 @@ DASHBOARD_CHART_MODEL_CACHE_VERSION = 9
 DASHBOARD_CHART_MODEL_DISK_LIMIT = 500
 
 
+def dashboard_cache_dir(workspace: str | Path) -> Path:
+    return Path(workspace).parent / '.dashboard-data-cache'
+
+
+def canvas_model_cache_dir(workspace: str | Path) -> Path:
+    return dashboard_cache_dir(workspace) / 'charts-canvas'
+
+
+def pil_chart_cache_dir(workspace: str | Path) -> Path:
+    return dashboard_cache_dir(workspace) / 'charts-pil'
+
+
 def resolve_filter_column(frame, field):
     columns = {identity(column): column for column in frame.columns}
     aliases = next((values for label, values in FILTER_COLUMNS.items() if identity(label) == identity(field)), (field,))
@@ -990,7 +1002,7 @@ def install_dashboard_routes(core):
         snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False, expected_workspace=expected_workspace)
         with lock:
             payload = snapshot.chart_payloads.get(index)
-        model_dir = Path(snapshot.workspace).parent / '.dashboard-data-cache' / 'charts'
+        model_dir = canvas_model_cache_dir(snapshot.workspace)
         entry_key = sha256(repr(entry).encode()).hexdigest()
         model_path = model_dir / sha256(
             f'{DASHBOARD_CHART_MODEL_CACHE_VERSION}:{snapshot.selection_key}:{entry_key}'.encode()
@@ -1033,7 +1045,7 @@ def install_dashboard_routes(core):
         selected_by_kind = selected_sources(candidate, task_repository)
         apply_selected_date_bounds(candidate, selected_date_bounds(task_repository, selected_by_kind))
         selection_key = persistent_selection_key(candidate, task_repository, dimensions, selected_by_kind)
-        model_dir = Path(workspace).parent / '.dashboard-data-cache' / 'charts'
+        model_dir = canvas_model_cache_dir(workspace)
         for entry in entries:
             if entry.structural_type or entry.source_kind not in selected_by_kind:
                 continue
@@ -1119,13 +1131,33 @@ def install_dashboard_routes(core):
     def prefetch_task_payloads(workspace):
         database_path = str(workspace.database_path.resolve())
         with lock:
-            return [
-                {'id': f'dashboard-prefetch:{job["dashboard_id"]}', 'label': f'Preparing Dashboard charts: {job["name"]}',
-                 'detail': (f'{job["completed"]} of {job["total"]} Canvas models' if job['total'] else 'Preparing filtered Dashboard selection'),
-                 'progress': round(job['completed'] * 100 / job['total']) if job['total'] else None}
-                for job in prefetch_jobs.values()
-                if job['workspace'] == database_path and job['status'] in {'queued', 'processing'} and not job.get('restoring_cached_models')
+            pending = [
+                job for job in prefetch_jobs.values()
+                if job['status'] in {'queued', 'processing'} and not job.get('restoring_cached_models')
             ]
+            queue_positions = {id(job): index for index, job in enumerate(pending)}
+            workspace_jobs = [job for job in pending if job['workspace'] == database_path]
+            tasks = []
+            for job in workspace_jobs:
+                if job['status'] == 'processing':
+                    tasks.append({
+                        'id': f'dashboard-prefetch:{job["dashboard_id"]}',
+                        'label': f'Preparing Dashboard charts: {job["name"]}',
+                        'detail': (
+                            f'{job["completed"]} of {job["total"]} Canvas models'
+                            if job['total'] else 'Preparing filtered Dashboard selection'
+                        ),
+                        'progress': round(job['completed'] * 100 / job['total']) if job['total'] else None,
+                    })
+                else:
+                    ahead = queue_positions[id(job)]
+                    tasks.append({
+                        'id': f'dashboard-prefetch:{job["dashboard_id"]}',
+                        'label': f'Queued Dashboard charts: {job["name"]}',
+                        'detail': f'Queued behind {ahead} Dashboard preparation{'' if ahead == 1 else 's'}',
+                        'progress': 0,
+                    })
+            return tasks
     core.e2e_dashboard_prefetch_tasks = prefetch_task_payloads
     core.e2e_dashboard_prefetch_workspace = prefetch_workspace_dashboards
 
@@ -1134,7 +1166,7 @@ def install_dashboard_routes(core):
         snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False)
         entry_key = sha256(repr(entry).encode()).hexdigest()
         key = (snapshot.selection_key, entry_key)
-        cache_dir = Path(snapshot.workspace).parent / '.dashboard-chart-cache'
+        cache_dir = pil_chart_cache_dir(snapshot.workspace)
         cache_path = cache_dir / sha256(
             f'{DASHBOARD_RENDER_CACHE_VERSION}:{snapshot.selection_key}:{entry_key}'.encode()
         ).hexdigest()

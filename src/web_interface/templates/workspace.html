@@ -54,6 +54,7 @@
               <tr>
                 <th>Workspace</th>
                 <th>Size</th>
+                <th>Cache Size</th>
                 <th>Status</th>
                 {% if user.role == 'super-admin' %}<th>Users with access</th>{% endif %}
                 <th>Actions</th>
@@ -69,6 +70,7 @@
                   <input form="workspace-save-{{ item.id }}" aria-label="Workspace name: {{ item.name }}" name="name" required maxlength="100" value="{{ item.name }}" data-workspace-name-input {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>
                 </td>
                 <td data-label="Size"><span class="workspace-size" data-workspace-size data-workspace-id="{{ item.id }}">{{ workspace_sizes.get(item.id, '0 MB') }}</span></td>
+                <td data-label="Cache Size"><span class="workspace-size" data-workspace-cache-size data-workspace-id="{{ item.id }}">{{ workspace_cache_sizes.get(item.id, '0 B') }}</span></td>
                 <td data-label="Status"><span class="workspace-status-pill workspace-status-{{ item.status }}" data-workspace-status data-workspace-id="{{ item.id }}">{{ 'Ready' if item.status == 'ready' else 'Duplicating' }}</span></td>
                 {% if user.role == 'super-admin' %}<td data-label="Users with access">
                   <div class="workspace-access-editor">
@@ -93,6 +95,10 @@
                       <input type="hidden" name="workspace_id" value="{{ item.id }}">
                       <input type="hidden" name="return_to" value="/workspace">
                       <button type="submit" class="workspace-action-open icon-action" data-workspace-row-open aria-label="Open workspace" title="Open workspace" {% if not workspace_access.get(item.id, false) or (active_workspace and item.id == active_workspace.id) %}disabled{% endif %}>📂</button>
+                    </form>
+                    <form method="post" action="/workspace/cache/delete" data-workspace-cache-delete-form data-workspace-name="{{ item.name }}">
+                      <input type="hidden" name="workspace_id" value="{{ item.id }}">
+                      <button type="submit" class="workspace-action-clear-cache icon-action" aria-label="Clear workspace cache" title="Clear workspace cache" {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>🧹</button>
                     </form>
                     <form method="post" action="/workspace/delete" data-workspace-delete-form data-workspace-name="{{ item.name }}">
                       <input type="hidden" name="workspace_id" value="{{ item.id }}">
@@ -707,6 +713,17 @@
 </script>
 <script>
 (() => {
+  document.querySelectorAll('[data-workspace-cache-delete-form]').forEach((form) => {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const workspaceName = form.dataset.workspaceName || 'this workspace';
+      const accepted = await showConfirmDialog(
+        `Clear the generated Dashboard cache for '${workspaceName}'? Dashboard data projections and rendered chart models will be rebuilt when needed.`,
+        {title: 'Clear workspace cache', confirmLabel: 'Clear cache'},
+      );
+      if (accepted?.accepted) form.submit();
+    });
+  });
   document.querySelectorAll('[data-workspace-delete-form]').forEach((form) => {
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -823,6 +840,9 @@
 </script>
 <script>
 (() => {
+  let refreshTimer = null;
+  const initialNotice = new URLSearchParams(window.location.search).get('workspace_notice') || '';
+  const shouldPollCacheClear = initialNotice.startsWith('Workspace cache clearing started.');
   const refreshTable = async () => {
     const before = new Map([...document.querySelectorAll('[data-workspace-status]')].map((node) => [node.dataset.workspaceId, node.textContent.trim()]));
     try {
@@ -841,8 +861,10 @@
       });
       payload.workspaces.forEach((workspace) => {
         const size = document.querySelector(`[data-workspace-size][data-workspace-id="${workspace.id}"]`);
+        const cacheSize = document.querySelector(`[data-workspace-cache-size][data-workspace-id="${workspace.id}"]`);
         const status = document.querySelector(`[data-workspace-status][data-workspace-id="${workspace.id}"]`);
         if (size) size.textContent = workspace.size;
+        if (cacheSize) cacheSize.textContent = workspace.cache_size || '0 B';
         if (!status) return;
         const label = workspace.status === 'ready' ? 'Ready' : 'Duplicating';
         completed ||= before.get(workspace.id) === 'Duplicating' && label === 'Ready';
@@ -862,15 +884,18 @@
         showInfoDialog('The workspace duplication has completed successfully.', {title: 'Duplication completed'});
       }
       if (deleted) showInfoDialog('The workspace has been deleted successfully.', {title: 'Workspace deleted'});
+      const cacheClearPending = (payload.pending_cache_clear_workspace_ids || []).length > 0;
+      const cacheClearCompleted = (payload.cleared_cache_workspace_ids || []).length > 0;
+      const duplicationPending = Boolean(document.querySelector('.workspace-status-duplicating'));
+      if (!cacheClearPending && !cacheClearCompleted && !duplicationPending && refreshTimer !== null) {
+        window.clearInterval(refreshTimer);
+        refreshTimer = null;
+      }
     } catch (_) { /* keep the next interval tick alive */ }
   };
-  if (document.querySelector('.workspace-status-duplicating')) {
+  if (document.querySelector('.workspace-status-duplicating') || shouldPollCacheClear) {
     refreshTable();
-    const timer = window.setInterval(() => {
-      if (!document.querySelector('.workspace-status-duplicating')) {
-        window.clearInterval(timer);
-        return;
-      }
+    refreshTimer = window.setInterval(() => {
       refreshTable();
     }, 5000);
   }

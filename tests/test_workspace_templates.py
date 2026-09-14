@@ -63,6 +63,9 @@ def test_template_package_matches_source_and_imports_to_multiple_workspaces(clie
     manifest = app_module.read_import_manifest(package)
     assert manifest['source_workspace']['name'] == source.name
     other = app_module.workspace_registry.create('Other')
+    obsolete_directory = other.database_path.parent / 'slides-templates'
+    obsolete_directory.mkdir(parents=True)
+    (obsolete_directory / 'old.csv').write_text('obsolete', encoding='utf-8')
     repo = Repository(other.database_path, app_module.repository.global_db_path)
     repo.initialize()
     assert repo.list_report_templates('nsa') == []
@@ -76,6 +79,8 @@ def test_template_package_matches_source_and_imports_to_multiple_workspaces(clie
     repo.set_report_template_content('nsa', str(copied['name']), b'independent')
     assert app_module.reporting_catalog_content('nsa') == source_content
     assert repo.list_datasets() == []
+    assert not obsolete_directory.exists()
+    assert not other.slides_templates_dir.exists()
 
 
 def test_template_import_without_matching_workspace_requires_selection(client, tmp_path):
@@ -179,10 +184,8 @@ def test_template_transfer_requires_and_retains_multiple_destinations(client):
     offer_id = offered.json()['offer_id']
     client.post('/login', data={'username': 'super', 'password': 'super123'}, follow_redirects=False)
     try:
-        assert client.post(f'/admin/import-export/transfers/offers/{offer_id}/accept', json={}).status_code == 400
-        selected = [source.id, other.id]
-        accepted = client.post(f'/admin/import-export/transfers/offers/{offer_id}/accept',
-                               json={'workspace_ids': selected})
+        selected = [source.id]
+        accepted = client.post(f'/admin/import-export/transfers/offers/{offer_id}/accept', json={})
         assert accepted.status_code == 200
         assert app_module.TRANSFER_OFFERS[offer_id]['destination_workspace_ids'] == selected
     finally:

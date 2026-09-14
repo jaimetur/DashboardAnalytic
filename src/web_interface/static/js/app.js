@@ -5494,7 +5494,11 @@ if (queueNode) {
   let polling = false;
   let renderedSignature = '';
   let serverGroups = [];
+  let previousServerTasks = new Map();
+  const completedServerTasks = new Map();
   const transientTasks = new Map();
+  const completedTaskRetentionMs = 5000;
+  let completedTaskExpiryTimer = null;
 
   window.addEventListener('dashboard-analytic:background-task', (event) => {
     const task = event.detail;
@@ -5509,6 +5513,14 @@ if (queueNode) {
 
   const mergedGroups = () => {
     const groups = serverGroups.map(group => ({...group, tasks: [...(group.tasks || [])]}));
+    completedServerTasks.forEach(({group: completedGroup, task}) => {
+      let group = groups.find(candidate => String(candidate.workspace_id) === String(completedGroup.workspace_id));
+      if (!group) {
+        group = {...completedGroup, tasks: []};
+        groups.push(group);
+      }
+      group.tasks.push(task);
+    });
     transientTasks.forEach((task) => {
       const workspaceId = String(task.workspace_id || '__client__');
       let group = groups.find(candidate => String(candidate.workspace_id) === workspaceId);
@@ -5524,6 +5536,48 @@ if (queueNode) {
       group.tasks.push(task);
     });
     return groups;
+  };
+
+  const retainCompletedServerTasks = (groups) => {
+    const now = Date.now();
+    const nextTasks = new Map();
+    (Array.isArray(groups) ? groups : []).forEach((group) => {
+      (Array.isArray(group.tasks) ? group.tasks : []).forEach((task) => {
+        if (!task?.id) return;
+        nextTasks.set(String(task.id), {group: {...group, tasks: []}, task: {...task}});
+      });
+    });
+    previousServerTasks.forEach((previous, taskId) => {
+      if (nextTasks.has(taskId)) return;
+      const completedAt = Number(previous.task.completed_at) * 1000;
+      const expiresAt = Number.isFinite(completedAt) && completedAt > 0
+        ? completedAt + completedTaskRetentionMs
+        : now + completedTaskRetentionMs;
+      if (expiresAt <= now) return;
+      completedServerTasks.set(taskId, {
+        group: previous.group,
+        task: {...previous.task, detail: 'Completed', progress: 100},
+        expiresAt,
+      });
+    });
+    completedServerTasks.forEach((completed, taskId) => {
+      if (completed.expiresAt <= now || nextTasks.has(taskId)) completedServerTasks.delete(taskId);
+    });
+    previousServerTasks = nextTasks;
+    if (completedTaskExpiryTimer !== null) window.clearTimeout(completedTaskExpiryTimer);
+    const expiries = [...completedServerTasks.values()].map((task) => task.expiresAt);
+    if (expiries.length) {
+      completedTaskExpiryTimer = window.setTimeout(() => {
+        completedTaskExpiryTimer = null;
+        const expiredAt = Date.now();
+        completedServerTasks.forEach((task, taskId) => {
+          if (task.expiresAt <= expiredAt) completedServerTasks.delete(taskId);
+        });
+        render(mergedGroups());
+      }, Math.max(0, Math.min(...expiries) - now + 10));
+    } else {
+      completedTaskExpiryTimer = null;
+    }
   };
 
   const createTaskPanel = (group) => {
@@ -5660,6 +5714,7 @@ if (queueNode) {
       if (!response.ok) return;
       const payload = await response.json();
       serverGroups = Array.isArray(payload.groups) ? payload.groups : [];
+      retainCompletedServerTasks(serverGroups);
       render(mergedGroups());
     } catch (_error) {
       // A transient polling failure must not interfere with the current page.

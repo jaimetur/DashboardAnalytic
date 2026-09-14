@@ -211,7 +211,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert interactive.json()['type'] == 'cdf'
     assert interactive.json()['renderer'] == 'catalog-v2'
     assert interactive.json()['series']
-    assert list((Path(core.repository.db_path).parent / '.dashboard-chart-cache').glob('*.png'))
+    assert list((Path(core.repository.db_path).parent / '.dashboard-data-cache' / 'charts-pil').glob('*.png'))
     entry = core.load_template_catalogue(next(row['content'] for row in core.repository.list_report_templates('nsa') if row['name'] == 'Dashboard test'), 'nsa')[0]
     assert not core.is_empty_catalog_chart(image.content, entry)
     data = client.get(f'/api/e2e-dashboards/data/{token}/0').json()

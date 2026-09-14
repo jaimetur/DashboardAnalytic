@@ -132,6 +132,7 @@ workspace_registry = WorkspaceRegistry(
 repository.set_workspace_registry_database(workspace_registry.registry_path)
 active_workspace: Workspace | None = None
 _workspace_size_cache: dict[str, tuple[float, int]] = {}
+_workspace_cache_size_cache: dict[str, tuple[float, int]] = {}
 _workspace_size_cache_lock = Lock()
 _WORKSPACE_SIZE_CACHE_SECONDS = 15.0
 FILTER_DIMENSIONS = [
@@ -1355,16 +1356,8 @@ def close_active_workspace() -> None:
     active_workspace = None
 
 
-def workspace_disk_usage(workspace: Workspace) -> int:
-    """Return the bytes used by a managed workspace, with a short-lived cache."""
-    root = workspace.database_path.parent
-    cache_key = str(root.resolve())
-    now = monotonic()
-    with _workspace_size_cache_lock:
-        cached = _workspace_size_cache.get(cache_key)
-        if cached and now - cached[0] < _WORKSPACE_SIZE_CACHE_SECONDS:
-            return cached[1]
-
+def _directory_disk_usage(root: Path) -> int:
+    """Return a recursive directory size without following symlinks."""
     total = 0
     pending = [root]
     while pending:
@@ -1385,9 +1378,40 @@ def workspace_disk_usage(workspace: Workspace) -> int:
                         continue
         except OSError:
             continue
+    return total
+
+
+def workspace_disk_usage(workspace: Workspace) -> int:
+    """Return the total bytes used by a managed workspace, including its cache."""
+    root = workspace.database_path.parent
+    cache_key = str(root.resolve())
+    now = monotonic()
+    with _workspace_size_cache_lock:
+        cached = _workspace_size_cache.get(cache_key)
+        if cached and now - cached[0] < _WORKSPACE_SIZE_CACHE_SECONDS:
+            return cached[1]
+
+    total = _directory_disk_usage(root)
 
     with _workspace_size_cache_lock:
         _workspace_size_cache[cache_key] = (now, total)
+    return total
+
+
+def workspace_cache_disk_usage(workspace: Workspace) -> int:
+    """Return the bytes in derived Dashboard caches for one workspace."""
+    root = workspace.database_path.parent
+    cache_key = str(root.resolve())
+    now = monotonic()
+    with _workspace_size_cache_lock:
+        cached = _workspace_cache_size_cache.get(cache_key)
+        if cached and now - cached[0] < _WORKSPACE_SIZE_CACHE_SECONDS:
+            return cached[1]
+    total = sum(_directory_disk_usage(directory) for directory in (
+        root / '.dashboard-data-cache', root / '.dashboard-chart-cache',
+    ) if directory.exists())
+    with _workspace_size_cache_lock:
+        _workspace_cache_size_cache[cache_key] = (now, total)
     return total
 
 
@@ -1402,15 +1426,22 @@ def invalidate_workspace_size_cache(workspace_root: Path | None = None) -> None:
         cache_key = str(root)
     with _workspace_size_cache_lock:
         _workspace_size_cache.pop(cache_key, None)
+        _workspace_cache_size_cache.pop(cache_key, None)
 
 
 def format_workspace_size(size_bytes: int) -> str:
     if size_bytes >= 1024 ** 3:
         value = size_bytes / (1024 ** 3)
         unit = 'GB'
-    else:
+    elif size_bytes >= 1024 ** 2:
         value = size_bytes / (1024 ** 2)
         unit = 'MB'
+    elif size_bytes >= 1024:
+        value = size_bytes / 1024
+        unit = 'KB'
+    else:
+        value = size_bytes
+        unit = 'B'
     formatted = f'{value:.1f}'.rstrip('0').rstrip('.')
     return f'{formatted} {unit}'
 
@@ -3427,6 +3458,7 @@ def restore_database_backup(archive_path: Path, components: Iterable[str]) -> No
                         if relative.parts[0] == 'default':
                             task_repository.set_default_report_template(technology, template_name)
                     shutil.rmtree(workspace.slides_templates_dir, ignore_errors=True)
+                shutil.rmtree(workspace.database_path.parent / 'slides-templates', ignore_errors=True)
             if 'auto_calculated_fields' in selected:
                 member = next((candidate for candidate in (
                     f'{prefix}auto-calculated-fields/auto-calculated-fields.json',
@@ -4194,7 +4226,6 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
         for source, destination in (
             (payload / 'input', workspace.input_dir),
             (payload / 'output', workspace.output_dir),
-            (payload / 'report-templates', workspace.slides_templates_dir),
             # Archives created before generated Chart Sets were included used
             # this reports-only directory name.
             (payload / 'exports', workspace.export_dir),
@@ -4203,8 +4234,10 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
                 shutil.copytree(source, destination, dirs_exist_ok=True)
             else:
                 destination.mkdir(parents=True, exist_ok=True)
-        # The database has already been fully materialised in staging. Keep
-        # the fast same-filesystem rename path so multi-GB workspaces are not
+        # The database has already been fully materialised in staging. Report
+        # Templates are stored in that database too, so a portable archive
+        # must not recreate a physical templates directory. Keep the fast
+        # same-filesystem rename path so multi-GB workspaces are not
         # written a second time; fall back to a copy for split Docker volumes.
         try:
             os.replace(database_snapshot, workspace.database_path)
@@ -4244,6 +4277,7 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
                             'UPDATE generated_jobs SET output_path = ? WHERE id = ?',
                             (str(target), report_id),
                         )
+        shutil.rmtree(workspace.database_path.parent / 'slides-templates', ignore_errors=True)
     except Exception:
         workspace_registry.remove(workspace.id)
         repository.remove_workspace_access(workspace.id)
@@ -4358,6 +4392,7 @@ def import_slides_templates_archive(
                 target_repository.add_report_template(technology, name, content, is_default=False)
             if relative.parts[0] == 'default':
                 target_repository.set_default_report_template(technology, name)
+        shutil.rmtree(workspace.database_path.parent / 'slides-templates', ignore_errors=True)
     _clear_chart_preview_caches()
     return len(destinations)
 
@@ -5689,6 +5724,7 @@ def workspace(
     workspaces = workspace_registry.list()
     workspace_access = workspace_access_map(user, workspaces)
     workspace_sizes = {item.id: format_workspace_size(workspace_disk_usage(item)) for item in workspaces}
+    workspace_cache_sizes = {item.id: format_workspace_size(workspace_cache_disk_usage(item)) for item in workspaces}
     if not active_workspace:
         return render_template(
             request,
@@ -5699,7 +5735,7 @@ def workspace(
                 'has_processing': False, 'vodafone_mapping_datasets': [], 'three_mapping_datasets': [],
                 'mappable_cdr_datasets': [], 'clearable_cdr_datasets': [],
                 'calculated_dimensions': [], 'combined_tables': [],
-                'workspaces': workspaces, 'workspace_access': workspace_access, 'workspace_sizes': workspace_sizes, 'workspace_users': workspace_users, 'workspace_notice': request.query_params.get('workspace_notice'),
+                'workspaces': workspaces, 'workspace_access': workspace_access, 'workspace_sizes': workspace_sizes, 'workspace_cache_sizes': workspace_cache_sizes, 'workspace_users': workspace_users, 'workspace_notice': request.query_params.get('workspace_notice'),
                 'workspace_warning': request.query_params.get('workspace_warning'),
                 'workspace_error': request.query_params.get('workspace_error'),
             },
@@ -5741,6 +5777,7 @@ def workspace(
             'workspaces': workspaces,
             'workspace_access': workspace_access,
             'workspace_sizes': workspace_sizes,
+            'workspace_cache_sizes': workspace_cache_sizes,
             'workspace_users': workspace_users,
             'active_workspace': active_workspace,
             'workspace_notice': request.query_params.get('workspace_notice'),
@@ -5760,6 +5797,7 @@ def workspace_sizes_status(user: SessionUser = Depends(current_user)) -> JSONRes
         'active_workspace_id': active_workspace.id if active_workspace else None,
         'active_workspace_name': active_workspace.name if active_workspace else 'None',
         'sizes': {item.id: format_workspace_size(workspace_disk_usage(item)) for item in visible},
+        'cache_sizes': {item.id: format_workspace_size(workspace_cache_disk_usage(item)) for item in visible},
     })
 
 
@@ -5814,6 +5852,16 @@ def workspace_status(user: SessionUser = Depends(current_user)) -> JSONResponse:
             if job.get('operation') in {'delete', 'duplicate-cancel'} and job.get('status') == 'ready'
             and float(job.get('finished_at') or 0) > now - 30
         ]
+        cleared_cache_workspace_ids = [
+            str(job['workspace_id']) for job in WORKSPACE_LIFECYCLE_JOBS.values()
+            if job.get('operation') == 'cache-clear' and job.get('status') == 'ready'
+            and float(job.get('finished_at') or 0) > now - 30
+        ]
+        pending_cache_clear_workspace_ids = [
+            str(job['workspace_id']) for job in WORKSPACE_LIFECYCLE_JOBS.values()
+            if job.get('operation') == 'cache-clear' and job.get('owner') == user.username
+            and job.get('status') in {'queued', 'processing'}
+        ]
         for job_id in [
             job_id for job_id, job in WORKSPACE_LIFECYCLE_JOBS.items()
             if job.get('status') in {'ready', 'failed'} and float(job.get('finished_at') or 0) <= now - 30
@@ -5821,10 +5869,13 @@ def workspace_status(user: SessionUser = Depends(current_user)) -> JSONResponse:
             WORKSPACE_LIFECYCLE_JOBS.pop(job_id, None)
     return JSONResponse({'workspaces': [
         {'id': item.id, 'status': item.status, 'size': format_workspace_size(workspace_disk_usage(item)),
+         'cache_size': format_workspace_size(workspace_cache_disk_usage(item)),
          'accessible': bool(access.get(item.id, False))}
         for item in workspaces
         if access.get(item.id, False) or (user.role in {'admin', 'super-admin'} and item.status == 'duplicating')
-    ], 'removed_workspace_ids': removed_workspace_ids}, headers={'Cache-Control': 'no-store'})
+    ], 'removed_workspace_ids': removed_workspace_ids,
+        'cleared_cache_workspace_ids': cleared_cache_workspace_ids,
+        'pending_cache_clear_workspace_ids': pending_cache_clear_workspace_ids}, headers={'Cache-Control': 'no-store'})
 
 
 def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
@@ -6034,22 +6085,29 @@ def background_tasks_status(user: SessionUser = Depends(current_user)) -> JSONRe
         lifecycle_jobs = [dict(job) for job in WORKSPACE_LIFECYCLE_JOBS.values()]
     now = datetime.now(timezone.utc).timestamp()
     for job in lifecycle_jobs:
-        if job.get('operation') != 'delete' or job.get('owner') != user.username:
+        if job.get('operation') not in {'delete', 'cache-clear'} or job.get('owner') != user.username:
             continue
-        if job.get('status') == 'ready' and float(job.get('finished_at') or 0) < now - 2:
+        completed_visibility_seconds = 5 if job.get('operation') == 'cache-clear' else 2
+        if job.get('status') == 'ready' and float(job.get('finished_at') or 0) < now - completed_visibility_seconds:
             continue
         if job.get('status') not in {'queued', 'processing', 'ready'}:
             continue
         workspace_id = str(job.get('workspace_id') or '')
+        clearing_cache = job.get('operation') == 'cache-clear'
         grouped[workspace_id] = {
             'workspace_id': workspace_id,
             'workspace_name': str(job.get('workspace_name') or 'Workspace'),
-            'is_active': False,
+            'is_active': bool(active_workspace and active_workspace.id == workspace_id),
             'tasks': [{
-                'id': f'workspace-delete:{job.get("id")}',
-                'label': 'Deleting workspace',
-                'detail': 'Removing workspace database and files' if job.get('delete_files') else 'Removing workspace database',
-                'progress': 100 if job.get('status') == 'ready' else None,
+                'id': f'workspace-{job.get("operation")}:{job.get("id")}',
+                'label': 'Clearing workspace cache' if clearing_cache else 'Deleting workspace',
+                'detail': (
+                    'Cache cleared' if job.get('status') == 'ready' else 'Removing generated Dashboard artifacts'
+                ) if clearing_cache else (
+                    'Removing workspace database and files' if job.get('delete_files') else 'Removing workspace database'
+                ),
+                'progress': 100 if job.get('status') == 'ready' else (job.get('progress') if clearing_cache else None),
+                'completed_at': job.get('finished_at') if job.get('status') == 'ready' else None,
             }],
         }
 
@@ -6503,6 +6561,64 @@ def delete_workspace(
     Thread(target=run_deletion, name=f'workspace-delete-{workspace_id}', daemon=True).start()
     return RedirectResponse(
         '/workspace?workspace_notice=Workspace+deletion+started.+The+workspace+will+disappear+when+the+operation+finishes.',
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post('/workspace/cache/delete')
+def delete_workspace_cache(
+    workspace_id: str = Form(...),
+    user: SessionUser = Depends(current_user),
+) -> Response:
+    """Remove derived Dashboard artifacts without changing workspace data or settings."""
+    require_workspace_admin(user)
+    workspace = workspace_registry.get(workspace_id)
+    if workspace is None:
+        return RedirectResponse('/workspace?workspace_error=Workspace+not+found.', status_code=status.HTTP_303_SEE_OTHER)
+    require_workspace_access(user, workspace_id)
+    if active_workspace and active_workspace.id == workspace_id:
+        ANALYSIS_CACHE.clear()
+        DATAFRAME_CACHE.clear()
+        _clear_chart_preview_caches()
+    job_id = uuid4().hex
+    with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+        WORKSPACE_LIFECYCLE_JOBS[job_id] = {
+            'id': job_id, 'operation': 'cache-clear', 'workspace_id': workspace_id,
+            'workspace_name': workspace.name, 'owner': user.username, 'status': 'queued', 'progress': 0,
+            'created_at': datetime.now(timezone.utc).timestamp(),
+        }
+
+    def run_cache_clear() -> None:
+        with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+            job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
+            if job:
+                job.update(status='processing', progress=15)
+        try:
+            workspace_root = workspace.database_path.parent
+            cache_directories = (
+                workspace_root / '.dashboard-data-cache',
+                workspace_root / '.dashboard-chart-cache',
+            )
+            for index, cache_dir in enumerate(cache_directories, start=1):
+                shutil.rmtree(cache_dir, ignore_errors=True)
+                with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+                    job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
+                    if job:
+                        job['progress'] = 15 + round(index * 75 / len(cache_directories))
+            invalidate_workspace_size_cache(workspace_root)
+            with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+                job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
+                if job:
+                    job.update(status='ready', progress=100, finished_at=datetime.now(timezone.utc).timestamp())
+        except Exception as exc:
+            with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+                job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
+                if job:
+                    job.update(status='failed', error=str(exc), finished_at=datetime.now(timezone.utc).timestamp())
+
+    Thread(target=run_cache_clear, name=f'workspace-cache-clear-{workspace_id}', daemon=True).start()
+    return RedirectResponse(
+        '/workspace?workspace_notice=Workspace+cache+clearing+started.+Dashboard+data+and+chart+models+will+be+rebuilt+when+needed.',
         status_code=status.HTTP_303_SEE_OTHER,
     )
 

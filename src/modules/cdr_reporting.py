@@ -71,7 +71,7 @@ OSM_TILE_SIZE = 256
 # and roads crisp after the final resize while still bounding a cold cache.
 OSM_TILE_MAX_COUNT = 48
 OSM_TILE_MAX_ZOOM = 18
-OSM_TILE_CACHE_DIR = settings.data_dir / 'map-tiles-cache' / 'openstreetmap'
+OSM_TILE_CACHE_DIR = settings.data_dir / '.map-tiles-cache' / 'openstreetmap'
 OSM_TLS_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 REPORT_CHART_RENDERER_ENV = "DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER"
 _DASHBOARD_CANVAS_RENDERER = None

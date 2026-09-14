@@ -1640,6 +1640,49 @@ def test_workspace_remove_preserves_files_unless_explicitly_requested(client) ->
     assert not second_root.exists()
 
 
+def test_workspace_cache_clear_removes_only_derived_dashboard_artifacts(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace = app_module.workspace_registry.get('default')
+    assert workspace is not None
+    workspace_root = workspace.database_path.parent
+    cached_model = workspace_root / '.dashboard-data-cache' / 'charts-canvas' / 'chart.json'
+    cached_model.parent.mkdir(parents=True, exist_ok=True)
+    cached_model.write_text('{}', encoding='utf-8')
+    legacy_png = workspace_root / '.dashboard-chart-cache' / 'chart.png'
+    legacy_png.parent.mkdir(parents=True, exist_ok=True)
+    legacy_png.write_bytes(b'png')
+    before_clear = client.get('/api/workspaces/status').json()
+    before_workspace = next(item for item in before_clear['workspaces'] if item['id'] == workspace.id)
+    assert before_workspace['cache_size'] != '0 B'
+
+    response = client.post('/workspace/cache/delete', data={'workspace_id': workspace.id}, follow_redirects=False)
+
+    assert response.status_code == 303
+    tasks = client.get('/api/background-tasks').json()['groups']
+    assert any(
+        task['label'] == 'Clearing workspace cache'
+        for group in tasks for task in group['tasks']
+    )
+    for _attempt in range(100):
+        if not cached_model.exists() and not legacy_png.exists():
+            break
+        time.sleep(0.01)
+    assert not cached_model.exists()
+    assert not legacy_png.exists()
+    assert workspace.database_path.exists()
+    status = client.get('/api/workspaces/status').json()
+    assert workspace.id in status['cleared_cache_workspace_ids']
+    cleared_workspace = next(item for item in status['workspaces'] if item['id'] == workspace.id)
+    assert cleared_workspace['cache_size'] == '0 B'
+    completed_tasks = client.get('/api/background-tasks').json()['groups']
+    assert any(
+        task['label'] == 'Clearing workspace cache' and task['detail'] == 'Cache cleared'
+        for group in completed_tasks for task in group['tasks']
+    )
+
+
 def test_workspace_status_reports_cancelled_duplicate_for_live_row_removal(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -1896,6 +1939,9 @@ def test_workspace_import_replaces_an_open_workspace_and_removes_old_files(clien
     payload = tmp_path / 'workspace-import'
     (payload / 'input').mkdir(parents=True)
     (payload / 'input' / 'new-data.csv').write_text('value\n1\n', encoding='utf-8')
+    archived_template = payload / 'report-templates' / 'library' / 'nsa' / 'Archived.csv'
+    archived_template.parent.mkdir(parents=True)
+    archived_template.write_bytes(b'legacy template payload')
     imported_report = payload / 'output' / 'reports' / 'imported.pptx'
     imported_report.parent.mkdir(parents=True)
     imported_report.write_bytes(b'imported report')
@@ -1928,6 +1974,8 @@ def test_workspace_import_replaces_an_open_workspace_and_removes_old_files(clien
     assert report_path == str(imported.export_dir / 'imported.pptx')
     assert app_module.repository.user_has_workspace_access('admin', imported.id)
     assert all(' - Importing ' not in workspace.name for workspace in app_module.workspace_registry.list())
+    assert not imported.slides_templates_dir.exists()
+    assert not (imported.database_path.parent / 'slides-templates').exists()
 
 
 def test_workspace_import_keeps_chart_sets_visible_in_reporting(client, tmp_path: Path) -> None:
@@ -2481,11 +2529,11 @@ def test_queued_dataset_actions_remain_compact_icons_during_live_updates(client)
 
     styles = client.get('/static/css/app.css')
     assert '.report-job-actions { display: flex; max-width: none; flex-wrap: nowrap;' in styles.text
-    assert '.report-jobs-table th:nth-child(2), .report-jobs-table td:nth-child(2) { width: 11%; min-width: 145px;' in styles.text
+    assert '.report-jobs-table th:nth-child(2), .report-jobs-table td:nth-child(2) { width: 10%; min-width: 130px;' in styles.text
     assert '.report-jobs-table th:nth-child(10), .report-jobs-table td:nth-child(10) { width: 20%; min-width: 240px;' in styles.text
-    assert '.report-jobs-table th:nth-child(1), .report-jobs-table td:nth-child(1) { width: 4%; min-width: 52px;' in styles.text
+    assert '.report-jobs-table th:nth-child(1), .report-jobs-table td:nth-child(1) { width: 6%; min-width: 76px;' in styles.text
     assert '.report-jobs-table th:nth-child(3), .report-jobs-table td:nth-child(3) { width: 9%; min-width: 132px;' in styles.text
-    assert '.report-jobs-table th:nth-child(4), .report-jobs-table td:nth-child(4) { width: 5%; min-width: 62px;' in styles.text
+    assert '.report-jobs-table th:nth-child(4), .report-jobs-table td:nth-child(4) { width: 7.5%; min-width: 96px;' in styles.text
     assert '.report-jobs-table th:nth-child(5), .report-jobs-table td:nth-child(5) { width: 6%; min-width: 68px;' in styles.text
     assert '.report-jobs-table th:nth-child(8), .report-jobs-table td:nth-child(8),\n.report-jobs-table th:nth-child(9), .report-jobs-table td:nth-child(9) { width: 6%; min-width: 72px;' in styles.text
     assert '.report-jobs-table th:nth-child(12), .report-jobs-table td:nth-child(12) { width: 10%; min-width: 110px;' in styles.text
