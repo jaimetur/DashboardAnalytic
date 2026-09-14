@@ -1384,10 +1384,11 @@ def install_dashboard_routes(core):
                     })
                 else:
                     ahead = queue_positions[id(job)]
+                    suffix = '' if ahead == 1 else 's'
                     tasks.append({
                         'id': f'dashboard-prefetch:{job["dashboard_id"]}',
                         'label': f'Queued Dashboard charts: {job["name"]}',
-                        'detail': f'Queued behind {ahead} Dashboard preparation{'' if ahead == 1 else 's'}',
+                        'detail': f'Queued behind {ahead} Dashboard preparation{suffix}',
                         'progress': 0,
                     })
             return tasks
