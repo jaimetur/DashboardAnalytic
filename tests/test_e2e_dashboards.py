@@ -158,6 +158,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "$('ds-apply-filters').disabled = !definition || filterStateFingerprint(definition) === appliedFilterState || filterActionBusy;" in dashboard_script
     assert "const dashboardStatuses = new Map();" in dashboard_script
     assert "window.setInterval(refreshDashboardStatuses, 2000);" in dashboard_script
+    dashboard_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+    assert '.e2e-dashboards .ds-dashboard-close::after' in dashboard_css
+    assert '.e2e-dashboards .ds-dashboard-close{background:linear-gradient(135deg,#485f70,#71899a)' in dashboard_css
+    assert "d='M12 2v10'" in dashboard_css
     assert "bind('ds-viewer-refresh',prepare);" in dashboard_script
     assert 'async function restorePrepared(id) {' in dashboard_script
     assert 'const preparedPayloads = new Map();' in dashboard_script

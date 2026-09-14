@@ -1702,9 +1702,18 @@ def test_workspace_management_reports_every_supported_row_status(client, tmp_pat
     assert header.index('<th>Cache Size</th>') < header.index('<th>Status</th>') < header.index('<th>Actions</th>')
     assert 'workspace-status-active' in page.text
     first_row = page.text.split('<tr class="workspace-library-row', 1)[1].split('</tr>', 1)[0]
-    assert first_row.index('workspace-action-open') < first_row.index('workspace-action-duplicate')
+    assert first_row.index('workspace-action-close') < first_row.index('workspace-action-duplicate')
+    assert 'action="/workspace/close"' in first_row
+    assert 'aria-label="Close workspace"' in first_row
+    assert '>⏻</button>' in first_row
     stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')
-    assert '.workspace-library-table .workspace-name-column { width: 22rem; min-width: 22rem; }' in stylesheet
+    assert '.workspace-row-actions .workspace-action-open.icon-action::after' in stylesheet
+    assert "d='M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z'" in stylesheet
+    assert '.workspace-row-actions .workspace-action-clear-cache.icon-action::after' in stylesheet
+    assert "d='m7 21-4-4a2 2 0 0 1 0-2.83L12.17 5" in stylesheet
+    assert '.workspace-action-close { background: linear-gradient(135deg, #08736d, #20a797);' in stylesheet
+    assert '.workspace-action-duplicate { background: linear-gradient(135deg, #b97813, #e0a33e);' in stylesheet
+    assert '.workspace-library-table .workspace-name-column { width: 42.5rem; min-width: 42.5rem; }' in stylesheet
     assert '.workspace-library-table .workspace-access-column { width: 12rem; min-width: 12rem; }' in stylesheet
 
     active = app_module.workspace_table_status(workspace, [])
