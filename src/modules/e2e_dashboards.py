@@ -786,9 +786,21 @@ def install_dashboard_routes(core):
         return {**payload, 'token': token}
 
     @app.post('/api/e2e-dashboards/prepare')
-    def prepare(definition: DashboardDefinition, user=Depends(dashboard_user)):
+    def prepare(
+        definition: DashboardDefinition,
+        dashboard_id: str | None = None,
+        user=Depends(dashboard_user),
+    ):
         try:
-            return build_preview(definition, user)
+            preview = build_preview(definition, user)
+            if dashboard_id:
+                enqueue_prefetch(
+                    dashboard_id,
+                    definition.model_dump(mode='json'),
+                    user,
+                    prepared_preview=preview,
+                )
+            return preview
         except (ValueError, KeyError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -1202,6 +1214,13 @@ def install_dashboard_routes(core):
                 raise HTTPException(404, 'Dashboard not found.')
             fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
             job = prefetch_jobs.get(f'{workspace}:{dashboard_id}:{fingerprint}')
+            if not job or job.get('token') != payload.token:
+                job = next((
+                    candidate for candidate in prefetch_jobs.values()
+                    if candidate.get('workspace') == workspace
+                    and candidate.get('dashboard_id') == dashboard_id
+                    and candidate.get('token') == payload.token
+                ), None)
             if not job or job.get('status') not in {'queued', 'processing'} or job.get('token') != payload.token:
                 return Response(status_code=204)
             snapshot = snapshots.get(payload.token)
@@ -1225,6 +1244,7 @@ def install_dashboard_routes(core):
         *,
         workspace: str | None = None,
         expected_generation: int | None = None,
+        prepared_preview: dict | None = None,
     ) -> None:
         """Warm Canvas JSON models only; PNG render caches are intentionally excluded."""
         workspace = workspace or workspace_key()
@@ -1235,7 +1255,7 @@ def install_dashboard_routes(core):
         # slide metadata. Do not gate it on a separate all-models check: an
         # interrupted warm-up can have a valid partial cache, which should be
         # served immediately while this worker fills its remaining models.
-        restored_preview = restore_preview_manifest(workspace, dashboard_id, fingerprint)
+        restored_preview = prepared_preview or restore_preview_manifest(workspace, dashboard_id, fingerprint)
         with lock:
             generation = prefetch_generation.get(workspace, 0)
             if expected_generation is not None and generation != expected_generation:
@@ -1245,7 +1265,8 @@ def install_dashboard_routes(core):
                 return
             job = prefetch_jobs[key] = {'id': key, 'workspace': workspace, 'dashboard_id': dashboard_id,
                 'name': str(raw_definition.get('name') or dashboard_id), 'status': 'queued', 'completed': 0, 'total': 0,
-                'restoring_cached_models': False, 'generation': generation, 'cancel_requested': False, 'priority_indexes': []}
+                'restoring_cached_models': False, 'generation': generation, 'cancel_requested': False, 'priority_indexes': [],
+                'task_id': f'dashboard-prefetch:{dashboard_id}' if prepared_preview is None else f'dashboard-prefetch:{dashboard_id}:{fingerprint[:12]}'}
             if restored_preview is not None:
                 total = sum(
                     1 for slide in restored_preview['slides'] for chart in slide['charts'] if chart['available']
@@ -1253,7 +1274,7 @@ def install_dashboard_routes(core):
                 completed = len(cached_canvas_model_indexes(restored_preview['token']))
                 job.update(
                     status='ready' if completed >= total else 'queued', completed=completed, total=total,
-                    token=restored_preview['token'], restored_from_manifest=True,
+                    token=restored_preview['token'], restored_from_manifest=prepared_preview is None,
                 )
                 if completed >= total:
                     return
@@ -1267,7 +1288,7 @@ def install_dashboard_routes(core):
                     job['status'] = 'processing'
                 if preview is None:
                     preview = build_preview(definition, user, workspace=workspace)
-                    persist_preview_manifest(workspace, dashboard_id, fingerprint, preview['token'])
+                persist_preview_manifest(workspace, dashboard_id, fingerprint, preview['token'])
                 charts = [chart['index'] for slide in preview['slides'] for chart in slide['charts'] if chart['available']]
                 with lock:
                     job.update(token=preview['token'], total=len(charts))
@@ -1374,7 +1395,7 @@ def install_dashboard_routes(core):
             for job in workspace_jobs:
                 if job['status'] == 'processing':
                     tasks.append({
-                        'id': f'dashboard-prefetch:{job["dashboard_id"]}',
+                        'id': job['task_id'],
                         'label': f'Preparing Dashboard charts: {job["name"]}',
                         'detail': (
                             f'{job["completed"]} of {job["total"]} Canvas models'
@@ -1386,7 +1407,7 @@ def install_dashboard_routes(core):
                     ahead = queue_positions[id(job)]
                     suffix = '' if ahead == 1 else 's'
                     tasks.append({
-                        'id': f'dashboard-prefetch:{job["dashboard_id"]}',
+                        'id': job['task_id'],
                         'label': f'Queued Dashboard charts: {job["name"]}',
                         'detail': f'Queued behind {ahead} Dashboard preparation{suffix}',
                         'progress': 0,

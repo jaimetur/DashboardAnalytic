@@ -2,6 +2,7 @@ import json
 import time
 from io import BytesIO
 from pathlib import Path
+from threading import Event
 
 import pandas as pd
 
@@ -145,6 +146,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'function filterChanged() {' in dashboard_script
     assert "status('Filter changes are ready to apply.');" in dashboard_script
     assert "bind('ds-apply-filters', async () => { if (hasUnsavedFilterChanges()) await prepare(); });" in dashboard_script
+    assert "api(`/prepare${activeId ? `?dashboard_id=${encodeURIComponent(activeId)}` : ''}`,'POST',definition,controller.signal)" in dashboard_script
+    assert "window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));" in dashboard_script
     assert "bind('ds-viewer-refresh',prepare);" in dashboard_script
     assert 'async function restorePrepared(id) {' in dashboard_script
     assert 'const preparedPayloads = new Map();' in dashboard_script
@@ -248,6 +251,61 @@ def test_prefetched_dashboard_reuses_completed_server_snapshot(client):
         (Path(core.repository.db_path).parent / '.dashboard-data-cache' / 'dashboard-previews').glob('*.json')
     )
     assert manifests
+
+
+def test_applying_filters_queues_all_chart_models_and_reuses_previous_cache(client, monkeypatch):
+    payload = setup_dashboard(client)
+    import src.modules.e2e_dashboards as dashboards_module
+
+    started = Event()
+    release = Event()
+    calls = []
+    original = dashboards_module.catalog_chart_payload
+
+    def tracked(*args, **kwargs):
+        calls.append(1)
+        started.set()
+        assert release.wait(5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(dashboards_module, 'catalog_chart_payload', tracked)
+    response = client.post('/api/e2e-dashboards/prepare?dashboard_id=filtered-dashboard', json=payload)
+    assert response.status_code == 200, response.text
+    assert started.wait(5)
+    try:
+        groups = client.get('/api/background-tasks').json()['groups']
+        tasks = [task for group in groups for task in group['tasks']]
+        assert any(
+            task['id'].startswith('dashboard-prefetch:filtered-dashboard:')
+            and task['label'] == 'Preparing Dashboard charts: Comparison'
+            for task in tasks
+        )
+    finally:
+        release.set()
+
+    cache_dir = Path(core.repository.db_path).parent / '.dashboard-data-cache' / 'charts-canvas'
+    deadline = time.monotonic() + 10
+    while len(list(cache_dir.glob('*.json'))) < 3 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    first_models = {path.name for path in cache_dir.glob('*.json')}
+    assert len(first_models) == 3
+
+    payload['filters'] = {'City': ['London']}
+    filtered = client.post('/api/e2e-dashboards/prepare?dashboard_id=filtered-dashboard', json=payload)
+    assert filtered.status_code == 200, filtered.text
+    deadline = time.monotonic() + 10
+    while len(list(cache_dir.glob('*.json'))) < 6 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    filtered_models = {path.name for path in cache_dir.glob('*.json')}
+    assert first_models < filtered_models
+
+    payload['filters'] = {}
+    calls_before_restore = len(calls)
+    restored = client.post('/api/e2e-dashboards/prepare?dashboard_id=filtered-dashboard', json=payload)
+    assert restored.status_code == 200, restored.text
+    time.sleep(0.1)
+    assert len(calls) == calls_before_restore
+    assert {path.name for path in cache_dir.glob('*.json')} == filtered_models
 
 
 def test_dashboard_api_session_expires_on_application_process_restart(client):

@@ -419,9 +419,10 @@
     setPreparationState('preparing');
     $('ds-rows').textContent = '';
     try {
-      const payload = await api('/prepare','POST',definition,controller.signal);
+      const payload = await api(`/prepare${activeId ? `?dashboard_id=${encodeURIComponent(activeId)}` : ''}`,'POST',definition,controller.signal);
       if (current !== sequence) return;
       applyPreparedPayload(payload);
+      window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
     } catch (error) { if (current === sequence && error.name !== 'AbortError') { facetsLoading = false; facets(); setViewEnabled(false); setPreparationState('hidden'); $('ds-rows').textContent = error.message; if (!$('ds-viewer').hidden) $('ds-charts').replaceChildren(node('div',error.message,'ds-empty')); } throw error; }
     })();
     preparing = pending;
