@@ -532,6 +532,35 @@ def test_interactive_status_model_preserves_reporting_row_and_column_aggregation
     ]
 
 
+def test_interactive_status_model_preserves_sql_aggregated_row_weights() -> None:
+    entry = CatalogEntry(
+        1, 'Data', '', '', 'Completed Ratio', 'CDR-Data', 'Test_Result',
+        '100% Stacked Vertical Bars', 'Test_Result', '', 'Type_of_Test',
+        'Operator × Campaign', 'Right',
+    )
+    frame = pd.DataFrame({
+        'Type_of_Test': ['Browsing'] * 6,
+        'Operator': ['VF'] * 3 + ['3'] * 3,
+        'Campaign': ['2026 Q1'] * 2 + ['2026 Q2'] + ['2026 Q1'] + ['2026 Q2'] * 2,
+        'Test_Result': ['Completed', 'Failed', 'Completed', 'Failed', 'Completed', 'Completed'],
+    })
+    weighted = (
+        frame.groupby(
+            ['Type_of_Test', 'Operator', 'Campaign', 'Test_Result'],
+            sort=False,
+            dropna=False,
+        )
+        .size()
+        .rename('__catalog_weight')
+        .reset_index()
+    )
+
+    expanded_model = catalog_chart_payload(frame, entry, prefiltered=True)
+    weighted_model = catalog_chart_payload(weighted, entry, prefiltered=True)
+
+    assert weighted_model == expanded_model
+
+
 def test_interactive_status_legend_uses_the_colours_of_its_plotted_states() -> None:
     entry = CatalogEntry(
         1, 'Voice', '', '', 'Failed ratio', 'CDR-Voice', 'Test_Result',

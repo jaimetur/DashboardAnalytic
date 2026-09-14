@@ -1495,7 +1495,7 @@ def test_workspace_management_save_updates_name_and_user_access(client) -> None:
     assert app_module.workspace_registry.get(germany.id).name == 'Germany Q3'
     assert app_module.repository.list_user_workspace_ids(int(demo['id'])) == ['default', germany.id]
     workspace_page = client.get('/workspace')
-    assert '<th>Workspace</th>' in workspace_page.text
+    assert '<th class="workspace-name-column">Workspace</th>' in workspace_page.text
     assert '<th>Size</th>' in workspace_page.text
     assert 'Save access' not in workspace_page.text
     assert 'class="workspace-action-save icon-action"' in workspace_page.text

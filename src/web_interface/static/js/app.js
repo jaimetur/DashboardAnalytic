@@ -5653,7 +5653,7 @@ if (queueNode) {
       if (dashboardName && dashboardName !== previousDashboardName) {
         const dashboard = document.createElement('span');
         dashboard.className = 'background-task-dashboard';
-        dashboard.textContent = `Dashboard - “${dashboardName}”:`;
+        dashboard.textContent = `Dashboard - “${dashboardName}”`;
         list.append(dashboard);
       }
       previousDashboardName = dashboardName;

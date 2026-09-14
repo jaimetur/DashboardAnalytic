@@ -6,6 +6,7 @@ import atexit
 import base64
 import csv
 import gc
+import heapq
 import io
 import json
 import math
@@ -18,6 +19,7 @@ import unicodedata
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 from collections import defaultdict
+from bisect import bisect_left, bisect_right
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from io import BytesIO
@@ -1633,7 +1635,8 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         values = frame[column].fillna("(blank)").astype(str)
         normalized_dimension = _normalise_catalog_name(dimension)
         if normalized_dimension == "campaign":
-            values = values.map(_campaign_display_value)
+            campaign_labels = {value: _campaign_display_value(value) for value in values.unique()}
+            values = values.map(campaign_labels)
         frame[target] = values
         requested = explicit_dimension_values.get(normalized_dimension)
         if requested:
@@ -1673,7 +1676,13 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
             if frame.empty:
                 frame[target] = pd.Series(index=frame.index, dtype="object")
             else:
-                frame[target] = frame[columns].fillna("(blank)").astype(str).agg(" · ".join, axis=1)
+                combined = frame[columns[0]].fillna("(blank)").astype(str)
+                for column in columns[1:]:
+                    combined = combined.str.cat(
+                        frame[column].fillna("(blank)").astype(str),
+                        sep=" · ",
+                    )
+                frame[target] = combined
 
     materialise(row_display_columns, primary)
     is_distribution = entry.chart_type.casefold() == "distribution stacked vertical bars"
@@ -2936,24 +2945,33 @@ def _empty_chart(title: str) -> BytesIO:
 
 def _status_chart_categories(
     data: pd.DataFrame, state_column: str, *, quality: bool, threshold: float,
+    copy: bool = True,
 ) -> tuple[pd.DataFrame, tuple[str, ...], tuple[str, ...]]:
     """Classify every non-empty result so 100% bars have no unpainted remainder."""
-    result = data.copy()
+    result = data.copy() if copy else data
     if quality:
         numeric = pd.to_numeric(result[state_column], errors="coerce")
         result = result.loc[numeric.notna()].copy()
         result["state"] = numeric.loc[result.index].map(lambda value: "< 1.6" if value < threshold else "≥ 1.6")
         return result, ("< 1.6", "≥ 1.6"), ("#C83E4D", "#2C9A62")
-    values = result[state_column].astype("string").str.strip()
-    normalised = values.str.casefold()
-    canonical_outcomes = normalised.map({
+    canonical_labels = {
         "completed": "Completed", "drop": "Dropped", "dropped": "Dropped", "failed": "Failed", "cutoff": "Cutoff",
-    })
-    semantic = canonical_outcomes.where(canonical_outcomes.notna(), values.where(values.map(_outcome_kind).notna()))
+    }
+    # Status columns contain only a handful of distinct labels even when a
+    # chart has hundreds of thousands of rows. Normalise and classify every
+    # distinct source value once, then use pandas' vectorised hash mapping.
+    state_by_value: dict[object, str | None] = {}
+    for value in result[state_column].dropna().drop_duplicates():
+        label = str(value).strip()
+        canonical = canonical_labels.get(label.casefold())
+        state_by_value[value] = canonical or (label if _outcome_kind(label) is not None else None)
+    semantic = result[state_column].map(state_by_value)
     # Status KPIs intentionally ignore unknown outcomes. Other categorical
     # KPIs (RAT, CA state, ARFCN, threshold buckets) retain their native values.
     result["state"] = (
-        semantic if semantic.notna().any() else values
+        semantic if semantic.notna().any() else result[state_column].map(
+            {value: str(value).strip() for value in result[state_column].dropna().drop_duplicates()}
+        )
     ).replace({"": pd.NA, "<NA>": pd.NA, "NaN": pd.NA, "nan": pd.NA})
     present = [str(value) for value in result["state"].dropna().drop_duplicates()]
     preferred = [state for state in ("Completed", "Success", "Cutoff", "Dropped", "Failed", "Failure") if state in present]
@@ -3514,17 +3532,46 @@ def _cdf_terminal_x_maximum(
     """Trim only a converged CDF tail that is already effectively complete."""
     if len(series_values) < 2:
         return fallback
-    candidates = sorted({value for values in series_values for value in values if low <= value <= fallback})
-    for value in candidates:
-        levels = sorted(sum(point <= value for point in values) / len(values) for values in series_values)
-        completed_levels = [level for level in levels if level > 0.98]
+    # Sweep the already sorted curves once. The previous implementation
+    # rescanned every point for every candidate x value, making large CDFs
+    # quadratic.
+    counts = [bisect_left(values, low) for values in series_values]
+    events: list[tuple[float, int]] = []
+    for series_index, (values, start) in enumerate(zip(series_values, counts, strict=True)):
+        if start < len(values) and values[start] <= fallback:
+            heapq.heappush(events, (values[start], series_index))
+    minimum_levels: list[tuple[float, int, int]] = []
+    maximum_levels: list[tuple[float, int, int]] = []
+    completed: set[int] = set()
+    while events:
+        value = events[0][0]
+        touched: set[int] = set()
+        while events and events[0][0] == value:
+            _event_value, series_index = heapq.heappop(events)
+            values = series_values[series_index]
+            counts[series_index] = bisect_right(values, value, lo=counts[series_index])
+            touched.add(series_index)
+            if counts[series_index] < len(values) and values[counts[series_index]] <= fallback:
+                heapq.heappush(events, (values[counts[series_index]], series_index))
+        for series_index in touched:
+            level = counts[series_index] / len(series_values[series_index])
+            if level > 0.98:
+                completed.add(series_index)
+                heapq.heappush(minimum_levels, (level, series_index, counts[series_index]))
+                heapq.heappush(maximum_levels, (-level, series_index, counts[series_index]))
+        while minimum_levels and counts[minimum_levels[0][1]] != minimum_levels[0][2]:
+            heapq.heappop(minimum_levels)
+        while maximum_levels and counts[maximum_levels[0][1]] != maximum_levels[0][2]:
+            heapq.heappop(maximum_levels)
         # Never crop meaningful CDF data. A tail is eligible only once at
         # least three curves have *exceeded* 98%, and those completed curves
         # have themselves converged too closely to distinguish. A coincident
         # pair alone must never truncate other still-separated CDF curves.
         completed_curves_converged = (
-            len(completed_levels) >= 3
-            and max(completed_levels) - min(completed_levels) < minimum_separation
+            len(completed) >= 3
+            and minimum_levels
+            and maximum_levels
+            and -maximum_levels[0][0] - minimum_levels[0][0] < minimum_separation
         )
         if completed_curves_converged:
             return value
@@ -3961,6 +4008,7 @@ def _catalog_spec(entry: CatalogEntry) -> dict:
 
 def prepare_catalog_chart_preview_frame(
     frame: pd.DataFrame, entry: CatalogEntry, *, multivendor: bool = False,
+    template_filters_applied: bool = False,
 ) -> tuple[pd.DataFrame, CatalogEntry]:
     """Return reusable chart rows after source and template filtering."""
     render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
@@ -3970,7 +4018,10 @@ def prepare_catalog_chart_preview_frame(
     filtered.attrs["catalogue_calculated_dimensions"] = render_entry.calculated_dimensions
     filtered.attrs["catalogue_cdr_source"] = render_entry.cdr_source
     metric = _metric_column(filtered, spec)
-    return _apply_catalog_filters(filtered, render_entry, multivendor, metric), render_entry
+    return (
+        filtered if template_filters_applied else _apply_catalog_filters(filtered, render_entry, multivendor, metric),
+        render_entry,
+    )
 
 
 INTERACTIVE_CHART_POINTS_PER_SERIES = 900
@@ -4064,7 +4115,10 @@ def catalog_chart_payload(
     spec = _catalog_spec(render_entry)
     title = render_entry.chart_title or render_entry.slide_title
     if prefiltered:
-        filtered = frame.copy()
+        # Grouping adds derived columns but never mutates a source column.
+        # A shallow frame copy avoids duplicating a potentially large filtered
+        # selection before every Canvas model.
+        filtered = frame.copy(deep=False)
     else:
         source_frame = (
             frame if frame.attrs.get("report_operator_aliases_normalized")
@@ -4120,7 +4174,9 @@ def catalog_chart_payload(
         numeric = data[columns].copy()
         numeric.attrs = data.attrs.copy()
         if campaign_column:
-            numeric["__cdf_campaign"] = numeric[campaign_column].fillna("(blank)").astype(str).map(_campaign_display_value)
+            campaign_values = numeric[campaign_column].fillna("(blank)").astype(str)
+            campaign_labels = {value: _campaign_display_value(value) for value in campaign_values.unique()}
+            numeric["__cdf_campaign"] = campaign_values.map(campaign_labels)
         numeric[candidate_metric] = pd.to_numeric(numeric[candidate_metric], errors="coerce")
         numeric = numeric.dropna(subset=[candidate_metric, *grouping_columns])
         if numeric.empty:
@@ -4211,12 +4267,17 @@ def catalog_chart_payload(
         return model or empty("No valid samples for this KPI and technology filter")
 
     if spec["kind"] in {"status_100", "quality_100"} and metric:
-        state_data = data[[group, period, metric, *hierarchy_columns]].copy()
+        weight_column = "__catalog_weight" if "__catalog_weight" in data else None
+        state_data = data[[
+            group, period, metric, *hierarchy_columns,
+            *([weight_column] if weight_column else []),
+        ]].copy()
         state_data.attrs = data.attrs.copy()
         state_data, states, colours = _status_chart_categories(
             state_data, metric,
             quality=spec["kind"] == "quality_100",
             threshold=spec.get("threshold", 1.6),
+            copy=False,
         )
         state_data = state_data.dropna(subset=[group, period])
         fallback = [
@@ -4240,8 +4301,20 @@ def catalog_chart_payload(
             column_keys = _hierarchical_unique_keys(state_data, render_columns)
             dimensions = [*row_hierarchy, *render_columns]
             dimension_grouper = dimensions[0] if len(dimensions) == 1 else dimensions
-            totals = state_data.groupby(dimension_grouper, sort=False, dropna=False).size()
-            counts = state_data.groupby([*dimensions, "state"], sort=False, dropna=False).size()
+            totals_group = state_data.groupby(
+                dimension_grouper, sort=False, dropna=False, observed=True,
+            )
+            counts_group = state_data.groupby(
+                [*dimensions, "state"], sort=False, dropna=False, observed=True,
+            )
+            totals = (
+                totals_group[weight_column].sum() if weight_column
+                else totals_group.size()
+            )
+            counts = (
+                counts_group[weight_column].sum() if weight_column
+                else counts_group.size()
+            )
 
             def hierarchy_total(key: tuple[object, ...]) -> int:
                 lookup = key[0] if len(dimensions) == 1 else key
@@ -4266,8 +4339,16 @@ def catalog_chart_payload(
             })
             return model
         combinations = list(state_data[[group, period]].drop_duplicates().itertuples(index=False, name=None))
-        totals = state_data.groupby([group, period], sort=False, dropna=False).size()
-        counts = state_data.groupby([group, period, "state"], sort=False, dropna=False).size()
+        if weight_column:
+            totals = state_data.groupby(
+                [group, period], sort=False, dropna=False, observed=True,
+            )[weight_column].sum()
+            counts = state_data.groupby(
+                [group, period, "state"], sort=False, dropna=False, observed=True,
+            )[weight_column].sum()
+        else:
+            totals = state_data.groupby([group, period], sort=False, dropna=False).size()
+            counts = state_data.groupby([group, period, "state"], sort=False, dropna=False).size()
         model.update({
             "mode": "flat",
             "categories": [_catalogue_display_label(*key) for key in combinations],

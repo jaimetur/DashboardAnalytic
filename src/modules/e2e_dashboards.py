@@ -5,7 +5,7 @@ import json
 import re
 import sqlite3
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from hashlib import sha256
@@ -82,6 +82,7 @@ DASHBOARD_PROJECTION_CACHE_VERSION = 1
 DASHBOARD_PROJECTION_DISK_LIMIT = 6
 DASHBOARD_CHART_MODEL_CACHE_VERSION = 9
 DASHBOARD_CHART_MODEL_DISK_LIMIT = 500
+DASHBOARD_CHART_RENDER_WORKERS = 3
 DASHBOARD_PREVIEW_MANIFEST_VERSION = 3
 
 
@@ -167,7 +168,36 @@ def install_dashboard_routes(core):
     prefetch_jobs: dict[str, dict] = {}
     direct_preparation_tasks: dict[str, dict] = {}
     prefetch_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='e2e-dashboard-models')
+    prefetch_dispatch_active = False
     prefetch_generation: dict[str, int] = {}
+
+    def schedule_next_prefetch() -> None:
+        """Run one queued Dashboard, selecting its name-order at dispatch time."""
+        nonlocal prefetch_dispatch_active
+        with lock:
+            if prefetch_dispatch_active:
+                return
+            candidates = [
+                job for job in prefetch_jobs.values()
+                if job.get('status') == 'queued' and callable(job.get('runner'))
+            ]
+            if not candidates:
+                return
+            job = min(candidates, key=lambda candidate: float(candidate.get('created_at') or 0))
+            prefetch_dispatch_active = True
+
+        def dispatch():
+            nonlocal prefetch_dispatch_active
+            try:
+                job['runner']()
+            finally:
+                with lock:
+                    prefetch_dispatch_active = False
+                schedule_next_prefetch()
+
+        future = prefetch_executor.submit(dispatch)
+        with lock:
+            job['future'] = future
 
     def workspace_key():
         if not core.active_workspace:
@@ -353,7 +383,12 @@ def install_dashboard_routes(core):
                 clauses.append('0')
                 continue
             value_placeholders = ', '.join('?' for _ in values)
-            clauses.append(f"COALESCE(CAST({quote(column)} AS TEXT), '') IN ({value_placeholders})")
+            selected_column = (
+                f"COALESCE(CAST({quote(column)} AS TEXT), '')"
+                if any(str(value) == '' for value in values)
+                else quote(column)
+            )
+            clauses.append(f"{selected_column} IN ({value_placeholders})")
             params.extend(str(value) for value in values)
         if definition.date_from or definition.date_to:
             date_column = next((resolve_sql_column(columns, candidate) for candidate in ('event_start_time', 'Test_Start_Time', 'Timestamp', 'Date') if resolve_sql_column(columns, candidate)), None)
@@ -658,6 +693,33 @@ def install_dashboard_routes(core):
             # users can switch between them without rebuilding their filters.
             while len(snapshots) > 128:
                 snapshots.popitem(last=False)
+            snapshot = snapshots[token]
+        # Build or restore the narrow source projections while the task is
+        # still in its data-preparation phase. Chart rendering then reads a
+        # small indexed table instead of paying this one-time cost per chart.
+        for kind in selected_by_kind:
+            ensure_projection(snapshot, kind, task_repository)
+        # Load and filter the inputs for uncached Canvas models while the job
+        # is still preparing Dashboard data. The rendering phase then only
+        # performs the chart aggregation/serialisation work measured by its
+        # task, rather than charging SQLite reads to every individual chart.
+        pending_frames = [
+            index for index, entry in enumerate(snapshot.entries)
+            if entry.source_kind in selected_by_kind
+            and not canvas_model_path(snapshot, entry).is_file()
+        ]
+        with ThreadPoolExecutor(
+            max_workers=DASHBOARD_CHART_RENDER_WORKERS,
+            thread_name_prefix='e2e-dashboard-data',
+        ) as data_executor:
+            futures = [
+                data_executor.submit(
+                    snapshot_chart, token, index, user, expected_workspace=workspace,
+                )
+                for index in pending_frames
+            ]
+            for future in as_completed(futures):
+                future.result()
         return {**payload, 'token': token}
 
     def preview_manifest_path(workspace: str, dashboard_id: str, fingerprint: str) -> Path:
@@ -926,12 +988,28 @@ def install_dashboard_routes(core):
                     )
                     if actual and actual not in indexed_columns:
                         indexed_columns.append(actual)
+                for entry in snapshot.entries:
+                    if entry.source_kind != kind:
+                        continue
+                    filter_fields = (
+                        part.strip()
+                        for condition in parse_catalog_filters(entry.filters)
+                        for part in condition.column.split('|')
+                    )
+                    for field_name in filter_fields:
+                        actual = resolve_sql_column(projection_columns, field_name)
+                        if actual and actual not in indexed_columns:
+                            indexed_columns.append(actual)
                 for indexed_column in indexed_columns:
-                    index_name = f'idx_{table_name}_{sha256(indexed_column.encode()).hexdigest()[:8]}'
+                    legacy_index_name = f'idx_{table_name}_{sha256(indexed_column.encode()).hexdigest()[:8]}'
+                    index_name = f'idx_{table_name}_{sha256(f"nocase:{indexed_column}".encode()).hexdigest()[:8]}'
+                    connection.execute(
+                        f'DROP INDEX IF EXISTS {task_repository._quote_identifier(legacy_index_name)}'
+                    )
                     connection.execute(
                         f'CREATE INDEX IF NOT EXISTS {task_repository._quote_identifier(index_name)} '
                         f'ON {task_repository._quote_identifier(table_name)} '
-                        f'({task_repository._quote_identifier(indexed_column)})'
+                        f'({task_repository._quote_identifier(indexed_column)} COLLATE NOCASE)'
                     )
                 connection.execute(
                     'INSERT INTO projection_cache (cache_key, dataset_kind, table_name) VALUES (?, ?, ?) '
@@ -994,17 +1072,117 @@ def install_dashboard_routes(core):
         selected.extend(('dataset_id', 'source_row_id'))
         return list(dict.fromkeys(selected))
 
-    def load_projection_frame(cache_path, table_name, projection_columns, requested_columns, where, parameters):
+    def chart_filter_sql(entry, columns, multivendor):
+        """Push safe physical template filters into SQLite before DataFrame creation."""
+        clauses = []
+        parameters = []
+        complete = True
+        quote = lambda value: '"' + str(value).replace('"', '""') + '"'
+        for condition in parse_catalog_filters(entry.filters):
+            normalized = identity(condition.column)
+            if normalized in {'threshold', 'buckets'}:
+                continue
+            if multivendor and normalized in {'operator', 'vendor', 'reportvendor', 'vendorv3'}:
+                complete = False
+                continue
+            column = next((
+                resolve_sql_column(columns, candidate.strip())
+                for candidate in condition.column.split('|')
+                if resolve_sql_column(columns, candidate.strip())
+            ), None)
+            if not column:
+                complete = False
+                continue
+            values = [str(value) for value in condition.values]
+            if normalized == 'operator':
+                operator_aliases = {
+                    'vf': ('VF', 'Vodafone', 'Vodafone UK'),
+                    'vodafone': ('VF', 'Vodafone', 'Vodafone UK'),
+                    'vodafoneuk': ('VF', 'Vodafone', 'Vodafone UK'),
+                    '3': ('3', 'Three', '3 UK'),
+                    'three': ('3', 'Three', '3 UK'),
+                    '3uk': ('3', 'Three', '3 UK'),
+                    'ee': ('EE',),
+                    'o2': ('O2', 'Telefonica', 'Telefónica'),
+                    'telefonica': ('O2', 'Telefonica', 'Telefónica'),
+                }
+                values = list(dict.fromkeys(
+                    alias
+                    for value in values
+                    for alias in operator_aliases.get(identity(value), (value,))
+                ))
+            selected = (
+                f"COALESCE(CAST({quote(column)} AS TEXT), '') COLLATE NOCASE"
+                if '' in values
+                else f'{quote(column)} COLLATE NOCASE'
+            )
+            if normalized in {'vendor', 'reportvendor', 'vendorv3'} and condition.operator not in {'CONTAINS', 'NOT CONTAINS'}:
+                complete = False
+                continue
+            if condition.operator in {'=', '!='} and len(values) > 1:
+                placeholders = ', '.join('?' for _value in values)
+                expression = f'{selected} IN ({placeholders})'
+                clauses.append(f'NOT ({expression})' if condition.operator == '!=' else expression)
+                parameters.extend(values)
+            elif condition.operator in {'=', '!='}:
+                clauses.append(f'{selected} {condition.operator} ?')
+                parameters.append(values[0])
+            elif condition.operator in {'IN', 'NOT IN'}:
+                placeholders = ', '.join('?' for _value in values)
+                expression = f'{selected} IN ({placeholders})'
+                clauses.append(f'NOT ({expression})' if condition.operator == 'NOT IN' else expression)
+                parameters.extend(values)
+            elif condition.operator in {'CONTAINS', 'NOT CONTAINS'}:
+                checks = [f'instr(LOWER(COALESCE(CAST({quote(column)} AS TEXT), \'\')), LOWER(?)) > 0' for _value in values]
+                expression = f'({" OR ".join(checks)})'
+                clauses.append(f'NOT {expression}' if condition.operator == 'NOT CONTAINS' else expression)
+                parameters.extend(values)
+            else:
+                complete = False
+        return ' AND '.join(clauses), parameters, complete
+
+    def chart_aggregation_columns(entry, columns, multivendor, filters_applied):
+        """Return physical dimensions that SQLite can aggregate without changing chart semantics."""
+        if (
+            multivendor
+            or not filters_applied
+            or entry.calculated_dimensions
+            or entry.chart_type.casefold() != '100% stacked vertical bars'
+        ):
+            return None
+        requested = [
+            *parse_catalog_grouping(entry.grouping_rows).dimensions,
+            *parse_catalog_grouping(entry.grouping_columns).dimensions,
+            *(
+                part.strip(' `')
+                for part in re.split(r'\s+vs\s+|\s*\|\s*', entry.kpi, flags=re.I)
+                if part.strip()
+            ),
+        ]
+        resolved = [resolve_sql_column(columns, name) for name in requested]
+        if any(column is None for column in resolved):
+            return None
+        return list(dict.fromkeys(resolved))
+
+    def load_projection_frame(
+        cache_path, table_name, projection_columns, requested_columns, where, parameters,
+        aggregation_columns=None,
+    ):
         lookup = {identity(column): column for column in projection_columns}
         selected_columns = []
-        for requested in requested_columns:
+        for requested in aggregation_columns or requested_columns:
             actual = lookup.get(identity(requested))
             if actual and actual not in selected_columns:
                 selected_columns.append(actual)
         if not selected_columns:
             return pd.DataFrame()
         quote = lambda column: '"' + str(column).replace('"', '""') + '"'
-        query = f'SELECT {", ".join(quote(column) for column in selected_columns)} FROM {quote(table_name)} WHERE {where}'
+        select_clause = ", ".join(quote(column) for column in selected_columns)
+        if aggregation_columns:
+            select_clause += ', COUNT(*) AS "__catalog_weight"'
+        query = f'SELECT {select_clause} FROM {quote(table_name)} WHERE {where}'
+        if aggregation_columns:
+            query += f' GROUP BY {", ".join(quote(column) for column in selected_columns)}'
         connection = sqlite3.connect(cache_path, timeout=120.0)
         try:
             return pd.read_sql_query(query, connection, params=parameters)
@@ -1036,8 +1214,18 @@ def install_dashboard_routes(core):
                 columns=projection_columns, include_dataset_scope=False,
             )
             requested_columns = chart_query_columns(entry, snapshot.multivendor)
+            template_where, template_parameters, template_filters_applied = chart_filter_sql(
+                entry, projection_columns, snapshot.multivendor,
+            )
+            if template_where:
+                where = f'({where}) AND ({template_where})'
+                parameters.extend(template_parameters)
+            aggregation_columns = chart_aggregation_columns(
+                entry, projection_columns, snapshot.multivendor, template_filters_applied,
+            )
             raw_key = sha256(json.dumps({
                 'kind': entry.source_kind, 'columns': requested_columns, 'where': where, 'parameters': parameters,
+                'aggregation_columns': aggregation_columns,
             }, sort_keys=True, default=str).encode()).hexdigest()
             with lock:
                 raw_frame = snapshot.frames.get(raw_key)
@@ -1049,6 +1237,7 @@ def install_dashboard_routes(core):
                     if raw_frame is None:
                         raw_frame = load_projection_frame(
                             cache_path, table_name, projection_columns, requested_columns, where, parameters,
+                            aggregation_columns,
                         )
                         if snapshot.multivendor:
                             raw_frame = ensure_report_vendor_group(raw_frame)
@@ -1075,6 +1264,7 @@ def install_dashboard_routes(core):
                         try:
                             prepared_frame = prepare_catalog_chart_preview_frame(
                                 raw_frame, entry, multivendor=snapshot.multivendor,
+                                template_filters_applied=template_filters_applied,
                             )[0]
                         except ValueError as exc:
                             raise HTTPException(400, str(exc)) from exc
@@ -1300,23 +1490,38 @@ def install_dashboard_routes(core):
                     )
                 cached_indexes = cached_canvas_model_indexes(preview['token'])
                 pending_indexes = list(dict.fromkeys(charts))
-                while pending_indexes:
-                    with lock:
-                        if job.get('cancel_requested') or job.get('generation') != prefetch_generation.get(workspace, 0):
-                            job['status'] = 'cancelled'
-                            return
-                        priority_indexes = [
-                            index for index in job.get('priority_indexes', []) if index in pending_indexes
+                # Keep Dashboards serial in the outer queue, but render a
+                # small batch of independent chart models concurrently.
+                # Their snapshot caches use per-frame locks, so companion
+                # charts still share their source data safely.
+                with ThreadPoolExecutor(
+                    max_workers=DASHBOARD_CHART_RENDER_WORKERS,
+                    thread_name_prefix='e2e-dashboard-chart',
+                ) as chart_executor:
+                    while pending_indexes:
+                        with lock:
+                            if job.get('cancel_requested') or job.get('generation') != prefetch_generation.get(workspace, 0):
+                                job['status'] = 'cancelled'
+                                return
+                            priority_indexes = [
+                                index for index in job.get('priority_indexes', []) if index in pending_indexes
+                            ]
+                            ordered_indexes = [*priority_indexes, *(
+                                index for index in pending_indexes if index not in priority_indexes
+                            )]
+                            batch = ordered_indexes[:DASHBOARD_CHART_RENDER_WORKERS]
+                            pending_indexes = [index for index in pending_indexes if index not in batch]
+                            job['priority_indexes'] = [
+                                candidate for candidate in job.get('priority_indexes', []) if candidate not in batch
+                            ]
+                        futures = [
+                            chart_executor.submit(chart_model, preview['token'], index, user, expected_workspace=workspace)
+                            for index in batch if index not in cached_indexes
                         ]
-                        index = priority_indexes[0] if priority_indexes else pending_indexes[0]
-                        pending_indexes.remove(index)
-                        job['priority_indexes'] = [
-                            candidate for candidate in job.get('priority_indexes', []) if candidate != index
-                        ]
-                    if index in cached_indexes:
-                        continue
-                    chart_model(preview['token'], index, user, expected_workspace=workspace)
-                    with lock: job['completed'] += 1
+                        for future in as_completed(futures):
+                            future.result()
+                            with lock:
+                                job['completed'] += 1
                 with lock:
                     if job.get('cancel_requested') or job.get('generation') != prefetch_generation.get(workspace, 0):
                         job['status'] = 'cancelled'
@@ -1339,9 +1544,9 @@ def install_dashboard_routes(core):
                         job['status'] = 'cancelled'
                     else:
                         job.update(status='failed', error=str(exc))
-        future = prefetch_executor.submit(run)
         with lock:
-            job['future'] = future
+            job['runner'] = run
+        schedule_next_prefetch()
 
     @app.get('/api/e2e-dashboards/statuses')
     def dashboard_statuses(user=Depends(dashboard_user)):
@@ -1411,10 +1616,14 @@ def install_dashboard_routes(core):
                 if job.get('workspace') != database_path or job.get('status') not in {'queued', 'processing'}:
                     continue
                 job['cancel_requested'] = True
-                future = job.get('future')
-                if future is not None and future.cancel():
+                if job.get('status') == 'queued':
+                    # The dispatcher owns one future at a time. Let its
+                    # runner observe this cancellation and schedule the next
+                    # Dashboard instead of cancelling that shared dispatch.
                     job['status'] = 'cancelled'
-                elif future is not None:
+                    continue
+                future = job.get('future')
+                if future is not None:
                     running_futures.append(future)
             stale_tokens = [token for token, snapshot in snapshots.items() if snapshot.workspace == database_path]
             for token in stale_tokens:
@@ -1487,10 +1696,6 @@ def install_dashboard_routes(core):
                 ),
                 'progress': None,
             } for task in direct_tasks)
-            tasks.sort(key=lambda task: (
-                str(task.get('dashboard_name') or '').casefold(),
-                str(task.get('label') or '').casefold(),
-            ))
             return tasks
     core.e2e_dashboard_prefetch_tasks = prefetch_task_payloads
     core.e2e_dashboard_prefetch_workspace = prefetch_workspace_dashboards

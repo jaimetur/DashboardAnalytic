@@ -198,13 +198,22 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "'rendering_only': rendering_only," in dashboard_module
     assert 'def materialize_selection(definition, task_repository, dimensions, selected_by_kind, fields, *, use_profile_options=False):' in dashboard_module
     assert 'use_profile_options=use_profile_options,' in dashboard_module
+    assert 'DASHBOARD_CHART_RENDER_WORKERS = 3' in dashboard_module
+    assert "thread_name_prefix='e2e-dashboard-chart'," in dashboard_module
+    assert 'def schedule_next_prefetch() -> None:' in dashboard_module
+    assert "job = min(candidates, key=lambda candidate: float(candidate.get('created_at') or 0))" in dashboard_module
+    assert 'template_where, template_parameters, template_filters_applied = chart_filter_sql(' in dashboard_module
+    assert 'template_filters_applied=template_filters_applied,' in dashboard_module
+    assert 'ensure_projection(snapshot, kind, task_repository)' in dashboard_module
+    assert 'aggregation_columns = chart_aggregation_columns(' in dashboard_module
+    assert "thread_name_prefix='e2e-dashboard-data'," in dashboard_module
     dashboard_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
     assert '.e2e-dashboards .ds-unsaved-filters-badge' in dashboard_css
     assert '.e2e-dashboards .ds-dashboard-close::after' in dashboard_css
     assert '.e2e-dashboards .ds-dashboard-close{background:linear-gradient(135deg,#e5989b,#f2b8b9)' in dashboard_css
     assert '.e2e-dashboards .ds-dashboard-view{background:linear-gradient(145deg,#167957,#29ae7d)' in dashboard_css
     assert '.ds-dashboard-status-loading-data{border-color:#d3aa45;background:#fff1c9;color:#77570a}' in dashboard_css
-    assert '.ds-dashboard-status-data-queued{border-color:#aaa3b2;background:#f0edf2;color:#655e6c}' in dashboard_css
+    assert '.ds-dashboard-status-data-queued,.ds-dashboard-status-charts-queued{border-color:#aaa3b2;background:#f0edf2;color:#655e6c}' in dashboard_css
     assert "d='M12 2v10'" in dashboard_css
     assert "bind('ds-viewer-refresh',prepare);" in dashboard_script
     assert 'async function restorePrepared(id) {' in dashboard_script
