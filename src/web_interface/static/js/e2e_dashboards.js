@@ -49,13 +49,13 @@
     return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalize(value[key])]));
   };
   const definitionFingerprint = value => JSON.stringify(canonicalize(canonicalDashboardDefinition(value)));
-  const hasUnsavedDashboardChanges = (ignoreName = false) => {
+  const hasUnsavedDashboardChanges = (ignoredFields = []) => {
     if (!definition) return false;
     const current = canonicalDashboardDefinition(definition);
     let saved;
     try { saved = canonicalDashboardDefinition(JSON.parse(savedDefinition || '{}')); }
     catch (_) { return true; }
-    if (ignoreName) current.name = saved.name;
+    for (const field of ignoredFields) current[field] = saved[field];
     return definitionFingerprint(current) !== definitionFingerprint(saved);
   };
   const api = async (path = '', method = 'GET', body, signal) => {
@@ -275,6 +275,7 @@
   }
   async function openDashboard(id) {
     clearTimeout(facetsRefreshTimer);
+    clearTimeout(timer); ++sequence; controller?.abort(); preparing = null;
     stopPresentation();
     activeId = id; definition = canonicalDashboardDefinition(dashboards[id]); savedDefinition = definitionFingerprint(definition); dirty = false; prepared = null; facetOptions = {}; availableFields = []; slideIndex = 0; setViewEnabled(false); rememberOpen(id);
     $('ds-name').value = definition.name; setNrMode(definition.technology || definition.template_technology, definition.template);
@@ -287,9 +288,9 @@
     if (dashboardId !== activeId || item !== definition) return;
     definition = canonicalDashboardDefinition(result.definition); dashboards[dashboardId] = structuredClone(definition); savedDefinition = definitionFingerprint(definition); dirty = false; library(); status(`Saved “${definition.name}”.`);
   }
-  const confirmDiscard = async (ignoreName = false) => !hasUnsavedDashboardChanges(ignoreName) || await window.showConfirmDialog('Discard unsaved Dashboard changes?', {title:'Unsaved changes',confirmLabel:'Discard'});
+  const confirmDiscard = async (ignoredFields = []) => !hasUnsavedDashboardChanges(ignoredFields) || await window.showConfirmDialog('Discard unsaved Dashboard changes?', {title:'Unsaved changes',confirmLabel:'Discard'});
   bind('ds-create', async () => {
-    if (!await confirmDiscard(true)) return;
+    if (!await confirmDiscard(['name', 'template', 'template_technology', 'technology'])) return;
     const technology = $('ds-nr-mode').value;
     const selected = (config.templates[technology] || []).find(row => row.identifier === $('ds-template').value);
     if (!selected) throw new Error('Choose a template for the selected NR Mode.');

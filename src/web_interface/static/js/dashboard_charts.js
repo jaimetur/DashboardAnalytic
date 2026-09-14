@@ -629,7 +629,7 @@
     if (canvas.dataset.tooltipReady) return; canvas.dataset.tooltipReady = 'true';
     canvas.addEventListener('pointermove', event => {
       const view = views.get(canvas), state = renderStates.get(canvas), tooltip = tooltipFor(canvas); if (!view || !state || !tooltip) return;
-      if (canvas.classList.contains('is-panning')) { tooltip.hidden = true; return; }
+      if (canvas.classList.contains('is-panning') || canvas.classList.contains('is-selecting')) { tooltip.hidden = true; return; }
       const bounds = canvas.getBoundingClientRect();
       const x = ((event.clientX - bounds.left) / view.scaleX - view.originX) / view.zoom;
       const y = ((event.clientY - bounds.top) / view.scaleY - view.originY) / view.zoom;
@@ -656,6 +656,43 @@
     return camera.zoom;
   }
 
+  function selectionOverlayFor(canvas) {
+    let overlay = canvas.parentElement?.querySelector(':scope > .ds-chart-zoom-selection');
+    if (!overlay && canvas.parentElement) {
+      overlay = document.createElement('div');
+      overlay.className = 'ds-chart-zoom-selection';
+      overlay.hidden = true;
+      canvas.parentElement.append(overlay);
+    }
+    return overlay;
+  }
+
+  function zoomToSelection(canvas, selection) {
+    const bounds = canvas.getBoundingClientRect();
+    const left = clamp(Math.min(selection.startX, selection.endX) - bounds.left, 0, bounds.width);
+    const top = clamp(Math.min(selection.startY, selection.endY) - bounds.top, 0, bounds.height);
+    const right = clamp(Math.max(selection.startX, selection.endX) - bounds.left, 0, bounds.width);
+    const bottom = clamp(Math.max(selection.startY, selection.endY) - bounds.top, 0, bounds.height);
+    const width = right - left;
+    const height = bottom - top;
+    if (width < 12 || height < 12) return;
+    const selectedWidth = width / bounds.width * LOGICAL_WIDTH;
+    const selectedHeight = height / bounds.height * LOGICAL_HEIGHT;
+    const zoom = Math.min(4, LOGICAL_WIDTH / selectedWidth, LOGICAL_HEIGHT / selectedHeight);
+    if (zoom <= 1) return;
+    const centreX = (left + width / 2) / bounds.width * LOGICAL_WIDTH;
+    const centreY = (top + height / 2) / bounds.height * LOGICAL_HEIGHT;
+    const camera = cameraFor(canvas);
+    camera.zoom = zoom;
+    camera.panX = zoom * (LOGICAL_WIDTH / 2 - centreX);
+    camera.panY = zoom * (LOGICAL_HEIGHT / 2 - centreY);
+    constrainCamera(camera);
+    canvas.classList.toggle('ds-chart-zoomed', camera.zoom > 1);
+    const payload = models.get(canvas);
+    if (payload) draw(canvas, payload);
+    canvas.dispatchEvent(new CustomEvent('dashboardchartzoom', {detail: {zoom: camera.zoom}}));
+  }
+
   function attachPan(canvas) {
     if (canvas.dataset.panReady) return;
     canvas.dataset.panReady = 'true';
@@ -672,15 +709,32 @@
       draw(canvas, payload);
     };
     canvas.addEventListener('pointerdown', event => {
-      if (event.button !== 0 || cameraFor(canvas).zoom <= 1) return;
-      drag = {pointerId: event.pointerId, x: event.clientX, y: event.clientY};
-      canvas.classList.add('is-panning');
+      if (event.button !== 0) return;
+      const selecting = cameraFor(canvas).zoom <= 1 && event.pointerType === 'mouse';
+      if (!selecting && cameraFor(canvas).zoom <= 1) return;
+      drag = {pointerId: event.pointerId, x: event.clientX, y: event.clientY, selecting, startX: event.clientX, startY: event.clientY};
+      canvas.classList.add(selecting ? 'is-selecting' : 'is-panning');
       canvas.setPointerCapture?.(event.pointerId);
       const tooltip = tooltipFor(canvas); if (tooltip) tooltip.hidden = true;
-      event.preventDefault();
+      if (!selecting) event.preventDefault();
     });
     canvas.addEventListener('pointermove', event => {
       if (!drag || event.pointerId !== drag.pointerId) return;
+      if (drag.selecting) {
+        drag.endX = event.clientX; drag.endY = event.clientY;
+        const bounds = canvas.getBoundingClientRect(), parentBounds = canvas.parentElement.getBoundingClientRect();
+        const overlay = selectionOverlayFor(canvas);
+        if (overlay) {
+          const left = clamp(Math.min(drag.startX, drag.endX), bounds.left, bounds.right);
+          const top = clamp(Math.min(drag.startY, drag.endY), bounds.top, bounds.bottom);
+          const right = clamp(Math.max(drag.startX, drag.endX), bounds.left, bounds.right);
+          const bottom = clamp(Math.max(drag.startY, drag.endY), bounds.top, bounds.bottom);
+          overlay.style.left = `${left - parentBounds.left}px`; overlay.style.top = `${top - parentBounds.top}px`;
+          overlay.style.width = `${right - left}px`; overlay.style.height = `${bottom - top}px`; overlay.hidden = false;
+        }
+        event.preventDefault();
+        return;
+      }
       pendingX += event.clientX - drag.x; pendingY += event.clientY - drag.y;
       drag.x = event.clientX; drag.y = event.clientY;
       if (!panFrame) panFrame = requestAnimationFrame(paintPan);
@@ -688,9 +742,14 @@
     });
     const stopPan = event => {
       if (!drag || event.pointerId !== drag.pointerId) return;
-      if (panFrame) { cancelAnimationFrame(panFrame); paintPan(); }
+      const completedDrag = drag;
+      if (completedDrag.selecting) {
+        completedDrag.endX ??= event.clientX; completedDrag.endY ??= event.clientY;
+        const overlay = selectionOverlayFor(canvas); if (overlay) overlay.hidden = true;
+        if (event.type === 'pointerup') zoomToSelection(canvas, completedDrag);
+      } else if (panFrame) { cancelAnimationFrame(panFrame); paintPan(); }
       canvas.releasePointerCapture?.(event.pointerId);
-      canvas.classList.remove('is-panning');
+      canvas.classList.remove('is-panning', 'is-selecting');
       drag = null;
     };
     canvas.addEventListener('pointerup', stopPan);
