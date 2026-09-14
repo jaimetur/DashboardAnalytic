@@ -5725,6 +5725,7 @@ if (queueNode) {
 
   poll();
   window.setInterval(poll, 2000);
+  window.addEventListener('dashboard-analytic:refresh-background-tasks', poll);
   window.addEventListener('focus', poll);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 })();

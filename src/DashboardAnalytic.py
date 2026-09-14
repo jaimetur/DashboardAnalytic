@@ -6567,6 +6567,7 @@ def delete_workspace(
 
 @app.post('/workspace/cache/delete')
 def delete_workspace_cache(
+    request: Request,
     workspace_id: str = Form(...),
     user: SessionUser = Depends(current_user),
 ) -> Response:
@@ -6576,6 +6577,9 @@ def delete_workspace_cache(
     if workspace is None:
         return RedirectResponse('/workspace?workspace_error=Workspace+not+found.', status_code=status.HTTP_303_SEE_OTHER)
     require_workspace_access(user, workspace_id)
+    cancel_dashboard_prefetch = getattr(sys.modules[__name__], 'e2e_dashboard_cancel_prefetch_workspace', None)
+    if callable(cancel_dashboard_prefetch):
+        cancel_dashboard_prefetch(workspace.database_path)
     if active_workspace and active_workspace.id == workspace_id:
         ANALYSIS_CACHE.clear()
         DATAFRAME_CACHE.clear()
@@ -6617,6 +6621,14 @@ def delete_workspace_cache(
                     job.update(status='failed', error=str(exc), finished_at=datetime.now(timezone.utc).timestamp())
 
     Thread(target=run_cache_clear, name=f'workspace-cache-clear-{workspace_id}', daemon=True).start()
+    notice = 'Workspace cache clearing started. Dashboard data and chart models will be rebuilt when needed.'
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JSONResponse({
+            'job_id': job_id,
+            'workspace_id': workspace_id,
+            'workspace_name': workspace.name,
+            'notice': notice,
+        })
     return RedirectResponse(
         '/workspace?workspace_notice=Workspace+cache+clearing+started.+Dashboard+data+and+chart+models+will+be+rebuilt+when+needed.',
         status_code=status.HTTP_303_SEE_OTHER,

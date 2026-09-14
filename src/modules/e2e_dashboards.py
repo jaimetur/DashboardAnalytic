@@ -155,6 +155,7 @@ def install_dashboard_routes(core):
     projection_load_locks: dict[str, RLock] = {}
     prefetch_jobs: dict[str, dict] = {}
     prefetch_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='e2e-dashboard-models')
+    prefetch_generation: dict[str, int] = {}
 
     def workspace_key():
         if not core.active_workspace:
@@ -1062,7 +1063,14 @@ def install_dashboard_routes(core):
         payload = chart_model(token, index, user)
         return JSONResponse(payload, headers={'Cache-Control': 'private, max-age=3600'})
 
-    def enqueue_prefetch(dashboard_id: str, raw_definition: dict, user, *, workspace: str | None = None) -> None:
+    def enqueue_prefetch(
+        dashboard_id: str,
+        raw_definition: dict,
+        user,
+        *,
+        workspace: str | None = None,
+        expected_generation: int | None = None,
+    ) -> None:
         """Warm Canvas JSON models only; PNG render caches are intentionally excluded."""
         workspace = workspace or workspace_key()
         fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
@@ -1073,23 +1081,37 @@ def install_dashboard_routes(core):
         except (HTTPException, OSError, sqlite3.Error, ValueError):
             restoring_cached_models = False
         with lock:
+            generation = prefetch_generation.get(workspace, 0)
+            if expected_generation is not None and generation != expected_generation:
+                return
             existing = prefetch_jobs.get(key)
             if existing and existing.get('status') in {'queued', 'processing', 'ready'}:
                 return
             job = prefetch_jobs[key] = {'id': key, 'workspace': workspace, 'dashboard_id': dashboard_id,
                 'name': str(raw_definition.get('name') or dashboard_id), 'status': 'queued', 'completed': 0, 'total': 0,
-                'restoring_cached_models': restoring_cached_models}
+                'restoring_cached_models': restoring_cached_models, 'generation': generation, 'cancel_requested': False}
         def run():
             preview = None
             try:
-                with lock: job['status'] = 'processing'
+                with lock:
+                    if job.get('cancel_requested') or job.get('generation') != prefetch_generation.get(workspace, 0):
+                        job['status'] = 'cancelled'
+                        return
+                    job['status'] = 'processing'
                 preview = build_preview(definition, user, workspace=workspace)
                 charts = [chart['index'] for slide in preview['slides'] for chart in slide['charts'] if chart['available']]
                 with lock: job['total'] = len(charts)
                 for index in charts:
+                    with lock:
+                        if job.get('cancel_requested') or job.get('generation') != prefetch_generation.get(workspace, 0):
+                            job['status'] = 'cancelled'
+                            return
                     chart_model(preview['token'], index, user, expected_workspace=workspace)
                     with lock: job['completed'] += 1
                 with lock:
+                    if job.get('cancel_requested') or job.get('generation') != prefetch_generation.get(workspace, 0):
+                        job['status'] = 'cancelled'
+                        return
                     snapshot = snapshots.get(preview['token'])
                     if snapshot is not None:
                         # Models now live on disk. Discard large frames while
@@ -1103,14 +1125,39 @@ def install_dashboard_routes(core):
                         snapshots.move_to_end(preview['token'])
                     job.update(status='ready', token=preview['token'])
             except Exception as exc:
-                with lock: job.update(status='failed', error=str(exc))
-        prefetch_executor.submit(run)
+                with lock:
+                    if job.get('cancel_requested') or job.get('generation') != prefetch_generation.get(workspace, 0):
+                        job['status'] = 'cancelled'
+                    else:
+                        job.update(status='failed', error=str(exc))
+        future = prefetch_executor.submit(run)
+        with lock:
+            job['future'] = future
+
+    def cancel_workspace_prefetch(workspace: str | Path) -> None:
+        """Stop queued warming and invalidate an in-flight warming generation."""
+        database_path = str(Path(workspace).resolve())
+        with lock:
+            prefetch_generation[database_path] = prefetch_generation.get(database_path, 0) + 1
+            for job in prefetch_jobs.values():
+                if job.get('workspace') != database_path or job.get('status') not in {'queued', 'processing'}:
+                    continue
+                job['cancel_requested'] = True
+                future = job.get('future')
+                if future is not None and future.cancel():
+                    job['status'] = 'cancelled'
+            stale_tokens = [token for token, snapshot in snapshots.items() if snapshot.workspace == database_path]
+            for token in stale_tokens:
+                snapshots.pop(token, None)
 
     def prefetch_workspace_dashboards(workspaces) -> None:
         """Queue saved Dashboards at application start without requiring the page."""
         system_user = SimpleNamespace(username='*')
         for workspace in workspaces:
             try:
+                database_path = str(workspace.database_path.resolve())
+                with lock:
+                    expected_generation = prefetch_generation.get(database_path, 0)
                 task_repository = Repository(workspace.database_path, core.repository.global_db_path)
                 # Do not create an empty canonical state during startup: that
                 # would mask a legacy state written by an older application.
@@ -1123,7 +1170,7 @@ def install_dashboard_routes(core):
                 for dashboard_id, definition in dashboards.items():
                     enqueue_prefetch(
                         dashboard_id, definition, system_user,
-                        workspace=str(workspace.database_path.resolve()),
+                        workspace=database_path, expected_generation=expected_generation,
                     )
             except (OSError, sqlite3.Error, json.JSONDecodeError):
                 continue
@@ -1160,6 +1207,7 @@ def install_dashboard_routes(core):
             return tasks
     core.e2e_dashboard_prefetch_tasks = prefetch_task_payloads
     core.e2e_dashboard_prefetch_workspace = prefetch_workspace_dashboards
+    core.e2e_dashboard_cancel_prefetch_workspace = cancel_workspace_prefetch
 
     @app.get('/api/e2e-dashboards/preview/{token}/{index}.png')
     def chart(token: str, index: int, user=Depends(dashboard_user)):
