@@ -5721,6 +5721,42 @@ def get_markdown_document(doc_name: str, user: SessionUser = Depends(current_use
     }
 
 
+WORKSPACE_TABLE_STATUS_LABELS = {
+    'active': 'Active',
+    'ready': 'Ready',
+    'duplicating': 'Duplicating',
+    'clearing-cache': 'Clearing cache',
+    'deleting': 'Deleting',
+    'unavailable': 'Unavailable',
+    'error': 'Error',
+}
+
+
+def workspace_table_status(workspace: Workspace, lifecycle_jobs: list[dict[str, Any]]) -> dict[str, str]:
+    """Resolve the most useful short-lived state for a workspace table row."""
+    latest_cache_job = max(
+        (
+            job for job in lifecycle_jobs
+            if job.get('operation') == 'cache-clear' and str(job.get('workspace_id')) == workspace.id
+        ),
+        key=lambda job: float(job.get('created_at') or 0),
+        default=None,
+    )
+    if workspace.status == 'duplicating':
+        status_key = 'duplicating'
+    elif latest_cache_job and latest_cache_job.get('status') in {'queued', 'processing'}:
+        status_key = 'clearing-cache'
+    elif latest_cache_job and latest_cache_job.get('status') == 'failed':
+        status_key = 'error'
+    elif not workspace.database_path.is_file():
+        status_key = 'unavailable'
+    elif active_workspace and active_workspace.id == workspace.id:
+        status_key = 'active'
+    else:
+        status_key = 'ready'
+    return {'status': status_key, 'status_label': WORKSPACE_TABLE_STATUS_LABELS[status_key]}
+
+
 @app.get('/workspace', response_class=HTMLResponse)
 def workspace(
     request: Request,
@@ -5737,6 +5773,11 @@ def workspace(
     workspace_access = workspace_access_map(user, workspaces)
     workspace_sizes = {item.id: format_workspace_size(workspace_disk_usage(item)) for item in workspaces}
     workspace_cache_sizes = {item.id: format_workspace_size(workspace_cache_disk_usage(item)) for item in workspaces}
+    with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+        workspace_lifecycle_jobs = [dict(job) for job in WORKSPACE_LIFECYCLE_JOBS.values()]
+    workspace_statuses = {
+        item.id: workspace_table_status(item, workspace_lifecycle_jobs) for item in workspaces
+    }
     if not active_workspace:
         return render_template(
             request,
@@ -5747,7 +5788,7 @@ def workspace(
                 'has_processing': False, 'vodafone_mapping_datasets': [], 'three_mapping_datasets': [],
                 'mappable_cdr_datasets': [], 'clearable_cdr_datasets': [],
                 'calculated_dimensions': [], 'combined_tables': [],
-                'workspaces': workspaces, 'workspace_access': workspace_access, 'workspace_sizes': workspace_sizes, 'workspace_cache_sizes': workspace_cache_sizes, 'workspace_users': workspace_users, 'workspace_notice': request.query_params.get('workspace_notice'),
+                'workspaces': workspaces, 'workspace_access': workspace_access, 'workspace_sizes': workspace_sizes, 'workspace_cache_sizes': workspace_cache_sizes, 'workspace_statuses': workspace_statuses, 'workspace_users': workspace_users, 'workspace_notice': request.query_params.get('workspace_notice'),
                 'workspace_warning': request.query_params.get('workspace_warning'),
                 'workspace_error': request.query_params.get('workspace_error'),
             },
@@ -5790,6 +5831,7 @@ def workspace(
             'workspace_access': workspace_access,
             'workspace_sizes': workspace_sizes,
             'workspace_cache_sizes': workspace_cache_sizes,
+            'workspace_statuses': workspace_statuses,
             'workspace_users': workspace_users,
             'active_workspace': active_workspace,
             'workspace_notice': request.query_params.get('workspace_notice'),
@@ -5859,18 +5901,19 @@ def workspace_status(user: SessionUser = Depends(current_user)) -> JSONResponse:
             invalidate_workspace_size_cache(item.database_path.parent)
     now = datetime.now(timezone.utc).timestamp()
     with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+        lifecycle_jobs = [dict(job) for job in WORKSPACE_LIFECYCLE_JOBS.values()]
         removed_workspace_ids = [
-            str(job['workspace_id']) for job in WORKSPACE_LIFECYCLE_JOBS.values()
+            str(job['workspace_id']) for job in lifecycle_jobs
             if job.get('operation') in {'delete', 'duplicate-cancel'} and job.get('status') == 'ready'
             and float(job.get('finished_at') or 0) > now - 30
         ]
         cleared_cache_workspace_ids = [
-            str(job['workspace_id']) for job in WORKSPACE_LIFECYCLE_JOBS.values()
+            str(job['workspace_id']) for job in lifecycle_jobs
             if job.get('operation') == 'cache-clear' and job.get('status') == 'ready'
             and float(job.get('finished_at') or 0) > now - 30
         ]
         pending_cache_clear_workspace_ids = [
-            str(job['workspace_id']) for job in WORKSPACE_LIFECYCLE_JOBS.values()
+            str(job['workspace_id']) for job in lifecycle_jobs
             if job.get('operation') == 'cache-clear' and job.get('owner') == user.username
             and job.get('status') in {'queued', 'processing'}
         ]
@@ -5879,13 +5922,26 @@ def workspace_status(user: SessionUser = Depends(current_user)) -> JSONResponse:
             if job.get('status') in {'ready', 'failed'} and float(job.get('finished_at') or 0) <= now - 30
         ]:
             WORKSPACE_LIFECYCLE_JOBS.pop(job_id, None)
+    lifecycle_workspaces = [
+        {
+            'id': str(job['workspace_id']),
+            'status': 'error' if job.get('status') == 'failed' else 'deleting',
+            'status_label': WORKSPACE_TABLE_STATUS_LABELS[
+                'error' if job.get('status') == 'failed' else 'deleting'
+            ],
+        }
+        for job in lifecycle_jobs
+        if job.get('operation') == 'delete' and job.get('owner') == user.username
+        and job.get('status') in {'queued', 'processing', 'failed'}
+    ]
     return JSONResponse({'workspaces': [
-        {'id': item.id, 'status': item.status, 'size': format_workspace_size(workspace_disk_usage(item)),
+        {'id': item.id, **workspace_table_status(item, lifecycle_jobs), 'registry_status': item.status,
+         'size': format_workspace_size(workspace_disk_usage(item)),
          'cache_size': format_workspace_size(workspace_cache_disk_usage(item)),
          'accessible': bool(access.get(item.id, False))}
         for item in workspaces
         if access.get(item.id, False) or (user.role in {'admin', 'super-admin'} and item.status == 'duplicating')
-    ], 'removed_workspace_ids': removed_workspace_ids,
+    ], 'lifecycle_workspaces': lifecycle_workspaces, 'removed_workspace_ids': removed_workspace_ids,
         'cleared_cache_workspace_ids': cleared_cache_workspace_ids,
         'pending_cache_clear_workspace_ids': pending_cache_clear_workspace_ids}, headers={'Cache-Control': 'no-store'})
 

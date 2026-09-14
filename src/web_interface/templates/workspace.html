@@ -52,27 +52,25 @@
           <table class="workspace-library-table">
             <thead>
               <tr>
-                <th>Workspace</th>
+                <th class="workspace-name-column">Workspace</th>
+                {% if user.role == 'super-admin' %}<th class="workspace-access-column">Users with access</th>{% endif %}
                 <th>Size</th>
                 <th>Cache Size</th>
                 <th>Status</th>
-                {% if user.role == 'super-admin' %}<th>Users with access</th>{% endif %}
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {% for item in workspaces %}
+              {% set workspace_status = workspace_statuses.get(item.id) %}
               <tr class="workspace-library-row{% if active_workspace and item.id == active_workspace.id %} active-workspace-row{% endif %}{% if not workspace_access.get(item.id, false) %} workspace-no-access-row{% endif %}">
-                <td data-label="Workspace">
+                <td class="workspace-name-column" data-label="Workspace">
                   <form id="workspace-save-{{ item.id }}" method="post" action="/workspace/save" data-workspace-save>
                     <input type="hidden" name="workspace_id" value="{{ item.id }}">
                   </form>
                   <input form="workspace-save-{{ item.id }}" aria-label="Workspace name: {{ item.name }}" name="name" required maxlength="100" value="{{ item.name }}" data-workspace-name-input {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>
                 </td>
-                <td data-label="Size"><span class="workspace-size" data-workspace-size data-workspace-id="{{ item.id }}">{{ workspace_sizes.get(item.id, '0 MB') }}</span></td>
-                <td data-label="Cache Size"><span class="workspace-size" data-workspace-cache-size data-workspace-id="{{ item.id }}">{{ workspace_cache_sizes.get(item.id, '0 B') }}</span></td>
-                <td data-label="Status"><span class="workspace-status-pill workspace-status-{{ item.status }}" data-workspace-status data-workspace-id="{{ item.id }}">{{ 'Ready' if item.status == 'ready' else 'Duplicating' }}</span></td>
-                {% if user.role == 'super-admin' %}<td data-label="Users with access">
+                {% if user.role == 'super-admin' %}<td class="workspace-access-column" data-label="Users with access">
                   <div class="workspace-access-editor">
                     <details class="workspace-user-picker" data-workspace-user-picker>
                       <summary><span>Users with access</span><span class="workspace-user-picker-chevron" aria-hidden="true"></span></summary>
@@ -84,17 +82,20 @@
                     </details>
                   </div>
                 </td>{% endif %}
+                <td data-label="Size"><span class="workspace-size" data-workspace-size data-workspace-id="{{ item.id }}">{{ workspace_sizes.get(item.id, '0 MB') }}</span></td>
+                <td data-label="Cache Size"><span class="workspace-size" data-workspace-cache-size data-workspace-id="{{ item.id }}">{{ workspace_cache_sizes.get(item.id, '0 B') }}</span></td>
+                <td data-label="Status"><span class="workspace-status-pill workspace-status-{{ workspace_status.status }}" data-workspace-status data-workspace-id="{{ item.id }}">{{ workspace_status.status_label }}</span></td>
                 <td data-label="Actions">
                   <div class="workspace-row-actions">
                     <button type="submit" form="workspace-save-{{ item.id }}" class="workspace-action-save icon-action" aria-label="Save workspace changes" title="Save workspace changes" {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>✓</button>
-                    <form method="post" action="/workspace/duplicate" data-workspace-duplicate-form data-workspace-name="{{ item.name }}">
-                      <input type="hidden" name="workspace_id" value="{{ item.id }}">
-                      <button type="submit" class="workspace-action-duplicate icon-action" aria-label="Duplicate workspace" title="Duplicate workspace" {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>⧉</button>
-                    </form>
                     <form method="post" action="/workspace/select">
                       <input type="hidden" name="workspace_id" value="{{ item.id }}">
                       <input type="hidden" name="return_to" value="/workspace">
                       <button type="submit" class="workspace-action-open icon-action" data-workspace-row-open aria-label="Open workspace" title="Open workspace" {% if not workspace_access.get(item.id, false) or (active_workspace and item.id == active_workspace.id) %}disabled{% endif %}>📂</button>
+                    </form>
+                    <form method="post" action="/workspace/duplicate" data-workspace-duplicate-form data-workspace-name="{{ item.name }}">
+                      <input type="hidden" name="workspace_id" value="{{ item.id }}">
+                      <button type="submit" class="workspace-action-duplicate icon-action" aria-label="Duplicate workspace" title="Duplicate workspace" {% if not workspace_access.get(item.id, false) %}disabled{% endif %}>⧉</button>
                     </form>
                     <form method="post" action="/workspace/cache/delete" data-workspace-cache-delete-form data-workspace-name="{{ item.name }}">
                       <input type="hidden" name="workspace_id" value="{{ item.id }}">
@@ -731,6 +732,11 @@
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.detail || 'Workspace cache could not be cleared.');
+        const status = document.querySelector(`[data-workspace-status][data-workspace-id="${CSS.escape(String(payload.workspace_id || ''))}"]`);
+        if (status) {
+          status.textContent = 'Clearing cache';
+          status.className = 'workspace-status-pill workspace-status-clearing-cache';
+        }
         window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
         window.dispatchEvent(new Event('dashboard-analytic:workspace-cache-clear-started'));
       } catch (error) {
@@ -761,7 +767,32 @@
         purge.value = 'true';
         form.append(purge);
       }
-      form.submit();
+      const submitter = form.querySelector('button[type="submit"]');
+      if (submitter instanceof HTMLButtonElement) submitter.disabled = true;
+      const workspaceId = String(form.querySelector('input[name="workspace_id"]')?.value || '');
+      const status = document.querySelector(`[data-workspace-status][data-workspace-id="${CSS.escape(workspaceId)}"]`);
+      if (status) {
+        status.textContent = 'Deleting';
+        status.className = 'workspace-status-pill workspace-status-deleting';
+      }
+      try {
+        const response = await fetch(form.action, {
+          method: 'POST', body: new FormData(form), credentials: 'same-origin',
+          headers: {'X-Requested-With': 'XMLHttpRequest'},
+        });
+        if (!response.ok) throw new Error('Workspace could not be deleted.');
+        window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
+        window.dispatchEvent(new Event('dashboard-analytic:workspace-deletion-started'));
+      } catch (error) {
+        if (submitter instanceof HTMLButtonElement) submitter.disabled = false;
+        if (status) {
+          status.textContent = 'Error';
+          status.className = 'workspace-status-pill workspace-status-error';
+        }
+        showInfoDialog(error instanceof Error ? error.message : 'Workspace could not be deleted.', {
+          title: 'Workspace deletion failed', tone: 'error',
+        });
+      }
     });
   });
   document.querySelectorAll('[data-workspace-duplicate-form]').forEach((form) => {
@@ -860,6 +891,10 @@
   let refreshTimer = null;
   const initialNotice = new URLSearchParams(window.location.search).get('workspace_notice') || '';
   const shouldPollCacheClear = initialNotice.startsWith('Workspace cache clearing started.');
+  const setWorkspaceStatus = (status, state, label) => {
+    status.textContent = label;
+    status.className = `workspace-status-pill workspace-status-${state}`;
+  };
   const refreshTable = async () => {
     const before = new Map([...document.querySelectorAll('[data-workspace-status]')].map((node) => [node.dataset.workspaceId, node.textContent.trim()]));
     try {
@@ -868,6 +903,10 @@
       const payload = await response.json();
       let completed = false;
       let deleted = false;
+      (payload.lifecycle_workspaces || []).forEach((workspace) => {
+        const status = document.querySelector(`[data-workspace-status][data-workspace-id="${CSS.escape(String(workspace.id))}"]`);
+        if (status) setWorkspaceStatus(status, workspace.status, workspace.status_label);
+      });
       (payload.removed_workspace_ids || []).forEach((workspaceId) => {
         const status = document.querySelector(`[data-workspace-status][data-workspace-id="${CSS.escape(String(workspaceId))}"]`);
         const row = status?.closest('.workspace-library-row');
@@ -883,12 +922,10 @@
         if (size) size.textContent = workspace.size;
         if (cacheSize) cacheSize.textContent = workspace.cache_size || '0 B';
         if (!status) return;
-        const label = workspace.status === 'ready' ? 'Ready' : 'Duplicating';
-        completed ||= before.get(workspace.id) === 'Duplicating' && label === 'Ready';
-        status.textContent = label;
-        status.classList.toggle('workspace-status-ready', label === 'Ready');
-        status.classList.toggle('workspace-status-duplicating', label === 'Duplicating');
-        if (label === 'Ready' && workspace.accessible) {
+        const label = workspace.status_label || 'Ready';
+        completed ||= before.get(workspace.id) === 'Duplicating' && ['Ready', 'Active'].includes(label);
+        setWorkspaceStatus(status, workspace.status || 'ready', label);
+        if (['Ready', 'Active'].includes(label) && workspace.accessible) {
           const row = status.closest('.workspace-library-row');
           row?.classList.remove('workspace-no-access-row');
           row?.querySelectorAll('input:not([type="hidden"]), button').forEach((control) => {
@@ -903,8 +940,8 @@
       if (deleted) showInfoDialog('The workspace has been deleted successfully.', {title: 'Workspace deleted'});
       const cacheClearPending = (payload.pending_cache_clear_workspace_ids || []).length > 0;
       const cacheClearCompleted = (payload.cleared_cache_workspace_ids || []).length > 0;
-      const duplicationPending = Boolean(document.querySelector('.workspace-status-duplicating'));
-      if (!cacheClearPending && !cacheClearCompleted && !duplicationPending && refreshTimer !== null) {
+      const operationPending = Boolean(document.querySelector('.workspace-status-duplicating, .workspace-status-clearing-cache, .workspace-status-deleting'));
+      if (!cacheClearPending && !cacheClearCompleted && !operationPending && refreshTimer !== null) {
         window.clearInterval(refreshTimer);
         refreshTimer = null;
       }
@@ -917,10 +954,11 @@
       refreshTable();
     }, 5000);
   };
-  if (document.querySelector('.workspace-status-duplicating') || shouldPollCacheClear) {
+  if (document.querySelector('.workspace-status-duplicating, .workspace-status-clearing-cache, .workspace-status-deleting') || shouldPollCacheClear) {
     startPolling();
   }
   window.addEventListener('dashboard-analytic:workspace-cache-clear-started', startPolling);
+  window.addEventListener('dashboard-analytic:workspace-deletion-started', startPolling);
 })();
 </script>
 {% endblock %}

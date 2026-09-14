@@ -2670,6 +2670,7 @@ const confirmOptionInput = document.getElementById('confirm-option-input');
 const confirmOptionLabel = document.getElementById('confirm-option-label');
 const confirmAccept = document.getElementById('confirm-accept');
 const confirmCancel = document.getElementById('confirm-cancel');
+const confirmSecondary = document.getElementById('confirm-secondary');
 const catalogueInsertOverlay = document.getElementById('catalogue-insert-overlay');
 const catalogueInsertTitle = document.getElementById('catalogue-insert-title');
 const catalogueInsertCopy = document.getElementById('catalogue-insert-copy');
@@ -4606,6 +4607,10 @@ document.querySelectorAll('form[data-loading-label]').forEach((form) => {
 function showConfirmDialog(message, options = {}) {
   if (!confirmOverlay || !confirmTitle || !confirmCopy || !confirmAccept || !confirmCancel) {
     const accepted = window.confirm(message || 'Are you sure?');
+    if (options.secondaryLabel) {
+      if (accepted) return Promise.resolve('confirm');
+      return Promise.resolve(window.confirm(`${options.secondaryLabel} instead?`) ? 'secondary' : null);
+    }
     return Promise.resolve(options.optionLabel ? {accepted, optionChecked: Boolean(options.optionChecked)} : accepted);
   }
 
@@ -4615,6 +4620,11 @@ function showConfirmDialog(message, options = {}) {
   confirmAccept.textContent = options.confirmLabel || 'Confirm';
   confirmCancel.textContent = options.cancelLabel || 'Cancel';
   confirmCancel.hidden = options.hideCancel === true;
+  const hasSecondary = Boolean(options.secondaryLabel && confirmSecondary);
+  if (confirmSecondary) {
+    confirmSecondary.textContent = options.secondaryLabel || 'Alternative';
+    confirmSecondary.hidden = !hasSecondary;
+  }
   const hasOption = Boolean(options.optionLabel && confirmOption && confirmOptionInput && confirmOptionLabel);
   if (hasOption) {
     confirmOptionLabel.textContent = options.optionLabel;
@@ -4631,32 +4641,39 @@ function showConfirmDialog(message, options = {}) {
       document.body.classList.remove('loading-active');
       confirmAccept.removeEventListener('click', handleAccept);
       confirmCancel.removeEventListener('click', handleCancel);
+      confirmSecondary?.removeEventListener('click', handleSecondary);
       confirmOverlay.removeEventListener('click', handleBackdrop);
       window.removeEventListener('keydown', handleKeydown);
       confirmCancel.hidden = false;
       confirmCancel.textContent = 'Cancel';
+      if (confirmSecondary) {
+        confirmSecondary.hidden = true;
+        confirmSecondary.textContent = 'Alternative';
+      }
       const optionChecked = hasOption && Boolean(confirmOptionInput?.checked);
       if (confirmOption) confirmOption.hidden = true;
       if (confirmOptionInput) confirmOptionInput.checked = false;
       if (confirmOptionLabel) confirmOptionLabel.title = '';
-      resolve(hasOption ? {accepted, optionChecked} : accepted);
+      resolve(hasSecondary ? accepted : (hasOption ? {accepted, optionChecked} : accepted));
     };
 
-    const handleAccept = () => close(true);
-    const handleCancel = () => close(false);
+    const handleAccept = () => close(hasSecondary ? 'confirm' : true);
+    const handleSecondary = () => close('secondary');
+    const handleCancel = () => close(hasSecondary ? null : false);
     const handleBackdrop = (event) => {
       if (event.target === confirmOverlay) {
-        close(false);
+        close(hasSecondary ? null : false);
       }
     };
     const handleKeydown = (event) => {
       if (event.key === 'Escape') {
-        close(false);
+        close(hasSecondary ? null : false);
       }
     };
 
     confirmAccept.addEventListener('click', handleAccept);
     confirmCancel.addEventListener('click', handleCancel);
+    confirmSecondary?.addEventListener('click', handleSecondary);
     confirmOverlay.addEventListener('click', handleBackdrop);
     window.addEventListener('keydown', handleKeydown);
     confirmAccept.focus();

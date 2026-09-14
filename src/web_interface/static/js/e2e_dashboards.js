@@ -1014,6 +1014,43 @@
     if (event.data?.type === 'dashboard-analytic:template-saved') templateEditorSaved = true;
     if (event.data?.type === 'dashboard-analytic:close-template-editor') void closeTemplateEditor();
   });
+  let navigationPromptOpen = false;
+  document.addEventListener('click', event => {
+    const link = event.target.closest?.('a.module-tab, a.topnav-link-logout');
+    if (!link || !dirty || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const target = new URL(link.href, window.location.href);
+    if (target.href === window.location.href || target.origin !== window.location.origin || navigationPromptOpen) return;
+    event.preventDefault();
+    navigationPromptOpen = true;
+    void (async () => {
+      try {
+        if (hasUnsavedFilterChanges()) {
+          const choice = await window.showConfirmDialog(
+            'This Dashboard has filter changes that have not been saved. Save them before leaving?',
+            {
+              title: 'Unsaved Dashboard filters',
+              confirmLabel: 'Save Filters',
+              secondaryLabel: 'Discard',
+              cancelLabel: 'Cancel',
+            },
+          );
+          if (choice === 'confirm') await save();
+          else if (choice !== 'secondary') return;
+        } else if (!await window.showConfirmDialog(
+          'This Dashboard has unsaved changes. Discard them before leaving?',
+          {title: 'Unsaved Dashboard changes', confirmLabel: 'Discard', cancelLabel: 'Cancel'},
+        )) return;
+        dirty = false;
+        window.location.assign(target.href);
+      } catch (error) {
+        window.showInfoDialog(error instanceof Error ? error.message : 'Dashboard changes could not be saved.', {
+          title: 'Save Dashboard filters failed', tone: 'error',
+        });
+      } finally {
+        navigationPromptOpen = false;
+      }
+    })();
+  }, true);
   window.addEventListener('beforeunload',event=>{ if (dirty) { event.preventDefault(); event.returnValue = ''; } });
   window.addEventListener('auto-calculated-field-job-status',event=>{ const job = event.detail; if (definition && job?.id && ['ready','completed'].includes(job.status) && !completedFieldJobs.has(job.id)) { completedFieldJobs.add(job.id); changed(); } });
   safe(async ()=>{

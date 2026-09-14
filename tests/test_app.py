@@ -4,6 +4,7 @@ import json
 import shutil
 import sqlite3
 import time
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote
@@ -1686,6 +1687,64 @@ def test_workspace_cache_clear_removes_only_derived_dashboard_artifacts(client) 
         task['label'] == 'Clearing workspace cache' and task['detail'] == 'Cache cleared'
         for group in completed_tasks for task in group['tasks']
     )
+
+
+def test_workspace_management_reports_every_supported_row_status(client, tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    client.post('/login', data={'username': 'super', 'password': 'super123'})
+    workspace = app_module.workspace_registry.get('default')
+    assert workspace is not None
+
+    page = client.get('/workspace')
+    header = page.text.split('<table class="workspace-library-table">', 1)[1].split('</thead>', 1)[0]
+    assert header.index('>Workspace</th>') < header.index('Users with access') < header.index('<th>Size</th>')
+    assert header.index('<th>Cache Size</th>') < header.index('<th>Status</th>') < header.index('<th>Actions</th>')
+    assert 'workspace-status-active' in page.text
+    first_row = page.text.split('<tr class="workspace-library-row', 1)[1].split('</tr>', 1)[0]
+    assert first_row.index('workspace-action-open') < first_row.index('workspace-action-duplicate')
+    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')
+    assert '.workspace-library-table .workspace-name-column { width: 22rem; min-width: 22rem; }' in stylesheet
+    assert '.workspace-library-table .workspace-access-column { width: 12rem; min-width: 12rem; }' in stylesheet
+
+    active = app_module.workspace_table_status(workspace, [])
+    ready = app_module.workspace_table_status(replace(workspace, id='ready-copy'), [])
+    duplicating = app_module.workspace_table_status(replace(workspace, id='copy', status='duplicating'), [])
+    unavailable = app_module.workspace_table_status(
+        replace(workspace, id='missing', database_path=tmp_path / 'missing.db'), [],
+    )
+    assert {active['status'], ready['status'], duplicating['status'], unavailable['status']} == {
+        'active', 'ready', 'duplicating', 'unavailable',
+    }
+
+    cache_job = {
+        'operation': 'cache-clear', 'workspace_id': workspace.id, 'workspace_name': workspace.name,
+        'owner': 'super', 'status': 'processing', 'created_at': time.time(),
+    }
+    delete_job = {
+        'operation': 'delete', 'workspace_id': 'deleting-workspace', 'workspace_name': 'Deleting',
+        'owner': 'super', 'status': 'processing', 'created_at': time.time(),
+    }
+    with app_module.WORKSPACE_LIFECYCLE_JOBS_LOCK:
+        app_module.WORKSPACE_LIFECYCLE_JOBS['status-cache-test'] = cache_job
+        app_module.WORKSPACE_LIFECYCLE_JOBS['status-delete-test'] = delete_job
+    try:
+        payload = client.get('/api/workspaces/status').json()
+        current = next(item for item in payload['workspaces'] if item['id'] == workspace.id)
+        assert (current['status'], current['status_label']) == ('clearing-cache', 'Clearing cache')
+        deleting = next(item for item in payload['lifecycle_workspaces'] if item['id'] == 'deleting-workspace')
+        assert (deleting['status'], deleting['status_label']) == ('deleting', 'Deleting')
+
+        with app_module.WORKSPACE_LIFECYCLE_JOBS_LOCK:
+            app_module.WORKSPACE_LIFECYCLE_JOBS['status-cache-test']['status'] = 'failed'
+            app_module.WORKSPACE_LIFECYCLE_JOBS['status-cache-test']['finished_at'] = time.time()
+        failed = client.get('/api/workspaces/status').json()
+        current = next(item for item in failed['workspaces'] if item['id'] == workspace.id)
+        assert (current['status'], current['status_label']) == ('error', 'Error')
+    finally:
+        with app_module.WORKSPACE_LIFECYCLE_JOBS_LOCK:
+            app_module.WORKSPACE_LIFECYCLE_JOBS.pop('status-cache-test', None)
+            app_module.WORKSPACE_LIFECYCLE_JOBS.pop('status-delete-test', None)
 
 
 def test_workspace_status_reports_cancelled_duplicate_for_live_row_removal(client) -> None:

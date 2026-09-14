@@ -55,6 +55,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-library"' not in page.text
     assert 'id="ds-save"' in page.text
     assert '>Save Filters<' in page.text
+    assert 'id="confirm-secondary"' in page.text
     assert '>Apply Filters<' in page.text
     assert page.text.index('>Apply Filters<') < page.text.index('>Save Filters<')
     assert 'id="ds-apply-filters" title="Apply current filters without saving them" disabled' in page.text
@@ -150,6 +151,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "bind('ds-apply-filters', async () => { if (definition && filterStateFingerprint(definition) !== appliedFilterState) await prepare(); });" in dashboard_script
     assert "api(`/prepare${activeId ? `?dashboard_id=${encodeURIComponent(activeId)}` : ''}`,'POST',definition,controller.signal)" in dashboard_script
     assert "window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));" in dashboard_script
+    assert "title: 'Unsaved Dashboard filters'" in dashboard_script
+    assert "confirmLabel: 'Save Filters'" in dashboard_script
+    assert "secondaryLabel: 'Discard'" in dashboard_script
+    assert "window.location.assign(target.href);" in dashboard_script
     assert "$('ds-apply-filters').disabled = !definition || filterStateFingerprint(definition) === appliedFilterState || filterActionBusy;" in dashboard_script
     assert "const dashboardStatuses = new Map();" in dashboard_script
     assert "window.setInterval(refreshDashboardStatuses, 2000);" in dashboard_script
