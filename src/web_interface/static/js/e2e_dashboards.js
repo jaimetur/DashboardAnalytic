@@ -3,7 +3,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const config = JSON.parse($('ds-config').textContent);
-  let dashboards = {}, activeId = '', definition = null, savedDefinition = '', prepared = null, slideIndex = 0;
+  let dashboards = {}, activeId = '', definition = null, savedDefinition = '', appliedFilterState = '', prepared = null, slideIndex = 0;
   let sequence = 0, timer, controller, preparing = null, dirty = false, filterActionBusy = false, dataIndex = 0, dataPage = 0, dataToken = '', dataRequest = 0;
   const dataPages = new Map();
   let presentationTimer = 0;
@@ -91,9 +91,8 @@
   }));
   const hasUnsavedFilterChanges = () => Boolean(definition) && filterStateFingerprint(definition) !== filterStateFingerprint(savedDashboardDefinition());
   const updateFilterActionState = () => {
-    const disabled = !hasUnsavedFilterChanges() || filterActionBusy;
-    $('ds-save').disabled = disabled;
-    $('ds-apply-filters').disabled = disabled;
+    $('ds-save').disabled = !hasUnsavedFilterChanges() || filterActionBusy;
+    $('ds-apply-filters').disabled = !definition || filterStateFingerprint(definition) === appliedFilterState || filterActionBusy;
   };
   const api = async (path = '', method = 'GET', body, signal) => {
     const response = await fetch(`/api/e2e-dashboards${path}`, {method, signal, cache: 'no-store', headers: {'Content-Type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
@@ -360,6 +359,7 @@
   };
   const applyPreparedPayload = payload => {
     prepared = payload; facetOptions = payload.options; facetFields = payload.filter_fields || facetFields; availableFields = payload.available_fields || payload.custom_fields || []; const datesChanged = applyDateBounds(payload.date_bounds); if (datesChanged) sources(); facetsLoading = false;
+    appliedFilterState = filterStateFingerprint(definition);
     if (hasOpenFacetMenu()) refreshFacetsAfterMenusClose(); else facets();
     setViewEnabled(Boolean(payload.slides?.length));
     const rowLabel = payload.rows_exact === false ? 'source rows' : 'rows';
@@ -398,7 +398,7 @@
   }
   function changed() {
     dismissPreparationStatus(); forgetPrepared();
-    updateDirtyState(); prepared = null; ++sequence; controller?.abort(); preparing = null;
+    updateDirtyState(); prepared = null; appliedFilterState = ''; ++sequence; controller?.abort(); preparing = null;
     setViewEnabled(false);
     setPreparationState('preparing');
     $('ds-rows').textContent = '';
@@ -438,7 +438,7 @@
     dismissPreparationStatus();
     clearTimeout(timer); ++sequence; controller?.abort(); preparing = null;
     stopPresentation();
-    activeId = id; definition = canonicalDashboardDefinition(dashboards[id]); savedDefinition = definitionFingerprint(definition); dirty = false; prepared = null; facetOptions = {}; availableFields = []; slideIndex = 0; setViewEnabled(false); rememberOpen(id);
+    activeId = id; definition = canonicalDashboardDefinition(dashboards[id]); savedDefinition = definitionFingerprint(definition); dirty = false; prepared = null; appliedFilterState = ''; facetOptions = {}; availableFields = []; slideIndex = 0; setViewEnabled(false); rememberOpen(id);
     resetViewerForDashboard();
     $('ds-name').value = definition.name; setNrMode(definition.technology || definition.template_technology, definition.template);
     $('ds-filter-panel').hidden = false; $('ds-dashboard-name').textContent = `Dashboard Name: ${definition.name}`; sources(); facets(); library(); status(''); if (!await restorePrepared(id)) await prepare();
@@ -476,7 +476,7 @@
     finally { $('ds-create').disabled = !$('ds-template').options.length; }
   });
   bind('ds-save', save);
-  bind('ds-apply-filters', async () => { if (hasUnsavedFilterChanges()) await prepare(); });
+  bind('ds-apply-filters', async () => { if (definition && filterStateFingerprint(definition) !== appliedFilterState) await prepare(); });
   async function duplicateDashboard(sourceId) {
     const id = dashboardId(), item = structuredClone(dashboards[sourceId]); item.name = nextName(`${item.name.slice(0,110)} (copy)`);
     status(`Duplicating “${dashboards[sourceId].name}”…`);
@@ -491,7 +491,7 @@
   }
   bind('ds-import',() => $('ds-import-file').click());
   $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name); const id = dashboardId(), result = await api(`/${id}`,'PUT',payload.definition); dashboards[id] = result.definition; await openDashboard(id); $('ds-import-file').value = ''; });
-  function closeDashboard() { clearTimeout(facetsRefreshTimer); dismissPreparationStatus(); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; savedDefinition = ''; prepared = null; dirty = false; setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard Name: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
+  function closeDashboard() { clearTimeout(facetsRefreshTimer); dismissPreparationStatus(); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; savedDefinition = ''; appliedFilterState = ''; prepared = null; dirty = false; setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard Name: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
   $('ds-name').oninput = () => { if (definition) { definition.name = $('ds-name').value; updateDirtyState(); } };
   $('ds-nr-mode').onchange = () => {
     const selected = setNrMode($('ds-nr-mode').value);

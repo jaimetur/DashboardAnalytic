@@ -1261,8 +1261,22 @@ def install_dashboard_routes(core):
             if expected_generation is not None and generation != expected_generation:
                 return
             existing = prefetch_jobs.get(key)
-            if existing and existing.get('status') in {'queued', 'processing', 'ready'}:
-                return
+            if existing and existing.get('status') in {'queued', 'processing'}:
+                existing_snapshot = snapshots.get(str(existing.get('token') or ''))
+                restored_snapshot = snapshots.get(str(restored_preview.get('token') or '')) if restored_preview else None
+                if (
+                    restored_snapshot is None
+                    or existing_snapshot is None
+                    or existing_snapshot.selection_key == restored_snapshot.selection_key
+                ):
+                    return
+                existing['cancel_requested'] = True
+            if existing and existing.get('status') == 'ready' and restored_preview is not None:
+                total = sum(
+                    1 for slide in restored_preview['slides'] for chart in slide['charts'] if chart['available']
+                )
+                if len(cached_canvas_model_indexes(restored_preview['token'])) >= total:
+                    return
             job = prefetch_jobs[key] = {'id': key, 'workspace': workspace, 'dashboard_id': dashboard_id,
                 'name': str(raw_definition.get('name') or dashboard_id), 'status': 'queued', 'completed': 0, 'total': 0,
                 'restoring_cached_models': False, 'generation': generation, 'cancel_requested': False, 'priority_indexes': [],

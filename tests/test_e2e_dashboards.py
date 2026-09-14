@@ -145,9 +145,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'if (next.length === current.length && next.every(value => current.includes(value))) return;' in dashboard_script
     assert 'function filterChanged() {' in dashboard_script
     assert "status('Filter changes are ready to apply.');" in dashboard_script
-    assert "bind('ds-apply-filters', async () => { if (hasUnsavedFilterChanges()) await prepare(); });" in dashboard_script
+    assert "bind('ds-apply-filters', async () => { if (definition && filterStateFingerprint(definition) !== appliedFilterState) await prepare(); });" in dashboard_script
     assert "api(`/prepare${activeId ? `?dashboard_id=${encodeURIComponent(activeId)}` : ''}`,'POST',definition,controller.signal)" in dashboard_script
     assert "window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));" in dashboard_script
+    assert "$('ds-apply-filters').disabled = !definition || filterStateFingerprint(definition) === appliedFilterState || filterActionBusy;" in dashboard_script
     assert "bind('ds-viewer-refresh',prepare);" in dashboard_script
     assert 'async function restorePrepared(id) {' in dashboard_script
     assert 'const preparedPayloads = new Map();' in dashboard_script
@@ -306,6 +307,17 @@ def test_applying_filters_queues_all_chart_models_and_reuses_previous_cache(clie
     time.sleep(0.1)
     assert len(calls) == calls_before_restore
     assert {path.name for path in cache_dir.glob('*.json')} == filtered_models
+
+    core.repository.update_dataset_profile(1, progress=100)
+    calls_before_revision = len(calls)
+    refreshed = client.post('/api/e2e-dashboards/prepare?dashboard_id=filtered-dashboard', json=payload)
+    assert refreshed.status_code == 200, refreshed.text
+    deadline = time.monotonic() + 10
+    while len(list(cache_dir.glob('*.json'))) < 9 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    refreshed_models = {path.name for path in cache_dir.glob('*.json')}
+    assert filtered_models < refreshed_models
+    assert len(calls) == calls_before_revision + 3
 
 
 def test_dashboard_api_session_expires_on_application_process_restart(client):
