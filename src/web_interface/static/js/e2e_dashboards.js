@@ -136,13 +136,13 @@
     const ready = state === 'ready';
     const floatingFilters = $('ds-filter-panel').parentElement?.id === 'ds-filter-float';
     notice.dataset.state = state;
-    $('ds-preparing-title').textContent = ready ? 'Dashboard is ready' : phase === 'rendering' ? 'Rendering Dashboard Charts' : 'Preparing Dashboard dataset';
+    $('ds-preparing-title').textContent = ready ? 'Dashboard dataset is ready' : phase === 'rendering' ? 'Rendering Dashboard Charts' : 'Preparing Dashboard dataset';
     $('ds-preparing-detail').textContent = floatingFilters
       ? (ready
-        ? 'Data and filters are ready. The Dashboard is ready to use.'
+        ? 'Dataset and filters are ready. The Dashboard dataset is ready to use.'
         : phase === 'rendering' ? 'Charts are rendering with the current Dashboard scope.' : 'Dataset and filters are still loading. The Dashboard will update when preparation is complete.')
       : (ready
-        ? 'Data and filters are ready. You can now open View Dashboard.'
+        ? 'Datasets and filters are ready. You can now open the dashboard using 'View Dashboard' button below.'
         : phase === 'rendering' ? 'Charts are rendering with the current Dashboard scope. View Dashboard will become available when rendering is complete.' : 'Dataset and filters are still loading. View Dashboard will become available when preparation is complete.');
   };
   function overlay(id, show) {
@@ -191,7 +191,7 @@
       statusCell.append(statusBadge); row.append(statusCell);
       const actions = node('div', undefined, 'ds-dashboard-actions');
       const action = (label, glyph, handler, tone = '') => {
-        const button = node('button', glyph, `icon-action ds-dashboard-action ${tone}`); button.type = 'button'; button.title = label; button.setAttribute('aria-label', label); button.onclick = safe(handler); actions.append(button);
+        const button = node('button', glyph, `icon-action ds-dashboard-action ${tone}`); button.type = 'button'; button.title = label; button.setAttribute('aria-label', label); button.onclick = safe(handler); actions.append(button); return button;
       };
       action('View Dashboard', '◉', async () => {
         if (id !== activeId) {
@@ -210,7 +210,20 @@
         else if (await confirmDiscard()) await openDashboard(id);
       }, id === activeId ? 'ds-dashboard-close' : 'ds-dashboard-open');
       action('Duplicate Dashboard', '⧉', async () => { if (await confirmDiscard()) await duplicateDashboard(id); });
-      action('Export Dashboard', '↓', () => exportDashboard(item));
+      action('Export Dashboard', '', () => exportDashboard(id, item), 'ds-dashboard-export');
+      const ppt = action('Generate Dashboard PPT', '', async () => {
+        const accepted = await window.showConfirmDialog(
+          `Generate a PowerPoint presentation for “${item.name}”?`,
+          {title: 'Generate Dashboard PPT', confirmLabel: 'Generate PPT'},
+        );
+        if (!accepted) return;
+        await api(`/${encodeURIComponent(id)}/export-ppt`, 'POST');
+        status(`Dashboard PPT export queued for “${item.name}”.`);
+        await refreshDashboardPptJobs();
+        window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
+      }, 'ds-dashboard-ppt');
+      ppt.dataset.dashboardPptId = id;
+      ppt.disabled = dashboardStatus.state !== 'ready';
       action('Delete Dashboard', '×', async () => { await deleteDashboard(id); }, 'danger-button');
       const cell = node('td'); cell.append(actions); row.append(cell); body.append(row);
     }
@@ -222,6 +235,46 @@
       badge.textContent = value.label;
       badge.title = value.detail || value.label;
     });
+    document.querySelectorAll('[data-dashboard-ppt-id]').forEach(button => {
+      button.disabled = (dashboardStatuses.get(button.dataset.dashboardPptId)?.state || 'checking') !== 'ready';
+    });
+  };
+  const jobAction = (label, className, handler, glyph = '') => {
+    const button = node('button', glyph, className); button.type = 'button';
+    button.title = label; button.setAttribute('aria-label', label); button.onclick = safe(handler); return button;
+  };
+  const renderDashboardPptJobs = jobs => {
+    const body = $('ds-ppt-jobs-body'); body.replaceChildren();
+    $('ds-ppt-jobs-count').textContent = `Total Jobs: ${jobs.length}`;
+    $('ds-ppt-jobs-empty').hidden = jobs.length > 0;
+    for (const job of jobs) {
+      const row = node('tr');
+      for (const value of [job.id, job.generated_by, job.date, job.dashboard_name, job.template, job.slides || '-', job.charts || '-']) row.append(node('td', String(value)));
+      const statusCell = node('td');
+      const badge = node('span', String(job.status || '').replaceAll('_', ' '), `queue-status-pill queue-status-${String(job.status || '').replaceAll('_', '-')}`);
+      if (job.error) badge.title = job.error;
+      statusCell.append(badge); row.append(statusCell);
+      const progressCell = node('td');
+      const progress = document.createElement('progress'); progress.max = 100; progress.value = Number(job.progress) || 0;
+      const duration = Number(job.duration_seconds);
+      const durationLabel = Number.isFinite(duration) ? ` · ${duration < 60 ? `${duration < 10 ? duration.toFixed(1) : Math.round(duration)}s` : `${Math.floor(duration / 60)}m ${Math.round(duration % 60)}s`}` : '';
+      progressCell.append(progress, node('span', ` ${Number(job.progress) || 0}%${durationLabel}`)); row.append(progressCell);
+      const actionsCell = node('td'); const actions = node('div', undefined, 'report-job-actions');
+      if (job.download_url) { const link = node('a', '', 'report-job-download-button report-job-report-download-button'); link.href = job.download_url; link.download = ''; link.title = link.ariaLabel = 'Download Dashboard PPT'; actions.append(link); }
+      if (job.charts_download_url) { const link = node('a', '', 'report-job-download-button report-job-charts-download-button'); link.href = job.charts_download_url; link.download = ''; link.title = link.ariaLabel = 'Download Dashboard charts as ZIP'; actions.append(link); }
+      if (job.charts_url) { const link = node('a', '📈', 'report-job-charts-button'); link.href = job.charts_url; link.target = '_blank'; link.rel = 'noopener'; link.title = link.ariaLabel = 'Open Dashboard charts'; actions.append(link); }
+      if (job.retry_url) actions.append(jobAction(job.status === 'ready' ? 'Relaunch Job' : 'Retry export', 'report-job-retry-button', async () => { await api(`/ppt-jobs/${job.id}/retry`, 'POST'); await refreshDashboardPptJobs(); }, '↻'));
+      if (job.stop_url) actions.append(jobAction('Stop export', 'report-job-stop-button', async () => { await api(`/ppt-jobs/${job.id}/stop`, 'POST'); await refreshDashboardPptJobs(); }, '■'));
+      if (config.can_manage) actions.append(jobAction('Delete export', 'danger-button', async () => {
+        if (!await window.showConfirmDialog(`Delete Dashboard PPT job ${job.id} and all its files?`, {title: 'Delete Dashboard PPT', confirmLabel: 'Delete'})) return;
+        await api(`/ppt-jobs/${job.id}/delete`, 'POST'); await refreshDashboardPptJobs();
+      }, '×'));
+      actionsCell.append(actions); row.append(actionsCell); body.append(row);
+    }
+  };
+  const refreshDashboardPptJobs = async () => {
+    const payload = await api('/ppt-jobs');
+    renderDashboardPptJobs(Array.isArray(payload.jobs) ? payload.jobs : []);
   };
   const setDashboardStatus = (id, state, label) => {
     if (!id) return;
@@ -565,7 +618,14 @@
     status(`Duplicating “${dashboards[sourceId].name}”…`);
     const result = await api(`/${id}`,'PUT',item); dashboards[id] = result.definition; await openDashboard(id);
   }
-  function exportDashboard(item) { const blob = new Blob([JSON.stringify({format:'dashboard-analytic-dashboard',version:2,definition:item},null,2)],{type:'application/json'}); const url = URL.createObjectURL(blob), a = node('a'); a.href = url; a.download = `${item.name.replace(/[^a-z0-9_-]/gi,'_')}.json`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000); status(`Exported “${item.name}”.`); }
+  async function exportDashboard(id, item) {
+    const response = await fetch(`/api/e2e-dashboards/${encodeURIComponent(id)}/export`, {credentials: 'same-origin'});
+    if (!response.ok) throw new Error(await response.text() || 'Unable to export the Dashboard.');
+    const blob = await response.blob(), url = URL.createObjectURL(blob), link = node('a');
+    link.href = url; link.download = `${item.name.replace(/[^a-z0-9_-]/gi, '_')}_dashboard.zip`; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    status(`Exported “${item.name}”.`);
+  }
   async function deleteDashboard(id) {
     const item = dashboards[id]; if (!item || !await window.showConfirmDialog(`Delete “${item.name}”?`,{title:'Delete Dashboard',confirmLabel:'Delete',tone:'danger'})) return;
     if (id === activeId && !await confirmDiscard()) return;
@@ -1108,10 +1168,11 @@
         && Object.values(cached).every(item => item && typeof item === 'object' && typeof item.name === 'string') ? cached : {};
       if (Object.keys(dashboards).length) library();
     } catch (_) { dashboards = {}; }
-    dashboards = await api(); library(); await refreshDashboardStatuses();
+    dashboards = await api(); library(); await Promise.all([refreshDashboardStatuses(), refreshDashboardPptJobs()]);
     if (dashboards[last]) await openDashboard(last);
   })();
   window.setInterval(refreshDashboardStatuses, 2000);
-  window.addEventListener('dashboard-analytic:refresh-background-tasks', refreshDashboardStatuses);
-  window.addEventListener('focus', refreshDashboardStatuses);
+  window.setInterval(refreshDashboardPptJobs, 2000);
+  window.addEventListener('dashboard-analytic:refresh-background-tasks', () => { void refreshDashboardStatuses(); void refreshDashboardPptJobs(); });
+  window.addEventListener('focus', () => { void refreshDashboardStatuses(); void refreshDashboardPptJobs(); });
 })();

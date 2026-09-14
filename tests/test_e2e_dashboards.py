@@ -1,10 +1,12 @@
 import json
 import time
+import zipfile
 from io import BytesIO
 from pathlib import Path
 from threading import Event
 
 import pandas as pd
+from pptx import Presentation
 
 import src.DashboardAnalytic as core
 from src.modules.e2e_dashboards import DashboardDefinition, dashboard_projection_scan_hint, filter_frame
@@ -52,6 +54,24 @@ def test_filter_empty_missing_and_inclusive_dates():
     assert len(filter_frame(radio, definition(filters={'RAT': ['NR'], 'Technology': ['5G']}))) == 1
 
 
+def test_dashboard_export_uses_the_admin_import_archive_format(client):
+    payload = setup_dashboard(client)
+    dashboard_id = 'portable-dashboard'
+    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+
+    exported = client.get(f'/api/e2e-dashboards/{dashboard_id}/export')
+
+    assert exported.status_code == 200
+    with zipfile.ZipFile(BytesIO(exported.content)) as archive:
+        manifest = json.loads(archive.read('manifest.json'))
+        assert manifest['format'] == 'dashboard-analytic-export'
+        assert manifest['kind'] == 'dashboards'
+        assert manifest['workspace_components'] == ['dashboards']
+        document = json.loads(archive.read(manifest['archive_path']))
+    assert document['format'] == 'dashboard-analytic-dashboards'
+    assert document['dashboards'] == {dashboard_id: payload}
+
+
 def test_dashboards_lifecycle_and_layout(client):
     payload = setup_dashboard(client)
     page = client.get('/e2e-dashboards')
@@ -63,6 +83,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert legacy_reporting.headers['location'] == '/e2e-reporting'
     assert 'id="ds-nr-mode"' in page.text
     assert 'id="ds-dashboards-body"' in page.text
+    assert '>Dashboards PPT Export Jobs<' in page.text
+    assert 'id="ds-ppt-jobs-body"' in page.text
     assert page.text.index('<th>Status</th>') < page.text.index('<th>Actions</th>')
     assert 'colspan="5" class="form-note">Loading Dashboards' in page.text
     assert 'id="ds-library"' not in page.text
@@ -76,7 +98,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-refresh"' not in page.text
     assert '>Import Dashboard<' in page.text
     assert 'Total Dashboards: 0' in page.text
-    assert '>Dashboard Data & Filters<' in page.text
+    assert '>Dashboard Datasets & Filters<' in page.text
     assert '>Default Filters<' in page.text
     assert '>Additional Filters<' in page.text
     assert '>Clear Filters<' in page.text
@@ -309,6 +331,73 @@ def test_dashboards_lifecycle_and_layout(client):
     assert client.get(f'/api/e2e-dashboards/data/{token}/0?download=true').headers['content-type'].startswith('text/csv')
     assert client.delete('/api/e2e-dashboards/test').status_code == 200
     assert client.get('/api/e2e-dashboards').json() == {}
+
+
+def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client):
+    payload = setup_dashboard(client)
+    payload['slide_comments'] = {'1': ['Review city outliers', 'Validate campaign coverage']}
+    dashboard_id = 'ppt-dashboard'
+    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]['state'] == 'ready':
+            break
+        time.sleep(0.05)
+    assert client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]['state'] == 'ready'
+
+    queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt')
+    assert queued.status_code == 202, queued.text
+    job_id = queued.json()['job_id']
+    job = None
+    while time.monotonic() < deadline:
+        jobs = client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs']
+        job = next(item for item in jobs if item['id'] == job_id)
+        if job['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.05)
+    assert job is not None and job['status'] == 'ready', job
+    assert job['slides'] == 2
+    assert job['charts'] == 3
+    assert job['duration_seconds'] is not None
+    background_groups = client.get('/api/background-tasks').json()['groups']
+    background_task = next(
+        task for group in background_groups for task in group['tasks']
+        if task['id'] == f'dashboard-ppt:{core.active_workspace.id}:{job_id}'
+    )
+    assert background_task['dashboard_name'] == 'Comparison'
+    assert background_task['label'] == 'Generating Dashboard PPT'
+    assert background_task['detail'] == 'Completed'
+    assert background_task['duration_seconds'] is not None
+
+    with core.repository.connection() as connection:
+        row = connection.execute('SELECT output_path FROM dashboard_ppt_jobs WHERE id = ?', (job_id,)).fetchone()
+    output_path = Path(row['output_path'])
+    charts_dir = output_path.parent / 'dashboard-charts'
+    assert output_path.is_file()
+    assert output_path.parent.parent == Path(core.repository.db_path).parent / 'output' / 'dashboards'
+    assert len(list(charts_dir.glob('*.png'))) == 3
+    assert len(list(charts_dir.glob('*.hover.json'))) == 3
+    manifest = json.loads((charts_dir / 'manifest.json').read_text(encoding='utf-8'))
+    assert manifest['generate_tooltips'] is True
+    assert len(manifest['charts']) == 3
+    presentation = Presentation(output_path)
+    commentary = next(
+        shape for shape in presentation.slides[0].shapes
+        if shape.is_placeholder and shape.placeholder_format.idx == 10
+    )
+    assert [paragraph.text for paragraph in commentary.text_frame.paragraphs] == [
+        'Review city outliers', 'Validate campaign coverage',
+    ]
+
+    ppt = client.get(job['download_url'])
+    assert ppt.status_code == 200
+    assert ppt.content.startswith(b'PK')
+    assert client.get(job['charts_url']).status_code == 200
+    archive = client.get(job['charts_download_url'])
+    assert archive.status_code == 200
+    with zipfile.ZipFile(BytesIO(archive.content)) as bundle:
+        assert len([name for name in bundle.namelist() if name.endswith('.png')]) == 3
 
 
 def test_prefetched_dashboard_reuses_completed_server_snapshot(client):

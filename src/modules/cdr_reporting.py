@@ -4026,6 +4026,10 @@ def prepare_catalog_chart_preview_frame(
 
 INTERACTIVE_CHART_POINTS_PER_SERIES = 900
 INTERACTIVE_SCATTER_POINTS_PER_SERIES = 900
+# A Canvas chart with tens of thousands of one-sample CDF lines is neither
+# legible nor responsive. Keep a bounded number of meaningful comparison
+# curves, dropping the most detailed leading hierarchy levels as needed.
+INTERACTIVE_CDF_SERIES_LIMIT = 120
 
 
 def _interactive_sample(values: list[object], limit: int) -> list[tuple[int, object]]:
@@ -4084,6 +4088,7 @@ def _chart_payload_base(
     fallback_legend: list[tuple[str, str, int]] | None = None,
     *,
     line_markers: bool = False,
+    show_legend: bool = True,
 ) -> dict[str, object]:
     """Create the fixed 1600 x 900 model used by both chart presentations."""
     return {
@@ -4092,8 +4097,10 @@ def _chart_payload_base(
         "height": 900,
         "type": chart_type,
         "title": title,
-        "legend": _chart_payload_legend(
-            entry, frame, metric, fallback_legend, chart_type=chart_type, line_markers=line_markers,
+        "legend": (
+            _chart_payload_legend(
+                entry, frame, metric, fallback_legend, chart_type=chart_type, line_markers=line_markers,
+            ) if show_legend else {"position": "right", "line_markers": False, "items": []}
         ),
     }
 
@@ -4181,28 +4188,75 @@ def catalog_chart_payload(
         numeric = numeric.dropna(subset=[candidate_metric, *grouping_columns])
         if numeric.empty:
             return None
-        combinations = _hierarchical_unique_keys(numeric, grouping_columns) if grouping_columns else [()]
+        # Some imported Tableau catalogues include per-test identifiers ahead
+        # of Operator. Those identifiers can turn one CDF into tens of
+        # thousands of single-point lines. Remove only the leading overly
+        # granular levels until the visual has a usable bounded series count;
+        # the remaining declared dimensions still aggregate every matching
+        # sample and keep the comparison meaningful.
+        def grouped_indexes(columns: list[str]):
+            grouper = columns[0] if len(columns) == 1 else columns
+            # Pandas deep-copies DataFrame attrs while splitting groups. The
+            # attrs describe catalogue metadata and are not used to find CDF
+            # membership, so remove them from this short-lived grouping view.
+            grouping_view = numeric[columns].copy(deep=False)
+            grouping_view.attrs = {}
+            return grouping_view.groupby(grouper, sort=False, dropna=False).indices
+
+        while len(grouping_columns) > 1:
+            unique_series = len(grouped_indexes(grouping_columns))
+            if unique_series <= INTERACTIVE_CDF_SERIES_LIMIT:
+                break
+            grouping_columns = grouping_columns[1:]
         if grouping_columns:
-            grouper = grouping_columns[0] if len(grouping_columns) == 1 else grouping_columns
-            grouped_subsets = {
-                tuple(str(value) for value in (key if isinstance(key, tuple) else (key,))): subset
-                for key, subset in numeric.groupby(grouper, sort=False, dropna=False)
+            raw_positions = grouped_indexes(grouping_columns)
+            # Iterating a pandas GroupBy materialises one DataFrame for every
+            # group.  A CDF can have thousands of groups, so that creates an
+            # enormous number of copies (and their DataFrame attrs) before
+            # the first curve is produced.  Group indices preserve the same
+            # group membership without creating those transient frames.
+            grouped_positions = {
+                tuple(str(value) for value in (key if isinstance(key, tuple) else (key,))): positions
+                for key, positions in raw_positions.items()
             }
+            combinations = list(grouped_positions)
+            if len(grouping_columns) > 1:
+                ordered_combinations: list[tuple[str, ...]] = []
+
+                def visit(keys: list[tuple[str, ...]], level: int) -> None:
+                    if level == len(grouping_columns) - 1:
+                        ordered_combinations.extend(keys)
+                        return
+                    children: dict[str, list[tuple[str, ...]]] = {}
+                    for key in keys:
+                        children.setdefault(key[level], []).append(key)
+                    for child_keys in children.values():
+                        visit(child_keys, level + 1)
+
+                visit(combinations, 0)
+                combinations = ordered_combinations
         else:
-            grouped_subsets = {(): numeric}
-        series_rows: list[tuple[tuple[object, ...], pd.DataFrame, list[float]]] = []
+            grouped_positions = {(): range(len(numeric))}
+            combinations = [()]
+        metric_values = numeric[candidate_metric].to_numpy()
+        campaign_values = numeric["__cdf_campaign"].astype(str).to_numpy() if "__cdf_campaign" in numeric else None
+        series_rows: list[tuple[tuple[object, ...], list[float], set[str]]] = []
         for combination in combinations:
-            subset = grouped_subsets.get(tuple(str(value) for value in combination))
-            if subset is None:
+            positions = grouped_positions.get(tuple(str(value) for value in combination))
+            if positions is None:
                 continue
-            values = sorted(float(value) for value in subset[candidate_metric].tolist())
+            values = sorted(float(metric_values[position]) for position in positions)
             if values:
-                series_rows.append((combination, subset, values))
+                campaigns = (
+                    {str(campaign_values[position]) for position in positions}
+                    if campaign_values is not None else set()
+                )
+                series_rows.append((combination, values, campaigns))
         if not series_rows:
             return None
         low = float(numeric[candidate_metric].min())
         observed_high = float(numeric[candidate_metric].max())
-        high = _cdf_terminal_x_maximum([values for _key, _subset, values in series_rows], low, observed_high)
+        high = _cdf_terminal_x_maximum([values for _key, values, _campaigns in series_rows], low, observed_high)
         high = high if high > low else low + 1
         colours = _series_colours(combinations, grouping_columns, numeric, line_chart=True)
         latest_campaign = None
@@ -4214,12 +4268,11 @@ def catalog_chart_payload(
         payload_series = []
         fallback_legend = []
         requested_legend = _legend_dimensions(render_entry.legend)
-        for index, (combination, subset, values) in enumerate(series_rows):
+        for index, (combination, values, campaigns) in enumerate(series_rows):
             visible_values = [value for value in values if value <= high]
             if not visible_values:
                 continue
             sampled = _interactive_sample(visible_values, INTERACTIVE_CHART_POINTS_PER_SERIES)
-            campaigns = subset["__cdf_campaign"].astype(str).unique() if latest_campaign else ()
             line_width = 4 if campaign_count <= 1 or (latest_campaign and latest_campaign in campaigns) else 1
             full_label = _legend_key_caption(combination, grouping_columns, numeric, ())
             # A CDF legend and tooltip identify a concrete curve. Retaining
@@ -4258,7 +4311,10 @@ def catalog_chart_payload(
         if not panels:
             return empty("No valid samples for this KPI and technology filter")
         return {
-            **_chart_payload_base("multi_cdf", title, render_entry, data, metric),
+            # Each child CDF owns its legend. Resolving a second parent legend
+            # repeats the expensive grouping over every source row, despite
+            # that parent legend never being painted by drawMultiCdf.
+            **_chart_payload_base("multi_cdf", title, render_entry, data, metric, show_legend=False),
             "panels": panels,
         }
 
@@ -4782,6 +4838,30 @@ def _clear_commentary(slide) -> None:
         text = shape.text.strip().lower()
         if len(text) > 45 and any(hint in text for hint in COMMENT_HINTS):
             shape.text_frame.clear()
+
+
+def _set_commentary(slide, comments: list[str] | tuple[str, ...]) -> None:
+    """Write saved Dashboard notes into the layout's commentary placeholder."""
+    values = [str(comment).strip() for comment in comments if str(comment).strip()]
+    if not values:
+        return
+    placeholder = next(
+        (
+            shape for shape in slide.shapes
+            if getattr(shape, "has_text_frame", False)
+            and getattr(shape, "is_placeholder", False)
+            and shape.placeholder_format.idx == 10
+        ),
+        None,
+    )
+    if placeholder is None:
+        return
+    text_frame = placeholder.text_frame
+    text_frame.clear()
+    for index, value in enumerate(values):
+        paragraph = text_frame.paragraphs[0] if index == 0 else text_frame.add_paragraph()
+        paragraph.text = value
+        paragraph.level = 0
 
 
 def _set_slide_header(slide, title: str, subtitle: str) -> None:

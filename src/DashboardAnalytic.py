@@ -6027,6 +6027,42 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
                         'stop_task_id': f'generated:{row["id"]}',
                         'stop_url': f'/api/background-tasks/{workspace.id}/stop',
                     })
+            if 'dashboard_ppt_jobs' in tables:
+                cutoff = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
+                rows = connection.execute(
+                    """SELECT id, dashboard_name, status, progress, created_at, finished_at
+                       FROM dashboard_ppt_jobs
+                       WHERE status IN ('queued', 'processing')
+                          OR (status = 'ready' AND finished_at >= ?)
+                       ORDER BY created_at, id""",
+                    (cutoff,),
+                ).fetchall()
+                for row in rows:
+                    ready = str(row['status']) == 'ready'
+                    started_at = None
+                    completed_at = None
+                    duration_seconds = None
+                    try:
+                        started_at = datetime.fromisoformat(str(row['created_at'])).timestamp()
+                        if row['finished_at']:
+                            completed_at = datetime.fromisoformat(str(row['finished_at'])).timestamp()
+                            duration_seconds = max(0, completed_at - started_at)
+                    except ValueError:
+                        pass
+                    tasks.append({
+                        'id': f'dashboard-ppt:{workspace.id}:{row["id"]}',
+                        'dashboard_name': str(row['dashboard_name'] or 'Dashboard'),
+                        'label': 'Generating Dashboard PPT',
+                        'detail': 'Completed' if ready else str(row['status'] or 'queued').title(),
+                        'progress': max(0, min(100, int(row['progress'] or 0))),
+                        'started_at': started_at,
+                        'completed_at': completed_at,
+                        'duration_seconds': duration_seconds,
+                        **({
+                            'stop_task_id': f'dashboard-ppt:{row["id"]}',
+                            'stop_url': f'/api/background-tasks/{workspace.id}/stop',
+                        } if not ready else {}),
+                    })
             if 'workspace_state' in tables:
                 materialization = connection.execute(
                     "SELECT value FROM workspace_state WHERE key = 'calculated_dimensions_need_materialization'"
@@ -6327,6 +6363,26 @@ def stop_background_task(
         if not stopped:
             raise HTTPException(status_code=409, detail='This generated job can no longer be stopped.')
         task_repository.add_log(user.username, 'stop_generated_job', json.dumps({'job_id': job_id, 'job_type': job['job_type']}))
+    elif prefix == 'dashboard-ppt':
+        try:
+            job_id = int(raw_identifier)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail='Invalid Dashboard PPT job.') from exc
+        with task_repository.connection() as connection:
+            tables = {
+                str(row['name'])
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+            }
+            row = connection.execute(
+                'SELECT status FROM dashboard_ppt_jobs WHERE id = ?', (job_id,),
+            ).fetchone() if 'dashboard_ppt_jobs' in tables else None
+            if row is None or str(row['status']) not in {'queued', 'processing'}:
+                raise HTTPException(status_code=409, detail='This Dashboard PPT job can no longer be stopped.')
+            connection.execute(
+                "UPDATE dashboard_ppt_jobs SET status = 'stopped', finished_at = ? WHERE id = ?",
+                (datetime.now(timezone.utc).isoformat(), job_id),
+            )
+        task_repository.add_log(user.username, 'stop_dashboard_ppt_job', json.dumps({'job_id': job_id}))
     elif prefix == 'auto-fields':
         with AUTO_CALCULATED_FIELD_JOBS_LOCK:
             job = AUTO_CALCULATED_FIELD_JOBS.get(raw_identifier)

@@ -477,6 +477,32 @@ def test_interactive_cdf_model_uses_reporting_hierarchy_palette_and_legend() -> 
     assert all(series['x'] and series['y'] and series['samples'] == 2 for series in model['series'])
 
 
+def test_multi_cdf_payload_bounds_high_cardinality_identifier_groups() -> None:
+    entries = 250
+    entry = CatalogEntry(
+        1, 'Interactivity score', '', '', 'Interactivity score', 'CDR-Data',
+        'Twamp Interactivity Score | Packet Delay Variation Score | Packet Loss Score',
+        'Multi KPI CDF Lines', 'Operator', '',
+        'Test Info × Test_Name × Latency Score × Operator', '', 'Right',
+    )
+    frame = pd.DataFrame({
+        'Test_Info': [f'test-{index}' for index in range(entries)],
+        'Test_Name': ['Interactivity'] * entries,
+        'Latency_Score': [str(index % 4) for index in range(entries)],
+        'Operator': ['EE' if index % 2 else 'VF' for index in range(entries)],
+        'Twamp_Interactivity_Score': list(range(entries)),
+        'Packet_Delay_Variation_Score': list(range(entries)),
+        'Packet_Loss_Score': list(range(entries)),
+    })
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert model['type'] == 'multi_cdf'
+    assert model['legend']['items'] == []
+    assert all(len(panel['series']) <= 120 for panel in model['panels'])
+    assert all({series['key'][-1] for series in panel['series']} == {'EE', 'VF'} for panel in model['panels'])
+
+
 def test_multivendor_cdf_legend_keeps_operator_and_vendor_for_each_curve() -> None:
     entry = CatalogEntry(
         1, 'Speech', '', '', 'Interactivity', 'CDR-Speech', 'LQ', 'CDF Line',
