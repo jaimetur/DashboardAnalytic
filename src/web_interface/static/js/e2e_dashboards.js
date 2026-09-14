@@ -4,7 +4,7 @@
   const $ = id => document.getElementById(id);
   const config = JSON.parse($('ds-config').textContent);
   let dashboards = {}, activeId = '', definition = null, savedDefinition = '', prepared = null, slideIndex = 0;
-  let sequence = 0, timer, controller, preparing = null, dirty = false, dataIndex = 0, dataPage = 0, dataToken = '', dataRequest = 0;
+  let sequence = 0, timer, controller, preparing = null, dirty = false, filterActionBusy = false, dataIndex = 0, dataPage = 0, dataToken = '', dataRequest = 0;
   const dataPages = new Map();
   let presentationTimer = 0;
   const presentation = {running: false, delay: 5000, effect: 'fade'};
@@ -14,8 +14,10 @@
   const renderedChartPayloads = new Map();
   let expandedChartRequest = 0;
   let backgroundChartPrefetchToken = '';
+  let dateBounds = null;
   const openStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:open`;
   const libraryStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:library`;
+  const preparedStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:prepared`;
   const dashboardId = () => {
     if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
     const bytes = new Uint8Array(16);
@@ -72,6 +74,24 @@
     for (const field of ignoredFields) current[field] = saved[field];
     return definitionFingerprint(current) !== definitionFingerprint(saved);
   };
+  const savedDashboardDefinition = () => {
+    try { return canonicalDashboardDefinition(JSON.parse(savedDefinition || '{}')); }
+    catch (_error) { return {}; }
+  };
+  const sameFilterValues = (left, right) => JSON.stringify([...(left || [])].sort()) === JSON.stringify([...(right || [])].sort());
+  const hasUnsavedFilter = field => !sameFilterValues(definition?.filters?.[field], savedDashboardDefinition().filters?.[field]);
+  const hasUnsavedDate = key => String(definition?.[key] || '') !== String(savedDashboardDefinition()[key] || '');
+  const filterStateFingerprint = value => JSON.stringify(canonicalize({
+    datasets: value?.datasets || {}, scope: value?.scope || 'single', filters: value?.filters || {},
+    custom_fields: value?.custom_fields || [], hidden_filters: value?.hidden_filters || [],
+    date_from: value?.date_from || null, date_to: value?.date_to || null,
+  }));
+  const hasUnsavedFilterChanges = () => Boolean(definition) && filterStateFingerprint(definition) !== filterStateFingerprint(savedDashboardDefinition());
+  const updateFilterActionState = () => {
+    const disabled = !hasUnsavedFilterChanges() || filterActionBusy;
+    $('ds-save').disabled = disabled;
+    $('ds-apply-filters').disabled = disabled;
+  };
   const api = async (path = '', method = 'GET', body, signal) => {
     const response = await fetch(`/api/e2e-dashboards${path}`, {method, signal, cache: 'no-store', headers: {'Content-Type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
     const payload = await response.json();
@@ -81,7 +101,7 @@
   const safe = fn => async (...args) => { try { await fn(...args); } catch (error) { if (error.name !== 'AbortError') { status(error.message); if (window.showInfoDialog) window.showInfoDialog(error.message, {title:'E2E Dashboards',tone:'error'}); } } };
   const bind = (id, fn) => $(id).addEventListener('click', safe(fn));
   const setViewEnabled = enabled => { $('ds-view').disabled = !enabled; };
-  const updateDirtyState = () => { dirty = hasUnsavedDashboardChanges(); return dirty; };
+  const updateDirtyState = () => { dirty = hasUnsavedDashboardChanges(); updateFilterActionState(); return dirty; };
   const updateSavedDefinition = updates => {
     try {
       savedDefinition = definitionFingerprint({...JSON.parse(savedDefinition || '{}'), ...updates});
@@ -94,6 +114,7 @@
     const notice = $('ds-preparing'), viewerNotice = $('ds-viewer-preparing');
     notice.hidden = state === 'hidden';
     viewerNotice.hidden = state !== 'preparing' || $('ds-viewer').hidden;
+    if (state !== 'ready') { $('ds-preparing-rows').hidden = true; $('ds-preparing-rows').textContent = ''; }
     if (state === 'hidden') return;
     const ready = state === 'ready';
     notice.dataset.state = state;
@@ -189,19 +210,70 @@
     select.multiple = multiple; if (multiple) { select.size = Math.max(2, Math.min(4, values.length)); select.dataset.multiselectAutoClose = '1000'; }
     if (!values.length) { select.disabled = true; select.multiple = false; select.size = 1; select.append(option('', 'No datasets available')); }
     for (const [value, text] of values) { const opt = option(value, text); opt.selected = multiple ? selected.map(String).includes(String(value)) : value === selected; select.append(opt); }
-    select.addEventListener('change', () => { change(multiple ? [...select.selectedOptions].map(opt => opt.value) : select.value); changed(); });
+    select.addEventListener('change', () => { change(multiple ? [...select.selectedOptions].map(opt => opt.value) : select.value); filterChanged(); });
     host.append(select); return host;
+  }
+  function applyDateBounds(bounds) {
+    const minimum = /^\d{4}-\d{2}-\d{2}$/.test(String(bounds?.min || '')) ? bounds.min : '';
+    const maximum = /^\d{4}-\d{2}-\d{2}$/.test(String(bounds?.max || '')) ? bounds.max : '';
+    const previous = dateBounds;
+    dateBounds = minimum && maximum && minimum <= maximum ? {min: minimum, max: maximum} : null;
+    if (!dateBounds || !definition) return previous !== dateBounds;
+    const from = definition.date_from;
+    const to = definition.date_to;
+    definition.date_from = !from || from < dateBounds.min || from > dateBounds.max ? dateBounds.min : from;
+    definition.date_to = !to || to < dateBounds.min || to > dateBounds.max ? dateBounds.max : to;
+    return previous?.min !== dateBounds.min || previous?.max !== dateBounds.max || from !== definition.date_from || to !== definition.date_to;
+  }
+  const parseCalendarDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? new Date(`${value}T00:00:00`) : null;
+  const calendarDateValue = value => [value.getFullYear(), String(value.getMonth() + 1).padStart(2, '0'), String(value.getDate()).padStart(2, '0')].join('-');
+  const calendarMonthValue = value => value.getFullYear() * 12 + value.getMonth();
+  function datePicker(key, label) {
+    const wrapper = node('div', undefined, 'ds-date-picker');
+    wrapper.classList.toggle('ds-date-picker-unsaved', hasUnsavedDate(key));
+    const captionLabel = node('span', label, 'ds-date-picker-label');
+    const input = document.createElement('input');
+    input.type = 'text'; input.readOnly = true; input.value = definition[key] || ''; input.placeholder = 'Select date'; input.setAttribute('aria-label', label);
+    const menu = node('div', undefined, 'ds-date-picker-menu'); menu.hidden = true; menu.setAttribute('role', 'dialog'); menu.setAttribute('aria-label', `${label} calendar`);
+    const header = node('div', undefined, 'ds-date-picker-header');
+    const previous = node('button', '‹', 'ds-date-picker-nav'); previous.type = 'button'; previous.setAttribute('aria-label', 'Previous month');
+    const caption = node('strong');
+    const next = node('button', '›', 'ds-date-picker-nav'); next.type = 'button'; next.setAttribute('aria-label', 'Next month');
+    header.append(previous, caption, next);
+    const weekdays = node('div', undefined, 'ds-date-picker-weekdays'); ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].forEach(day => weekdays.append(node('span', day)));
+    const days = node('div', undefined, 'ds-date-picker-days'); menu.append(header, weekdays, days);
+    const minimum = parseCalendarDate(dateBounds?.min);
+    const maximum = parseCalendarDate(dateBounds?.max);
+    let month = parseCalendarDate(definition[key]) || minimum || new Date(); month.setDate(1);
+    const render = () => {
+      caption.textContent = month.toLocaleDateString(undefined, {month: 'long', year: 'numeric'});
+      previous.disabled = Boolean(minimum && calendarMonthValue(month) <= calendarMonthValue(minimum));
+      next.disabled = Boolean(maximum && calendarMonthValue(month) >= calendarMonthValue(maximum));
+      days.replaceChildren();
+      const offset = (month.getDay() + 6) % 7;
+      for (let index = 0; index < offset; index += 1) days.append(node('span', '', 'ds-date-picker-blank'));
+      const count = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+      for (let day = 1; day <= count; day += 1) {
+        const value = new Date(month.getFullYear(), month.getMonth(), day);
+        const iso = calendarDateValue(value);
+        const button = node('button', String(day), 'ds-date-picker-day'); button.type = 'button'; button.disabled = Boolean((minimum && value < minimum) || (maximum && value > maximum));
+        button.classList.toggle('is-selected', input.value === iso);
+        button.addEventListener('click', () => { input.value = iso; definition[key] = iso; wrapper.classList.toggle('ds-date-picker-unsaved', hasUnsavedDate(key)); menu.hidden = true; filterChanged(); });
+        days.append(button);
+      }
+    };
+    previous.addEventListener('click', () => { month.setMonth(month.getMonth() - 1); render(); });
+    next.addEventListener('click', () => { month.setMonth(month.getMonth() + 1); render(); });
+    input.addEventListener('click', () => { menu.hidden = !menu.hidden; if (!menu.hidden) render(); });
+    input.addEventListener('keydown', event => { if (event.key === 'Escape') menu.hidden = true; else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); menu.hidden = !menu.hidden; if (!menu.hidden) render(); } });
+    document.addEventListener('pointerdown', event => { if (!wrapper.contains(event.target)) menu.hidden = true; });
+    wrapper.append(captionLabel, input, menu); return wrapper;
   }
   function sources() {
     const host = $('ds-sources'); host.replaceChildren();
     for (const kind of ['data','voice','speech']) host.append(selectControl(`CDR ${kind[0].toUpperCase()+kind.slice(1)}`, config.datasets[kind].map(row => [String(row.id), `${row.file_name} · ${row.row_count} rows`]), definition.datasets[kind] || [], values => { definition.datasets[kind] = values.map(Number); }, true));
     host.append(selectControl('Scope', [['single','Operator Comparison'],['multivendor','Multivendor Comparison']], definition.scope, value => { definition.scope = value; }));
-    for (const [key, label] of [['date_from', 'Date from'], ['date_to', 'Date to']]) {
-      const wrapper = node('label', label), input = document.createElement('input');
-      input.type = 'date'; input.value = definition[key] || '';
-      input.onchange = () => { definition[key] = input.value || null; changed(); };
-      wrapper.append(input); host.append(wrapper);
-    }
+    for (const [key, label] of [['date_from', 'Date from'], ['date_to', 'Date to']]) host.append(datePicker(key, label));
     globalThis.setupCustomMultiSelects?.();
   }
   function facets() {
@@ -211,6 +283,7 @@
     const fields = new Set([...facetFields.filter(field => !hidden.has(identity(field))), ...Object.keys(definition.filters), ...definition.custom_fields]);
     for (const field of fields) {
       const facet = node('div', undefined, 'ds-facet');
+      facet.classList.toggle('ds-filter-unsaved', hasUnsavedFilter(field));
       const selected = definition.filters[field];
       const custom = definition.custom_fields.includes(field);
       const label = custom ? field : field === 'technology_primary' ? 'Technology' : field.replaceAll('_',' ').replace(/\b\w/g, letter => letter.toUpperCase());
@@ -221,7 +294,7 @@
         if (!confirmed) return;
         if (custom) definition.custom_fields = definition.custom_fields.filter(item => item !== field);
         else if (!definition.hidden_filters.some(item => identity(item) === identity(field))) definition.hidden_filters.push(field);
-        delete definition.filters[field]; facets(); changed();
+        delete definition.filters[field]; facets(); filterChanged();
       });
       head.append(remove); facet.append(head);
       const values = document.createElement('select'); values.multiple = true; values.size = 1; values.dataset.multiselectAutoClose = '1000'; values.setAttribute('aria-label', `${label} filter`);
@@ -230,7 +303,14 @@
         const item = option(value, value || '(Empty)'); item.selected = !selected || selected.includes(value); values.append(item);
       }
       if (!available.length) { values.disabled = true; values.append(option('', facetsLoading ? 'Loading values…' : 'No matching values')); }
-      values.onchange = () => { definition.filters[field] = [...values.selectedOptions].filter(item => item.value).map(item => item.value); changed(); };
+      values.onchange = () => {
+        const next = [...values.selectedOptions].map(item => item.value).filter(Boolean);
+        const current = (selected || available).filter(Boolean);
+        if (next.length === current.length && next.every(value => current.includes(value))) return;
+        definition.filters[field] = next;
+        facet.classList.toggle('ds-filter-unsaved', hasUnsavedFilter(field));
+        filterChanged();
+      };
       facet.append(values);
       (custom ? additionalHost : defaultHost).append(facet);
     }
@@ -253,8 +333,39 @@
     if (!hasOpenFacetMenu()) { facets(); return; }
     facetsRefreshTimer = setTimeout(refreshFacetsAfterMenusClose, 100);
   }
+  const rememberPrepared = payload => {
+    try { sessionStorage.setItem(preparedStorageKey, JSON.stringify({dashboardId: activeId, token: payload.token})); }
+    catch (_) { /* Session storage is optional. */ }
+  };
+  const forgetPrepared = () => { try { sessionStorage.removeItem(preparedStorageKey); } catch (_) { /* Session storage is optional. */ } };
+  const applyPreparedPayload = payload => {
+    prepared = payload; facetOptions = payload.options; facetFields = payload.filter_fields || facetFields; availableFields = payload.available_fields || payload.custom_fields || []; const datesChanged = applyDateBounds(payload.date_bounds); if (datesChanged) sources(); facetsLoading = false;
+    if (hasOpenFacetMenu()) refreshFacetsAfterMenusClose(); else facets();
+    setViewEnabled(Boolean(payload.slides?.length));
+    const rowLabel = payload.rows_exact === false ? 'source rows' : 'rows';
+    $('ds-preparing-rows').textContent = Object.entries(payload.rows).map(([kind,count]) => `${kind.toUpperCase()}: ${count.toLocaleString()} ${rowLabel}`).join(' · ');
+    $('ds-preparing-rows').hidden = !$('ds-preparing-rows').textContent;
+    setPreparationState('ready');
+    chartPayloads.clear(); renderedChartPayloads.clear(); rememberPrepared(payload);
+    const prioritySlide = !$('ds-viewer').hidden ? slideIndex : 0;
+    const priorityReady = prefetchSlide(prioritySlide, 'high');
+    prefetchRemainingCharts(priorityReady, prioritySlide);
+    if (!$('ds-viewer').hidden) renderSlide();
+  };
+  async function restorePrepared(id) {
+    let cached;
+    try { cached = JSON.parse(sessionStorage.getItem(preparedStorageKey) || 'null'); }
+    catch (_) { return false; }
+    if (!cached || cached.dashboardId !== id || !cached.token) return false;
+    try { applyPreparedPayload(await api(`/prepared/${encodeURIComponent(cached.token)}`)); return true; }
+    catch (error) { if (error.message.includes('expired')) forgetPrepared(); return false; }
+  }
+  function filterChanged() {
+    updateDirtyState();
+    status('Filter changes are ready to apply.');
+  }
   function changed() {
-    dismissChartPrefetchStatus();
+    dismissChartPrefetchStatus(); forgetPrepared();
     updateDirtyState(); prepared = null; ++sequence; controller?.abort(); preparing = null;
     setViewEnabled(false);
     setPreparationState('preparing');
@@ -267,6 +378,7 @@
     if (preparing) return preparing;
     const pending = (async () => {
     clearTimeout(timer); const current = ++sequence; dismissChartPrefetchStatus(); controller?.abort(); controller = new AbortController();
+    filterActionBusy = true; updateFilterActionState();
     facetsLoading = true;
     if (!hasOpenFacetMenu()) facets();
     setViewEnabled(false);
@@ -275,21 +387,12 @@
     try {
       const payload = await api('/prepare','POST',definition,controller.signal);
       if (current !== sequence) return;
-      prepared = payload; facetOptions = payload.options; facetFields = payload.filter_fields || facetFields; availableFields = payload.available_fields || payload.custom_fields || []; facetsLoading = false;
-      if (hasOpenFacetMenu()) refreshFacetsAfterMenusClose(); else facets();
-      setViewEnabled(Boolean(payload.slides?.length)); setPreparationState('ready');
-      const rowLabel = payload.rows_exact === false ? 'source rows' : 'rows';
-      $('ds-rows').textContent = Object.entries(payload.rows).map(([kind,count]) => `${kind.toUpperCase()}: ${count.toLocaleString()} ${rowLabel}`).join(' · ');
-      chartPayloads.clear(); renderedChartPayloads.clear();
-      const prioritySlide = !$('ds-viewer').hidden ? slideIndex : 0;
-      const priorityReady = prefetchSlide(prioritySlide, 'high');
-      prefetchRemainingCharts(priorityReady, prioritySlide);
-      if (!$('ds-viewer').hidden) renderSlide();
+      applyPreparedPayload(payload);
     } catch (error) { if (current === sequence && error.name !== 'AbortError') { facetsLoading = false; facets(); setViewEnabled(false); setPreparationState('hidden'); $('ds-rows').textContent = error.message; if (!$('ds-viewer').hidden) $('ds-charts').replaceChildren(node('div',error.message,'ds-empty')); } throw error; }
     })();
     preparing = pending;
     try { return await pending; }
-    finally { if (preparing === pending) preparing = null; }
+    finally { if (preparing === pending) preparing = null; filterActionBusy = false; updateFilterActionState(); }
   }
   async function openDashboard(id) {
     clearTimeout(facetsRefreshTimer);
@@ -297,17 +400,24 @@
     stopPresentation();
     activeId = id; definition = canonicalDashboardDefinition(dashboards[id]); savedDefinition = definitionFingerprint(definition); dirty = false; prepared = null; facetOptions = {}; availableFields = []; slideIndex = 0; setViewEnabled(false); rememberOpen(id);
     $('ds-name').value = definition.name; setNrMode(definition.technology || definition.template_technology, definition.template);
-    $('ds-filter-panel').hidden = false; $('ds-dashboard-name').textContent = `Dashboard Name: ${definition.name}`; sources(); facets(); library(); status(''); await prepare();
+    $('ds-filter-panel').hidden = false; $('ds-dashboard-name').textContent = `Dashboard Name: ${definition.name}`; sources(); facets(); library(); status(''); if (!await restorePrepared(id)) await prepare();
     // UI setup may fill omitted legacy defaults. Treat that normalization as the
     // persisted baseline, so opening another Dashboard does not prompt to discard it.
-    savedDefinition = definitionFingerprint(definition); dirty = false;
+    savedDefinition = definitionFingerprint(definition); updateDirtyState();
   }
   async function save() {
-    if (!activeId || !definition) return;
-    const dashboardId = activeId, item = definition;
-    item.name = $('ds-name').value.trim(); const result = await api(`/${dashboardId}`,'PUT',item);
-    if (dashboardId !== activeId || item !== definition) return;
-    definition = canonicalDashboardDefinition(result.definition); dashboards[dashboardId] = structuredClone(definition); savedDefinition = definitionFingerprint(definition); dirty = false; library(); status(`Saved “${definition.name}”.`);
+    if (!activeId || !definition || !hasUnsavedFilterChanges()) return;
+    filterActionBusy = true; updateFilterActionState();
+    try {
+      const dashboardId = activeId, item = definition;
+      item.name = $('ds-name').value.trim(); const result = await api(`/${dashboardId}`,'PUT',item);
+      if (dashboardId !== activeId || item !== definition) return;
+      definition = canonicalDashboardDefinition(result.definition); dashboards[dashboardId] = structuredClone(definition); savedDefinition = definitionFingerprint(definition); updateDirtyState(); sources(); facets(); library();
+      await prepare();
+      status(`Saved filters for “${definition.name}”.`);
+    } finally {
+      filterActionBusy = false; updateFilterActionState();
+    }
   }
   const confirmDiscard = async (ignoredFields = []) => !hasUnsavedDashboardChanges(ignoredFields) || await window.showConfirmDialog('Discard unsaved Dashboard changes?', {title:'Unsaved changes',confirmLabel:'Discard'});
   bind('ds-create', async () => {
@@ -321,6 +431,7 @@
     finally { $('ds-create').disabled = !$('ds-template').options.length; }
   });
   bind('ds-save', save);
+  bind('ds-apply-filters', async () => { if (hasUnsavedFilterChanges()) await prepare(); });
   async function duplicateDashboard(sourceId) {
     const id = dashboardId(), item = structuredClone(dashboards[sourceId]); item.name = nextName(`${item.name.slice(0,110)} (copy)`);
     status(`Duplicating “${dashboards[sourceId].name}”…`);
@@ -342,9 +453,22 @@
     if (definition && selected) { definition.template_technology = definition.technology = $('ds-nr-mode').value; definition.template = selected.name; changed(); }
   };
   $('ds-template').onchange = () => { if (definition) { setTemplate($('ds-template').value); changed(); } };
-  bind('ds-add-filter',() => { const field = $('ds-custom-field').value; if (!field) return; const defaultField = facetFields.find(item => identity(item) === identity(field)); if (defaultField) definition.hidden_filters = definition.hidden_filters.filter(item => identity(item) !== identity(defaultField)); else definition.custom_fields.push(field); facets(); changed(); });
-  bind('ds-reset',() => { definition.filters = {}; definition.date_from = definition.date_to = null; changed(); });
-  bind('ds-refresh',prepare); bind('ds-viewer-refresh',prepare);
+  bind('ds-add-filter',() => { const field = $('ds-custom-field').value; if (!field) return; const defaultField = facetFields.find(item => identity(item) === identity(field)); if (defaultField) definition.hidden_filters = definition.hidden_filters.filter(item => identity(item) !== identity(defaultField)); else definition.custom_fields.push(field); facets(); filterChanged(); });
+  bind('ds-clear-filters', () => { definition.filters = {}; definition.date_from = definition.date_to = null; sources(); facets(); filterChanged(); });
+  bind('ds-last-saved-filters', () => {
+    const saved = savedDashboardDefinition();
+    const current = JSON.stringify({filters: definition.filters, custom_fields: definition.custom_fields, hidden_filters: definition.hidden_filters, date_from: definition.date_from, date_to: definition.date_to});
+    definition.filters = structuredClone(saved.filters || {});
+    definition.custom_fields = structuredClone(saved.custom_fields || []);
+    definition.hidden_filters = structuredClone(saved.hidden_filters || []);
+    definition.date_from = saved.date_from || null;
+    definition.date_to = saved.date_to || null;
+    applyDateBounds(dateBounds);
+    const restored = JSON.stringify({filters: definition.filters, custom_fields: definition.custom_fields, hidden_filters: definition.hidden_filters, date_from: definition.date_from, date_to: definition.date_to});
+    if (restored === current) return;
+    sources(); facets(); filterChanged();
+  });
+  bind('ds-viewer-refresh',prepare);
   bind('ds-view',async () => { if (!prepared?.slides.length) return; overlay('ds-viewer',true); renderSlide(); });
   function loadChartPayload(chart, priority = 'high') {
     const url = `/api/e2e-dashboards/chart/${prepared.token}/${chart.index}`;
@@ -484,6 +608,29 @@
   $('ds-chart-expanded-next').onclick = safe(async () => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) + 1));
   $('ds-chart-expanded-last').onclick = safe(async () => navigateExpandedChart(expandedCharts().length - 1));
   const openFloatingFilters = () => { $('ds-filter-float').append($('ds-filter-panel')); $('ds-view').hidden = true; $('ds-filter-close-action').hidden = false; overlay('ds-filter-overlay', true); };
+  const closeFilters = async () => {
+    if (hasUnsavedDashboardChanges() && !await window.showConfirmDialog(
+      'This Dashboard has unsaved changes. Close Adaptative Filters without saving them?',
+      {title: 'Unsaved Dashboard changes', confirmLabel: 'Close filters', cancelLabel: 'Keep editing', tone: 'warning'},
+    )) return false;
+    $('ds-filter-home').append($('ds-filter-panel')); $('ds-view').hidden = false; $('ds-filter-close-action').hidden = true; overlay('ds-filter-overlay', false);
+    return true;
+  };
+  const templateEditorHasUnsavedChanges = () => {
+    try {
+      return Boolean($('ds-editor-frame').contentDocument?.querySelector('[data-catalogue-editor]')?.hasUnsavedCatalogueChanges?.());
+    } catch (_error) {
+      return false;
+    }
+  };
+  const closeTemplateEditor = async () => {
+    if (templateEditorHasUnsavedChanges() && !await window.showConfirmDialog(
+      'This Report Template has unsaved changes. Close the editor without saving them?',
+      {title: 'Unsaved Report Template changes', confirmLabel: 'Close editor', cancelLabel: 'Keep editing', tone: 'warning'},
+    )) return false;
+    overlay('ds-editor-overlay', false); $('ds-editor-frame').removeAttribute('src'); await prepare();
+    return true;
+  };
   const openTemplateEditor = focusRow => {
     if (!definition || !Number.isInteger(focusRow)) return;
     $('ds-editor-frame').src = `/admin/report-templates/${encodeURIComponent(definition.template_technology)}/${encodeURIComponent(definition.template)}/editor?focus_row=${focusRow}`;
@@ -679,11 +826,23 @@
   bind('ds-presentation-close', () => overlay('ds-presentation-overlay', false));
   bind('ds-presentation-start', startPresentation);
   bind('ds-presentation-stop', stopPresentation);
-  const closeFilters = () => { $('ds-filter-home').append($('ds-filter-panel')); $('ds-view').hidden = false; $('ds-filter-close-action').hidden = true; overlay('ds-filter-overlay',false); };
   bind('ds-floating-filters', openFloatingFilters);
-  bind('ds-filter-close',closeFilters);
-  bind('ds-filter-close-action',closeFilters);
-  bind('ds-viewer-close',()=>{ stopPresentation(); if (!$('ds-chart-expanded-overlay').hidden) expandedChartOverlay(false); if (!$('ds-filter-overlay').hidden) closeFilters(); overlay('ds-viewer',false); });
+  bind('ds-filter-close', closeFilters);
+  bind('ds-filter-close-action', closeFilters);
+  const closeOnOutsidePointer = (id, close) => {
+    const host = $(id);
+    host.addEventListener('pointerdown', event => {
+      const dialog = host.querySelector('[role=dialog]');
+      if (dialog?.contains(event.target)) return;
+      event.preventDefault();
+      void close();
+    });
+  };
+  closeOnOutsidePointer('ds-filter-overlay', closeFilters);
+  closeOnOutsidePointer('ds-editor-overlay', closeTemplateEditor);
+  closeOnOutsidePointer('ds-data-overlay', () => overlay('ds-data-overlay', false));
+  closeOnOutsidePointer('ds-presentation-overlay', () => overlay('ds-presentation-overlay', false));
+  bind('ds-viewer-close', async () => { stopPresentation(); if (!$('ds-chart-expanded-overlay').hidden) expandedChartOverlay(false); if (!$('ds-filter-overlay').hidden && !await closeFilters()) return; overlay('ds-viewer', false); });
   function loadDataPage(token, index, page) {
     const key = `${token}:${index}:${page}`;
     let request = dataPages.get(key);
@@ -730,7 +889,7 @@
   bind('ds-data-close',()=>overlay('ds-data-overlay',false));
   bind('ds-chart-expanded-close',()=>expandedChartOverlay(false));
   if ($('ds-edit')) bind('ds-edit',()=>{ const slide = prepared?.slides[slideIndex]; if (slide) openTemplateEditor(slide.focus_row); });
-  bind('ds-editor-close',async ()=>{ overlay('ds-editor-overlay',false); $('ds-editor-frame').removeAttribute('src'); await prepare(); });
+  bind('ds-editor-close', closeTemplateEditor);
   document.addEventListener('keydown',event=>{
     const visible = ['ds-chart-expanded-overlay','ds-editor-overlay','ds-data-overlay','ds-filter-overlay','ds-presentation-overlay','ds-viewer'].find(id=>!$(id).hidden && $(id).contains(document.activeElement)); if (!visible) return;
     const editing = event.target.closest?.('input,textarea,select,[contenteditable="true"]');
@@ -740,7 +899,7 @@
     if (event.key === 'Tab') { const controls = [...$(visible).querySelectorAll('button:not(:disabled),a[href],input,select,summary,[tabindex="0"]')].filter(el=>el.getClientRects().length); if (!controls.length) return; const first = controls[0], last = controls.at(-1); if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
   });
   window.addEventListener('message', event => {
-    if (event.origin === window.location.origin && event.source === $('ds-editor-frame').contentWindow && event.data?.type === 'dashboard-analytic:close-template-editor') $('ds-editor-close').click();
+    if (event.origin === window.location.origin && event.source === $('ds-editor-frame').contentWindow && event.data?.type === 'dashboard-analytic:close-template-editor') void closeTemplateEditor();
   });
   window.addEventListener('beforeunload',event=>{ if (dirty) { event.preventDefault(); event.returnValue = ''; } });
   window.addEventListener('auto-calculated-field-job-status',event=>{ const job = event.detail; if (definition && job?.id && ['ready','completed'].includes(job.status) && !completedFieldJobs.has(job.id)) { completedFieldJobs.add(job.id); changed(); } });

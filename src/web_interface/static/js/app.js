@@ -64,17 +64,6 @@ function monitorAutoCalculatedFieldJob(statusUrl, notice = '') {
   saved.add(statusUrl);
   window.localStorage.setItem(autoCalculatedFieldJobStorageKey, JSON.stringify([...saved]));
   if (notice) showInfoDialog(notice, {title: 'Auto-calculated Fields'});
-  window.addEventListener('dashboard-analytic:background-task', (event) => {
-    const task = event.detail;
-    if (!task || !task.id) return;
-    if (['complete', 'completed', 'cancelled'].includes(String(task.status || '').toLowerCase())) {
-      transientTasks.delete(String(task.id));
-    } else {
-      transientTasks.set(String(task.id), {...task});
-    }
-    render(mergedGroups());
-  });
-
   const poll = async () => {
     try {
       const response = await fetch(statusUrl, {credentials: 'same-origin'});
@@ -254,14 +243,21 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
       window.removeEventListener('keydown', handleEscape, true);
       overlay.remove();
     };
+    const requestFinish = async () => {
+      if (hasUnsavedEditorChanges() && !await showConfirmDialog(
+        'This Auto-calculated Field has unsaved changes. Close without saving them?',
+        {title: 'Unsaved Auto-calculated Field', confirmLabel: 'Close', cancelLabel: 'Keep editing', tone: 'warning'},
+      )) return;
+      finish();
+    };
     const handleEscape = (event) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (!hasUnsavedEditorChanges()) finish();
+      void requestFinish();
     };
-    close.addEventListener('click', finish); panelClose.addEventListener('click', finish);
-    overlay.addEventListener('click', (event) => { if (event.target === overlay) finish(); });
+    close.addEventListener('click', () => { void requestFinish(); }); panelClose.addEventListener('click', () => { void requestFinish(); });
+    overlay.addEventListener('click', (event) => { if (event.target === overlay) void requestFinish(); });
     window.addEventListener('keydown', handleEscape, true);
     const restoreManagerActions = () => { managerActions.hidden = false; managerActions.append(add, panelClose); };
     const edit = (index = null) => {
@@ -5487,6 +5483,17 @@ if (queueNode) {
   let renderedSignature = '';
   let serverGroups = [];
   const transientTasks = new Map();
+
+  window.addEventListener('dashboard-analytic:background-task', (event) => {
+    const task = event.detail;
+    if (!task || !task.id) return;
+    if (['complete', 'completed', 'cancelled'].includes(String(task.status || '').toLowerCase())) {
+      transientTasks.delete(String(task.id));
+    } else {
+      transientTasks.set(String(task.id), {...task});
+    }
+    render(mergedGroups());
+  });
 
   const mergedGroups = () => {
     const groups = serverGroups.map(group => ({...group, tasks: [...(group.tasks || [])]}));

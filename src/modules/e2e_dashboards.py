@@ -125,6 +125,7 @@ class Snapshot:
     selection_id: int
     selection_key: str
     selection_materialized: bool
+    payload: dict[str, object]
     chart_frames: dict[int, pd.DataFrame] = field(default_factory=dict)
     filtered_frames: dict[str, pd.DataFrame] = field(default_factory=dict)
     chart_payloads: dict[int, dict[str, object]] = field(default_factory=dict)
@@ -145,8 +146,6 @@ def install_dashboard_routes(core):
         return str(core.repository.db_path)
 
     def dashboard_user(user=Depends(core.current_user)):
-        if user.role != 'super-admin' and user.username.casefold() != 'ejaitur':
-            raise HTTPException(403, 'E2E Dashboards is available only to super-admins and EJAITUR.')
         if core.active_workspace and user.role != 'super-admin' and not core.repository.user_has_workspace_access(user.username, core.active_workspace.id):
             raise HTTPException(403, 'You do not have access to the active workspace.')
         return user
@@ -408,6 +407,47 @@ def install_dashboard_routes(core):
         }
         return sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
+    def selected_date_bounds(task_repository, selected_by_kind):
+        """Return the inclusive calendar bounds across the selected source datasets."""
+        lower = upper = None
+        with task_repository.connection() as connection:
+            for kind, selected in selected_by_kind.items():
+                columns = task_repository.list_reporting_row_columns(kind)
+                date_column = next((
+                    resolve_sql_column(columns, candidate)
+                    for candidate in ('event_start_time', 'Test_Start_Time', 'Timestamp', 'Date')
+                    if resolve_sql_column(columns, candidate)
+                ), None)
+                if not date_column:
+                    continue
+                dataset_ids = [int(row['id']) for row in selected]
+                placeholders = ', '.join('?' for _ in dataset_ids)
+                table = task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))
+                column = task_repository._quote_identifier(date_column)
+                row = connection.execute(
+                    f'SELECT MIN(date({column})) AS first_date, MAX(date({column})) AS last_date '
+                    f'FROM {table} WHERE dataset_id IN ({placeholders})', dataset_ids,
+                ).fetchone()
+                for value, is_lower in ((row['first_date'], True), (row['last_date'], False)):
+                    try:
+                        parsed = date.fromisoformat(str(value)) if value else None
+                    except ValueError:
+                        parsed = None
+                    if parsed is not None and (lower is None or parsed < lower) and is_lower:
+                        lower = parsed
+                    if parsed is not None and (upper is None or parsed > upper) and not is_lower:
+                        upper = parsed
+        if lower is None or upper is None:
+            return None
+        return {'min': lower.isoformat(), 'max': upper.isoformat()}
+
+    def apply_selected_date_bounds(definition, bounds):
+        if not bounds:
+            return
+        lower, upper = date.fromisoformat(bounds['min']), date.fromisoformat(bounds['max'])
+        definition.date_from = lower if definition.date_from is None or not lower <= definition.date_from <= upper else definition.date_from
+        definition.date_to = upper if definition.date_to is None or not lower <= definition.date_to <= upper else definition.date_to
+
     def profile_filter_options(definition, dimensions, selected_by_kind, fields, connection):
         """Resolve large-dashboard facets without scanning wide combined CDR tables."""
         options = {field_name: set() for field_name in fields}
@@ -576,6 +616,8 @@ def install_dashboard_routes(core):
         dimensions = core.load_repository_calculated_dimensions(task_repository)
         selected_by_kind = selected_sources(definition, task_repository)
         ensure_filter_projection(definition, task_repository, dimensions, selected_by_kind, entries)
+        date_bounds = selected_date_bounds(task_repository, selected_by_kind)
+        apply_selected_date_bounds(definition, date_bounds)
         selected_dataset_ids = {dataset_id for ids in definition.datasets.values() for dataset_id in ids}
         available_fields = {column for dataset_id in selected_dataset_ids for column in task_repository.list_dataset_row_columns(dataset_id)}
         available_fields.update(dimension.name for dimension in dimensions)
@@ -618,11 +660,12 @@ def install_dashboard_routes(core):
             'available_fields': sorted(available_fields, key=str.casefold),
             'rows': row_counts,
             'rows_exact': rows_exact,
+            'date_bounds': date_bounds,
         }
         with lock:
             snapshots[token] = Snapshot(
                 workspace, user.username, entries, {}, definition.scope == 'multivendor',
-                definition.model_copy(deep=True), tuple(dimensions), selection_id, selection_key, selection_materialized,
+                definition.model_copy(deep=True), tuple(dimensions), selection_id, selection_key, selection_materialized, payload,
             )
             while len(snapshots) > 3:
                 snapshots.popitem(last=False)
@@ -634,6 +677,14 @@ def install_dashboard_routes(core):
             return build_preview(definition, user)
         except (ValueError, KeyError) as exc:
             raise HTTPException(400, str(exc)) from exc
+
+    @app.get('/api/e2e-dashboards/prepared/{token}')
+    def prepared_preview(token: str, user=Depends(dashboard_user)):
+        with lock:
+            snapshot = snapshots.get(token)
+            if snapshot is None or snapshot.workspace != workspace_key() or snapshot.owner != user.username:
+                raise HTTPException(410, 'Dashboard preview expired. Refresh the Dashboard.')
+            return {**snapshot.payload, 'token': token}
 
     def source_spec(snapshot, kind, task_repository):
         selected = core._optional_reporting_datasets(

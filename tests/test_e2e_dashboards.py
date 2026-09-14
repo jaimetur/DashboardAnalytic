@@ -50,18 +50,29 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-dashboards-body"' in page.text
     assert 'id="ds-library"' not in page.text
     assert 'id="ds-save"' in page.text
+    assert '>Save Filters<' in page.text
+    assert '>Apply Filters<' in page.text
+    assert page.text.index('>Apply Filters<') < page.text.index('>Save Filters<')
+    assert 'id="ds-apply-filters" title="Apply current filters without saving them" disabled' in page.text
+    assert 'id="ds-refresh"' not in page.text
     assert '>Import Dashboard<' in page.text
     assert 'Total Dashboards: 0' in page.text
     assert '>Dashboard Data & Filters<' in page.text
     assert '>Default Filters<' in page.text
     assert '>Additional Filters<' in page.text
+    assert '>Clear Filters<' in page.text
+    assert '>Last Saved Filters<' in page.text
+    assert 'title="Save and apply the current Dashboard filters"' in page.text
+    assert 'title="Remove all filter restrictions and dates"' in page.text
+    assert 'title="Restore filters, additional fields and dates from the last saved Dashboard"' in page.text
+    assert 'id="ds-preparing-rows"' in page.text
     assert 'id="ds-default-facets"' in page.text
     assert 'id="ds-additional-facets"' in page.text
     assert 'Select field to add new filter' in page.text
     assert 'id="ds-custom-field" multiple size="1" data-multiselect-single="true"' in page.text
     assert 'hidden_filters' in DashboardDefinition.model_fields
     assert 'slide_comments' in DashboardDefinition.model_fields
-    assert 'id="ds-view" disabled' in page.text
+    assert 'id="ds-view" class="ds-view-dashboard-action" title="Open the Dashboard viewer" disabled' in page.text
     assert 'id="ds-preparing"' in page.text
     assert 'id="ds-preparing-title"' in page.text
     assert 'id="ds-viewer-preparing"' in page.text
@@ -87,6 +98,12 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "prefetchRemainingCharts(priorityReady, prioritySlide);" in dashboard_script
     assert "savedDefinition = definitionFingerprint(definition); dirty = false;" in dashboard_script
     assert "emitChartPrefetchStatus('processing'" in dashboard_script
+    app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+    task_panel_start = app_script.index("const root = document.getElementById('background-task-panels');")
+    task_listener = app_script.index("window.addEventListener('dashboard-analytic:background-task'")
+    assert task_listener > task_panel_start
+    assert "This Auto-calculated Field has unsaved changes. Close without saving them?" in app_script
+    assert "overlay.addEventListener('click', (event) => { if (event.target === overlay) void requestFinish(); });" in app_script
     assert "openTemplateEditor(expandedChart?.focus_row)" in dashboard_script
     assert "card.ondblclick = safe(async event =>" in dashboard_script
     assert "const syncExpandedChartNavigation" in dashboard_script
@@ -94,12 +111,48 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "expandedCanvasShell.classList.add('ds-hover')" in dashboard_script
     assert "`Chart ${index + 1} / ${charts.length}`" in dashboard_script
     assert "if (event.target === event.currentTarget) expandedChartOverlay(false);" in dashboard_script
+    assert 'const closeOnOutsidePointer = (id, close) =>' in dashboard_script
+    assert "closeOnOutsidePointer('ds-filter-overlay', closeFilters);" in dashboard_script
+    assert "closeOnOutsidePointer('ds-editor-overlay', closeTemplateEditor);" in dashboard_script
+    assert "This Dashboard has unsaved changes. Close Adaptative Filters without saving them?" in dashboard_script
+    assert "This Report Template has unsaved changes. Close the editor without saving them?" in dashboard_script
     chart_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/dashboard_charts.js').read_text(encoding='utf-8')
     assert 'function selectionStartAllowed(canvas, event)' in chart_script
     assert 'return logicalY >= 90;' in chart_script
     assert "canvas.classList.toggle('ds-chart-selection-blocked', !selectionStartAllowed(canvas, event));" in chart_script
+    assert 'function applyDateBounds(bounds)' in dashboard_script
+    assert "button.disabled = Boolean((minimum && value < minimum) || (maximum && value > maximum));" in dashboard_script
+    assert 'applyDateBounds(payload.date_bounds)' in dashboard_script
+    assert 'function datePicker(key, label)' in dashboard_script
+    assert "previous.addEventListener('click', () => { month.setMonth(month.getMonth() - 1); render(); });" in dashboard_script
+    assert "button.addEventListener('click', () => { input.value = iso; definition[key] = iso; wrapper.classList.toggle('ds-date-picker-unsaved', hasUnsavedDate(key)); menu.hidden = true; filterChanged(); });" in dashboard_script
+    assert 'const current = (selected || available).filter(Boolean);' in dashboard_script
+    assert "const hasUnsavedFilter = field => !sameFilterValues(definition?.filters?.[field], savedDashboardDefinition().filters?.[field]);" in dashboard_script
+    assert "facet.classList.toggle('ds-filter-unsaved', hasUnsavedFilter(field));" in dashboard_script
+    assert "wrapper.classList.toggle('ds-date-picker-unsaved', hasUnsavedDate(key));" in dashboard_script
+    assert 'savedDefinition = definitionFingerprint(definition); updateDirtyState(); sources(); facets(); library();' in dashboard_script
+    assert 'await prepare();' in dashboard_script
+    assert 'if (next.length === current.length && next.every(value => current.includes(value))) return;' in dashboard_script
+    assert 'function filterChanged() {' in dashboard_script
+    assert "status('Filter changes are ready to apply.');" in dashboard_script
+    assert "bind('ds-apply-filters', async () => { if (hasUnsavedFilterChanges()) await prepare(); });" in dashboard_script
+    assert "bind('ds-viewer-refresh',prepare);" in dashboard_script
+    assert 'async function restorePrepared(id) {' in dashboard_script
+    assert "api(`/prepared/${encodeURIComponent(cached.token)}`)" in dashboard_script
+    assert 'if (!await restorePrepared(id)) await prepare();' in dashboard_script
+    assert "setPreparationState('preparing');" in dashboard_script
+    assert "bind('ds-refresh',prepare);" not in dashboard_script
+    assert "$('ds-preparing-rows').textContent = Object.entries(payload.rows)" in dashboard_script
+    assert "$('ds-preparing-rows').hidden = !$('ds-preparing-rows').textContent;" in dashboard_script
+    assert "bind('ds-clear-filters', () => { definition.filters = {}; definition.date_from = definition.date_to = null; sources(); facets(); filterChanged(); });" in dashboard_script
+    assert "bind('ds-last-saved-filters', () => {" in dashboard_script
+    assert "definition.filters = structuredClone(saved.filters || {});" in dashboard_script
+    assert "definition.custom_fields = structuredClone(saved.custom_fields || []);" in dashboard_script
+    assert "definition.hidden_filters = structuredClone(saved.hidden_filters || []);" in dashboard_script
     dashboard_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
     assert '.ds-chart-controls button:not(:disabled){cursor:pointer!important}' in dashboard_css
+    assert '.ds-date-picker.ds-date-picker-unsaved>input,.ds-facet.ds-filter-unsaved .multiselect-trigger' in dashboard_css
+    assert '.e2e-dashboards .ds-view-dashboard-action{margin-left:auto;' in dashboard_css
     assert '.ds-chart-expanded-canvas.ds-hover .ds-chart-controls,.ds-chart-expanded-canvas:focus-within .ds-chart-controls{opacity:1;visibility:visible;transform:translateY(0);transition-delay:0s;pointer-events:auto}' in dashboard_css
     saved = client.put('/api/e2e-dashboards/test', json=payload)
     assert saved.status_code == 200
@@ -122,12 +175,16 @@ def test_dashboards_lifecycle_and_layout(client):
     assert preview['filter_fields'] == ['Market', 'Operator', 'Vendor', 'Region', 'City', 'Session Type', 'Technology', 'RAT']
     assert preview['options']['Operator'] == ['A', 'B']
     assert preview['options']['City'] == ['Leeds', 'London']
+    assert preview['date_bounds'] == {'min': '2026-09-01', 'max': '2026-09-03'}
     assert len(preview['slides']) == 2
     assert len(preview['slides'][0]['charts']) == 2
     assert preview['slides'][0]['charts'][0]['focus_row'] == 0
     assert preview['slides'][0]['charts'][1]['focus_row'] == 1
     assert preview['slides'][0]['charts'][0]['position'][0] < preview['slides'][0]['charts'][1]['position'][0]
     token = preview['token']
+    restored = client.get(f'/api/e2e-dashboards/prepared/{token}')
+    assert restored.status_code == 200
+    assert restored.json() == preview
     image = client.get(f'/api/e2e-dashboards/preview/{token}/0.png')
     assert image.status_code == 200, image.text if image.status_code != 200 else ''
     assert image.content.startswith(b'\x89PNG')
@@ -257,9 +314,10 @@ def test_dashboard_snapshot_access_and_legacy_redirect(client):
     preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
     client.get('/logout')
     client.post('/login', data={'username': 'demo', 'password': 'demo123'})
-    assert client.get(f"/api/e2e-dashboards/data/{preview['token']}/0").status_code == 403
-    assert client.get(f"/api/e2e-dashboards/preview/{preview['token']}/0.png").status_code == 403
-    assert client.get(f"/api/e2e-dashboards/chart/{preview['token']}/0").status_code == 403
+    assert client.get(f"/api/e2e-dashboards/data/{preview['token']}/0").status_code == 410
+    assert client.get(f"/api/e2e-dashboards/preview/{preview['token']}/0.png").status_code == 410
+    assert client.get(f"/api/e2e-dashboards/chart/{preview['token']}/0").status_code == 410
+    assert client.get(f"/api/e2e-dashboards/prepared/{preview['token']}").status_code == 410
 
 
 def test_dashboard_reuses_persistent_sql_selection_and_invalidates_dataset_versions(client):
@@ -332,17 +390,15 @@ def test_dashboard_reuses_normalized_snapshot_for_every_chart(client, monkeypatc
     assert calls == [3]
 
 
-def test_dashboard_is_restricted_to_super_admins_and_ejaitur(client):
+def test_dashboard_is_available_to_workspace_users(client):
     setup_dashboard(client)
-    assert 'href="/e2e-dashboards"' in client.get('/datasets-analysis').text
     client.get('/logout')
     client.post('/login', data={'username': 'admin', 'password': 'admin123'})
-    assert client.get('/api/e2e-dashboards').status_code == 403
-    assert client.put('/api/e2e-dashboards/test', json=definition().model_dump(mode='json')).status_code == 403
-    assert 'href="/e2e-dashboards"' not in client.get('/datasets-analysis').text
-    core.repository.create_user('EJAITUR', 'ejaitur123', 'admin')
-    core.repository.set_workspace_user_access(core.active_workspace.id, ['super', 'admin', 'demo', 'EJAITUR'])
+    assert client.get('/e2e-dashboards').status_code == 200
+    assert client.get('/api/e2e-dashboards').status_code == 200
+    assert client.put('/api/e2e-dashboards/test', json=definition().model_dump(mode='json')).status_code == 200
+    assert 'href="/e2e-dashboards"' in client.get('/datasets-analysis').text
     client.get('/logout')
-    client.post('/login', data={'username': 'EJAITUR', 'password': 'ejaitur123'})
+    client.post('/login', data={'username': 'demo', 'password': 'demo123'})
     assert client.get('/e2e-dashboards').status_code == 200
     assert 'href="/e2e-dashboards"' in client.get('/datasets-analysis').text
