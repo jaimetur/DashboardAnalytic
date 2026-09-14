@@ -6578,8 +6578,9 @@ def delete_workspace_cache(
         return RedirectResponse('/workspace?workspace_error=Workspace+not+found.', status_code=status.HTTP_303_SEE_OTHER)
     require_workspace_access(user, workspace_id)
     cancel_dashboard_prefetch = getattr(sys.modules[__name__], 'e2e_dashboard_cancel_prefetch_workspace', None)
+    cancelled_prefetch_workers = []
     if callable(cancel_dashboard_prefetch):
-        cancel_dashboard_prefetch(workspace.database_path)
+        cancelled_prefetch_workers = cancel_dashboard_prefetch(workspace.database_path) or []
     if active_workspace and active_workspace.id == workspace_id:
         ANALYSIS_CACHE.clear()
         DATAFRAME_CACHE.clear()
@@ -6598,6 +6599,14 @@ def delete_workspace_cache(
             if job:
                 job.update(status='processing', progress=15)
         try:
+            # A running warm-up can be inside a projection write when it sees
+            # the cooperative cancellation flag.  Wait for it to leave that
+            # section before deleting the cache, so it cannot recreate files.
+            for worker in cancelled_prefetch_workers:
+                try:
+                    worker.result()
+                except Exception:
+                    pass
             workspace_root = workspace.database_path.parent
             cache_directories = (
                 workspace_root / '.dashboard-data-cache',
@@ -6614,6 +6623,13 @@ def delete_workspace_cache(
                 job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
                 if job:
                     job.update(status='ready', progress=100, finished_at=datetime.now(timezone.utc).timestamp())
+            # Queue a new generation only after every cancelled worker has
+            # stopped and the derived files have been removed.  This keeps
+            # clearing observable as its own task and prevents cache writers
+            # from racing the removal.
+            prefetch_workspace = getattr(sys.modules[__name__], 'e2e_dashboard_prefetch_workspace', None)
+            if callable(prefetch_workspace):
+                prefetch_workspace([workspace])
         except Exception as exc:
             with WORKSPACE_LIFECYCLE_JOBS_LOCK:
                 job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)

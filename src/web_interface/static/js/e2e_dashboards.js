@@ -14,7 +14,6 @@
   const renderedChartPayloads = new Map();
   const preparedPayloads = new Map();
   let expandedChartRequest = 0;
-  let backgroundChartPrefetchToken = '';
   let backgroundPreparationToken = '';
   let dateBounds = null, templateEditorSaved = false;
   const openStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:open`;
@@ -36,18 +35,6 @@
   const focusReturn = new Map();
   const status = message => { $('ds-status').textContent = message; };
   const backgroundWorkspaceName = () => document.querySelector('[data-header-active-workspace-name]')?.textContent?.trim() || 'Active workspace';
-  const emitChartPrefetchStatus = (statusValue, detail = '', progress = null, token = backgroundChartPrefetchToken) => {
-    if (!token || token !== backgroundChartPrefetchToken) return;
-    window.dispatchEvent(new CustomEvent('dashboard-analytic:background-task', {detail: {
-      id: 'e2e-dashboard-chart-prefetch', workspace_id: config.workspace, workspace_name: backgroundWorkspaceName(), is_active: true,
-      label: 'Rendering Dashboard charts', detail, progress, status: statusValue,
-    }}));
-  };
-  const dismissChartPrefetchStatus = () => {
-    if (!backgroundChartPrefetchToken) return;
-    emitChartPrefetchStatus('complete');
-    backgroundChartPrefetchToken = '';
-  };
   const emitPreparationStatus = (statusValue, detail = '', token = backgroundPreparationToken) => {
     if (!token || token !== backgroundPreparationToken) return;
     window.dispatchEvent(new CustomEvent('dashboard-analytic:background-task', {detail: {
@@ -111,7 +98,11 @@
   const api = async (path = '', method = 'GET', body, signal) => {
     const response = await fetch(`/api/e2e-dashboards${path}`, {method, signal, cache: 'no-store', headers: {'Content-Type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
     const payload = await response.json();
-    if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : JSON.stringify(payload.detail));
+    if (!response.ok) {
+      const error = new Error(typeof payload.detail === 'string' ? payload.detail : JSON.stringify(payload.detail));
+      error.status = response.status;
+      throw error;
+    }
     return payload;
   };
   const safe = fn => async (...args) => { try { await fn(...args); } catch (error) { if (error.name !== 'AbortError') { status(error.message); if (window.showInfoDialog) window.showInfoDialog(error.message, {title:'E2E Dashboards',tone:'error'}); } } };
@@ -375,9 +366,6 @@
     $('ds-preparing-rows').hidden = !$('ds-preparing-rows').textContent;
     setPreparationState('ready');
     chartPayloads.clear(); renderedChartPayloads.clear(); rememberPrepared(payload);
-    const prioritySlide = !$('ds-viewer').hidden ? slideIndex : 0;
-    const priorityReady = prefetchSlide(prioritySlide, 'high');
-    prefetchRemainingCharts(priorityReady, prioritySlide);
     if (!$('ds-viewer').hidden) renderSlide();
   };
   async function restorePrepared(id) {
@@ -391,19 +379,24 @@
       try { applyPreparedPayload(await api(`/prepared/${encodeURIComponent(cached.token)}`)); return true; }
       catch (error) { if (error.message.includes('expired')) forgetPrepared(); }
     }
-    try {
-      applyPreparedPayload(await api(`/prefetched/${encodeURIComponent(id)}`));
-      return true;
-    } catch (_) {
-      return false;
+    for (let attempt = 0; attempt < 480 && activeId === id; attempt += 1) {
+      try {
+        applyPreparedPayload(await api(`/prefetched/${encodeURIComponent(id)}`));
+        return true;
+      } catch (error) {
+        if (error.status !== 409) return false;
+        if (attempt === 0) setPreparationState('preparing');
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
     }
+    return false;
   }
   function filterChanged() {
     updateDirtyState();
     status('Filter changes are ready to apply.');
   }
   function changed() {
-    dismissChartPrefetchStatus(); dismissPreparationStatus(); forgetPrepared();
+    dismissPreparationStatus(); forgetPrepared();
     updateDirtyState(); prepared = null; ++sequence; controller?.abort(); preparing = null;
     setViewEnabled(false);
     setPreparationState('preparing');
@@ -415,7 +408,7 @@
   async function prepare() {
     if (preparing) return preparing;
     const pending = (async () => {
-    clearTimeout(timer); const current = ++sequence; dismissChartPrefetchStatus(); controller?.abort(); controller = new AbortController();
+    clearTimeout(timer); const current = ++sequence; controller?.abort(); controller = new AbortController();
     dismissPreparationStatus(); backgroundPreparationToken = `prepare-${current}`;
     emitPreparationStatus('processing', 'Building the filtered Dashboard selection');
     filterActionBusy = true; updateFilterActionState();
@@ -495,7 +488,7 @@
   }
   bind('ds-import',() => $('ds-import-file').click());
   $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name); const id = dashboardId(), result = await api(`/${id}`,'PUT',payload.definition); dashboards[id] = result.definition; await openDashboard(id); $('ds-import-file').value = ''; });
-  function closeDashboard() { clearTimeout(facetsRefreshTimer); dismissChartPrefetchStatus(); dismissPreparationStatus(); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; savedDefinition = ''; prepared = null; dirty = false; setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard Name: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
+  function closeDashboard() { clearTimeout(facetsRefreshTimer); dismissPreparationStatus(); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; savedDefinition = ''; prepared = null; dirty = false; setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard Name: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
   $('ds-name').oninput = () => { if (definition) { definition.name = $('ds-name').value; updateDirtyState(); } };
   $('ds-nr-mode').onchange = () => {
     const selected = setNrMode($('ds-nr-mode').value);
@@ -524,9 +517,6 @@
     if (!prepared?.slides.length) return;
     setViewEnabled(false);
     try {
-      // Do not expose the viewer until every Canvas model is locally available.
-      // Disk-cached server models make this a lightweight read after warm-up.
-      await warmDashboardModels();
       overlay('ds-viewer', true); renderSlide();
     } finally {
       setViewEnabled(Boolean(prepared?.slides.length));
@@ -555,57 +545,6 @@
       request.catch(() => { if (chartPayloads.get(url) === request) chartPayloads.delete(url); });
     }
     return request;
-  }
-  function prefetchSlide(index, priority = 'low') {
-    const slide = prepared?.slides[index]; if (!slide) return Promise.resolve([]);
-    const requests = [];
-    for (const chart of slide.charts) {
-      if (!chart.available) continue;
-      requests.push(loadChartPayload(chart, priority));
-    }
-    return Promise.allSettled(requests);
-  }
-  async function warmDashboardModels() {
-    const token = prepared?.token;
-    if (!token) return;
-    const charts = prepared.slides.flatMap(slide => slide.charts).filter(chart => chart.available);
-    let next = 0;
-    const workers = Array.from({length: Math.min(4, charts.length)}, async () => {
-      while (prepared?.token === token && next < charts.length) {
-        const chart = charts[next++];
-        await loadChartPayload(chart, 'high');
-      }
-    });
-    await Promise.all(workers);
-  }
-  function prefetchRemainingCharts(priorityReady = Promise.resolve(), prioritySlide = slideIndex) {
-    const token = prepared?.token;
-    if (!token) return;
-    const pendingCharts = prepared.slides.flatMap((slide, index) => index === prioritySlide ? [] : slide.charts)
-      .filter(chart => chart.available);
-    let nextChart = 0;
-    const total = pendingCharts.length;
-    const warmNextChart = async () => {
-      try {
-        while (prepared?.token === token && nextChart < total) {
-          const chart = pendingCharts[nextChart++];
-          emitChartPrefetchStatus('processing', `Rendering chart ${nextChart} of ${total}`, Math.round((nextChart - 1) * 100 / total), token);
-          await loadChartPayload(chart, 'low').catch(() => undefined);
-          emitChartPrefetchStatus('processing', `Rendered ${nextChart} of ${total} charts`, Math.round(nextChart * 100 / total), token);
-          await new Promise(resolve => setTimeout(resolve, 0));
-        }
-      } finally {
-        if (prepared?.token === token && backgroundChartPrefetchToken === token) dismissChartPrefetchStatus();
-      }
-    };
-    priorityReady.finally(() => {
-      // Keep background work deliberately narrow so a newly visible slide can
-      // start rendering without competing with a pool of older slides.
-      if (prepared?.token !== token || !total) return;
-      backgroundChartPrefetchToken = token;
-      emitChartPrefetchStatus('processing', `Rendering 0 of ${total} charts`, 0, token);
-      setTimeout(() => { void warmNextChart(); }, 60);
-    });
   }
   function structuralDashboard(stage, slide) {
     const kind = String(slide.structural_type || '').toLowerCase().includes('transition') ? 'transition' : 'title';
@@ -892,7 +831,7 @@
       stage.append(card);
     }
     if (presentation.running) { stage.dataset.presentationEffect = presentation.effect; void stage.offsetWidth; stage.classList.add('ds-slide-transition'); }
-    renderComments(); prefetchSlide(slideIndex + 1, 'low');
+    renderComments();
   }
   bind('ds-first',()=>{ stopPresentation(); slideIndex = 0; renderSlide(); });
   bind('ds-prev',()=>{ stopPresentation(); slideIndex--; renderSlide(); });

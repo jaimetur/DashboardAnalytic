@@ -1657,9 +1657,14 @@ def test_workspace_cache_clear_removes_only_derived_dashboard_artifacts(client) 
     before_workspace = next(item for item in before_clear['workspaces'] if item['id'] == workspace.id)
     assert before_workspace['cache_size'] != '0 B'
 
-    response = client.post('/workspace/cache/delete', data={'workspace_id': workspace.id}, follow_redirects=False)
+    response = client.post(
+        '/workspace/cache/delete', data={'workspace_id': workspace.id},
+        headers={'X-Requested-With': 'XMLHttpRequest'}, follow_redirects=False,
+    )
 
-    assert response.status_code == 303
+    assert response.status_code == 200
+    assert response.json()['workspace_id'] == workspace.id
+    assert response.json()['job_id']
     tasks = client.get('/api/background-tasks').json()['groups']
     assert any(
         task['label'] == 'Clearing workspace cache'

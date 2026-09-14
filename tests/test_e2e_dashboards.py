@@ -1,4 +1,5 @@
 import json
+import time
 from io import BytesIO
 from pathlib import Path
 
@@ -95,10 +96,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'ds-viewer-refresh-action' in page.text
     dashboard_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
     assert "controls.append(data, expand, zoom)" in dashboard_script
-    assert "const prioritySlide = !$('ds-viewer').hidden ? slideIndex : 0;" in dashboard_script
-    assert "prefetchRemainingCharts(priorityReady, prioritySlide);" in dashboard_script
     assert "savedDefinition = definitionFingerprint(definition); dirty = false;" in dashboard_script
-    assert "emitChartPrefetchStatus('processing'" in dashboard_script
+    assert "await warmDashboardModels();" not in dashboard_script
+    assert "Rendering Dashboard charts" not in dashboard_script
+    assert "overlay('ds-viewer', true); renderSlide();" in dashboard_script
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
     task_panel_start = app_script.index("const root = document.getElementById('background-task-panels');")
     task_listener = app_script.index("window.addEventListener('dashboard-analytic:background-task'")
@@ -219,6 +220,34 @@ def test_dashboards_lifecycle_and_layout(client):
     assert client.get(f'/api/e2e-dashboards/data/{token}/0?download=true').headers['content-type'].startswith('text/csv')
     assert client.delete('/api/e2e-dashboards/test').status_code == 200
     assert client.get('/api/e2e-dashboards').json() == {}
+
+
+def test_prefetched_dashboard_reuses_completed_server_snapshot(client):
+    payload = setup_dashboard(client)
+    dashboard_id = 'warmed-dashboard'
+    saved = client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload)
+    assert saved.status_code == 200
+
+    deadline = time.monotonic() + 10
+    response = client.get(f'/api/e2e-dashboards/prefetched/{dashboard_id}')
+    while response.status_code == 409 and time.monotonic() < deadline:
+        time.sleep(0.05)
+        response = client.get(f'/api/e2e-dashboards/prefetched/{dashboard_id}')
+
+    assert response.status_code == 200, response.text
+    assert response.json()['slides']
+    while time.monotonic() < deadline:
+        groups = client.get('/api/background-tasks').json()['groups']
+        if not any(
+            task['id'] == f'dashboard-prefetch:{dashboard_id}'
+            for group in groups for task in group['tasks']
+        ):
+            break
+        time.sleep(0.05)
+    manifests = list(
+        (Path(core.repository.db_path).parent / '.dashboard-data-cache' / 'dashboard-previews').glob('*.json')
+    )
+    assert manifests
 
 
 def test_dashboard_api_session_expires_on_application_process_restart(client):

@@ -76,6 +76,7 @@ DASHBOARD_PROJECTION_CACHE_VERSION = 1
 DASHBOARD_PROJECTION_DISK_LIMIT = 6
 DASHBOARD_CHART_MODEL_CACHE_VERSION = 9
 DASHBOARD_CHART_MODEL_DISK_LIMIT = 500
+DASHBOARD_PREVIEW_MANIFEST_VERSION = 1
 
 
 def dashboard_cache_dir(workspace: str | Path) -> Path:
@@ -88,6 +89,10 @@ def canvas_model_cache_dir(workspace: str | Path) -> Path:
 
 def pil_chart_cache_dir(workspace: str | Path) -> Path:
     return dashboard_cache_dir(workspace) / 'charts-pil'
+
+
+def preview_manifest_cache_dir(workspace: str | Path) -> Path:
+    return dashboard_cache_dir(workspace) / 'dashboard-previews'
 
 
 def resolve_filter_column(frame, field):
@@ -694,6 +699,87 @@ def install_dashboard_routes(core):
                 snapshots.popitem(last=False)
         return {**payload, 'token': token}
 
+    def preview_manifest_path(workspace: str, dashboard_id: str, fingerprint: str) -> Path:
+        cache_key = sha256(
+            f'{DASHBOARD_PREVIEW_MANIFEST_VERSION}:{dashboard_id}:{fingerprint}'.encode()
+        ).hexdigest()
+        return preview_manifest_cache_dir(workspace) / f'{cache_key}.json'
+
+    def persist_preview_manifest(
+        workspace: str,
+        dashboard_id: str,
+        fingerprint: str,
+        token: str,
+    ) -> None:
+        with lock:
+            snapshot = snapshots.get(token)
+            if snapshot is None:
+                return
+            manifest = {
+                'version': DASHBOARD_PREVIEW_MANIFEST_VERSION,
+                'dashboard_id': dashboard_id,
+                'fingerprint': fingerprint,
+                'definition': snapshot.definition.model_dump(mode='json'),
+                'selection_id': snapshot.selection_id,
+                'selection_key': snapshot.selection_key,
+                'selection_materialized': snapshot.selection_materialized,
+                'payload': snapshot.payload,
+            }
+        manifest_path = preview_manifest_path(workspace, dashboard_id, fingerprint)
+        try:
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = manifest_path.with_suffix(f'.{uuid4().hex}.tmp')
+            temporary.write_text(json.dumps(manifest, separators=(',', ':')), encoding='utf-8')
+            temporary.replace(manifest_path)
+        except OSError:
+            pass
+
+    def restore_preview_manifest(
+        workspace: str,
+        dashboard_id: str,
+        fingerprint: str,
+    ) -> dict | None:
+        manifest_path = preview_manifest_path(workspace, dashboard_id, fingerprint)
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            if (
+                manifest.get('version') != DASHBOARD_PREVIEW_MANIFEST_VERSION
+                or manifest.get('dashboard_id') != dashboard_id
+                or manifest.get('fingerprint') != fingerprint
+            ):
+                return None
+            definition = DashboardDefinition.model_validate(manifest['definition'])
+            task_repository = Repository(Path(workspace), core.repository.global_db_path)
+            entries = validate(definition, task_repository)
+            dimensions = core.load_repository_calculated_dimensions(task_repository)
+            selected_by_kind = selected_sources(definition, task_repository)
+            selection_key = persistent_selection_key(definition, task_repository, dimensions, selected_by_kind)
+            if selection_key != manifest.get('selection_key'):
+                return None
+            selection_id = int(manifest['selection_id'])
+            with task_repository.connection() as connection:
+                selection = connection.execute(
+                    'SELECT id FROM dashboard_filter_selections WHERE id = ? AND cache_key = ?',
+                    (selection_id, selection_key),
+                ).fetchone()
+            if selection is None:
+                return None
+            payload = manifest['payload']
+            if not isinstance(payload, dict) or not isinstance(payload.get('slides'), list):
+                return None
+        except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError, sqlite3.Error):
+            return None
+        token = uuid4().hex
+        with lock:
+            snapshots[token] = Snapshot(
+                workspace, '*', entries, {}, definition.scope == 'multivendor',
+                definition, tuple(dimensions), selection_id, selection_key,
+                bool(manifest.get('selection_materialized')), payload,
+            )
+            while len(snapshots) > 128:
+                snapshots.popitem(last=False)
+        return {**payload, 'token': token}
+
     @app.post('/api/e2e-dashboards/prepare')
     def prepare(definition: DashboardDefinition, user=Depends(dashboard_user)):
         try:
@@ -718,9 +804,19 @@ def install_dashboard_routes(core):
             if not isinstance(raw_definition, dict):
                 raise HTTPException(404, 'Dashboard not found.')
             fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
-            key = f'{workspace}:{dashboard_id}:{fingerprint}:{user.username}'
+            # Warm-up jobs are shared by every permitted user of the
+            # workspace.  Their snapshot owner is the system user (`*`), so
+            # use the same key created by enqueue_prefetch rather than a
+            # user-specific variant that can never be found.
+            key = f'{workspace}:{dashboard_id}:{fingerprint}'
             job = prefetch_jobs.get(key)
-            token = str(job.get('token') or '') if job and job.get('status') == 'ready' else ''
+            if job and job.get('status') == 'failed':
+                raise HTTPException(500, str(job.get('error') or 'Dashboard preparation failed.'))
+            # The snapshot is available as soon as the selection is built.
+            # It remains safe to serve while the worker fills missing Canvas
+            # models because chart_model reads a disk hit when present and
+            # computes only the chart requested by the viewer when absent.
+            token = str(job.get('token') or '') if job and job.get('status') in {'processing', 'ready'} else ''
             snapshot = snapshots.get(token)
             if not token or snapshot is None or snapshot.owner not in {user.username, '*'}:
                 raise HTTPException(409, 'Dashboard preparation is still running.')
@@ -1080,6 +1176,10 @@ def install_dashboard_routes(core):
             restoring_cached_models = cached_models_complete(definition, workspace)
         except (HTTPException, OSError, sqlite3.Error, ValueError):
             restoring_cached_models = False
+        restored_preview = (
+            restore_preview_manifest(workspace, dashboard_id, fingerprint)
+            if restoring_cached_models else None
+        )
         with lock:
             generation = prefetch_generation.get(workspace, 0)
             if expected_generation is not None and generation != expected_generation:
@@ -1090,6 +1190,15 @@ def install_dashboard_routes(core):
             job = prefetch_jobs[key] = {'id': key, 'workspace': workspace, 'dashboard_id': dashboard_id,
                 'name': str(raw_definition.get('name') or dashboard_id), 'status': 'queued', 'completed': 0, 'total': 0,
                 'restoring_cached_models': restoring_cached_models, 'generation': generation, 'cancel_requested': False}
+            if restored_preview is not None:
+                total = sum(
+                    1 for slide in restored_preview['slides'] for chart in slide['charts'] if chart['available']
+                )
+                job.update(
+                    status='ready', completed=total, total=total,
+                    token=restored_preview['token'], restored_from_manifest=True,
+                )
+                return
         def run():
             preview = None
             try:
@@ -1099,8 +1208,10 @@ def install_dashboard_routes(core):
                         return
                     job['status'] = 'processing'
                 preview = build_preview(definition, user, workspace=workspace)
+                persist_preview_manifest(workspace, dashboard_id, fingerprint, preview['token'])
                 charts = [chart['index'] for slide in preview['slides'] for chart in slide['charts'] if chart['available']]
-                with lock: job['total'] = len(charts)
+                with lock:
+                    job.update(token=preview['token'], total=len(charts))
                 for index in charts:
                     with lock:
                         if job.get('cancel_requested') or job.get('generation') != prefetch_generation.get(workspace, 0):
@@ -1134,9 +1245,10 @@ def install_dashboard_routes(core):
         with lock:
             job['future'] = future
 
-    def cancel_workspace_prefetch(workspace: str | Path) -> None:
-        """Stop queued warming and invalidate an in-flight warming generation."""
+    def cancel_workspace_prefetch(workspace: str | Path) -> list:
+        """Stop warming and return running workers that must finish before cache removal."""
         database_path = str(Path(workspace).resolve())
+        running_futures = []
         with lock:
             prefetch_generation[database_path] = prefetch_generation.get(database_path, 0) + 1
             for job in prefetch_jobs.values():
@@ -1146,9 +1258,12 @@ def install_dashboard_routes(core):
                 future = job.get('future')
                 if future is not None and future.cancel():
                     job['status'] = 'cancelled'
+                elif future is not None:
+                    running_futures.append(future)
             stale_tokens = [token for token, snapshot in snapshots.items() if snapshot.workspace == database_path]
             for token in stale_tokens:
                 snapshots.pop(token, None)
+        return running_futures
 
     def prefetch_workspace_dashboards(workspaces) -> None:
         """Queue saved Dashboards at application start without requiring the page."""
