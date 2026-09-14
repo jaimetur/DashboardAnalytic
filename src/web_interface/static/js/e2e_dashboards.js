@@ -468,14 +468,16 @@
   bind('ds-clear-filters', () => { definition.filters = {}; definition.date_from = definition.date_to = null; sources(); facets(); filterChanged(); });
   bind('ds-last-saved-filters', () => {
     const saved = savedDashboardDefinition();
-    const current = JSON.stringify({filters: definition.filters, custom_fields: definition.custom_fields, hidden_filters: definition.hidden_filters, date_from: definition.date_from, date_to: definition.date_to});
+    const current = JSON.stringify({datasets: definition.datasets, scope: definition.scope, filters: definition.filters, custom_fields: definition.custom_fields, hidden_filters: definition.hidden_filters, date_from: definition.date_from, date_to: definition.date_to});
+    definition.datasets = structuredClone(saved.datasets || {});
+    definition.scope = saved.scope || 'single';
     definition.filters = structuredClone(saved.filters || {});
     definition.custom_fields = structuredClone(saved.custom_fields || []);
     definition.hidden_filters = structuredClone(saved.hidden_filters || []);
     definition.date_from = saved.date_from || null;
     definition.date_to = saved.date_to || null;
     applyDateBounds(dateBounds);
-    const restored = JSON.stringify({filters: definition.filters, custom_fields: definition.custom_fields, hidden_filters: definition.hidden_filters, date_from: definition.date_from, date_to: definition.date_to});
+    const restored = JSON.stringify({datasets: definition.datasets, scope: definition.scope, filters: definition.filters, custom_fields: definition.custom_fields, hidden_filters: definition.hidden_filters, date_from: definition.date_from, date_to: definition.date_to});
     if (restored === current) return;
     sources(); facets(); filterChanged();
   });

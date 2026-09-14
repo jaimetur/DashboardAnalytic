@@ -64,7 +64,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '>Last Saved Filters<' in page.text
     assert 'title="Save and apply the current Dashboard filters"' in page.text
     assert 'title="Remove all filter restrictions and dates"' in page.text
-    assert 'title="Restore filters, additional fields and dates from the last saved Dashboard"' in page.text
+    assert 'title="Restore CDR sources, scope, filters, additional fields and dates from the last saved Dashboard"' in page.text
     assert 'id="ds-preparing-rows"' in page.text
     assert 'class="form-note ds-filter-help"' in page.text
     assert 'id="ds-default-facets"' in page.text
@@ -157,6 +157,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "$('ds-preparing-rows').hidden = !$('ds-preparing-rows').textContent;" in dashboard_script
     assert "bind('ds-clear-filters', () => { definition.filters = {}; definition.date_from = definition.date_to = null; sources(); facets(); filterChanged(); });" in dashboard_script
     assert "bind('ds-last-saved-filters', () => {" in dashboard_script
+    assert "definition.datasets = structuredClone(saved.datasets || {});" in dashboard_script
+    assert "definition.scope = saved.scope || 'single';" in dashboard_script
     assert "definition.filters = structuredClone(saved.filters || {});" in dashboard_script
     assert "definition.custom_fields = structuredClone(saved.custom_fields || []);" in dashboard_script
     assert "definition.hidden_filters = structuredClone(saved.hidden_filters || []);" in dashboard_script
