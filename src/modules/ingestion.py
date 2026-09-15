@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -217,6 +218,50 @@ def get_excel_sheet_columns(file_path: Path, sheet_name: str) -> list[str]:
         if not _sheet_has_only_empty_values(values):
             return _make_unique_headers(values)
     return []
+
+
+def get_dataset_source_columns(file_path: Path) -> list[str]:
+    """Return every physical source header using the same names as ingestion."""
+    file_path = file_path.resolve()
+    stat = file_path.stat()
+    return list(_cached_dataset_source_columns(str(file_path), stat.st_mtime_ns, stat.st_size))
+
+
+@lru_cache(maxsize=128)
+def _cached_dataset_source_columns(
+    file_path_value: str, modified_ns: int, file_size: int,
+) -> tuple[str, ...]:
+    """Cache source headers without retaining source data in memory."""
+    del modified_ns, file_size
+    file_path = Path(file_path_value)
+    suffix = file_path.suffix.lower()
+    if suffix == '.csv':
+        for encoding in ('utf-8-sig', 'cp1252', 'latin-1'):
+            try:
+                return tuple(str(column) for column in pd.read_csv(file_path, nrows=0, encoding=encoding).columns)
+            except UnicodeDecodeError:
+                continue
+        return ()
+    if suffix in {'.xlsx', '.xlsm'}:
+        workbook = load_workbook(filename=file_path, read_only=True, data_only=True)
+        try:
+            columns: list[str] = []
+            for sheet_name in _operator_sheet_names(workbook):
+                worksheet = workbook[sheet_name]
+                for row in worksheet.iter_rows(values_only=True):
+                    values = tuple(row or ())
+                    if _sheet_has_only_empty_values(values):
+                        continue
+                    for column in _make_unique_headers(values):
+                        if column not in columns:
+                            columns.append(column)
+                    break
+            return tuple(columns)
+        finally:
+            workbook.close()
+    if suffix == '.xls':
+        return tuple(str(column) for column in pd.read_excel(file_path, nrows=0).columns)
+    return ()
 
 
 def _read_openxml_sheet(worksheet, progress_callback: Callable[[int], None] | None, progress_state: dict[str, int], total_rows: int) -> pd.DataFrame:

@@ -51,7 +51,7 @@ from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
 from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
-from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
+from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE
 from src.modules.workspaces import Workspace, WorkspaceRegistry
 from src.version import __app_name__, __release_date__, __version__
@@ -6903,6 +6903,58 @@ def update_workspace_access(
     return RedirectResponse('/workspace?workspace_notice=Workspace+access+updated.', status_code=status.HTTP_303_SEE_OTHER)
 
 
+def _ordered_cdr_preview_columns(
+    available_columns: list[str], source_paths: Iterable[str | Path],
+) -> tuple[list[str], set[str]]:
+    source_columns: set[str] = set()
+    for source_path in source_paths:
+        try:
+            path = Path(source_path)
+            if path.exists():
+                source_columns.update(get_dataset_source_columns(path))
+        except (OSError, ValueError, KeyError):
+            continue
+    derived_columns = {
+        column for column in available_columns
+        if column != 'source_sheet' and column not in source_columns
+    }
+    ordered = [column for column in ('source_sheet',) if column in available_columns]
+    ordered.extend(column for column in available_columns if column in derived_columns)
+    ordered.extend(column for column in available_columns if column not in ordered)
+    return ordered, derived_columns
+
+
+def _preview_rows(frame: pd.DataFrame) -> list[dict[str, str]]:
+    if frame.empty:
+        return []
+    return [
+        {column: '' if pd.isna(value) else str(value) for column, value in row.items()}
+        for row in frame.to_dict(orient='records')
+    ]
+
+
+def _dataset_preview_request(payload: Any, available_columns: list[str]) -> tuple[int, dict[str, list[str]], str | None]:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='Invalid preview request.')
+    try:
+        page = max(0, int(payload.get('page', 0)))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail='Invalid preview page.') from None
+    raw_filters = payload.get('column_filters', {})
+    if not isinstance(raw_filters, dict):
+        raise HTTPException(status_code=400, detail='Invalid column filters.')
+    allowed = set(available_columns)
+    filters = {
+        str(column): [str(value) for value in values]
+        for column, values in raw_filters.items()
+        if column in allowed and isinstance(values, list)
+    }
+    filter_column = payload.get('filter_column')
+    if filter_column is not None and filter_column not in allowed:
+        raise HTTPException(status_code=400, detail='Invalid filter column.')
+    return page, filters, str(filter_column) if filter_column is not None else None
+
+
 @app.get('/workspace/preview/{dataset_id}', response_class=HTMLResponse)
 def preview_dataset(
     dataset_id: int,
@@ -6911,11 +6963,6 @@ def preview_dataset(
     source_sheet: str | None = Query(default=None),
     mapping_vendor: str | None = Query(default=None),
     gcid: str | None = Query(default=None),
-    cdr_operator: list[str] = Query(default=[]),
-    cdr_vendor: list[str] = Query(default=[]),
-    cdr_rat: list[str] = Query(default=[]),
-    cdr_session_type: list[str] = Query(default=[]),
-    cdr_call_status: list[str] = Query(default=[]),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
     dataset_row = repository.get_dataset(dataset_id)
@@ -6936,16 +6983,7 @@ def preview_dataset(
     preview_sheet_options: list[str] = []
     preview_source_sheet: str | None = None
     preview_filters: dict[str, Any] = {}
-    workspace_dimensions = load_workspace_calculated_dimensions()
-    all_calculated_dimension_keys = {
-        _normalise_catalogue_dimension_name(dimension.name)
-        for dimension in workspace_dimensions
-    }
-    derived_preview_columns = {
-        dimension.name for dimension in workspace_dimensions
-        if f"cdr-{dataset['dataset_kind']}" in dimension.sources
-        and dimension.name in available_columns
-    } if dataset['dataset_kind'] in CDR_DATASET_KINDS else set()
+    derived_preview_columns: set[str] = set()
     if dataset['dataset_kind'] == 'mapping_vodafone':
         available_sheets = {sheet.casefold(): sheet for sheet in repository.list_distinct_dataset_row_values(dataset_id, 'source_sheet')}
         preview_sheet_options = [available_sheets[name] for name in ('4g', '5g') if name in available_sheets]
@@ -6963,41 +7001,6 @@ def preview_dataset(
     if selected_gcid:
         preview_filters['GCID'] = selected_gcid
     cdr_preview_filters: list[dict[str, object]] = []
-    if dataset['dataset_kind'] in CDR_DATASET_KINDS:
-        requested_by_parameter = {
-            'cdr_operator': cdr_operator, 'cdr_vendor': cdr_vendor, 'cdr_rat': cdr_rat,
-            'cdr_session_type': cdr_session_type, 'cdr_call_status': cdr_call_status,
-        }
-        for parameter, label, candidates in CDR_PREVIEW_FILTER_DEFINITIONS:
-            requested_values = requested_by_parameter[parameter]
-            column = next(
-                (
-                    resolved for candidate in candidates
-                    if (resolved := repository.resolve_dataset_row_column_name(dataset_id, candidate))
-                ),
-                None,
-            )
-            if not column:
-                continue
-            options = repository.list_distinct_dataset_row_values(dataset_id, column)
-            # A newly opened CDR preview represents the complete dataset, so
-            # its multi-select controls must visibly start with every available
-            # value selected.  Explicit query values continue to narrow the
-            # selection when the user refreshes the preview.
-            selected_values = (
-                [value for value in requested_values if value in options]
-                if requested_values else list(options)
-            )
-            if selected_values:
-                preview_filters[column] = selected_values
-            cdr_preview_filters.append({
-                'parameter': parameter,
-                'label': label,
-                'options': options,
-                'selected_values': selected_values,
-            })
-            if parameter == 'cdr_vendor':
-                vendor_preview_columns.add(column)
 
     if dataset['dataset_kind'] == 'mapping_vodafone':
         source_columns = get_excel_sheet_columns(Path(dataset['stored_path']), preview_source_sheet) if preview_source_sheet else []
@@ -7018,26 +7021,20 @@ def preview_dataset(
             if column not in preview_columns and not is_mapping_preview_normalized_column(column)
         )
     else:
-        priority_columns = [
-            'source_sheet', 'GCID', 'operator', 'vendor', 'market', 'period', 'region', 'city', 'technology_primary',
-            'session_type', 'test_name', 'direction', 'event_start_time', 'status',
-        ]
-        preview_columns = [column for column in priority_columns if column in available_columns]
-        # report_vendor is a renderer-only comparison field. The analyst sees
-        # the calculated vendor column instead, highlighted near the start.
-        preview_columns.extend(
-            column for column in available_columns
-            if column not in preview_columns
-            and column != 'report_vendor'
-            and column not in derived_preview_columns
-            and _normalise_catalogue_dimension_name(column) not in all_calculated_dimension_keys
+        preview_columns, derived_preview_columns = _ordered_cdr_preview_columns(
+            available_columns, [dataset['stored_path']],
         )
-        preview_columns.extend(column for column in available_columns if column in derived_preview_columns)
-    preview_frame = repository.load_dataset_rows(dataset_id, preview_columns, preview_filters).head(row_limit)
+    server_paginated_preview = dataset['dataset_kind'] in CDR_DATASET_KINDS
+    if server_paginated_preview:
+        preview_frame, _filtered_total, _filter_values = repository.load_dataset_preview_page(
+            dataset_id, preview_columns, {}, 0, 100,
+        )
+    else:
+        preview_frame = repository.load_dataset_rows(dataset_id, preview_columns, preview_filters).head(row_limit)
     if 'GCID' in preview_frame.columns:
         preview_frame = preview_frame.copy()
         preview_frame['GCID'] = preview_frame['GCID'].map(format_preview_gcid)
-    preview_rows = preview_frame.astype(object).where(pd.notna(preview_frame), '').to_dict(orient='records')
+    preview_rows = _preview_rows(preview_frame)
 
     return render_template(
         request,
@@ -7057,21 +7054,48 @@ def preview_dataset(
             'selected_gcid': selected_gcid,
             'cdr_preview_filters': cdr_preview_filters,
             'visible_column_count': len(preview_columns),
+            'server_paginated_preview': server_paginated_preview,
+            'preview_data_endpoint': f'/api/workspace/preview/{dataset_id}/data',
+            'preview_page_size': 100,
+            'preview_total_rows': repository.dataset_row_count(dataset_id),
         },
     )
+
+
+@app.post('/api/workspace/preview/{dataset_id}/data')
+async def dataset_preview_data(
+    dataset_id: int, request: Request, user: SessionUser = Depends(current_user),
+) -> JSONResponse:
+    dataset_row = repository.get_dataset(dataset_id)
+    if not dataset_row:
+        raise HTTPException(status_code=404, detail='Dataset not found')
+    dataset = serialize_dataset_row(dataset_row)
+    if not dataset['is_ready'] or dataset['dataset_kind'] not in CDR_DATASET_KINDS:
+        raise HTTPException(status_code=400, detail='Only processed CDR datasets support paginated preview.')
+    available_columns = repository.list_dataset_row_columns(dataset_id)
+    columns, _derived = _ordered_cdr_preview_columns(available_columns, [dataset['stored_path']])
+    page, filters, filter_column = _dataset_preview_request(await request.json(), columns)
+    frame, total, filter_values = repository.load_dataset_preview_page(
+        dataset_id, columns, filters, page, 100, filter_column,
+    )
+    max_page = max(0, (total - 1) // 100)
+    if page > max_page:
+        page = max_page
+        frame, total, filter_values = repository.load_dataset_preview_page(
+            dataset_id, columns, filters, page, 100, filter_column,
+        )
+    return JSONResponse({
+        'columns': columns, 'rows': _preview_rows(frame), 'total': total,
+        'unfiltered_total': repository.dataset_row_count(dataset_id), 'page': page,
+        'page_size': 100, 'filter_values': filter_values,
+    })
 
 
 @app.get('/workspace/combined/{kind}/preview', response_class=HTMLResponse)
 def preview_combined_dataset(
     kind: str,
     request: Request,
-    row_limit: int = Query(default=100, ge=1, le=5000),
     allow_incomplete: bool = Query(default=False),
-    cdr_operator: list[str] = Query(default=[]),
-    cdr_vendor: list[str] = Query(default=[]),
-    cdr_rat: list[str] = Query(default=[]),
-    cdr_session_type: list[str] = Query(default=[]),
-    cdr_call_status: list[str] = Query(default=[]),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
     """Render a combined CDR through the same preview interface as an individual CDR."""
@@ -7087,65 +7111,19 @@ def preview_combined_dataset(
                 f"{integrity['expected_row_count']} rows. Recreate it from Workspace > Datasets before using it."
             ),
         )
-    available_columns = [
-        column for column in repository.list_reporting_row_columns(normalized_kind)
-        if column not in {'dataset_id', 'source_row_id'}
-    ]
+    available_columns = repository.list_reporting_row_columns(normalized_kind)
     if not available_columns:
         raise HTTPException(status_code=404, detail='Combined dataset not found')
-    workspace_dimensions = load_workspace_calculated_dimensions()
-    all_calculated_dimension_keys = {
-        _normalise_catalogue_dimension_name(dimension.name) for dimension in workspace_dimensions
-    }
-    derived_preview_columns = {
-        dimension.name for dimension in workspace_dimensions
-        if f'cdr-{normalized_kind}' in dimension.sources and dimension.name in available_columns
-    }
-    requested_by_parameter = {
-        'cdr_operator': cdr_operator, 'cdr_vendor': cdr_vendor, 'cdr_rat': cdr_rat,
-        'cdr_session_type': cdr_session_type, 'cdr_call_status': cdr_call_status,
-    }
-    preview_filters: dict[str, Any] = {}
-    cdr_preview_filters: list[dict[str, object]] = []
-    vendor_preview_columns: set[str] = set()
-    for parameter, label, candidates in CDR_PREVIEW_FILTER_DEFINITIONS:
-        column = next(
-            (
-                resolved for candidate in candidates
-                if (resolved := repository.resolve_reporting_row_column_name(normalized_kind, candidate))
-            ),
-            None,
-        )
-        if not column:
-            continue
-        options = repository.list_distinct_reporting_row_values(normalized_kind, column)
-        requested_values = requested_by_parameter[parameter]
-        selected_values = [value for value in requested_values if value in options] if requested_values else list(options)
-        if selected_values:
-            preview_filters[column] = selected_values
-        cdr_preview_filters.append({
-            'parameter': parameter, 'label': label, 'options': options,
-            'selected_values': selected_values,
-        })
-        if parameter == 'cdr_vendor':
-            vendor_preview_columns.add(column)
-    priority_columns = [
-        'source_sheet', 'operator', 'vendor', 'market', 'period', 'region', 'city', 'technology_primary',
-        'session_type', 'test_name', 'direction', 'event_start_time', 'status',
+    source_paths = [
+        dataset['stored_path'] for row in repository.list_datasets()
+        if (dataset := serialize_dataset_row(row))['is_ready']
+        and dataset['dataset_kind'] == normalized_kind
     ]
-    preview_columns = [column for column in priority_columns if column in available_columns]
-    preview_columns.extend(
-        column for column in available_columns
-        if column not in preview_columns
-        and column != 'report_vendor'
-        and column not in derived_preview_columns
-        and _normalise_catalogue_dimension_name(column) not in all_calculated_dimension_keys
+    preview_columns, derived_preview_columns = _ordered_cdr_preview_columns(available_columns, source_paths)
+    preview_frame, _filtered_total, _filter_values = repository.load_reporting_preview_page(
+        normalized_kind, preview_columns, {}, 0, 100,
     )
-    preview_columns.extend(column for column in available_columns if column in derived_preview_columns)
-    preview_frame = repository.load_reporting_preview_rows(
-        normalized_kind, preview_columns, preview_filters, row_limit,
-    )
-    preview_rows = preview_frame.astype(object).where(pd.notna(preview_frame), '').to_dict(orient='records')
+    preview_rows = _preview_rows(preview_frame)
     updated_at = repository.get_workspace_state(f'combined_reporting_updated_{normalized_kind}') or ''
     total_row_count = repository.reporting_row_count(normalized_kind)
     dataset = {
@@ -7164,18 +7142,55 @@ def preview_combined_dataset(
             'dataset': dataset,
             'preview_columns': preview_columns,
             'preview_rows': preview_rows,
-            'preview_row_limit': row_limit,
+            'preview_row_limit': 100,
             'preview_sheet_options': [], 'preview_source_sheet': None,
-            'vendor_preview_columns': vendor_preview_columns,
+            'vendor_preview_columns': set(),
             'derived_preview_columns': derived_preview_columns,
             'vendor_filter_options': [], 'selected_mapping_vendor': '', 'selected_gcid': '',
-            'cdr_preview_filters': cdr_preview_filters,
+            'cdr_preview_filters': [],
             'visible_column_count': len(preview_columns),
             'preview_action': f'/workspace/combined/{normalized_kind}/preview',
             'preview_metadata_label': 'Updated',
             'preview_metadata_value': format_local_timestamp(updated_at) if updated_at else '—',
+            'server_paginated_preview': True,
+            'preview_data_endpoint': f'/api/workspace/combined/{normalized_kind}/preview/data',
+            'preview_page_size': 100,
+            'preview_total_rows': total_row_count,
         },
     )
+
+
+@app.post('/api/workspace/combined/{kind}/preview/data')
+async def combined_dataset_preview_data(
+    kind: str, request: Request, user: SessionUser = Depends(current_user),
+) -> JSONResponse:
+    normalized_kind = str(kind or '').casefold()
+    if normalized_kind not in CDR_DATASET_KINDS:
+        raise HTTPException(status_code=404, detail='Combined dataset not found')
+    available_columns = repository.list_reporting_row_columns(normalized_kind)
+    if not available_columns:
+        raise HTTPException(status_code=404, detail='Combined dataset not found')
+    source_paths = [
+        dataset['stored_path'] for row in repository.list_datasets()
+        if (dataset := serialize_dataset_row(row))['is_ready']
+        and dataset['dataset_kind'] == normalized_kind
+    ]
+    columns, _derived = _ordered_cdr_preview_columns(available_columns, source_paths)
+    page, filters, filter_column = _dataset_preview_request(await request.json(), columns)
+    frame, total, filter_values = repository.load_reporting_preview_page(
+        normalized_kind, columns, filters, page, 100, filter_column,
+    )
+    max_page = max(0, (total - 1) // 100)
+    if page > max_page:
+        page = max_page
+        frame, total, filter_values = repository.load_reporting_preview_page(
+            normalized_kind, columns, filters, page, 100, filter_column,
+        )
+    return JSONResponse({
+        'columns': columns, 'rows': _preview_rows(frame), 'total': total,
+        'unfiltered_total': repository.reporting_row_count(normalized_kind), 'page': page,
+        'page_size': 100, 'filter_values': filter_values,
+    })
 
 
 @app.get('/app-logs', response_class=HTMLResponse)

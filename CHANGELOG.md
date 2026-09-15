@@ -8,6 +8,7 @@
 #### ⚠️ Breaking Changes:
 
 #### 🌟 New Features:
+- Dataset Preview now exposes the complete individual or combined CDR table through fixed 100-row pagination and Excel-style column menus whose values come from the full persisted column, support simultaneous filters and include a disabled-aware `Clear N Filters` action. It no longer applies Rows to preview, Operator, Vendor, RAT, Session Type or Call Status pre-filters; every processed field remains visible, with source fields preserving their original order and every derived field grouped after `source_sheet` in light gray.
 
 #### 🚀 Enhancements:
 - Persistent Dashboard caches now remain valid across application patch releases when their cache-format versions are unchanged; the stored manifest is updated to record the new application version without rebuilding cached selections, projections or chart models. The Dashboard viewer Refresh action now asks for confirmation, invalidates every rendered chart model in the active preview and rebuilds all of them, while Refresh Chart in the expanded single-chart viewer invalidates and rebuilds only the current chart. Prepared-preview identities now include the complete Report Template content, and relaunching a Dashboard PPT Job after editing that template automatically prepares its current snapshot and missing Canvas models before replacing the Job charts and presentation while retaining the original Job's exact Scope, datasets, dates and filters; incomplete Jobs without a manifest retain their recorded Scope while rebuilding the current saved universe.
@@ -22,6 +23,7 @@
 - The floating background-task card now suppresses an automatic Dashboard warm-up for the same Dashboard while its foreground preparation is running, so one preparation appears as one task.
 
 #### 📚 Documentation:
+- Updated Datasets Analysis help with the complete CDR Dataset Preview pagination, column-filter and derived-field layout.
 
 ---
 

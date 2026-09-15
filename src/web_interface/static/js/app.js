@@ -680,6 +680,255 @@ document.querySelectorAll('[data-horizontal-wheel-scroll]').forEach((container) 
   }, {passive: false});
 });
 
+document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => {
+  const panel = toolbar.closest('.dataset-preview-panel');
+  const table = panel?.querySelector('[data-server-preview-table]');
+  const tbody = table?.querySelector('tbody');
+  const headers = Array.from(table?.querySelectorAll('thead th') || []);
+  const clearFilters = toolbar.querySelector('[data-preview-clear-filters]');
+  const filterStatus = toolbar.querySelector('[data-preview-filter-status]');
+  const rowPill = panel?.querySelector('[data-preview-row-pill]');
+  const pageStatus = panel?.querySelector('[data-preview-page-status]');
+  const firstPage = panel?.querySelector('[data-preview-first-page]');
+  const previousPage = panel?.querySelector('[data-preview-previous-page]');
+  const nextPage = panel?.querySelector('[data-preview-next-page]');
+  const lastPage = panel?.querySelector('[data-preview-last-page]');
+  if (!table || !tbody || !headers.length || !clearFilters) return;
+
+  const endpoint = toolbar.dataset.endpoint;
+  const pageSize = Number(toolbar.dataset.pageSize || 100);
+  const columnFilters = new Map();
+  let currentPage = 0;
+  let filteredTotal = Number(toolbar.dataset.totalRows || 0);
+  let unfilteredTotal = filteredTotal;
+  let openColumnMenu = null;
+  let requestSequence = 0;
+
+  const closeColumnMenu = () => {
+    if (!openColumnMenu) return;
+    openColumnMenu.trigger.setAttribute('aria-expanded', 'false');
+    openColumnMenu.menu.remove();
+    openColumnMenu = null;
+  };
+
+  const updateControls = (rowCount) => {
+    const activeFilters = columnFilters.size;
+    clearFilters.textContent = `Clear ${activeFilters} Filter${activeFilters === 1 ? '' : 's'}`;
+    clearFilters.disabled = activeFilters === 0;
+    const totalPages = Math.max(1, Math.ceil(filteredTotal / pageSize));
+    const start = filteredTotal ? currentPage * pageSize + 1 : 0;
+    const end = filteredTotal ? start + rowCount - 1 : 0;
+    if (filterStatus) {
+      filterStatus.textContent = activeFilters
+        ? `Showing ${start}-${end} of ${filteredTotal} matching rows (${unfilteredTotal} total)`
+        : `Showing ${start}-${end} of ${unfilteredTotal} rows`;
+    }
+    if (rowPill) rowPill.textContent = `${rowCount} rows shown`;
+    if (pageStatus) pageStatus.textContent = `Page ${currentPage + 1} of ${totalPages}`;
+    if (firstPage) firstPage.disabled = currentPage === 0;
+    if (previousPage) previousPage.disabled = currentPage === 0;
+    if (nextPage) nextPage.disabled = currentPage >= totalPages - 1;
+    if (lastPage) lastPage.disabled = currentPage >= totalPages - 1;
+    headers.forEach((header) => header.classList.toggle('has-value-filter', columnFilters.has(header.dataset.columnName)));
+  };
+
+  const setLoading = (loading) => {
+    toolbar.setAttribute('aria-busy', String(loading));
+    [firstPage, previousPage, nextPage, lastPage].forEach((button) => {
+      if (button && loading) button.disabled = true;
+    });
+  };
+
+  const requestPreview = async (page, filterColumn = null) => {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+      body: JSON.stringify({
+        page,
+        column_filters: Object.fromEntries(Array.from(columnFilters, ([column, values]) => [column, Array.from(values)])),
+        filter_column: filterColumn,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || 'Unable to load the dataset preview.');
+    return payload;
+  };
+
+  const renderRows = (rows) => {
+    tbody.replaceChildren();
+    rows.forEach((row) => {
+      const tr = document.createElement('tr');
+      headers.forEach((header) => {
+        const td = document.createElement('td');
+        td.textContent = row[header.dataset.columnName] ?? '';
+        ['gcid-column', 'vendor-column', 'derived-cdr-column'].forEach((className) => {
+          if (header.classList.contains(className)) td.classList.add(className);
+        });
+        tr.append(td);
+      });
+      tbody.append(tr);
+    });
+  };
+
+  const loadPage = async (page) => {
+    const sequence = ++requestSequence;
+    setLoading(true);
+    closeColumnMenu();
+    try {
+      const payload = await requestPreview(page);
+      if (sequence !== requestSequence) return;
+      currentPage = Number(payload.page || 0);
+      filteredTotal = Number(payload.total || 0);
+      unfilteredTotal = Number(payload.unfiltered_total || 0);
+      const rows = Array.isArray(payload.rows) ? payload.rows : [];
+      renderRows(rows);
+      updateControls(rows.length);
+    } catch (error) {
+      showInfoDialog(error.message || 'Unable to load the dataset preview.', {title: 'Dataset preview', tone: 'error'});
+      updateControls(tbody.rows.length);
+    } finally {
+      if (sequence === requestSequence) setLoading(false);
+    }
+  };
+
+  const positionMenu = (menu, trigger) => {
+    const bounds = trigger.getBoundingClientRect();
+    const width = Math.min(320, window.innerWidth - 20);
+    menu.style.width = `${width}px`;
+    menu.style.left = `${Math.max(10, Math.min(bounds.left, window.innerWidth - width - 10))}px`;
+    const preferredTop = bounds.bottom + 5;
+    const menuHeight = menu.offsetHeight;
+    menu.style.top = `${preferredTop + menuHeight <= window.innerHeight - 10 ? preferredTop : Math.max(10, bounds.top - menuHeight - 5)}px`;
+  };
+
+  const openValueMenu = async (header, trigger) => {
+    if (openColumnMenu?.trigger === trigger) {
+      closeColumnMenu();
+      return;
+    }
+    closeColumnMenu();
+    const column = header.dataset.columnName;
+    const menu = document.createElement('section');
+    menu.className = 'preview-column-filter-menu';
+    menu.setAttribute('role', 'dialog');
+    menu.setAttribute('aria-label', `Filter ${column}`);
+    menu.textContent = 'Loading values...';
+    document.body.append(menu);
+    trigger.setAttribute('aria-expanded', 'true');
+    openColumnMenu = {menu, trigger};
+    positionMenu(menu, trigger);
+    try {
+      const payload = await requestPreview(currentPage, column);
+      if (openColumnMenu?.menu !== menu) return;
+      const values = Array.isArray(payload.filter_values) ? payload.filter_values.map(String) : [];
+      const activeValues = columnFilters.get(column);
+      const selectedValues = new Set(activeValues ? Array.from(activeValues) : values);
+      const search = document.createElement('input');
+      search.type = 'search';
+      search.className = 'preview-column-filter-search';
+      search.placeholder = 'Search values';
+      search.autocomplete = 'off';
+      search.setAttribute('aria-label', `Search ${column} values`);
+      const toolbarNode = document.createElement('div');
+      toolbarNode.className = 'preview-column-filter-toolbar';
+      const selectAll = document.createElement('button');
+      selectAll.type = 'button';
+      selectAll.textContent = 'Select all';
+      const clearAll = document.createElement('button');
+      clearAll.type = 'button';
+      clearAll.textContent = 'Clear';
+      toolbarNode.append(selectAll, clearAll);
+      const options = document.createElement('div');
+      options.className = 'preview-column-filter-options';
+      values.forEach((value) => {
+        const option = document.createElement('label');
+        option.className = 'preview-column-filter-option';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = value;
+        checkbox.checked = selectedValues.has(value);
+        checkbox.setAttribute('data-preview-value-option', '');
+        const caption = document.createElement('span');
+        caption.textContent = value || '(Blank)';
+        option.append(checkbox, caption);
+        options.append(option);
+      });
+      const footer = document.createElement('div');
+      footer.className = 'preview-column-filter-footer';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'preview-column-filter-cancel';
+      cancel.textContent = 'Cancel';
+      const apply = document.createElement('button');
+      apply.type = 'button';
+      apply.className = 'preview-column-filter-apply';
+      apply.textContent = 'Apply';
+      footer.append(cancel, apply);
+      menu.replaceChildren(search, toolbarNode, options, footer);
+      positionMenu(menu, trigger);
+      const setVisibleCheckboxes = (checked) => options.querySelectorAll('.preview-column-filter-option:not([hidden]) input').forEach((checkbox) => { checkbox.checked = checked; });
+      search.addEventListener('input', () => {
+        const term = search.value.trim().toLocaleLowerCase();
+        options.querySelectorAll('.preview-column-filter-option').forEach((option) => {
+          option.hidden = Boolean(term) && !option.textContent.toLocaleLowerCase().includes(term);
+        });
+      });
+      selectAll.addEventListener('click', () => setVisibleCheckboxes(true));
+      clearAll.addEventListener('click', () => setVisibleCheckboxes(false));
+      cancel.addEventListener('click', closeColumnMenu);
+      apply.addEventListener('click', () => {
+        const accepted = new Set(Array.from(options.querySelectorAll('[data-preview-value-option]:checked')).map((checkbox) => checkbox.value));
+        if (accepted.size === values.length) columnFilters.delete(column);
+        else columnFilters.set(column, accepted);
+        closeColumnMenu();
+        loadPage(0);
+      });
+      menu.addEventListener('click', (event) => event.stopPropagation());
+      requestAnimationFrame(() => search.focus());
+    } catch (error) {
+      closeColumnMenu();
+      showInfoDialog(error.message || 'Unable to load column values.', {title: 'Dataset preview', tone: 'error'});
+    }
+  };
+
+  headers.forEach((header) => {
+    const columnLabel = header.dataset.columnName || header.textContent.trim();
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'preview-column-filter-trigger';
+    trigger.dataset.columnLabel = columnLabel;
+    trigger.setAttribute('aria-label', `Filter ${columnLabel}`);
+    trigger.setAttribute('aria-haspopup', 'dialog');
+    trigger.setAttribute('aria-expanded', 'false');
+    const caption = document.createElement('span');
+    caption.textContent = columnLabel;
+    const icon = document.createElement('span');
+    icon.className = 'preview-column-filter-icon';
+    icon.textContent = '▾';
+    icon.setAttribute('aria-hidden', 'true');
+    trigger.append(caption, icon);
+    header.replaceChildren(trigger);
+    trigger.addEventListener('click', (event) => {
+      event.stopPropagation();
+      openValueMenu(header, trigger);
+    });
+  });
+
+  clearFilters.addEventListener('click', () => {
+    columnFilters.clear();
+    loadPage(0);
+  });
+  firstPage?.addEventListener('click', () => loadPage(0));
+  previousPage?.addEventListener('click', () => loadPage(Math.max(0, currentPage - 1)));
+  nextPage?.addEventListener('click', () => loadPage(currentPage + 1));
+  lastPage?.addEventListener('click', () => loadPage(Math.max(0, Math.ceil(filteredTotal / pageSize) - 1)));
+  document.addEventListener('click', closeColumnMenu);
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeColumnMenu(); });
+  window.addEventListener('resize', closeColumnMenu);
+  panel.querySelector('.dataset-preview-table-wrap')?.addEventListener('scroll', closeColumnMenu, {passive: true});
+  updateControls(tbody.rows.length);
+});
+
 document.querySelectorAll('[data-preview-table-filters]').forEach((filters) => {
   const panel = filters.closest('.dataset-preview-panel');
   const table = panel?.querySelector('[data-preview-filter-table]');

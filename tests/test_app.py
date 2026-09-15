@@ -2590,9 +2590,10 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     assert "Dataset preview" in preview_response.text
     assert "Vodafone UK" in preview_response.text
     assert "Show Analysis" in preview_response.text
-    assert 'name="row_limit" value="100"' in preview_response.text
-    assert 'data-preview-column-filter' in preview_response.text
-    assert 'data-preview-row-filter' in preview_response.text
+    assert 'name="row_limit"' not in preview_response.text
+    assert 'data-server-dataset-preview' in preview_response.text
+    assert 'data-preview-column-filter' not in preview_response.text
+    assert 'data-preview-row-filter' not in preview_response.text
     assert 'data-preview-filter-table' in preview_response.text
     preview_script = client.get('/static/js/app.js')
     assert preview_script.status_code == 200
@@ -2601,7 +2602,7 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
 
     limited_preview_response = client.get("/workspace/preview/1?row_limit=25")
     assert limited_preview_response.status_code == 200
-    assert 'name="row_limit" value="25"' in limited_preview_response.text
+    assert 'name="row_limit"' not in limited_preview_response.text
 
     dashboard_response = client.get('/datasets-analysis?dataset_id=1&input_kind=data')
     assert dashboard_response.status_code == 200
@@ -2631,11 +2632,19 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     assert preview_response.status_code == 200
     assert 'CDR-Data (combined)' in preview_response.text
     assert 'Vodafone UK' in preview_response.text
-    assert 'action="/workspace/combined/data/preview"' in preview_response.text
-    assert 'name="cdr_operator"' in preview_response.text
-    assert 'data-preview-column-filter' in preview_response.text
-    assert 'data-preview-row-filter' in preview_response.text
+    assert 'action="/workspace/combined/data/preview"' not in preview_response.text
+    assert 'data-endpoint="/api/workspace/combined/data/preview/data"' in preview_response.text
+    assert 'name="cdr_operator"' not in preview_response.text
+    assert 'data-preview-column-filter' not in preview_response.text
+    assert 'data-preview-row-filter' not in preview_response.text
+    assert 'data-preview-clear-filters disabled' in preview_response.text
     assert 'Show Analysis' not in preview_response.text
+    combined_page = client.post('/api/workspace/combined/data/preview/data', json={
+        'page': 0, 'column_filters': {'operator': ['Vodafone UK']}, 'filter_column': 'operator',
+    })
+    assert combined_page.status_code == 200
+    assert combined_page.json()['total'] == 1
+    assert combined_page.json()['filter_values'] == ['Vodafone UK']
 
 
 def test_combined_dataset_missing_rows_are_flagged_and_require_confirmation(client, tmp_path: Path) -> None:
@@ -2718,22 +2727,41 @@ def test_queued_dataset_actions_remain_compact_icons_during_live_updates(client)
     assert '.report-jobs-table th:nth-child(12), .report-jobs-table td:nth-child(12) { width: 10%; min-width: 110px;' in styles.text
 
 
-def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> None:
+def test_cdr_preview_groups_every_non_source_field_after_source_sheet(tmp_path: Path) -> None:
     import src.DashboardAnalytic as app_module
 
-    import src.DashboardAnalytic as app_module
+    source = tmp_path / 'source.csv'
+    source.write_text('Campaign,Operator,score\nUK_Q3_2026,VF,91\n', encoding='utf-8')
+    ordered, derived = app_module._ordered_cdr_preview_columns(
+        ['Campaign', 'source_sheet', 'market', 'Operator', 'report_vendor', 'score'], [source],
+    )
 
+    assert ordered == ['source_sheet', 'market', 'report_vendor', 'Campaign', 'Operator', 'score']
+    assert derived == {'market', 'report_vendor'}
+
+
+def test_cdr_preview_paginates_and_filters_every_column(client) -> None:
     login(client)
+    cdr_rows = [
+        'Vodafone UK,Ericsson,ENDC,VoLTE,Completed,Streaming,YouTube playback,91',
+        '3,Nokia,NR,WhatsApp,Dropped,Interactivity,Chat,90',
+        *[
+            f'Vodafone UK,Ericsson,ENDC,VoLTE,Completed,Streaming,YouTube playback,{index}'
+            for index in range(100)
+        ],
+        ',Ericsson,ENDC,VoLTE,Completed,Streaming,YouTube playback,blank-operator',
+    ]
+    cdr_content = (
+        'operator,vendor,RAT_A,Session_Type,Call_Status,Type_of_Test,Test_Name,score\n'
+        + '\n'.join(cdr_rows)
+        + '\n'
+    ).encode()
     client.post(
         '/datasets-analysis/upload',
         data={'dataset_kinds': 'data'},
         files={'dataset_files': (
             'cdr_data.csv',
-            BytesIO(
-                b'operator,vendor,RAT_A,Session_Type,Call_Status,Type_of_Test,Test_Name,score\n'
-                b'Vodafone UK,Ericsson,ENDC,VoLTE,Completed,Streaming,YouTube playback,91\n'
-                b'3,Nokia,NR,WhatsApp,Dropped,Interactivity,Chat,90\n'
-            ),
+            BytesIO(cdr_content),
             'text/csv',
         )},
         follow_redirects=False,
@@ -2741,43 +2769,51 @@ def test_cdr_preview_highlights_vendor_and_filters_cdr_dimensions(client) -> Non
 
     default_preview = client.get('/workspace/preview/1')
     assert default_preview.status_code == 200
-    assert '<option value="Vodafone UK" selected>' in default_preview.text
-    assert '<option value="3" selected>' in default_preview.text
-    assert '<option value="Ericsson" selected>' in default_preview.text
-    assert '<option value="Nokia" selected>' in default_preview.text
+    assert 'Rows to preview' not in default_preview.text
+    assert 'name="cdr_operator"' not in default_preview.text
+    assert 'name="cdr_vendor"' not in default_preview.text
+    assert 'name="cdr_rat"' not in default_preview.text
+    assert 'name="cdr_session_type"' not in default_preview.text
+    assert 'name="cdr_call_status"' not in default_preview.text
+    assert 'data-server-dataset-preview' in default_preview.text
+    assert 'data-preview-clear-filters disabled>Clear 0 Filters</button>' in default_preview.text
+    assert 'data-preview-next-page disabled' not in default_preview.text
     assert '>Call Family<' not in default_preview.text
     assert 'class="derived-cdr-column">Test Family<' in default_preview.text
     assert 'class="derived-cdr-column">Result Group<' in default_preview.text
     header = default_preview.text.split('<thead>', 1)[1].split('</thead>', 1)[0]
-    assert header.index('score') < header.index('Result Group') < header.index('Test Family')
-    reporting_columns = app_module.repository.list_reporting_row_columns('data')
-    assert 'Result Group' in reporting_columns
-    assert 'Test Family' in reporting_columns
-    assert {'Result Group', 'Test Family'} <= set(app_module.repository.list_reporting_row_columns('data'))
+    assert header.index('data-column-name="Result Group"') < header.index('data-column-name="operator"')
+    assert header.index('data-column-name="Test Family"') < header.index('data-column-name="score"')
+    values_response = client.post('/api/workspace/preview/1/data', json={
+        'page': 0, 'column_filters': {}, 'filter_column': 'operator',
+    })
+    assert values_response.status_code == 200
+    assert values_response.json()['filter_values'] == ['', '3', 'Vodafone UK']
+    assert values_response.json()['total'] == 103
 
-    preview = client.get(
-        '/workspace/preview/1?cdr_operator=3&cdr_vendor=Nokia&cdr_rat=NR'
-        '&cdr_session_type=WhatsApp&cdr_call_status=Dropped',
-    )
-    assert preview.status_code == 200
-    assert 'name="cdr_operator"' in preview.text
-    assert 'name="cdr_vendor"' in preview.text
-    assert 'name="cdr_rat"' in preview.text
-    assert 'name="cdr_session_type"' in preview.text
-    assert 'name="cdr_call_status"' in preview.text
-    assert 'name="cdr_call_family"' not in preview.text
-    assert 'name="cdr_test_family"' not in preview.text
-    assert 'class="vendor-column">vendor<' in preview.text
-    preview_rows = preview.text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
-    assert '>Nokia<' in preview_rows
-    assert '>Ericsson<' not in preview_rows
+    second_page = client.post('/api/workspace/preview/1/data', json={
+        'page': 1, 'column_filters': {},
+    })
+    assert second_page.status_code == 200
+    assert second_page.json()['page'] == 1
+    assert len(second_page.json()['rows']) == 3
 
-    multi_preview = client.get('/workspace/preview/1?cdr_operator=Vodafone%20UK&cdr_operator=3')
-    multi_rows = multi_preview.text.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
-    assert '>Nokia<' in multi_rows
-    assert '>Ericsson<' in multi_rows
+    filtered_response = client.post('/api/workspace/preview/1/data', json={
+        'page': 0,
+        'column_filters': {'operator': ['3'], 'vendor': ['Nokia'], 'RAT_A': ['NR']},
+    })
+    assert filtered_response.status_code == 200
+    assert filtered_response.json()['total'] == 1
+    assert filtered_response.json()['unfiltered_total'] == 103
+    assert filtered_response.json()['rows'][0]['operator'] == '3'
+    assert filtered_response.json()['rows'][0]['vendor'] == 'Nokia'
 
-    assert 'name="cdr_operator" multiple' in multi_preview.text
+    empty_selection = client.post('/api/workspace/preview/1/data', json={
+        'page': 0, 'column_filters': {'operator': []},
+    })
+    assert empty_selection.status_code == 200
+    assert empty_selection.json()['total'] == 0
+    assert empty_selection.json()['rows'] == []
 
 
 def test_workspace_uses_persisted_vendor_flags_without_reloading_cdr_files(client, monkeypatch) -> None:
@@ -4095,7 +4131,9 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     assert 'collapseOthers' in changelog_view.text
     changelog_index = client.get('/api/documents/changelog-index')
     assert changelog_index.status_code == 200
-    assert changelog_index.json()['releases'][0] == {'version': '0.3.0', 'id': 'release-v0.3.0'}
+    assert changelog_index.json()['releases'][0] == {
+        'version': __version__, 'id': f'release-v{__version__}',
+    }
 
     help_view = client.get("/documents/view/help")
     assert help_view.status_code == 200

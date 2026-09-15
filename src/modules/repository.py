@@ -1508,6 +1508,86 @@ class Repository:
         with self.connection() as conn:
             return pd.read_sql_query(query, conn, params=params)
 
+    def _load_table_preview_page(
+        self, table_name: str, existing_columns: set[str], columns: list[str],
+        filters: dict[str, list[str]], page: int, page_size: int,
+        filter_column: str | None = None,
+    ) -> tuple[pd.DataFrame, int, list[str] | None]:
+        selected_columns: list[tuple[str, str]] = []
+        for column in columns:
+            resolved = self._resolve_dataset_row_column_name(existing_columns, column)
+            if resolved:
+                selected_columns.append((column, resolved))
+        if not selected_columns:
+            return pd.DataFrame(), 0, [] if filter_column else None
+
+        where_clauses: list[str] = []
+        params: list[Any] = []
+        for key, raw_values in filters.items():
+            resolved = self._resolve_dataset_row_column_name(existing_columns, key)
+            if not resolved:
+                continue
+            values = [str(value).strip() for value in raw_values]
+            if not values:
+                where_clauses.append('0 = 1')
+                continue
+            placeholders = ', '.join('?' for _ in values)
+            where_clauses.append(
+                f"COALESCE(TRIM(CAST({self._quote_identifier(resolved)} AS TEXT)), '') IN ({placeholders})"
+            )
+            params.extend(values)
+
+        quoted_table = self._quote_identifier(table_name)
+        where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ''
+        with self.connection() as conn:
+            total = int(conn.execute(
+                f"SELECT COUNT(*) AS count FROM {quoted_table}{where_sql}", params,
+            ).fetchone()['count'] or 0)
+            select_clause = ', '.join(
+                f"{self._quote_identifier(actual)} AS {self._quote_identifier(requested)}"
+                if actual != requested else self._quote_identifier(actual)
+                for requested, actual in selected_columns
+            )
+            query_params = [*params, max(1, int(page_size)), max(0, int(page)) * max(1, int(page_size))]
+            frame = pd.read_sql_query(
+                f"SELECT {select_clause} FROM {quoted_table}{where_sql} ORDER BY rowid LIMIT ? OFFSET ?",
+                conn,
+                params=query_params,
+            )
+            filter_values: list[str] | None = None
+            resolved_filter_column = (
+                self._resolve_dataset_row_column_name(existing_columns, filter_column)
+                if filter_column else None
+            )
+            if resolved_filter_column:
+                quoted_column = self._quote_identifier(resolved_filter_column)
+                rows = conn.execute(
+                    f"SELECT DISTINCT COALESCE(TRIM(CAST({quoted_column} AS TEXT)), '') AS value "
+                    f"FROM {quoted_table} ORDER BY value COLLATE NOCASE"
+                ).fetchall()
+                filter_values = [str(row['value'] or '') for row in rows]
+            elif filter_column:
+                filter_values = []
+        return frame, total, filter_values
+
+    def load_dataset_preview_page(
+        self, dataset_id: int, columns: list[str], filters: dict[str, list[str]],
+        page: int, page_size: int, filter_column: str | None = None,
+    ) -> tuple[pd.DataFrame, int, list[str] | None]:
+        return self._load_table_preview_page(
+            self.dataset_rows_table_name(dataset_id), set(self.list_dataset_row_columns(dataset_id)),
+            columns, filters, page, page_size, filter_column,
+        )
+
+    def load_reporting_preview_page(
+        self, dataset_kind: str, columns: list[str], filters: dict[str, list[str]],
+        page: int, page_size: int, filter_column: str | None = None,
+    ) -> tuple[pd.DataFrame, int, list[str] | None]:
+        return self._load_table_preview_page(
+            self.reporting_rows_table_name(dataset_kind), set(self.list_reporting_row_columns(dataset_kind)),
+            columns, filters, page, page_size, filter_column,
+        )
+
     def reporting_rows_exist_for_dataset(self, dataset_id: int, dataset_kind: str) -> bool:
         table_name = self.reporting_rows_table_name(dataset_kind)
         with self.connection() as conn:

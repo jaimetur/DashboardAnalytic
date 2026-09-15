@@ -50,7 +50,7 @@ The table shows the calculated records for the active request. Use it to verify 
 
 ## Preview and export
 
-- **Preview Dataset** opens stored rows and independent preview filters.
+- **Preview Dataset** opens every stored CDR field in 100-row pages. Each column header provides an Excel-style value menu loaded from the complete column; filters can be combined and cleared together. Derived fields appear in light gray after `source_sheet`, before the original source fields.
 - Dashboard filters do not overwrite the dataset.
 - Word and PowerPoint exports reflect the current Dashboard analysis.
 - Template-driven reports belong to E2E Reporting instead.
