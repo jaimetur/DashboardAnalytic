@@ -844,7 +844,7 @@ def test_full_environment_selector_offers_generated_outputs_by_default(client) -
 
     assert response.status_code == 200
     assert 'data-full-environment-generated-outputs' in response.text
-    assert 'Include generated reports and Chart Sets' in response.text
+    assert 'Include generated Reports, Chart Sets and Dashboard PPT jobs' in response.text
 
 
 def test_voice_and_speech_import_without_measured_kpis_remain_ready(client) -> None:
@@ -2293,6 +2293,30 @@ def test_backup_skips_stale_workspace_registry_entries(monkeypatch, tmp_path: Pa
     assert manifest['components'] == ['workspace_components']
     assert manifest['workspace_components'] == ['report_templates']
     assert manifest['workspaces'] == [{'id': 'current-workspace', 'name': 'Current-Workspace'}]
+
+
+def test_dashboard_backup_declares_dashboard_component_for_selective_restore(client, tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    app_module.repository.set_workspace_state(
+        app_module.DASHBOARD_STATE_KEY,
+        json.dumps({'dashboard-1': {'name': 'Executive Dashboard', 'comments': {'1': 'Review'}}}),
+    )
+
+    archive_path = app_module.create_recurring_database_backup({
+        'components': ['dashboards'],
+        'backup_path': str(tmp_path / 'backups'),
+        'max_backups': 30,
+        'workspace_ids': ['default'],
+    })
+
+    with zipfile.ZipFile(archive_path) as archive:
+        manifest = json.loads(archive.read('manifest.json'))
+        names = archive.namelist()
+    assert manifest['workspace_components'] == ['dashboards']
+    assert 'workspaces/Default/dashboards/dashboards.json' in names
+    assert app_module._backup_archive_components(archive_path) == ['dashboards']
 
 
 def test_login_and_admin_remain_available_after_closing_the_active_workspace(client) -> None:

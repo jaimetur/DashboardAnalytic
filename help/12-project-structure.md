@@ -1,101 +1,161 @@
 # Project structure
 
-## Source tree
+## Repository tree
 
 ```text
 DashboardAnalytic/
 ├── src/
 │   ├── DashboardAnalytic.py
+│   ├── main.py
+│   ├── config.py
+│   ├── version.py
 │   ├── modules/
 │   ├── utils/
 │   └── web_interface/
 │       ├── templates/
 │       └── static/
-├── tests/
+├── assets/
+│   ├── default-calculated-dimensions.json
+│   └── ppt-templates/
 ├── docker/
-├── assets/ppt-templates/
-├── config/
-├── data/
 ├── help/
+├── tests/
+├── tools/
+├── .github/workflows/
+├── storage-paths.conf
+├── pyproject.toml
+├── requirements.txt
 ├── README.md
 └── CHANGELOG.md
 ```
 
-## Application layer
+Runtime `config/` and `data/` directories use project-local defaults but are excluded from source control and Docker build context.
 
-- `src/DashboardAnalytic.py`: FastAPI routes, page composition, background job orchestration and shared UI payloads.
-- `src/modules/repository.py`: SQLite schemas, migrations and persistence operations.
-- `src/modules/cdr_reporting.py`: Report Template parsing, filtering, aggregation and reporting contracts.
-- Reporting/rendering modules: chart PNG and PowerPoint generation.
-- `src/web_interface/templates/`: Jinja pages and browser behaviour.
-- `src/web_interface/static/`: shared CSS, JavaScript and images.
+## Python application layer
 
-## Persistent configuration
+- `src/main.py`: direct source/PyCharm launcher using `APP_HOST` and `APP_PORT`.
+- `src/DashboardAnalytic.py`: FastAPI application, page/API routes, workspace activation, shared background-task orchestration, Admin portability and classic Reporting jobs.
+- `src/config.py`: environment and `storage-paths.conf` resolution.
+- `src/version.py`: application version and release date shown by the UI.
+- `src/modules/repository.py`: global/workspace SQLite schemas, migrations and persistence methods.
+- `src/modules/workspaces.py`: workspace registry, lifecycle, path migration, duplication and deletion.
+- `src/modules/ingestion.py`: workbook/CSV ingestion, CDR classification helpers and derived input fields.
+- `src/modules/analytics.py`: single-dataset analytical calculations.
+- `src/modules/exports.py`: Datasets Analysis Word and PowerPoint output.
+- `src/modules/cdr_reporting.py`: Report Template parsing, filters, aggregations, chart contracts, map tiles and classic report rendering.
+- `src/modules/e2e_dashboards.py`: Dashboard definitions, SQL selections, projection/model caches, live previews, filtered chart data and Dashboard PPT jobs.
+- `src/modules/dashboard_canvas_renderer.mjs`: Node/Chromium-compatible Canvas rendering used for consistent interactive and exported charts.
+- `src/modules/auth.py`: password and authentication helpers.
+- `src/utils/`: chart, filesystem and font utilities shared by modules.
+
+## Browser layer
+
+- `src/web_interface/templates/`: Jinja pages for Workspace, Datasets Analysis, E2E Dashboards, E2E Reporting, Chart Builder, Admin, App Logs and document viewing.
+- `src/web_interface/static/js/`: shared UI behaviour, common chart drawing and the E2E Dashboard client.
+- `src/web_interface/static/css/`: application and module-specific styles.
+- `src/web_interface/static/markdown_renderer.js`: in-app README, Changelog and Help rendering, including cross-document heading anchors.
+- `src/web_interface/static/img/`: brand and interface images.
+
+## Persistent data layout
 
 ```text
-config/
+APP_CONFIG_DIR/
 └── application.db
+
+APP_DATA_DIR/
+├── workspaces/
+│   ├── workspace-registry.db
+│   └── <workspace>/
+│       ├── <workspace>.db
+│       ├── .dashboard-cache-version.json
+│       ├── .dashboard-data-cache/
+│       │   ├── dashboard-analytics.sqlite3
+│       │   ├── dashboard-previews/
+│       │   ├── charts-canvas/
+│       │   └── charts-pil/
+│       ├── input/
+│       └── output/
+│           ├── reports/
+│           ├── charts/
+│           └── dashboards/
+├── transfer-packages/
+├── scheduled-backups/
+└── .map-tiles-cache/
+    └── openstreetmap/
 ```
 
-`application.db` stores global state such as users, workspace permissions and transfer offers.
+Directories are created when their corresponding feature first needs them, so an unused workspace may contain only its database and basic input/output roots. SQLite can also create temporary `-wal` and `-shm` sidecars beside active databases.
 
-## Persistent workspace data
+### Global database
 
-```text
-data/workspaces/
-├── workspace-registry.db
-└── <workspace>/
-    ├── <workspace>.db
-    ├── input/
-    └── output/
-        ├── reports/
-        ├── charts/
-        └── dashboards/
-```
+`APP_CONFIG_DIR/application.db` owns:
 
-The workspace database stores:
+- users, roles and workspace access lists;
+- global application state;
+- server-transfer offers.
 
-- dataset records and profiles;
-- materialised dataset rows;
-- combined Data/Voice/Speech reporting rows;
-- audit events;
-- unified Report and Chart Set jobs;
-- Dashboard definitions, selections and PowerPoint jobs;
+### Workspace registry
+
+`APP_DATA_DIR/workspaces/workspace-registry.db` owns workspace IDs, display names, registered paths, lifecycle status and the active-workspace pointer. Registry paths are rewritten during portable import instead of preserving absolute paths from another server.
+
+### Workspace database
+
+Each `<workspace>.db` owns:
+
+- dataset records, processing profiles and audit logs;
+- individual materialised dataset-row tables and combined Data/Voice/Speech reporting tables;
 - Auto-calculated Field definitions;
-- complete Report Templates in `report_templates`.
+- complete database-backed Report Templates in `report_templates`;
+- saved Dashboard definitions in workspace state;
+- cached Dashboard selection metadata and bounded row identities;
+- classic Report/Chart Set jobs in `generated_jobs`;
+- Dashboard PowerPoint history in `dashboard_ppt_jobs`.
 
-## Reporting assets
+Report Templates become CSV files only inside portable export, transfer and backup packages.
 
-- `assets/ppt-templates/Template_CDR_analysis.pptx` supplies masters and layouts.
-- Database-backed workspace Report Templates define slide order, layout, charts, filters, aggregations and legends. Portable packages serialize them as CSV files.
-- Generated report charts stay beside their PPTX under `output/reports/`.
-- Standalone Chart Sets stay under `output/charts/`.
+### Regenerable Dashboard cache
+
+`.dashboard-cache-version.json` records the application and cache-format signature. Opening a workspace deletes older incompatible cache versions and selection rows. `.dashboard-data-cache` contains narrow SQLite projections, reusable preview manifests, Canvas chart models and legacy PIL artifacts. It can be cleared without removing datasets, Dashboard definitions, templates or generated jobs.
+
+### Generated output
+
+- `output/reports/`: classic Report PPTX files and report chart assets.
+- `output/charts/`: standalone Chart Sets.
+- `output/dashboards/`: Dashboard PPTX files plus persistent PNG, tooltip and Canvas-model assets used by PowerPoint Generation Jobs and Charts Panel.
+
+`transfer-packages/` holds temporary or recoverable portable packages. `scheduled-backups/` is the default Admin backup destination. `.map-tiles-cache/openstreetmap/` is a shared regenerable tile cache outside individual workspaces.
+
+## Bundled assets
+
+- `assets/ppt-templates/Template_CDR_analysis.pptx` supplies slide masters, named layouts and placeholders.
+- `assets/default-calculated-dimensions.json` supplies initial Auto-calculated Field definitions where applicable.
+- Workspace Report Templates supply slide/chart definitions and are documented in [Administration → Report Template reference](10-administration.md#report-template-reference).
 
 ## Documentation
 
-- `README.md`: concise product, setup and deployment guide.
-- `CHANGELOG.md`: versioned changes.
-- `help/00-help.md`: Help index.
-- `help/01-overview.md`: detailed product tour.
-- `help/02-technical-considerations.md`: calculation and architecture rules.
-- Remaining numbered files: focused operational guides.
+- `README.md`: product summary, source quick start and deployment overview.
+- `CHANGELOG.md`: versioned release history.
+- `help/00-help.md`: in-app Help index.
+- `help/01-overview.md`: product and module tour.
+- `help/02-technical-considerations.md`: data interpretation, persistence, caching and job semantics.
+- Remaining numbered Help files: focused operational and deployment guides.
 
-The in-app Help navigation is explicitly curated in `DashboardAnalytic.py`; renaming an article requires updating that list and its tests.
+The Help navigation order and labels are curated in `src/DashboardAnalytic.py`. Renaming an article requires updating that list, incoming links and related tests.
 
-## Testing
+## Tests, tooling and delivery
 
-- `tests/test_app.py`: routes, UI, admin, documentation and integration behaviour.
-- `tests/test_cdr_reporting.py`: filter/template/report/chart contracts.
-- Other test modules cover workspaces and domain-specific components.
+- `tests/test_app.py`: routes, shared UI, Admin, documentation and integration behaviour.
+- `tests/test_e2e_dashboards.py`: Dashboard definitions, filtering, caching, rendering and PPT jobs.
+- `tests/test_cdr_reporting.py`: template, filter, chart and classic Reporting contracts.
+- Other test modules cover analytics, exports, workspaces and workspace template isolation.
+- `tools/`: maintenance/build helpers.
+- `.github/workflows/`: automated tests, Docker publishing and source packaging.
+- `docker/`: production/development Compose files, image definition and execution notes.
 
-Run:
+Run the complete suite from the repository root:
 
 ```bash
-pytest -q
+python -m pytest -q
 ```
 
-Keep databases, uploaded customer files and generated output out of source control.
-
-## Template-driven dashboards
-
-`src/modules/e2e_dashboards.py` registers Dashboard persistence, SQL selection, Canvas models, PowerPoint jobs and filtered-data endpoints. `e2e_dashboards.html`, `e2e_dashboards.js` and `e2e_dashboards.css` provide the workspace tab and synchronized overlays. Definitions are stored under `e2e_dashboards_v2` in workspace state; existing `e2e_dashboard_sets_v1` values migrate automatically. `dashboard_filter_selections` and `dashboard_filter_selection_rows` persist bounded filter metadata and compact row-key selections, and `dashboard_ppt_jobs` stores Dashboard generation history. Regenerable projections, preview manifests and chart models live in `.dashboard-data-cache`; completed Dashboard job assets live under `output/dashboards`. Single-dataset analysis uses `datasets_analysis.html` and `/datasets-analysis`; legacy `/dashboard` endpoints remain compatibility aliases.
+Keep databases, uploaded customer files, generated output, cache files and secrets out of source control.

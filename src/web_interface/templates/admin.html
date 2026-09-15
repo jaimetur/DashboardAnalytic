@@ -10,7 +10,7 @@
       </div>
       <span class="pill">{{ user.username }} · administrator</span>
     </div>
-    <p class="lede">Manage user access, review the datasets stored in the workspace and trace significant operational events such as uploads, processing and report generation from one controlled area.</p>
+    <p class="lede">Manage user access, Report Templates, portable packages, backups, databases and datasets for the active workspace from one controlled area.</p>
     {% if error %}<span hidden data-admin-error>{{ error }}</span>{% endif %}
   </article>
 
@@ -362,7 +362,7 @@
           <input type="file" name="package" accept=".zip,application/zip" required>
         </label>
         <input type="hidden" name="confirmed_import" value="0" data-import-package-confirmed>
-        <p class="form-note">The package manifest identifies its content automatically. Auto-calculated Fields packages ask which destination workspaces should receive the fields before the background import starts.</p>
+        <p class="form-note">The package manifest identifies its content automatically. Dashboard, Report Template and Auto-calculated Field packages ask which destination workspaces should receive their definitions before the background import starts.</p>
         <button type="submit" class="import-export-action">Import ZIP</button>
       </form>
       <form class="form-stack" action="/admin/import-export/export/jobs" method="post" data-export-package-form data-loading-label="Preparing export package" data-loading-copy="Please wait while Dashboard Analytic creates the selected export package. You can keep this page open while it runs.">
@@ -416,7 +416,7 @@
       <div class="confirm-icon info-icon" aria-hidden="true">⇩</div>
       <p class="eyebrow">Full Environment export</p>
       <h3 id="full-environment-workspace-title">Select workspaces</h3>
-      <p>Configuration is always included. Each selected workspace includes its Dashboard definitions, Report Templates and Auto-calculated Fields.</p>
+      <p>App Config is always included. Each selected workspace includes its database, input files, Dashboard definitions, Report Templates and Auto-calculated Fields.</p>
       <div class="full-environment-workspace-toolbar">
         <button type="button" class="ghost-link" data-full-environment-select-all>Select all</button>
         <button type="button" class="ghost-link" data-full-environment-select-none>Select none</button>
@@ -431,7 +431,7 @@
       </div>
       <label class="confirm-option full-environment-generated-outputs-option">
         <input type="checkbox" checked data-full-environment-generated-outputs>
-        <span>Include generated reports and Chart Sets</span>
+        <span>Include generated Reports, Chart Sets and Dashboard PPT jobs</span>
       </label>
       <p class="full-environment-workspace-error" data-full-environment-workspace-error hidden>Select at least one workspace.</p>
       <div class="confirm-actions">

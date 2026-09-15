@@ -17,7 +17,7 @@ Use this Help centre for detailed workflows, examples and technical rules. For a
 
 1. [Product Overview](01-overview.md) — detailed tour of every module and panel.
 2. [Technical Considerations](02-technical-considerations.md) — normalisation, execution semantics, vendor mapping, storage, Dashboard caching and jobs.
-3. [Configuration](03-configuration.md) — runtime variables, storage roots and initial access.
+3. [Configuration](03-configuration.md) — runtime/rendering variables, storage roots, Docker settings and initial access.
 4. [Web Interface](04-web-interface.md) — shared navigation, dialogs, tables and responsive behaviour.
 5. [Workspace Management](05-workspace-management.md) — workspaces, data ingestion, processing, previews and mappings.
 6. [Datasets Analysis](06-datasets-analysis.md) — interactive single-dataset analysis and exports.
@@ -26,7 +26,7 @@ Use this Help centre for detailed workflows, examples and technical rules. For a
 9. [Chart Builder](09-chart-builder.md) — temporary ad-hoc chart construction.
 10. [Administration](10-administration.md) — users, complete Report Template authoring reference, portability, databases and datasets.
 11. [Docker Deployment](11-docker-deployment.md) — production, development, persistence and upgrades.
-12. [Project Structure](12-project-structure.md) — source, storage and runtime components.
+12. [Project Structure](12-project-structure.md) — source/browser layers, database ownership, persistent storage, caches and generated output.
 13. [Roadmap](13-roadmap.md) — current limitations and planned work.
 
 ## Fast troubleshooting

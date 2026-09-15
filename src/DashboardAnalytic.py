@@ -3185,7 +3185,7 @@ def create_recurring_database_backup(
     ]
     components = set(config['components'])
     workspace_manifest_components = [
-        component for component in ('workspace_database', 'input', 'output', 'report_templates', 'auto_calculated_fields')
+        component for component in ('workspace_database', 'dashboards', 'input', 'output', 'report_templates', 'auto_calculated_fields')
         if component in components
     ]
     def report_progress(message: str, progress: float) -> None:
@@ -5273,6 +5273,9 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         'application_state': 'Application state',
         'autocalculated_fields': 'Auto-calculated Fields',
         'audit_logs': 'Audit log',
+        'dashboard_filter_selections': 'Dashboard filter selections',
+        'dashboard_filter_selection_rows': 'Dashboard selected rows',
+        'dashboard_ppt_jobs': 'Dashboard PPT jobs',
         'dataset_profiles': 'Dataset profiles',
         'datasets': 'Datasets',
         'generated_jobs': 'Generated jobs',

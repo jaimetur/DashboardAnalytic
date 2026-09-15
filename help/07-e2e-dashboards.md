@@ -94,7 +94,7 @@ Preparation is debounced and stale responses are ignored. A new request replaces
 
 Manage Dashboards reports Loading data, Data queued, Rendering charts, Charts queued, Ready, Missing charts or Failed. The floating background-task card groups data preparation and chart rendering under the Dashboard name. View Dashboard and PPT actions remain disabled until their data and required models are ready.
 
-`.dashboard-data-cache` stores bounded analytical projections, selection manifests, Canvas chart models and legacy PIL artifacts. Cache keys include dataset revisions, required fields, selection, scope and renderer version. Opening a workspace removes artifacts from older application/cache versions while retaining current ones. Workspace Clear cache cancels active warming and removes derived cache only; definitions, CDRs, templates and generated jobs remain intact.
+`.dashboard-data-cache` stores bounded analytical projections, reusable preview manifests, Canvas chart models and legacy PIL artifacts. Cache keys include dataset revisions, required fields, selection, scope and renderer version. Opening a workspace removes artifacts from older application/cache versions while retaining current ones. Workspace Clear cache cancels active warming and removes derived cache only; definitions, CDRs, templates and generated jobs remain intact.
 
 ## View Dashboard
 

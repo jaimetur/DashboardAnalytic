@@ -21,9 +21,12 @@ Stored below `APP_DATA_DIR/workspaces/<workspace>/`:
 - `output/reports/`: generated PowerPoint reports and their PNG charts.
 - `output/charts/`: standalone Chart Sets.
 - `output/dashboards/`: Dashboard PowerPoint jobs and their persistent PNG, tooltip and Canvas-model assets.
-- `.dashboard-data-cache/`: bounded, regenerable E2E Dashboard analytical projections, selection manifests, preview manifests and live Canvas models. This cache is not a user dataset or source of record.
+- `.dashboard-data-cache/`: bounded, regenerable E2E Dashboard analytical projections, reusable preview manifests and live Canvas/legacy PIL chart artifacts. This cache is not a user dataset or source of record.
+- `.dashboard-cache-version.json`: signature used to invalidate caches written by older application or cache-format versions.
 
-The workspace registry is local to the deployment. Full Environment imports rebuild it from the imported workspaces instead of retaining source-server absolute paths. Report Template import, export, backup and transfer packages use CSV as a portable representation; the live templates remain database-backed and current flows remove obsolete `slides-templates` directories.
+Application-level derived data lives below `APP_DATA_DIR`: `transfer-packages/` holds temporary/recoverable portability archives, `scheduled-backups/` is the default Admin backup destination and `.map-tiles-cache/openstreetmap/` stores regenerable map tiles.
+
+The workspace registry is local to the deployment. Full Environment imports rebuild it from the imported workspaces instead of retaining source-server absolute paths. Report Template import, export, backup and transfer packages use CSV as a portable representation; the live templates remain database-backed and current flows remove obsolete `slides-templates` directories. See [Project Structure → Persistent data layout](12-project-structure.md#persistent-data-layout) for the complete ownership tree.
 
 ## Processed and derived columns
 
@@ -152,6 +155,8 @@ vendor NOT CONTAINS (Mixed, Other);
 
 E2E Reporting, Chart Builder and Report Template Editor use the shared Interactive Preview. E2E Dashboards uses the same chart contracts in its live viewer, expanded viewer and historical Charts Panel, while preparing one synchronized dataset selection for the complete Dashboard.
 
+Live charts draw their Canvas models in the user's browser. Server-side Report, Chart Set and Dashboard exports send those same models through a persistent Node/Chromium renderer, which keeps chart geometry and semantic tooltips aligned with the interactive view. Docker includes these runtime dependencies; source deployments using `dashboard-canvas` need Node.js, a supported Chromium-family browser and the WebSocket module. `DASHBOARD_ANALYTIC_CHROMIUM` can select an explicit browser executable, while `DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER=pil` selects the legacy painter.
+
 The shared preview cache separates expensive data work from presentation work:
 
 - Dataset combination depends on selected datasets.
@@ -213,13 +218,14 @@ Both job families continue after leaving the page or signing out. A process rest
 
 ## Import, export and server transfer
 
-Portable ZIPs can contain configuration, templates, workspaces or a selected Full Environment.
+Portable ZIPs can contain App Config, Dashboard definitions, Report Templates, Auto-calculated Fields, complete workspaces or a selected Full Environment.
 
 - Large packages are built and processed on disk rather than fully in browser memory.
 - Workspace database snapshots use SQLite-safe copy/backup behaviour.
 - Workspace replacement closes the target automatically when required.
 - Old workspace files are removed only after the replacement succeeds.
 - Full Environment import preserves imported workspace permissions, including the workspace that was active on the source.
+- Dashboard-only packages contain definitions and comments. Complete workspace and Full Environment packages can include source CDRs and generated output; regenerable Dashboard and map caches are never portability content.
 
 Server transfers use a persisted offer and resumable package reception:
 

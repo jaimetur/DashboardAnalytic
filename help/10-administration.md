@@ -4,10 +4,10 @@ Admin centralises global configuration and active-workspace maintenance. The ava
 
 ## Roles
 
-- `admin`: manage permitted users, templates, accessible workspaces and authorised portability operations.
-- `super-admin`: full role/access control, configuration and Full Environment portability, plus incoming transfer approval.
+- `admin`: create and manage ordinary users/admins, manage active-workspace templates and datasets, and export/import/transfer Dashboards, templates, fields and accessible workspaces.
+- `super-admin`: create or modify super-admin accounts, assign workspace access, export App Config or Full Environment, and approve incoming server transfers.
 
-Safeguards prevent removal, deactivation or demotion of the last active administrator.
+An admin cannot modify a super-admin account or assign the super-admin role. The signed-in account cannot delete itself, and at least one active super-admin must remain.
 
 ## Create user and Users
 
@@ -21,7 +21,7 @@ Administrators can:
 - manage workspace access where authorised;
 - delete eligible accounts.
 
-Leave a password field empty when an edit should preserve the current password.
+Only a super-admin can change workspace access. Leave a password field empty when an edit should preserve the current password. **Reset password** restores `super123`, `admin123` or `demo123` for the three bootstrap names and uses `Ericsson123` for another account; the dialog displays the resulting password so it can be changed or communicated securely.
 
 ## Report Templates Management
 
@@ -39,7 +39,9 @@ Available actions:
 - Export
 - Delete
 
-One template can be default for each technology within a workspace. Reporting initially selects that default but does not change it when a user chooses another template for one job. New workspaces start without templates.
+**New Template** creates a blank NSA definition and opens it for editing. Import accepts a CSV name or derives it from the filename, can convert a legacy catalogue when prompted and requires explicit overwrite confirmation for a case-insensitive name collision. Rename saves inline; duplicate creates `- Copy`; and a non-default template can move between NSA and SA when no same-name target exists.
+
+One template can be default for each technology within a workspace. Reporting initially selects that default but does not change it when a user chooses another template for one job. A default template cannot change type or be deleted until another template becomes default. New workspaces start without templates. The row Export action downloads that individual CSV; portable ZIP export is available under Import / Export / Transfer.
 
 ## Report Template Editor
 
@@ -51,6 +53,7 @@ One template can be default for each technology within a workspace. Reporting in
 - The bottom action bar remains visible.
 - Shared slide cells are visually merged across charts on the same slide.
 - Row controls add, remove, reorder and preview chart definitions.
+- **Re-Enumerate Slides** rewrites slide numbers into their current visual order.
 - Edited cells use a light pastel-yellow background.
 - Newly inserted text is highlighted more strongly.
 - A successful save resets all change highlighting.
@@ -71,6 +74,9 @@ One template can be default for each technology within a workspace. Reporting in
 - Chart Data Preview opens the full filtered dataset directly.
 - Chart Preview reuses the shared Interactive Preview.
 - **Update Template** applies preview values to the in-memory row; it does not save to disk.
+- **Auto-calculated Fields** opens the shared active-workspace field manager.
+
+**Save Template** validates and persists the complete grid atomically. Close, Escape and backdrop actions preserve the editor when unsaved changes still require a decision.
 
 ## Report Template reference
 
@@ -345,17 +351,19 @@ Historical aliases resolve to `VF`, `O2`, `3` and `EE` for display without chang
 - An accessible workspace
 - Full Environment with selected workspaces
 
-Admins can export/transfer the active workspace's Report Templates and Auto-calculated Fields, plus workspaces they can access. Super-admins can also include global configuration and Full Environment content. Template and field packages preselect a destination workspace with the same name as their source, where available, and allow more destinations to be selected.
+Admins can export/transfer the active workspace's Dashboards, Report Templates and Auto-calculated Fields, plus complete workspaces they can access. Super-admins can also export App Config and a Full Environment. Dashboard, template and field packages preselect a destination workspace with the same name as their source, where available, and allow one or more accessible destinations to be selected.
+
+A Full Environment always contains App Config and the complete database/input content, Dashboard definitions, Report Templates and Auto-calculated Fields for every selected workspace. **Include generated Reports, Chart Sets and Dashboard PPT jobs** controls whether their `output/` trees are included. At least one workspace is required.
 
 Exports run as disk-backed jobs and show estimated progress. The ZIP download starts when package creation finishes.
 
 ### Import workflow
 
-1. Select a Dashboard Analytic ZIP.
-2. Wait for upload progress.
-3. Review detected content and overwrite warnings.
+1. Select a Dashboard Analytic ZIP and wait for its disk-backed upload.
+2. Review the manifest-detected content, affected workspaces and overwrite warnings.
+3. For Dashboard, Report Template or Auto-calculated Field packages, choose one or more accessible destination workspaces; a matching source name is preselected when available.
 4. Confirm import.
-5. Follow processing progress.
+5. Follow the background import in the floating task card.
 
 Workspace replacement is automatic: the application closes the target when required, imports the replacement, and removes obsolete old files only after success.
 
@@ -370,7 +378,7 @@ Workspace replacement is automatic: the application closes the target when requi
 
 The dialog remembers the last destination. Active state is restored after page reload, resumable reception tolerates temporary connection cuts and contacting can be cancelled.
 
-Complete unimported packages appear in **Recovered transfer packages** with content, workspaces, creation time, size, Import and Delete actions. Incomplete remnants are removed automatically.
+For super-admins, complete unimported packages appear in **Recovered transfer packages** with content, workspaces, creation time, size, Import and Delete actions. Incomplete remnants are removed automatically.
 
 ## Database Management
 
@@ -384,20 +392,21 @@ In **Backup**, select one or more content types:
 
 - **Configuration Content: Application database** stores the shared application configuration.
 - **Workspace Content: Workspace Database** stores the selected workspace SQLite databases.
+- **Workspace Content: Dashboards** stores one JSON file with every Dashboard definition and its comments for each selected workspace.
 - **Workspace Content: Report Templates** stores one CSV file for each Report Template.
 - **Workspace Content: Auto-calculated Fields** stores one JSON file containing every selected workspace definition.
 - **Workspace Content: Input** stores raw dataset files when explicitly selected.
 - **Workspace Content: Output** stores generated Reports, Chart Sets and Dashboard PowerPoint jobs when explicitly selected.
 
-Application database, Workspace Database, Report Templates and Auto-calculated Fields are selected by default. Input and Output are opt-in. Selecting any workspace content reveals **Workspaces to include**, containing only workspaces you can access. Report Template CSV files use `workspaces/<workspace name>/report-templates/` in Backup and Export ZIPs; this portable path is independent from the application's internal workspace folder name. Use **Backup folder** and **Browse** to choose the server-visible destination, then use **Backup Now** to create a ZIP in the background from the current content and workspace selection. Content, workspace and folder selections are saved for the scheduler without enabling it; the job appears in the floating background-task card and keeps the Admin panel in place.
+Application database, Workspace Database, Dashboards, Report Templates and Auto-calculated Fields are selected by default. Input and Output are opt-in. Selecting any workspace content reveals **Workspaces to include**, containing only workspaces you can access. Dashboard JSON and Report Template CSV files use `workspaces/<workspace name>/dashboards/` and `workspaces/<workspace name>/report-templates/` in Backup and Export ZIPs; these portable paths are independent from the application's internal workspace folder name. Use **Backup folder** and **Browse** to choose the server-visible destination, then use **Backup Now** to create a ZIP in the background from the current content and workspace selection. Content, workspace and folder selections are saved for the scheduler without enabling it; the job appears in the floating background-task card and keeps the Admin panel in place.
 
 In **Restore**, choose a server-visible **Backup folder** and one of its ZIP files. The application reads the selected backup's manifest to detect its granular content and affected workspace names, with a structural fallback for older ZIPs, then shows a structured overwrite confirmation grouped into **Configuration Content** and **Workspace Content**. Choose the individual parts to restore only after reviewing that existing data will be replaced. Restore work also runs in the floating background-task card. The ZIP selector refreshes after an immediate backup and periodically while Admin remains open, so completed scheduled backups appear without a page reload.
 
 Enable the schedule to select hourly, daily, weekly or monthly execution. Weekly schedules expose a weekday selector and monthly schedules expose a day-of-month selector.
 
-Set **Retention backups** to keep a maximum number of ZIPs; the scheduler removes the oldest successful backups after creating a newer one. The default storage directory is `data/scheduled-backups`. **Browse** opens a server-side directory picker limited to the application `data` tree, so it reflects directories visible to the host or Docker container rather than the browser's computer. It can create a folder before selecting it.
+Set **Retention backups** to keep a maximum number of ZIPs; the scheduler removes the oldest successful backups after creating a newer one. The default storage directory is `APP_DATA_DIR/scheduled-backups`. **Browse** opens a server-side directory picker limited to `APP_DATA_DIR`, so it reflects directories visible to the host or Docker container rather than the browser's computer. It can create a folder before selecting it.
 
-The status line reports the stored backup count and size, the most recent successful backup and the next scheduled run. Scheduled backups use the same chosen content and workspace selection as the Backup panel. Select Input and/or Output when raw datasets, reports or Chart Sets must be included. Scheduled backups complement infrastructure backups and portable Export packages.
+The status line reports the stored backup count and size, the most recent successful backup and the next scheduled run. Scheduled backups use the same chosen content and workspace selection as the Backup panel. Select Input and/or Output when raw datasets, Reports, Chart Sets or Dashboard PPT jobs must be included. Scheduled backups complement infrastructure backups and portable Export packages.
 
 ### Database Viewer
 
@@ -406,7 +415,7 @@ The status line reports the stored backup count and size, the most recent succes
 Tables are grouped by ownership:
 
 - **Config Tables**: global application configuration.
-- **Workspace Tables**: templates registry, datasets, profiles, logs and unified generated jobs.
+- **Workspace Tables**: templates, datasets, profiles, logs, workspace state, Dashboard selections, Dashboard selected rows, Dashboard PPT jobs and unified classic generated jobs.
 - **Individual dataset rows**: one materialised table per dataset.
 - **Combined CDR rows**: reporting acceleration tables by CDR type.
 
@@ -416,19 +425,22 @@ The **Report Templates** table is the active workspace's `report_templates` tabl
 
 Capabilities:
 
-- server-side pagination;
+- 100-row server-side pagination with First/Previous/Next/Last;
 - Excel-style distinct-value filters;
 - active-filter chips;
 - row editing and deletion;
 - orphaned materialisation cleanup.
 
-Database edits affect the active workspace immediately. Use Export first when changing production data manually.
+Saving or deleting a row clears analysis caches so later Dashboard and Reporting requests use the new value. Database edits affect the active workspace immediately. Use Export first when changing production data manually.
 
 ## Datasets Management
 
-- Review dataset ID, filename, kind, status and ownership.
-- Rename datasets.
-- Use Workspace for processing, preview and deletion actions.
+- Review dataset ID, editable name, stored path, uploader, upload time and last update.
+- Rename a dataset inline; queued and processing rows remain locked until their current work finishes.
+- Preview any Ready dataset in a separate tab.
+- Open Ready Data, Voice or Speech CDRs in Datasets Analysis.
+- Apply available VFUK/3UK mappings to an eligible CDR or clear its persisted Vendor mapping.
+- Delete a dataset after confirmation whenever it is not processing; stop active processing from Workspace first.
 
 Datasets Management appears below Database Management in Admin.
 
