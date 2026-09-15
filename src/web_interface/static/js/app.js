@@ -4623,6 +4623,7 @@ function showConfirmDialog(message, options = {}) {
   confirmCancel.textContent = options.cancelLabel || 'Cancel';
   confirmCancel.hidden = options.hideCancel === true;
   const hasSecondary = Boolean(options.secondaryLabel && confirmSecondary);
+  confirmOverlay.classList.toggle('confirm-wide-actions', hasSecondary && options.wideActions === true);
   if (confirmSecondary) {
     confirmSecondary.textContent = options.secondaryLabel || 'Alternative';
     confirmSecondary.hidden = !hasSecondary;
@@ -4648,6 +4649,7 @@ function showConfirmDialog(message, options = {}) {
       window.removeEventListener('keydown', handleKeydown);
       confirmCancel.hidden = false;
       confirmCancel.textContent = 'Cancel';
+      confirmOverlay.classList.remove('confirm-wide-actions');
       if (confirmSecondary) {
         confirmSecondary.hidden = true;
         confirmSecondary.textContent = 'Alternative';

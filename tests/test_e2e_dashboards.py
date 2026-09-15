@@ -98,6 +98,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-library"' not in page.text
     assert 'id="ds-save"' in page.text
     assert '>Save Filters<' in page.text
+    assert page.text.index('id="ds-unapplied-filters-badge"') < page.text.index('id="ds-unsaved-filters-badge"')
     assert page.text.index('id="ds-unsaved-filters-badge"') < page.text.index('id="ds-dashboard-name"')
     assert 'id="confirm-secondary"' in page.text
     assert '>Apply Filters<' in page.text
@@ -129,6 +130,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'hidden_filters' in DashboardDefinition.model_fields
     assert 'slide_comments' in DashboardDefinition.model_fields
     assert 'id="ds-view" class="ds-view-dashboard-action" title="Open the Dashboard viewer" disabled' in page.text
+    assert 'id="ds-generate-ppt" class="ds-generate-ppt-action" title="Generate a PowerPoint presentation for this Dashboard" disabled' in page.text
+    assert page.text.index('id="ds-generate-ppt"') < page.text.index('id="ds-view"')
     assert 'id="ds-preparing"' in page.text
     assert 'id="ds-preparing-title"' in page.text
     assert '>Preparing Dashboard dataset<' in page.text
@@ -176,6 +179,14 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "overlay.addEventListener('click', (event) => { if (event.target === overlay) void requestFinish(); });" in app_script
     assert "window.parent.postMessage({type: 'dashboard-analytic:template-saved'}, window.location.origin);" in app_script
     assert "openTemplateEditor(expandedChart?.focus_row, sourceDefinition)" in dashboard_script
+    assert 'const hasAppliedUnsavedFilterChanges = () => Boolean(' in dashboard_script
+    assert "confirmLabel: 'Use Current Filters'" in dashboard_script
+    assert "secondaryLabel: 'Use Saved Filters'" in dashboard_script
+    assert 'wideActions: true' in dashboard_script
+    assert 'preparation_token: preparationToken' in dashboard_script
+    assert "const preview = node('div', undefined, 'ds-ppt-chart-thumbnail');" in dashboard_script
+    assert 'globalThis.renderDashboardChart(canvas, model);' in dashboard_script
+    assert 'preview.replaceChildren(cachedImage(chart))' in dashboard_script
     assert "card.ondblclick = safe(async event =>" in dashboard_script
     assert "const syncExpandedChartNavigation" in dashboard_script
     assert "navigateExpandedChart(expandedCharts().length - 1)" in dashboard_script
@@ -185,7 +196,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'const closeOnOutsidePointer = (id, close) =>' in dashboard_script
     assert "closeOnOutsidePointer('ds-filter-overlay', closeFilters);" in dashboard_script
     assert "closeOnOutsidePointer('ds-editor-overlay', closeTemplateEditor);" in dashboard_script
-    assert "const updateUnsavedFiltersBadge = () => { $('ds-unsaved-filters-badge').hidden = !hasUnsavedFilterChanges(); };" in dashboard_script
+    assert "$('ds-unapplied-filters-badge').hidden = !hasUnappliedFilterChanges();" in dashboard_script
+    assert "$('ds-unsaved-filters-badge').hidden = !hasUnsavedFilterChanges();" in dashboard_script
     assert "if (!$('ds-filter-overlay').hidden) await closeFilters();" in dashboard_script
     assert "This Dashboard has unsaved changes. Close Adaptative Filters without saving them?" not in dashboard_script
     assert "This Report Template has unsaved changes. Close the editor without saving them?" in dashboard_script
@@ -193,6 +205,17 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "if (templateChanged && expandedChartMode !== 'ppt') await prepare();" in dashboard_script
     assert "event.data?.type === 'dashboard-analytic:template-saved'" in dashboard_script
     chart_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/dashboard_charts.js').read_text(encoding='utf-8')
+    assert 'function legendLayout(legend, fontSize = 15)' in chart_script
+    assert "position = items.length ? String(legend?.position || 'none').toLowerCase() : 'none';" in chart_script
+    assert "left: position === 'left' ? 300 : 70" in chart_script
+    assert "right: position === 'right' ? 1300 : 1540" in chart_script
+    assert "top: position === 'top' ? 80 + rows * rowHeight + 18 : 82" in chart_script
+    assert "bottom: position === 'bottom' ? 900 - rows * rowHeight - 22 : 820" in chart_script
+    assert 'Math.min(250, columnWidth * .72)' in chart_script
+    assert 'function drawOutsideBarLabel(context, value, x, y, colour, size = 12)' in chart_script
+    assert "context.fillStyle = 'rgba(255, 255, 255, 0.94)'" in chart_script
+    assert "context.fillText(`${tick}%`, plot.left - 14, y - 10)" in chart_script
+    assert 'Math.floor((layout.right - left) / Math.max(headers.length, 1))' in chart_script
     assert 'function selectionStartAllowed(canvas, event)' in chart_script
     assert 'return logicalY >= 90;' in chart_script
     assert "canvas.classList.toggle('ds-chart-selection-blocked', !selectionStartAllowed(canvas, event));" in chart_script
@@ -201,23 +224,28 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'applyDateBounds(payload.date_bounds)' in dashboard_script
     assert 'function datePicker(key, label)' in dashboard_script
     assert "previous.addEventListener('click', () => { month.setMonth(month.getMonth() - 1); render(); });" in dashboard_script
-    assert "button.addEventListener('click', () => { input.value = iso; definition[key] = iso; wrapper.classList.toggle('ds-date-picker-unsaved', hasUnsavedDate(key)); menu.hidden = true; filterChanged(); });" in dashboard_script
+    assert "button.addEventListener('click', () => { input.value = iso; definition[key] = iso; updateFilterControlState(wrapper, dateState(key), true); menu.hidden = true; filterChanged(); });" in dashboard_script
     assert 'const current = (selected || available).filter(Boolean);' in dashboard_script
-    assert "const hasUnsavedFilter = field => !sameFilterValues(definition?.filters?.[field], savedDashboardDefinition().filters?.[field]);" in dashboard_script
-    assert "const hasUnsavedSource = kind => !sameFilterValues(definition?.datasets?.[kind], savedDashboardDefinition().datasets?.[kind]);" in dashboard_script
-    assert "const hasUnsavedScope = () => String(definition?.scope || '') !== String(savedDashboardDefinition().scope || '');" in dashboard_script
+    assert "const filterControlState = (current, applied, saved, equal = sameFilterValues) =>" in dashboard_script
+    assert "if (!equal(current, applied)) return 'unapplied';" in dashboard_script
+    assert "return equal(applied, saved) ? '' : 'applied-unsaved';" in dashboard_script
+    assert "const sourceState = kind => filterControlState(" in dashboard_script
+    assert "const hasUnappliedFilterChanges = () =>" in dashboard_script
     assert "const host = node('label', label, 'ds-source-filter')" in dashboard_script
-    assert "facet.classList.toggle('ds-filter-unsaved', hasUnsavedFilter(field));" in dashboard_script
-    assert "wrapper.classList.toggle('ds-date-picker-unsaved', hasUnsavedDate(key));" in dashboard_script
+    assert "updateFilterControlState(facet, filterState(field));" in dashboard_script
+    assert "updateFilterControlState(wrapper, dateState(key), true);" in dashboard_script
     assert 'savedDefinition = definitionFingerprint(definition); updateDirtyState(); sources(); facets(); library();' in dashboard_script
     assert 'await prepare();' in dashboard_script
     assert 'if (next.length === current.length && next.every(value => current.includes(value))) return;' in dashboard_script
     assert 'function filterChanged() {' in dashboard_script
     assert "status('Filter changes are ready to apply.');" in dashboard_script
-    assert 'const cached = preparedPayloads.get(preparedPayloadKey(activeId, definitionFingerprint(definition)));' in dashboard_script
+    assert 'const cached = preparedPayloads.get(preparedPayloadKey(activeId, preparedStateFingerprint(definition)));' in dashboard_script
     assert 'if (preparing && cached && currentFilterState !== preparingFilterState)' in dashboard_script
     assert "status('Restored the previously prepared filters.');" in dashboard_script
     assert 'const preparedPayloadKey = (id, fingerprint) =>' in dashboard_script
+    assert 'const preparedStateFingerprint = value =>' in dashboard_script
+    assert 'delete preparedDefinition.name;' in dashboard_script
+    assert 'delete preparedDefinition.slide_comments;' in dashboard_script
     assert 'entries.push({fingerprint, token: payload.token});' in dashboard_script
     assert 'const selectionStateFingerprint = value =>' in dashboard_script
     assert 'appliedSelectionState = selectionStateFingerprint(definition);' in dashboard_script
@@ -246,6 +274,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "window.location.assign(target.href);" in dashboard_script
     assert "$('ds-apply-filters').disabled = !definition || filterStateFingerprint(definition) === appliedFilterState || filterActionBusy;" in dashboard_script
     assert "const dashboardStatuses = new Map();" in dashboard_script
+    assert 'const dashboardPreparationTokens = new Map();' in dashboard_script
+    assert "if (!dashboardPreparationTokens.has(id)) dashboardStatuses.set(id, value);" in dashboard_script
+    assert "bind('ds-generate-ppt', async () => {" in dashboard_script
     assert "window.setInterval(refreshDashboardStatuses, 2000);" in dashboard_script
     assert "let previousDashboardName = '';" in app_script
     assert 'if (dashboardName && dashboardName !== previousDashboardName)' in app_script
@@ -270,6 +301,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "thread_name_prefix='e2e-dashboard-data'," in dashboard_module
     dashboard_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
     assert '.e2e-dashboards .ds-unsaved-filters-badge' in dashboard_css
+    assert '.e2e-dashboards .ds-unapplied-filters-badge' in dashboard_css
+    assert '.ds-scope-control.ds-filter-applied-unsaved select' in dashboard_css
+    assert '.ds-date-picker.ds-date-picker-applied-unsaved>input' in dashboard_css
     assert '.e2e-dashboards .ds-dashboard-close::after' in dashboard_css
     assert '.e2e-dashboards .ds-dashboard-close{background:linear-gradient(135deg,#e5989b,#f2b8b9)' in dashboard_css
     assert '.e2e-dashboards .ds-dashboard-view{background:linear-gradient(145deg,#167957,#29ae7d)' in dashboard_css
@@ -279,7 +313,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "bind('ds-viewer-refresh',prepare);" in dashboard_script
     assert 'async function restorePrepared(id) {' in dashboard_script
     assert 'const preparedPayloads = new Map();' in dashboard_script
+    assert 'const restoreRememberedPrepared = async id =>' in dashboard_script
     assert 'const inMemory = preparedPayloads.get(preparedPayloadKey(id, fingerprint));' in dashboard_script
+    assert 'if (await restoreRememberedPrepared(activeId))' in dashboard_script
     assert 'if (inMemory?.fingerprint === fingerprint) { applyPreparedPayload(inMemory.payload); return true; }' in dashboard_script
     assert "api(`/prefetched/${encodeURIComponent(id)}`)" in dashboard_script
     assert "api(`/prepared/${encodeURIComponent(cachedEntry.token)}`)" in dashboard_script
@@ -290,7 +326,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "bind('ds-refresh',prepare);" not in dashboard_script
     assert 'const setPreparationRows = payload =>' in dashboard_script
     assert 'setPreparationRows(payload);' in dashboard_script
-    assert 'setPreparationRows(prepared);' in dashboard_script
+    assert 'applyPreparedPayload(cached.payload);' in dashboard_script
     assert "['Universe Dataset', universe, 'ds-preparing-universe-label']" in dashboard_script
     assert "['Filtered Universe', filtered, 'ds-preparing-filtered-label']" in dashboard_script
     assert 'rows.hidden = !rows.textContent;' in dashboard_script
@@ -312,12 +348,23 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '.ds-dashboard-status-rendering{' in dashboard_css
     assert '.ds-chart-controls button:not(:disabled){cursor:pointer!important}' in dashboard_css
     assert '.ds-preparing .ds-preparing-universe-label{color:#60408d}' in dashboard_css
-    assert '.ds-preparing .ds-preparing-filtered-label{color:#086b71}' in dashboard_css
+    assert '.ds-preparing .ds-preparing-filtered-label{color:#d7a921}' in dashboard_css
     assert '.e2e-dashboards .ds-chart-zoom-reset svg' in dashboard_css
     assert '.e2e-dashboards .ds-chart-data{width:2rem;min-width:2rem;height:2rem;min-height:2rem}' in dashboard_css
     assert '.ds-source-filter.ds-filter-unsaved select,.ds-source-filter.ds-filter-unsaved .multiselect-trigger' in dashboard_css
     assert '.ds-date-picker.ds-date-picker-unsaved>input,.ds-facet.ds-filter-unsaved .multiselect-trigger' in dashboard_css
-    assert '.e2e-dashboards .ds-view-dashboard-action{margin-left:auto;' in dashboard_css
+    assert '.e2e-dashboards .ds-generate-ppt-action{' in dashboard_css
+    assert ':is(.ds-view-dashboard-action,.ds-generate-ppt-action)::before{width:1.35rem' in dashboard_css
+    assert '#ds-apply-filters::before' in dashboard_css
+    assert '#ds-save::before' in dashboard_css
+    assert '#ds-clear-filters::before' in dashboard_css
+    assert '#ds-last-saved-filters::before' in dashboard_css
+    assert 'id="ds-filter-close-action"' in page.text
+    assert '#ds-filter-close-action[hidden]{display:none!important}' in dashboard_css
+    assert "bind('ds-filter-close-action', closeFilters);" in dashboard_script
+    assert '#ds-add-filter::before' in dashboard_css
+    assert '#ds-ppt-jobs-delete-all::before' in dashboard_css
+    assert '.e2e-dashboards .ds-ppt-charts-filters::before{' in dashboard_css
     assert '#ds-filter-float .ds-filter-help{margin:26px 0 5px}' in dashboard_css
     assert '#ds-filter-float .ds-data-panel>summary{pointer-events:none;cursor:default}' in dashboard_css
     assert "panel.querySelector('summary').tabIndex = -1;" in dashboard_script
@@ -385,7 +432,25 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
         time.sleep(0.05)
     assert client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]['state'] == 'ready'
 
-    queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt')
+    with core.repository.connection() as connection:
+        connection.execute('UPDATE dataset_profiles SET vendor_mapping_applied = 1')
+    export_payload = json.loads(json.dumps(payload))
+    export_payload['scope'] = 'multivendor'
+    prepared = client.post(
+        f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}', json=export_payload,
+    )
+    assert prepared.status_code == 200, prepared.text
+    prepared_payload = prepared.json()
+    for slide in prepared_payload['slides']:
+        for chart in slide['charts']:
+            if chart['available']:
+                rendered = client.get(f"/api/e2e-dashboards/chart/{prepared_payload['token']}/{chart['index']}")
+                assert rendered.status_code == 200, rendered.text
+
+    queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
+        'definition': export_payload,
+        'preparation_token': prepared_payload['token'],
+    })
     assert queued.status_code == 202, queued.text
     job_id = queued.json()['job_id']
     job = None
@@ -399,9 +464,12 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     assert job['slides'] == 2
     assert job['charts'] == 3
     assert job['nr_mode'] == 'NSA'
+    assert job['scope'] == 'Multivendor Comparison'
     assert job['template'] == 'Dashboard test'
     assert re.fullmatch(r'\d{8}_\d{6}', job['timestamp'])
-    assert job['filters'] == ['CDR Data: sample.csv', 'City: London']
+    assert job['filters'] == [
+        'CDR Data: sample.csv', 'Date: 2026-09-01 to 2026-09-03', 'City: London',
+    ]
     assert job['duration_seconds'] is not None
     background_groups = client.get('/api/background-tasks').json()['groups']
     background_task = next(
@@ -429,6 +497,7 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     assert manifest['dashboard_id'] == dashboard_id
     assert re.fullmatch(r'[0-9a-f]{64}', manifest['preview_fingerprint'])
     assert manifest['definition']['filters'] == {'City': ['London']}
+    assert manifest['definition']['scope'] == 'multivendor'
     assert len(manifest['charts']) == 3
     assert manifest['charts'][0]['entry_index'] == 0
     assert manifest['charts'][0]['focus_row'] == 0

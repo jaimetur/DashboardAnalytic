@@ -1651,6 +1651,9 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .report-multicampaign-error { margin: 0.9rem 0 0; color: #b23b3b; font-weight: 700; }
 @media (max-width: 720px) { .report-multicampaign-groups { grid-template-columns: 1fr; } }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.35rem; flex-wrap: wrap; }
+.confirm-overlay.confirm-wide-actions .confirm-panel { width: min(92vw, 680px); }
+.confirm-overlay.confirm-wide-actions .confirm-actions { flex-wrap: nowrap; }
+.confirm-overlay.confirm-wide-actions .confirm-actions > button { flex: 0 0 auto; white-space: nowrap; }
 .confirm-cancel { cursor: pointer; color: #44515d; box-shadow: 0 8px 20px rgba(18, 32, 43, 0.08); }
 .change-password-cancel { background: linear-gradient(135deg, #e8eef2, #d4e0e6); border-color: rgba(68, 81, 93, 0.28); color: #263946; }
 .doc-page { display: grid; min-width: 0; max-width: 100%; }

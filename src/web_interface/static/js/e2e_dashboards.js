@@ -3,7 +3,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const config = JSON.parse($('ds-config').textContent);
-  let dashboards = {}, activeId = '', definition = null, savedDefinition = '', appliedFilterState = '', appliedSelectionState = '', prepared = null, slideIndex = 0;
+  let dashboards = {}, activeId = '', definition = null, savedDefinition = '', appliedFilterState = '', appliedSelectionState = '', appliedDashboardDefinition = null, prepared = null, slideIndex = 0;
   let sequence = 0, timer, controller, preparing = null, preparingFilterState = '', dirty = false, filterActionBusy = false, dataIndex = 0, dataPage = 0, dataToken = '', dataEndpoint = '', dataRequest = 0;
   const dataPages = new Map();
   const dataColumnFilters = new Map();
@@ -16,6 +16,10 @@
   const renderedChartPayloads = new Map();
   const preparedPayloads = new Map();
   const dashboardStatuses = new Map();
+  // A prepare request returns before the server-side chart cache is fully
+  // rendered. Do not let status polling replace this transient state with the
+  // previously-ready persisted Dashboard.
+  const dashboardPreparationTokens = new Map();
   let dashboardStatusRefreshing = false;
   let expandedChartRequest = 0;
   let backgroundPreparationToken = '';
@@ -95,6 +99,12 @@
     return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalize(value[key])]));
   };
   const definitionFingerprint = value => JSON.stringify(canonicalize(canonicalDashboardDefinition(value)));
+  const preparedStateFingerprint = value => {
+    const preparedDefinition = canonicalDashboardDefinition(value);
+    delete preparedDefinition.name;
+    delete preparedDefinition.slide_comments;
+    return JSON.stringify(canonicalize(preparedDefinition));
+  };
   const hasUnsavedDashboardChanges = (ignoredFields = []) => {
     if (!definition) return false;
     const current = canonicalDashboardDefinition(definition);
@@ -109,10 +119,20 @@
     catch (_error) { return {}; }
   };
   const sameFilterValues = (left, right) => JSON.stringify([...(left || [])].sort()) === JSON.stringify([...(right || [])].sort());
-  const hasUnsavedFilter = field => !sameFilterValues(definition?.filters?.[field], savedDashboardDefinition().filters?.[field]);
-  const hasUnsavedSource = kind => !sameFilterValues(definition?.datasets?.[kind], savedDashboardDefinition().datasets?.[kind]);
-  const hasUnsavedScope = () => String(definition?.scope || '') !== String(savedDashboardDefinition().scope || '');
-  const hasUnsavedDate = key => String(definition?.[key] || '') !== String(savedDashboardDefinition()[key] || '');
+  const appliedDefinition = () => appliedDashboardDefinition || savedDashboardDefinition();
+  const filterControlState = (current, applied, saved, equal = sameFilterValues) => {
+    if (!equal(current, applied)) return 'unapplied';
+    return equal(applied, saved) ? '' : 'applied-unsaved';
+  };
+  const filterState = field => filterControlState(definition?.filters?.[field], appliedDefinition().filters?.[field], savedDashboardDefinition().filters?.[field]);
+  const sourceState = kind => filterControlState(definition?.datasets?.[kind], appliedDefinition().datasets?.[kind], savedDashboardDefinition().datasets?.[kind]);
+  const stringFilterState = (current, applied, saved) => filterControlState(String(current || ''), String(applied || ''), String(saved || ''), (left, right) => left === right);
+  const scopeState = () => stringFilterState(definition?.scope, appliedDefinition().scope, savedDashboardDefinition().scope);
+  const dateState = key => stringFilterState(definition?.[key], appliedDefinition()[key], savedDashboardDefinition()[key]);
+  const updateFilterControlState = (element, state, date = false) => {
+    element.classList.toggle(date ? 'ds-date-picker-unsaved' : 'ds-filter-unsaved', state === 'unapplied');
+    element.classList.toggle(date ? 'ds-date-picker-applied-unsaved' : 'ds-filter-applied-unsaved', state === 'applied-unsaved');
+  };
   const filterStateFingerprint = value => JSON.stringify(canonicalize({
     datasets: value?.datasets || {}, scope: value?.scope || 'single', filters: value?.filters || {},
     custom_fields: value?.custom_fields || [], hidden_filters: value?.hidden_filters || [],
@@ -123,6 +143,11 @@
     hidden_filters: value?.hidden_filters || [], date_from: value?.date_from || null, date_to: value?.date_to || null,
   }));
   const hasUnsavedFilterChanges = () => Boolean(definition) && filterStateFingerprint(definition) !== filterStateFingerprint(savedDashboardDefinition());
+  const hasUnappliedFilterChanges = () => Boolean(definition) && filterStateFingerprint(definition) !== filterStateFingerprint(appliedDefinition());
+  const hasAppliedUnsavedFilterChanges = () => Boolean(
+    prepared?.token && appliedFilterState
+    && appliedFilterState !== filterStateFingerprint(savedDashboardDefinition())
+  );
   const updateFilterActionState = () => {
     $('ds-save').disabled = !hasUnsavedFilterChanges() || filterActionBusy;
     $('ds-apply-filters').disabled = !definition || filterStateFingerprint(definition) === appliedFilterState || filterActionBusy;
@@ -139,8 +164,20 @@
   };
   const safe = fn => async (...args) => { try { await fn(...args); } catch (error) { if (error.name !== 'AbortError') { status(error.message); if (window.showInfoDialog) window.showInfoDialog(error.message, {title:'E2E Dashboards',tone:'error'}); } } };
   const bind = (id, fn) => $(id).addEventListener('click', safe(fn));
-  const setViewEnabled = enabled => { $('ds-view').disabled = !enabled; };
-  const updateUnsavedFiltersBadge = () => { $('ds-unsaved-filters-badge').hidden = !hasUnsavedFilterChanges(); };
+  const dashboardIsReady = id => Boolean(id && !dashboardPreparationTokens.has(id) && dashboardStatuses.get(id)?.state === 'ready');
+  const syncDashboardPptActions = () => {
+    document.querySelectorAll('[data-dashboard-ppt-id]').forEach(button => {
+      button.disabled = !dashboardIsReady(button.dataset.dashboardPptId);
+    });
+    const activePptReady = dashboardIsReady(activeId) && Boolean(prepared?.slides?.length);
+    $('ds-generate-ppt').disabled = !activePptReady;
+    $('ds-viewer-export-ppt').disabled = !activePptReady;
+  };
+  const setViewEnabled = enabled => { $('ds-view').disabled = !enabled; syncDashboardPptActions(); };
+  const updateUnsavedFiltersBadge = () => {
+    $('ds-unapplied-filters-badge').hidden = !hasUnappliedFilterChanges();
+    $('ds-unsaved-filters-badge').hidden = !hasUnsavedFilterChanges();
+  };
   const updateDirtyState = () => { dirty = hasUnsavedDashboardChanges(); updateFilterActionState(); updateUnsavedFiltersBadge(); return dirty; };
   const updateSavedDefinition = updates => {
     try {
@@ -177,13 +214,43 @@
     document.body.style.overflow = [...document.querySelectorAll('.ds-overlay')].some(el => !el.hidden) ? 'hidden' : '';
   }
   async function queueDashboardPptExport(id, item) {
-    const accepted = await window.showConfirmDialog(
-      `Generate a PowerPoint presentation for “${item.name}”?`,
-      {title: 'Generate PPT Dashboard', confirmLabel: 'Generate PPT'},
-    );
-    if (!accepted) return;
-    await api(`/${encodeURIComponent(id)}/export-ppt`, 'POST');
-    status(`Dashboard PPT export queued for “${item.name}”.`);
+    let exportDefinition = item;
+    let preparationToken = null;
+    if (id === activeId && prepared?.token) {
+      const appliedDefinition = appliedDashboardDefinition || definition;
+      if (hasAppliedUnsavedFilterChanges()) {
+        const choice = await window.showConfirmDialog(
+          'This Dashboard has applied filters that have not been saved. Which filters should the PowerPoint use?',
+          {
+            title: 'Choose PowerPoint filters',
+            confirmLabel: 'Use Current Filters',
+            secondaryLabel: 'Use Saved Filters',
+            cancelLabel: 'Cancel',
+            wideActions: true,
+          },
+        );
+        if (choice === 'confirm') {
+          exportDefinition = JSON.parse(JSON.stringify(appliedDefinition));
+          preparationToken = prepared.token;
+        } else if (choice === 'secondary') exportDefinition = savedDashboardDefinition();
+        else return;
+      } else {
+        exportDefinition = JSON.parse(JSON.stringify(appliedDefinition));
+        preparationToken = prepared.token;
+      }
+    }
+    if (!hasAppliedUnsavedFilterChanges()) {
+      const accepted = await window.showConfirmDialog(
+        `Generate a PowerPoint presentation for “${exportDefinition.name}”?`,
+        {title: 'Generate PPT Dashboard', confirmLabel: 'Generate PPT'},
+      );
+      if (!accepted) return;
+    }
+    await api(`/${encodeURIComponent(id)}/export-ppt`, 'POST', {
+      definition: exportDefinition,
+      preparation_token: preparationToken,
+    });
+    status(`Dashboard PPT export queued for “${exportDefinition.name}”.`);
     await refreshDashboardPptJobs();
     window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
   }
@@ -259,9 +326,7 @@
       badge.textContent = value.label;
       badge.title = value.detail || value.label;
     });
-    document.querySelectorAll('[data-dashboard-ppt-id]').forEach(button => {
-      button.disabled = (dashboardStatuses.get(button.dataset.dashboardPptId)?.state || 'checking') !== 'ready';
-    });
+    syncDashboardPptActions();
   };
   const jobAction = (label, className, handler, glyph = '') => {
     const button = node('button', glyph, className); button.type = 'button';
@@ -381,6 +446,14 @@
       ? `Cached charts generated for Dashboard "${job.dashboard_name}". Click any chart to enlarge it.`
       : 'This PowerPoint job does not contain any Dashboard charts.';
     setDashboardPptChartBadges(job);
+    const thumbnailJobId = dashboardPptChartsJobId;
+    const cachedImage = chart => {
+      const image = node('img');
+      image.src = chart.image_url;
+      image.alt = chart.title || 'Dashboard chart';
+      image.loading = 'lazy';
+      return image;
+    };
     const cards = dashboardPptCharts.map((chart, index) => {
       const card = node('article', undefined, 'report-chart-card');
       card.tabIndex = 0;
@@ -389,11 +462,24 @@
       heading.append(node('h3', chart.title || 'Dashboard chart'));
       heading.append(node('p', [chart.slide ? `Slide ${chart.slide}` : '', chart.source || '', chart.chart_type || ''].filter(Boolean).join(' · ')));
       head.append(heading);
-      const image = node('img');
-      image.src = chart.image_url;
-      image.alt = chart.title || 'Dashboard chart';
-      image.loading = 'lazy';
-      card.append(head, image);
+      const preview = node('div', undefined, 'ds-ppt-chart-thumbnail');
+      if (chart.payload_url && globalThis.renderDashboardChart) {
+        const canvas = node('canvas');
+        canvas.setAttribute('role', 'img');
+        canvas.setAttribute('aria-label', chart.title || 'Dashboard chart');
+        preview.append(canvas);
+        fetch(chart.payload_url, {cache: 'no-store', credentials: 'same-origin'})
+          .then(async response => {
+            const model = await response.json();
+            if (!response.ok) throw new Error(model.detail || 'Unable to load chart model.');
+            if (dashboardPptChartsJobId !== thumbnailJobId || !canvas.isConnected) return;
+            globalThis.renderDashboardChart(canvas, model);
+          })
+          .catch(() => {
+            if (dashboardPptChartsJobId === thumbnailJobId && preview.isConnected) preview.replaceChildren(cachedImage(chart));
+          });
+      } else preview.append(cachedImage(chart));
+      card.append(head, preview);
       card.addEventListener('click', safe(() => showDashboardPptChart(index)));
       card.addEventListener('keydown', safe(async event => {
         if (!['Enter', ' '].includes(event.key)) return;
@@ -634,7 +720,9 @@
     dashboardStatusRefreshing = true;
     try {
       const payload = await api('/statuses');
-      for (const [id, value] of Object.entries(payload || {})) dashboardStatuses.set(id, value);
+      for (const [id, value] of Object.entries(payload || {})) {
+        if (!dashboardPreparationTokens.has(id)) dashboardStatuses.set(id, value);
+      }
       for (const id of [...dashboardStatuses.keys()]) if (!dashboards[id]) dashboardStatuses.delete(id);
       renderDashboardStatuses();
     } catch (_error) { /* A status refresh must not interrupt Dashboard work. */ }
@@ -661,7 +749,7 @@
   }
   function selectControl(label, values, selected, change, multiple = false, isUnsaved = () => false) {
     const host = node('label', label, 'ds-source-filter'), select = document.createElement('select');
-    const updateUnsavedState = () => host.classList.toggle('ds-filter-unsaved', isUnsaved());
+    const updateUnsavedState = () => updateFilterControlState(host, isUnsaved());
     select.multiple = multiple; if (multiple) { select.size = Math.max(2, Math.min(4, values.length)); select.dataset.multiselectAutoClose = '1000'; }
     if (!values.length) { select.disabled = true; select.multiple = false; select.size = 1; select.append(option('', 'No datasets available')); }
     for (const [value, text] of values) { const opt = option(value, text); opt.selected = multiple ? selected.map(String).includes(String(value)) : value === selected; select.append(opt); }
@@ -686,7 +774,7 @@
   const calendarMonthValue = value => value.getFullYear() * 12 + value.getMonth();
   function datePicker(key, label) {
     const wrapper = node('div', undefined, 'ds-date-picker');
-    wrapper.classList.toggle('ds-date-picker-unsaved', hasUnsavedDate(key));
+    updateFilterControlState(wrapper, dateState(key), true);
     const captionLabel = node('span', label, 'ds-date-picker-label');
     const input = document.createElement('input');
     input.type = 'text'; input.readOnly = true; input.value = definition[key] || ''; input.placeholder = 'Select date'; input.setAttribute('aria-label', label);
@@ -714,7 +802,7 @@
         const iso = calendarDateValue(value);
         const button = node('button', String(day), 'ds-date-picker-day'); button.type = 'button'; button.disabled = Boolean((minimum && value < minimum) || (maximum && value > maximum));
         button.classList.toggle('is-selected', input.value === iso);
-        button.addEventListener('click', () => { input.value = iso; definition[key] = iso; wrapper.classList.toggle('ds-date-picker-unsaved', hasUnsavedDate(key)); menu.hidden = true; filterChanged(); });
+        button.addEventListener('click', () => { input.value = iso; definition[key] = iso; updateFilterControlState(wrapper, dateState(key), true); menu.hidden = true; filterChanged(); });
         days.append(button);
       }
     };
@@ -727,10 +815,10 @@
   }
   function sources() {
     const host = $('ds-sources'); host.replaceChildren();
-    for (const kind of ['data','voice','speech']) host.append(selectControl(`CDR ${kind[0].toUpperCase()+kind.slice(1)}`, config.datasets[kind].map(row => [String(row.id), `${row.file_name} · ${row.row_count} rows`]), definition.datasets[kind] || [], values => { definition.datasets[kind] = values.map(Number); }, true, () => hasUnsavedSource(kind)));
+    for (const kind of ['data','voice','speech']) host.append(selectControl(`CDR ${kind[0].toUpperCase()+kind.slice(1)}`, config.datasets[kind].map(row => [String(row.id), `${row.file_name} · ${row.row_count} rows`]), definition.datasets[kind] || [], values => { definition.datasets[kind] = values.map(Number); }, true, () => sourceState(kind)));
     const scopeControl = $('ds-scope');
     scopeControl.value = definition.scope || 'single';
-    scopeControl.closest('.ds-scope-control').classList.toggle('ds-filter-unsaved', hasUnsavedScope());
+    updateFilterControlState(scopeControl.closest('.ds-scope-control'), scopeState());
     for (const [key, label] of [['date_from', 'Date from'], ['date_to', 'Date to']]) host.append(datePicker(key, label));
     globalThis.setupCustomMultiSelects?.();
   }
@@ -741,7 +829,7 @@
     const fields = new Set([...facetFields.filter(field => !hidden.has(identity(field))), ...Object.keys(definition.filters), ...definition.custom_fields]);
     for (const field of fields) {
       const facet = node('div', undefined, 'ds-facet');
-      facet.classList.toggle('ds-filter-unsaved', hasUnsavedFilter(field));
+      updateFilterControlState(facet, filterState(field));
       const selected = definition.filters[field];
       const custom = definition.custom_fields.includes(field);
       const label = custom ? field : field === 'technology_primary' ? 'Technology' : field.replaceAll('_',' ').replace(/\b\w/g, letter => letter.toUpperCase());
@@ -766,7 +854,7 @@
         const current = (selected || available).filter(Boolean);
         if (next.length === current.length && next.every(value => current.includes(value))) return;
         definition.filters[field] = next;
-        facet.classList.toggle('ds-filter-unsaved', hasUnsavedFilter(field));
+        updateFilterControlState(facet, filterState(field));
         filterChanged();
       };
       facet.append(values);
@@ -793,7 +881,7 @@
   }
   const preparedPayloadKey = (id, fingerprint) => `${id}:${fingerprint}`;
   const rememberPrepared = payload => {
-    const fingerprint = definitionFingerprint(definition), entry = {payload, fingerprint};
+    const fingerprint = preparedStateFingerprint(definition), entry = {payload, fingerprint};
     preparedPayloads.set(preparedPayloadKey(activeId, fingerprint), entry);
     try {
       const stored = JSON.parse(sessionStorage.getItem(preparedStorageKey) || 'null');
@@ -802,6 +890,31 @@
       sessionStorage.setItem(preparedStorageKey, JSON.stringify({dashboardId: activeId, entries: entries.slice(-8)}));
     } catch (_) { /* Session storage is optional. */ }
   };
+  const restoreRememberedPrepared = async id => {
+    const fingerprint = preparedStateFingerprint(definition);
+    const inMemory = preparedPayloads.get(preparedPayloadKey(id, fingerprint));
+    if (inMemory?.fingerprint === fingerprint) { applyPreparedPayload(inMemory.payload); return true; }
+    let stored;
+    try { stored = JSON.parse(sessionStorage.getItem(preparedStorageKey) || 'null'); }
+    catch (_) { return false; }
+    const cachedEntry = stored?.dashboardId === id
+      ? (stored.entries || []).find(item => item?.fingerprint === fingerprint) || (stored.fingerprint === fingerprint ? stored : null)
+      : null;
+    if (!cachedEntry?.token) return false;
+    try {
+      const payload = await api(`/prepared/${encodeURIComponent(cachedEntry.token)}`);
+      if (activeId !== id || preparedStateFingerprint(definition) !== fingerprint) return false;
+      applyPreparedPayload(payload);
+      return true;
+    } catch (error) {
+      if (!error.message.includes('expired')) return false;
+      try {
+        const entries = (stored.entries || []).filter(item => item?.fingerprint !== fingerprint);
+        sessionStorage.setItem(preparedStorageKey, JSON.stringify({...stored, entries}));
+      } catch (_) { /* Session storage is optional. */ }
+      return false;
+    }
+  };
   const forgetPrepared = () => {
     for (const key of preparedPayloads.keys()) if (key.startsWith(`${activeId}:`)) preparedPayloads.delete(key);
     try { sessionStorage.removeItem(preparedStorageKey); } catch (_) { /* Session storage is optional. */ }
@@ -809,7 +922,11 @@
   const setPreparationRows = payload => {
     const rows = $('ds-preparing-rows');
     const formatCounts = counts => Object.entries(counts || {}).map(([kind, count]) => `${kind.toUpperCase()}: ${Number(count).toLocaleString()} rows`).join(' · ');
-    const universe = formatCounts(payload?.universe_rows);
+    const selectedUniverse = Object.fromEntries(['data', 'voice', 'speech'].map(kind => [kind,
+      (config.datasets?.[kind] || []).filter(dataset => (definition?.datasets?.[kind] || []).includes(dataset.id))
+        .reduce((total, dataset) => total + Number(dataset.row_count || 0), 0),
+    ]));
+    const universe = formatCounts(payload?.universe_rows || selectedUniverse);
     const filtered = formatCounts(payload?.rows);
     rows.replaceChildren();
     for (const [label, counts, className] of [
@@ -824,9 +941,12 @@
     rows.hidden = !rows.textContent;
   };
   const applyPreparedPayload = payload => {
-    prepared = payload; facetOptions = payload.options; facetFields = payload.filter_fields || facetFields; availableFields = payload.available_fields || payload.custom_fields || []; const datesChanged = applyDateBounds(payload.date_bounds); if (datesChanged) sources(); facetsLoading = false;
+    prepared = payload; facetOptions = payload.options; facetFields = payload.filter_fields || facetFields; availableFields = payload.available_fields || payload.custom_fields || []; applyDateBounds(payload.date_bounds); facetsLoading = false;
     appliedFilterState = filterStateFingerprint(definition);
     appliedSelectionState = selectionStateFingerprint(definition);
+    appliedDashboardDefinition = JSON.parse(JSON.stringify(definition));
+    updateDirtyState();
+    sources();
     if (hasOpenFacetMenu()) refreshFacetsAfterMenusClose(); else facets();
     setViewEnabled(Boolean(payload.slides?.length));
     setPreparationRows(payload);
@@ -835,19 +955,7 @@
     if (!$('ds-viewer').hidden) renderSlide();
   };
   async function restorePrepared(id) {
-    const fingerprint = definitionFingerprint(definition);
-    const inMemory = preparedPayloads.get(preparedPayloadKey(id, fingerprint));
-    if (inMemory?.fingerprint === fingerprint) { applyPreparedPayload(inMemory.payload); return true; }
-    let cached;
-    try { cached = JSON.parse(sessionStorage.getItem(preparedStorageKey) || 'null'); }
-    catch (_) { return false; }
-    const cachedEntry = cached?.dashboardId === id
-      ? (cached.entries || []).find(item => item?.fingerprint === fingerprint) || (cached.fingerprint === fingerprint ? cached : null)
-      : null;
-    if (cachedEntry?.token) {
-      try { applyPreparedPayload(await api(`/prepared/${encodeURIComponent(cachedEntry.token)}`)); return true; }
-      catch (error) { if (error.message.includes('expired')) forgetPrepared(); }
-    }
+    if (await restoreRememberedPrepared(id)) return true;
     for (let attempt = 0; attempt < 480 && activeId === id; attempt += 1) {
       try {
         applyPreparedPayload(await api(`/prefetched/${encodeURIComponent(id)}`));
@@ -863,11 +971,10 @@
   function filterChanged() {
     updateDirtyState();
     const currentFilterState = filterStateFingerprint(definition);
-    const cached = preparedPayloads.get(preparedPayloadKey(activeId, definitionFingerprint(definition)));
+    const cached = preparedPayloads.get(preparedPayloadKey(activeId, preparedStateFingerprint(definition)));
     if (preparing && cached && currentFilterState !== preparingFilterState) {
       clearTimeout(timer); ++sequence; controller?.abort(); controller = null; preparing = null; preparingFilterState = ''; filterActionBusy = false; updateFilterActionState();
-      dismissPreparationStatus(); facetsLoading = false; sources(); facets(); prepared = cached.payload; setViewEnabled(Boolean(prepared.slides?.length)); setPreparationRows(prepared); setPreparationState('ready');
-      if (!$('ds-viewer').hidden) renderSlide();
+      dismissPreparationStatus(); facetsLoading = false; applyPreparedPayload(cached.payload);
       status('Restored the previously prepared filters.');
       return;
     }
@@ -894,14 +1001,16 @@
       try { await preparing; } catch (error) { if (error.name !== 'AbortError') throw error; }
       return prepare();
     }
-    const cached = preparedPayloads.get(preparedPayloadKey(activeId, definitionFingerprint(definition)));
-    if (cached) { applyPreparedPayload(cached.payload); status('Restored the previously prepared filters.'); return cached.payload; }
+    if (await restoreRememberedPrepared(activeId)) { status('Restored the previously prepared filters.'); return prepared; }
     let preparationToken = '';
+    let requestSequence = 0;
+    const dashboardIdAtStart = activeId;
     const pending = (async () => {
-    clearTimeout(timer); const current = ++sequence; controller?.abort(); controller = new AbortController();
+    clearTimeout(timer); const current = requestSequence = ++sequence; controller?.abort(); controller = new AbortController();
     dismissPreparationStatus(); preparationToken = backgroundPreparationToken = `prepare-${current}`; preparingFilterState = filterStateFingerprint(definition);
+    dashboardPreparationTokens.set(dashboardIdAtStart, current);
     emitPreparationStatus('processing', needsDataPreparation ? 'Building the filtered Dashboard selection' : 'Rendering Dashboard charts for the current scope', preparationToken);
-    setDashboardStatus(activeId, needsDataPreparation ? 'loading-data' : 'rendering', needsDataPreparation ? 'Loading data' : 'Rendering');
+    setDashboardStatus(dashboardIdAtStart, needsDataPreparation ? 'loading-data' : 'rendering', needsDataPreparation ? 'Loading data' : 'Rendering');
     filterActionBusy = true; updateFilterActionState();
     facetsLoading = true;
     if (!hasOpenFacetMenu()) facets();
@@ -917,14 +1026,17 @@
       if (current !== sequence) return;
       applyPreparedPayload(payload);
       window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
-    } catch (error) { if (current === sequence && error.name !== 'AbortError') { setDashboardStatus(activeId, 'error', 'Error'); facetsLoading = false; facets(); setViewEnabled(false); setPreparationState('hidden'); $('ds-rows').textContent = error.message; if (!$('ds-viewer').hidden) $('ds-charts').replaceChildren(node('div',error.message,'ds-empty')); } throw error; }
+    } catch (error) { if (current === sequence && error.name !== 'AbortError') { setDashboardStatus(dashboardIdAtStart, 'error', 'Error'); facetsLoading = false; facets(); setViewEnabled(false); setPreparationState('hidden'); $('ds-rows').textContent = error.message; if (!$('ds-viewer').hidden) $('ds-charts').replaceChildren(node('div',error.message,'ds-empty')); } throw error; }
     })();
     preparing = pending;
     try { return await pending; }
     finally {
       if (backgroundPreparationToken === preparationToken) dismissPreparationStatus();
       if (preparing === pending) { preparing = null; preparingFilterState = ''; }
+      if (dashboardPreparationTokens.get(dashboardIdAtStart) === requestSequence) dashboardPreparationTokens.delete(dashboardIdAtStart);
       filterActionBusy = false; updateFilterActionState();
+      syncDashboardPptActions();
+      void refreshDashboardStatuses();
     }
   }
   async function openDashboard(id) {
@@ -932,7 +1044,7 @@
     dismissPreparationStatus();
     clearTimeout(timer); ++sequence; controller?.abort(); preparing = null;
     stopPresentation();
-    activeId = id; $('ds-viewer-export-ppt').dataset.dashboardPptId = id; $('ds-viewer-export-ppt').disabled = (dashboardStatuses.get(id)?.state || 'checking') !== 'ready'; definition = canonicalDashboardDefinition(dashboards[id]); savedDefinition = definitionFingerprint(definition); dirty = false; prepared = null; appliedFilterState = ''; appliedSelectionState = ''; facetOptions = {}; availableFields = []; slideIndex = 0; setViewEnabled(false); rememberOpen(id);
+    activeId = id; $('ds-viewer-export-ppt').dataset.dashboardPptId = id; definition = canonicalDashboardDefinition(dashboards[id]); savedDefinition = definitionFingerprint(definition); dirty = false; prepared = null; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; facetOptions = {}; availableFields = []; slideIndex = 0; setViewEnabled(false); rememberOpen(id);
     resetViewerForDashboard();
     $('ds-name').value = definition.name; setNrMode(definition.technology || definition.template_technology, definition.template);
     $('ds-filter-panel').hidden = false; $('ds-dashboard-name').textContent = `Dashboard: ${definition.name}`; sources(); facets(); library(); status(''); if (!await restorePrepared(id)) await prepare();
@@ -997,7 +1109,7 @@
   }
   bind('ds-import',() => $('ds-import-file').click());
   $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name); const id = dashboardId(), result = await api(`/${id}`,'PUT',payload.definition); dashboards[id] = result.definition; await openDashboard(id); $('ds-import-file').value = ''; });
-  function closeDashboard() { delete $('ds-viewer-export-ppt').dataset.dashboardPptId; $('ds-viewer-export-ppt').disabled = true; clearTimeout(facetsRefreshTimer); dismissPreparationStatus(); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; savedDefinition = ''; appliedFilterState = ''; appliedSelectionState = ''; prepared = null; dirty = false; updateUnsavedFiltersBadge(); setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
+  function closeDashboard() { delete $('ds-viewer-export-ppt').dataset.dashboardPptId; $('ds-viewer-export-ppt').disabled = true; clearTimeout(facetsRefreshTimer); dismissPreparationStatus(); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; savedDefinition = ''; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; prepared = null; dirty = false; updateUnsavedFiltersBadge(); setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; $('ds-dashboard-name').textContent = 'Dashboard: —'; $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
   $('ds-name').oninput = () => { if (definition) { definition.name = $('ds-name').value; updateDirtyState(); } };
   $('ds-nr-mode').onchange = () => {
     const selected = setNrMode($('ds-nr-mode').value);
@@ -1063,7 +1175,7 @@
     }
     definition.scope = selectedScope;
     sources();
-    $('ds-scope').closest('.ds-scope-control').classList.toggle('ds-filter-unsaved', hasUnsavedScope());
+    updateFilterControlState($('ds-scope').closest('.ds-scope-control'), scopeState());
     filterChanged();
   });
   bind('ds-add-filter',() => { const field = $('ds-custom-field').value; if (!field) return; const defaultField = facetFields.find(item => identity(item) === identity(field)); if (defaultField) definition.hidden_filters = definition.hidden_filters.filter(item => identity(item) !== identity(defaultField)); else definition.custom_fields.push(field); facets(); filterChanged(); });
@@ -1085,6 +1197,10 @@
   });
   bind('ds-viewer-refresh',prepare);
   bind('ds-viewer-export-ppt', async () => {
+    const item = dashboards[activeId];
+    if (item) await queueDashboardPptExport(activeId, item);
+  });
+  bind('ds-generate-ppt', async () => {
     const item = dashboards[activeId];
     if (item) await queueDashboardPptExport(activeId, item);
   });

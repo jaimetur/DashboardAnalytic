@@ -1120,17 +1120,23 @@ def test_cdf_uses_emphasised_lines_when_only_one_campaign_is_rendered() -> None:
     assert {item[2] for item in draw_legend.call_args.args[1]} == {4}
 
 
-def test_cdf_trims_only_a_converged_tail_after_three_curves_reach_98_percent() -> None:
+def test_cdf_trims_only_after_80_percent_of_curves_exceed_99_percent() -> None:
+    # With four curves, ceil(4 * 80%) requires all four curves.  Three
+    # converged curves must retain the fourth curve's meaningful tail.
     assert _cdf_terminal_x_maximum(
-        [[1.0] * 99 + [10.0], [2.0] * 99 + [10.0], [3.0] * 99 + [10.0], [4.0] * 70 + [30.0] * 30],
+        [[1.0] * 100 + [10.0], [2.0] * 100 + [10.0], [3.0] * 100 + [10.0], [4.0] * 70 + [30.0] * 31],
         1.0, 30.0, minimum_separation=0.08,
-    ) == 3.0
-    # Fewer than three completed curves never make a tail eligible.
-    assert _cdf_terminal_x_maximum([[1.0, 2.0, 3.0, 10.0], [1.0, 2.0, 3.0, 10.0]], 1.0, 10.0) == 10.0
-    # Exactly 98% does not satisfy the strictly-above-98% threshold.
+    ) == 30.0
+    # With five curves, ceil(5 * 80%) requires four curves and permits the
+    # converged tail to be removed once four are above 99%.
     assert _cdf_terminal_x_maximum(
-        [[1.0] * 99 + [10.0], [2.0] * 99 + [10.0], [3.0] * 98 + [10.0, 11.0]],
-        1.0, 10.0,
+        [[1.0] * 100 + [10.0], [2.0] * 100 + [10.0], [3.0] * 100 + [10.0], [4.0] * 100 + [10.0], [5.0] * 70 + [30.0] * 31],
+        1.0, 30.0, minimum_separation=0.08,
+    ) == 4.0
+    # Exactly 99% does not satisfy the strictly-above-99% threshold.
+    assert _cdf_terminal_x_maximum(
+        [[1.0] * 99 + [10.0], [2.0] * 99 + [10.0], [3.0] * 99 + [10.0]],
+        1.0, 10.0, minimum_separation=0.08,
     ) == 10.0
 
 
@@ -1804,10 +1810,12 @@ def test_cdf_hover_targets_use_the_same_clipped_domain_as_the_renderer() -> None
     entry = CatalogEntry(
         13, 'POLQA CDF', '', '', '', 'CDR-Speech', 'LQ', 'CDF Line', 'Operator × Campaign', '', 'Operator', 'Campaign', 'Top',
     )
-    values = list(range(1, 100)) + [1000]
+    # 100 / 101 samples exceeds 99%, so the common terminal value remains
+    # inside the clipped renderer domain under the stricter CDF policy.
+    values = list(range(1, 101)) + [1000]
     frame = pd.DataFrame({
-        'Session_Type': ['WhatsApp CALL'] * 300, 'Operator': ['VF'] * 100 + ['3'] * 100 + ['EE'] * 100,
-        'Campaign': ['UK_Q2_2026'] * 300, 'LQ': values * 3,
+        'Session_Type': ['WhatsApp CALL'] * 303, 'Operator': ['VF'] * 101 + ['3'] * 101 + ['EE'] * 101,
+        'Campaign': ['UK_Q2_2026'] * 303, 'LQ': values * 3,
     })
 
     targets = catalog_chart_hover_targets(frame, entry)
@@ -1816,8 +1824,8 @@ def test_cdf_hover_targets_use_the_same_clipped_domain_as_the_renderer() -> None
     left, top, width, height = _cdf_plot_geometry('top')
     vf_last = [target for target in targets if target['legend'].startswith('VF')][-1]
 
-    assert vf_last['x'] == pytest.approx(left + (99.0 - low) / (high - low) * width)
-    assert vf_last['y'] == pytest.approx(top + height - 99 / 100 * height)
+    assert vf_last['x'] == pytest.approx(left + (100.0 - low) / (high - low) * width)
+    assert vf_last['y'] == pytest.approx(top + height - 100 / 101 * height)
     assert all(target['x'] <= left + width for target in targets)
 
 

@@ -3533,9 +3533,10 @@ def _cdf_terminal_x_maximum(
     fallback: float,
     minimum_separation: float = 0.015,
 ) -> float:
-    """Trim only a converged CDF tail that is already effectively complete."""
+    """Trim only a converged tail after most CDF curves are effectively complete."""
     if len(series_values) < 2:
         return fallback
+    required_completed_curves = math.ceil(len(series_values) * 0.80)
     # Sweep the already sorted curves once. The previous implementation
     # rescanned every point for every candidate x value, making large CDFs
     # quadratic.
@@ -3559,7 +3560,7 @@ def _cdf_terminal_x_maximum(
                 heapq.heappush(events, (values[counts[series_index]], series_index))
         for series_index in touched:
             level = counts[series_index] / len(series_values[series_index])
-            if level > 0.98:
+            if level > 0.99:
                 completed.add(series_index)
                 heapq.heappush(minimum_levels, (level, series_index, counts[series_index]))
                 heapq.heappush(maximum_levels, (-level, series_index, counts[series_index]))
@@ -3568,11 +3569,12 @@ def _cdf_terminal_x_maximum(
         while maximum_levels and counts[maximum_levels[0][1]] != maximum_levels[0][2]:
             heapq.heappop(maximum_levels)
         # Never crop meaningful CDF data. A tail is eligible only once at
-        # least three curves have *exceeded* 98%, and those completed curves
-        # have themselves converged too closely to distinguish. A coincident
-        # pair alone must never truncate other still-separated CDF curves.
+        # least 80% of curves (rounded up) have *exceeded* 99%, and those
+        # completed curves have themselves converged too closely to
+        # distinguish. A coincident minority must never truncate other
+        # still-separated CDF curves.
         completed_curves_converged = (
-            len(completed) >= 3
+            len(completed) >= required_completed_curves
             and minimum_levels
             and maximum_levels
             and -maximum_levels[0][0] - minimum_levels[0][0] < minimum_separation

@@ -60,6 +60,11 @@ class DashboardDefinition(BaseModel):
     date_to: date | None = None
 
 
+class DashboardPptExportRequest(BaseModel):
+    definition: DashboardDefinition | None = None
+    preparation_token: str | None = None
+
+
 class DashboardComments(BaseModel):
     slide_comments: dict[str, list[str]] = Field(default_factory=dict)
 
@@ -395,6 +400,9 @@ def install_dashboard_routes(core):
         snapshot = snapshots.get(str(preview.get('token') or '')) if preview else None
         if snapshot is None:
             raise ValueError('The Dashboard dataset is not prepared.')
+        return validate_dashboard_export_snapshot(snapshot, task_repository)
+
+    def validate_dashboard_export_snapshot(snapshot, task_repository):
         missing = [
             index for index, entry in enumerate(snapshot.entries)
             if entry.source_kind in selected_sources(snapshot.definition, task_repository)
@@ -630,14 +638,43 @@ def install_dashboard_routes(core):
             background=BackgroundTask(archive.unlink, missing_ok=True),
         )
 
-    def queue_dashboard_ppt_export(dashboard_id, user, *, reuse_job_id=None):
+    def queue_dashboard_ppt_export(
+        dashboard_id, user, *, reuse_job_id=None, export_definition: DashboardDefinition | None = None,
+        preparation_token: str | None = None,
+    ):
         task_repository = bound_repository()
+        workspace = workspace_key()
         with lock:
-            raw_definition = read_dashboards(task_repository).get(dashboard_id)
-        if not isinstance(raw_definition, dict):
+            preparing = any(
+                task.get('workspace') == workspace and task.get('dashboard_id') == dashboard_id
+                for task in direct_preparation_tasks.values()
+            )
+        if preparing:
+            raise HTTPException(409, 'The Dashboard dataset is still being prepared.')
+        with lock:
+            stored_definition = read_dashboards(task_repository).get(dashboard_id)
+        if not isinstance(stored_definition, dict):
             raise HTTPException(404, 'Dashboard not found.')
+        raw_definition = (
+            export_definition.model_dump(mode='json')
+            if export_definition is not None else stored_definition
+        )
         try:
-            snapshot = dashboard_export_snapshot(dashboard_id, raw_definition, task_repository)
+            if preparation_token:
+                with lock:
+                    snapshot = snapshots.get(preparation_token)
+                if (
+                    snapshot is None
+                    or snapshot.workspace != workspace
+                    or snapshot.owner not in {user.username, '*'}
+                ):
+                    raise ValueError('The prepared Dashboard has expired. Refresh it before generating the PPT.')
+                if export_definition is not None and snapshot.definition.scope != export_definition.scope:
+                    raise ValueError('The prepared Dashboard Scope no longer matches the selected Scope.')
+                snapshot = validate_dashboard_export_snapshot(snapshot, task_repository)
+                raw_definition = snapshot.definition.model_dump(mode='json')
+            else:
+                snapshot = dashboard_export_snapshot(dashboard_id, raw_definition, task_repository)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         dashboard_name = str(raw_definition.get('name') or dashboard_id)
@@ -697,8 +734,15 @@ def install_dashboard_routes(core):
         return job_id
 
     @app.post('/api/e2e-dashboards/{dashboard_id}/export-ppt')
-    def export_dashboard_ppt(dashboard_id: str, user=Depends(dashboard_user)):
-        job_id = queue_dashboard_ppt_export(dashboard_id, user)
+    def export_dashboard_ppt(
+        dashboard_id: str, request: DashboardPptExportRequest | None = None,
+        user=Depends(dashboard_user),
+    ):
+        job_id = queue_dashboard_ppt_export(
+            dashboard_id, user,
+            export_definition=request.definition if request else None,
+            preparation_token=request.preparation_token if request else None,
+        )
         return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
 
     @app.get('/api/e2e-dashboards/ppt-jobs')
@@ -1544,6 +1588,7 @@ def install_dashboard_routes(core):
         with lock:
             direct_preparation_tasks[preparation_id] = {
                 'id': preparation_id, 'workspace': workspace, 'name': definition.name,
+                'dashboard_id': dashboard_id,
                 'rendering_only': rendering_only, 'cancellation': cancellation,
             }
         try:
@@ -2520,7 +2565,12 @@ def install_dashboard_routes(core):
         result = {}
         with lock:
             latest_jobs = {}
+            direct_jobs = {}
             for dashboard_id in dashboards:
+                direct_jobs[dashboard_id] = next((
+                    dict(task) for task in direct_preparation_tasks.values()
+                    if task.get('workspace') == workspace and task.get('dashboard_id') == dashboard_id
+                ), None)
                 matching_jobs = [
                     job for job in prefetch_jobs.values()
                     if job.get('workspace') == workspace and job.get('dashboard_id') == dashboard_id
@@ -2531,6 +2581,14 @@ def install_dashboard_routes(core):
                     matching_jobs, key=lambda candidate: float(candidate.get('created_at') or 0), default={}
                 ))
         for dashboard_id, job in latest_jobs.items():
+            direct_job = direct_jobs.get(dashboard_id)
+            if direct_job is not None:
+                rendering_only = bool(direct_job.get('rendering_only'))
+                result[dashboard_id] = {
+                    'state': 'rendering' if rendering_only else 'loading-data',
+                    'label': 'Rendering' if rendering_only else 'Loading data',
+                }
+                continue
             if not job or job.get('status') == 'cancelled':
                 result[dashboard_id] = {'state': 'not-cached', 'label': 'Not cached'}
                 continue
