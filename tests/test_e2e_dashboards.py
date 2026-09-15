@@ -855,17 +855,24 @@ def test_relaunching_dashboard_ppt_uses_the_modified_report_template(client):
     dashboard_id = 'updated-template-ppt'
     assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
 
+    with core.repository.connection() as connection:
+        connection.execute('UPDATE dataset_profiles SET vendor_mapping_applied = 1')
+    export_payload = {**payload, 'scope': 'multivendor'}
     deadline = time.monotonic() + 15
-    prepared = client.get(f'/api/e2e-dashboards/prefetched/{dashboard_id}')
-    while time.monotonic() < deadline:
-        if prepared.status_code == 200:
-            break
-        time.sleep(0.05)
-        prepared = client.get(f'/api/e2e-dashboards/prefetched/{dashboard_id}')
-
+    prepared = client.post(
+        f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}', json=export_payload,
+    )
     assert prepared.status_code == 200, prepared.text
+    prepared_payload = prepared.json()
+    for slide in prepared_payload['slides']:
+        for chart in slide['charts']:
+            if chart['available']:
+                assert client.get(
+                    f"/api/e2e-dashboards/chart/{prepared_payload['token']}/{chart['index']}"
+                ).status_code == 200
     queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
-        'preparation_token': prepared.json()['token'],
+        'definition': export_payload,
+        'preparation_token': prepared_payload['token'],
     })
     assert queued.status_code == 202, queued.text
     job_id = queued.json()['job_id']
@@ -881,7 +888,9 @@ def test_relaunching_dashboard_ppt_uses_the_modified_report_template(client):
             time.sleep(0.05)
         return job
 
-    assert wait_for_job()['status'] == 'ready'
+    original_job = wait_for_job()
+    assert original_job['status'] == 'ready'
+    assert original_job['scope'] == 'Multivendor Comparison'
     original_charts = client.get(
         f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json'
     ).json()['charts']
@@ -897,11 +906,18 @@ def test_relaunching_dashboard_ppt_uses_the_modified_report_template(client):
     deadline = time.monotonic() + 15
     job = wait_for_job()
     assert job['status'] == 'ready', job
+    assert job['scope'] == 'Multivendor Comparison'
     refreshed_charts = client.get(job['charts_api_url']).json()['charts']
     assert refreshed_charts[0]['title'] == 'Updated rate'
     refreshed_model = client.get(refreshed_charts[0]['payload_url'])
     assert refreshed_model.status_code == 200, refreshed_model.text
     assert refreshed_model.json()['title'] == 'Updated rate'
+    with core.repository.connection() as connection:
+        output_path = Path(connection.execute(
+            'SELECT output_path FROM dashboard_ppt_jobs WHERE id = ?', (job_id,),
+        ).fetchone()['output_path'])
+    manifest = json.loads((output_path.parent / 'dashboard-charts' / 'manifest.json').read_text(encoding='utf-8'))
+    assert manifest['definition']['scope'] == 'multivendor'
     assert client.get(job['download_url']).content.startswith(b'PK')
 
 

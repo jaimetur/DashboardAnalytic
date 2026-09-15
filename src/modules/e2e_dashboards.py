@@ -1254,7 +1254,28 @@ def install_dashboard_routes(core):
         row = dashboard_ppt_job(task_repository, job_id)
         if row is None or str(row['status']) not in {'ready', 'failed', 'stopped'}:
             raise HTTPException(409, 'This Dashboard export cannot be relaunched.')
-        queue_dashboard_ppt_export(str(row['dashboard_id']), user, reuse_job_id=job_id)
+        try:
+            manifest_path = Path(str(row['output_path'])).parent / 'dashboard-charts' / 'manifest.json'
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            retry_definition = DashboardDefinition.model_validate(manifest['definition'])
+        except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+            # Failed or stopped Jobs may not have reached manifest creation.
+            # Preserve at least their recorded Scope while rebuilding the
+            # current saved Dashboard universe.
+            raw_definition = read_dashboards(task_repository).get(str(row['dashboard_id']))
+            if not isinstance(raw_definition, dict):
+                raise HTTPException(404, 'Dashboard not found.')
+            raw_definition = dict(raw_definition)
+            raw_definition['scope'] = (
+                'multivendor' if str(row['scope'] or '').casefold() == 'multivendor' else 'single'
+            )
+            retry_definition = DashboardDefinition.model_validate(
+                runtime_dashboard_definition(raw_definition, task_repository)
+            )
+        queue_dashboard_ppt_export(
+            str(row['dashboard_id']), user, reuse_job_id=job_id,
+            export_definition=retry_definition,
+        )
         return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=202)
 
     @app.post('/api/e2e-dashboards/ppt-jobs/delete-all')
