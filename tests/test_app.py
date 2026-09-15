@@ -579,7 +579,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert 'Import / Export / Transfer' in admin_response.text
     assert 'Transfer to other server' in admin_response.text
     assert 'Config</option>' in admin_response.text
-    assert 'Config + Report Templates' in admin_response.text
+    assert 'Full Environment (App Config + Dashboards + Report Templates + Auto-calculated Fields + Selected Workspaces)' in admin_response.text
     assert 'Workspace: Default' in admin_response.text
 
     config_response = client.get('/admin/import-export/export?export_target=config')
@@ -653,6 +653,9 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert 'import_export_notice=' in imported_response.headers['location']
     assert any(workspace.name == 'Default' for workspace in app_module.workspace_registry.list())
 
+    app_module.repository.set_workspace_state('e2e_dashboards_v2', json.dumps({
+        'exported-dashboard': {'name': 'Exported Dashboard'},
+    }))
     full_response = client.get('/admin/import-export/export?export_target=full-environment')
     assert full_response.status_code == 200
     with zipfile.ZipFile(BytesIO(full_response.content)) as archive:
@@ -661,6 +664,9 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
         assert len(full_manifest['workspaces']) == 1
         assert full_manifest['workspaces'][0]['id'] == 'default'
         assert {'super', 'admin', 'demo'} <= set(full_manifest['workspaces'][0]['access_usernames'])
+        assert 'dashboards' in full_manifest['workspace_components']
+        exported_dashboards = json.loads(archive.read('workspaces/Default/dashboards/dashboards.json'))
+        assert exported_dashboards['dashboards']['exported-dashboard']['name'] == 'Exported Dashboard'
         assert 'config/workspace-registry.db' not in archive.namelist()
     full_import_response = client.post(
         '/admin/import-export/import',

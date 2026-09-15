@@ -42,6 +42,7 @@ from src.modules.repository import Repository
 KINDS = ('data', 'voice', 'speech')
 STATE_KEY = 'e2e_dashboards_v2'
 LEGACY_STATE_KEY = 'e2e_dashboard_sets_v1'
+DEFAULT_FILTERS_MIGRATION_KEY = 'e2e_dashboard_default_filters_v6'
 DASHBOARD_PPT_JOBS_TABLE = 'dashboard_ppt_jobs'
 
 
@@ -65,6 +66,11 @@ class DashboardPptExportRequest(BaseModel):
     preparation_token: str | None = None
 
 
+class DashboardFilterOptionsRequest(BaseModel):
+    definition: DashboardDefinition
+    field: str = Field(min_length=1, max_length=255)
+
+
 class DashboardComments(BaseModel):
     slide_comments: dict[str, list[str]] = Field(default_factory=dict)
 
@@ -84,11 +90,15 @@ def identity(value):
 
 FILTER_COLUMNS = {
     'Market': ('market',), 'Operator': ('operator',), 'Vendor': ('vendor',),
-    'Region': ('region',), 'City': ('city',), 'Session Type': ('session_type',),
-    'Technology': ('technology_primary', 'technology'),
-    'RAT': ('RAT', 'RAT_A', 'Sample_RAT_A'),
+    'Region': ('Region', 'G_Level_2', 'G Level 2'),
+    'City': ('City', 'G_Level_4', 'G Level 4'), 'Campaign': ('Campaign', 'campaign'),
+    'Session Type': ('session_type',),
+    'RAT': ('RAT_A', 'RAT', 'Sample_RAT_A'),
+    'Call Status': ('Call_Status', 'call_status', 'status'),
 }
-ADAPTATIVE_FILTER_FIELDS = tuple(FILTER_COLUMNS)
+ADAPTATIVE_FILTER_FIELDS = (
+    'Market', 'Operator', 'Vendor', 'Region', 'City', 'Campaign', 'RAT', 'Session Type', 'Call Status',
+)
 DASHBOARD_RENDER_CACHE_VERSION = 1
 DASHBOARD_SELECTION_ROW_LIMIT = 25_000
 DASHBOARD_PROFILE_SELECTION_THRESHOLD = 100_000
@@ -100,7 +110,7 @@ DASHBOARD_PROJECTION_MMAP_SIZE = 4 * 1024 ** 3
 DASHBOARD_CHART_MODEL_CACHE_VERSION = 9
 DASHBOARD_CHART_MODEL_DISK_LIMIT = 500
 DASHBOARD_CHART_RENDER_WORKERS = 3
-DASHBOARD_PREVIEW_MANIFEST_VERSION = 3
+DASHBOARD_PREVIEW_MANIFEST_VERSION = 7
 
 
 def dashboard_cache_dir(workspace: str | Path) -> Path:
@@ -132,7 +142,27 @@ def resolve_filter_column(frame, field):
     columns = {identity(column): column for column in frame.columns}
     aliases = next((values for label, values in FILTER_COLUMNS.items() if identity(label) == identity(field)), (field,))
     candidates = [columns[identity(alias)] for alias in aliases if identity(alias) in columns]
-    return next((column for column in candidates if frame[column].notna().any()), candidates[0] if candidates else None)
+    return next((
+        column for column in candidates
+        if frame[column].fillna('').astype(str).str.strip().ne('').any()
+    ), candidates[0] if candidates else None)
+
+
+def filter_value_series(frame, field):
+    """Resolve geographic aliases per row, skipping empty higher-priority values."""
+    columns = {identity(column): column for column in frame.columns}
+    aliases = next((values for label, values in FILTER_COLUMNS.items() if identity(label) == identity(field)), (field,))
+    candidates = [columns[identity(alias)] for alias in aliases if identity(alias) in columns]
+    if not candidates:
+        return None
+    values = frame[candidates[0]].fillna('').astype(str)
+    if identity(field) in {identity('City'), identity('Region')}:
+        for column in candidates[1:]:
+            empty = values.str.strip().eq('')
+            if not empty.any():
+                break
+            values = values.where(~empty, frame[column].fillna('').astype(str))
+    return values
 
 
 def filter_mask(frame, definition, exclude=None):
@@ -142,10 +172,10 @@ def filter_mask(frame, definition, exclude=None):
     for field, values in definition.filters.items():
         if identity(field) == identity(exclude):
             continue
-        column = resolve_filter_column(frame, field)
-        if column is None:
+        field_values = filter_value_series(frame, field)
+        if field_values is None:
             return pd.Series(False, index=frame.index)
-        mask &= frame[column].fillna('').astype(str).isin(values)
+        mask &= field_values.isin(values)
     if definition.date_from or definition.date_to:
         time_column = next((columns[key] for key in ('eventstarttime', 'teststarttime', 'timestamp', 'datetime', 'date') if key in columns), None)
         if time_column is None:
@@ -554,9 +584,56 @@ def install_dashboard_routes(core):
     def read_dashboards(task_repository):
         stored = task_repository.get_workspace_state(STATE_KEY)
         if stored is None:
-            stored = task_repository.get_workspace_state(LEGACY_STATE_KEY) or '{}'
-            task_repository.set_workspace_state(STATE_KEY, stored)
-        return json.loads(stored or '{}')
+            stored = task_repository.get_workspace_state(LEGACY_STATE_KEY)
+        if stored is None:
+            return {}
+        dashboards = json.loads(stored or '{}')
+        if not isinstance(dashboards, dict):
+            return dashboards
+        reset_defaults = task_repository.get_workspace_state(DEFAULT_FILTERS_MIGRATION_KEY) != '1'
+        migrated = {
+            dashboard_id: normalize_dashboard_filters(definition, reset_defaults=reset_defaults)
+            for dashboard_id, definition in dashboards.items()
+        }
+        if migrated != dashboards or reset_defaults or task_repository.get_workspace_state(STATE_KEY) is None:
+            task_repository.set_workspace_state(STATE_KEY, json.dumps(migrated))
+        if reset_defaults:
+            task_repository.set_workspace_state(DEFAULT_FILTERS_MIGRATION_KEY, '1')
+        return migrated
+
+    def normalize_dashboard_filters(definition, *, reset_defaults=False):
+        """Migrate retired filters and apply the current defaults once per workspace."""
+        if not isinstance(definition, dict):
+            return definition
+        normalized = dict(definition)
+        filters = normalized.get('filters')
+        retired_filter_keys = {identity('Technology'), identity('Zone')}
+        migrated_filters = {}
+        region_values = []
+        for field, values in (filters.items() if isinstance(filters, dict) else []):
+            field_key = identity(field)
+            if field_key == identity('Zone'):
+                region_values.extend(values or [])
+            elif field_key == identity('Region'):
+                region_values = list(values or []) + region_values
+            elif field_key not in retired_filter_keys:
+                migrated_filters[field] = values
+        if region_values:
+            migrated_filters['Region'] = list(dict.fromkeys(region_values))
+        normalized['filters'] = migrated_filters
+        custom_fields = normalized.get('custom_fields')
+        normalized['custom_fields'] = [
+            field for field in custom_fields or []
+            if identity(field) not in retired_filter_keys and identity(field) != identity('Region')
+        ]
+        default_keys = {identity(field) for field in ADAPTATIVE_FILTER_FIELDS}
+        hidden_filters = normalized.get('hidden_filters')
+        normalized['hidden_filters'] = [
+            field for field in hidden_filters or []
+            if identity(field) not in retired_filter_keys
+            and (not reset_defaults or identity(field) not in default_keys)
+        ]
+        return normalized
 
     def catalogue(definition, task_repository=None):
         task_repository = task_repository or core.repository
@@ -589,6 +666,9 @@ def install_dashboard_routes(core):
             'dashboard_workspace_id': core.active_workspace.id,
             'calculated_dimensions': core.calculated_dimensions_json(core.load_workspace_calculated_dimensions()),
             'dashboard_filter_fields': ADAPTATIVE_FILTER_FIELDS,
+            'dashboard_filter_aliases': {
+                field: list(aliases) for field, aliases in FILTER_COLUMNS.items() if len(aliases) > 1
+            },
         })
 
     @app.get('/api/e2e-dashboards')
@@ -1026,7 +1106,7 @@ def install_dashboard_routes(core):
             if any(key != dashboard_id and item['name'].strip().casefold() == definition.name.strip().casefold() for key, item in dashboards.items()):
                 raise HTTPException(409, 'A Dashboard with this name already exists.')
             definition.name = definition.name.strip()
-            saved_definition = definition.model_dump(mode='json')
+            saved_definition = normalize_dashboard_filters(definition.model_dump(mode='json'))
             dashboards[dashboard_id] = saved_definition
             task_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
             task_repository.add_log(user.username, 'save_dashboard', json.dumps({'id': dashboard_id, 'name': definition.name}))
@@ -1095,6 +1175,23 @@ def install_dashboard_routes(core):
         aliases = next((values for label, values in FILTER_COLUMNS.items() if identity(label) == identity(field)), (field,))
         return next((lookup[identity(alias)] for alias in aliases if identity(alias) in lookup), None)
 
+    def filter_sql_value_expression(task_repository, columns, field):
+        """Return a text value expression with row-level fallback aliases."""
+        lookup = {identity(column): column for column in columns}
+        aliases = next((values for label, values in FILTER_COLUMNS.items() if identity(label) == identity(field)), (field,))
+        resolved = list(dict.fromkeys(
+            lookup[identity(alias)] for alias in aliases if identity(alias) in lookup
+        ))
+        if not resolved:
+            return None
+        quote = task_repository._quote_identifier
+        if identity(field) in {identity('City'), identity('Region')}:
+            candidates = ', '.join(
+                f"NULLIF(TRIM(CAST({quote(column)} AS TEXT)), '')" for column in resolved
+            )
+            return f"COALESCE({candidates}, '')"
+        return f"COALESCE(CAST({quote(resolved[0])} AS TEXT), '')"
+
     def nr_mode_sql(columns, technology):
         rat = resolve_sql_column(columns, 'RAT')
         call_modes = [resolve_sql_column(columns, name) for name in ('L1_Call_Mode_A', 'L2_Call_Mode_A')]
@@ -1132,17 +1229,12 @@ def install_dashboard_routes(core):
         for field_name, values in definition.filters.items():
             if identity(field_name) == excluded:
                 continue
-            column = resolve_sql_column(columns, field_name)
-            if column is None or not values:
+            value_expression = filter_sql_value_expression(task_repository, columns, field_name)
+            if value_expression is None or not values:
                 clauses.append('0')
                 continue
             value_placeholders = ', '.join('?' for _ in values)
-            selected_column = (
-                f"COALESCE(CAST({quote(column)} AS TEXT), '')"
-                if any(str(value) == '' for value in values)
-                else quote(column)
-            )
-            clauses.append(f"{selected_column} IN ({value_placeholders})")
+            clauses.append(f"{value_expression} IN ({value_placeholders})")
             params.extend(str(value) for value in values)
         if definition.date_from or definition.date_to:
             date_column = next((resolve_sql_column(columns, candidate) for candidate in ('event_start_time', 'Test_Start_Time', 'Timestamp', 'Date') if resolve_sql_column(columns, candidate)), None)
@@ -1203,26 +1295,32 @@ def install_dashboard_routes(core):
 
     def persistent_selection_key(definition, task_repository, dimensions, selected_by_kind):
         versions = {
-            kind: [
+            kind: sorted([
                 (row['id'], row.get('updated_at'), row.get('processed_at'), row.get('normalization_version'), row.get('row_count'))
                 for row in selected
-            ]
+            ], key=lambda row: row[0])
             for kind, selected in selected_by_kind.items()
         }
         revisions = {kind: task_repository.get_workspace_state(f'combined_reporting_updated_{kind}') for kind in selected_by_kind}
         selection_definition = {
             'technology': definition.technology,
-            'datasets': definition.datasets,
-            'filters': definition.filters,
-            'custom_fields': definition.custom_fields,
-            'hidden_filters': definition.hidden_filters,
+            'datasets': {
+                kind: sorted(set(dataset_ids))
+                for kind, dataset_ids in definition.datasets.items()
+            },
+            'filters': {
+                field: sorted(set(values))
+                for field, values in definition.filters.items()
+            },
+            'custom_fields': sorted(set(definition.custom_fields), key=str.casefold),
+            'hidden_filters': sorted(set(definition.hidden_filters), key=str.casefold),
             'date_from': definition.date_from,
             'date_to': definition.date_to,
         }
         payload = {
             # Scope changes only how charts group the already selected rows.
             # Keep that presentation setting out of the selection cache key.
-            'schema': 4,
+            'schema': 8,
             'definition': selection_definition,
             'versions': versions,
             'combined_revisions': revisions,
@@ -1271,9 +1369,10 @@ def install_dashboard_routes(core):
         definition.date_from = lower if definition.date_from is None or not lower <= definition.date_from <= upper else definition.date_from
         definition.date_to = upper if definition.date_to is None or not lower <= definition.date_to <= upper else definition.date_to
 
-    def profile_filter_options(definition, dimensions, selected_by_kind, fields):
+    def profile_filter_options(definition, dimensions, selected_by_kind, fields, task_repository):
         """Load large-dashboard facet values from selected CDR profiles."""
         options = {field_name: set() for field_name in fields}
+        incomplete_fields = set()
         for selected in selected_by_kind.values():
             for dataset in selected:
                 try:
@@ -1283,18 +1382,57 @@ def install_dashboard_routes(core):
                 lookup = {identity(column): values for column, values in stored.items()} if isinstance(stored, dict) else {}
                 for field_name in fields:
                     aliases = next((values for label, values in FILTER_COLUMNS.items() if identity(label) == identity(field_name)), (field_name,))
-                    for alias in aliases:
-                        values = lookup.get(identity(alias), ())
-                        if isinstance(values, list):
-                            options[field_name].update(str(value) for value in values if value is not None)
+                    resolved = next((
+                        column for alias in aliases
+                        if (column := task_repository.resolve_dataset_row_column_name(int(dataset['id']), alias))
+                    ), None)
+                    if resolved is None:
+                        continue
+                    values = lookup.get(identity(resolved))
+                    if not isinstance(values, list):
+                        incomplete_fields.add(field_name)
+                        continue
+                    options[field_name].update(str(value) for value in values if value is not None)
         dimensions_by_name = {identity(dimension.name): dimension for dimension in dimensions}
         for field_name in fields:
             dimension = dimensions_by_name.get(identity(field_name))
             if dimension:
+                incomplete_fields.discard(field_name)
                 options[field_name].update(str(rule.value) for rule in dimension.rules if str(rule.value).strip())
                 if str(dimension.default).strip():
                     options[field_name].add(str(dimension.default))
             options[field_name].update(str(value) for value in definition.filters.get(field_name, ()) if value is not None)
+        missing_fields = [
+            field_name for field_name in fields
+            if not options[field_name] or field_name in incomplete_fields
+        ]
+        if missing_fields:
+            # Older upload profiles do not contain every Dashboard facet. Read
+            # only the missing catalogues from the narrow combined tables in a
+            # single pass per CDR kind instead of returning empty controls.
+            with task_repository.connection() as connection:
+                for kind, selected in selected_by_kind.items():
+                    columns = task_repository.list_reporting_row_columns(kind)
+                    available = [
+                        (field_name, filter_sql_value_expression(task_repository, columns, field_name))
+                        for field_name in missing_fields
+                    ]
+                    available = [(field_name, expression) for field_name, expression in available if expression is not None]
+                    if not available:
+                        continue
+                    where, params = selection_where(
+                        task_repository, kind, [int(row['id']) for row in selected], definition,
+                        columns=columns,
+                    )
+                    select_clause = ', '.join(
+                        f'json_group_array(DISTINCT {expression}) AS facet_{index}'
+                        for index, (_field_name, expression) in enumerate(available)
+                    )
+                    table = task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))
+                    row = connection.execute(f'SELECT {select_clause} FROM {table} WHERE {where}', params).fetchone()
+                    for index, (field_name, _column) in enumerate(available):
+                        encoded_values = row[f'facet_{index}'] if row else '[]'
+                        options[field_name].update(str(value) for value in json.loads(encoded_values or '[]'))
         return {field_name: sorted(values, key=str.casefold) for field_name, values in options.items()}
 
     def materialize_selection(definition, task_repository, dimensions, selected_by_kind, fields, *, use_profile_options=False):
@@ -1336,7 +1474,9 @@ def install_dashboard_routes(core):
             # catalogue. This avoids wide DISTINCT scans while row counts and
             # chart previews remain exact from the combined reporting tables.
             if use_profile_options:
-                options = profile_filter_options(definition, dimensions, selected_by_kind, fields)
+                options = profile_filter_options(
+                    definition, dimensions, selected_by_kind, fields, task_repository,
+                )
             else:
                 # Active filters need facet values that exclude each field's
                 # own restriction. Aggregate fields sharing a predicate in one
@@ -1351,16 +1491,19 @@ def install_dashboard_routes(core):
                     columns = task_repository.list_reporting_row_columns(kind)
                     table = task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))
                     for excluded, group_fields in facet_groups.items():
-                        available = [(field_name, resolve_sql_column(columns, field_name)) for field_name in group_fields]
-                        available = [(field_name, column) for field_name, column in available if column is not None]
+                        available = [
+                            (field_name, filter_sql_value_expression(task_repository, columns, field_name))
+                            for field_name in group_fields
+                        ]
+                        available = [(field_name, expression) for field_name, expression in available if expression is not None]
                         if not available:
                             continue
                         where, params = selection_where(
                             task_repository, kind, [int(row['id']) for row in selected], definition, exclude=excluded,
                         )
                         select_clause = ', '.join(
-                            f"json_group_array(DISTINCT COALESCE(CAST({task_repository._quote_identifier(column)} AS TEXT), '')) AS facet_{index}"
-                            for index, (_field_name, column) in enumerate(available)
+                            f'json_group_array(DISTINCT {expression}) AS facet_{index}'
+                            for index, (_field_name, expression) in enumerate(available)
                         )
                         row = connection.execute(f'SELECT {select_clause} FROM {table} WHERE {where}', params).fetchone()
                         for index, (field_name, _column) in enumerate(available):
@@ -1378,6 +1521,40 @@ def install_dashboard_routes(core):
                 connection.execute('DELETE FROM dashboard_filter_selection_rows WHERE selection_id = ?', (row['id'],))
                 connection.execute('DELETE FROM dashboard_filter_selections WHERE id = ?', (row['id'],))
             return selection_id, cache_key, materialized, options, row_counts, True
+
+    def load_filter_options(definition, field_name, task_repository):
+        """Load one adaptive filter catalogue without preparing Dashboard charts."""
+        field_name = field_name.strip()
+        entries = validate(definition, task_repository)
+        dimensions = core.load_repository_calculated_dimensions(task_repository)
+        selected_by_kind = selected_sources(definition, task_repository)
+        requested_definition = definition.model_copy(deep=True)
+        known_default = any(identity(field_name) == identity(field) for field in ADAPTATIVE_FILTER_FIELDS)
+        if not known_default and not any(identity(field_name) == identity(field) for field in requested_definition.custom_fields):
+            requested_definition.custom_fields.append(field_name)
+        ensure_filter_projection(requested_definition, task_repository, dimensions, selected_by_kind, entries)
+        values = set()
+        resolved = False
+        with task_repository.connection() as connection:
+            for kind, selected in selected_by_kind.items():
+                columns = task_repository.list_reporting_row_columns(kind)
+                value_expression = filter_sql_value_expression(task_repository, columns, field_name)
+                if value_expression is None:
+                    continue
+                resolved = True
+                where, params = selection_where(
+                    task_repository, kind, [int(row['id']) for row in selected],
+                    requested_definition, exclude=field_name, columns=columns,
+                )
+                table = task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))
+                rows = connection.execute(
+                    f'SELECT DISTINCT {value_expression} AS value '
+                    f'FROM {table} WHERE {where}', params,
+                ).fetchall()
+                values.update(str(row['value']) for row in rows)
+        if not resolved:
+            raise HTTPException(400, f'The selected CDRs do not contain the {field_name} field.')
+        return sorted(values, key=str.casefold)
 
     def build_preview(definition, user, *, workspace: str | None = None, cancelled=None):
         def ensure_not_cancelled():
@@ -1611,6 +1788,15 @@ def install_dashboard_routes(core):
         finally:
             with lock:
                 direct_preparation_tasks.pop(preparation_id, None)
+
+    @app.post('/api/e2e-dashboards/filter-options')
+    def filter_options(request: DashboardFilterOptionsRequest, user=Depends(dashboard_user)):
+        try:
+            task_repository = bound_repository()
+            values = load_filter_options(request.definition, request.field, task_repository)
+            return {'field': request.field.strip(), 'values': values}
+        except (ValueError, KeyError) as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @app.get('/api/e2e-dashboards/prepared/{token}')
     def prepared_preview(token: str, user=Depends(dashboard_user)):
@@ -2670,10 +2856,7 @@ def install_dashboard_routes(core):
                 task_repository = Repository(workspace.database_path, core.repository.global_db_path)
                 # Do not create an empty canonical state during startup: that
                 # would mask a legacy state written by an older application.
-                stored = task_repository.get_workspace_state(STATE_KEY)
-                if stored is None:
-                    stored = task_repository.get_workspace_state(LEGACY_STATE_KEY)
-                dashboards = json.loads(stored or '{}')
+                dashboards = read_dashboards(task_repository)
                 if not isinstance(dashboards, dict):
                     continue
                 for dashboard_id, definition in dashboards.items():

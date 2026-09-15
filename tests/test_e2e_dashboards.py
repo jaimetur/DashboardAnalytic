@@ -54,7 +54,13 @@ def test_filter_empty_missing_and_inclusive_dates():
     assert len(filter_frame(frame, definition(date_from='2026-09-01', date_to='2026-09-01'))) == 1
     assert len(filter_frame(frame, definition(filters={'city': ['London']}))) == 1
     radio = pd.DataFrame({'RAT_A': ['LTE', 'NR'], 'technology_primary': ['4G', '5G']})
-    assert len(filter_frame(radio, definition(filters={'RAT': ['NR'], 'Technology': ['5G']}))) == 1
+    assert len(filter_frame(radio, definition(filters={'RAT': ['NR']}))) == 1
+    assert filter_frame(radio, definition(filters={'Technology': ['5G']})).empty
+    geography = pd.DataFrame({
+        'city': ['', None], 'G_Level_4': ['London', 'Leeds'],
+        'region': ['', None], 'G_Level_2': ['England', 'England'],
+    })
+    assert len(filter_frame(geography, definition(filters={'City': ['London'], 'Region': ['England']}))) == 1
 
 
 def test_dashboard_export_uses_the_admin_import_archive_format(client):
@@ -101,6 +107,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert page.text.index('id="ds-unapplied-filters-badge"') < page.text.index('id="ds-unsaved-filters-badge"')
     assert page.text.index('id="ds-unsaved-filters-badge"') < page.text.index('id="ds-dashboard-name"')
     assert 'id="confirm-secondary"' in page.text
+    assert 'id="confirm-tertiary"' in page.text
     assert '>Apply Filters<' in page.text
     assert page.text.index('>Apply Filters<') < page.text.index('>Save Filters<')
     assert 'id="ds-apply-filters" title="Apply current filters without saving them" disabled' in page.text
@@ -170,12 +177,16 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "savedDefinition = definitionFingerprint(definition); dirty = false;" in dashboard_script
     assert "await warmDashboardModels();" not in dashboard_script
     assert "Rendering Dashboard Charts" in dashboard_script
-    assert "overlay('ds-viewer', true); renderSlide();" in dashboard_script
+    assert "overlay('ds-viewer', true);\n      renderSlide();" in dashboard_script
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+    app_styles = (Path(__file__).parents[1] / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')
+    assert '.multiselect-option[hidden], .multiselect-group-label[hidden] { display: none !important; }' in app_styles
     task_panel_start = app_script.index("const root = document.getElementById('background-task-panels');")
     task_listener = app_script.index("window.addEventListener('dashboard-analytic:background-task'")
     assert task_listener > task_panel_start
     assert "This Auto-calculated Field has unsaved changes. Close without saving them?" in app_script
+    assert "const confirmTertiary = document.getElementById('confirm-tertiary');" in app_script
+    assert "const handleTertiary = () => close('tertiary');" in app_script
     assert "overlay.addEventListener('click', (event) => { if (event.target === overlay) void requestFinish(); });" in app_script
     assert "window.parent.postMessage({type: 'dashboard-analytic:template-saved'}, window.location.origin);" in app_script
     assert "openTemplateEditor(expandedChart?.focus_row, sourceDefinition)" in dashboard_script
@@ -231,6 +242,18 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "return equal(applied, saved) ? '' : 'applied-unsaved';" in dashboard_script
     assert "const sourceState = kind => filterControlState(" in dashboard_script
     assert "const hasUnappliedFilterChanges = () =>" in dashboard_script
+    assert 'const resolveUnappliedFilterChanges = async () =>' in dashboard_script
+    assert "title: 'Unapplied Dashboard filters'" in dashboard_script
+    assert "confirmLabel: 'Apply Filters and Continue'" in dashboard_script
+    assert "secondaryLabel: 'Discard and Continue'" in dashboard_script
+    assert "tertiaryLabel: 'Save and Continue'" in dashboard_script
+    assert "await prepare();\n      return 'applied';" in dashboard_script
+    assert "if (hasUnsavedFilterChanges()) await save();" in dashboard_script
+    assert "return 'saved';" in dashboard_script
+    assert 'restoreAppliedFilterSelection();' in dashboard_script
+    assert 'const openActiveDashboardViewer = async () =>' in dashboard_script
+    assert "bind('ds-view', openActiveDashboardViewer);" in dashboard_script
+    assert "const filterDecision = id === activeId ? await resolveUnappliedFilterChanges() : 'unchanged';" in dashboard_script
     assert "const host = node('label', label, 'ds-source-filter')" in dashboard_script
     assert "updateFilterControlState(facet, filterState(field));" in dashboard_script
     assert "updateFilterControlState(wrapper, dateState(key), true);" in dashboard_script
@@ -242,8 +265,20 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'const cached = preparedPayloads.get(preparedPayloadKey(activeId, preparedStateFingerprint(definition)));' in dashboard_script
     assert 'if (preparing && cached && currentFilterState !== preparingFilterState)' in dashboard_script
     assert "status('Restored the previously prepared filters.');" in dashboard_script
+    assert "const payload = await api('/filter-options', 'POST', {definition, field});" in dashboard_script
+    assert "facetOptionRequests.has(field) ? 'Loading values…'" in dashboard_script
+    assert "const filterAliases = config.filter_aliases || {};" in dashboard_script
+    assert "facet.dataset.aliasTooltip = aliasTooltip;" in dashboard_script
+    dashboard_styles = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+    assert '.ds-facet[data-alias-tooltip]::after' in dashboard_styles
     assert 'const preparedPayloadKey = (id, fingerprint) =>' in dashboard_script
     assert 'const preparedStateFingerprint = value =>' in dashboard_script
+    assert 'const canonicalSetValues = values =>' in dashboard_script
+    assert 'const canonicalSelectionDefinition = value =>' in dashboard_script
+    assert 'selection.filters = Object.fromEntries' in dashboard_script
+    assert 'selection.date_from = dateBounds.min;' in dashboard_script
+    assert 'selection.date_to = dateBounds.max;' in dashboard_script
+    assert 'const effectiveDateValue = (value, key) => canonicalSelectionDefinition(value)[key];' in dashboard_script
     assert 'delete preparedDefinition.name;' in dashboard_script
     assert 'delete preparedDefinition.slide_comments;' in dashboard_script
     assert 'entries.push({fingerprint, token: payload.token});' in dashboard_script
@@ -284,13 +319,17 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'entry.group.tasks.splice(Math.min(entry.position + offset, entry.group.tasks.length), 0, entry.task);' in app_script
     selection_key_source = dashboard_module[dashboard_module.index('def persistent_selection_key'):dashboard_module.index('def selected_date_bounds')]
     assert "'scope': definition.scope," not in selection_key_source
-    assert "'schema': 4," in selection_key_source
+    assert "'schema': 8," in selection_key_source
+    assert "kind: sorted([" in selection_key_source
+    assert "kind: sorted(set(dataset_ids))" in selection_key_source
+    assert "field: sorted(set(values))" in selection_key_source
     assert '{snapshot.selection_key}:{snapshot.definition.scope}:{entry_key}' in dashboard_module
     assert '{selection_key}:{candidate.scope}:{entry_key}' in dashboard_module
     assert "'rendering_only': rendering_only," in dashboard_module
     assert 'def materialize_selection(definition, task_repository, dimensions, selected_by_kind, fields, *, use_profile_options=False):' in dashboard_module
     assert 'use_profile_options=use_profile_options,' in dashboard_module
     assert 'DASHBOARD_CHART_RENDER_WORKERS = 3' in dashboard_module
+    assert 'DASHBOARD_PREVIEW_MANIFEST_VERSION = 7' in dashboard_module
     assert "thread_name_prefix='e2e-dashboard-chart'," in dashboard_module
     assert 'def schedule_next_prefetch() -> None:' in dashboard_module
     assert "job = min(candidates, key=lambda candidate: float(candidate.get('created_at') or 0))" in dashboard_module
@@ -387,7 +426,8 @@ def test_dashboards_lifecycle_and_layout(client):
     result = client.post('/api/e2e-dashboards/prepare', json=payload)
     assert result.status_code == 200, result.text
     preview = result.json()
-    assert preview['filter_fields'] == ['Market', 'Operator', 'Vendor', 'Region', 'City', 'Session Type', 'Technology', 'RAT']
+    assert preview['filter_fields'] == ['Market', 'Operator', 'Vendor', 'Region', 'City', 'Campaign', 'RAT', 'Session Type', 'Call Status']
+    assert 'Technology' not in preview['options']
     assert preview['options']['Operator'] == ['A', 'B']
     assert preview['options']['City'] == ['Leeds', 'London']
     assert preview['date_bounds'] == {'min': '2026-09-01', 'max': '2026-09-03'}
@@ -727,6 +767,26 @@ def test_dashboard_state_migrates_from_legacy_storage(client):
     assert json.loads(core.repository.get_workspace_state('e2e_dashboards_v2')) == result.json()
 
 
+def test_dashboard_migrates_all_saved_definitions_to_current_default_filters(client):
+    payload = setup_dashboard(client)
+    payload['filters'] = {'Technology': ['5G'], 'Zone': ['North'], 'Operator': ['A']}
+    payload['custom_fields'] = ['Technology', 'Zone', 'Region', 'Mean_Data_Rate']
+    payload['hidden_filters'] = ['Technology', 'Region', 'Zone', 'City', 'Campaign', 'RAT', 'Call Status', 'Former custom filter']
+    with core.repository.connection() as connection:
+        connection.execute("DELETE FROM workspace_state WHERE key = 'e2e_dashboard_default_filters_v6'")
+    core.repository.set_workspace_state('e2e_dashboards_v2', json.dumps({'legacy': payload}))
+
+    result = client.get('/api/e2e-dashboards')
+
+    assert result.status_code == 200
+    migrated = result.json()['legacy']
+    assert migrated['filters'] == {'Operator': ['A'], 'Region': ['North']}
+    assert migrated['custom_fields'] == ['Mean_Data_Rate']
+    assert migrated['hidden_filters'] == ['Former custom filter']
+    assert core.repository.get_workspace_state('e2e_dashboard_default_filters_v6') == '1'
+    assert json.loads(core.repository.get_workspace_state('e2e_dashboards_v2'))['legacy'] == migrated
+
+
 def test_dashboard_custom_fields_and_snapshot_filters(client):
     payload = setup_dashboard(client)
     core.write_workspace_calculated_dimensions([{'name': '7-cities', 'sources': ['cdr-data'], 'rules': [{'when': 'City IN (London)', 'value': 'Yes'}], 'default': 'No'}])
@@ -753,6 +813,74 @@ def test_dashboard_custom_fields_and_snapshot_filters(client):
     payload['hidden_filters'] = ['Market']
     preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
     assert 'Market' not in preview['options']
+
+
+def test_dashboard_loads_new_filter_values_without_preparing_a_snapshot(client):
+    payload = setup_dashboard(client)
+    payload['custom_fields'] = ['Mean_Data_Rate']
+    payload['filters'] = {'City': ['London']}
+
+    response = client.post('/api/e2e-dashboards/filter-options', json={
+        'definition': payload,
+        'field': 'Mean_Data_Rate',
+    })
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {'field': 'Mean_Data_Rate', 'values': ['10', '30']}
+
+
+def test_dashboard_rat_filter_uses_dataset_preview_column_precedence(client):
+    client.post('/login', data={'username': 'super', 'password': 'super123'})
+    response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
+        'dataset_files': ('radio.csv', BytesIO(
+            b'Operator,City,Campaign,RAT_A,RAT,Sample_RAT_A,Call_Status,Mean_Data_Rate\n'
+            b'A,London,Spring,ENDC,LTE,NR,Completed,10\n'
+            b'B,Leeds,Summer,NR,LTE,ENDC,Failed,20\n'
+        ), 'text/csv'),
+    })
+    assert response.status_code == 200
+    core.repository.add_report_template('nsa', 'Radio Dashboard', (
+        'Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position\n'
+        '1,Radio,,Title and 1 column + Comments,Rate,CDR-Data,Mean_Data_Rate,CDF Line,,Operator,,,Top\n'
+    ).encode(), is_default=False)
+    payload = definition().model_dump(mode='json')
+    payload['template'] = 'Radio Dashboard'
+
+    preview = client.post('/api/e2e-dashboards/prepare', json=payload)
+
+    assert preview.status_code == 200, preview.text
+    assert preview.json()['options']['Campaign'] == ['Spring', 'Summer']
+    assert preview.json()['options']['RAT'] == ['ENDC', 'NR']
+    assert preview.json()['options']['Call Status'] == ['Completed', 'Failed']
+
+
+def test_dashboard_falls_back_to_combined_rows_for_values_missing_from_profiles(client):
+    client.post('/login', data={'username': 'super', 'password': 'super123'})
+    response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
+        'dataset_files': ('profile-gap.csv', BytesIO(
+            b'Operator,G_Level_2,G_Level_4,Campaign,RAT,Call_Status,Mean_Data_Rate,Test_Start_Time\n'
+            b'A,England,London,Spring,ENDC,Completed,10,2026-09-01\n'
+            b'B,England,Leeds,Summer,NR,Failed,20,2026-09-02\n'
+        ), 'text/csv'),
+    })
+    assert response.status_code == 200
+    with core.repository.connection() as connection:
+        connection.execute("UPDATE dataset_profiles SET filter_options_json = '{}' WHERE dataset_id = 1")
+    core.repository.add_report_template('nsa', 'Profile fallback Dashboard', (
+        'Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position\n'
+        '1,Profile fallback,,Title and 1 column + Comments,Rate,CDR-Data,Mean_Data_Rate,CDF Line,,Operator,,,Top\n'
+    ).encode(), is_default=False)
+    payload = definition().model_dump(mode='json')
+    payload['template'] = 'Profile fallback Dashboard'
+
+    preview = client.post('/api/e2e-dashboards/prepare', json=payload)
+
+    assert preview.status_code == 200, preview.text
+    assert preview.json()['options']['Region'] == ['England']
+    assert preview.json()['options']['City'] == ['Leeds', 'London']
+    assert preview.json()['options']['Campaign'] == ['Spring', 'Summer']
+    assert preview.json()['options']['RAT'] == ['ENDC', 'NR']
+    assert preview.json()['options']['Call Status'] == ['Completed', 'Failed']
 
 
 def test_dashboard_validates_template_dates_and_sources(client):
@@ -833,6 +961,22 @@ def test_dashboard_reuses_persistent_sql_selection_and_invalidates_dataset_versi
     assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 200
     with core.repository.connection() as connection:
         assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 3
+
+
+def test_dashboard_selection_cache_ignores_filter_value_order(client):
+    payload = setup_dashboard(client)
+    payload['filters'] = {'City': ['London', 'Leeds']}
+
+    first = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert first.status_code == 200
+    payload['filters']['City'].reverse()
+    repeated = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert repeated.status_code == 200
+
+    with core.repository.connection() as connection:
+        assert connection.execute(
+            'SELECT COUNT(*) AS count FROM dashboard_filter_selections'
+        ).fetchone()['count'] == 1
 
 
 def test_dashboard_large_selection_uses_direct_sql_predicate(client, monkeypatch):

@@ -48,6 +48,7 @@ select[multiple] { min-height: 10rem; border-radius: 18px; padding-right: 0.55re
 .multiselect-search { min-width: 0; padding: 0.58rem 0.72rem; border-radius: 10px; font-size: 0.82rem; }
 .multiselect-action { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; width: 100%; padding: 0.72rem 0.85rem; border: 0; border-radius: 12px; background: rgba(11, 122, 117, 0.08); color: var(--brand); font-weight: 700; cursor: pointer; }
 .multiselect-option { display: flex; align-items: center; gap: 0.7rem; padding: 0.62rem 0.75rem; border-radius: 12px; color: var(--text); cursor: pointer; }
+.multiselect-option[hidden], .multiselect-group-label[hidden] { display: none !important; }
 .multiselect-option:hover { background: rgba(16, 49, 74, 0.05); }
 .multiselect-option input { width: auto; margin: 0; }
 .multiselect-option span { color: var(--text); }
@@ -1652,6 +1653,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 @media (max-width: 720px) { .report-multicampaign-groups { grid-template-columns: 1fr; } }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.35rem; flex-wrap: wrap; }
 .confirm-overlay.confirm-wide-actions .confirm-panel { width: min(92vw, 680px); }
+.confirm-overlay.confirm-four-actions .confirm-panel { width: min(96vw, 900px); }
 .confirm-overlay.confirm-wide-actions .confirm-actions { flex-wrap: nowrap; }
 .confirm-overlay.confirm-wide-actions .confirm-actions > button { flex: 0 0 auto; white-space: nowrap; }
 .confirm-cancel { cursor: pointer; color: #44515d; box-shadow: 0 8px 20px rgba(18, 32, 43, 0.08); }
@@ -1884,6 +1886,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
   .confirm-panel h3, .loading-panel h3 { font-size: 1.3rem; }
   .confirm-actions { width: 100%; gap: 0.45rem; }
   .confirm-actions > button { flex: 1 1 auto; min-width: 0; padding-inline: 0.75rem; }
+  .confirm-overlay.confirm-four-actions .confirm-actions { flex-wrap: wrap; }
   .full-environment-workspace-dialog, .server-transfer-dialog { max-height: calc(100dvh - 0.7rem); overflow-y: auto; }
 
   .confirm-panel.report-chart-viewer-dialog {

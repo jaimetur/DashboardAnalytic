@@ -192,3 +192,35 @@
 .ds-facet.ds-filter-applied-unsaved .multiselect-trigger,
 .ds-source-filter.ds-filter-applied-unsaved select,
 .ds-source-filter.ds-filter-applied-unsaved .multiselect-trigger{border-color:#d77b85!important;background:#fbdfe3!important;color:#8a303b!important;box-shadow:0 0 0 2px #e6a7ae38}
+
+.ds-facet[data-alias-tooltip] { position: relative; }
+.ds-facet[data-alias-tooltip]::after {
+  content: attr(data-alias-tooltip);
+  position: absolute;
+  z-index: 2750;
+  left: 0;
+  bottom: calc(100% + .45rem);
+  width: max-content;
+  max-width: min(23rem, calc(100vw - 2rem));
+  padding: .55rem .7rem;
+  border: 1px solid #a98bc9;
+  border-radius: .55rem;
+  background: #382652;
+  color: #fff;
+  font-size: .75rem;
+  font-weight: 650;
+  line-height: 1.45;
+  white-space: pre-line;
+  box-shadow: 0 10px 24px rgba(43, 27, 67, .28);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(.25rem);
+  transition: opacity .14s ease, transform .14s ease, visibility .14s ease;
+}
+.ds-facet[data-alias-tooltip]:hover::after,
+.ds-facet[data-alias-tooltip]:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}

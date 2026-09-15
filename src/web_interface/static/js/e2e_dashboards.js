@@ -3,6 +3,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const config = JSON.parse($('ds-config').textContent);
+  const filterAliases = config.filter_aliases || {};
   let dashboards = {}, activeId = '', definition = null, savedDefinition = '', appliedFilterState = '', appliedSelectionState = '', appliedDashboardDefinition = null, prepared = null, slideIndex = 0;
   let sequence = 0, timer, controller, preparing = null, preparingFilterState = '', dirty = false, filterActionBusy = false, dataIndex = 0, dataPage = 0, dataToken = '', dataEndpoint = '', dataRequest = 0;
   const dataPages = new Map();
@@ -11,6 +12,8 @@
   let presentationTimer = 0;
   const presentation = {running: false, delay: 5000, effect: 'fade'};
   let facetOptions = {}, availableFields = [], facetFields = config.filter_fields || [], facetsLoading = false, facetsRefreshTimer = 0;
+  const facetOptionRequests = new Map();
+  let facetOptionRequestSequence = 0;
   const completedFieldJobs = new Set();
   const chartPayloads = new Map();
   const renderedChartPayloads = new Map();
@@ -98,9 +101,25 @@
     if (!value || typeof value !== 'object') return value;
     return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalize(value[key])]));
   };
-  const definitionFingerprint = value => JSON.stringify(canonicalize(canonicalDashboardDefinition(value)));
+  const canonicalSetValues = values => [...new Set(values || [])].sort((left, right) => {
+    const leftKey = JSON.stringify(left), rightKey = JSON.stringify(right);
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+  });
+  const canonicalSelectionDefinition = value => {
+    const selection = canonicalDashboardDefinition(value);
+    selection.datasets = Object.fromEntries(Object.entries(selection.datasets).map(([kind, ids]) => [kind, canonicalSetValues(ids)]));
+    selection.filters = Object.fromEntries(Object.entries(selection.filters).map(([field, values]) => [field, canonicalSetValues(values)]));
+    selection.custom_fields = canonicalSetValues(selection.custom_fields);
+    selection.hidden_filters = canonicalSetValues(selection.hidden_filters);
+    if (dateBounds) {
+      if (!selection.date_from || selection.date_from < dateBounds.min || selection.date_from > dateBounds.max) selection.date_from = dateBounds.min;
+      if (!selection.date_to || selection.date_to < dateBounds.min || selection.date_to > dateBounds.max) selection.date_to = dateBounds.max;
+    }
+    return selection;
+  };
+  const definitionFingerprint = value => JSON.stringify(canonicalize(canonicalSelectionDefinition(value)));
   const preparedStateFingerprint = value => {
-    const preparedDefinition = canonicalDashboardDefinition(value);
+    const preparedDefinition = canonicalSelectionDefinition(value);
     delete preparedDefinition.name;
     delete preparedDefinition.slide_comments;
     return JSON.stringify(canonicalize(preparedDefinition));
@@ -128,20 +147,31 @@
   const sourceState = kind => filterControlState(definition?.datasets?.[kind], appliedDefinition().datasets?.[kind], savedDashboardDefinition().datasets?.[kind]);
   const stringFilterState = (current, applied, saved) => filterControlState(String(current || ''), String(applied || ''), String(saved || ''), (left, right) => left === right);
   const scopeState = () => stringFilterState(definition?.scope, appliedDefinition().scope, savedDashboardDefinition().scope);
-  const dateState = key => stringFilterState(definition?.[key], appliedDefinition()[key], savedDashboardDefinition()[key]);
+  const effectiveDateValue = (value, key) => canonicalSelectionDefinition(value)[key];
+  const dateState = key => stringFilterState(
+    effectiveDateValue(definition, key),
+    effectiveDateValue(appliedDefinition(), key),
+    effectiveDateValue(savedDashboardDefinition(), key),
+  );
   const updateFilterControlState = (element, state, date = false) => {
     element.classList.toggle(date ? 'ds-date-picker-unsaved' : 'ds-filter-unsaved', state === 'unapplied');
     element.classList.toggle(date ? 'ds-date-picker-applied-unsaved' : 'ds-filter-applied-unsaved', state === 'applied-unsaved');
   };
-  const filterStateFingerprint = value => JSON.stringify(canonicalize({
-    datasets: value?.datasets || {}, scope: value?.scope || 'single', filters: value?.filters || {},
-    custom_fields: value?.custom_fields || [], hidden_filters: value?.hidden_filters || [],
-    date_from: value?.date_from || null, date_to: value?.date_to || null,
-  }));
-  const selectionStateFingerprint = value => JSON.stringify(canonicalize({
-    datasets: value?.datasets || {}, filters: value?.filters || {}, custom_fields: value?.custom_fields || [],
-    hidden_filters: value?.hidden_filters || [], date_from: value?.date_from || null, date_to: value?.date_to || null,
-  }));
+  const filterStateFingerprint = value => {
+    const selection = canonicalSelectionDefinition(value);
+    return JSON.stringify(canonicalize({
+      datasets: selection.datasets, scope: selection.scope || 'single', filters: selection.filters,
+      custom_fields: selection.custom_fields, hidden_filters: selection.hidden_filters,
+      date_from: selection.date_from || null, date_to: selection.date_to || null,
+    }));
+  };
+  const selectionStateFingerprint = value => {
+    const selection = canonicalSelectionDefinition(value);
+    return JSON.stringify(canonicalize({
+      datasets: selection.datasets, filters: selection.filters, custom_fields: selection.custom_fields,
+      hidden_filters: selection.hidden_filters, date_from: selection.date_from || null, date_to: selection.date_to || null,
+    }));
+  };
   const hasUnsavedFilterChanges = () => Boolean(definition) && filterStateFingerprint(definition) !== filterStateFingerprint(savedDashboardDefinition());
   const hasUnappliedFilterChanges = () => Boolean(definition) && filterStateFingerprint(definition) !== filterStateFingerprint(appliedDefinition());
   const hasAppliedUnsavedFilterChanges = () => Boolean(
@@ -213,12 +243,72 @@
     if (id === 'ds-viewer' && show) scheduleTemplateEditorPreload();
     document.body.style.overflow = [...document.querySelectorAll('.ds-overlay')].some(el => !el.hidden) ? 'hidden' : '';
   }
+  const restoreAppliedFilterSelection = () => {
+    const applied = canonicalDashboardDefinition(appliedDefinition());
+    definition.datasets = structuredClone(applied.datasets);
+    definition.scope = applied.scope || 'single';
+    definition.filters = structuredClone(applied.filters);
+    definition.custom_fields = structuredClone(applied.custom_fields);
+    definition.hidden_filters = structuredClone(applied.hidden_filters);
+    definition.date_from = applied.date_from || null;
+    definition.date_to = applied.date_to || null;
+    applyDateBounds(dateBounds);
+    sources();
+    facets();
+    updateDirtyState();
+  };
+  const resolveUnappliedFilterChanges = async () => {
+    if (!hasUnappliedFilterChanges()) return 'unchanged';
+    const choice = await window.showConfirmDialog(
+      'This Dashboard has filter changes that have not been applied. Apply, save or discard them before continuing?',
+      {
+        title: 'Unapplied Dashboard filters',
+        confirmLabel: 'Apply Filters and Continue',
+        secondaryLabel: 'Discard and Continue',
+        tertiaryLabel: 'Save and Continue',
+        cancelLabel: 'Cancel',
+        wideActions: true,
+      },
+    );
+    if (!choice) return null;
+    if (!$('ds-filter-overlay').hidden) await closeFilters();
+    if (choice === 'confirm') {
+      await prepare();
+      return 'applied';
+    }
+    if (choice === 'tertiary') {
+      if (hasUnsavedFilterChanges()) await save();
+      else await prepare();
+      return 'saved';
+    }
+    restoreAppliedFilterSelection();
+    status('Discarded unapplied filter changes.');
+    return 'discarded';
+  };
+  const openActiveDashboardViewer = async () => {
+    const filterDecision = await resolveUnappliedFilterChanges();
+    if (!filterDecision) return;
+    if (!prepared) await prepare();
+    if (!prepared?.slides.length) return;
+    setViewEnabled(false);
+    try {
+      overlay('ds-viewer', true);
+      renderSlide();
+    } finally {
+      setViewEnabled(Boolean(prepared?.slides.length));
+    }
+  };
   async function queueDashboardPptExport(id, item) {
     let exportDefinition = item;
     let preparationToken = null;
+    const filterDecision = id === activeId ? await resolveUnappliedFilterChanges() : 'unchanged';
+    if (!filterDecision) return;
     if (id === activeId && prepared?.token) {
-      const appliedDefinition = appliedDashboardDefinition || definition;
-      if (hasAppliedUnsavedFilterChanges()) {
+      const exportAppliedDefinition = appliedDashboardDefinition || definition;
+      if (filterDecision !== 'unchanged') {
+        exportDefinition = JSON.parse(JSON.stringify(exportAppliedDefinition));
+        preparationToken = prepared.token;
+      } else if (hasAppliedUnsavedFilterChanges()) {
         const choice = await window.showConfirmDialog(
           'This Dashboard has applied filters that have not been saved. Which filters should the PowerPoint use?',
           {
@@ -230,16 +320,16 @@
           },
         );
         if (choice === 'confirm') {
-          exportDefinition = JSON.parse(JSON.stringify(appliedDefinition));
+          exportDefinition = JSON.parse(JSON.stringify(exportAppliedDefinition));
           preparationToken = prepared.token;
         } else if (choice === 'secondary') exportDefinition = savedDashboardDefinition();
         else return;
       } else {
-        exportDefinition = JSON.parse(JSON.stringify(appliedDefinition));
+        exportDefinition = JSON.parse(JSON.stringify(exportAppliedDefinition));
         preparationToken = prepared.token;
       }
     }
-    if (!hasAppliedUnsavedFilterChanges()) {
+    if (filterDecision === 'unchanged' && !hasAppliedUnsavedFilterChanges()) {
       const accepted = await window.showConfirmDialog(
         `Generate a PowerPoint presentation for “${exportDefinition.name}”?`,
         {title: 'Generate PPT Dashboard', confirmLabel: 'Generate PPT'},
@@ -301,9 +391,7 @@
           overlay('ds-viewer', true);
           await loading;
         } else {
-          overlay('ds-viewer', true);
-          if (!prepared) await prepare();
-          else renderSlide();
+          await openActiveDashboardViewer();
         }
       }, 'ds-dashboard-view');
       action(id === activeId ? 'Close Dashboard' : 'Open Dashboard', id === activeId ? '🚪' : '📂', async () => {
@@ -833,6 +921,13 @@
       const selected = definition.filters[field];
       const custom = definition.custom_fields.includes(field);
       const label = custom ? field : field === 'technology_primary' ? 'Technology' : field.replaceAll('_',' ').replace(/\b\w/g, letter => letter.toUpperCase());
+      const aliases = Object.entries(filterAliases).find(([name]) => identity(name) === identity(field))?.[1] || [];
+      if (aliases.length > 1) {
+        const aliasTooltip = `Supported columns by priority:\n${aliases.map((alias, index) => `${index + 1}. ${alias}`).join('\n')}`;
+        facet.dataset.aliasTooltip = aliasTooltip;
+        facet.tabIndex = 0;
+        facet.setAttribute('aria-label', `${label} filter. ${aliasTooltip.replaceAll('\n', ' ')}`);
+      }
       const head = node('div', undefined, 'ds-facet-head'); head.append(node('span', label));
       const remove = node('button', '×', 'ds-facet-remove'); remove.type = 'button'; remove.title = `Remove ${label} filter`; remove.setAttribute('aria-label', `Remove ${label} filter`);
       remove.onclick = safe(async () => {
@@ -848,7 +943,7 @@
       for (const value of available) {
         const item = option(value, value || '(Empty)'); item.selected = !selected || selected.includes(value); values.append(item);
       }
-      if (!available.length) { values.disabled = true; values.append(option('', facetsLoading ? 'Loading values…' : 'No matching values')); }
+      if (!available.length) { values.disabled = true; values.append(option('', facetsLoading || facetOptionRequests.has(field) ? 'Loading values…' : 'No matching values')); }
       values.onchange = () => {
         const next = [...values.selectedOptions].map(item => item.value).filter(Boolean);
         const current = (selected || available).filter(Boolean);
@@ -941,7 +1036,7 @@
     rows.hidden = !rows.textContent;
   };
   const applyPreparedPayload = payload => {
-    prepared = payload; facetOptions = payload.options; facetFields = payload.filter_fields || facetFields; availableFields = payload.available_fields || payload.custom_fields || []; applyDateBounds(payload.date_bounds); facetsLoading = false;
+    prepared = payload; facetOptions = payload.options; facetFields = config.filter_fields || payload.filter_fields || facetFields; availableFields = payload.available_fields || payload.custom_fields || []; applyDateBounds(payload.date_bounds); facetsLoading = false; facetOptionRequests.clear();
     appliedFilterState = filterStateFingerprint(definition);
     appliedSelectionState = selectionStateFingerprint(definition);
     appliedDashboardDefinition = JSON.parse(JSON.stringify(definition));
@@ -1044,7 +1139,7 @@
     dismissPreparationStatus();
     clearTimeout(timer); ++sequence; controller?.abort(); preparing = null;
     stopPresentation();
-    activeId = id; $('ds-viewer-export-ppt').dataset.dashboardPptId = id; definition = canonicalDashboardDefinition(dashboards[id]); savedDefinition = definitionFingerprint(definition); dirty = false; prepared = null; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; facetOptions = {}; availableFields = []; slideIndex = 0; setViewEnabled(false); rememberOpen(id);
+    activeId = id; $('ds-viewer-export-ppt').dataset.dashboardPptId = id; definition = canonicalDashboardDefinition(dashboards[id]); savedDefinition = definitionFingerprint(definition); dirty = false; prepared = null; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; facetOptions = {}; availableFields = []; facetOptionRequests.clear(); slideIndex = 0; setViewEnabled(false); rememberOpen(id);
     resetViewerForDashboard();
     $('ds-name').value = definition.name; setNrMode(definition.technology || definition.template_technology, definition.template);
     $('ds-filter-panel').hidden = false; $('ds-dashboard-name').textContent = `Dashboard: ${definition.name}`; sources(); facets(); library(); status(''); if (!await restorePrepared(id)) await prepare();
@@ -1178,7 +1273,28 @@
     updateFilterControlState($('ds-scope').closest('.ds-scope-control'), scopeState());
     filterChanged();
   });
-  bind('ds-add-filter',() => { const field = $('ds-custom-field').value; if (!field) return; const defaultField = facetFields.find(item => identity(item) === identity(field)); if (defaultField) definition.hidden_filters = definition.hidden_filters.filter(item => identity(item) !== identity(defaultField)); else definition.custom_fields.push(field); facets(); filterChanged(); });
+  bind('ds-add-filter', async () => {
+    const field = $('ds-custom-field').value;
+    if (!field) return;
+    const defaultField = facetFields.find(item => identity(item) === identity(field));
+    if (defaultField) definition.hidden_filters = definition.hidden_filters.filter(item => identity(item) !== identity(defaultField));
+    else definition.custom_fields.push(field);
+    const dashboardIdAtStart = activeId;
+    const requestedState = selectionStateFingerprint(definition);
+    const requestId = ++facetOptionRequestSequence;
+    facetOptionRequests.set(field, requestId);
+    facets(); filterChanged();
+    try {
+      const payload = await api('/filter-options', 'POST', {definition, field});
+      if (activeId !== dashboardIdAtStart || selectionStateFingerprint(definition) !== requestedState || facetOptionRequests.get(field) !== requestId) return;
+      facetOptions[field] = Array.isArray(payload.values) ? payload.values : [];
+    } finally {
+      if (facetOptionRequests.get(field) === requestId) {
+        facetOptionRequests.delete(field);
+        if (activeId === dashboardIdAtStart) facets();
+      }
+    }
+  });
   bind('ds-clear-filters', () => { definition.filters = {}; definition.date_from = definition.date_to = null; sources(); facets(); filterChanged(); });
   bind('ds-last-saved-filters', () => {
     const saved = savedDashboardDefinition();
@@ -1204,15 +1320,7 @@
     const item = dashboards[activeId];
     if (item) await queueDashboardPptExport(activeId, item);
   });
-  bind('ds-view',async () => {
-    if (!prepared?.slides.length) return;
-    setViewEnabled(false);
-    try {
-      overlay('ds-viewer', true); renderSlide();
-    } finally {
-      setViewEnabled(Boolean(prepared?.slides.length));
-    }
-  });
+  bind('ds-view', openActiveDashboardViewer);
   function loadChartPayload(chart, priority = 'high') {
     const url = `/api/e2e-dashboards/chart/${prepared.token}/${chart.index}`;
     const rendered = renderedChartPayloads.get(url);

@@ -5264,7 +5264,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         {'value': 'dashboards', 'label': 'Dashboards (from active workspace)', 'disabled': not active_workspace},
         {'value': 'slides-templates', 'label': 'Report Templates (from active workspace)', 'disabled': not active_workspace},
         {'value': 'auto-calculated-fields', 'label': 'Auto-calculated Fields (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'full-environment', 'label': 'Full Environment (App Config + Report Templates + Auto-calculated Fields + Selected Workspaces)'},
+        {'value': 'full-environment', 'label': 'Full Environment (App Config + Dashboards + Report Templates + Auto-calculated Fields + Selected Workspaces)'},
         *[
             {'value': f'workspace:{workspace.id}', 'label': f'Full Workspace: {workspace.name}'}
             for workspace in accessible_workspaces(user)
