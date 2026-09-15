@@ -610,6 +610,11 @@ def install_dashboard_routes(core):
         if not isinstance(definition, dict):
             return definition
         normalized = dict(definition)
+        # Scope, source CDRs and dates define the temporary dataset universe.
+        # They are rebuilt when a Dashboard opens and are never saved as
+        # persistent Dashboard filters.
+        for field in ('scope', 'datasets', 'date_from', 'date_to'):
+            normalized.pop(field, None)
         filters = normalized.get('filters')
         retired_filter_keys = {identity('Technology'), identity('Zone')}
         migrated_filters = {}
@@ -638,6 +643,42 @@ def install_dashboard_routes(core):
             and (not reset_defaults or identity(field) not in default_keys)
         ]
         return normalized
+
+    def runtime_dashboard_definition(definition, task_repository):
+        """Add a fresh default universe to a persisted Dashboard definition."""
+        effective = dict(definition)
+        effective.setdefault('scope', 'single')
+        if 'datasets' not in effective:
+            selected = {kind: [] for kind in KINDS}
+            ready = [
+                core.serialize_dataset_row(row) for row in task_repository.list_datasets()
+                if row['status'] == 'ready' and row['dataset_kind'] in KINDS
+            ]
+
+            def recency(row):
+                for field in ('uploaded_at', 'updated_at', 'processed_at', 'created_at'):
+                    try:
+                        return datetime.fromisoformat(str(row.get(field) or '').replace('Z', '+00:00')).timestamp()
+                    except ValueError:
+                        continue
+                return float(row.get('id') or 0)
+
+            count = 1 if effective['scope'] == 'multivendor' else 2
+            for kind in KINDS:
+                selected[kind] = [
+                    int(row['id']) for row in sorted(
+                        (row for row in ready if row.get('dataset_kind') == kind),
+                        key=lambda row: (recency(row), int(row.get('id') or 0)), reverse=True,
+                    )[:count]
+                ]
+            effective['datasets'] = selected
+        else:
+            effective['datasets'] = {
+                kind: list((effective.get('datasets') or {}).get(kind, [])) for kind in KINDS
+            }
+        effective.setdefault('date_from', 'Oldest')
+        effective.setdefault('date_to', 'Newest')
+        return effective
 
     def catalogue(definition, task_repository=None):
         task_repository = task_repository or core.repository
@@ -739,10 +780,10 @@ def install_dashboard_routes(core):
             stored_definition = read_dashboards(task_repository).get(dashboard_id)
         if not isinstance(stored_definition, dict):
             raise HTTPException(404, 'Dashboard not found.')
-        raw_definition = (
-            export_definition.model_dump(mode='json')
-            if export_definition is not None else stored_definition
-        )
+        raw_definition = export_definition.model_dump(mode='json') if export_definition is not None else stored_definition
+        if not any((raw_definition.get('datasets') or {}).values()):
+            raw_definition.pop('datasets', None)
+            raw_definition = runtime_dashboard_definition(raw_definition, task_repository)
         try:
             if preparation_token:
                 with lock:
@@ -1114,7 +1155,7 @@ def install_dashboard_routes(core):
             dashboards[dashboard_id] = saved_definition
             task_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
             task_repository.add_log(user.username, 'save_dashboard', json.dumps({'id': dashboard_id, 'name': definition.name}))
-        enqueue_prefetch(dashboard_id, saved_definition, user)
+        enqueue_prefetch(dashboard_id, definition.model_dump(mode='json'), user)
         return {'id': dashboard_id, 'definition': saved_definition}
 
     @app.patch('/api/e2e-dashboards/{dashboard_id}/name')
@@ -1850,11 +1891,13 @@ def install_dashboard_routes(core):
     @app.get('/api/e2e-dashboards/prefetched/{dashboard_id}')
     def prefetched_dashboard(dashboard_id: str, user=Depends(dashboard_user)):
         workspace = workspace_key()
+        task_repository = bound_repository()
         with lock:
-            dashboards = read_dashboards(bound_repository())
+            dashboards = read_dashboards(task_repository)
             raw_definition = dashboards.get(dashboard_id)
             if not isinstance(raw_definition, dict):
                 raise HTTPException(404, 'Dashboard not found.')
+            raw_definition = runtime_dashboard_definition(raw_definition, task_repository)
             fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
             # Warm-up jobs are shared by every permitted user of the
             # workspace.  Their snapshot owner is the system user (`*`), so
@@ -2633,6 +2676,8 @@ def install_dashboard_routes(core):
     ) -> None:
         """Warm Canvas JSON models only; PNG render caches are intentionally excluded."""
         workspace = workspace or workspace_key()
+        task_repository = Repository(Path(workspace), core.repository.global_db_path)
+        raw_definition = runtime_dashboard_definition(raw_definition, task_repository)
         fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
         key = f'{workspace}:{dashboard_id}:{fingerprint}'
         definition = DashboardDefinition.model_validate(raw_definition)

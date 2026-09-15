@@ -106,7 +106,7 @@ Datasets Analysis analyses one processed CDR at a time.
 
 ## E2E Dashboards
 
-E2E Dashboards is the main analysis module and the complete template-driven workflow behind Dashboard Analytic. A saved Dashboard binds a name and NR Mode to a workspace Report Template, selected Data/Voice/Speech CDRs, comparison scope, dates, filters, hidden fields and slide comments. The definition can be opened repeatedly, duplicated, exported or moved with its workspace without copying source rows into it.
+E2E Dashboards is the main analysis module and the complete template-driven workflow behind Dashboard Analytic. A saved Dashboard binds a name and NR Mode to a workspace Report Template, filters, hidden fields and slide comments. Scope, selected Data/Voice/Speech CDRs and dates define the current Dataset Universe and remain session state rather than persisted filters. The definition can be opened repeatedly, duplicated, exported or moved with its workspace without copying source rows into it.
 
 ### Manage Dashboards
 

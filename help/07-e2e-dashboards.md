@@ -2,7 +2,7 @@
 
 E2E Dashboards is the main template-driven analysis workspace. It combines processed Data, Voice and Speech CDRs, applies one synchronized selection to a complete Dashboard and renders every template slide interactively before producing a PowerPoint.
 
-Each Dashboard stores its name, NR mode, Report Template, selected CDRs, comparison scope, dates, adaptive and additional filters, hidden filters and slide comments in the active workspace. It does not copy source datasets or generated cache files.
+Each Dashboard stores its name, NR mode, Report Template, adaptive and additional filters, hidden filters and slide comments in the active workspace. Scope, selected CDRs and dates form the temporary Dataset Universe and are rebuilt when the Dashboard opens; they are not persisted in the Dashboard definition. A Dashboard does not copy source datasets or generated cache files.
 
 ## Before creating a Dashboard
 
@@ -22,25 +22,25 @@ Dashboard uses the same Report Template schema and renderer as Reporting. This g
 5. Duplicate creates an independent definition. Close leaves the active definition without deleting it.
 6. Delete removes the definition after confirmation; it does not remove CDRs, templates or generated PPT jobs.
 
-**Export Dashboard** creates the versioned ZIP accepted by Admin Import. **Import Dashboard** also accepts the legacy standalone JSON definition. Imported definitions need a compatible template and valid dataset references in the destination workspace.
+**Export Dashboard** creates the versioned ZIP accepted by Admin Import. **Import Dashboard** also accepts the legacy standalone JSON definition. Imported definitions need a compatible template; their temporary Dataset Universe is rebuilt from ready CDRs in the destination workspace when they are opened.
 
 The last open Dashboard and page scroll position are remembered in the browser session. Real unsaved filter changes require Save, Discard or Cancel before navigation. Management-only name, NR Mode and Template inputs do not create false unsaved-filter warnings.
 
 ## Dashboard Datasets & Filters
 
-The panel separates the comparison scope and selected universe from default and additional filters. Its badges distinguish **Unapplied filters** from **Unsaved filters**.
+The panel separates the comparison scope and selected universe from default and additional filters. **Unapplied filters** and **Unsaved filters** apply only to the filters on the right; changing Scope, CDRs or dates can require preparation but never produces those badges.
 
 ### Dashboard Scope
 
 - **Operator Comparison** uses normalized Operator values.
 - **Multivendor Comparison** requires Vendor mapping for every selected CDR and expands Operator into its operator/vendor hierarchy.
-- Changing comparison scope always opens a dataset chooser. Keep the current Data/Voice/Speech universe or apply the checkboxes shown in the dialog. When entering Multivendor, the recent shortcut selects the latest CDR of each type; when returning to Operator Comparison, it selects the two most recent CDRs of each type (or every available CDR when fewer than two exist).
+- Changing comparison scope immediately rebuilds the Dataset Universe without a confirmation dialog. Multivendor selects the newest CDR of each type; Operator Comparison selects the two newest CDRs of each type, or every available CDR when fewer than two exist.
 
 NR Mode follows the shared reporting rule: Voice and Speech sessions are classified as NSA/SA; valid Data attempts remain available even when a sample RAT records a fallback. RAT can be restricted explicitly with the adaptive filter.
 
 ### Dataset Universe and dates
 
-Select one or more CDR Data, Voice and Speech sources. Date from/Date to default to `Oldest` and `Newest`. Their small in-field **Use oldest** and **Use newest** actions restore those symbolic values; saving keeps the literal markers in the Dashboard definition, while the textboxes show the currently resolved bounds as `Oldest (YYYY-MM-DD)` and `Newest (YYYY-MM-DD)`. Every preparation resolves them from the selected CDRs. Selecting a calendar day stores and displays a fixed date instead. Date to includes the complete day, and calendar month navigation does not change the selection until a day is chosen.
+Select one or more CDR Data, Voice and Speech sources. Date from/Date to default to `Oldest` and `Newest`. Their small in-field **Use oldest** and **Use newest** actions restore those symbolic values, while the textboxes show the currently resolved bounds as `Oldest (YYYY-MM-DD)` and `Newest (YYYY-MM-DD)`. Every preparation resolves them from the selected CDRs. Selecting a calendar day uses and displays a fixed date for the current session. Date to includes the complete day, and calendar month navigation does not change the selection until a day is chosen.
 
 The ready summary distinguishes:
 
@@ -73,13 +73,13 @@ The circular `×` removes an additional filter or hides a default filter after c
 ### Apply, Save, Clear and Reload
 
 - **Apply Filters** prepares the current selection without changing the Dashboard defaults.
-- **Save Filters** applies and persists CDRs, scope, dates, filters, additional fields and hidden filters.
-- **Clear Filters** removes filter restrictions and dates.
-- **Reload Saved Filters** restores the complete saved selection, including derived automatic date bounds.
+- **Save Filters** applies and persists adaptive filters, additional fields and hidden filters.
+- **Clear Filters** removes adaptive-filter restrictions without changing the Dataset Universe.
+- **Reload Saved Filters** restores only the persisted filters and keeps the current Scope, CDRs and dates.
 
 Returning to an already prepared combination restores its snapshot and charts without recalculation. Filter-value and dataset order do not create different cache entries for equivalent selections.
 
-If View Dashboard or Generate PPT is requested with unapplied changes:
+If View Dashboard or Generate PPT is requested with unapplied adaptive-filter changes, the dialog provides these actions. Pending changes limited to Scope, CDRs or dates prepare the temporary Dataset Universe automatically before continuing.
 
 - **Apply Filters and Continue** applies, waits for preparation and continues.
 - **Discard and Continue** restores the last applied selection and continues.

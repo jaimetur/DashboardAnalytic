@@ -89,6 +89,16 @@
   };
   const option = (value, label) => { const el = node('option', label); el.value = value; return el; };
   const identity = value => String(value).toLocaleLowerCase().replace(/[^a-z0-9]/g, '');
+  const datasetRecency = row => {
+    const uploadedAt = Date.parse(row.uploaded_at || row.updated_at || row.processed_at || row.created_at || '');
+    return Number.isFinite(uploadedAt) ? uploadedAt : Number(row.id) || 0;
+  };
+  const latestDatasetsForScope = scope => Object.fromEntries(['data', 'voice', 'speech'].map(kind => [kind,
+    [...(config.datasets[kind] || [])]
+      .sort((left, right) => datasetRecency(right) - datasetRecency(left) || Number(right.id) - Number(left.id))
+      .slice(0, scope === 'multivendor' ? 1 : 2)
+      .map(row => Number(row.id)),
+  ]));
   const canonicalDashboardDefinition = value => {
     const definitionValue = structuredClone(value || {});
     definitionValue.datasets ||= {};
@@ -100,6 +110,21 @@
     if (!definitionValue.date_from) definitionValue.date_from = 'Oldest';
     if (!definitionValue.date_to) definitionValue.date_to = 'Newest';
     return definitionValue;
+  };
+  const runtimeDashboardDefinition = value => ({
+    ...canonicalDashboardDefinition(value),
+    scope: 'single',
+    datasets: latestDatasetsForScope('single'),
+    date_from: 'Oldest',
+    date_to: 'Newest',
+  });
+  const persistedDashboardDefinition = value => {
+    const persisted = canonicalDashboardDefinition(value);
+    delete persisted.scope;
+    delete persisted.datasets;
+    delete persisted.date_from;
+    delete persisted.date_to;
+    return persisted;
   };
   const canonicalize = value => {
     if (Array.isArray(value)) return value.map(canonicalize);
@@ -122,7 +147,7 @@
     }
     return selection;
   };
-  const definitionFingerprint = value => JSON.stringify(canonicalize(canonicalSelectionDefinition(value)));
+  const definitionFingerprint = value => JSON.stringify(canonicalize(persistedDashboardDefinition(value)));
   const preparedStateFingerprint = value => {
     const preparedDefinition = canonicalSelectionDefinition(value);
     delete preparedDefinition.name;
@@ -149,20 +174,20 @@
     return equal(applied, saved) ? '' : 'applied-unsaved';
   };
   const filterState = field => filterControlState(definition?.filters?.[field], appliedDefinition().filters?.[field], savedDashboardDefinition().filters?.[field]);
-  const sourceState = kind => filterControlState(definition?.datasets?.[kind], appliedDefinition().datasets?.[kind], savedDashboardDefinition().datasets?.[kind]);
-  const stringFilterState = (current, applied, saved) => filterControlState(String(current || ''), String(applied || ''), String(saved || ''), (left, right) => left === right);
-  const scopeState = () => stringFilterState(definition?.scope, appliedDefinition().scope, savedDashboardDefinition().scope);
-  const effectiveDateValue = (value, key) => canonicalSelectionDefinition(value)[key];
-  const dateState = key => stringFilterState(
-    effectiveDateValue(definition, key),
-    effectiveDateValue(appliedDefinition(), key),
-    effectiveDateValue(savedDashboardDefinition(), key),
-  );
+  const sourceState = _kind => '';
+  const scopeState = () => '';
+  const dateState = _key => '';
   const updateFilterControlState = (element, state, date = false) => {
     element.classList.toggle(date ? 'ds-date-picker-unsaved' : 'ds-filter-unsaved', state === 'unapplied');
     element.classList.toggle(date ? 'ds-date-picker-applied-unsaved' : 'ds-filter-applied-unsaved', state === 'applied-unsaved');
   };
   const filterStateFingerprint = value => {
+    const selection = canonicalSelectionDefinition(value);
+    return JSON.stringify(canonicalize({
+      filters: selection.filters, custom_fields: selection.custom_fields, hidden_filters: selection.hidden_filters,
+    }));
+  };
+  const preparationStateFingerprint = value => {
     const selection = canonicalSelectionDefinition(value);
     return JSON.stringify(canonicalize({
       datasets: selection.datasets, scope: selection.scope || 'single', filters: selection.filters,
@@ -180,12 +205,12 @@
   const hasUnsavedFilterChanges = () => Boolean(definition) && filterStateFingerprint(definition) !== filterStateFingerprint(savedDashboardDefinition());
   const hasUnappliedFilterChanges = () => Boolean(definition) && filterStateFingerprint(definition) !== filterStateFingerprint(appliedDefinition());
   const hasAppliedUnsavedFilterChanges = () => Boolean(
-    prepared?.token && appliedFilterState
-    && appliedFilterState !== filterStateFingerprint(savedDashboardDefinition())
+    prepared?.token && appliedDashboardDefinition
+    && filterStateFingerprint(appliedDashboardDefinition) !== filterStateFingerprint(savedDashboardDefinition())
   );
   const updateFilterActionState = () => {
     $('ds-save').disabled = !hasUnsavedFilterChanges() || filterActionBusy;
-    $('ds-apply-filters').disabled = !definition || filterStateFingerprint(definition) === appliedFilterState || filterActionBusy;
+    $('ds-apply-filters').disabled = !definition || preparationStateFingerprint(definition) === appliedFilterState || filterActionBusy;
   };
   const api = async (path = '', method = 'GET', body, signal) => {
     const response = await fetch(`/api/e2e-dashboards${path}`, {method, signal, cache: 'no-store', headers: {'Content-Type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
@@ -250,14 +275,9 @@
   }
   const restoreAppliedFilterSelection = () => {
     const applied = canonicalDashboardDefinition(appliedDefinition());
-    definition.datasets = structuredClone(applied.datasets);
-    definition.scope = applied.scope || 'single';
     definition.filters = structuredClone(applied.filters);
     definition.custom_fields = structuredClone(applied.custom_fields);
     definition.hidden_filters = structuredClone(applied.hidden_filters);
-    definition.date_from = applied.date_from || 'Oldest';
-    definition.date_to = applied.date_to || 'Newest';
-    applyDateBounds(dateBounds);
     sources();
     facets();
     updateDirtyState();
@@ -293,7 +313,7 @@
   const openActiveDashboardViewer = async () => {
     const filterDecision = await resolveUnappliedFilterChanges();
     if (!filterDecision) return;
-    if (!prepared) await prepare();
+    if (!prepared || preparationStateFingerprint(definition) !== appliedFilterState) await prepare();
     if (!prepared?.slides.length) return;
     setViewEnabled(false);
     try {
@@ -308,6 +328,7 @@
     let preparationToken = null;
     const filterDecision = id === activeId ? await resolveUnappliedFilterChanges() : 'unchanged';
     if (!filterDecision) return;
+    if (id === activeId && (!prepared || preparationStateFingerprint(definition) !== appliedFilterState)) await prepare();
     if (id === activeId && prepared?.token) {
       const exportAppliedDefinition = appliedDashboardDefinition || definition;
       if (filterDecision !== 'unchanged') {
@@ -1082,7 +1103,7 @@
   };
   const applyPreparedPayload = payload => {
     prepared = payload; facetOptions = payload.options; facetFields = config.filter_fields || payload.filter_fields || facetFields; availableFields = payload.available_fields || payload.custom_fields || []; applyDateBounds(payload.date_bounds); facetsLoading = false; facetOptionRequests.clear();
-    appliedFilterState = filterStateFingerprint(definition);
+    appliedFilterState = preparationStateFingerprint(definition);
     appliedSelectionState = selectionStateFingerprint(definition);
     appliedDashboardDefinition = JSON.parse(JSON.stringify(definition));
     updateDirtyState();
@@ -1110,7 +1131,7 @@
   }
   function filterChanged() {
     updateDirtyState();
-    const currentFilterState = filterStateFingerprint(definition);
+    const currentFilterState = preparationStateFingerprint(definition);
     const cached = preparedPayloads.get(preparedPayloadKey(activeId, preparedStateFingerprint(definition)));
     if (preparing && cached && currentFilterState !== preparingFilterState) {
       clearTimeout(timer); ++sequence; controller?.abort(); controller = null; preparing = null; preparingFilterState = ''; filterActionBusy = false; updateFilterActionState();
@@ -1118,7 +1139,7 @@
       status('Restored the previously prepared filters.');
       return;
     }
-    status('Filter changes are ready to apply.');
+    status('Universe or filter changes are ready to apply.');
   }
   function changed() {
     dismissPreparationStatus(); forgetPrepared();
@@ -1131,9 +1152,9 @@
     clearTimeout(timer); timer = setTimeout(safe(prepare), delay);
   }
   async function prepare() {
-    const requestedFilterState = filterStateFingerprint(definition);
-    // Scope changes keep the same filtered CDR rows. They still need a fresh
-    // chart snapshot because charts group those rows by Operator or Vendor.
+    const requestedFilterState = preparationStateFingerprint(definition);
+    // Universe changes need fresh filtered rows; Scope also changes how the
+    // resulting charts group those rows by Operator or Vendor.
     const needsDataPreparation = selectionStateFingerprint(definition) !== appliedSelectionState;
     if (preparing) {
       if (preparingFilterState === requestedFilterState) return preparing;
@@ -1147,7 +1168,7 @@
     const dashboardIdAtStart = activeId;
     const pending = (async () => {
     clearTimeout(timer); const current = requestSequence = ++sequence; controller?.abort(); controller = new AbortController();
-    dismissPreparationStatus(); preparationToken = backgroundPreparationToken = `prepare-${current}`; preparingFilterState = filterStateFingerprint(definition);
+    dismissPreparationStatus(); preparationToken = backgroundPreparationToken = `prepare-${current}`; preparingFilterState = preparationStateFingerprint(definition);
     dashboardPreparationTokens.set(dashboardIdAtStart, current);
     emitPreparationStatus('processing', needsDataPreparation ? 'Building the filtered Dashboard selection' : 'Rendering Dashboard charts for the current scope', preparationToken);
     setDashboardStatus(dashboardIdAtStart, needsDataPreparation ? 'loading-data' : 'rendering', needsDataPreparation ? 'Loading data' : 'Rendering');
@@ -1190,7 +1211,7 @@
     dismissPreparationStatus();
     clearTimeout(timer); ++sequence; controller?.abort(); preparing = null;
     stopPresentation();
-    activeId = id; $('ds-viewer-export-ppt').dataset.dashboardPptId = id; definition = canonicalDashboardDefinition(dashboards[id]); savedDefinition = definitionFingerprint(definition); dirty = false; prepared = null; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; facetOptions = {}; availableFields = []; facetOptionRequests.clear(); slideIndex = 0; setViewEnabled(false); rememberOpen(id);
+    activeId = id; $('ds-viewer-export-ppt').dataset.dashboardPptId = id; definition = runtimeDashboardDefinition(dashboards[id]); savedDefinition = definitionFingerprint(dashboards[id]); dirty = false; prepared = null; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; facetOptions = {}; availableFields = []; facetOptionRequests.clear(); slideIndex = 0; setViewEnabled(false); rememberOpen(id);
     resetViewerForDashboard();
     $('ds-name').value = definition.name; setNrMode(definition.technology || definition.template_technology, definition.template);
     $('ds-filter-panel').hidden = false; $('ds-dashboard-name').textContent = `Dashboard: ${definition.name}`; sources(); facets(); library(); status(''); if (!await restorePrepared(id)) await prepare();
@@ -1208,9 +1229,11 @@
     filterActionBusy = true; updateFilterActionState();
     try {
       const dashboardId = activeId, item = definition;
+      const universe = {scope: item.scope, datasets: structuredClone(item.datasets), date_from: item.date_from, date_to: item.date_to};
       item.name = $('ds-name').value.trim(); const result = await api(`/${dashboardId}`,'PUT',item);
       if (dashboardId !== activeId || item !== definition) return;
-      definition = canonicalDashboardDefinition(result.definition); dashboards[dashboardId] = structuredClone(definition); savedDefinition = definitionFingerprint(definition); updateDirtyState(); sources(); facets(); library();
+      dashboards[dashboardId] = structuredClone(result.definition);
+      definition = canonicalDashboardDefinition({...result.definition, ...universe}); savedDefinition = definitionFingerprint(result.definition); updateDirtyState(); sources(); facets(); library();
       await prepare();
       status(`Saved filters for “${definition.name}”.`);
     } finally {
@@ -1223,19 +1246,19 @@
     const technology = $('ds-nr-mode').value;
     const selected = (config.templates[technology] || []).find(row => row.identifier === $('ds-template').value);
     if (!selected) throw new Error('Choose a template for the selected NR Mode.');
-    const item = {name:$('ds-name').value.trim(),template_technology:technology,template:selected.name,technology,scope:'single',datasets:Object.fromEntries(Object.entries(config.datasets).map(([kind,rows])=>[kind,rows.map(row=>row.id)])),filters:{},custom_fields:[],date_from:'Oldest',date_to:'Newest'};
+    const item = {name:$('ds-name').value.trim(),template_technology:technology,template:selected.name,technology,scope:'single',datasets:latestDatasetsForScope('single'),filters:{},custom_fields:[],date_from:'Oldest',date_to:'Newest'};
     status(`Creating “${item.name}”…`); $('ds-create').disabled = true;
     try { const id = dashboardId(), result = await api(`/${id}`,'PUT',item); dashboards[id] = result.definition; await openDashboard(id); }
     finally { $('ds-create').disabled = !$('ds-template').options.length; }
   });
   bind('ds-save', save);
   bind('ds-apply-filters', async () => {
-    if (!definition || filterStateFingerprint(definition) === appliedFilterState) return;
+    if (!definition || preparationStateFingerprint(definition) === appliedFilterState) return;
     if (!$('ds-filter-overlay').hidden) await closeFilters();
     await prepare();
   });
   async function duplicateDashboard(sourceId) {
-    const id = dashboardId(), item = structuredClone(dashboards[sourceId]); item.name = nextName(`${item.name.slice(0,110)} (copy)`);
+    const id = dashboardId(), item = runtimeDashboardDefinition(dashboards[sourceId]); item.name = nextName(`${item.name.slice(0,110)} (copy)`);
     status(`Duplicating “${dashboards[sourceId].name}”…`);
     const result = await api(`/${id}`,'PUT',item); dashboards[id] = result.definition; await openDashboard(id);
   }
@@ -1262,78 +1285,13 @@
     if (definition && selected) { definition.template_technology = definition.technology = $('ds-nr-mode').value; definition.template = selected.name; changed(); }
   };
   $('ds-template').onchange = () => { if (definition) { setTemplate($('ds-template').value); changed(); } };
-  const chooseScopeDatasets = targetScope => new Promise(resolve => {
-    const host = $('ds-multivendor-overlay');
-    const choices = $('ds-multivendor-choices');
-    const currentDatasets = structuredClone(definition.datasets || {});
-    const latestDatasets = {data: [], voice: [], speech: []};
-    const recentCount = targetScope === 'single' ? 2 : 1;
-    const datasetRecency = row => {
-      const uploadedAt = Date.parse(row.uploaded_at || row.updated_at || row.processed_at || row.created_at || '');
-      return Number.isFinite(uploadedAt) ? uploadedAt : Number(row.id) || 0;
-    };
-    $('ds-multivendor-eyebrow').textContent = targetScope === 'single' ? 'Operator CDR selection' : 'Multivendor CDR selection';
-    $('ds-multivendor-note').textContent = targetScope === 'single'
-      ? 'Keep the current CDR universe, choose datasets below, or use the two most recent datasets of each type.'
-      : 'Keep the current CDR universe, choose datasets below, or use the most recent dataset of each type.';
-    $('ds-multivendor-use-latest').textContent = targetScope === 'single' ? 'Use Two Latest per Type' : 'Use Latest Datasets';
-    choices.replaceChildren();
-    for (const kind of ['data', 'voice', 'speech']) {
-      const datasets = [...(config.datasets[kind] || [])];
-      if (!datasets.length) continue;
-      const currentIds = new Set((currentDatasets[kind] || []).map(String));
-      latestDatasets[kind] = datasets
-        .sort((left, right) => datasetRecency(right) - datasetRecency(left) || Number(right.id) - Number(left.id))
-        .slice(0, recentCount)
-        .map(row => Number(row.id));
-      const group = node('section', undefined, 'ds-multivendor-group');
-      group.append(node('h3', `CDR ${kind[0].toUpperCase()}${kind.slice(1)}`));
-      const options = node('div', undefined, 'ds-multivendor-options');
-      datasets.forEach(row => {
-        const label = node('label', undefined, 'ds-multivendor-option');
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox'; checkbox.value = String(row.id); checkbox.dataset.datasetKind = kind;
-        checkbox.checked = currentIds.has(String(row.id));
-        label.append(checkbox, node('span', `${row.file_name} · ${Number(row.row_count || 0).toLocaleString()} rows`));
-        options.append(label);
-      });
-      group.append(options); choices.append(group);
-    }
-    const useCurrent = $('ds-multivendor-use-current');
-    const syncUseCurrent = () => { useCurrent.disabled = !choices.querySelector('input:checked'); };
-    choices.addEventListener('change', syncUseCurrent);
-    syncUseCurrent();
-    const finish = result => {
-      window.removeEventListener('keydown', onKeydown);
-      choices.removeEventListener('change', syncUseCurrent);
-      host.onclick = null;
-      overlay('ds-multivendor-overlay', false);
-      resolve(result);
-    };
-    const onKeydown = event => { if (event.key === 'Escape') { event.preventDefault(); finish(null); } };
-    $('ds-multivendor-close').onclick = () => finish(null);
-    $('ds-multivendor-cancel').onclick = () => finish(null);
-    $('ds-multivendor-keep-current').onclick = () => finish({datasets: currentDatasets});
-    useCurrent.onclick = () => {
-      const datasets = {data: [], voice: [], speech: []};
-      choices.querySelectorAll('input:checked').forEach(input => datasets[input.dataset.datasetKind].push(Number(input.value)));
-      finish({datasets});
-    };
-    $('ds-multivendor-use-latest').onclick = () => finish({datasets: latestDatasets});
-    host.onclick = event => { if (event.target === host) finish(null); };
-    window.addEventListener('keydown', onKeydown);
-    overlay('ds-multivendor-overlay', true);
-  });
   $('ds-scope').onchange = safe(async () => {
     if (!definition) return;
     const selectedScope = $('ds-scope').value;
     if (selectedScope !== definition.scope) {
-      const selection = await chooseScopeDatasets(selectedScope);
-      if (!selection) { $('ds-scope').value = definition.scope || 'single'; return; }
-      if (selection.datasets && filterStateFingerprint({...definition, datasets: selection.datasets}) !== filterStateFingerprint(definition)) {
-        resetAutomaticDatesForDatasetChange();
-        definition.datasets = selection.datasets;
-      }
+      definition.datasets = latestDatasetsForScope(selectedScope);
+      definition.date_from = 'Oldest';
+      definition.date_to = 'Newest';
     }
     definition.scope = selectedScope;
     sources();
@@ -1362,21 +1320,16 @@
       }
     }
   });
-  bind('ds-clear-filters', () => { definition.filters = {}; definition.date_from = 'Oldest'; definition.date_to = 'Newest'; sources(); facets(); filterChanged(); });
+  bind('ds-clear-filters', () => { definition.filters = {}; facets(); filterChanged(); });
   bind('ds-last-saved-filters', () => {
     const saved = savedDashboardDefinition();
-    const current = JSON.stringify({datasets: definition.datasets, scope: definition.scope, filters: definition.filters, custom_fields: definition.custom_fields, hidden_filters: definition.hidden_filters, date_from: definition.date_from, date_to: definition.date_to});
-    definition.datasets = structuredClone(saved.datasets || {});
-    definition.scope = saved.scope || 'single';
+    const current = filterStateFingerprint(definition);
     definition.filters = structuredClone(saved.filters || {});
     definition.custom_fields = structuredClone(saved.custom_fields || []);
     definition.hidden_filters = structuredClone(saved.hidden_filters || []);
-    definition.date_from = saved.date_from || 'Oldest';
-    definition.date_to = saved.date_to || 'Newest';
-    applyDateBounds(dateBounds);
-    const restored = JSON.stringify({datasets: definition.datasets, scope: definition.scope, filters: definition.filters, custom_fields: definition.custom_fields, hidden_filters: definition.hidden_filters, date_from: definition.date_from, date_to: definition.date_to});
+    const restored = filterStateFingerprint(definition);
     if (restored === current) return;
-    sources(); facets(); filterChanged();
+    facets(); filterChanged();
   });
   bind('ds-viewer-refresh',prepare);
   bind('ds-viewer-export-ppt', async () => {
