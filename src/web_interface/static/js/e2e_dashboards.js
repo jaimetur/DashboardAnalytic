@@ -2099,6 +2099,16 @@
     if (event.key === 'Escape' && dataFilterMenu) { event.preventDefault(); closeDataFilterMenu(); return; }
     const visible = ['ds-ppt-filter-overlay','ds-chart-expanded-overlay','ds-editor-overlay','ds-data-overlay','ds-filter-overlay','ds-presentation-overlay','ds-viewer'].find(id=>!$(id).hidden && $(id).contains(document.activeElement)); if (!visible) return;
     const editing = event.target.closest?.('input,textarea,select,[contenteditable="true"]');
+    if (visible === 'ds-chart-expanded-overlay' && !editing && event.key === 'ArrowLeft') {
+      event.preventDefault();
+      void safe(() => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) - 1))();
+      return;
+    }
+    if (visible === 'ds-chart-expanded-overlay' && !editing && event.key === 'ArrowRight') {
+      event.preventDefault();
+      void safe(() => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) + 1))();
+      return;
+    }
     if (visible === 'ds-viewer' && !editing && event.key === 'ArrowLeft' && slideIndex > 0) { event.preventDefault(); stopPresentation(); slideIndex -= 1; renderSlide(); return; }
     if (visible === 'ds-viewer' && !editing && event.key === 'ArrowRight' && slideIndex < (prepared?.slides.length || 1) - 1) { event.preventDefault(); stopPresentation(); slideIndex += 1; renderSlide(); return; }
     if (event.key === 'Escape') { event.preventDefault(); $({'ds-chart-expanded-overlay':'ds-chart-expanded-close','ds-editor-overlay':'ds-editor-close','ds-data-overlay':'ds-data-close','ds-filter-overlay':'ds-filter-close','ds-ppt-filter-overlay':'ds-ppt-filter-dialog-close','ds-presentation-overlay':'ds-presentation-close','ds-viewer':'ds-viewer-close'}[visible]).click(); }

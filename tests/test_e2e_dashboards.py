@@ -246,6 +246,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "card.ondblclick = safe(async event =>" in dashboard_script
     assert "const syncExpandedChartNavigation" in dashboard_script
     assert "navigateExpandedChart(expandedCharts().length - 1)" in dashboard_script
+    assert "visible === 'ds-chart-expanded-overlay' && !editing && event.key === 'ArrowLeft'" in dashboard_script
+    assert "visible === 'ds-chart-expanded-overlay' && !editing && event.key === 'ArrowRight'" in dashboard_script
     assert "expandedCanvasShell.classList.add('ds-hover')" in dashboard_script
     assert "`Chart ${index + 1} / ${charts.length}`" in dashboard_script
     assert "if (event.target === event.currentTarget) expandedChartOverlay(false);" in dashboard_script
