@@ -100,6 +100,7 @@ ADAPTATIVE_FILTER_FIELDS = (
     'Market', 'Operator', 'Vendor', 'Region', 'City', 'Campaign', 'RAT', 'Session Type', 'Call Status',
 )
 DASHBOARD_RENDER_CACHE_VERSION = 1
+DASHBOARD_SELECTION_CACHE_VERSION = 8
 DASHBOARD_SELECTION_ROW_LIMIT = 25_000
 DASHBOARD_PROFILE_SELECTION_THRESHOLD = 100_000
 DASHBOARD_PROJECTION_CACHE_VERSION = 1
@@ -1320,7 +1321,7 @@ def install_dashboard_routes(core):
         payload = {
             # Scope changes only how charts group the already selected rows.
             # Keep that presentation setting out of the selection cache key.
-            'schema': 8,
+            'schema': DASHBOARD_SELECTION_CACHE_VERSION,
             'definition': selection_definition,
             'versions': versions,
             'combined_revisions': revisions,

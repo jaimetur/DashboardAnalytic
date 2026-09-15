@@ -1344,6 +1344,7 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
     active_workspace = workspace
     if initialize:
         repository.initialize()
+        clear_outdated_workspace_caches(workspace)
         migration_marker = workspace.slides_templates_dir / '.migrate-library'
         if migration_marker.exists():
             register_workspace_template_files(workspace)
@@ -1439,6 +1440,47 @@ def invalidate_workspace_size_cache(workspace_root: Path | None = None) -> None:
     with _workspace_size_cache_lock:
         _workspace_size_cache.pop(cache_key, None)
         _workspace_cache_size_cache.pop(cache_key, None)
+
+
+def workspace_cache_version_signature() -> dict[str, int | str]:
+    """Describe every persistent Dashboard cache format used by this release."""
+    return {
+        'application': __version__,
+        'workspace_cache': 1,
+        'dashboard_render': DASHBOARD_RENDER_CACHE_VERSION,
+        'dashboard_selection': DASHBOARD_SELECTION_CACHE_VERSION,
+        'dashboard_projection': DASHBOARD_PROJECTION_CACHE_VERSION,
+        'dashboard_chart_model': DASHBOARD_CHART_MODEL_CACHE_VERSION,
+        'dashboard_preview_manifest': DASHBOARD_PREVIEW_MANIFEST_VERSION,
+    }
+
+
+def clear_outdated_workspace_caches(workspace: Workspace) -> bool:
+    """Remove persistent cache data when it was written by an older format or release."""
+    workspace_root = workspace.database_path.parent
+    cache_root = workspace_root / '.dashboard-data-cache'
+    version_file = workspace_root / '.dashboard-cache-version.json'
+    current_signature = workspace_cache_version_signature()
+    try:
+        stored_signature = json.loads(version_file.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError):
+        stored_signature = None
+    if stored_signature == current_signature:
+        return False
+
+    cancel_prefetch = getattr(sys.modules[__name__], 'e2e_dashboard_cancel_prefetch_workspace', None)
+    if callable(cancel_prefetch):
+        cancel_prefetch(workspace.database_path)
+    shutil.rmtree(cache_root, ignore_errors=True)
+    shutil.rmtree(workspace_root / '.dashboard-chart-cache', ignore_errors=True)
+    with repository.connection() as connection:
+        connection.execute('DELETE FROM dashboard_filter_selection_rows')
+        connection.execute('DELETE FROM dashboard_filter_selections')
+    temporary = version_file.with_suffix(f'.{uuid4().hex}.tmp')
+    temporary.write_text(json.dumps(current_signature, sort_keys=True), encoding='utf-8')
+    temporary.replace(version_file)
+    invalidate_workspace_size_cache(workspace_root)
+    return True
 
 
 def format_workspace_size(size_bytes: int) -> str:
@@ -11798,5 +11840,12 @@ templates.env.globals['format_cdf_overrides'] = format_cdf_overrides
 templates.env.globals['format_aggregation_label'] = format_aggregation_label
 
 # Register the template-driven dashboard workspace after the shared reporting helpers.
-from src.modules.e2e_dashboards import install_dashboard_routes
+from src.modules.e2e_dashboards import (
+    DASHBOARD_CHART_MODEL_CACHE_VERSION,
+    DASHBOARD_PREVIEW_MANIFEST_VERSION,
+    DASHBOARD_PROJECTION_CACHE_VERSION,
+    DASHBOARD_RENDER_CACHE_VERSION,
+    DASHBOARD_SELECTION_CACHE_VERSION,
+    install_dashboard_routes,
+)
 install_dashboard_routes(sys.modules[__name__])

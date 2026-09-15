@@ -1704,6 +1704,39 @@ def test_workspace_cache_clear_removes_only_derived_dashboard_artifacts(client, 
     )
 
 
+def test_opening_workspace_removes_only_cache_from_previous_versions(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace = app_module.workspace_registry.get('default')
+    assert workspace is not None
+    workspace_root = workspace.database_path.parent
+    version_file = workspace_root / '.dashboard-cache-version.json'
+    stale_model = workspace_root / '.dashboard-data-cache' / 'charts-canvas' / 'stale.json'
+    stale_model.parent.mkdir(parents=True, exist_ok=True)
+    stale_model.write_text('{}', encoding='utf-8')
+    legacy_chart = workspace_root / '.dashboard-chart-cache' / 'stale.png'
+    legacy_chart.parent.mkdir(parents=True, exist_ok=True)
+    legacy_chart.write_bytes(b'png')
+    version_file.write_text('{"application":"0.2.0"}', encoding='utf-8')
+    with app_module.repository.connection() as connection:
+        connection.execute("INSERT INTO dashboard_filter_selections (cache_key) VALUES ('stale-selection')")
+
+    app_module.activate_workspace(workspace.id)
+
+    assert not stale_model.exists()
+    assert not legacy_chart.exists()
+    assert json.loads(version_file.read_text(encoding='utf-8')) == app_module.workspace_cache_version_signature()
+    with app_module.repository.connection() as connection:
+        assert connection.execute('SELECT COUNT(*) FROM dashboard_filter_selections').fetchone()[0] == 0
+
+    current_model = workspace_root / '.dashboard-data-cache' / 'charts-canvas' / 'current.json'
+    current_model.parent.mkdir(parents=True, exist_ok=True)
+    current_model.write_text('{}', encoding='utf-8')
+    app_module.activate_workspace(workspace.id)
+    assert current_model.exists()
+
+
 def test_workspace_management_reports_every_supported_row_status(client, tmp_path: Path) -> None:
     import src.DashboardAnalytic as app_module
 

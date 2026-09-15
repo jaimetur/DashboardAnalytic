@@ -108,6 +108,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert page.text.index('id="ds-unsaved-filters-badge"') < page.text.index('id="ds-dashboard-name"')
     assert 'id="confirm-secondary"' in page.text
     assert 'id="confirm-tertiary"' in page.text
+    assert '"filter_aliases"' in page.text
+    assert '"Region": ["Region", "G_Level_2", "G Level 2"]' in page.text
     assert '>Apply Filters<' in page.text
     assert page.text.index('>Apply Filters<') < page.text.index('>Save Filters<')
     assert 'id="ds-apply-filters" title="Apply current filters without saving them" disabled' in page.text
@@ -319,7 +321,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'entry.group.tasks.splice(Math.min(entry.position + offset, entry.group.tasks.length), 0, entry.task);' in app_script
     selection_key_source = dashboard_module[dashboard_module.index('def persistent_selection_key'):dashboard_module.index('def selected_date_bounds')]
     assert "'scope': definition.scope," not in selection_key_source
-    assert "'schema': 8," in selection_key_source
+    assert "'schema': DASHBOARD_SELECTION_CACHE_VERSION," in selection_key_source
+    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 8' in dashboard_module
     assert "kind: sorted([" in selection_key_source
     assert "kind: sorted(set(dataset_ids))" in selection_key_source
     assert "field: sorted(set(values))" in selection_key_source
