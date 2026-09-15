@@ -5611,6 +5611,15 @@ if (queueNode) {
         };
         groups.push(group);
       }
+      if (task.dashboard_name && String(task.id).startsWith('prepare-')) {
+        group.tasks = (group.tasks || []).filter(candidate => (
+          !String(candidate.id || '').startsWith('dashboard-prefetch:')
+          ||
+          !candidate.dashboard_name
+          || String(candidate.dashboard_name) !== String(task.dashboard_name)
+          || String(candidate.id) === String(task.id)
+        ));
+      }
       if (!(group.tasks || []).some(candidate => String(candidate.id) === String(task.id))) group.tasks.push(task);
     });
     return groups;
@@ -5703,7 +5712,13 @@ if (queueNode) {
     const list = document.createElement('div');
     list.className = 'background-task-list';
     let previousDashboardName = '';
+    const taskSections = new Map();
     (Array.isArray(group.tasks) ? group.tasks : []).forEach((task) => {
+      const section = String(task.dashboard_name || `task:${task.id || taskSections.size}`);
+      if (!taskSections.has(section)) taskSections.set(section, []);
+      taskSections.get(section).push(task);
+    });
+    [...taskSections.values()].flat().forEach((task) => {
       const dashboardName = String(task.dashboard_name || '');
       if (dashboardName && dashboardName !== previousDashboardName) {
         const dashboard = document.createElement('span');
@@ -5726,12 +5741,12 @@ if (queueNode) {
         stop.type = 'button';
         stop.className = 'background-task-stop-button';
         stop.textContent = '■';
-        stop.title = 'Stop Job';
-        stop.setAttribute('aria-label', 'Stop Job');
+        stop.title = 'Interrupt task';
+        stop.setAttribute('aria-label', 'Interrupt task');
         stop.addEventListener('click', async () => {
           const accepted = await showConfirmDialog(
             `Stop “${String(task.label || 'this background job')}”?`,
-            {title: 'Stop background job', confirmLabel: 'Stop Job'},
+            {title: 'Interrupt background task', confirmLabel: 'Interrupt'},
           );
           if (!accepted) return;
           stop.disabled = true;
@@ -5748,7 +5763,7 @@ if (queueNode) {
             await poll();
           } catch (error) {
             stop.disabled = false;
-            showInfoDialog(error instanceof Error ? error.message : 'The background job could not be stopped.', {title: 'Stop Job', tone: 'error'});
+            showInfoDialog(error instanceof Error ? error.message : 'The background task could not be interrupted.', {title: 'Interrupt task', tone: 'error'});
           }
         });
         taskHead.append(stop);

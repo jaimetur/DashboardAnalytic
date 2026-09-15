@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
-from threading import RLock, Thread
+from threading import Lock, RLock, Thread
 from time import monotonic
 from types import SimpleNamespace
 from typing import Literal
@@ -57,8 +57,8 @@ class DashboardDefinition(BaseModel):
     custom_fields: list[str] = Field(default_factory=list)
     hidden_filters: list[str] = Field(default_factory=list)
     slide_comments: dict[str, list[str]] = Field(default_factory=dict)
-    date_from: date | None = None
-    date_to: date | None = None
+    date_from: date | Literal['Oldest'] | None = 'Oldest'
+    date_to: date | Literal['Newest'] | None = 'Newest'
 
 
 class DashboardPptExportRequest(BaseModel):
@@ -100,7 +100,7 @@ ADAPTATIVE_FILTER_FIELDS = (
     'Market', 'Operator', 'Vendor', 'Region', 'City', 'Campaign', 'RAT', 'Session Type', 'Call Status',
 )
 DASHBOARD_RENDER_CACHE_VERSION = 1
-DASHBOARD_SELECTION_CACHE_VERSION = 8
+DASHBOARD_SELECTION_CACHE_VERSION = 9
 DASHBOARD_SELECTION_ROW_LIMIT = 25_000
 DASHBOARD_PROFILE_SELECTION_THRESHOLD = 100_000
 DASHBOARD_PROJECTION_CACHE_VERSION = 1
@@ -177,21 +177,23 @@ def filter_mask(frame, definition, exclude=None):
         if field_values is None:
             return pd.Series(False, index=frame.index)
         mask &= field_values.isin(values)
-    if definition.date_from or definition.date_to:
+    concrete_from = definition.date_from if isinstance(definition.date_from, date) else None
+    concrete_to = definition.date_to if isinstance(definition.date_to, date) else None
+    if concrete_from or concrete_to:
         time_column = next((columns[key] for key in ('eventstarttime', 'teststarttime', 'timestamp', 'datetime', 'date') if key in columns), None)
         if time_column is None:
             return pd.Series(False, index=frame.index)
         times = pd.to_datetime(frame[time_column], errors='coerce', utc=True, format='mixed')
-        if definition.date_from:
-            mask &= times >= pd.Timestamp(definition.date_from, tz='UTC')
-        if definition.date_to:
-            mask &= times < pd.Timestamp(definition.date_to + timedelta(days=1), tz='UTC')
+        if concrete_from:
+            mask &= times >= pd.Timestamp(concrete_from, tz='UTC')
+        if concrete_to:
+            mask &= times < pd.Timestamp(concrete_to + timedelta(days=1), tz='UTC')
     return mask
 
 
 def filter_frame(frame, definition, exclude=None):
     """Apply selections, including explicit empty selections and missing fields."""
-    if not definition.filters and not definition.date_from and not definition.date_to:
+    if not definition.filters and not isinstance(definition.date_from, date) and not isinstance(definition.date_to, date):
         return frame
     return frame.loc[filter_mask(frame, definition, exclude)]
 
@@ -222,6 +224,7 @@ def install_dashboard_routes(core):
     lock = RLock()
     snapshots = OrderedDict()
     images = OrderedDict()
+    universe_row_count_cache = OrderedDict()
     projection_load_locks: dict[str, RLock] = {}
     prefetch_jobs: dict[str, dict] = {}
     direct_preparation_tasks: dict[str, dict] = {}
@@ -229,6 +232,7 @@ def install_dashboard_routes(core):
     dashboard_ppt_runs: dict[tuple[str, int], str] = {}
     dashboard_ppt_data_tokens: dict[tuple[str, int, str], str] = {}
     prefetch_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='e2e-dashboard-models')
+    dashboard_work_gate = Lock()
     prefetch_dispatch_active = False
     prefetch_generation: dict[str, int] = {}
 
@@ -650,7 +654,7 @@ def install_dashboard_routes(core):
     def validate(definition, task_repository=None):
         if not definition.name.strip():
             raise HTTPException(400, 'Enter a Dashboard name.')
-        if definition.date_from and definition.date_to and definition.date_from > definition.date_to:
+        if isinstance(definition.date_from, date) and isinstance(definition.date_to, date) and definition.date_from > definition.date_to:
             raise HTTPException(400, 'The start date must not follow the end date.')
         if set(definition.datasets) - set(KINDS):
             raise HTTPException(400, 'Unsupported dataset type.')
@@ -1237,17 +1241,19 @@ def install_dashboard_routes(core):
             value_placeholders = ', '.join('?' for _ in values)
             clauses.append(f"{value_expression} IN ({value_placeholders})")
             params.extend(str(value) for value in values)
-        if definition.date_from or definition.date_to:
+        concrete_from = definition.date_from if isinstance(definition.date_from, date) else None
+        concrete_to = definition.date_to if isinstance(definition.date_to, date) else None
+        if concrete_from or concrete_to:
             date_column = next((resolve_sql_column(columns, candidate) for candidate in ('event_start_time', 'Test_Start_Time', 'Timestamp', 'Date') if resolve_sql_column(columns, candidate)), None)
             if date_column is None:
                 clauses.append('0')
             else:
-                if definition.date_from:
+                if concrete_from:
                     clauses.append(f"datetime({quote(date_column)}) >= datetime(?)")
-                    params.append(definition.date_from.isoformat())
-                if definition.date_to:
+                    params.append(concrete_from.isoformat())
+                if concrete_to:
                     clauses.append(f"datetime({quote(date_column)}) < datetime(?, '+1 day')")
-                    params.append(definition.date_to.isoformat())
+                    params.append(concrete_to.isoformat())
         source_sheet = resolve_sql_column(columns, 'source_sheet')
         if source_sheet and core.CDR_IGNORED_SHEET_KEYS:
             ignored = sorted(core.CDR_IGNORED_SHEET_KEYS)
@@ -1267,18 +1273,15 @@ def install_dashboard_routes(core):
             requested.update(definition.filters)
             requested.update(alias for aliases in FILTER_COLUMNS.values() for alias in aliases)
             requested.update(('event_start_time', 'Test_Start_Time', 'Timestamp', 'Date'))
-            existing = {identity(column) for column in task_repository.list_reporting_row_columns(kind)}
-            source_columns = {
-                identity(column)
-                for row in selected
-                for column in task_repository.list_dataset_row_columns(row['id'])
-            }
-            required = {identity(column) for column in requested if identity(column) in source_columns}
-            repair = not required.issubset(existing)
             changed = False
             for row in selected:
-                if repair or not task_repository.reporting_rows_exist_for_dataset(row['id'], kind):
-                    task_repository.copy_dataset_rows_to_reporting(row['id'], kind, sorted(requested, key=str.casefold))
+                # Existing rows can still have NULL values for fields added by
+                # another dataset or by a later normalization pass. The copy
+                # helper has a fast no-change path and repairs only incomplete
+                # requested columns for this selected dataset.
+                if task_repository.copy_dataset_rows_to_reporting(
+                    row['id'], kind, sorted(requested, key=str.casefold),
+                ):
                     changed = True
             current = {identity(column) for column in task_repository.list_reporting_row_columns(kind)}
             missing_dimensions = tuple(
@@ -1329,6 +1332,38 @@ def install_dashboard_routes(core):
         }
         return sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
+    def dataset_universe_row_counts(definition, task_repository, dimensions, selected_by_kind):
+        """Count the selected CDR rows before date and adaptive-filter restrictions."""
+        baseline = definition.model_copy(deep=True)
+        baseline.filters = {}
+        baseline.custom_fields = []
+        baseline.hidden_filters = []
+        baseline.date_from = None
+        baseline.date_to = None
+        cache_key = persistent_selection_key(baseline, task_repository, dimensions, selected_by_kind)
+        with lock:
+            cached = universe_row_count_cache.get(cache_key)
+            if cached is not None:
+                universe_row_count_cache.move_to_end(cache_key)
+                return dict(cached)
+        counts = {}
+        with task_repository.connection() as connection:
+            for kind, selected in selected_by_kind.items():
+                columns = task_repository.list_reporting_row_columns(kind)
+                where, params = selection_where(
+                    task_repository, kind, [int(row['id']) for row in selected], baseline, columns=columns,
+                )
+                table = task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))
+                counts[kind] = int(connection.execute(
+                    f'SELECT COUNT(*) AS count FROM {table} WHERE {where}', params,
+                ).fetchone()['count'])
+        with lock:
+            universe_row_count_cache[cache_key] = dict(counts)
+            universe_row_count_cache.move_to_end(cache_key)
+            while len(universe_row_count_cache) > 64:
+                universe_row_count_cache.popitem(last=False)
+        return counts
+
     def selected_date_bounds(task_repository, selected_by_kind):
         """Return the inclusive calendar bounds across the selected source datasets."""
         lower = upper = None
@@ -1367,8 +1402,8 @@ def install_dashboard_routes(core):
         if not bounds:
             return
         lower, upper = date.fromisoformat(bounds['min']), date.fromisoformat(bounds['max'])
-        definition.date_from = lower if definition.date_from is None or not lower <= definition.date_from <= upper else definition.date_from
-        definition.date_to = upper if definition.date_to is None or not lower <= definition.date_to <= upper else definition.date_to
+        definition.date_from = lower if definition.date_from == 'Oldest' or definition.date_from is None or not lower <= definition.date_from <= upper else definition.date_from
+        definition.date_to = upper if definition.date_to == 'Newest' or definition.date_to is None or not lower <= definition.date_to <= upper else definition.date_to
 
     def profile_filter_options(definition, dimensions, selected_by_kind, fields, task_repository):
         """Load large-dashboard facet values from selected CDR profiles."""
@@ -1389,7 +1424,11 @@ def install_dashboard_routes(core):
                     ), None)
                     if resolved is None:
                         continue
-                    values = lookup.get(identity(resolved))
+                    lookup_keys = list(dict.fromkeys([
+                        identity(resolved), identity(field_name),
+                        *(identity(alias) for alias in aliases),
+                    ]))
+                    values = next((lookup[key] for key in lookup_keys if isinstance(lookup.get(key), list)), None)
                     if not isinstance(values, list):
                         incomplete_fields.add(field_name)
                         continue
@@ -1409,31 +1448,38 @@ def install_dashboard_routes(core):
         ]
         if missing_fields:
             # Older upload profiles do not contain every Dashboard facet. Read
-            # only the missing catalogues from the narrow combined tables in a
-            # single pass per CDR kind instead of returning empty controls.
+            # only the missing catalogues from the narrow combined tables. An
+            # adaptive facet must ignore its own current restriction so users
+            # can see and select values outside the saved selection.
             with task_repository.connection() as connection:
                 for kind, selected in selected_by_kind.items():
                     columns = task_repository.list_reporting_row_columns(kind)
-                    available = [
-                        (field_name, filter_sql_value_expression(task_repository, columns, field_name))
-                        for field_name in missing_fields
-                    ]
-                    available = [(field_name, expression) for field_name, expression in available if expression is not None]
-                    if not available:
-                        continue
-                    where, params = selection_where(
-                        task_repository, kind, [int(row['id']) for row in selected], definition,
-                        columns=columns,
-                    )
-                    select_clause = ', '.join(
-                        f'json_group_array(DISTINCT {expression}) AS facet_{index}'
-                        for index, (_field_name, expression) in enumerate(available)
-                    )
                     table = task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))
-                    row = connection.execute(f'SELECT {select_clause} FROM {table} WHERE {where}', params).fetchone()
-                    for index, (field_name, _column) in enumerate(available):
-                        encoded_values = row[f'facet_{index}'] if row else '[]'
-                        options[field_name].update(str(value) for value in json.loads(encoded_values or '[]'))
+                    active_filter_keys = {identity(field_name) for field_name in definition.filters}
+                    facet_groups: dict[str | None, list[str]] = {None: []}
+                    for field_name in missing_fields:
+                        excluded = field_name if identity(field_name) in active_filter_keys else None
+                        facet_groups.setdefault(excluded, []).append(field_name)
+                    for excluded, group_fields in facet_groups.items():
+                        available = [
+                            (field_name, filter_sql_value_expression(task_repository, columns, field_name))
+                            for field_name in group_fields
+                        ]
+                        available = [(field_name, expression) for field_name, expression in available if expression is not None]
+                        if not available:
+                            continue
+                        where, params = selection_where(
+                            task_repository, kind, [int(row['id']) for row in selected], definition,
+                            exclude=excluded, columns=columns,
+                        )
+                        select_clause = ', '.join(
+                            f'json_group_array(DISTINCT {expression}) AS facet_{index}'
+                            for index, (_field_name, expression) in enumerate(available)
+                        )
+                        row = connection.execute(f'SELECT {select_clause} FROM {table} WHERE {where}', params).fetchone()
+                        for index, (field_name, _column) in enumerate(available):
+                            encoded_values = row[f'facet_{index}'] if row else '[]'
+                            options[field_name].update(str(value) for value in json.loads(encoded_values or '[]'))
         return {field_name: sorted(values, key=str.casefold) for field_name, values in options.items()}
 
     def materialize_selection(definition, task_repository, dimensions, selected_by_kind, fields, *, use_profile_options=False):
@@ -1534,6 +1580,7 @@ def install_dashboard_routes(core):
         if not known_default and not any(identity(field_name) == identity(field) for field in requested_definition.custom_fields):
             requested_definition.custom_fields.append(field_name)
         ensure_filter_projection(requested_definition, task_repository, dimensions, selected_by_kind, entries)
+        apply_selected_date_bounds(requested_definition, selected_date_bounds(task_repository, selected_by_kind))
         values = set()
         resolved = False
         with task_repository.connection() as connection:
@@ -1563,15 +1610,13 @@ def install_dashboard_routes(core):
                 raise RuntimeError('Dashboard preparation cancelled.')
 
         workspace = workspace or workspace_key()
+        ensure_not_cancelled()
         task_repository = Repository(Path(workspace), core.repository.global_db_path)
         entries = validate(definition, task_repository)
         dimensions = core.load_repository_calculated_dimensions(task_repository)
         selected_by_kind = selected_sources(definition, task_repository)
-        universe_rows = {
-            kind: sum(int(dataset.get('row_count') or 0) for dataset in selected)
-            for kind, selected in selected_by_kind.items()
-        }
         ensure_filter_projection(definition, task_repository, dimensions, selected_by_kind, entries)
+        ensure_not_cancelled()
         date_bounds = selected_date_bounds(task_repository, selected_by_kind)
         apply_selected_date_bounds(definition, date_bounds)
         selected_dataset_ids = {dataset_id for ids in definition.datasets.values() for dataset_id in ids}
@@ -1589,6 +1634,15 @@ def install_dashboard_routes(core):
         )
         selection_id, selection_key, selection_materialized, options, row_counts, rows_exact = materialize_selection(
             definition, task_repository, dimensions, selected_by_kind, fields, use_profile_options=use_profile_options,
+        )
+        full_date_range = bool(
+            date_bounds
+            and str(definition.date_from) == date_bounds['min']
+            and str(definition.date_to) == date_bounds['max']
+        )
+        universe_rows = (
+            dict(row_counts) if not definition.filters and full_date_range
+            else dataset_universe_row_counts(definition, task_repository, dimensions, selected_by_kind)
         )
         slides = OrderedDict()
         deck = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
@@ -1763,7 +1817,29 @@ def install_dashboard_routes(core):
         preparation_id = preparation_id or f'dashboard-preparation:{uuid4().hex}'
         workspace = workspace_key()
         cancellation = {'requested': False}
+        deferred_prefetches = []
         with lock:
+            # Foreground work has priority over every automatic Dashboard
+            # warm-up. Cancel all queued/running warm-ups before waiting for
+            # the shared gate, then put the unrelated ones back afterwards.
+            for job in prefetch_jobs.values():
+                if job.get('status') not in {'queued', 'processing'} or job.get('cancel_requested'):
+                    continue
+                raw_definition = job.get('raw_definition')
+                if isinstance(raw_definition, dict):
+                    deferred_prefetches.append((
+                        str(job.get('dashboard_id') or ''), raw_definition,
+                        job.get('user') or SimpleNamespace(username='*'), str(job.get('workspace') or ''),
+                    ))
+                job['cancel_requested'] = True
+                if job.get('status') == 'queued':
+                    job['status'] = 'cancelled'
+            for task_id, task in direct_preparation_tasks.items():
+                if task_id == preparation_id:
+                    continue
+                existing_cancellation = task.get('cancellation')
+                if isinstance(existing_cancellation, dict):
+                    existing_cancellation['requested'] = True
             direct_preparation_tasks[preparation_id] = {
                 'id': preparation_id, 'workspace': workspace, 'name': definition.name,
                 'dashboard_id': dashboard_id,
@@ -1773,9 +1849,10 @@ def install_dashboard_routes(core):
             def preparation_cancelled():
                 return bool(cancellation['requested'])
 
-            preview = build_preview(
-                definition, user, workspace=workspace, cancelled=preparation_cancelled,
-            )
+            with dashboard_work_gate:
+                preview = build_preview(
+                    definition, user, workspace=workspace, cancelled=preparation_cancelled,
+                )
             if dashboard_id:
                 enqueue_prefetch(
                     dashboard_id,
@@ -1786,9 +1863,24 @@ def install_dashboard_routes(core):
             return preview
         except (ValueError, KeyError) as exc:
             raise HTTPException(400, str(exc)) from exc
+        except RuntimeError as exc:
+            if cancellation['requested']:
+                raise HTTPException(409, 'Dashboard preparation was interrupted.') from exc
+            raise
         finally:
             with lock:
                 direct_preparation_tasks.pop(preparation_id, None)
+            requeued = set()
+            for deferred_id, deferred_definition, deferred_user, deferred_workspace in deferred_prefetches:
+                deferred_key = (deferred_workspace, deferred_id)
+                if not deferred_id or deferred_key in requeued or (
+                    dashboard_id == deferred_id and workspace == deferred_workspace
+                ):
+                    continue
+                requeued.add(deferred_key)
+                enqueue_prefetch(
+                    deferred_id, deferred_definition, deferred_user, workspace=deferred_workspace,
+                )
 
     @app.post('/api/e2e-dashboards/filter-options')
     def filter_options(request: DashboardFilterOptionsRequest, user=Depends(dashboard_user)):
@@ -2635,7 +2727,8 @@ def install_dashboard_routes(core):
                 'name': str(raw_definition.get('name') or dashboard_id), 'status': 'queued', 'completed': 0, 'total': 0,
                 'restoring_cached_models': False, 'generation': generation, 'cancel_requested': False, 'priority_indexes': [],
                 'task_id': f'dashboard-prefetch:{dashboard_id}' if prepared_preview is None else f'dashboard-prefetch:{dashboard_id}:{fingerprint[:12]}',
-                'created_at': monotonic(), 'started_at': datetime.now(timezone.utc).timestamp()}
+                'created_at': monotonic(), 'started_at': datetime.now(timezone.utc).timestamp(),
+                'raw_definition': dict(raw_definition), 'user': user}
             if restored_preview is not None:
                 total = sum(
                     1 for slide in restored_preview['slides'] for chart in slide['charts'] if chart['available']
@@ -2651,7 +2744,7 @@ def install_dashboard_routes(core):
                 )
                 if completed >= total:
                     return
-        def run():
+        def run_job():
             preview = restored_preview
             try:
                 with lock:
@@ -2740,6 +2833,10 @@ def install_dashboard_routes(core):
                         job['status'] = 'cancelled'
                     else:
                         job.update(status='failed', error=str(exc))
+        def run():
+            with dashboard_work_gate:
+                run_job()
+
         with lock:
             job['runner'] = run
         schedule_next_prefetch()
@@ -2899,6 +2996,8 @@ def install_dashboard_routes(core):
                         ),
                         'started_at': job.get('started_at'),
                         'progress': round(job['completed'] * 100 / job['total']) if job['total'] else None,
+                        'stop_task_id': f'dashboard-prepare:{job["task_id"]}',
+                        'stop_url': f'/api/background-tasks/{workspace.id}/stop',
                     })
                 else:
                     tasks.append({
@@ -2908,6 +3007,8 @@ def install_dashboard_routes(core):
                         'detail': 'Queued',
                         'started_at': job.get('started_at'),
                         'progress': 0,
+                        'stop_task_id': f'dashboard-prepare:{job["task_id"]}',
+                        'stop_url': f'/api/background-tasks/{workspace.id}/stop',
                     })
             tasks.extend({
                 'id': task['id'],
@@ -2919,11 +3020,38 @@ def install_dashboard_routes(core):
                     else 'Building filtered Dashboard selection'
                 ),
                 'progress': None,
+                'stop_task_id': f'dashboard-prepare:{task["id"]}',
+                'stop_url': f'/api/background-tasks/{workspace.id}/stop',
             } for task in direct_tasks)
             return tasks
+
+    def stop_dashboard_task(workspace_path, task_id):
+        database_path = str(Path(workspace_path).resolve())
+        stopped = False
+        with lock:
+            direct = direct_preparation_tasks.get(task_id)
+            if direct and direct.get('workspace') == database_path:
+                cancellation = direct.get('cancellation')
+                if isinstance(cancellation, dict):
+                    cancellation['requested'] = True
+                    stopped = True
+            for job in prefetch_jobs.values():
+                if (
+                    job.get('workspace') == database_path
+                    and job.get('task_id') == task_id
+                    and job.get('status') in {'queued', 'processing'}
+                    and not job.get('cancel_requested')
+                ):
+                    job['cancel_requested'] = True
+                    if job.get('status') == 'queued':
+                        job['status'] = 'cancelled'
+                    stopped = True
+        return stopped
+
     core.e2e_dashboard_prefetch_tasks = prefetch_task_payloads
     core.e2e_dashboard_prefetch_workspace = prefetch_workspace_dashboards
     core.e2e_dashboard_cancel_prefetch_workspace = cancel_workspace_prefetch
+    core.e2e_dashboard_stop_task = stop_dashboard_task
 
     @app.get('/api/e2e-dashboards/preview/{token}/{index}.png')
     def chart(token: str, index: int, user=Depends(dashboard_user)):

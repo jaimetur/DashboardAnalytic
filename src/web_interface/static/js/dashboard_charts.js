@@ -238,29 +238,36 @@
     }
   }
 
+  function labelAngle(context, value, availableWidth, size) {
+    font(context, size, true); const measured = textWidth(context, value);
+    if (measured + 8 <= availableWidth) return 0;
+    // A 45° label occupies its text width and height projected onto the
+    // column. Use 90° only when that diagonal footprint still overflows.
+    return (measured + size) * Math.SQRT1_2 + 8 <= availableWidth ? 45 : 90;
+  }
+
+  function bottomAxisReserve(context, keys, width, size = 22) {
+    const itemWidth = width / Math.max(keys.length, 1);
+    const angles = keys.map(key => labelAngle(context, String(key.at(-1) ?? '').slice(0, 18), itemWidth, size));
+    return angles.includes(90) ? 118 : angles.includes(45) ? 90 : 46;
+  }
+
   function drawHierarchicalAxisLabels(context, keys, left, width, top, bottom) {
     if (!keys.length) return;
     const levels = keys[0].length, itemWidth = width / keys.length;
-    const labelAngle = (value, availableWidth, size) => {
-      font(context, size, true); const measured = textWidth(context, value);
-      if (measured + 8 <= availableWidth) return 0;
-      // A 45° label occupies its text width and height projected onto the
-      // column. Use 90° only when that diagonal footprint still overflows.
-      return (measured + size) * Math.SQRT1_2 + 8 <= availableWidth ? 45 : 90;
-    };
     for (let level = 0; level < Math.max(levels - 1, 0); level += 1) {
       for (const [start, end, rawValue] of hierarchySpans(keys, level)) {
         const centre = left + ((start + end) / 2) * itemWidth, value = rawValue.slice(0, 20), y = top - 30 * (levels - level), available = (end - start) * itemWidth;
-        const angle = labelAngle(value, available, 18);
-        if (angle) rotatedLabel(context, value, centre, y + 24, '#566A78', 18, true, angle);
-        else { context.fillStyle = '#566A78'; context.textAlign = 'center'; context.textBaseline = 'top'; font(context, 18, true); context.fillText(value, centre, y); }
+        const angle = labelAngle(context, value, available, 22);
+        if (angle) rotatedLabel(context, value, centre, y + 24, '#566A78', 22, true, angle);
+        else { context.fillStyle = '#566A78'; context.textAlign = 'center'; context.textBaseline = 'top'; font(context, 22, true); context.fillText(value, centre, y); }
         line(context, left + start * itemWidth, y + 24, left + end * itemWidth, y + 24, '#CDD7DE', 1);
       }
     }
     keys.forEach((key, index) => {
-      const value = String(key.at(-1) ?? '').slice(0, 18), centre = left + (index + .5) * itemWidth, angle = labelAngle(value, itemWidth, 16);
-      if (angle) rotatedLabel(context, value, centre, angle === 45 ? bottom + 78 : bottom + 106, '#62727E', 16, true, angle);
-      else { context.fillStyle = '#62727E'; context.textAlign = 'center'; context.textBaseline = 'top'; font(context, 16, true); context.fillText(value, centre, bottom + 11); }
+      const value = String(key.at(-1) ?? '').slice(0, 18), centre = left + (index + .5) * itemWidth, angle = labelAngle(context, value, itemWidth, 22);
+      if (angle) rotatedLabel(context, value, centre, angle === 45 ? bottom + 82 : bottom + 112, '#62727E', 22, true, angle);
+      else { context.fillStyle = '#62727E'; context.textAlign = 'center'; context.textBaseline = 'top'; font(context, 22, true); context.fillText(value, centre, bottom + 11); }
     });
   }
 
@@ -278,7 +285,7 @@
       left: position === 'left' ? 300 : 70,
       right: position === 'right' ? 1300 : 1540,
       top: position === 'top' ? 80 + rows * rowHeight + 18 : 82,
-      bottom: position === 'bottom' ? 900 - rows * rowHeight - 22 : 820,
+      bottom: position === 'bottom' ? 900 - rows * rowHeight - 22 : 860,
       sideX: position === 'right' ? 1325 : 26,
       size,
       columns,
@@ -474,7 +481,9 @@
   function drawDistribution(context, payload, state, transform) {
     const keys = payload.keys || [], buckets = payload.buckets || [];
     const layout = legendLayout(payload.legend), hierarchyHeight = 30 * (keys[0]?.length || 1) + 8;
-    const left = layout.left, top = layout.top + hierarchyHeight, width = layout.right - left, height = Math.max(180, layout.bottom - top - 105);
+    const left = layout.left, top = layout.top + hierarchyHeight, width = layout.right - left;
+    const usableBottom = layout.position === 'bottom' ? layout.bottom : 884;
+    const height = Math.max(180, usableBottom - top - bottomAxisReserve(context, keys, width));
     const barWidth = Math.max(24, Math.min(220, Math.floor(width / Math.max(keys.length * 1.25, 1))));
     keys.forEach((key, index) => {
       const ratios = payload.cells[index] || [], x = left + index * width / keys.length + 10; let running = 0;
@@ -537,7 +546,8 @@
     const bars = payload.bars || [], keys = bars.map(bar => bar.key);
     const layout = legendLayout(payload.legend), hierarchyHeight = 30 * (keys[0]?.length || 1) + 8;
     const left = Math.max(105, layout.left), top = layout.top + hierarchyHeight;
-    const width = layout.right - left, baseline = Math.max(top + 180, layout.bottom - 105);
+    const width = layout.right - left, usableBottom = layout.position === 'bottom' ? layout.bottom : 884;
+    const baseline = Math.max(top + 180, usableBottom - bottomAxisReserve(context, keys, width));
     const barWidth = Math.min(260, Math.max(32, width / Math.max(bars.length * 1.22, 1)));
     bars.forEach((bar, index) => {
       const height = (baseline - top) * Number(bar.value) / Math.max(Number(payload.maximum), 1), x = left + (index + .5) * width / bars.length - barWidth / 2, y = baseline - height;

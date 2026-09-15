@@ -6434,6 +6434,11 @@ def stop_background_task(
             if not job or str(job.get('workspace_id') or '') != workspace_id or job.get('status') not in {'queued', 'processing'}:
                 raise HTTPException(status_code=409, detail='This materialization task can no longer be stopped.')
             job.update(cancel_requested=True, message='Stopping background job')
+    elif prefix == 'dashboard-prepare':
+        stop_dashboard = getattr(sys.modules[__name__], 'e2e_dashboard_stop_task', None)
+        if not callable(stop_dashboard) or not stop_dashboard(workspace.database_path, raw_identifier):
+            raise HTTPException(status_code=409, detail='This Dashboard task can no longer be interrupted.')
+        task_repository.add_log(user.username, 'interrupt_dashboard_preparation', json.dumps({'task_id': raw_identifier}))
     elif prefix == 'export':
         with EXPORT_JOBS_LOCK:
             job = EXPORT_JOBS.get(raw_identifier)

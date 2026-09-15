@@ -35,7 +35,7 @@ Floating cards group live tasks by execution context and keep their label, detai
 - **Blue — Other workspace**: work that continues for a different workspace after the user switches away from it.
 - **Red — System tasks**: deployment-wide work such as portable-package and server-transfer operations.
 
-Dashboard cards also group preparation and chart-model work under the Dashboard name and distinguish the active item from its queued position. A Stop action appears when the job supports cancellation. Cards can be minimized without stopping their tasks, refresh automatically, and retain a completed task briefly so its final state is visible before the card disappears. Persistent generation jobs remain available in their module table after the floating notification closes.
+Dashboard cards also group preparation and chart-model work under the Dashboard name and distinguish the active item from its queued position. An **Interrupt task** action appears when the job supports cancellation. Cards can be minimized without interrupting their tasks, refresh automatically, and retain a completed task briefly so its final state is visible before the card disappears. Persistent generation jobs remain available in their module table after the floating notification closes.
 
 ## Workspace
 
@@ -117,7 +117,7 @@ E2E Dashboards is the main analysis module and the complete template-driven work
 
 ### Dashboard Datasets & Filters
 
-- Build one **Universe Dataset** from any compatible Data, Voice and Speech CDRs, then compare operators or persisted vendor mappings.
+- Build one **Dataset Universe** from any compatible Data, Voice and Speech CDRs, then compare operators or persisted vendor mappings.
 - Use automatic date bounds and synchronized default filters for Market, Operator, Vendor, Region, City, Campaign, RAT, Session Type and Call Status.
 - Resolve Region, City, RAT and other known fields through ordered source-column aliases, with the supported priority visible in a tooltip.
 - Add any selected-CDR column or applicable Auto-calculated Field as an extra filter.
@@ -125,7 +125,7 @@ E2E Dashboards is the main analysis module and the complete template-driven work
 
 ### Preparation and reuse
 
-The module prepares a **Filtered Universe** once and reuses it across every template chart. Small selections retain exact row identities; large selections use equivalent SQL predicates. Narrow projections, persisted selection snapshots and versioned Canvas models avoid rebuilding an unchanged Dashboard after reopening it or restarting the application. A FIFO workspace queue prepares one Dashboard at a time and renders a small group of independent chart models concurrently. Opening a workspace removes cache artifacts written by older application or cache-format versions.
+The module prepares a **Filtered Universe** once and reuses it across every template chart. Small selections retain exact row identities; large selections use equivalent SQL predicates. Narrow projections, persisted selection snapshots and versioned Canvas models avoid rebuilding an unchanged Dashboard after reopening it or restarting the application. One global gate permits only one Dashboard preparation or warm-up task at a time. A foreground Apply Filters request interrupts automatic warm-up, runs first and requeues the interrupted Dashboards afterwards. Opening a workspace removes cache artifacts written by older application or cache-format versions.
 
 Status cards distinguish data loading, queued data, chart rendering, queued charts, Ready, missing charts and failures. The floating background-task card shows the same work while users move between modules.
 

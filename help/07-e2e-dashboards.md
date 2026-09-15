@@ -34,17 +34,17 @@ The panel separates the comparison scope and selected universe from default and 
 
 - **Operator Comparison** uses normalized Operator values.
 - **Multivendor Comparison** requires Vendor mapping for every selected CDR and expands Operator into its operator/vendor hierarchy.
-- Entering Multivendor opens a dataset chooser. Use the Dashboard's saved selection, adjust individual Data/Voice/Speech checkboxes or select the latest available dataset of each type.
+- Changing comparison scope always opens a dataset chooser. Keep the current Data/Voice/Speech universe or apply the checkboxes shown in the dialog. When entering Multivendor, the recent shortcut selects the latest CDR of each type; when returning to Operator Comparison, it selects the two most recent CDRs of each type (or every available CDR when fewer than two exist).
 
 NR Mode follows the shared reporting rule: Voice and Speech sessions are classified as NSA/SA; valid Data attempts remain available even when a sample RAT records a fallback. RAT can be restricted explicitly with the adaptive filter.
 
-### Universe Dataset and dates
+### Dataset Universe and dates
 
-Select one or more CDR Data, Voice and Speech sources. Date from/Date to default to the earliest and latest dates across that selection; Date to includes the complete day. Calendar month navigation does not change the selection until a day is chosen.
+Select one or more CDR Data, Voice and Speech sources. Date from/Date to default to `Oldest` and `Newest`. Their small in-field **Use oldest** and **Use newest** actions restore those symbolic values; saving keeps the literal markers in the Dashboard definition, while the textboxes show the currently resolved bounds as `Oldest (YYYY-MM-DD)` and `Newest (YYYY-MM-DD)`. Every preparation resolves them from the selected CDRs. Selecting a calendar day stores and displays a fixed date instead. Date to includes the complete day, and calendar month navigation does not change the selection until a day is chosen.
 
 The ready summary distinguishes:
 
-- **Universe Dataset**: rows contributed by the selected CDRs;
+- **Dataset Universe**: usable rows contributed by the selected CDRs before date and adaptive-filter restrictions;
 - **Filtered Universe**: rows remaining after dates and adaptive filters;
 - chart rows: the subset after the selected template row's own filters.
 
@@ -90,9 +90,9 @@ If View Dashboard or Generate PPT is requested with unapplied changes:
 
 Combined CDR tables are the source of record. Selections up to 25,000 rows can store exact `(dataset_id, source_row_id)` references; larger selections use SQL predicates. A narrow SQLite projection contains only fields required by the Dashboard, filters and template.
 
-Preparation is debounced and stale responses are ignored. A new request replaces the current one; an equivalent cached request restores immediately. The visible Dashboard is prepared first, then up to three chart models render concurrently before the FIFO queue advances to another Dashboard.
+Preparation is debounced and stale responses are ignored. A new request replaces the current one; an equivalent cached request restores immediately. A global gate allows only one Dashboard preparation or warm-up task to run at a time. Applying filters to the visible Dashboard interrupts any automatic warm-up, waits for that worker to release the gate, runs the visible Dashboard first and then requeues the interrupted Dashboards. Chart-model workers belong to that single displayed task.
 
-Manage Dashboards reports Loading data, Data queued, Rendering charts, Charts queued, Ready, Missing charts or Failed. The floating background-task card groups data preparation and chart rendering under the Dashboard name. View Dashboard and PPT actions remain disabled until their data and required models are ready.
+Manage Dashboards reports Loading data, Data queued, Rendering charts, Charts queued, Ready, Missing charts or Failed. The floating background-task card groups data preparation and chart rendering under the Dashboard name. Queued and running Dashboard tasks provide an **Interrupt task** action. View Dashboard and PPT actions remain disabled until their data and required models are ready.
 
 `.dashboard-data-cache` stores bounded analytical projections, reusable preview manifests, Canvas chart models and legacy PIL artifacts. Cache keys include dataset revisions, required fields, selection, scope and renderer version. Opening a workspace removes artifacts from older application/cache versions while retaining current ones. Workspace Clear cache cancels active warming and removes derived cache only; definitions, CDRs, templates and generated jobs remain intact.
 
@@ -151,7 +151,7 @@ Depending on state, actions download the PPT, open/download charts, stop work, r
 
 ## Charts Panel
 
-Charts Panel browses completed Dashboard PPT charts. Filter by NR Mode, Dashboard, Template and Scope, then choose a PowerPoint Job. The selector identifies local date/time, Dashboard and scope; header badges repeat Dashboard, date and scope.
+Charts Panel browses completed Dashboard PPT charts. Filter by NR Mode, Dashboard, Template and Scope, then choose a PowerPoint Job. The selector identifies local date/time, Dashboard and scope; header badges repeat Dashboard, date and scope. Polling automatically selects and loads the newest matching job as soon as it finishes.
 
 Cards fill equal template frames and repaint stored Canvas models with the current renderer. Legacy jobs without models retain their PNG. Open any card in the same expanded viewer and Filtered Chart Dataset used by the live Dashboard.
 
@@ -165,6 +165,6 @@ Dashboard export uses a versioned ZIP accepted by Admin Import. It contains the 
 
 - **View Dashboard or Generate PPT is disabled**: inspect the status badge and floating preparation task.
 - **A filter has no values**: verify its field/aliases exist and other filters leave matching rows.
-- **A chart is empty**: compare Universe Dataset, Filtered Universe and chart rows; then check NR Mode and the template row in Administration.
+- **A chart is empty**: compare Dataset Universe, Filtered Universe and chart rows; then check NR Mode and the template row in Administration.
 - **Multivendor is unavailable**: persist Vendor mapping for every selected CDR.
 - **Preparation is failed or remains queued**: inspect App Logs, retry and clear only the workspace Dashboard cache if derived data is invalid.

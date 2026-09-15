@@ -1527,7 +1527,7 @@ class Repository:
                 ).fetchone()
             return int(row['count'] or 0)
 
-    def copy_dataset_rows_to_reporting(self, dataset_id: int, dataset_kind: str, columns: list[str] | None = None) -> None:
+    def copy_dataset_rows_to_reporting(self, dataset_id: int, dataset_kind: str, columns: list[str] | None = None) -> bool:
         """Backfill a shared table entirely inside SQLite, without pandas RAM use."""
         source_table = self.dataset_rows_table_name(dataset_id)
         target_table = self.reporting_rows_table_name(dataset_kind)
@@ -1536,7 +1536,7 @@ class Repository:
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (source_table,)
             ).fetchone()
             if not source_exists:
-                return
+                return False
             target_table, target_columns = self._ensure_reporting_table(conn, dataset_kind)
             quoted_target = self._quote_identifier(target_table)
             source_columns = self._table_columns(conn, source_table)
@@ -1578,7 +1578,7 @@ class Repository:
                     if source_value:
                         columns_to_refresh.append((target, source))
                 if not columns_to_refresh:
-                    return
+                    return False
                 # Adding a template field used to delete and recreate every
                 # shared CDR row, including columns that were already ready.
                 # Fill only the newly required or incomplete columns by their
@@ -1593,7 +1593,7 @@ class Repository:
                         (dataset_id,),
                     )
                 self._create_reporting_row_indexes(conn, target_table, target_columns)
-                return
+                return True
             conn.execute(f"DELETE FROM {quoted_target} WHERE dataset_id = ?", (dataset_id,))
             insert_columns = ['dataset_id', 'source_row_id', *(column for column in target_columns if column not in {'dataset_id', 'source_row_id'})]
             select_columns = ['?', 'rowid']
@@ -1608,6 +1608,7 @@ class Repository:
                 (dataset_id,),
             )
             self._create_reporting_row_indexes(conn, target_table, target_columns)
+            return True
 
     def load_reporting_rows(self, dataset_kind: str, dataset_ids: list[int], columns: list[str]) -> pd.DataFrame:
         if not dataset_ids:

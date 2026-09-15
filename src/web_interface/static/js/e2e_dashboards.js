@@ -28,6 +28,7 @@
   let backgroundPreparationToken = '';
   let dateBounds = null, templateEditorSaved = false, templateEditorPreloadTimer = 0, dashboardPptColumnFilters = null;
   let dashboardPptJobs = [], dashboardPptCharts = [], dashboardPptChartsJobId = '', dashboardPptChartsRequest = 0;
+  let dashboardPptJobsLoaded = false, dashboardPptJobsRefreshing = false;
   const openStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:open`;
   const libraryStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:library`;
   const scrollStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:scroll`;
@@ -66,6 +67,8 @@
       dashboard_name: definition?.name || 'Dashboard',
       label: rendering ? 'Rendering Dashboard Charts' : 'Preparing Dashboard dataset',
       detail, progress: null, status: statusValue,
+      stop_task_id: `dashboard-prepare:${token}`,
+      stop_url: `/api/background-tasks/${encodeURIComponent(config.workspace)}/stop`,
     }}));
     window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
   };
@@ -94,6 +97,8 @@
     definitionValue.custom_fields ||= [];
     definitionValue.hidden_filters ||= [];
     definitionValue.slide_comments ||= {};
+    if (!definitionValue.date_from) definitionValue.date_from = 'Oldest';
+    if (!definitionValue.date_to) definitionValue.date_to = 'Newest';
     return definitionValue;
   };
   const canonicalize = value => {
@@ -112,8 +117,8 @@
     selection.custom_fields = canonicalSetValues(selection.custom_fields);
     selection.hidden_filters = canonicalSetValues(selection.hidden_filters);
     if (dateBounds) {
-      if (!selection.date_from || selection.date_from < dateBounds.min || selection.date_from > dateBounds.max) selection.date_from = dateBounds.min;
-      if (!selection.date_to || selection.date_to < dateBounds.min || selection.date_to > dateBounds.max) selection.date_to = dateBounds.max;
+      if (selection.date_from !== 'Oldest' && (selection.date_from < dateBounds.min || selection.date_from > dateBounds.max)) selection.date_from = dateBounds.min;
+      if (selection.date_to !== 'Newest' && (selection.date_to < dateBounds.min || selection.date_to > dateBounds.max)) selection.date_to = dateBounds.max;
     }
     return selection;
   };
@@ -162,14 +167,14 @@
     return JSON.stringify(canonicalize({
       datasets: selection.datasets, scope: selection.scope || 'single', filters: selection.filters,
       custom_fields: selection.custom_fields, hidden_filters: selection.hidden_filters,
-      date_from: selection.date_from || null, date_to: selection.date_to || null,
+      date_from: selection.date_from || 'Oldest', date_to: selection.date_to || 'Newest',
     }));
   };
   const selectionStateFingerprint = value => {
     const selection = canonicalSelectionDefinition(value);
     return JSON.stringify(canonicalize({
       datasets: selection.datasets, filters: selection.filters, custom_fields: selection.custom_fields,
-      hidden_filters: selection.hidden_filters, date_from: selection.date_from || null, date_to: selection.date_to || null,
+      hidden_filters: selection.hidden_filters, date_from: selection.date_from || 'Oldest', date_to: selection.date_to || 'Newest',
     }));
   };
   const hasUnsavedFilterChanges = () => Boolean(definition) && filterStateFingerprint(definition) !== filterStateFingerprint(savedDashboardDefinition());
@@ -250,8 +255,8 @@
     definition.filters = structuredClone(applied.filters);
     definition.custom_fields = structuredClone(applied.custom_fields);
     definition.hidden_filters = structuredClone(applied.hidden_filters);
-    definition.date_from = applied.date_from || null;
-    definition.date_to = applied.date_to || null;
+    definition.date_from = applied.date_from || 'Oldest';
+    definition.date_to = applied.date_to || 'Newest';
     applyDateBounds(dateBounds);
     sources();
     facets();
@@ -662,10 +667,10 @@
       return choice;
     }));
   };
-  const syncDashboardPptChartJobs = jobs => {
+  const syncDashboardPptChartJobs = (jobs, preferredJobId = '') => {
     dashboardPptJobs = jobs;
     const select = $('ds-ppt-chart-job');
-    const previous = select.value;
+    const previous = String(preferredJobId || select.value);
     const generated = jobs.filter(job => job.charts_api_url).sort((left, right) =>
       String(right.timestamp || '').localeCompare(String(left.timestamp || '')) || Number(right.id) - Number(left.id));
     refreshDashboardPptChartFilterChoices(generated);
@@ -714,7 +719,7 @@
     dashboardPptChartFilterState[control.dataset.dashboardPptChartFilter] = normalizeDashboardPptChartFilter(control.value);
     syncDashboardPptChartJobs(dashboardPptJobs);
   }));
-  const renderDashboardPptJobs = jobs => {
+  const renderDashboardPptJobs = (jobs, preferredJobId = '') => {
     const body = $('ds-ppt-jobs-body'); body.replaceChildren();
     $('ds-ppt-jobs-count').textContent = `Total Jobs: ${jobs.length}`;
     $('ds-ppt-jobs-empty').hidden = jobs.length > 0;
@@ -757,7 +762,7 @@
       }, '×'));
       actionsCell.append(actions); row.append(actionsCell); body.append(row);
     }
-    syncDashboardPptChartJobs(jobs);
+    syncDashboardPptChartJobs(jobs, preferredJobId);
     dashboardPptColumnFilters?.apply();
     if (!dashboardPptColumnFilters) syncDashboardPptJobsHeight();
   };
@@ -782,8 +787,22 @@
     });
   }
   const refreshDashboardPptJobs = async () => {
-    const payload = await api('/ppt-jobs');
-    renderDashboardPptJobs(Array.isArray(payload.jobs) ? payload.jobs : []);
+    if (dashboardPptJobsRefreshing) return;
+    dashboardPptJobsRefreshing = true;
+    try {
+      const previousJobs = new Map(dashboardPptJobs.map(job => [String(job.id), job]));
+      const payload = await api('/ppt-jobs');
+      const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+      const newlyReady = dashboardPptJobsLoaded ? jobs.filter(job => {
+        const previous = previousJobs.get(String(job.id));
+        return job.status === 'ready' && job.charts_api_url && (!previous || previous.status !== 'ready');
+      }).sort((left, right) =>
+        String(right.timestamp || '').localeCompare(String(left.timestamp || '')) || Number(right.id) - Number(left.id)) : [];
+      renderDashboardPptJobs(jobs, newlyReady[0]?.id || '');
+      dashboardPptJobsLoaded = true;
+    } finally {
+      dashboardPptJobsRefreshing = false;
+    }
   };
   dashboardPptColumnFilters = window.enableExcelColumnFilters?.(
     $('ds-ppt-jobs-body').closest('table'), {onChange: syncDashboardPptJobsHeight},
@@ -853,19 +872,29 @@
     if (!dateBounds || !definition) return previous !== dateBounds;
     const from = definition.date_from;
     const to = definition.date_to;
-    definition.date_from = !from || from < dateBounds.min || from > dateBounds.max ? dateBounds.min : from;
-    definition.date_to = !to || to < dateBounds.min || to > dateBounds.max ? dateBounds.max : to;
+    definition.date_from = from === 'Oldest' ? 'Oldest' : !from || from < dateBounds.min || from > dateBounds.max ? dateBounds.min : from;
+    definition.date_to = to === 'Newest' ? 'Newest' : !to || to < dateBounds.min || to > dateBounds.max ? dateBounds.max : to;
     return previous?.min !== dateBounds.min || previous?.max !== dateBounds.max || from !== definition.date_from || to !== definition.date_to;
   }
   const parseCalendarDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? new Date(`${value}T00:00:00`) : null;
   const calendarDateValue = value => [value.getFullYear(), String(value.getMonth() + 1).padStart(2, '0'), String(value.getDate()).padStart(2, '0')].join('-');
   const calendarMonthValue = value => value.getFullYear() * 12 + value.getMonth();
+  const dateInputDisplayValue = (key, value) => {
+    if (value === 'Oldest') return dateBounds?.min ? `Oldest (${dateBounds.min})` : 'Oldest';
+    if (value === 'Newest') return dateBounds?.max ? `Newest (${dateBounds.max})` : 'Newest';
+    return value || '';
+  };
   function datePicker(key, label) {
     const wrapper = node('div', undefined, 'ds-date-picker');
     updateFilterControlState(wrapper, dateState(key), true);
     const captionLabel = node('span', label, 'ds-date-picker-label');
     const input = document.createElement('input');
-    input.type = 'text'; input.readOnly = true; input.value = definition[key] || ''; input.placeholder = 'Select date'; input.setAttribute('aria-label', label);
+    input.type = 'text'; input.readOnly = true; input.value = dateInputDisplayValue(key, definition[key]); input.placeholder = 'Select date'; input.setAttribute('aria-label', label);
+    const automaticLabel = key === 'date_from' ? 'Use oldest' : 'Use newest';
+    const automaticValue = key === 'date_from' ? 'Oldest' : 'Newest';
+    const automatic = node('button', automaticLabel, 'ds-date-auto-action'); automatic.type = 'button';
+    automatic.setAttribute('aria-pressed', String(definition[key] === automaticValue));
+    automatic.title = `${automaticLabel} date from the selected datasets`;
     const menu = node('div', undefined, 'ds-date-picker-menu'); menu.hidden = true; menu.setAttribute('role', 'dialog'); menu.setAttribute('aria-label', `${label} calendar`);
     const header = node('div', undefined, 'ds-date-picker-header');
     const previous = node('button', '‹', 'ds-date-picker-nav'); previous.type = 'button'; previous.setAttribute('aria-label', 'Previous month');
@@ -890,7 +919,7 @@
         const iso = calendarDateValue(value);
         const button = node('button', String(day), 'ds-date-picker-day'); button.type = 'button'; button.disabled = Boolean((minimum && value < minimum) || (maximum && value > maximum));
         button.classList.toggle('is-selected', input.value === iso);
-        button.addEventListener('click', () => { input.value = iso; definition[key] = iso; updateFilterControlState(wrapper, dateState(key), true); menu.hidden = true; filterChanged(); });
+        button.addEventListener('click', () => { input.value = iso; definition[key] = iso; automatic.setAttribute('aria-pressed', 'false'); updateFilterControlState(wrapper, dateState(key), true); menu.hidden = true; filterChanged(); });
         days.append(button);
       }
     };
@@ -899,11 +928,27 @@
     input.addEventListener('click', () => { menu.hidden = !menu.hidden; if (!menu.hidden) render(); });
     input.addEventListener('keydown', event => { if (event.key === 'Escape') menu.hidden = true; else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); menu.hidden = !menu.hidden; if (!menu.hidden) render(); } });
     document.addEventListener('pointerdown', event => { if (!wrapper.contains(event.target)) menu.hidden = true; });
-    wrapper.append(captionLabel, input, menu); return wrapper;
+    automatic.addEventListener('click', () => {
+      definition[key] = automaticValue;
+      input.value = dateInputDisplayValue(key, automaticValue);
+      automatic.setAttribute('aria-pressed', 'true');
+      updateFilterControlState(wrapper, dateState(key), true);
+      filterChanged();
+    });
+    const control = node('div', undefined, 'ds-date-picker-control'); control.append(input, automatic);
+    wrapper.append(captionLabel, control, menu); return wrapper;
+  }
+  function resetAutomaticDatesForDatasetChange() {
+    if (!definition) return;
+    if (!definition.date_from) definition.date_from = 'Oldest';
+    if (!definition.date_to) definition.date_to = 'Newest';
   }
   function sources() {
     const host = $('ds-sources'); host.replaceChildren();
-    for (const kind of ['data','voice','speech']) host.append(selectControl(`CDR ${kind[0].toUpperCase()+kind.slice(1)}`, config.datasets[kind].map(row => [String(row.id), `${row.file_name} · ${row.row_count} rows`]), definition.datasets[kind] || [], values => { definition.datasets[kind] = values.map(Number); }, true, () => sourceState(kind)));
+    for (const kind of ['data','voice','speech']) host.append(selectControl(`CDR ${kind[0].toUpperCase()+kind.slice(1)}`, config.datasets[kind].map(row => [String(row.id), `${row.file_name} · ${row.row_count} rows`]), definition.datasets[kind] || [], values => {
+      resetAutomaticDatesForDatasetChange();
+      definition.datasets[kind] = values.map(Number);
+    }, true, () => sourceState(kind)));
     const scopeControl = $('ds-scope');
     scopeControl.value = definition.scope || 'single';
     updateFilterControlState(scopeControl.closest('.ds-scope-control'), scopeState());
@@ -1025,7 +1070,7 @@
     const filtered = formatCounts(payload?.rows);
     rows.replaceChildren();
     for (const [label, counts, className] of [
-      ['Universe Dataset', universe, 'ds-preparing-universe-label'],
+      ['Dataset Universe', universe, 'ds-preparing-universe-label'],
       ['Filtered Universe', filtered, 'ds-preparing-filtered-label'],
     ]) {
       if (!counts) continue;
@@ -1121,7 +1166,13 @@
       if (current !== sequence) return;
       applyPreparedPayload(payload);
       window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));
-    } catch (error) { if (current === sequence && error.name !== 'AbortError') { setDashboardStatus(dashboardIdAtStart, 'error', 'Error'); facetsLoading = false; facets(); setViewEnabled(false); setPreparationState('hidden'); $('ds-rows').textContent = error.message; if (!$('ds-viewer').hidden) $('ds-charts').replaceChildren(node('div',error.message,'ds-empty')); } throw error; }
+    } catch (error) {
+      if (current === sequence && error.name !== 'AbortError' && error.message.includes('interrupted')) {
+        setDashboardStatus(dashboardIdAtStart, 'data-needed', 'Data needed'); facetsLoading = false; facets();
+        setViewEnabled(false); setPreparationState('hidden'); status('Dashboard preparation was interrupted.'); return;
+      }
+      if (current === sequence && error.name !== 'AbortError') { setDashboardStatus(dashboardIdAtStart, 'error', 'Error'); facetsLoading = false; facets(); setViewEnabled(false); setPreparationState('hidden'); $('ds-rows').textContent = error.message; if (!$('ds-viewer').hidden) $('ds-charts').replaceChildren(node('div',error.message,'ds-empty')); } throw error;
+    }
     })();
     preparing = pending;
     try { return await pending; }
@@ -1172,7 +1223,7 @@
     const technology = $('ds-nr-mode').value;
     const selected = (config.templates[technology] || []).find(row => row.identifier === $('ds-template').value);
     if (!selected) throw new Error('Choose a template for the selected NR Mode.');
-    const item = {name:$('ds-name').value.trim(),template_technology:technology,template:selected.name,technology,scope:'single',datasets:Object.fromEntries(Object.entries(config.datasets).map(([kind,rows])=>[kind,rows.map(row=>row.id)])),filters:{},custom_fields:[],date_from:null,date_to:null};
+    const item = {name:$('ds-name').value.trim(),template_technology:technology,template:selected.name,technology,scope:'single',datasets:Object.fromEntries(Object.entries(config.datasets).map(([kind,rows])=>[kind,rows.map(row=>row.id)])),filters:{},custom_fields:[],date_from:'Oldest',date_to:'Newest'};
     status(`Creating “${item.name}”…`); $('ds-create').disabled = true;
     try { const id = dashboardId(), result = await api(`/${id}`,'PUT',item); dashboards[id] = result.definition; await openDashboard(id); }
     finally { $('ds-create').disabled = !$('ds-template').options.length; }
@@ -1211,18 +1262,30 @@
     if (definition && selected) { definition.template_technology = definition.technology = $('ds-nr-mode').value; definition.template = selected.name; changed(); }
   };
   $('ds-template').onchange = () => { if (definition) { setTemplate($('ds-template').value); changed(); } };
-  const chooseMultivendorDatasets = () => new Promise(resolve => {
+  const chooseScopeDatasets = targetScope => new Promise(resolve => {
     const host = $('ds-multivendor-overlay');
     const choices = $('ds-multivendor-choices');
-    const savedDatasets = savedDashboardDefinition().datasets || {};
+    const currentDatasets = structuredClone(definition.datasets || {});
     const latestDatasets = {data: [], voice: [], speech: []};
+    const recentCount = targetScope === 'single' ? 2 : 1;
+    const datasetRecency = row => {
+      const uploadedAt = Date.parse(row.uploaded_at || row.updated_at || row.processed_at || row.created_at || '');
+      return Number.isFinite(uploadedAt) ? uploadedAt : Number(row.id) || 0;
+    };
+    $('ds-multivendor-eyebrow').textContent = targetScope === 'single' ? 'Operator CDR selection' : 'Multivendor CDR selection';
+    $('ds-multivendor-note').textContent = targetScope === 'single'
+      ? 'Keep the current CDR universe, choose datasets below, or use the two most recent datasets of each type.'
+      : 'Keep the current CDR universe, choose datasets below, or use the most recent dataset of each type.';
+    $('ds-multivendor-use-latest').textContent = targetScope === 'single' ? 'Use Two Latest per Type' : 'Use Latest Datasets';
     choices.replaceChildren();
     for (const kind of ['data', 'voice', 'speech']) {
       const datasets = [...(config.datasets[kind] || [])];
       if (!datasets.length) continue;
-      const latestId = String(datasets.reduce((latest, row) => Number(row.id) > Number(latest.id) ? row : latest).id);
-      const savedIds = new Set((savedDatasets[kind] || []).map(String));
-      latestDatasets[kind] = [Number(latestId)];
+      const currentIds = new Set((currentDatasets[kind] || []).map(String));
+      latestDatasets[kind] = datasets
+        .sort((left, right) => datasetRecency(right) - datasetRecency(left) || Number(right.id) - Number(left.id))
+        .slice(0, recentCount)
+        .map(row => Number(row.id));
       const group = node('section', undefined, 'ds-multivendor-group');
       group.append(node('h3', `CDR ${kind[0].toUpperCase()}${kind.slice(1)}`));
       const options = node('div', undefined, 'ds-multivendor-options');
@@ -1230,7 +1293,7 @@
         const label = node('label', undefined, 'ds-multivendor-option');
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox'; checkbox.value = String(row.id); checkbox.dataset.datasetKind = kind;
-        checkbox.checked = savedIds.has(String(row.id));
+        checkbox.checked = currentIds.has(String(row.id));
         label.append(checkbox, node('span', `${row.file_name} · ${Number(row.row_count || 0).toLocaleString()} rows`));
         options.append(label);
       });
@@ -1250,6 +1313,7 @@
     const onKeydown = event => { if (event.key === 'Escape') { event.preventDefault(); finish(null); } };
     $('ds-multivendor-close').onclick = () => finish(null);
     $('ds-multivendor-cancel').onclick = () => finish(null);
+    $('ds-multivendor-keep-current').onclick = () => finish({datasets: currentDatasets});
     useCurrent.onclick = () => {
       const datasets = {data: [], voice: [], speech: []};
       choices.querySelectorAll('input:checked').forEach(input => datasets[input.dataset.datasetKind].push(Number(input.value)));
@@ -1263,10 +1327,13 @@
   $('ds-scope').onchange = safe(async () => {
     if (!definition) return;
     const selectedScope = $('ds-scope').value;
-    if (selectedScope === 'multivendor' && definition.scope !== 'multivendor') {
-      const selection = await chooseMultivendorDatasets();
+    if (selectedScope !== definition.scope) {
+      const selection = await chooseScopeDatasets(selectedScope);
       if (!selection) { $('ds-scope').value = definition.scope || 'single'; return; }
-      if (selection.datasets) definition.datasets = selection.datasets;
+      if (selection.datasets && filterStateFingerprint({...definition, datasets: selection.datasets}) !== filterStateFingerprint(definition)) {
+        resetAutomaticDatesForDatasetChange();
+        definition.datasets = selection.datasets;
+      }
     }
     definition.scope = selectedScope;
     sources();
@@ -1295,7 +1362,7 @@
       }
     }
   });
-  bind('ds-clear-filters', () => { definition.filters = {}; definition.date_from = definition.date_to = null; sources(); facets(); filterChanged(); });
+  bind('ds-clear-filters', () => { definition.filters = {}; definition.date_from = 'Oldest'; definition.date_to = 'Newest'; sources(); facets(); filterChanged(); });
   bind('ds-last-saved-filters', () => {
     const saved = savedDashboardDefinition();
     const current = JSON.stringify({datasets: definition.datasets, scope: definition.scope, filters: definition.filters, custom_fields: definition.custom_fields, hidden_filters: definition.hidden_filters, date_from: definition.date_from, date_to: definition.date_to});
@@ -1304,8 +1371,8 @@
     definition.filters = structuredClone(saved.filters || {});
     definition.custom_fields = structuredClone(saved.custom_fields || []);
     definition.hidden_filters = structuredClone(saved.hidden_filters || []);
-    definition.date_from = saved.date_from || null;
-    definition.date_to = saved.date_to || null;
+    definition.date_from = saved.date_from || 'Oldest';
+    definition.date_to = saved.date_to || 'Newest';
     applyDateBounds(dateBounds);
     const restored = JSON.stringify({datasets: definition.datasets, scope: definition.scope, filters: definition.filters, custom_fields: definition.custom_fields, hidden_filters: definition.hidden_filters, date_from: definition.date_from, date_to: definition.date_to});
     if (restored === current) return;

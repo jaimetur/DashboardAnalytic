@@ -4,7 +4,7 @@ import time
 import zipfile
 from io import BytesIO
 from pathlib import Path
-from threading import Event
+from threading import Event, Thread
 
 import pandas as pd
 from PIL import Image
@@ -81,6 +81,24 @@ def test_dashboard_export_uses_the_admin_import_archive_format(client):
     assert document['dashboards'] == {dashboard_id: payload}
 
 
+def test_dashboard_persists_symbolic_dataset_date_bounds(client):
+    payload = setup_dashboard(client)
+    payload['date_from'], payload['date_to'] = 'Oldest', 'Newest'
+
+    saved = client.put('/api/e2e-dashboards/symbolic-dates', json=payload)
+
+    assert saved.status_code == 200, saved.text
+    assert saved.json()['definition']['date_from'] == 'Oldest'
+    assert saved.json()['definition']['date_to'] == 'Newest'
+    stored = client.get('/api/e2e-dashboards').json()['symbolic-dates']
+    assert stored['date_from'] == 'Oldest'
+    assert stored['date_to'] == 'Newest'
+    prepared = client.post('/api/e2e-dashboards/prepare', json=stored)
+    assert prepared.status_code == 200, prepared.text
+    assert prepared.json()['date_bounds'] == {'min': '2026-09-01', 'max': '2026-09-03'}
+    assert prepared.json()['rows']['data'] == 3
+
+
 def test_dashboards_lifecycle_and_layout(client):
     payload = setup_dashboard(client)
     page = client.get('/e2e-dashboards')
@@ -117,7 +135,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '>Import Dashboard<' in page.text
     assert 'Total Dashboards: 0' in page.text
     assert '>Dashboard Datasets & Filters<' in page.text
-    assert '>Universe Dataset<' in page.text
+    assert '>Dataset Universe<' in page.text
     assert '>Select Dataset Universe<' in page.text
     assert '>Dashboard Scope<' in page.text
     assert '>Select Comparison Scope<' in page.text
@@ -171,7 +189,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '>View Filters</button>' in page.text
     assert 'id="ds-ppt-chart-job-picker"' in page.text
     assert 'id="ds-multivendor-overlay"' in page.text
-    assert '>Use Current Selection</button>' in page.text
+    assert '>Keep Current Selection</button>' in page.text
+    assert '>Use Selected Datasets</button>' in page.text
     assert '>Use Latest Datasets</button>' in page.text
     assert 'ds-viewer-refresh-action' in page.text
     dashboard_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
@@ -223,7 +242,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "left: position === 'left' ? 300 : 70" in chart_script
     assert "right: position === 'right' ? 1300 : 1540" in chart_script
     assert "top: position === 'top' ? 80 + rows * rowHeight + 18 : 82" in chart_script
-    assert "bottom: position === 'bottom' ? 900 - rows * rowHeight - 22 : 820" in chart_script
+    assert "bottom: position === 'bottom' ? 900 - rows * rowHeight - 22 : 860" in chart_script
+    assert "function labelAngle(context, value, availableWidth, size)" in chart_script
+    assert "function bottomAxisReserve(context, keys, width, size = 22)" in chart_script
+    assert "const usableBottom = layout.position === 'bottom' ? layout.bottom : 884;" in chart_script
     assert 'Math.min(250, columnWidth * .72)' in chart_script
     assert 'function drawOutsideBarLabel(context, value, x, y, colour, size = 12)' in chart_script
     assert "context.fillStyle = 'rgba(255, 255, 255, 0.94)'" in chart_script
@@ -237,7 +259,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'applyDateBounds(payload.date_bounds)' in dashboard_script
     assert 'function datePicker(key, label)' in dashboard_script
     assert "previous.addEventListener('click', () => { month.setMonth(month.getMonth() - 1); render(); });" in dashboard_script
-    assert "button.addEventListener('click', () => { input.value = iso; definition[key] = iso; updateFilterControlState(wrapper, dateState(key), true); menu.hidden = true; filterChanged(); });" in dashboard_script
+    assert "button.addEventListener('click', () => { input.value = iso; definition[key] = iso; automatic.setAttribute('aria-pressed', 'false'); updateFilterControlState(wrapper, dateState(key), true); menu.hidden = true; filterChanged(); });" in dashboard_script
     assert 'const current = (selected || available).filter(Boolean);' in dashboard_script
     assert "const filterControlState = (current, applied, saved, equal = sameFilterValues) =>" in dashboard_script
     assert "if (!equal(current, applied)) return 'unapplied';" in dashboard_script
@@ -278,8 +300,13 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'const canonicalSetValues = values =>' in dashboard_script
     assert 'const canonicalSelectionDefinition = value =>' in dashboard_script
     assert 'selection.filters = Object.fromEntries' in dashboard_script
-    assert 'selection.date_from = dateBounds.min;' in dashboard_script
-    assert 'selection.date_to = dateBounds.max;' in dashboard_script
+    assert "if (!definitionValue.date_from) definitionValue.date_from = 'Oldest';" in dashboard_script
+    assert "if (!definitionValue.date_to) definitionValue.date_to = 'Newest';" in dashboard_script
+    assert "const automaticLabel = key === 'date_from' ? 'Use oldest' : 'Use newest';" in dashboard_script
+    assert "const automaticValue = key === 'date_from' ? 'Oldest' : 'Newest';" in dashboard_script
+    assert "if (value === 'Oldest') return dateBounds?.min ? `Oldest (${dateBounds.min})` : 'Oldest';" in dashboard_script
+    assert "if (value === 'Newest') return dateBounds?.max ? `Newest (${dateBounds.max})` : 'Newest';" in dashboard_script
+    assert "input.value = dateInputDisplayValue(key, definition[key]);" in dashboard_script
     assert 'const effectiveDateValue = (value, key) => canonicalSelectionDefinition(value)[key];' in dashboard_script
     assert 'delete preparedDefinition.name;' in dashboard_script
     assert 'delete preparedDefinition.slide_comments;' in dashboard_script
@@ -292,6 +319,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "dashboard_name: definition?.name || 'Dashboard'," in dashboard_script
     assert "let preparationToken = '';" in dashboard_script
     assert "window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));" in dashboard_script
+    assert 'let dashboardPptJobsLoaded = false, dashboardPptJobsRefreshing = false;' in dashboard_script
+    assert "previous.status !== 'ready'" in dashboard_script
+    assert "renderDashboardPptJobs(jobs, newlyReady[0]?.id || '');" in dashboard_script
+    assert "const previous = String(preferredJobId || select.value);" in dashboard_script
     dashboard_module = (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     assert "'dashboard_name': task['name']," in dashboard_module
     assert "'label': 'Rendering Dashboard Charts' if task.get('rendering_only') else 'Preparing Dashboard dataset'," in dashboard_module
@@ -322,7 +353,7 @@ def test_dashboards_lifecycle_and_layout(client):
     selection_key_source = dashboard_module[dashboard_module.index('def persistent_selection_key'):dashboard_module.index('def selected_date_bounds')]
     assert "'scope': definition.scope," not in selection_key_source
     assert "'schema': DASHBOARD_SELECTION_CACHE_VERSION," in selection_key_source
-    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 8' in dashboard_module
+    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 9' in dashboard_module
     assert "kind: sorted([" in selection_key_source
     assert "kind: sorted(set(dataset_ids))" in selection_key_source
     assert "field: sorted(set(values))" in selection_key_source
@@ -345,7 +376,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '.e2e-dashboards .ds-unsaved-filters-badge' in dashboard_css
     assert '.e2e-dashboards .ds-unapplied-filters-badge' in dashboard_css
     assert '.ds-scope-control.ds-filter-applied-unsaved select' in dashboard_css
-    assert '.ds-date-picker.ds-date-picker-applied-unsaved>input' in dashboard_css
+    assert '.ds-date-picker.ds-date-picker-applied-unsaved .ds-date-picker-control>input' in dashboard_css
     assert '.e2e-dashboards .ds-dashboard-close::after' in dashboard_css
     assert '.e2e-dashboards .ds-dashboard-close{background:linear-gradient(135deg,#e5989b,#f2b8b9)' in dashboard_css
     assert '.e2e-dashboards .ds-dashboard-view{background:linear-gradient(145deg,#167957,#29ae7d)' in dashboard_css
@@ -353,6 +384,13 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '.ds-dashboard-status-data-queued,.ds-dashboard-status-charts-queued{border-color:#aaa3b2;background:#f0edf2;color:#655e6c}' in dashboard_css
     assert "d='M12 2v10'" in dashboard_css
     assert "bind('ds-viewer-refresh',prepare);" in dashboard_script
+    assert "function resetAutomaticDatesForDatasetChange()" in dashboard_script
+    assert "definition[key] = automaticValue;" in dashboard_script
+    assert "input.value = dateInputDisplayValue(key, automaticValue);" in dashboard_script
+    assert "const chooseScopeDatasets = targetScope =>" in dashboard_script
+    assert "const recentCount = targetScope === 'single' ? 2 : 1;" in dashboard_script
+    assert "datasetRecency(right) - datasetRecency(left)" in dashboard_script
+    assert "if (selectedScope !== definition.scope)" in dashboard_script
     assert 'async function restorePrepared(id) {' in dashboard_script
     assert 'const preparedPayloads = new Map();' in dashboard_script
     assert 'const restoreRememberedPrepared = async id =>' in dashboard_script
@@ -369,7 +407,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'const setPreparationRows = payload =>' in dashboard_script
     assert 'setPreparationRows(payload);' in dashboard_script
     assert 'applyPreparedPayload(cached.payload);' in dashboard_script
-    assert "['Universe Dataset', universe, 'ds-preparing-universe-label']" in dashboard_script
+    assert "['Dataset Universe', universe, 'ds-preparing-universe-label']" in dashboard_script
     assert "['Filtered Universe', filtered, 'ds-preparing-filtered-label']" in dashboard_script
     assert 'rows.hidden = !rows.textContent;' in dashboard_script
     assert 'const zoomResetIcon = () =>' in dashboard_script
@@ -378,7 +416,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "Clear ${dataColumnFilters.size} filter${dataColumnFilters.size === 1 ? '' : 's'}" in dashboard_script
     assert "bind('ds-data-close-bottom',()=>" in dashboard_script
     assert "const reset = node('button', undefined, 'ds-chart-zoom-button ds-chart-zoom-reset');" in dashboard_script
-    assert "bind('ds-clear-filters', () => { definition.filters = {}; definition.date_from = definition.date_to = null; sources(); facets(); filterChanged(); });" in dashboard_script
+    assert "bind('ds-clear-filters', () => { definition.filters = {}; definition.date_from = 'Oldest'; definition.date_to = 'Newest'; sources(); facets(); filterChanged(); });" in dashboard_script
     assert "bind('ds-last-saved-filters', () => {" in dashboard_script
     assert "definition.datasets = structuredClone(saved.datasets || {});" in dashboard_script
     assert "definition.scope = saved.scope || 'single';" in dashboard_script
@@ -394,7 +432,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '.e2e-dashboards .ds-chart-zoom-reset svg' in dashboard_css
     assert '.e2e-dashboards .ds-chart-data{width:2rem;min-width:2rem;height:2rem;min-height:2rem}' in dashboard_css
     assert '.ds-source-filter.ds-filter-unsaved select,.ds-source-filter.ds-filter-unsaved .multiselect-trigger' in dashboard_css
-    assert '.ds-date-picker.ds-date-picker-unsaved>input,.ds-facet.ds-filter-unsaved .multiselect-trigger' in dashboard_css
+    assert '.ds-date-picker.ds-date-picker-unsaved .ds-date-picker-control>input,.ds-facet.ds-filter-unsaved .multiselect-trigger' in dashboard_css
+    assert '.e2e-dashboards .ds-date-auto-action{position:absolute;right:.32rem;top:50%' in dashboard_css
     assert '.e2e-dashboards .ds-generate-ppt-action{' in dashboard_css
     assert ':is(.ds-view-dashboard-action,.ds-generate-ppt-action)::before{width:1.35rem' in dashboard_css
     assert '#ds-apply-filters::before' in dashboard_css
@@ -647,6 +686,91 @@ def test_prefetched_dashboard_reuses_completed_server_snapshot(client):
     assert manifests
 
 
+def test_foreground_preparation_replaces_the_same_dashboard_warmup(client, monkeypatch):
+    payload = setup_dashboard(client)
+    import src.modules.e2e_dashboards as dashboards_module
+
+    started = Event()
+    release = Event()
+    original = dashboards_module.catalog_chart_payload
+
+    def delayed(*args, **kwargs):
+        started.set()
+        assert release.wait(5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(dashboards_module, 'catalog_chart_payload', delayed)
+    dashboard_id = 'foreground-dashboard'
+    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    assert started.wait(5)
+    result = {}
+    foreground = Thread(target=lambda: result.setdefault(
+        'response', client.post(
+            f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}&preparation_id=foreground-test',
+            json=payload,
+        ),
+    ))
+    try:
+        foreground.start()
+        deadline = time.monotonic() + 5
+        tasks = []
+        while time.monotonic() < deadline:
+            tasks = [
+                task for group in client.get('/api/background-tasks').json()['groups']
+                for task in group['tasks'] if task.get('dashboard_name') == payload['name']
+            ]
+            if any(task['id'] == 'foreground-test' for task in tasks):
+                break
+            time.sleep(0.02)
+        assert [task['id'] for task in tasks] == ['foreground-test']
+        assert tasks[0]['stop_task_id'] == 'dashboard-prepare:foreground-test'
+        assert foreground.is_alive()
+        release.set()
+        foreground.join(5)
+        prepared = result['response']
+        assert prepared.status_code == 200, prepared.text
+        tasks = [
+            task for group in client.get('/api/background-tasks').json()['groups']
+            for task in group['tasks'] if task.get('dashboard_name') == payload['name']
+        ]
+        assert len(tasks) <= 1
+        if tasks:
+            assert tasks[0]['id'].startswith(f'dashboard-prefetch:{dashboard_id}:')
+    finally:
+        release.set()
+        foreground.join(5)
+
+
+def test_dashboard_background_preparation_can_be_interrupted(client, monkeypatch):
+    payload = setup_dashboard(client)
+    import src.modules.e2e_dashboards as dashboards_module
+
+    started = Event()
+    release = Event()
+    original = dashboards_module.catalog_chart_payload
+
+    def delayed(*args, **kwargs):
+        started.set()
+        assert release.wait(5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(dashboards_module, 'catalog_chart_payload', delayed)
+    dashboard_id = 'interruptible-dashboard'
+    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+    assert started.wait(5)
+    try:
+        task = next(
+            task for group in client.get('/api/background-tasks').json()['groups']
+            for task in group['tasks'] if task.get('dashboard_name') == payload['name']
+        )
+        assert task['stop_task_id'].startswith('dashboard-prepare:dashboard-prefetch:')
+        stopped = client.post(task['stop_url'], data={'task_id': task['stop_task_id']})
+        assert stopped.status_code == 200, stopped.text
+        assert stopped.json() == {'stopping': task['stop_task_id']}
+    finally:
+        release.set()
+
+
 def test_applying_filters_queues_all_chart_models_and_reuses_previous_cache(client, monkeypatch):
     payload = setup_dashboard(client)
     import src.modules.e2e_dashboards as dashboards_module
@@ -729,6 +853,50 @@ def test_applying_filters_queues_all_chart_models_and_reuses_previous_cache(clie
     assert client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard'] == {
         'state': 'charts-needed', 'label': 'Charts needed',
     }
+
+
+def test_adding_a_dataset_builds_a_new_chart_model_with_every_campaign(client):
+    client.post('/login', data={'username': 'super', 'password': 'super123'})
+    for file_name, campaign, date_value in (
+        ('campaign-q1.csv', '2026-Q1', '2026-02-01'),
+        ('campaign-q2.csv', '2026-Q2', '2026-05-01'),
+    ):
+        response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
+            'dataset_files': (
+                file_name,
+                BytesIO(
+                    f'Operator,Campaign,Mean_Data_Rate,Test_Start_Time\nA,{campaign},10,{date_value}\n'.encode()
+                ),
+                'text/csv',
+            ),
+        })
+        assert response.status_code == 200
+    core.repository.add_report_template('nsa', 'Campaign cache test', (
+        'Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position\n'
+        '1,Campaigns,,Title and 1 column + Comments,Rate,CDR-Data,Mean_Data_Rate,Average Vertical Bars,,Operator,Campaign,,Right\n'
+    ).encode(), is_default=False)
+    datasets = sorted(core.repository.list_datasets(), key=lambda row: int(row['id']))
+    first_id, second_id = (int(row['id']) for row in datasets[-2:])
+    payload = DashboardDefinition(
+        name='Campaign cache test', template='Campaign cache test', datasets={'data': [first_id]},
+    ).model_dump(mode='json')
+
+    first = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert first.status_code == 200, first.text
+    first_model = client.get(f"/api/e2e-dashboards/chart/{first.json()['token']}/0")
+    assert first_model.status_code == 200, first_model.text
+    assert {bar['key'][-1] for bar in first_model.json()['bars']} == {'2026-Q1'}
+
+    payload['datasets']['data'] = [first_id, second_id]
+    payload['date_from'], payload['date_to'] = 'Oldest', 'Newest'
+    combined = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert combined.status_code == 200, combined.text
+    combined_model = client.get(f"/api/e2e-dashboards/chart/{combined.json()['token']}/0")
+    assert combined_model.status_code == 200, combined_model.text
+    assert {bar['key'][-1] for bar in combined_model.json()['bars']} == {'2026-Q1', '2026-Q2'}
+
+    cache_dir = Path(core.repository.db_path).parent / '.dashboard-data-cache' / 'charts-canvas'
+    assert len(list(cache_dir.glob('*.json'))) >= 2
 
 
 def test_dashboard_api_session_expires_on_application_process_restart(client):
@@ -917,9 +1085,13 @@ def test_dashboard_sql_selection_preserves_voice_nr_mode_semantics(client):
     payload = DashboardDefinition(
         name='Voice', template='Voice Dashboard', datasets={'voice': [1]}, technology='nsa',
     ).model_dump(mode='json')
-    assert client.post('/api/e2e-dashboards/prepare', json=payload).json()['rows']['voice'] == 2
+    nsa = client.post('/api/e2e-dashboards/prepare', json=payload).json()
+    assert nsa['rows']['voice'] == 2
+    assert nsa['universe_rows']['voice'] == 2
     payload['technology'] = 'sa'
-    assert client.post('/api/e2e-dashboards/prepare', json=payload).json()['rows']['voice'] == 2
+    sa = client.post('/api/e2e-dashboards/prepare', json=payload).json()
+    assert sa['rows']['voice'] == 2
+    assert sa['universe_rows']['voice'] == 2
 
 
 def test_dashboard_snapshot_access_and_legacy_redirect(client):
@@ -1005,6 +1177,22 @@ def test_dashboard_large_selection_uses_direct_sql_predicate(client, monkeypatch
     data = client.get(f"/api/e2e-dashboards/data/{preview.json()['token']}/0")
     assert data.status_code == 200
     assert data.json()['total'] == 2
+
+
+def test_dashboard_profile_facets_show_values_outside_the_saved_filter(client, monkeypatch):
+    payload = setup_dashboard(client)
+    import src.modules.e2e_dashboards as dashboards_module
+
+    monkeypatch.setattr(dashboards_module, 'DASHBOARD_PROFILE_SELECTION_THRESHOLD', 1)
+    with core.repository.connection() as connection:
+        connection.execute("UPDATE dataset_profiles SET filter_options_json = '{}' WHERE dataset_id = 1")
+    payload['filters'] = {'Operator': ['A']}
+
+    preview = client.post('/api/e2e-dashboards/prepare', json=payload)
+
+    assert preview.status_code == 200, preview.text
+    assert preview.json()['rows']['data'] == 2
+    assert preview.json()['options']['Operator'] == ['A', 'B']
 
 
 def test_dashboard_reuses_normalized_snapshot_for_every_chart(client, monkeypatch):
