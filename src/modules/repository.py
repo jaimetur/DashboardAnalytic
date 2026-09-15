@@ -1404,6 +1404,18 @@ class Repository:
             f"ON {quoted_table} (dataset_id, source_row_id)"
         )
         self._create_dataset_row_indexes(conn, table_name, columns)
+        normalized_columns = {str(column).strip().lower(): column for column in columns}
+        event_time_column = normalized_columns.get('event_start_time')
+        if event_time_column:
+            quoted_column = self._quote_identifier(event_time_column)
+            quoted_index = self._quote_identifier(self._index_name(table_name, 'dataset_event_time', 'date'))
+            # Dashboard cache validation obtains the oldest and newest date
+            # for a selected Dataset Universe.  Keeping dataset_id first lets
+            # SQLite restrict that MIN/MAX query to the selected CDRs.
+            conn.execute(
+                f"CREATE INDEX IF NOT EXISTS {quoted_index} "
+                f"ON {quoted_table} (dataset_id, date(CAST({quoted_column} AS TEXT)))"
+            )
 
     def drop_reporting_rows(self, dataset_id: int, dataset_kind: str | None = None) -> None:
         kinds = [dataset_kind] if dataset_kind in {'data', 'voice', 'speech'} else ['data', 'voice', 'speech']

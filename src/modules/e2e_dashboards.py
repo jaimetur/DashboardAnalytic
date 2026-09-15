@@ -113,6 +113,7 @@ DASHBOARD_CHART_MODEL_CACHE_VERSION = 9
 DASHBOARD_CHART_MODEL_DISK_LIMIT = 500
 DASHBOARD_CHART_RENDER_WORKERS = 3
 DASHBOARD_PREVIEW_MANIFEST_VERSION = 7
+DASHBOARD_DATE_BOUNDS_CACHE_VERSION = 1
 
 
 def dashboard_cache_dir(workspace: str | Path) -> Path:
@@ -1404,15 +1405,38 @@ def install_dashboard_routes(core):
 
     def selected_date_bounds(task_repository, selected_by_kind):
         """Return the inclusive calendar bounds across the selected source datasets."""
+        sources = {}
+        for kind, selected in selected_by_kind.items():
+            columns = task_repository.list_reporting_row_columns(kind)
+            date_column = next((
+                resolve_sql_column(columns, candidate)
+                for candidate in ('event_start_time', 'Test_Start_Time', 'Timestamp', 'Date')
+                if resolve_sql_column(columns, candidate)
+            ), None)
+            sources[kind] = {
+                'datasets': sorted((
+                    row['id'], row.get('updated_at'), row.get('processed_at'),
+                    row.get('normalization_version'), row.get('row_count'),
+                ) for row in selected),
+                'revision': task_repository.get_workspace_state(f'combined_reporting_updated_{kind}'),
+                'date_column': date_column,
+            }
+        cache_signature = sha256(json.dumps({
+            'schema': DASHBOARD_DATE_BOUNDS_CACHE_VERSION, 'sources': sources,
+        }, sort_keys=True, default=str).encode()).hexdigest()
+        cache_state_key = f'dashboard_date_bounds_v{DASHBOARD_DATE_BOUNDS_CACHE_VERSION}'
+        try:
+            cached_bounds = json.loads(task_repository.get_workspace_state(cache_state_key) or '{}')
+            if not isinstance(cached_bounds, dict):
+                cached_bounds = {}
+            if cache_signature in cached_bounds:
+                return cached_bounds[cache_signature]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            cached_bounds = {}
         lower = upper = None
         with task_repository.connection() as connection:
             for kind, selected in selected_by_kind.items():
-                columns = task_repository.list_reporting_row_columns(kind)
-                date_column = next((
-                    resolve_sql_column(columns, candidate)
-                    for candidate in ('event_start_time', 'Test_Start_Time', 'Timestamp', 'Date')
-                    if resolve_sql_column(columns, candidate)
-                ), None)
+                date_column = sources[kind]['date_column']
                 if not date_column:
                     continue
                 dataset_ids = [int(row['id']) for row in selected]
@@ -1432,9 +1456,16 @@ def install_dashboard_routes(core):
                         lower = parsed
                     if parsed is not None and (upper is None or parsed > upper) and not is_lower:
                         upper = parsed
-        if lower is None or upper is None:
-            return None
-        return {'min': lower.isoformat(), 'max': upper.isoformat()}
+        bounds = None if lower is None or upper is None else {'min': lower.isoformat(), 'max': upper.isoformat()}
+        # This result is immutable while the selected datasets and their
+        # combined-table revisions are unchanged.  Persist a small bounded
+        # map so restarting the server does not repeat a full date scan just
+        # to validate a Dashboard preview manifest.
+        cached_bounds[cache_signature] = bounds
+        if len(cached_bounds) > 128:
+            cached_bounds = dict(list(cached_bounds.items())[-128:])
+        task_repository.set_workspace_state(cache_state_key, json.dumps(cached_bounds, separators=(',', ':')))
+        return bounds
 
     def apply_selected_date_bounds(definition, bounds):
         if not bounds:
