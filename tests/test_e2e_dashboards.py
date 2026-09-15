@@ -113,6 +113,50 @@ def test_dashboard_library_ppt_scope_builds_its_automatic_dataset_universe(clien
     assert prepared.json()['date_bounds'] == {'min': '2026-09-01', 'max': '2026-09-03'}
 
 
+def test_expanded_dashboard_chart_apply_builds_a_new_temporary_model(client):
+    payload = setup_dashboard(client)
+    prepared = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert prepared.status_code == 200, prepared.text
+    token = prepared.json()['token']
+
+    original = client.get(f'/api/e2e-dashboards/chart/{token}/0')
+    assert original.status_code == 200, original.text
+    assert len(original.json()['series']) == 2
+    context = client.get(f'/api/e2e-dashboards/chart/{token}/0/filter-context')
+    assert context.status_code == 200, context.text
+    assert context.json()['kpi'] == 'Mean_Data_Rate'
+
+    preview = client.post(f'/api/e2e-dashboards/chart/{token}/0/filter-preview', json={
+        'chart_title': 'Filtered operator preview',
+        'filters': 'Operator = A',
+        'grouping_rows': 'Test_Name × City × Operator',
+        'grouping_columns': '',
+        'legend': 'Operator',
+        'legend_position': 'Right',
+    })
+    assert preview.status_code == 200, preview.text
+    assert preview.json()['title'] == 'Filtered operator preview'
+    assert len(preview.json()['series']) == 1
+    assert preview.json()['series'][0]['name'] == 'HTTP DL · London · A'
+    assert preview.json()['legend']['position'] == 'right'
+
+    retained_kpi = client.post(f'/api/e2e-dashboards/chart/{token}/0/filter-preview', json={
+        'kpi': '', 'grouping_rows': 'Operator', 'grouping_columns': '',
+    })
+    assert retained_kpi.status_code == 200, retained_kpi.text
+    assert retained_kpi.json()['metric'] == 'Mean Data Rate'
+
+    updated = client.post(f'/api/e2e-dashboards/chart/{token}/0/update-template', json={
+        'chart_title': 'Updated template chart', 'grouping_rows': 'Test_Name × Operator',
+        'grouping_columns': 'City', 'legend_position': 'Right',
+    })
+    assert updated.status_code == 200, updated.text
+    entry = core.load_template_catalogue(core.repository.report_template_content('nsa', 'Dashboard test'), 'nsa')[0]
+    assert (entry.chart_title, entry.grouping_rows, entry.grouping_columns, entry.legend_position) == (
+        'Updated template chart', 'Test_Name × Operator', 'City', 'right',
+    )
+
+
 def test_dashboards_lifecycle_and_layout(client):
     payload = setup_dashboard(client)
     page = client.get('/e2e-dashboards')
@@ -223,8 +267,27 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "await warmDashboardModels();" not in dashboard_script
     assert "Rendering Dashboard Charts" in dashboard_script
     assert "overlay('ds-viewer', true);\n    if (needsPreparation) await prepare();" in dashboard_script
+    assert "window.addEventListener('beforeunload', rememberScroll);" in dashboard_script
+    assert "document.addEventListener('visibilitychange'" in dashboard_script
+    assert "document.documentElement.scrollHeight - window.innerHeight" in dashboard_script
+    assert "if (dashboards[last]) await openDashboard(last);\n    restoreScroll();" in dashboard_script
+    assert "preview_snapshot = replace(" in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
+    assert "The template owns these required chart attributes." in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+    assert "\\s*×\\s*|\\s+\\bx\\b\\s+" in app_script
+    assert "const configuredValues = multiFields.has(key)" in app_script
+    assert "columns_by_source" in dashboard_script
+    assert "control.dataset.previewDisplay = parsed.value.trim();" in app_script
+    assert "control.dispatchEvent(new Event('preview-selection-change'));" in app_script
+    assert "would erase text the user has just entered but has not completed." in app_script
+    reporting_source = (Path(__file__).parents[1] / 'src/modules/cdr_reporting.py').read_text(encoding='utf-8')
+    assert 'This chart type has no interactive renderer' not in reporting_source
     app_styles = (Path(__file__).parents[1] / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')
+    dashboard_styles = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+    assert '.ds-chart-expanded-canvas.ds-hover .ds-chart-filter-panel' in dashboard_styles
+    assert '.ds-chart-filter-panel.is-open {' in dashboard_styles
+    assert 'text-transform: uppercase;' in dashboard_styles
+    assert 'height: 14rem;' in dashboard_styles
     assert '.multiselect-option[hidden], .multiselect-group-label[hidden] { display: none !important; }' in app_styles
     task_panel_start = app_script.index("const root = document.getElementById('background-task-panels');")
     task_listener = app_script.index("window.addEventListener('dashboard-analytic:background-task'")
@@ -248,7 +311,21 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "navigateExpandedChart(expandedCharts().length - 1)" in dashboard_script
     assert "visible === 'ds-chart-expanded-overlay' && !editing && event.key === 'ArrowLeft'" in dashboard_script
     assert "visible === 'ds-chart-expanded-overlay' && !editing && event.key === 'ArrowRight'" in dashboard_script
+    assert "ds-chart-filter-panel" in page.text
+    assert "Chart Definition" in page.text
+    assert "/filter-preview" in dashboard_script
+    assert "editableGroupingInputs: true" in dashboard_script
+    assert "previewDefinition = expandedChartFilterControls.definition()" in dashboard_script
+    assert "id = 'ds-chart-filter-update'" in dashboard_script
+    assert "/update-template" in dashboard_script
+    assert "if (open && !expandedChartFilterControls) await loadExpandedChartFilters();" in dashboard_script
     assert "expandedCanvasShell.classList.add('ds-hover')" in dashboard_script
+    assert 'const scheduleExpandedChartFiltersClose = () =>' in dashboard_script
+    assert '}, 5000);' in dashboard_script
+    assert "$('ds-chart-filter-panel').addEventListener('pointerleave', scheduleExpandedChartFiltersClose);" in dashboard_script
+    assert "addEventListener('focusout', event =>" not in dashboard_script
+    assert "document.addEventListener('pointerdown', event => {" in dashboard_script
+    assert "event.target.closest('.report-chart-preview-select-menu')" in dashboard_script
     assert "`Chart ${index + 1} / ${charts.length}`" in dashboard_script
     assert "if (event.target === event.currentTarget) expandedChartOverlay(false);" in dashboard_script
     assert 'const closeOnOutsidePointer = (id, close) =>' in dashboard_script
@@ -271,6 +348,12 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "bottom: position === 'bottom' ? 900 - rows * rowHeight - 22 : 860" in chart_script
     assert "function labelAngle(context, value, availableWidth, size)" in chart_script
     assert "function bottomAxisReserve(context, keys, width, size = 22)" in chart_script
+    assert "function hierarchyRowLabelSize(context, rowKeys, availableWidth" in chart_script
+    assert "function drawFullHierarchyLabel(context, value, x, y, width, size" in chart_script
+    assert "drawFullHierarchyLabel(context, value, x + 4" in chart_script
+    assert "const rowLabelGap = rowLevels > 1 ? 20 : 0;" in chart_script
+    assert "const rowLabelArea = rowLevels ? Math.min(440, Math.max(230" in chart_script
+    assert "drawFullHierarchyLabel(context, value, labelLeft + 3" in chart_script
     assert "const usableBottom = layout.position === 'bottom' ? layout.bottom : 884;" in chart_script
     assert 'Math.min(250, columnWidth * .72)' in chart_script
     assert 'function drawOutsideBarLabel(context, value, x, y, colour, size = 12)' in chart_script

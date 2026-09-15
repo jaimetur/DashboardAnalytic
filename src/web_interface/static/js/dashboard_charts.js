@@ -168,6 +168,29 @@
     return `${result.trimEnd()}…`;
   }
 
+  function hierarchyRowLabelSize(context, rowKeys, availableWidth, preferredSize = 18, minimumSize = 9) {
+    const levels = rowKeys[0]?.length || 0;
+    for (let size = preferredSize; size >= minimumSize; size -= 1) {
+      font(context, size, true);
+      const required = Array.from({length: levels}, (_value, level) => Math.max(
+        ...rowKeys.map(key => textWidth(context, String(key[level] ?? ''))), 0,
+      ) + 12).reduce((total, width) => total + width, 0);
+      if (required <= availableWidth) return size;
+    }
+    return minimumSize;
+  }
+
+  function drawFullHierarchyLabel(context, value, x, y, width, size, colour = '#405765') {
+    const label = String(value ?? '');
+    context.fillStyle = colour; context.textAlign = 'left'; context.textBaseline = 'top'; font(context, size, true);
+    const measured = textWidth(context, label);
+    if (measured <= width) { context.fillText(label, x, y); return; }
+    // Preserve the complete aggregation value in its own pane when even the
+    // smallest readable font does not fit. Horizontal condensation is only a
+    // last resort and avoids silently replacing business labels with an ellipsis.
+    context.save(); context.translate(x, y); context.scale(width / measured, 1); context.fillText(label, 0, 0); context.restore();
+  }
+
   function rotatedLabel(context, value, centreX, bottomY, colour, size, bold = true, angle = 45) {
     context.save(); context.translate(centreX, bottomY); context.rotate(-Math.PI * angle / 180);
     context.fillStyle = colour; context.textAlign = 'center'; context.textBaseline = 'bottom'; font(context, size, bold);
@@ -351,8 +374,9 @@
     }
 
     const rowKeys = payload.row_keys || [[]], columnKeys = payload.column_keys || [];
-    font(context, 18, true);
-    const rowLabelWidths = (rowKeys[0] || []).map((_value, level) => Math.max(...rowKeys.map(key => textWidth(context, String(key[level] ?? '').slice(0, 24))), 0) + 18);
+    const rowLabelSize = hierarchyRowLabelSize(context, rowKeys, 420);
+    font(context, rowLabelSize, true);
+    const rowLabelWidths = (rowKeys[0] || []).map((_value, level) => Math.max(...rowKeys.map(key => textWidth(context, String(key[level] ?? ''))), 0) + 12);
     const upperLevels = Math.max((columnKeys[0]?.length || 1) - 1, 0), headerBandHeight = Math.min(32, 112 / Math.max(upperLevels, 1));
     const layout = legendLayout(payload.legend), rowOrigin = layout.position === 'left' ? layout.left : 24;
     const chartLeft = Math.max(rowOrigin + 121, Math.min(rowOrigin + 516, rowOrigin + Math.min(rowLabelWidths.reduce((sum, value) => sum + value, 0), 420) + 68));
@@ -407,8 +431,7 @@
       rowLabelWidths.forEach((width, level) => {
         const visible = width * factor;
         hierarchySpans(rowKeys, level).forEach(([start, end, value]) => {
-          context.fillStyle = '#405765'; context.textAlign = 'left'; font(context, 18, true);
-          context.fillText(fittedText(context, value, visible - 8), x + 4, chartTop + (start + end) / 2 * rowHeight - 10);
+          drawFullHierarchyLabel(context, value, x + 4, chartTop + (start + end) / 2 * rowHeight - rowLabelSize / 2, visible - 8, rowLabelSize);
         });
         x += visible; line(context, x, chartTop, x, chartTop + chartHeight, '#D7DEE3');
       });
@@ -445,7 +468,19 @@
     if (!columnKeys.length) return;
     const upperLevels = Math.max((columnKeys[0]?.length || 1) - 1, 0), headerBandHeight = upperLevels ? Math.min(34, 120 / upperLevels) : 0;
     const layout = legendLayout(payload.legend, 13), rowOrigin = layout.position === 'left' ? layout.left : 20;
-    const chartLeft = rowOrigin + 110, chartTop = layout.top + upperLevels * headerBandHeight + 8;
+    const rowLevels = rowKeys[0]?.length || 0;
+    const rowLabelSize = hierarchyRowLabelSize(context, rowKeys, 400, 16, 9);
+    font(context, rowLabelSize, true);
+    const rowLabelWidths = Array.from({length: rowLevels}, (_value, level) => Math.max(
+      ...rowKeys.map(key => textWidth(context, String(key[level] ?? ''))), 0,
+    ) + 14);
+    const rowLabelGap = rowLevels > 1 ? 20 : 0;
+    const rowLabelTotal = Math.max(rowLabelWidths.reduce((sum, value) => sum + value, 0), 1);
+    // Keep hierarchy levels in separate panes. The previous fixed 110px
+    // gutter caused long parent labels to enter the first chart column.
+    const rowLabelArea = rowLevels ? Math.min(440, Math.max(230, rowLabelTotal + rowLabelGap * (rowLevels - 1))) : 0;
+    const rowLabelFactor = Math.min((rowLabelArea - rowLabelGap * (rowLevels - 1)) / rowLabelTotal, 1);
+    const chartLeft = rowOrigin + rowLabelArea + (rowLevels ? 56 : 110), chartTop = layout.top + upperLevels * headerBandHeight + 8;
     const chartHeight = Math.max(180, layout.bottom - chartTop - 40), chartWidth = layout.right - chartLeft - 10;
     const headerTop = chartTop - upperLevels * headerBandHeight - 8, leafLabelY = chartTop - 10, rowHeight = chartHeight / rowKeys.length, columnWidth = chartWidth / columnKeys.length;
     for (let level = 0; level < upperLevels; level += 1) {
@@ -462,12 +497,18 @@
       if (index) { let changed = columnKeys[index - 1].findIndex((value, level) => value !== key[level]); if (changed < 0) changed = key.length - 1; const lineTop = changed === 0 ? headerTop : headerTop + Math.min(changed, upperLevels) * headerBandHeight; if (changed === 0) line(context, cellLeft, lineTop, cellLeft, chartTop + chartHeight + 25, '#AEBBC4', 2); else dashedVertical(context, cellLeft, lineTop, chartTop + chartHeight + 25); } else line(context, cellLeft, headerTop, cellLeft, chartTop + chartHeight + 25, '#AEBBC4', 2);
       context.fillStyle = '#566A78'; context.textAlign = 'left'; font(context, 13, true); context.fillText('0', cellLeft + 3, chartTop + chartHeight + 7); context.textAlign = 'right'; context.fillText(String(payload.maximum), cellLeft + columnWidth - 3, chartTop + chartHeight + 7);
     });
-    const rowLevels = rowKeys[0]?.length || 0, labelWidth = rowLevels ? Math.max((chartLeft - rowOrigin - 8) / rowLevels, 65) : 0;
-    for (let level = 0; level < rowLevels; level += 1) hierarchySpans(rowKeys, level).forEach(([start, end, value]) => { context.fillStyle = '#405765'; context.textAlign = 'left'; font(context, 14, true); context.fillText(value.slice(0, 22), rowOrigin + level * labelWidth, chartTop + (start + end) / 2 * rowHeight - 9); });
+    const nestedRowStart = level => rowOrigin + rowLabelWidths.slice(0, level).reduce((sum, width) => sum + width * rowLabelFactor + rowLabelGap, 0);
+    for (let level = 0; level < rowLevels; level += 1) {
+      const labelLeft = nestedRowStart(level), labelWidth = rowLabelWidths[level] * rowLabelFactor;
+      hierarchySpans(rowKeys, level).forEach(([start, end, value]) => {
+        drawFullHierarchyLabel(context, value, labelLeft + 3, chartTop + (start + end) / 2 * rowHeight - rowLabelSize / 2, labelWidth - 6, rowLabelSize);
+      });
+      if (level < rowLevels - 1) line(context, labelLeft + labelWidth + rowLabelGap / 2, chartTop, labelLeft + labelWidth + rowLabelGap / 2, chartTop + chartHeight, '#D7DEE3');
+    }
     rowKeys.forEach((rowKey, rowIndex) => {
       const rowTop = chartTop + rowIndex * rowHeight, rowBottom = rowTop + rowHeight, next = rowKeys[rowIndex + 1];
       const changed = next ? rowKey.findIndex((value, level) => value !== next[level]) : 0;
-      if (next && changed > 0) dashedHorizontal(context, rowBottom, rowOrigin + labelWidth * changed, chartLeft + chartWidth); else line(context, rowOrigin, rowBottom, chartLeft + chartWidth, rowBottom, '#AEBBC4', 2);
+      if (next && changed > 0) dashedHorizontal(context, rowBottom, nestedRowStart(changed), chartLeft + chartWidth); else line(context, rowOrigin, rowBottom, chartLeft + chartWidth, rowBottom, '#AEBBC4', 2);
       columnKeys.forEach((columnKey, columnIndex) => {
         const values = payload.cells[rowIndex]?.[columnIndex] || [], cellLeft = chartLeft + columnIndex * columnWidth, available = Math.max(columnWidth - 10, 1); let x = cellLeft + 4;
         const barHeight = Math.max(12, Math.min(22, rowHeight * .84)), y = rowTop + (rowHeight - barHeight) / 2, outside = [];
@@ -543,6 +584,35 @@
   }
 
   function drawMeanBars(context, payload, state, transform) {
+    if (payload.mode === 'hierarchy') {
+      const rowKeys = payload.row_keys || [[]], columnKeys = payload.column_keys || [[]];
+      const layout = legendLayout(payload.legend), rowOrigin = layout.position === 'left' ? layout.left : 24;
+      const rowLevels = rowKeys[0]?.length || 0, labelWidth = rowLevels ? Math.min(140, Math.max(72, (layout.right - rowOrigin) / (rowLevels + 5))) : 0;
+      const chartLeft = rowOrigin + rowLevels * labelWidth + 56, chartRight = layout.right - 12;
+      const upperLevels = Math.max((columnKeys[0]?.length || 1) - 1, 0), headerHeight = upperLevels * 28;
+      const chartTop = layout.top + headerHeight + 8, chartHeight = Math.max(180, layout.bottom - chartTop - 20), chartWidth = chartRight - chartLeft;
+      const rowHeight = chartHeight / Math.max(rowKeys.length, 1), columnWidth = chartWidth / Math.max(columnKeys.length, 1);
+      for (let level = 0; level < upperLevels; level += 1) hierarchySpans(columnKeys, level).forEach(([start, end, value]) => {
+        const left = chartLeft + start * columnWidth, right = chartLeft + end * columnWidth;
+        context.fillStyle = '#405765'; context.textAlign = 'center'; font(context, 15, true); context.fillText(fittedText(context, value, right - left - 8), (left + right) / 2, layout.top + level * 28);
+      });
+      rowKeys.forEach((rowKey, rowIndex) => {
+        const top = chartTop + rowIndex * rowHeight, bottom = top + rowHeight, next = rowKeys[rowIndex + 1];
+        const changed = next ? rowKey.findIndex((value, level) => value !== next[level]) : 0;
+        if (next && changed > 0) dashedHorizontal(context, bottom, rowOrigin + changed * labelWidth, chartRight); else line(context, rowOrigin, bottom, chartRight, bottom, '#AEBBC4', 2);
+        rowKey.forEach((value, level) => { context.fillStyle = '#405765'; context.textAlign = 'left'; font(context, 15, true); context.fillText(fittedText(context, value, labelWidth - 8), rowOrigin + level * labelWidth + 4, top + rowHeight / 2 - 8); });
+        columnKeys.forEach((columnKey, columnIndex) => {
+          const value = Number(payload.cells?.[rowIndex]?.[columnIndex]); if (!Number.isFinite(value)) return;
+          const cellLeft = chartLeft + columnIndex * columnWidth, height = Math.max(0, (rowHeight - 28) * value / Math.max(Number(payload.maximum), 1));
+          const width = Math.max(14, Math.min(columnWidth * .68, 110)), x = cellLeft + (columnWidth - width) / 2, y = bottom - 10 - height;
+          context.fillStyle = '#4E79A7'; context.fillRect(x, y, width, height); const label = value.toFixed(2);
+          if (!(height >= 32 && drawInsideBarLabel(context, label, x, y, width, height, '#FFFFFF', 15))) { context.fillStyle = '#4E79A7'; context.textAlign = 'center'; font(context, 14, true); context.fillText(label, x + width / 2, Math.max(top + 2, y - 18)); }
+          pushRectangleHit(state, transform, {x, y, width, height}, {label: displayKey([...rowKey, ...columnKey]), series: payload.aggregation || 'mean', value: label});
+          if (rowIndex === rowKeys.length - 1) { context.fillStyle = '#4E6271'; context.textAlign = 'center'; font(context, 14, true); context.fillText(fittedText(context, String(columnKey.at(-1) || ''), columnWidth - 8), cellLeft + columnWidth / 2, bottom + 3); }
+        });
+      });
+      drawLegend(context, payload.legend); return;
+    }
     const bars = payload.bars || [], keys = bars.map(bar => bar.key);
     const layout = legendLayout(payload.legend), hierarchyHeight = 30 * (keys[0]?.length || 1) + 8;
     const left = Math.max(105, layout.left), top = layout.top + hierarchyHeight;

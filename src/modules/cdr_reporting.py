@@ -457,7 +457,7 @@ def calculated_dimensions_json(dimensions: Iterable[CalculatedDimension]) -> lis
 def parse_catalog_grouping(value: str) -> GroupingSpec:
     if not value.strip():
         return GroupingSpec(())
-    dimensions = tuple(part.strip() for part in re.split(r"\s*(?:×|x)\s*", value, flags=re.I) if part.strip())
+    dimensions = tuple(part.strip() for part in re.split(r"\s*×\s*|\s+\bx\b\s+", value, flags=re.I) if part.strip())
     if not dimensions:
         raise ValueError("Grouping must contain at least one dimension.")
     return GroupingSpec(dimensions)
@@ -3089,7 +3089,11 @@ def _render_status_100_hierarchy(
     # to cross the y axis on multi-pane charts.
     available_row_width = min(sum(row_label_widths), 420)
     chart_left = max(145, min(540, 24 + available_row_width + 68))
-    chart_top, chart_right, chart_height = 245, 1395, 510
+    # Bottom legends occupy the same lower canvas band as rotated leaf labels.
+    # Reserve that band before plotting so column captions never overlap the
+    # legend, regardless of the number of hierarchy levels.
+    bottom_legend_reserve = 122 if parse_legend_position(legend_position) == "bottom" and legend_labels else 0
+    chart_top, chart_right, chart_height = 245, 1395, 510 - bottom_legend_reserve
     chart_width = chart_right - chart_left
     row_height = chart_height / len(row_keys)
     column_width = chart_width / len(column_keys)
@@ -4654,6 +4658,41 @@ def catalog_chart_payload(
         means = aggregate.median() if aggregation == "median" else aggregate.mean()
         if means.empty:
             return empty("No valid samples for this KPI and technology filter")
+        if row_hierarchy:
+            render_columns = column_hierarchy or ["__catalog_single_column"]
+            if render_columns == ["__catalog_single_column"]:
+                values["__catalog_single_column"] = "(all)"
+                aggregate = values.dropna().groupby([*row_hierarchy, *render_columns], dropna=False, sort=False)[metric]
+                means = aggregate.median() if aggregation == "median" else aggregate.mean()
+            row_keys = _hierarchical_unique_keys(values, row_hierarchy)
+            column_keys = _hierarchical_unique_keys(values, render_columns)
+            lookup = {key if len(axes) > 1 else key[0]: float(value) for key, value in means.items()}
+            flat_keys = [label if isinstance(label, tuple) else (label,) for label in means.index]
+            colours = _series_colours(flat_keys, [*row_hierarchy, *render_columns], values)
+            def mean_value(row_key: tuple[object, ...], column_key: tuple[object, ...]) -> float | None:
+                key = (*row_key, *column_key)
+                lookup_key = key if len(key) > 1 else key[0]
+                return lookup.get(lookup_key)
+            return {
+                **_chart_payload_base("mean_bar", title, render_entry, values, metric),
+                "mode": "hierarchy",
+                "metric": metric.replace("_", " "),
+                "aggregation": aggregation,
+                "maximum": max(float(means.max()), 1.0),
+                "row_keys": [serialise_key(key) for key in row_keys],
+                "column_keys": [serialise_key(key) for key in column_keys],
+                "cells": [[mean_value(row_key, column_key) for column_key in column_keys] for row_key in row_keys],
+                # Retain the flat values for existing API consumers. Canvas
+                # rendering uses the explicit row/column matrix above.
+                "bars": [
+                    {
+                        "key": serialise_key(key), "value": float(value),
+                        "colour": colours.get(key, _colour(key, item_index)),
+                        "legend": _legend_key_caption(key, [*row_hierarchy, *render_columns], values, _legend_dimensions(render_entry.legend)),
+                    }
+                    for item_index, (key, value) in enumerate(zip(flat_keys, means.tolist(), strict=True))
+                ],
+            }
         keys = [label if isinstance(label, tuple) else (label,) for label in means.index]
         colours = _series_colours(keys, axes, values)
         return {
@@ -4716,7 +4755,7 @@ def catalog_chart_payload(
         model = cdf_model(metric, title) if metric else None
         return model or empty("No valid samples for this KPI and technology filter")
 
-    return empty("This chart type has no interactive renderer")
+    return empty("Select a valid KPI for the selected CDR type to render this chart preview")
 
 
 def _chart_for_catalog_entry(

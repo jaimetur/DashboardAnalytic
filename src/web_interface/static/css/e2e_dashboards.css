@@ -227,3 +227,171 @@
   visibility: visible;
   transform: translateY(0);
 }
+
+.ds-chart-filter-panel {
+  position: absolute;
+  z-index: 6;
+  top: 3.65rem;
+  right: 0;
+  bottom: 1rem;
+  width: min(28rem, calc(100% - 3rem));
+  transform: translateX(100%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform .22s ease, opacity .18s ease, visibility 0s linear .22s;
+  filter: drop-shadow(0 10px 24px rgba(42, 28, 68, .16));
+}
+.ds-chart-expanded-canvas.ds-hover .ds-chart-filter-panel,
+.ds-chart-expanded-canvas:focus-within .ds-chart-filter-panel,
+.ds-chart-filter-panel.is-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+.ds-chart-filter-panel.is-open {
+  transform: translateX(-.9rem);
+}
+.e2e-dashboards .ds-chart-filter-toggle {
+  position: absolute;
+  top: 0;
+  left: -2.7rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  width: 2.7rem;
+  min-width: 2.7rem;
+  height: 14rem;
+  min-height: 0;
+  padding: .7rem .38rem;
+  border: 1px solid #60408f;
+  border-right: 0;
+  border-radius: .6rem 0 0 .6rem;
+  background: linear-gradient(145deg, #7654aa, #60408f);
+  color: #fff;
+  font: inherit;
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .14em;
+  line-height: 1.1;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  white-space: nowrap;
+  box-shadow: 0 5px 14px rgba(73, 46, 111, .2);
+  cursor: pointer;
+}
+.ds-chart-filter-toggle::before {
+  content: '';
+  width: .95rem;
+  height: .95rem;
+  flex: 0 0 .95rem;
+  background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 19V5M4 19h16'/%3E%3Cpath d='M8 16v-4M12 16V8M16 16v-7'/%3E%3Cpath d='m15.5 4.5 4 4M14 10l5.8-5.8'/%3E%3C/svg%3E");
+}
+.e2e-dashboards .ds-chart-filter-toggle:hover,
+.e2e-dashboards .ds-chart-filter-toggle:focus-visible {
+  border-color: #4d2e78;
+  background: linear-gradient(145deg, #684799, #51327c);
+  box-shadow: 0 0 0 3px rgba(112, 76, 168, .15), 0 6px 16px rgba(73, 46, 111, .22);
+}
+.ds-chart-filter-panel.is-open .ds-chart-filter-toggle {
+  border-radius: .6rem 0 0 .6rem;
+  box-shadow: 0 5px 14px rgba(73, 46, 111, .18);
+}
+.ds-chart-filter-content {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 1rem 1rem .85rem;
+  border: 1px solid #cbb9df;
+  border-radius: .8rem 0 .8rem .8rem;
+  background: rgba(252, 250, 255, .98);
+  box-shadow: 0 18px 44px rgba(35, 21, 54, .22);
+  backdrop-filter: blur(10px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .14s ease, visibility 0s linear .22s;
+}
+.ds-chart-filter-panel.is-open .ds-chart-filter-content { opacity: 1; visibility: visible; pointer-events: auto; transition-delay: .08s; }
+.ds-chart-filter-content h3 { margin: 0; color: #432a69; font-size: 1rem; }
+.ds-chart-filter-content .form-note { margin: .25rem 0 .85rem; color: #70637e; font-size: .72rem; line-height: 1.35; }
+.ds-chart-filter-content .report-chart-viewer-fields {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  gap: .68rem;
+  padding: .15rem .25rem .6rem 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.ds-chart-filter-content .report-chart-viewer-fields label { gap: .28rem; color: #4d376b; font-size: .68rem; }
+.e2e-dashboards .ds-chart-filter-panel .report-chart-preview-select-trigger,
+.e2e-dashboards .ds-chart-filter-panel .report-chart-viewer-fields input[type="text"] {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 2rem;
+  padding: .38rem 1.7rem .38rem .55rem;
+  border: 1px solid #d2c5e2;
+  border-radius: .48rem;
+  background: #fff;
+  color: #352747;
+  font-size: .75rem;
+  font-weight: 550;
+  line-height: 1.2;
+  text-align: left;
+  box-shadow: 0 1px 2px rgba(45, 30, 62, .04);
+}
+.e2e-dashboards .ds-chart-filter-panel .report-chart-preview-select-trigger:hover,
+.e2e-dashboards .ds-chart-filter-panel .report-chart-preview-select-trigger:focus-visible,
+.e2e-dashboards .ds-chart-filter-panel .report-chart-viewer-fields input[type="text"]:focus {
+  border-color: #9574bd;
+  background: #fff;
+  color: #352747;
+  box-shadow: 0 0 0 3px rgba(119, 81, 185, .1);
+}
+.ds-chart-filter-content .report-chart-filter-builder { padding: .55rem; border-color: #ddd3e8; background: #fff; }
+.ds-chart-filter-content .report-chart-filter-condition { grid-template-columns: minmax(0, 1fr) 5.5rem minmax(0, 1fr) 1.75rem; }
+.e2e-dashboards .ds-chart-filter-panel .report-chart-filter-condition button,
+.e2e-dashboards .ds-chart-filter-panel .report-chart-filter-add {
+  min-width: 0;
+  min-height: 1.8rem;
+  padding: .22rem .4rem;
+  border: 1px solid #d2c5e2;
+  border-radius: .42rem;
+  background: #f4eff9;
+  color: #5c407f;
+  font-size: .7rem;
+  box-shadow: none;
+}
+.e2e-dashboards .ds-chart-filter-panel .report-chart-filter-add { width: 100%; }
+.ds-chart-filter-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: .55rem;
+  margin-top: .25rem;
+  padding-top: .75rem;
+  border-top: 1px solid #e5ddec;
+}
+.e2e-dashboards .ds-chart-filter-actions button {
+  min-width: 5.25rem;
+  min-height: 2rem;
+  padding: .38rem .75rem;
+  border-radius: .5rem;
+  font-size: .74rem;
+  box-shadow: none;
+}
+.e2e-dashboards .ds-chart-filter-actions #ds-chart-filter-close { border-color: #cbc2d3; background: #fff; color: #554a60; }
+.e2e-dashboards .ds-chart-filter-actions #ds-chart-filter-apply { border-color: #60408f; background: #6c4aa3; color: #fff; }
+.e2e-dashboards .ds-chart-filter-actions #ds-chart-filter-apply:hover,
+.e2e-dashboards .ds-chart-filter-actions #ds-chart-filter-apply:focus-visible { background: #553782; }
+.e2e-dashboards .ds-chart-filter-actions #ds-chart-filter-update { border-color: #9f3b48; background: #ad4351; color: #fff; }
+.e2e-dashboards .ds-chart-filter-actions #ds-chart-filter-update:hover,
+.e2e-dashboards .ds-chart-filter-actions #ds-chart-filter-update:focus-visible { background: #8f3340; }
+@media (max-width:720px) { .ds-chart-filter-panel { width: calc(100% - 3rem); } }

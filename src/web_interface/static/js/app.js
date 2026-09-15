@@ -3460,7 +3460,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     return ({data: 'cdr-data', voice: 'cdr-voice', speech: 'cdr-speech'})[normalized] || (normalized.startsWith('cdr-') ? normalized : `cdr-${normalized}`);
   };
   const columnsFor = (source) => Array.from(new Set((options.columnsBySource || {})[sourceKey(source)] || [])).sort((left, right) => left.localeCompare(right));
-  const valuesFor = (value, key) => new Set(String(value || '').split(key === 'legend' ? ',' : /\s*(?:×|x)\s*/i).map((item) => item.trim()).filter(Boolean));
+  const valuesFor = (value, key) => new Set(String(value || '').split(key === 'legend' ? ',' : /\s*×\s*|\s+\bx\b\s+/i).map((item) => item.trim()).filter(Boolean));
   const normalisePreviewValue = (value) => String(value || '').trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, '');
   const matchingPreviewValue = (requested, available) => (
     available.find((value) => normalisePreviewValue(value) === normalisePreviewValue(requested)) || requested
@@ -3475,7 +3475,11 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     return order;
   };
   const currentDefinition = () => Object.fromEntries(Array.from(fieldsElement.querySelectorAll('[name]')).map((control) => {
-    if (!control.multiple) return [control.name, control.value];
+    if (options.editableGroupingInputs && ['grouping_rows', 'grouping_columns'].includes(control.name)) {
+      const editor = control.parentElement?.querySelector('[data-preview-grouping-text]');
+      if (editor) return [control.name, editor.value.trim()];
+    }
+    if (!control.multiple) return [control.name, control.value || control.dataset.previewDisplay || ''];
     return [control.name, orderedSelectedValues(control).join(control.name === 'legend' || control.name === 'dataset_ids' ? ', ' : ' × ')];
   }));
   let activeMenu = null;
@@ -3507,7 +3511,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
         const selected = Array.from(select.selectedOptions).map((option) => option.textContent?.trim()).filter(Boolean);
         const configured = select.dataset.previewDisplay || '';
         triggerText.textContent = select.multiple
-          ? (selected.length ? `${selected.length} selected` : (configured ? `${configured.split(select.name === 'legend' || select.name === 'dataset_ids' ? ',' : /\s*(?:×|x)\s*/i).filter(Boolean).length} selected` : 'Select fields…'))
+          ? (selected.length ? `${selected.length} selected` : (configured ? `${configured.split(select.name === 'legend' || select.name === 'dataset_ids' ? ',' : /\s*×\s*|\s+\bx\b\s+/i).filter(Boolean).length} selected` : 'Select fields…'))
           : (selected[0] || configured || 'Select a value…');
       };
       const renderOptions = () => {
@@ -3551,7 +3555,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       shell.addEventListener('mouseleave', () => { if (closeTimer) window.clearTimeout(closeTimer); closeTimer = window.setTimeout(() => { if (activeMenu === menu) closeMenu(); }, 550); });
       menu.addEventListener('mouseenter', () => { if (closeTimer) window.clearTimeout(closeTimer); });
       menu.addEventListener('mouseleave', () => { if (closeTimer) window.clearTimeout(closeTimer); closeTimer = window.setTimeout(() => { if (activeMenu === menu) closeMenu(); }, 550); });
-      select.classList.add('report-chart-preview-select-native'); select.after(shell); shell.append(trigger, menu); syncTrigger();
+      select.classList.add('report-chart-preview-select-native'); select.after(shell); shell.append(trigger, menu); select.addEventListener('input', syncTrigger); select.addEventListener('change', syncTrigger); select.addEventListener('preview-selection-change', syncTrigger); syncTrigger();
     });
   };
   document.addEventListener('click', (event) => {
@@ -3606,7 +3610,10 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     else if (key === 'legend_position') (options.legendPositions || ['Top', 'Bottom', 'Left', 'Right']).forEach((value) => control.add(new Option(value, value, false, normalisePreviewValue(value) === normalisePreviewValue(definition[key]))));
     else {
       const available = columnsFor(definition.cdr_source);
-      const selected = new Set(Array.from(valuesFor(definition[key], key)).map((value) => matchingPreviewValue(value, available)));
+      const configuredValues = multiFields.has(key)
+        ? Array.from(valuesFor(definition[key], key))
+        : [String(definition[key] || '').trim()].filter(Boolean);
+      const selected = new Set(configuredValues.map((value) => matchingPreviewValue(value, available)));
       if (multiFields.has(key)) control.multiple = true; else control.add(new Option('Choose a field…', ''));
       Array.from(new Set([...selected, ...available])).filter(Boolean).forEach((value) => control.add(new Option(value, value, false, selected.has(value))));
     }
@@ -3635,9 +3642,22 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     }
     control.name = key; control.dataset.previewDisplay = String(definition[key] || ''); control.setAttribute('aria-label', label); field.append(control);
     if (key === 'grouping_rows' || key === 'grouping_columns') {
-      const parsed = document.createElement('input'); parsed.type = 'text'; parsed.className = 'report-chart-preview-parsed'; parsed.readOnly = true; parsed.placeholder = `No ${label.toLowerCase()} selected`; parsed.setAttribute('aria-label', `Selected ${label.toLowerCase()}`);
+      const parsed = document.createElement('input'); parsed.type = 'text'; parsed.className = 'report-chart-preview-parsed'; parsed.readOnly = !options.editableGroupingInputs; parsed.dataset.previewGroupingText = ''; parsed.placeholder = `No ${label.toLowerCase()} selected`; parsed.setAttribute('aria-label', `Selected ${label.toLowerCase()}`);
       const syncParsed = () => { parsed.value = orderedSelectedValues(control).join(' × '); };
       control.addEventListener('input', syncParsed); control.addEventListener('change', syncParsed); syncParsed(); field.append(parsed);
+      if (options.editableGroupingInputs) parsed.addEventListener('input', () => {
+        const requested = Array.from(valuesFor(parsed.value, key));
+        const available = Array.from(control.options).map((option) => option.value);
+        const selected = requested.map((value) => matchingPreviewValue(value, available));
+        Array.from(control.options).forEach((option) => { option.selected = selected.includes(option.value); });
+        control.dataset.previewSelectionOrder = JSON.stringify(selected);
+        control.dataset.previewDisplay = parsed.value.trim();
+        // Updating the native select must not emit its input event: that event
+        // also normalizes the editable expression from selected options and
+        // would erase text the user has just entered but has not completed.
+        control.dispatchEvent(new Event('preview-selection-change'));
+        options.onChange?.(currentDefinition());
+      });
     }
     return field;
   }));

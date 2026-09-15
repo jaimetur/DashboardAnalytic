@@ -51,11 +51,20 @@
     try {
       const top = Number(sessionStorage.getItem(scrollStorageKey));
       if (!Number.isFinite(top) || top <= 0) return;
-      requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo({top, left: 0, behavior: 'auto'})));
+      let attempts = 0;
+      const restore = () => {
+        window.scrollTo({top, left: 0, behavior: 'auto'});
+        const maximumTop = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+        if (attempts++ >= 24 || (maximumTop >= top && Math.abs(window.scrollY - top) < 2)) return;
+        window.setTimeout(() => requestAnimationFrame(restore), 50);
+      };
+      requestAnimationFrame(() => requestAnimationFrame(restore));
     } catch (_) { /* Storage is optional. */ }
   };
   if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
   window.addEventListener('pagehide', rememberScroll);
+  window.addEventListener('beforeunload', rememberScroll);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') rememberScroll(); });
   const nextName = value => { let name = value, number = 2; while (Object.values(dashboards).some(item => item.name.toLowerCase() === name.toLowerCase())) name = `${value.slice(0, 108)} (${number++})`; return name; };
   const focusReturn = new Map();
   const status = message => { $('ds-status').textContent = message; };
@@ -1574,6 +1583,7 @@
   $('ds-chart-expanded-zoom').append(expandedZoom);
   const expandedCanvasShell = $('ds-chart-expanded-canvas-shell');
   let expandedControlsTimer;
+  let expandedFiltersCloseTimer;
   const showExpandedCanvasControls = () => {
     clearTimeout(expandedControlsTimer);
     expandedControlsTimer = null;
@@ -1592,6 +1602,138 @@
   expandedCanvasShell.onfocusout = () => { if (!expandedCanvasShell.contains(document.activeElement)) hideExpandedCanvasControls(); };
   let expandedChart = null;
   let expandedChartMode = 'dashboard';
+  let expandedChartFilterControls = null;
+  let expandedChartFilterToken = '';
+  let expandedChartFilterIndex = -1;
+  let expandedChartFilterContextPath = '';
+  const expandedTemplateUpdate = node('button', 'Update Template', 'danger-button');
+  expandedTemplateUpdate.id = 'ds-chart-filter-update';
+  expandedTemplateUpdate.hidden = true;
+  $('ds-chart-filter-apply').before(expandedTemplateUpdate);
+  const setExpandedChartFiltersOpen = open => {
+    clearTimeout(expandedFiltersCloseTimer);
+    expandedFiltersCloseTimer = null;
+    $('ds-chart-filter-panel').classList.toggle('is-open', open);
+    $('ds-chart-filter-toggle').setAttribute('aria-expanded', String(open));
+    if (open) $('ds-chart-filter-fields').querySelector('input,select,button')?.focus();
+  };
+  const scheduleExpandedChartFiltersClose = () => {
+    clearTimeout(expandedFiltersCloseTimer);
+    expandedFiltersCloseTimer = setTimeout(() => {
+      if (!$('ds-chart-filter-panel').matches(':hover')) {
+        setExpandedChartFiltersOpen(false);
+        $('ds-chart-filter-toggle').focus();
+      }
+    }, 5000);
+  };
+  $('ds-chart-filter-panel').addEventListener('pointerenter', () => clearTimeout(expandedFiltersCloseTimer));
+  $('ds-chart-filter-panel').addEventListener('pointerleave', scheduleExpandedChartFiltersClose);
+  $('ds-chart-filter-panel').addEventListener('focusin', () => clearTimeout(expandedFiltersCloseTimer));
+  // Focus can temporarily move from a panel field to one of its searchable
+  // menus. Only leaving with the pointer starts the delayed auto-collapse;
+  // a click outside the panel remains an immediate close below.
+  document.addEventListener('pointerdown', event => {
+    const panel = $('ds-chart-filter-panel');
+    if (!panel.classList.contains('is-open') || panel.contains(event.target)) return;
+    // Searchable selector menus are temporarily mounted in the overlay, not
+    // inside the panel, and must remain interactive until a choice is made.
+    if (event.target.closest('.report-chart-preview-select-menu')) return;
+    setExpandedChartFiltersOpen(false);
+  });
+  const createExpandedChartFilterControls = context => {
+    const sourceKey = source => {
+      const normalized = String(source || '').trim().toLocaleLowerCase();
+      return ({data: 'cdr-data', voice: 'cdr-voice', speech: 'cdr-speech'})[normalized]
+        || (normalized.startsWith('cdr-') ? normalized : `cdr-${normalized}`);
+    };
+    const columnsBySource = context.columns_by_source || {[sourceKey(context.cdr_source)]: context.columns || []};
+    return globalThis.createInteractiveChartPreviewControls($('ds-chart-filter-fields'), context, {
+      columnsBySource, datasetsBySource: context.datasets_by_source || {},
+      fields: [
+        ['chart_type', 'Chart Type'], ['chart_title', 'Chart Title'], ['cdr_source', 'CDR Type'], ['dataset_ids', 'Datasets'],
+        ['kpi', 'KPI'], ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'],
+        ['legend', 'Legend'], ['legend_position', 'Legend Position'],
+      ],
+      textFields: {chart_title: true}, editableGroupingInputs: true,
+      chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
+      menuContainer: expandedOverlayHost,
+      onSourceChange: next => {
+        const source = sourceKey(next.cdr_source);
+        expandedChartFilterControls = createExpandedChartFilterControls({...context, ...next, columns: columnsBySource[source] || []});
+      },
+    });
+  };
+  const loadExpandedChartFilters = async () => {
+    const fields = $('ds-chart-filter-fields');
+    if ((!prepared?.token && expandedChartMode !== 'ppt') || !expandedChart) return;
+    const chart = expandedChart;
+    fields.textContent = 'Loading filters…';
+    expandedChartFilterContextPath = expandedChartMode === 'ppt'
+      ? `/ppt-jobs/${encodeURIComponent(dashboardPptChartsJobId)}/charts/${chart.index}/filter-context`
+      : `/chart/${encodeURIComponent(prepared.token)}/${chart.index}/filter-context`;
+    const context = await api(expandedChartFilterContextPath);
+    if (chart !== expandedChart) return;
+    expandedChartFilterToken = String(context.token || prepared?.token || '');
+    expandedChartFilterIndex = Number.isInteger(context.chart_index) ? context.chart_index : chart.index;
+    expandedChartFilterControls = createExpandedChartFilterControls(context);
+    expandedTemplateUpdate.hidden = !context.template_available;
+  };
+  $('ds-chart-filter-toggle').onclick = safe(async () => {
+    const open = !$('ds-chart-filter-panel').classList.contains('is-open');
+    setExpandedChartFiltersOpen(open);
+    if (open && !expandedChartFilterControls) await loadExpandedChartFilters();
+  });
+  $('ds-chart-filter-close').onclick = () => setExpandedChartFiltersOpen(false);
+  expandedTemplateUpdate.onclick = safe(async () => {
+    if (!expandedChart || !expandedChartFilterControls) return;
+    const accepted = await window.showConfirmDialog(
+      'Update the current Report Template row with the values shown in Chart Definition?',
+      {title: 'Update Template?', confirmLabel: 'Update Template', tone: 'warning'},
+    );
+    if (!accepted) return;
+    expandedTemplateUpdate.disabled = true;
+    try {
+      const values = expandedChartFilterControls.definition();
+      await api(`/chart/${encodeURIComponent(expandedChartFilterToken)}/${expandedChartFilterIndex}/update-template`, 'POST', values);
+      window.showInfoDialog('The current Chart Definition values were saved to the Report Template.', {title: 'Template updated'});
+    } finally {
+      expandedTemplateUpdate.disabled = false;
+    }
+  });
+  $('ds-chart-filter-apply').onclick = safe(async () => {
+    const chart = expandedChart;
+    if (!chart || !expandedChartFilterControls) return;
+    const button = $('ds-chart-filter-apply');
+    const canvas = $('ds-chart-expanded-canvas');
+    const message = $('ds-chart-expanded-message');
+    button.disabled = true;
+    button.textContent = 'Applying…';
+    message.textContent = 'Rendering chart preview…';
+    message.hidden = false;
+    try {
+      if (!expandedChartFilterToken && expandedChartMode === 'ppt') {
+        const preparedContext = await api(`${expandedChartFilterContextPath}?prepare=true`);
+        expandedChartFilterToken = String(preparedContext.token || '');
+        expandedChartFilterIndex = Number(preparedContext.chart_index);
+      }
+      if (!expandedChartFilterToken) throw new Error('The chart dataset could not be restored.');
+      const previewDefinition = expandedChartFilterControls.definition();
+      const payload = await api(`/chart/${encodeURIComponent(expandedChartFilterToken)}/${expandedChartFilterIndex}/filter-preview`, 'POST', previewDefinition);
+      if (chart !== expandedChart) return;
+      $('ds-chart-expanded-title').textContent = payload.title || chart.title || 'Expanded chart';
+      expandedZoom.reset();
+      canvas.hidden = false;
+      globalThis.renderDashboardChart(canvas, payload);
+      message.hidden = true;
+      setExpandedChartFiltersOpen(false);
+    } catch (error) {
+      message.hidden = true;
+      throw error;
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Apply';
+    }
+  });
   async function openChartDataset(chart) {
     dataIndex = chart.index;
     dataPage = 0;
@@ -1740,6 +1882,13 @@
     const message = $('ds-chart-expanded-message');
     expandedChart = chart;
     expandedChartMode = mode;
+    expandedChartFilterControls = null;
+    expandedChartFilterToken = '';
+    expandedChartFilterIndex = -1;
+    expandedChartFilterContextPath = '';
+    $('ds-chart-filter-fields').replaceChildren();
+    expandedTemplateUpdate.hidden = true;
+    setExpandedChartFiltersOpen(false);
     syncExpandedChartNavigation();
     const historical = mode === 'ppt';
     $('ds-chart-expanded-data').disabled = historical ? !chart.data_url : false;
@@ -2172,6 +2321,7 @@
     void refreshDashboardStatuses();
     void refreshDashboardPptJobs();
     if (dashboards[last]) await openDashboard(last);
+    restoreScroll();
   })();
   window.setInterval(refreshDashboardStatuses, 2000);
   window.setInterval(refreshDashboardPptJobs, 2000);

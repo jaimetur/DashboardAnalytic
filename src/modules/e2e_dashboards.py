@@ -10,7 +10,7 @@ import tempfile
 import zipfile
 from collections import OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 from io import BytesIO
@@ -69,6 +69,19 @@ class DashboardPptExportRequest(BaseModel):
 class DashboardFilterOptionsRequest(BaseModel):
     definition: DashboardDefinition
     field: str = Field(min_length=1, max_length=255)
+
+
+class DashboardChartFilterPreviewRequest(BaseModel):
+    filters: str = ''
+    chart_title: str | None = None
+    cdr_source: str | None = None
+    dataset_ids: list[int] | str | None = None
+    kpi: str | None = None
+    chart_type: str | None = None
+    grouping_rows: str | None = None
+    grouping_columns: str | None = None
+    legend: str | None = None
+    legend_position: str | None = None
 
 
 class DashboardComments(BaseModel):
@@ -1005,6 +1018,58 @@ def install_dashboard_routes(core):
             'generate_tooltips': bool(manifest.get('generate_tooltips')),
             'charts': charts,
         }
+
+    @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/charts/{chart_index}/filter-context')
+    def dashboard_ppt_chart_filter_context(
+        job_id: int, chart_index: int, prepare: bool = False, user=Depends(dashboard_user),
+    ):
+        """Load PPT chart metadata immediately and restore its data only on demand."""
+        task_repository = bound_repository()
+        row = dashboard_ppt_job(task_repository, job_id)
+        charts_dir = Path(str(row['output_path'])).parent / 'dashboard-charts' if row else None
+        try:
+            manifest = json.loads((charts_dir / 'manifest.json').read_text(encoding='utf-8'))
+            definition = DashboardDefinition.model_validate(manifest['definition'])
+            entry_index = int(manifest['charts'][chart_index]['entry_index'])
+            entry = validate(definition, task_repository)[entry_index]
+        except (AttributeError, IndexError, KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+            raise HTTPException(404, 'Chart filters are not available for this PowerPoint Job.')
+        workspace = str(Path(task_repository.db_path).resolve())
+        token = ''
+        if prepare:
+            preview = restore_preview_manifest(
+                workspace, str(manifest.get('dashboard_id') or row['dashboard_id']),
+                str(manifest.get('preview_fingerprint') or ''),
+            ) or build_preview(definition, user, workspace=workspace)
+            token = str(preview['token'])
+        hidden = {identity('dataset_id'), identity('source_row_id')}
+        datasets_by_source = {f'cdr-{kind}': [] for kind in KINDS}
+        columns_by_source = {f'cdr-{kind}': [] for kind in KINDS}
+        for dataset in task_repository.list_datasets():
+            kind = str(dataset['dataset_kind'] or '').casefold()
+            if kind in KINDS and dataset['status'] == 'ready':
+                datasets_by_source[f'cdr-{kind}'].append({'value': str(dataset['id']), 'label': str(dataset['file_name'])})
+                columns_by_source[f'cdr-{kind}'].extend(
+                    str(column) for column in task_repository.list_dataset_row_columns(int(dataset['id']))
+                )
+        for source, source_columns in columns_by_source.items():
+            columns_by_source[source] = sorted({
+                column for column in source_columns if identity(column) not in hidden
+            }, key=str.casefold)
+        columns = columns_by_source.get(f'cdr-{entry.source_kind}', [])
+        template_available = user.role in {'admin', 'super-admin'} and any(
+            str(item['name']) == definition.template
+            for item in task_repository.list_report_templates(definition.template_technology)
+        )
+        return JSONResponse({
+            'token': token, 'chart_index': entry_index, 'cdr_source': entry.cdr_source,
+            'chart_type': entry.chart_type, 'chart_title': entry.chart_title, 'kpi': entry.kpi,
+            'dataset_ids': [str(value) for value in definition.datasets.get(entry.source_kind, [])],
+            'filters': entry.filters, 'grouping_rows': entry.grouping_rows,
+            'grouping_columns': entry.grouping_columns, 'legend': entry.legend,
+            'legend_position': entry.legend_position, 'template_available': template_available, 'datasets_by_source': datasets_by_source,
+            'columns_by_source': columns_by_source, 'columns': columns,
+        })
 
     @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/chart-models/{model_file}')
     def dashboard_ppt_chart_model(job_id: int, model_file: str, user=Depends(dashboard_user)):
@@ -2825,6 +2890,170 @@ def install_dashboard_routes(core):
     def interactive_chart(token: str, index: int, user=Depends(dashboard_user)):
         payload = chart_model(token, index, user)
         return JSONResponse(payload, headers={'Cache-Control': 'private, max-age=3600'})
+
+    @app.get('/api/e2e-dashboards/chart/{token}/{index}/filter-context')
+    def interactive_chart_filter_context(token: str, index: int, user=Depends(dashboard_user)):
+        """Return filter fields available to an expanded Dashboard chart."""
+        snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False)
+        task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
+        _cache_path, _table_name, columns = ensure_projection(snapshot, entry.source_kind, task_repository)
+        hidden = {identity('dataset_id'), identity('source_row_id')}
+        datasets_by_source = {f'cdr-{kind}': [] for kind in KINDS}
+        columns_by_source = {f'cdr-{kind}': [] for kind in KINDS}
+        for row in task_repository.list_datasets():
+            kind = str(row['dataset_kind'] or '').casefold()
+            if kind in KINDS and row['status'] == 'ready':
+                datasets_by_source[f'cdr-{kind}'].append({
+                    'value': str(row['id']), 'label': str(row['file_name']),
+                })
+                columns_by_source[f'cdr-{kind}'].extend(
+                    str(column) for column in task_repository.list_dataset_row_columns(int(row['id']))
+                )
+        for source, source_columns in columns_by_source.items():
+            columns_by_source[source] = sorted({
+                column for column in source_columns if identity(column) not in hidden
+            }, key=str.casefold)
+        template_available = user.role in {'admin', 'super-admin'} and any(
+            str(row['name']) == snapshot.definition.template
+            for row in task_repository.list_report_templates(snapshot.definition.template_technology)
+        )
+        return JSONResponse({
+            'cdr_source': entry.cdr_source,
+            'chart_type': entry.chart_type,
+            'chart_title': entry.chart_title,
+            'kpi': entry.kpi,
+            'dataset_ids': [str(value) for value in snapshot.definition.datasets.get(entry.source_kind, [])],
+            'filters': entry.filters,
+            'grouping_rows': entry.grouping_rows,
+            'grouping_columns': entry.grouping_columns,
+            'legend': entry.legend,
+            'legend_position': entry.legend_position, 'template_available': template_available,
+            'datasets_by_source': datasets_by_source, 'columns_by_source': columns_by_source,
+            'columns': columns_by_source.get(f'cdr-{entry.source_kind}', [str(column) for column in columns if identity(column) not in hidden]),
+        })
+
+    @app.post('/api/e2e-dashboards/chart/{token}/{index}/filter-preview')
+    def interactive_chart_filter_preview(
+        token: str,
+        index: int,
+        request: DashboardChartFilterPreviewRequest,
+        user=Depends(dashboard_user),
+    ):
+        """Render one expanded chart with temporary, unsaved template filters."""
+        snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False)
+        changes = {
+            key: value for key, value in request.model_dump().items()
+            if value is not None and key in {
+                'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'grouping_rows',
+                'grouping_columns', 'legend', 'legend_position',
+            }
+        }
+        # The template owns these required chart attributes. Custom dropdowns
+        # can briefly report an empty value while their available fields are
+        # being rebuilt, which must not erase the template KPI/source/type.
+        for key in ('cdr_source', 'kpi', 'chart_type'):
+            if not str(changes.get(key, '')).strip():
+                changes.pop(key, None)
+        preview_entry = replace(entry, **changes)
+        if not preview_entry.source_kind:
+            raise HTTPException(400, 'Select a valid CDR type.')
+        task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
+        preview_definition = snapshot.definition.model_copy(deep=True)
+        if request.dataset_ids is not None:
+            values = request.dataset_ids if isinstance(request.dataset_ids, list) else str(request.dataset_ids).split(',')
+            try:
+                preview_definition.datasets[preview_entry.source_kind] = list(dict.fromkeys(
+                    int(str(value).strip()) for value in values if str(value).strip()
+                ))
+            except ValueError as exc:
+                raise HTTPException(400, 'Selected datasets must have valid identifiers.') from exc
+        # The Dashboard snapshot projection is deliberately narrow. An expanded
+        # chart may introduce any available field, so create a short-lived
+        # projection specification from its current definition instead of
+        # silently dropping newly entered grouping, KPI or legend fields.
+        preview_snapshot = replace(
+            snapshot, entries=[preview_entry], definition=preview_definition,
+            projections={}, frames={}, chart_frames={}, filtered_frames={}, chart_payloads={}, frame_locks={},
+        )
+        selected = core._optional_reporting_datasets(
+            preview_definition.datasets.get(preview_entry.source_kind, []), preview_entry.source_kind,
+            task_repository,
+        )
+        cache_path, table_name, projection_columns = ensure_projection(
+            preview_snapshot, preview_entry.source_kind, task_repository,
+        )
+        where, parameters = selection_where(
+            task_repository, preview_entry.source_kind, [int(row['id']) for row in selected],
+            preview_definition, columns=projection_columns, include_dataset_scope=False,
+        )
+        requested_columns = chart_query_columns(preview_entry, snapshot.multivendor)
+        template_where, template_parameters, template_filters_applied = chart_filter_sql(
+            preview_entry, projection_columns, snapshot.multivendor,
+        )
+        if template_where:
+            where = f'({where}) AND ({template_where})'
+            parameters.extend(template_parameters)
+        aggregation_columns = chart_aggregation_columns(
+            preview_entry, projection_columns, snapshot.multivendor, template_filters_applied,
+        )
+        raw_frame = load_projection_frame(
+            cache_path, table_name, projection_columns, requested_columns, where, parameters,
+            aggregation_columns,
+        )
+        if snapshot.multivendor:
+            raw_frame = ensure_report_vendor_group(raw_frame)
+        raw_frame = normalise_report_operator_aliases(raw_frame)
+        raw_frame.attrs['report_operator_aliases_normalized'] = True
+        try:
+            frame, _ = prepare_catalog_chart_preview_frame(
+                raw_frame, preview_entry, multivendor=snapshot.multivendor,
+                template_filters_applied=template_filters_applied,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return JSONResponse(catalog_chart_payload(
+            frame, preview_entry, multivendor=snapshot.multivendor, prefiltered=True,
+        ), headers={'Cache-Control': 'no-store'})
+
+    @app.post('/api/e2e-dashboards/chart/{token}/{index}/update-template')
+    def update_interactive_chart_template(
+        token: str,
+        index: int,
+        request: DashboardChartFilterPreviewRequest,
+        user=Depends(dashboard_admin_user),
+    ):
+        """Persist the expanded Chart Definition into its source template row."""
+        snapshot, _entry, _ = snapshot_chart(token, index, user, include_frame=False)
+        task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
+        technology, template_name = snapshot.definition.template_technology, snapshot.definition.template
+        template = next((
+            row for row in task_repository.list_report_templates(technology)
+            if str(row['name']) == template_name
+        ), None)
+        if template is None:
+            raise HTTPException(404, 'The Report Template used by this chart is no longer available.')
+        entries = catalogue(snapshot.definition, task_repository)
+        if index >= len(entries):
+            raise HTTPException(404, 'The chart row is no longer available in the Report Template.')
+        changes = {
+            key: value for key, value in request.model_dump().items()
+            if value is not None and key in {
+                'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'grouping_rows',
+                'grouping_columns', 'legend', 'legend_position',
+            }
+        }
+        for key in ('cdr_source', 'kpi', 'chart_type'):
+            if not str(changes.get(key, '')).strip():
+                changes.pop(key, None)
+        entries[index] = replace(entries[index], **changes)
+        try:
+            task_repository.set_report_template_content(technology, template_name, core.catalogue_csv(entries))
+        except (OSError, ValueError) as exc:
+            raise HTTPException(503, f'Unable to update the Report Template: {exc}') from exc
+        task_repository.add_log(user.username, 'update_dashboard_chart_template', json.dumps({
+            'technology': technology, 'template': template_name, 'chart_index': index,
+        }))
+        return {'template': template_name, 'technology': technology, 'chart_index': index}
 
     @app.post('/api/e2e-dashboards/prefetched/{dashboard_id}/priority')
     def prioritize_prefetched_dashboard(
