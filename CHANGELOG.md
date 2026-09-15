@@ -12,6 +12,7 @@
 #### 🚀 Enhancements:
 - Persistent Dashboard caches now remain valid across application patch releases when their cache-format versions are unchanged; the stored manifest is updated to record the new application version without rebuilding cached selections, projections or chart models.
 - Generate PPT from Manage Dashboards now asks for Operator or Multivendor Comparison and immediately queues the selected scope. The server derives its temporary Dataset Universe from the one newest CDR of each type for Multivendor or the two newest CDRs of each type for Operator Comparison, always using automatic oldest/newest dates; it restores a matching prepared universe when available or prepares its required chart models before starting the PowerPoint job.
+- PowerPoint Generation Jobs now keeps the five most recent visible jobs in its scroll area before older jobs require scrolling.
 
 #### 🐛 Bug fixes:
 - The floating background-task card now suppresses an automatic Dashboard warm-up for the same Dashboard while its foreground preparation is running, so one preparation appears as one task.

@@ -937,13 +937,13 @@
     rows.forEach((row) => { row.hidden = !(dashboardPptColumnFilters?.matches(row) ?? true); });
     const visibleRows = rows.filter(row => !row.hidden);
     requestAnimationFrame(() => {
-      if (window.matchMedia('(max-width: 760px)').matches || visibleRows.length <= 3) {
+      if (window.matchMedia('(max-width: 760px)').matches || visibleRows.length <= 5) {
         wrapper.style.maxHeight = '';
         return;
       }
       const table = wrapper.querySelector('.ds-ppt-jobs-table');
       const headerHeight = table?.tHead?.getBoundingClientRect().height || 0;
-      const rowsHeight = visibleRows.slice(0, 3).reduce(
+      const rowsHeight = visibleRows.slice(0, 5).reduce(
         (height, row) => height + row.getBoundingClientRect().height, 0,
       );
       wrapper.style.maxHeight = `${Math.ceil(headerHeight + rowsHeight + 2)}px`;
