@@ -1,370 +1,80 @@
 # E2E Reporting
 
-Use **E2E Reporting → NetCheck CDR Reports** to create a PowerPoint report or a persistent set of PNG charts from processed CDR-Data, CDR-Voice and CDR-Speech datasets.
+Use **E2E Reporting → NetCheck CDR Reports** to create a persistent PowerPoint Report or standalone Chart Set from processed CDR-Data, CDR-Voice and CDR-Speech datasets.
 
-The canonical page route is `/e2e-reporting`. Existing `/reporting` bookmarks redirect there; its API uses `/api/e2e-reporting`.
+The canonical route is `/e2e-reporting`; `/reporting` bookmarks redirect there and the API uses `/api/e2e-reporting`.
 
-## Before generating a report
+## Before generating
 
-Process at least one ready CDR of each type in Workspace. The reporting page can combine several datasets of the same type, retaining their `Campaign` values for multi-campaign comparisons.
+Process at least one suitable CDR. Reporting can combine multiple datasets of one type and retains Campaign for comparisons. Reports may use any non-empty combination of Data, Voice and Speech; template rows without a selected source render an explicit unavailable-source placeholder.
 
-Choose the required technology:
+Select NR Mode:
 
-| Technology | Included sessions |
+| NR Mode | Included sessions |
 | --- | --- |
-| NSA | Values containing `ENDC` in `RAT`, `RAT_A` or `Sample_RAT_A` |
-| SA | Values containing `NR` in the same fields |
+| NSA | Voice/Speech sessions classified through recognised ENDC/NSA RAT or Call Mode values. |
+| SA | Voice/Speech sessions classified through recognised NR/SA RAT or Call Mode values. |
 
-Choose the scope:
+Valid Data attempts remain available even when sample RAT records a fallback.
 
-- **Operator Comparison** uses the normalised operator dimension.
-- **Multivendor Comparison** requires every selected CDR to have a persisted Vendor mapping.
-- In Multivendor Comparison, `Operator` aggregations resolve to the operator-vendor comparison field.
-- `Operator` filters still apply to the physical CDR Operator column.
+Select Scope:
 
-Default dataset selection:
+- **Operator Comparison** uses normalized Operator.
+- **Multivendor Comparison** requires Vendor mapping for every selected CDR.
+- In Multivendor, Operator aggregation resolves to the mapped operator/vendor comparison field; an Operator template filter still applies to the physical Operator column.
 
-- Operator Comparison selects the two newest CDRs of each type, or the only available CDR.
-- Changing to Vendor Comparison reduces multiple selections to the newest currently selected CDR of each type.
-- An existing single selection is preserved even when it is not the newest dataset in the workspace.
+Operator Comparison initially selects the two newest CDRs of each type, or the only available one. Changing to Multivendor keeps one selected CDR per type. An existing single selection is preserved even when it is not the newest.
 
-## Report Templates
+## Report Template selection
 
-PowerPoint reports use CSV Report Templates from the active workspace, managed in **Admin → Report Templates Management**. Administrators can create, duplicate, import, rename, export and classify NSA/SA templates there. A new workspace has no template until one is created or imported.
+Choose an NSA/SA Report Template from the active workspace. Each template controls slides, layouts, CDR sources, chart types, KPIs, filters, aggregations and legends. Administrators manage and edit templates in Admin; new workspaces have none until a template is created or imported.
 
-The common `assets/ppt-templates/Template_CDR_analysis.pptx` supplies masters and layouts:
+For the complete schema, supported chart types, examples, Filter Builder language, aggregations, legends, multi-chart slides and colour rules, see [Administration → Report Template reference](10-administration.md#report-template-reference).
 
-- Each distinct `Slide` value creates one slide.
-- `Layout` chooses the named PowerPoint layout.
-- Chart rows sharing a slide fill chart placeholders in row order.
-- Commentary placeholders remain blank for the analyst.
+## Generate PowerPoint Report
 
-Templates are stored under `data/workspaces/<workspace>/slides-templates/`, alongside a workspace `report_templates` registry. A template exported or transferred separately identifies its source workspace; the matching destination workspace is selected by default when it exists, and more destinations may be selected.
-
-## Template columns
-
-| Column | Purpose |
-| --- | --- |
-| `Slide` | Positive slide number. Rows are sorted by this value when saved. Rows with the same number form one slide. |
-| `Slide Tittle` | Shared slide title. The spelling `Tittle` is intentional and is part of the CSV schema. |
-| `Slide Subtittle` | Optional shared slide subtitle. |
-| `Layout` | Exact layout name from `Template_CDR_analysis.pptx`. |
-| `Chart Tittle` | Optional title drawn inside the chart. |
-| `CDR source` | `CDR-Data`, `CDR-Voice` or `CDR-Speech`. Leave empty for structural slides. |
-| `KPI` | Processed CDR field to render. |
-| `Chart type` | Automated chart type or a structural slide type. |
-| `Filters` | Conditions applied before aggregation, stored one per line and terminated with `;`. |
-| `Rows Aggregation` | Category/table-row hierarchy. Separate dimensions with `×`. |
-| `Column Aggregation` | Comparison-series/table-column hierarchy. Separate dimensions with `×`. |
-| `Legend` | Optional field whose chart values or applied filter values should be explained. Blank means no legend. |
-| `Legend Position` | `Top`, `Bottom`, `Left` or `Right`; blank defaults to `Top`. |
-
-For multi-chart slides, the editor visually groups `Slide`, `Slide Tittle`, `Slide Subtittle` and `Layout`. The CSV still stores those values on every row. Assistance includes the Filter Builder, field suggestions and chart-data/chart-image previews.
-
-### Structural slides
-
-Use one row with no `CDR source` or KPI fields:
-
-- `Title Slide` normally uses `Title Page` and fills the title/subtitle placeholders.
-- `Transition Slide` normally uses `Title Only` and creates a section divider.
-
-A structural slide cannot share its slide number with chart rows.
-
-Example cover row (only the relevant values are shown):
+Enter the report name, choose datasets, NR Mode, scope and template, then queue generation. The job creates:
 
 ```text
-Slide: 1
-Slide Tittle: NetCheck 5G Executive Report
-Slide Subtittle: 2026-Q2 · Operator Comparison
-Layout: Title Page
-Chart type: Title Slide
+output/reports/<report-name>/
+  <report-name>.pptx
+  report-charts/
 ```
 
-Example divider row:
+The PPTX uses `Template_CDR_analysis.pptx` masters/layouts and the selected Report Template definition. Commentary placeholders remain available to the analyst.
+
+## Generate Report Charts
+
+This queues a standalone Chart Set under:
 
 ```text
-Slide: 6
-Slide Tittle: Voice service analysis
-Layout: Title Only
-Chart type: Transition Slide
+output/charts/<generation>/
 ```
 
-## Supported chart types
+Chart Sets use the same datasets, NR Mode, scope, template and renderer as Reports without building the final PowerPoint.
 
-Automated rows support:
+## Reports and Charts Jobs
 
-- `100% Stacked Vertical Bars`
-- `Count Stacked Horizontal Bars`
-- `CDF Line`
-- `Multi KPI CDF Lines`
-- `Scatter`
-- `Map`
-- `Table`
-- `Average Vertical Bars`
-- `Median Vertical Bars`
-- `Distribution Stacked Vertical Bars`
-- `Threshold Stacked Vertical Bars`
+Reports and Chart Sets share the workspace `generated_jobs` table and are distinguished by Type. The table supports Excel-style filters for ID, Date, NR Mode, Type, Template, Scope and other displayed fields.
 
-Choose a KPI and at least one Rows or Column Aggregation dimension for every automated row. `CDF Line` creates one curve per complete aggregation combination. Count charts retain empty combinations so comparisons remain aligned.
+Actions depend on job state: open, download, stop, retry, relaunch or delete. If an interrupted job has valid deterministic PNG and tooltip files, retry keeps completed assets and renders only missing or invalid charts. Deliberately relaunching a completed job starts clean.
 
-### Chart recipes
+## Charts Panel
 
-The examples below show the chart-specific fields. Add the shared `Slide`, titles and `Layout` fields appropriate for the target PowerPoint layout.
+Charts Panel browses report-rendered and standalone Chart Sets. Filter by NR Mode, Type, Template and Scope, then select a generated set.
 
-#### 100% Stacked Vertical Bars
+- Open thumbnails in the shared expanded Interactive Preview.
+- Inspect the complete chart-filtered dataset with server-side pagination and column filters.
+- Download or delete a Chart Set.
+- Administrators can open the exact source template and row.
+- Temporary preview changes do not modify the stored template until Update Template and Save are used in the editor.
 
-Use for proportions, success ratios and categorical quality splits. The KPI is the field whose categories become the stack segments.
+Reports, Chart Sets, Dashboard exports and interactive previews share the Dashboard Canvas renderer for consistent geometry, colours, hierarchy, legends and semantic tooltips. `DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER=pil` enables the legacy server painter when required.
 
-```text
-CDR source: CDR-Voice
-KPI: Call_Status
-Chart type: 100% Stacked Vertical Bars
-Filters: Call Family IN (VoLTE, MultiRAB); Operator IN (Vodafone, 3, EE)
-Rows Aggregation: Call Family
-Column Aggregation: Operator × Campaign
-Legend Position: Right
-```
+## Troubleshooting
 
-This produces one 100% bar per operator/campaign comparison, split by `Call_Status`.
-
-#### Count Stacked Horizontal Bars
-
-Use for counts of failures or events. Rows form the horizontal categories and the KPI normally supplies the stacked statuses or failure causes.
-
-```text
-CDR source: CDR-Data
-KPI: Test_Result
-Chart type: Count Stacked Horizontal Bars
-Filters: Test Family IN (FDFS, FDTT); Test_Result IN (Failed, Dropped)
-Rows Aggregation: Test Family × City
-Column Aggregation: Operator × Campaign
-Legend Position: Bottom
-```
-
-All combinations of the selected aggregation values are retained, including zero-count combinations, so operator/campaign comparisons remain aligned.
-
-#### CDF Line
-
-Use for continuous metrics such as throughput, duration, latency or MOS. Every complete Rows/Columns Aggregation combination creates one line.
-
-```text
-CDR source: CDR-Data
-KPI: Mean_Data_Rate
-Chart type: CDF Line
-Filters: Test_Result = Completed; Test_Name CONTAINS FDFS; Direction = DL
-Rows Aggregation: Operator
-Column Aggregation: Campaign
-Legend Position: Bottom
-```
-
-With two operators and two campaigns, the example produces four CDF lines. A single campaign is emphasised; with multiple campaigns the latest campaign is emphasised within each comparison family.
-
-#### Multi KPI CDF Lines
-
-Use this type for a Tableau worksheet that places several continuous measures in one view. Separate KPI names with `|`; the renderer keeps the shared filters, aggregations and legend and places one CDF panel per measure.
-
-```text
-CDR source: CDR-Data
-KPI: NR_PCell_SINR_Avg | LTE_PCell_SINR_Avg
-Chart type: Multi KPI CDF Lines
-Filters: Test_Result = Completed; Test_Name = FDTT http DL MT
-Rows Aggregation: Operator
-Column Aggregation: Campaign
-Legend Position: Right
-```
-
-#### Average Vertical Bars and Median Vertical Bars
-
-Use for one numeric summary per aggregation combination. Choose `Average Vertical Bars` for mean values or `Median Vertical Bars` where outliers should have less influence.
-
-```text
-CDR source: CDR-Speech
-KPI: LQ
-Chart type: Average Vertical Bars
-Filters: Call_Status = Completed; Call Family = WhatsApp
-Rows Aggregation: Operator
-Column Aggregation: Campaign
-Legend Position: Top
-```
-
-To show the median instead, change only `Chart type` to `Median Vertical Bars`.
-
-#### Distribution Stacked Vertical Bars
-
-Use to show how a numeric KPI is distributed across explicit ranges. Add `Buckets` in Filters and use `Rate Bucket` as the final column aggregation dimension.
-
-```text
-CDR source: CDR-Data
-KPI: Mean_Data_Rate
-Chart type: Distribution Stacked Vertical Bars
-Filters: Test_Result = Completed; Test_Name CONTAINS FDTT; Buckets = 1,5,20,100
-Rows Aggregation: Operator
-Column Aggregation: Campaign × Rate Bucket
-Legend Position: Right
-```
-
-The bucket values define the boundaries; adjust them to the KPI unit and the business thresholds being analysed.
-
-#### Threshold Stacked Vertical Bars
-
-Use for a pass/fail distribution around one threshold. Add `Threshold` in Filters.
-
-```text
-CDR source: CDR-Speech
-KPI: LQ
-Chart type: Threshold Stacked Vertical Bars
-Filters: Call_Status = Completed; Call Family = VoLTE; Threshold = 1.6
-Rows Aggregation: Operator
-Column Aggregation: Campaign
-Legend Position: Right
-```
-
-#### Scatter
-
-Use for the relationship between a KPI and a radio/quality dimension. The KPI can use the `Metric vs Dimension` form where supported by the processed CDR columns.
-
-```text
-CDR source: CDR-Speech
-KPI: LQ vs Playing_RSRP_NR_Avg
-Chart type: Scatter
-Filters: Call_Status = Completed; Call Family = WhatsApp
-Rows Aggregation: Operator
-Column Aggregation: Campaign
-Legend Position: Bottom
-```
-
-#### Map
-
-Use latitude and longitude fields in `Latitude vs Longitude` order. Aggregation dimensions and the legend determine how points are grouped and coloured.
-
-```text
-CDR source: CDR-Data
-KPI: Test_Start_Latitude vs Test_Start_Longitude
-Chart type: Map
-Filters: G_Level_4 = London
-Rows Aggregation: Operator
-Column Aggregation: Campaign
-Legend: Test_Result
-Legend Position: Right
-```
-
-#### Table
-
-Use when exact values are more useful than a chart. Rows and columns form the table axes; KPI supplies the aggregated cell value.
-
-```text
-CDR source: CDR-Voice
-KPI: Call_Setup_Time
-Chart type: Table
-Filters: Call_Status = Completed
-Rows Aggregation: City
-Column Aggregation: Operator × Campaign
-Legend Position: Top
-```
-
-## Filters
-
-Write one or more conditions separated by `;` (logical AND). Column names are matched case-insensitively against the selected processed CDR source.
-
-```text
-Call Family IN (VoLTE, MultiRAB); Direction = DL; vendor NOT CONTAINS (Mixed, Other)
-```
-
-Supported operators are:
-
-| Operator | Example |
-| --- | --- |
-| Equals / not equal | `Call_Status = Completed`, `Operator != EE` |
-| List inclusion / exclusion | `Operator IN (VF, O2, 3, EE)`, `Campaign NOT IN (2025-Q4)` |
-| Contains / not contains | `Test_Name CONTAINS FDFS`, `vendor NOT CONTAINS (Mixed, Other)` |
-| Numeric comparison | `LQ < 1.6`, `Mean_Data_Rate >= 20` |
-
-`IN`, `NOT IN`, `CONTAINS` and `NOT CONTAINS` accept comma-separated values. Parentheses are optional in Filter Builder input; the shared parser adds them to the generated expression.
-
-More filter examples:
-
-```text
-Operator = Vodafone
-Campaign IN (2026-Q1, 2026-Q2)
-vendor NOT CONTAINS (Mixed, Other)
-Test_Name CONTAINS FDFS
-LQ >= 1.6; LQ < 4.0
-```
-
-Use `;` rather than a comma to join independent conditions. A comma only separates values belonging to the same `IN`, `NOT IN`, `CONTAINS` or `NOT CONTAINS` condition.
-
-`Call Family` and `Test Family` are materialised derived fields and use a light-grey background in CDR Preview.
-
-- `Threshold = 1.6` configures threshold charts.
-- `Buckets = 1,5,20,100` configures distribution-chart ranges.
-
-## Aggregations and legends
-
-Use `×` to define a hierarchy, for example:
-
-```text
-Rows Aggregation: Call Family × G Level 4
-Column Aggregation: Operator × Campaign
-```
-
-- Rows Aggregation supplies categories or table rows.
-- Column Aggregation supplies comparison series or table columns.
-- Blank Column Aggregation produces one `(all)` comparison.
-- `Campaign` compares selected CDRs and is ordered oldest to newest.
-- In multivendor reports, `Operator` aggregation resolves to the mapped comparison field.
-
-Legend behaviour:
-
-- Blank means no legend.
-- A KPI or aggregation dimension produces entries from plotted values.
-- A field used only by Filters displays its applied values as contextual text.
-
-Special chart legends include:
-
-- CDF Lines reproduce series colour and relative line width.
-- Threshold charts show below/above-threshold colours and the configured threshold value.
-- Bucket legends show readable ranges derived from `Buckets`.
-
-Use `Top` or `Bottom` for a compact horizontal legend and `Left` or `Right` for a vertical legend. Side placement reserves plot space to prevent overlap.
-
-### Multi-chart slides
-
-Rows with the same `Slide` number create separate charts on one PowerPoint slide.
-
-- They must share `Slide Tittle`, `Slide Subtittle` and `Layout`.
-- They may use different sources, KPIs, filters and chart types.
-- The layout needs at least as many chart placeholders as chart rows.
-
-Example: place a CDF Line and Average Vertical Bars on Slide 8 to compare a throughput distribution with its headline average.
-
-## Operators, vendors and colours
-
-Recognised historical aliases resolve to `VF`, `O2`, `3` or `EE` for reporting. This does not alter the source workbook.
-
-Vendor colour families are stable:
-
-- Ericsson: green.
-- Huawei: red.
-- Samsung: yellow.
-- NSN: blue.
-- Multiple operators using one vendor receive distinct shades.
-
-## Output and jobs
-
-**Generate PowerPoint Report** queues a report job. Its PPTX is stored in `output/reports/<report-name>/`; rendered PNG charts are stored in `output/reports/<report-name>/report-charts/`.
-
-**Generate Report Charts** queues a Chart Set job under `output/charts/<timestamp>/`.
-
-Reports, Chart Sets, Dashboard charts and interactive previews use the shared Dashboard Canvas painter. It produces the PNG and its semantic tooltip geometry in one pass, so visual formatting remains consistent across every destination. Server administrators can temporarily select the legacy PIL painter by setting `DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER=pil` before starting the application.
-
-The Charts Panel supports:
-
-- report-generated and standalone sets;
-- enlarged Interactive Preview;
-- filtered-data inspection;
-- ZIP downloads and cleanup;
-- source-template editing for administrators.
-
-Reports and Chart Sets appear together in **Reports and Charts Jobs** and share the workspace `generated_jobs` table. The UI preserves the appropriate actions for each type.
-
-If a job is stopped or interrupted, retrying it validates the existing deterministic PNG charts and tooltip JSON files, keeps the completed assets and regenerates only incomplete or invalid ones. Partial output has no published manifest and is never offered in the Charts Panel. Completed jobs can be deliberately relaunched in the same row; that relaunch removes their previous output first.
+- Missing CDR: verify the active workspace, dataset type and Processed status.
+- Multivendor unavailable: persist Vendor mapping for every selected CDR.
+- Empty chart: inspect the filtered dataset and the template row referenced in [Administration → Report Template reference](10-administration.md#report-template-reference).
+- Invalid template: use the editor's `Slide: n - Chart: n` validation message.
+- Failed or interrupted job: inspect App Logs, then retry the existing job.

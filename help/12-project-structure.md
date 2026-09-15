@@ -46,11 +46,11 @@ data/workspaces/
 ├── workspace-registry.db
 └── <workspace>/
     ├── <workspace>.db
-    ├── slides-templates/
     ├── input/
     └── output/
         ├── reports/
-        └── charts/
+        ├── charts/
+        └── dashboards/
 ```
 
 The workspace database stores:
@@ -59,14 +59,15 @@ The workspace database stores:
 - materialised dataset rows;
 - combined Data/Voice/Speech reporting rows;
 - audit events;
-- unified Report and Chart Set jobs.
+- unified Report and Chart Set jobs;
+- Dashboard definitions, selections and PowerPoint jobs;
 - Auto-calculated Field definitions;
-- Report Template metadata in `report_templates`.
+- complete Report Templates in `report_templates`.
 
 ## Reporting assets
 
 - `assets/ppt-templates/Template_CDR_analysis.pptx` supplies masters and layouts.
-- Workspace CSV Report Templates define slide order, layout, charts, filters, aggregations and legends.
+- Database-backed workspace Report Templates define slide order, layout, charts, filters, aggregations and legends. Portable packages serialize them as CSV files.
 - Generated report charts stay beside their PPTX under `output/reports/`.
 - Standalone Chart Sets stay under `output/charts/`.
 
@@ -97,4 +98,4 @@ Keep databases, uploaded customer files and generated output out of source contr
 
 ## Template-driven dashboards
 
-`src/modules/e2e_dashboards.py` registers Dashboard persistence, SQL selection, chart PNG and filtered-data endpoints. `e2e_dashboards.html`, `e2e_dashboards.js` and `e2e_dashboards.css` provide the workspace tab and synchronized overlays. Definitions are stored under `e2e_dashboards_v2` in workspace state; existing `e2e_dashboard_sets_v1` values migrate automatically. `dashboard_filter_selections` and `dashboard_filter_selection_rows` persist bounded filter metadata and compact row-key selections in the workspace database, while rendered images use the bounded `.dashboard-chart-cache` directory beside that database. Single-dataset analysis uses `datasets_analysis.html` and `/datasets-analysis`; legacy `/dashboard` endpoints remain compatibility aliases.
+`src/modules/e2e_dashboards.py` registers Dashboard persistence, SQL selection, Canvas models, PowerPoint jobs and filtered-data endpoints. `e2e_dashboards.html`, `e2e_dashboards.js` and `e2e_dashboards.css` provide the workspace tab and synchronized overlays. Definitions are stored under `e2e_dashboards_v2` in workspace state; existing `e2e_dashboard_sets_v1` values migrate automatically. `dashboard_filter_selections` and `dashboard_filter_selection_rows` persist bounded filter metadata and compact row-key selections, and `dashboard_ppt_jobs` stores Dashboard generation history. Regenerable projections, preview manifests and chart models live in `.dashboard-data-cache`; completed Dashboard job assets live under `output/dashboards`. Single-dataset analysis uses `datasets_analysis.html` and `/datasets-analysis`; legacy `/dashboard` endpoints remain compatibility aliases.

@@ -48,7 +48,7 @@ Datasets Analysis analyses one ready Data, Voice or Speech CDR.
 
 ### E2E Dashboards
 
-Create, save, duplicate, import and export workspace Dashboards from any Report Template. Combine CDR sources, apply adaptive and custom Auto-calculated Field filters, and view each Slide with all its charts filling the template layout. Persisted filter catalogues and narrow analytical projections make opening and refiltering large Dashboards fast; the browser renders compact live chart models without waiting for PNG generation. The large viewer provides dashboard navigation, independent chart zoom and pan, branded Title and Transition Slides, chart datasets and CSV downloads, template editing, and synchronized floating filters. See [E2E Dashboards Help](help/07-e2e-dashboards.md).
+Create, save, duplicate, import and export workspace Dashboards from an NSA/SA Report Template. Combine Data, Voice and Speech CDRs, use Operator or Multivendor scope, apply default, aliased and custom Auto-calculated Field filters, then apply, save, reload or discard selections explicitly. Each template Slide becomes a navigable 16:9 view with live Canvas charts, zoom, pan, filtered datasets, CSV downloads, comments, presentation mode and synchronized floating filters. Generate PPT uses the same prepared definition and waits for pending filter decisions. Versioned projections, selection snapshots and chart models keep large Dashboards responsive and remove obsolete cache versions when a workspace opens. See [E2E Dashboards Help](help/07-e2e-dashboards.md) for the operational workflow and [Administration → Report Template reference](help/10-administration.md#report-template-reference) for template authoring, supported chart types and examples.
 
 ### E2E Reporting
 
@@ -82,6 +82,7 @@ Chart Builder reuses the shared Interactive Preview for ad-hoc analysis.
 - **Create user / Users**: account, role, password, status and workspace access management.
 - **Report Templates Management**: create, import, duplicate, rename, export, delete and set defaults within the active workspace.
 - **Report Template Editor**: validated grid editing, cell assistance, Filter Builder and shared Chart Preview.
+- **Report Template reference**: canonical schema, structural slides, supported chart types, recipes, filters, aggregations, legends, multi-chart layouts and colours.
 - **Import / Export / Transfer**: portable ZIP jobs, Full Environment workspace selection, server-to-server transfer and recovered packages.
 - **Database Management**: **Backup Protection** for granular on-demand/scheduled backups and overwrite-confirmed restore, plus **Database Viewer** for grouped application, workspace and combined-CDR tables with server-side filters, editing and cleanup.
 - **Datasets Management**: inspect and rename workspace datasets.
@@ -221,8 +222,7 @@ CONTAINER_NAME=dashboardanalytic
 ```text
 <deployment-root>/
 ├── config/
-│   ├── application.db
-│   └── slides-templates/
+│   └── application.db
 └── data/
     ├── transfer-packages/
     └── workspaces/
@@ -232,7 +232,8 @@ CONTAINER_NAME=dashboardanalytic
             ├── input/
             └── output/
                 ├── reports/
-                └── charts/
+                ├── charts/
+                └── dashboards/
 ```
 
 Back up both persistent roots. Backing up only the container does not preserve application state.
@@ -275,7 +276,7 @@ DashboardAnalytic/
 ├── tests/                  # Unit and integration tests
 ├── docker/                 # Dockerfiles, Compose and environment settings
 ├── assets/ppt-templates/   # PowerPoint master/layout file
-├── config/                 # Global database and Report Templates
+├── config/                 # Global application database
 ├── data/workspaces/        # Workspace registry and isolated workspace data
 ├── help/                   # Detailed in-app documentation
 ├── README.md

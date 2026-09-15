@@ -16,14 +16,14 @@ Stored below `APP_CONFIG_DIR`:
 
 Stored below `APP_DATA_DIR/workspaces/<workspace>/`:
 
-- `<workspace>.db`: datasets, profiles, audit events, generated jobs, Auto-calculated Fields, Report Template metadata and materialised reporting rows.
-- `slides-templates/`: workspace-owned CSV Report Templates.
+- `<workspace>.db`: datasets, profiles, audit events, Dashboard definitions and selections, generated jobs, Auto-calculated Fields, complete Report Templates in `report_templates`, and materialised reporting rows.
 - `input/`: uploaded source files.
 - `output/reports/`: generated PowerPoint reports and their PNG charts.
 - `output/charts/`: standalone Chart Sets.
-- `.dashboard-data-cache/`: bounded, regenerable E2E Dashboard analytical projections and compact live-chart models. This cache is not a user dataset or source of record.
+- `output/dashboards/`: Dashboard PowerPoint jobs and their persistent PNG, tooltip and Canvas-model assets.
+- `.dashboard-data-cache/`: bounded, regenerable E2E Dashboard analytical projections, selection manifests, preview manifests and live Canvas models. This cache is not a user dataset or source of record.
 
-The workspace registry is local to the deployment. Full Environment imports rebuild it from the imported workspaces instead of retaining source-server absolute paths. Migrating from the old shared template directory copies its contents to every existing workspace and retains the old directory until it is manually archived or removed after verification.
+The workspace registry is local to the deployment. Full Environment imports rebuild it from the imported workspaces instead of retaining source-server absolute paths. Report Template import, export, backup and transfer packages use CSV as a portable representation; the live templates remain database-backed and current flows remove obsolete `slides-templates` directories.
 
 ## Processed and derived columns
 
@@ -57,15 +57,16 @@ Report-facing operator aliases are resolved consistently without rewriting the s
 
 Normalisation is case-insensitive and avoids ambiguous fragments. For example, `H3G` is not treated as Three because it can refer to unrelated vendor/technology text.
 
-## Technology selection
+## NR Mode and radio-access selection
 
-Technology filters inspect the available radio-access field, commonly `RAT`, `RAT_A` or `Sample_RAT_A`.
+NSA/SA selection is a report or Dashboard-definition rule rather than a universal row-level RAT filter.
 
-- NSA selects recognised ENDC/NSA samples.
-- SA selects recognised NR/SA samples.
-- Missing radio values are not silently assigned to a technology.
+- Voice and Speech sessions are classified from the available RAT and Call Mode evidence. Recognised ENDC/NSA sessions enter NSA; recognised NR/SA sessions enter SA.
+- Valid Data attempts remain available even when a sampled radio-access value records fallback. This prevents an otherwise valid data test from disappearing solely because one sample is LTE.
+- E2E Dashboard does not expose Technology as an adaptive filter. Its NR Mode belongs to the Dashboard definition, while the separate RAT filter can restrict explicit `RAT_A`, `RAT` or `Sample_RAT_A` values.
+- Missing radio values are not silently relabelled as a recognised technology.
 
-When a chart looks incomplete, compare its filtered dataset with the source fields before assuming that a visual category is missing.
+When a chart looks incomplete, compare its chart-filtered dataset with the source RAT and Call Mode fields and with the selected NR Mode.
 
 ## Test result semantics
 
@@ -93,61 +94,11 @@ Example:
 2025-Q4 → 2026-Q1 → 2026-Q2
 ```
 
-## Filter language
+## Template execution semantics
 
-Each condition is joined with logical AND and ends with `;`.
+Template filters are parsed as ordered, semicolon-terminated conditions joined with logical AND. Rows and Columns are ordered dimensions, so reversing their selection changes the grouping hierarchy. Legends derive their content from the chosen dimension, filter, threshold or bucket rule, and side legends reserve plot space.
 
-```text
-Test_Result IN (Completed, Dropped, Failed);
-Operator IN (VF, 3, EE);
-G Level 4 IN (Belfast, Bristol, Cardiff, Edinburgh, London, Leeds, Sheffield);
-```
-
-Supported forms include:
-
-- Equality: `Direction = DL;`
-- Inequality: `Operator != O2;`
-- Lists: `Operator IN (VF, 3, EE);`
-- Excluded lists: `vendor NOT IN (Mixed, Other);`
-- Text matching: `Test_Name CONTAINS FDFS;`
-- Excluded text: `vendor NOT CONTAINS (Mixed, Other);`
-- Numeric comparisons: `LQ >= 1.6;`
-
-The Filter Builder accepts comma-separated `IN` and `NOT IN` values with or without parentheses and adds the parentheses required by the parser. It renders one condition per line. The CSV stores the same newlines inside the quoted cell.
-
-Missing semicolons between conditions are rejected. Errors identify the logical position in the template:
-
-```text
-Slide: 5 - Chart: 1 -> Invalid filter ...
-```
-
-## Ordered aggregations
-
-Rows and Columns are ordered multi-selections. Selection order defines the hierarchy.
-
-```text
-Rows: Operator × Campaign
-```
-
-To create that expression, select `Operator` first and `Campaign` second. Reversing the order changes grouping, separators and labels.
-
-- Rows define categories or table rows.
-- Columns define comparison series or table columns.
-- Complete aggregation combinations can be retained with zero counts where the chart contract requires aligned comparisons.
-
-## Legend rules
-
-The `Legend` field is interpreted from the chart definition.
-
-- Blank: no legend is drawn.
-- Aggregation/KPI dimension: show the values included in the chart.
-- Filtered field: show the values applied by that filter as contextual text.
-- `Threshold`: show coloured below/above-threshold keys and the configured threshold value.
-- `Buckets`/`Rate Bucket`: show human-readable ranges derived from the bucket boundaries.
-
-`Legend Position` accepts `Top`, `Bottom`, `Left` and `Right`. The renderer reserves plot space for side legends so they do not overlap the chart.
-
-For CDF Lines, legend handles reproduce both series colour and relative line width. Campaign legends are compacted into multiple columns for top/bottom placement.
+These contracts are shared by E2E Dashboards, E2E Reporting, Chart Builder and Template Editor so a saved definition has the same meaning in previews and generated output. The authoring syntax, operators, examples, aggregation behaviour and legend rules are centralized in [Administration → Report Template reference](10-administration.md#report-template-reference).
 
 ## Multivendor calculation and remapping
 
@@ -197,11 +148,11 @@ For Vendor Comparison, the renderer also appends this effective filter without a
 vendor NOT CONTAINS (Mixed, Other);
 ```
 
-## Interactive Preview caching
+## Interactive previews and Dashboard preparation
 
-The shared Interactive Preview is used by E2E Reporting, Chart Builder and Report Template editing.
+E2E Reporting, Chart Builder and Report Template Editor use the shared Interactive Preview. E2E Dashboards uses the same chart contracts in its live viewer, expanded viewer and historical Charts Panel, while preparing one synchronized dataset selection for the complete Dashboard.
 
-Its cache separates expensive data work from presentation work:
+The shared preview cache separates expensive data work from presentation work:
 
 - Dataset combination depends on selected datasets.
 - Filtered rows depend on datasets, technology and filters.
@@ -210,6 +161,18 @@ Its cache separates expensive data work from presentation work:
 - Superseded browser requests are cancelled and ignored.
 
 Changing only a title should therefore be much faster than changing datasets or filters.
+
+E2E Dashboard persistence has additional layers:
+
+- `dashboard_filter_selections` stores a versioned selection key, faceted filter values, row counts and whether the selection was materialised.
+- A selection of at most 25,000 rows stores exact `(dataset_id, source_row_id)` keys in `dashboard_filter_selection_rows`. Larger selections retain reproducible SQL predicates instead of writing every row identity.
+- `.dashboard-data-cache/dashboard-analytics.sqlite3` holds narrow, indexed projections containing only the fields needed by the Dashboard definition, its filters and its template.
+- `.dashboard-data-cache/charts-canvas` stores compact interactive models; `charts-pil` contains legacy raster artifacts and `dashboard-previews` stores reusable preview manifests.
+- Cache keys include selected datasets and revisions, NR Mode, scope, dates, filters, required fields, template definition and renderer/cache versions. Equivalent value and dataset ordering resolves to the same selection.
+
+When a workspace opens, the application compares its saved cache signature with the current application and every Dashboard cache-format version. A mismatch cancels queued warming, deletes obsolete projections, chart models, manifests and persisted selection rows, then records the current signature. Current-version artifacts remain available. The Workspace **Clear cache** action performs the same derived-data cleanup on demand without deleting definitions, datasets, templates or generated jobs.
+
+Dashboard warming uses a FIFO queue with one Dashboard preparation active at a time. Once its selection is ready, up to three independent chart models are prepared concurrently. The visible Dashboard receives priority, and completed background snapshots release their large temporary frames while retaining reusable selection metadata and disk-backed models.
 
 ## Filtered dataset preview
 
@@ -223,7 +186,7 @@ The filtered-data overlay uses the complete chart-filtered dataset, not a fixed 
 
 ## Background jobs and output
 
-Reports and standalone Chart Sets share the `generated_jobs` table and are distinguished by `job_type`.
+Classic Reports and standalone Chart Sets share the `generated_jobs` table and are distinguished by `job_type`.
 
 - `report`: creates a PPTX and its report chart PNGs.
 - `chart_set`: creates the standalone PNG collection.
@@ -238,7 +201,15 @@ output/reports/<report-name>/
 output/charts/<generation>/
 ```
 
-Jobs continue after leaving the page or signing out. A process restart marks interrupted in-process jobs as failed and retryable because the current worker model runs inside the application process.
+Dashboard PowerPoint generations use the separate `dashboard_ppt_jobs` table because they preserve a saved Dashboard identity and its exact applied definition. Each job records its CDR selection, dates, NR Mode, scope, adaptive filters, preview fingerprint and progress. Its output contains the PPTX plus persistent PNG, tooltip and Canvas-model assets:
+
+```text
+output/dashboards/<timestamp - dashboard-name>/
+```
+
+The Dashboard jobs UI supports stop, retry, relaunch and deletion. A completed job can be reopened through Charts Panel without rerendering its charts, and its Filtered Chart Dataset resolves against the materialised selection or cached projection used at generation time.
+
+Both job families continue after leaving the page or signing out. A process restart marks interrupted in-process jobs as failed and retryable because the current worker model runs inside the application process.
 
 ## Import, export and server transfer
 
@@ -265,7 +236,8 @@ Incomplete transfer files are cleaned up. Complete packages that were not import
 
 - SQLite uses WAL mode, a busy timeout and normal synchronous mode.
 - Processed CDR rows are materialised per dataset and into combined tables by CDR type.
-- E2E Dashboard filter catalogues come from persisted dataset profiles instead of repeated wide-table scans. Narrow, revision-keyed SQLite projections are warmed in the background and exact compact chart models persist across restarts; live charts are drawn on a fixed logical browser canvas using the same aggregation, hierarchy, colour, title, legend and tooltip contracts as Report and Chart Set charts.
+- E2E Dashboard filter catalogues normally come from persisted dataset profiles. If an older profile lacks a current default or added field, the application reads only the missing catalogues from combined CDR tables in one grouped pass per CDR type.
+- Narrow, revision-keyed SQLite projections are warmed in the background and compact Canvas models persist across restarts. Live, expanded, historical and exported charts share aggregation, hierarchy, colour, title, legend and semantic-tooltip contracts with Reports and Chart Sets.
 - Interactive Preview caches combined and filtered frames separately.
 - Database import prefers bulk database/file replacement over row-by-row queries where safe.
 

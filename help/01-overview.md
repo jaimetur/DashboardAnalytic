@@ -8,8 +8,8 @@ Dashboard Analytic turns processed CDR datasets into interactive KPI analysis, r
 2. Upload Data, Voice or Speech CDRs from **Workspace**.
 3. Confirm the detected input type and wait for processing to finish.
 4. Optionally map Vodafone and Three vendor information.
-5. Explore one dataset in **Datasets Analysis**, build an ad-hoc chart in **Chart Builder**, or combine campaigns in **E2E Reporting**.
-6. Follow background work in the floating task cards and **Reports and Charts Jobs**.
+5. Create or open a saved **E2E Dashboard** to analyse a complete template interactively, reuse prepared selections and generate its PowerPoint. Use **Datasets Analysis** or **Chart Builder** for focused exploration, or **E2E Reporting** for the classic report and Chart Set workflow.
+6. Follow Dashboard preparation and generation in the floating task cards, **PowerPoint Generation Jobs** and **Reports and Charts Jobs**.
 7. Use **App Logs** for traceability and **Admin** for shared configuration.
 
 ## Header and navigation
@@ -24,6 +24,18 @@ The header is available throughout the authenticated application.
 - **Help** opens this detailed guide.
 - **App Logs** opens operational events for the active workspace.
 - **Admin** is visible to administrators and super-admins.
+
+## Background tasks and floating cards
+
+Long operations continue while the user navigates between modules or signs out. This includes ingestion and mapping, Auto-calculated Field materialization, combined-table recreation, workspace duplication/deletion/cache clearing, Dashboard preparation and model warming, Report and Chart Set generation, Dashboard PowerPoint generation, backup, import, export and server transfer.
+
+Floating cards group live tasks by execution context and keep their label, detail, percentage, elapsed time and progress bar visible from any application page:
+
+- **Yellow — Active workspace**: work attached to the workspace currently open in the browser.
+- **Blue — Other workspace**: work that continues for a different workspace after the user switches away from it.
+- **Red — System tasks**: deployment-wide work such as portable-package and server-transfer operations.
+
+Dashboard cards also group preparation and chart-model work under the Dashboard name and distinguish the active item from its queued position. A Stop action appears when the job supports cancellation. Cards can be minimized without stopping their tasks, refresh automatically, and retain a completed task briefly so its final state is visible before the card disappears. Persistent generation jobs remain available in their module table after the floating notification closes.
 
 ## Workspace
 
@@ -94,7 +106,42 @@ Datasets Analysis analyses one processed CDR at a time.
 
 ## E2E Dashboards
 
-Create named Dashboards from workspace templates and combine CDR sources with adaptive filters, including custom Auto-calculated Fields. Each Slide appears as a dashboard with its charts arranged using the template Layout. The viewer supports navigation, filtered datasets, template editing and synchronized floating filters. See [E2E Dashboards](07-e2e-dashboards.md) for the complete workflow.
+E2E Dashboards is the main analysis module and the complete template-driven workflow behind Dashboard Analytic. A saved Dashboard binds a name and NR Mode to a workspace Report Template, selected Data/Voice/Speech CDRs, comparison scope, dates, filters, hidden fields and slide comments. The definition can be opened repeatedly, duplicated, exported or moved with its workspace without copying source rows into it.
+
+### Manage Dashboards
+
+- Create, open, rename, duplicate, export, import, close and delete workspace Dashboard definitions.
+- Choose NSA or SA before selecting a compatible Report Template.
+- Open the definition editor or enter the prepared viewer directly from the Dashboard library.
+- Preserve the last open Dashboard and page position within the browser session.
+
+### Dashboard Datasets & Filters
+
+- Build one **Universe Dataset** from any compatible Data, Voice and Speech CDRs, then compare operators or persisted vendor mappings.
+- Use automatic date bounds and synchronized default filters for Market, Operator, Vendor, Region, City, Campaign, RAT, Session Type and Call Status.
+- Resolve Region, City, RAT and other known fields through ordered source-column aliases, with the supported priority visible in a tooltip.
+- Add any selected-CDR column or applicable Auto-calculated Field as an extra filter.
+- Apply a temporary selection, save it as the Dashboard default, reload the saved selection or clear it. Pending changes offer Apply, Discard, Save or Cancel before viewing or exporting.
+
+### Preparation and reuse
+
+The module prepares a **Filtered Universe** once and reuses it across every template chart. Small selections retain exact row identities; large selections use equivalent SQL predicates. Narrow projections, persisted selection snapshots and versioned Canvas models avoid rebuilding an unchanged Dashboard after reopening it or restarting the application. A FIFO workspace queue prepares one Dashboard at a time and renders a small group of independent chart models concurrently. Opening a workspace removes cache artifacts written by older application or cache-format versions.
+
+Status cards distinguish data loading, queued data, chart rendering, queued charts, Ready, missing charts and failures. The floating background-task card shows the same work while users move between modules.
+
+### View Dashboard
+
+- Convert every template Slide into a navigable 16:9 screen and place charts using its stored Layout geometry.
+- Navigate slides, expand a chart, zoom and pan its Canvas model, refresh it and move between charts without regenerating the complete Dashboard.
+- Open the exact chart-filtered rows with server-side pages, Excel-style column filters and CSV download.
+- Edit slide comments, run timed Presentation mode and reopen synchronized filters from a floating panel.
+- Open Auto-calculated Fields or the exact template row when the current role permits it.
+
+### Generate PPT and review results
+
+**Generate PPT** uses the exact applied definition and continues as a background job. Completed jobs retain their CDRs, dates, scope, filter snapshot, comments, PPTX, PNGs, tooltips and Canvas models under `output/dashboards`. **PowerPoint Generation Jobs** supports download, chart access, stop, retry, relaunch and deletion. **Charts Panel** filters completed jobs and reopens their charts in the same expanded viewer, including the historical chart dataset.
+
+The operational guide is [E2E Dashboards](07-e2e-dashboards.md). Template creation, columns, structural slides, supported chart types, filters, aggregations, legends, layouts and colours are documented once in [Administration → Report Template reference](10-administration.md#report-template-reference).
 
 ## E2E Reporting
 
@@ -183,7 +230,7 @@ Admin is available to `admin` and `super-admin` roles, with permission-sensitive
 - Set the default template for each technology.
 - Open the editor in a large dialog tied to the selected template.
 
-Templates belong to their workspace. A new workspace starts without templates. Existing shared libraries are copied once into each existing workspace during migration; the former shared directory is retained as a safety copy.
+Templates belong to their workspace and live in its `report_templates` database table. A new workspace starts without templates; portable operations represent selected templates as CSV files inside their ZIP package.
 
 ### Report Template Editor
 
@@ -193,6 +240,8 @@ Templates belong to their workspace. A new workspace starts without templates. E
 - Preview chart data or a generated chart.
 - Apply temporary preview values back to the in-memory row with **Update Template**.
 - Save atomically; saved cells then clear their change highlighting.
+
+The complete authoring specification, examples and supported chart catalogue are in [Administration → Report Template reference](10-administration.md#report-template-reference).
 
 ### Import / Export / Transfer
 

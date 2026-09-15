@@ -1,63 +1,170 @@
 # E2E Dashboards
 
-E2E Dashboards combines processed CDRs into interactive, template-driven Dashboards. Each template Slide becomes one dashboard, displaying all its charts together.
+E2E Dashboards is the main template-driven analysis workspace. It combines processed Data, Voice and Speech CDRs, applies one synchronized selection to a complete Dashboard and renders every template slide interactively before producing a PowerPoint.
+
+Each Dashboard stores its name, NR mode, Report Template, selected CDRs, comparison scope, dates, adaptive and additional filters, hidden filters and slide comments in the active workspace. It does not copy source datasets or generated cache files.
+
+## Before creating a Dashboard
+
+1. Open a workspace and process the required CDR-Data, CDR-Voice or CDR-Speech datasets.
+2. Persist Vendor mappings before using Multivendor Comparison.
+3. Create or import an NSA/SA Report Template in Admin.
+4. Open E2E Dashboards. Any user with workspace access can manage Dashboard definitions; Template Editor and Auto-calculated Field management require administrator access.
+
+Dashboard uses the same Report Template schema and renderer as Reporting. This guide covers how the template is selected and used by a Dashboard. For template columns, structural slides, supported chart types, recipes, template filters, aggregations, legends, layouts and colours, see [Administration → Report Template reference](10-administration.md#report-template-reference).
 
 ## Manage Dashboards
 
-1. Enter a **Dashboard name** and select a workspace **Template**. Both NSA and SA template libraries are available.
-2. Click **Create**. All available processed CDRs are initially selected; refine the selection before interpreting results.
-3. Use **Save** to retain the current name, template, sources and filters in the active workspace database.
-4. Edit a Dashboard name directly in its table field and use the green check that appears inside the field while editing to save it. Use the eye icon to open that Dashboard directly in **View Dashboard**, **Open** to restore it in the editor, **Duplicate** to create an independent copy, or **Close** to leave the current dashboard.
-5. **Delete** removes only the selected definition after confirmation.
-6. **Export** downloads a versioned JSON definition; **Import** restores one with a new identity. The JSON contains template and dataset references and filters, not source data or chart images. Import into a workspace with the corresponding template and dataset IDs, or adjust its source selections before viewing.
+1. Enter **Dashboard name**, select **NR Mode** and choose a compatible **Template**.
+2. Click **Create Dashboard**. The definition is persisted immediately and opens in Dashboard Datasets & Filters.
+3. Use Open to restore a Dashboard in the editor or the green eye to enter View Dashboard directly.
+4. Edit a name in the table and save it with the green check.
+5. Duplicate creates an independent definition. Close leaves the active definition without deleting it.
+6. Delete removes the definition after confirmation; it does not remove CDRs, templates or generated PPT jobs.
 
-Dashboard definitions belong to the workspace and are included when its database is backed up, exported or duplicated. They do not create Reporting jobs or PowerPoint files. The last open dashboard is restored when returning to this tab in the same browser session. Changes are retained when **Save** is pressed; unsaved changes trigger a warning before leaving or opening another dashboard.
+**Export Dashboard** creates the versioned ZIP accepted by Admin Import. **Import Dashboard** also accepts the legacy standalone JSON definition. Imported definitions need a compatible template and valid dataset references in the destination workspace.
 
-## Adaptative Filters
+The last open Dashboard and page scroll position are remembered in the browser session. Real unsaved filter changes require Save, Discard or Cancel before navigation. Management-only name, NR Mode and Template inputs do not create false unsaved-filter warnings.
 
-The left subpanel contains **CDR Data**, **CDR Voice**, **CDR Speech**, **Scope**, and the date bounds. Ctrl/Cmd-click selects multiple source files. Multivendor Comparison requires vendor mappings for every selected source. NR Mode and Template are selected when the Dashboard is created.
+## Dashboard Datasets & Filters
 
-The right subpanel exposes available Market, Operator, Vendor, Region, City, Session Type, Technology and RAT columns. **Date from** and **Date to** use the source timestamp; the end date includes its entire day. Sources without a usable date column contribute no rows when a date range is active.
+The panel separates the comparison scope and selected universe from default and additional filters. Its badges distinguish **Unapplied filters** from **Unsaved filters**.
 
-The right side separates built-in **Default Filters** from Dashboard-specific **Additional Filters**. Additional filters use a pastel-pink panel and controls so they remain visually distinct. Each categorical filter supports searching values, **All**, **None**, and individual checkboxes. Its multi-select menu stays open while values are selected, closes when its control is clicked again, or one second after the pointer leaves it. All removes that restriction; None intentionally selects zero rows. The value catalogue is loaded from the selected datasets' persisted profiles, so all choices appear without scanning the combined CDR tables. Selected values remain visible even if the current combination has no matches. A source without an actively filtered column contributes no rows instead of silently ignoring that restriction.
+### Dashboard Scope
 
-Each filter has a circular **×** action. Confirming it removes an added filter or hides a default filter from the Dashboard; hidden default filters can be restored with **Select field to add new filter**.
+- **Operator Comparison** uses normalized Operator values.
+- **Multivendor Comparison** requires Vendor mapping for every selected CDR and expands Operator into its operator/vendor hierarchy.
+- Entering Multivendor opens a dataset chooser. Use the Dashboard's saved selection, adjust individual Data/Voice/Speech checkboxes or select the latest available dataset of each type.
+
+NR Mode follows the shared reporting rule: Voice and Speech sessions are classified as NSA/SA; valid Data attempts remain available even when a sample RAT records a fallback. RAT can be restricted explicitly with the adaptive filter.
+
+### Universe Dataset and dates
+
+Select one or more CDR Data, Voice and Speech sources. Date from/Date to default to the earliest and latest dates across that selection; Date to includes the complete day. Calendar month navigation does not change the selection until a day is chosen.
+
+The ready summary distinguishes:
+
+- **Universe Dataset**: rows contributed by the selected CDRs;
+- **Filtered Universe**: rows remaining after dates and adaptive filters;
+- chart rows: the subset after the selected template row's own filters.
+
+### Default filters and aliases
+
+Default filters appear in this order: `Market`, `Operator`, `Vendor`, `Region`, `City`, `Campaign`, `RAT`, `Session Type`, `Call Status`. Technology is not an adaptive Dashboard filter because NR Mode is selected on the Dashboard definition.
+
+| Visible filter | Supported columns in priority order |
+| --- | --- |
+| Region | `Region` → `G_Level_2` → `G Level 2` |
+| City | `City` → `G_Level_4` → `G Level 4` |
+| Campaign | `Campaign` → `campaign` |
+| RAT | `RAT_A` → `RAT` → `Sample_RAT_A` |
+| Call Status | `Call_Status` → `call_status` → `status` |
+
+Aliases resolve per row: an empty higher-priority value falls back to the next column. Hover or keyboard-focus an aliased filter to see its complete priority list.
+
+Each multiselect provides search, **All**, **None** and individual values. All removes the restriction; None deliberately produces zero rows. Menus stay open while values are selected and close after pointer exit. Choices normally come from persisted dataset profiles; missing fields are read from combined CDR tables.
 
 ### Additional Filters
 
-Open **Select field to add new filter** and use its in-menu search box to find any column available in the selected CDRs, including workspace Auto-calculated Fields, then click **Add Filter**. The picker has the same width and dropdown behaviour as the filter fields. Standard field choices come from each processed dataset profile; Auto-calculated Field choices come directly from their rule results and fallback, with a persisted value catalogue available for older datasets. Adding a field also includes it in the reusable analytical projection when required.
+**Select field to add new filter** searches all columns available in the selected CDRs and all applicable workspace Auto-calculated Fields. Adding a field loads its values in a separate request that respects the current CDRs, dates and other filters without preparing the complete Dashboard.
 
-For example, define `7-cities` for CDR-Data with `Yes` when City belongs to the comparison group and `No` otherwise. Add the field as a filter and select only `Yes`. Every dashboard chart using CDR-Data then receives only those matching samples, followed by its own template filters. Removing a custom filter removes its restriction.
+The circular `×` removes an additional filter or hides a default filter after confirmation. A hidden default can be restored from the field picker. Auto-calculated Fields apply only to their declared CDR types and join the analytical projection when needed.
 
-## Shared data and refresh
+### Apply, Save, Clear and Reload
 
-The existing combined CDR tables remain the authoritative source. Opening a large Dashboard does not scan them for controls or counts: filter choices come from the dataset profiles and the response reports source-row totals while the selected data is queried. Small selections of up to 25,000 rows can still persist exact indexed `(dataset_id, source_row_id)` keys and exact filtered counts.
+- **Apply Filters** prepares the current selection without changing the Dashboard defaults.
+- **Save Filters** applies and persists CDRs, scope, dates, filters, additional fields and hidden filters.
+- **Clear Filters** removes filter restrictions and dates.
+- **Reload Saved Filters** restores the complete saved selection, including derived automatic date bounds.
 
-For large CDRs, the application maintains a narrow analytical SQLite cache at `<workspace database directory>/.dashboard-data-cache/dashboard-analytics.sqlite3`. Each projection contains only the columns required by one Dashboard/template and its filters. It is versioned by dataset revisions and requested fields, limited to six recent projections, warmed in the background when a workspace opens or a Dashboard is saved, and rebuilt only after its source data or required columns change. This one-time build can take longer for an existing multi-million-cell workspace; later openings and filter changes reuse it.
+Returning to an already prepared combination restores its snapshot and charts without recalculation. Filter-value and dataset order do not create different cache entries for equivalent selections.
 
-Each chart reads only its KPI, grouping and template-filter columns from that narrow projection. Charts with the same source, KPI and filters share one filtered frame. The server reduces the result to a compact chart model, including bounded CDF/scatter samples and already aggregated bars or tables. The model applies the same Rows/Columns hierarchy, aggregation, chronological Campaign ordering, Operator/Vendor/Campaign colours, title, legend placement and line emphasis as Reporting and Chart Set generation. The browser paints it from a 1600 × 900 logical canvas, stretching width and height independently to fill the complete chart placeholder, and adds value tooltips, so live Dashboards do not wait for PIL to generate or transfer a chart PNG. Map points use the same OpenStreetMap viewport and projection; cached browser tiles can complete asynchronously after the points appear. Exact chart models persist under `.dashboard-data-cache/charts` with a 500-entry LRU limit, making a previously viewed selection reusable after an application restart. The legacy PNG preview endpoint and `.dashboard-chart-cache` remain available for compatibility and image-based export workflows; the live viewer does not request them.
+If View Dashboard or Generate PPT is requested with unapplied changes:
 
-Dashboard selections are implementation caches, not workspace datasets: `dashboard_filter_selections` stores their filter metadata, facets and row counts, while `dashboard_filter_selection_rows` stores the compact `(dataset_kind, dataset_id, source_row_id)` references when the selection is at most 25,000 rows. These tables intentionally do not appear in the Datasets list or the Database Viewer, which expose user datasets and the three combined CDR tables only.
+- **Apply Filters and Continue** applies, waits for preparation and continues.
+- **Discard and Continue** restores the last applied selection and continues.
+- **Save and Continue** saves, prepares and continues.
+- **Cancel** takes no action.
 
-A filter change selects a new consistent SQL snapshot for every dashboard in the template. Requests are debounced and obsolete responses are ignored. The visible slide is prepared first; every remaining chart is then warmed through a small background queue so slides are ready when reached without competing heavily with the charts on screen. **Refresh Data** (or **Refresh** inside the viewer) checks backing data and template edits. Session tokens and chart DataFrames remain bounded in memory and may expire; analytical projections and compact chart models remain reusable until their source revision changes or the LRU policy removes them.
+## Preparation lifecycle and cache
 
-NR Mode follows Reporting semantics: Voice and Speech are classified by NSA/SA, while valid Data attempts are retained even when their sample RAT records a fallback. Use Technology or RAT filters for explicit sample-level restrictions.
+Combined CDR tables are the source of record. Selections up to 25,000 rows can store exact `(dataset_id, source_row_id)` references; larger selections use SQL predicates. A narrow SQLite projection contains only fields required by the Dashboard, filters and template.
+
+Preparation is debounced and stale responses are ignored. A new request replaces the current one; an equivalent cached request restores immediately. The visible Dashboard is prepared first, then up to three chart models render concurrently before the FIFO queue advances to another Dashboard.
+
+Manage Dashboards reports Loading data, Data queued, Rendering charts, Charts queued, Ready, Missing charts or Failed. The floating background-task card groups data preparation and chart rendering under the Dashboard name. View Dashboard and PPT actions remain disabled until their data and required models are ready.
+
+`.dashboard-data-cache` stores bounded analytical projections, selection manifests, Canvas chart models and legacy PIL artifacts. Cache keys include dataset revisions, required fields, selection, scope and renderer version. Opening a workspace removes artifacts from older application/cache versions while retaining current ones. Workspace Clear cache cancels active warming and removes derived cache only; definitions, CDRs, templates and generated jobs remain intact.
 
 ## View Dashboard
 
-Click **View Dashboard** after preparation completes, or use a Dashboard's eye icon to open its viewer immediately. While its data and filters update, a centered status card explains that charts refresh automatically, then disappears when the update is complete. The viewer occupies 96% of the desktop viewport width and expands on small screens.
+Use View Dashboard or the library eye action. A centered preparation card remains until updated slides and charts are ready. The viewer uses approximately 96% of the viewport and preserves the template's 16:9 layout.
 
-- The dashboard selector is followed by compact First, Previous, Next and Last icon controls, each with an accessible label and hover tooltip, to navigate template Slides in numeric order.
-- The viewer header reserves one subtitle line even when a slide has no subtitle, keeping the navigation controls in a stable vertical position between slides.
-- Charts retain their order and relative placeholder positions from the selected Layout in `Template_CDR_analysis.pptx`, and each chart fills its complete placeholder. Its Rendering message stays centred until the live chart is ready. Small screens stack charts for readability.
-- Title and Transition Slides appear as 16:9 section dashboards with a Dashboard Analytic logo lockup in the upper-right corner. Title Pages use a wide, prominent title with a yellow subtitle that uses more relaxed lettering; Transition Slide titles use a slightly smaller scale to leave more space around the section heading.
-- Every live chart has independent **−**, **+**, and **Reset zoom** controls from 100% to 400%. Drag a rectangle with the mouse at 100% to zoom directly to that area, then drag the zoomed chart to inspect a different area; its cursor becomes a hand while it can be moved and closes while dragging. The same gestures and cursor apply in the single-chart expanded panel. The compact dataset icon and zoom controls appear when hovering or focusing the chart, then disappear half a second after the pointer leaves. CDF charts show horizontal guides at 0%, 25%, 50%, 75% and 100%. Tooltips continue to report the underlying values.
-- The dataset icon appears with the zoom controls on hover or keyboard focus, remains visible for half a second after the pointer leaves, and is always available on touch devices. It opens the chart's filtered samples, with compact first, previous, next and last page controls. Adjacent and final pages are prefetched, while only table rows change during navigation. A compact download icon provides the full CSV.
-- The **Comments** area follows the selected Layout: layouts whose name ends in `Comments right` place it beside the chart canvas, which then uses the full available height; other layouts place it below the charts. Its note list scrolls independently, keeping the comments heading and entry controls fixed. Add, edit or remove a note and it is saved immediately with the Dashboard; press Enter or leave an edited note to save it.
-- **Presentation** opens settings for a 3, 5, 10 or 15-second automatic slide interval and a Fade, Slide or no transition effect. It stops at the last slide or when navigation is used manually.
-- **Edit Template**, available to administrators, opens the workspace template editor at the first row of the current dashboard. Closing the editor refreshes the dashboard definition.
-- The Refresh and Presentation controls use compact icons after slide navigation. **Adaptative Filters**, **Auto-Calculated Fields** and **Edit Template** are aligned at the right in that order; the latter two are available to administrators. Auto-Calculated Fields opens the shared workspace field manager. Refresh data after a materialization job finishes if the viewer was left open.
-- **Adaptative Filters** moves the same filter panel into a floating dialog. The fixed and floating views share the same controls and temporary state because they are the same panel; edits regenerate the visible charts after a short debounce without saving the filters to the Dashboard. In this dialog, **View Dashboard** is replaced by a grey **Close** action that returns the controls to the main tab.
-- Escape closes the active dashboard dialog, Auto-Calculated Fields manager or embedded Template Editor when they have no unsaved changes; keyboard focus returns to its invoking control.
+### Slides and navigation
 
-Missing sources, invalid templates and render errors are displayed instead of being mistaken for successful charts. Check source selections, filtered row counts and template fields, then use **Refresh Data**.
+- Select any template slide or use First, Previous, Next and Last.
+- Left/Right Arrow navigates outside editable controls.
+- Title and Transition slides use branded Dashboard Analytic typography.
+- Chart rows preserve template order and placeholder geometry.
+- Layouts ending in `Comments right` place comments beside charts; other layouts place them below.
+
+### Live and expanded chart controls
+
+Hover or focus a chart to reveal Dataset, Expand, Refresh and Zoom controls. They hide shortly after pointer exit and remain accessible on touch devices.
+
+- Zoom from 100% to 400% with `−`, `+` and `1:1` reset.
+- At 100%, drag a rectangle over the plot to zoom into it; drag a zoomed chart to pan.
+- Double-click or use Expand to open the focused chart.
+- The expanded viewer reuses the Canvas model and navigates all available charts with First/Previous/Next/Last.
+- Adaptative Filters, Auto-calculated Fields and Edit Template remain available in expanded view when permitted.
+- Edit Template focuses the exact template row for the chart. Saving refreshes the Dashboard; closing unchanged retains the current preparation.
+
+For the complete definition of a chart row, see [Administration → Report Template reference](10-administration.md#report-template-reference).
+
+### Filtered Chart Dataset
+
+Dataset opens the exact rows after Dashboard filters and that chart's template filters. It uses server-side 100-row pages with First/Previous/Next/Last and full CSV download.
+
+Every column provides an Excel-style value filter across the complete chart dataset. Active columns are highlighted, value choices remain faceted by other column filters, pagination and CSV retain the selection, and the footer shows filtered rows against total chart rows with **Clear N filters** and Close.
+
+### Comments, Presentation and floating tools
+
+- Add, edit or remove slide comments; Enter or leaving an edit saves immediately.
+- **Presentation** supports 3, 5, 10 or 15 seconds with Fade, Slide or no transition. Manual navigation stops it.
+- **Adaptative Filters** moves the same panel into a floating dialog; edits refresh visible charts without automatically saving defaults.
+- **Auto-Calculated Fields** opens the shared workspace manager for administrators.
+- Backdrop/Escape closes unchanged dialogs and returns focus. Unsaved Filters, Template Editor or calculated-field changes request a decision first.
+
+## Generate PPT
+
+Generate PPT appears immediately before View Dashboard in the dataset/filter actions and after Presentation in the viewer. It uses the exact prepared CDRs, dates, scope and applied filters, even if they have not been saved as Dashboard defaults.
+
+The job renders the template into `Template_CDR_analysis.pptx`, preserving slides, layouts, chart placeholder proportions, titles, legends and saved comments. It writes the PPT plus chart PNG, tooltip and Canvas-model assets under `output/dashboards`. Folder and PPT names begin with `yyyymmdd_HHMMSS - Dashboard Name`.
+
+Template authoring details for the exported presentation are centralized in [Administration → Report Template reference](10-administration.md#report-template-reference).
+
+## PowerPoint Generation Jobs
+
+Jobs continue on the server after leaving the page. The table records ID, creator, local date/time, NR Mode, Dashboard, scope, filter snapshot, slides, charts, status and elapsed progress.
+
+Depending on state, actions download the PPT, open/download charts, stop work, retry/relaunch or delete the job and files. The filter action groups CDRs as Data, Voice and Speech and shows exact dates and adaptive filters in a tooltip or dialog. Excel-style header filters search every job column. Administrators can use **Delete All PPTs**.
+
+## Charts Panel
+
+Charts Panel browses completed Dashboard PPT charts. Filter by NR Mode, Dashboard, Template and Scope, then choose a PowerPoint Job. The selector identifies local date/time, Dashboard and scope; header badges repeat Dashboard, date and scope.
+
+Cards fill equal template frames and repaint stored Canvas models with the current renderer. Legacy jobs without models retain their PNG. Open any card in the same expanded viewer and Filtered Chart Dataset used by the live Dashboard.
+
+Historical previews retain the job's exact template and selection. **View Filters** opens that snapshot. Administrators can open the generating template and Auto-calculated Fields. Adaptative Filters are hidden because a completed export is immutable.
+
+## Portability and maintenance
+
+Dashboard export uses a versioned ZIP accepted by Admin Import. It contains the definition and comments, but excludes source CDRs and caches. Dashboard is an independent Admin export/import/transfer/backup/restore component. Full Workspace and Full Environment include definitions from every selected workspace, with Dashboards listed immediately after App Config.
+
+## Troubleshooting
+
+- **View Dashboard or Generate PPT is disabled**: inspect the status badge and floating preparation task.
+- **A filter has no values**: verify its field/aliases exist and other filters leave matching rows.
+- **A chart is empty**: compare Universe Dataset, Filtered Universe and chart rows; then check NR Mode and the template row in Administration.
+- **Multivendor is unavailable**: persist Vendor mapping for every selected CDR.
+- **Preparation is failed or remains queued**: inspect App Logs, retry and clear only the workspace Dashboard cache if derived data is invalid.

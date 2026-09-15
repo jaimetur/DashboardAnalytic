@@ -4085,6 +4085,9 @@ def test_docs_routes_expose_readme_changelog_and_help(client) -> None:
     assert 'id="help-nav-list"' in help_article.text
     assert "/api/documents/help/04-web-interface.md" in help_article.text
     assert "`${number}. ${label}`" in help_article.text
+    assert "includeHeadingIds: true" in help_article.text
+    assert "const fragment = hashIndex >= 0 ? raw.slice(hashIndex) : '';" in help_article.text
+    assert "document.getElementById(targetId)?.scrollIntoView" in help_article.text
 
 
 def test_dashboard_analysis_reuses_cached_result_on_reload(client, monkeypatch) -> None:
