@@ -1506,7 +1506,36 @@
     if (restored === current) return;
     facets(); filterChanged();
   });
-  bind('ds-viewer-refresh',prepare);
+  bind('ds-viewer-refresh', async () => {
+    if (!prepared?.token) return;
+    const accepted = await window.showConfirmDialog(
+      'Invalidate the rendered chart cache and render every chart in this Dashboard again?',
+      {title: 'Refresh Dashboard charts?', confirmLabel: 'Refresh Charts', tone: 'warning'},
+    );
+    if (!accepted) return;
+    const token = prepared.token;
+    const refreshButton = $('ds-viewer-refresh');
+    refreshButton.disabled = true;
+    setViewEnabled(false);
+    setPreparationState('preparing', 'rendering');
+    status('Rendering every Dashboard chart again…');
+    try {
+      await api(`/charts/${encodeURIComponent(token)}/refresh`, 'POST');
+      if (prepared?.token !== token) return;
+      chartPayloads.clear();
+      renderedChartPayloads.clear();
+      setPreparationProgress(100, 'Dashboard charts are ready');
+      renderSlide();
+      status('Every Dashboard chart was rendered again.');
+      void refreshDashboardStatuses();
+    } finally {
+      if (prepared?.token === token) {
+        refreshButton.disabled = false;
+        setViewEnabled(Boolean(prepared.slides?.length));
+        setPreparationState('ready');
+      }
+    }
+  });
   bind('ds-preparing-refresh', async () => {
     if (dashboardNeedsRefresh()) await prepare();
   });
@@ -1843,7 +1872,25 @@
       if (index >= 0) await showDashboardPptChart(index);
       return;
     }
-    await prepare();
+    if (!expandedChart || !prepared?.token) return;
+    const refreshButton = $('ds-chart-expanded-refresh');
+    const chart = expandedChart;
+    const token = prepared.token;
+    const request = expandedChartRequest;
+    const url = `/api/e2e-dashboards/chart/${token}/${chart.index}`;
+    refreshButton.disabled = true;
+    status(`Rendering ${chart.title || 'chart'} again…`);
+    try {
+      const payload = await api(`/chart/${encodeURIComponent(token)}/${chart.index}/refresh`, 'POST');
+      if (prepared?.token !== token || expandedChartRequest !== request || $('ds-chart-expanded-overlay').hidden) return;
+      chartPayloads.delete(url);
+      renderedChartPayloads.set(url, payload);
+      renderSlide();
+      await openExpandedChart(chart, payload);
+      status(`${chart.title || 'Chart'} was rendered again.`);
+    } finally {
+      refreshButton.disabled = false;
+    }
   });
   $('ds-chart-expanded-filters').onclick = openFloatingFilters;
   $('ds-chart-expanded-auto-fields')?.addEventListener('click', () => document.querySelector('.ds-viewer-panel [data-workspace-manage-calculated-dimensions]')?.click());

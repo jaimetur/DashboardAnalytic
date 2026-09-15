@@ -157,6 +157,43 @@ def test_expanded_dashboard_chart_apply_builds_a_new_temporary_model(client):
     )
 
 
+def test_dashboard_refresh_rebuilds_all_models_and_chart_refresh_rebuilds_only_one(client, monkeypatch):
+    payload = setup_dashboard(client)
+    preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
+    token = preview['token']
+    indexes = [
+        chart['index']
+        for slide in preview['slides']
+        for chart in slide['charts']
+        if chart['available']
+    ]
+    for index in indexes:
+        assert client.get(f'/api/e2e-dashboards/chart/{token}/{index}').status_code == 200
+
+    import src.modules.e2e_dashboards as dashboards_module
+    original = dashboards_module.catalog_chart_payload
+    calls = []
+
+    def tracked(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(dashboards_module, 'catalog_chart_payload', tracked)
+
+    current = indexes[1]
+    refreshed_chart = client.post(f'/api/e2e-dashboards/chart/{token}/{current}/refresh')
+    assert refreshed_chart.status_code == 200, refreshed_chart.text
+    assert len(calls) == 1
+    assert client.get(f'/api/e2e-dashboards/chart/{token}/{indexes[0]}').status_code == 200
+    assert len(calls) == 1
+
+    calls.clear()
+    refreshed_dashboard = client.post(f'/api/e2e-dashboards/charts/{token}/refresh')
+    assert refreshed_dashboard.status_code == 200, refreshed_dashboard.text
+    assert refreshed_dashboard.json() == {'refreshed': len(indexes)}
+    assert len(calls) == len(indexes)
+
+
 def test_dashboards_lifecycle_and_layout(client):
     payload = setup_dashboard(client)
     page = client.get('/e2e-dashboards')
@@ -516,7 +553,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '.ds-filter-groups{display:grid;grid-template-rows:max-content max-content minmax(0,1fr);gap:14px}' in dashboard_css
     assert '.ds-default-filter-panel{border-color:#afd1e8;background:#f1f8fd}' in dashboard_css
     assert "d='M12 2v10'" in dashboard_css
-    assert "bind('ds-viewer-refresh',prepare);" in dashboard_script
+    assert "title: 'Refresh Dashboard charts?'" in dashboard_script
+    assert "api(`/charts/${encodeURIComponent(token)}/refresh`, 'POST')" in dashboard_script
+    assert "api(`/chart/${encodeURIComponent(token)}/${chart.index}/refresh`, 'POST')" in dashboard_script
     assert "function resetAutomaticDatesForDatasetChange()" in dashboard_script
     assert "definition[key] = automaticValue;" in dashboard_script
     assert "input.value = dateInputDisplayValue(key, automaticValue);" in dashboard_script

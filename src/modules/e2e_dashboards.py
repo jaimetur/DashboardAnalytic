@@ -2786,12 +2786,23 @@ def install_dashboard_routes(core):
                 frame = snapshot.chart_frames.setdefault(index, prepared_frame)
         return snapshot, entry, frame
 
-    def chart_model(token: str, index: int, user, *, expected_workspace: str | None = None):
+    def chart_model(
+        token: str,
+        index: int,
+        user,
+        *,
+        expected_workspace: str | None = None,
+        force: bool = False,
+    ):
         snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False, expected_workspace=expected_workspace)
-        with lock:
-            payload = snapshot.chart_payloads.get(index)
         model_path = canvas_model_path(snapshot, entry)
         model_dir = model_path.parent
+        if force:
+            with lock:
+                snapshot.chart_payloads.pop(index, None)
+            model_path.unlink(missing_ok=True)
+        with lock:
+            payload = snapshot.chart_payloads.get(index)
         if payload is None and model_path.is_file():
             try:
                 payload = json.loads(model_path.read_text(encoding='utf-8'))
@@ -2890,6 +2901,41 @@ def install_dashboard_routes(core):
     def interactive_chart(token: str, index: int, user=Depends(dashboard_user)):
         payload = chart_model(token, index, user)
         return JSONResponse(payload, headers={'Cache-Control': 'private, max-age=3600'})
+
+    @app.post('/api/e2e-dashboards/chart/{token}/{index}/refresh')
+    def refresh_interactive_chart(token: str, index: int, user=Depends(dashboard_user)):
+        """Invalidate and rebuild only the requested Canvas chart model."""
+        payload = chart_model(token, index, user, force=True)
+        return JSONResponse(payload, headers={'Cache-Control': 'no-store'})
+
+    @app.post('/api/e2e-dashboards/charts/{token}/refresh')
+    def refresh_interactive_charts(token: str, user=Depends(dashboard_user)):
+        """Invalidate and rebuild every available Canvas model in a Dashboard snapshot."""
+        with lock:
+            snapshot = snapshots.get(token)
+        workspace = workspace_key()
+        if snapshot is None or snapshot.workspace != workspace or snapshot.owner not in {user.username, '*'}:
+            raise HTTPException(410, 'Dashboard preview expired. Refresh the Dashboard.')
+        indexes = list(dict.fromkeys(
+            int(chart['index'])
+            for slide in snapshot.payload.get('slides', [])
+            for chart in slide.get('charts', [])
+            if chart.get('available')
+        ))
+        with ThreadPoolExecutor(
+            max_workers=DASHBOARD_CHART_RENDER_WORKERS,
+            thread_name_prefix='e2e-dashboard-refresh',
+        ) as chart_executor:
+            futures = [
+                chart_executor.submit(
+                    chart_model, token, index, user, expected_workspace=workspace, force=True,
+                )
+                for index in indexes
+            ]
+            for future in as_completed(futures):
+                future.result()
+        core.invalidate_workspace_size_cache(Path(workspace).parent)
+        return {'refreshed': len(indexes)}
 
     @app.get('/api/e2e-dashboards/chart/{token}/{index}/filter-context')
     def interactive_chart_filter_context(token: str, index: int, user=Depends(dashboard_user)):
