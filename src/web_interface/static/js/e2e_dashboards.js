@@ -5,7 +5,7 @@
   const config = JSON.parse($('ds-config').textContent);
   const filterAliases = config.filter_aliases || {};
   let dashboards = {}, activeId = '', definition = null, savedDefinition = '', appliedFilterState = '', appliedSelectionState = '', appliedDashboardDefinition = null, prepared = null, slideIndex = 0;
-  let sequence = 0, timer, controller, preparing = null, preparingFilterState = '', dirty = false, filterActionBusy = false, dataIndex = 0, dataPage = 0, dataToken = '', dataEndpoint = '', dataRequest = 0;
+  let sequence = 0, cacheLookupSequence = 0, timer, controller, preparing = null, preparingFilterState = '', preparationProgressTimer = 0, dirty = false, filterActionBusy = false, dataIndex = 0, dataPage = 0, dataToken = '', dataEndpoint = '', dataRequest = 0;
   const dataPages = new Map();
   const dataColumnFilters = new Map();
   let dataFilterValues = {}, dataFilterValuesLoaded = false, dataChartTotal = 0, dataFilterMenu = null;
@@ -33,6 +33,7 @@
   const libraryStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:library`;
   const scrollStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:scroll`;
   const preparedStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:prepared`;
+  const universeStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:universes`;
   const dashboardId = () => {
     if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
     const bytes = new Uint8Array(16);
@@ -74,6 +75,7 @@
   };
   const dismissPreparationStatus = () => {
     if (!backgroundPreparationToken) return;
+    clearTimeout(preparationProgressTimer); preparationProgressTimer = 0;
     emitPreparationStatus('complete');
     backgroundPreparationToken = '';
   };
@@ -111,13 +113,41 @@
     if (!definitionValue.date_to) definitionValue.date_to = 'Newest';
     return definitionValue;
   };
-  const runtimeDashboardDefinition = value => ({
+  const rememberedUniverse = id => {
+    if (!id) return null;
+    try {
+      const stored = JSON.parse(sessionStorage.getItem(universeStorageKey) || '{}');
+      const saved = stored?.[id];
+      if (!saved || !['single', 'multivendor'].includes(saved.scope) || !saved.datasets) return null;
+      const datasets = Object.fromEntries(['data', 'voice', 'speech'].map(kind => {
+        const available = new Set((config.datasets?.[kind] || []).map(row => Number(row.id)));
+        return [kind, (saved.datasets[kind] || []).map(Number).filter(datasetId => available.has(datasetId))];
+      }));
+      return {
+        scope: saved.scope,
+        datasets,
+        date_from: /^\d{4}-\d{2}-\d{2}$/.test(String(saved.date_from || '')) || saved.date_from === 'Oldest' ? saved.date_from : 'Oldest',
+        date_to: /^\d{4}-\d{2}-\d{2}$/.test(String(saved.date_to || '')) || saved.date_to === 'Newest' ? saved.date_to : 'Newest',
+      };
+    } catch (_) { return null; }
+  };
+  const runtimeDashboardDefinition = (value, id = '') => ({
     ...canonicalDashboardDefinition(value),
-    scope: 'single',
-    datasets: latestDatasetsForScope('single'),
-    date_from: 'Oldest',
-    date_to: 'Newest',
+    ...(rememberedUniverse(id) || {
+      scope: 'single', datasets: latestDatasetsForScope('single'), date_from: 'Oldest', date_to: 'Newest',
+    }),
   });
+  const rememberUniverse = () => {
+    if (!activeId || !definition) return;
+    try {
+      const stored = JSON.parse(sessionStorage.getItem(universeStorageKey) || '{}');
+      stored[activeId] = {
+        scope: definition.scope || 'single', datasets: structuredClone(definition.datasets || {}),
+        date_from: definition.date_from || 'Oldest', date_to: definition.date_to || 'Newest',
+      };
+      sessionStorage.setItem(universeStorageKey, JSON.stringify(stored));
+    } catch (_) { /* Session storage is optional. */ }
+  };
   const persistedDashboardDefinition = value => {
     const persisted = canonicalDashboardDefinition(value);
     delete persisted.scope;
@@ -210,7 +240,7 @@
   );
   const updateFilterActionState = () => {
     $('ds-save').disabled = !hasUnsavedFilterChanges() || filterActionBusy;
-    $('ds-apply-filters').disabled = !definition || preparationStateFingerprint(definition) === appliedFilterState || filterActionBusy;
+    $('ds-apply-filters').disabled = !hasUnappliedFilterChanges() || filterActionBusy;
   };
   const api = async (path = '', method = 'GET', body, signal) => {
     const response = await fetch(`/api/e2e-dashboards${path}`, {method, signal, cache: 'no-store', headers: {'Content-Type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
@@ -265,6 +295,44 @@
         ? "Datasets and filters are ready. You can now open the dashboard using 'View Dashboard' button below."
         : phase === 'rendering' ? 'Charts are rendering with the current Dashboard scope. View Dashboard will become available when rendering is complete.' : 'Dataset and filters are still loading. View Dashboard will become available when preparation is complete.');
   };
+  const setPreparationProgress = (progress, detail = 'Preparing…') => {
+    const numeric = Number(progress);
+    const known = Number.isFinite(numeric);
+    const percent = known ? Math.max(0, Math.min(100, Math.round(numeric))) : 0;
+    for (const [rootId, barId, labelId] of [
+      ['ds-preparing-progress', 'ds-preparing-progress-bar', 'ds-preparing-progress-label'],
+      ['ds-viewer-preparing-progress', 'ds-viewer-preparing-progress-bar', 'ds-viewer-preparing-progress-label'],
+    ]) {
+      const root = $(rootId), bar = $(barId), label = $(labelId);
+      root.classList.toggle('is-indeterminate', !known);
+      if (known) {
+        root.setAttribute('aria-valuemin', '0'); root.setAttribute('aria-valuemax', '100'); root.setAttribute('aria-valuenow', String(percent));
+        bar.style.width = `${percent}%`;
+      } else {
+        root.removeAttribute('aria-valuenow'); bar.style.width = '';
+      }
+      label.textContent = `${detail} · ${percent}%`;
+    }
+  };
+  const monitorPreparationProgress = token => {
+    clearTimeout(preparationProgressTimer);
+    setPreparationProgress(null, 'Starting Dashboard preparation');
+    const refresh = async () => {
+      if (!token || token !== backgroundPreparationToken) return;
+      try {
+        const payload = await api(`/preparation-progress/${encodeURIComponent(token)}`);
+        if (token === backgroundPreparationToken) {
+          setPreparationProgress(payload.progress, payload.detail);
+          emitPreparationStatus('processing', `${payload.detail} · ${Math.round(Number(payload.progress) || 0)}%`, token);
+        }
+      } catch (_) {
+        // The task may not yet be registered or may have just completed.
+      } finally {
+        if (token === backgroundPreparationToken) preparationProgressTimer = setTimeout(refresh, 400);
+      }
+    };
+    void refresh();
+  };
   function overlay(id, show) {
     const el = $(id);
     if (show) { focusReturn.set(id, document.activeElement); el.hidden = false; el.querySelector('[role=dialog]').focus(); }
@@ -313,15 +381,16 @@
   const openActiveDashboardViewer = async () => {
     const filterDecision = await resolveUnappliedFilterChanges();
     if (!filterDecision) return;
-    if (!prepared || preparationStateFingerprint(definition) !== appliedFilterState) await prepare();
-    if (!prepared?.slides.length) return;
-    setViewEnabled(false);
-    try {
-      overlay('ds-viewer', true);
-      renderSlide();
-    } finally {
-      setViewEnabled(Boolean(prepared?.slides.length));
+    if (!$('ds-filter-overlay').hidden) await closeFilters();
+    const needsPreparation = !prepared || preparationStateFingerprint(definition) !== appliedFilterState;
+    if (needsPreparation) {
+      resetViewerForDashboard();
+      const needsDataPreparation = selectionStateFingerprint(definition) !== appliedSelectionState;
+      setPreparationState('preparing', needsDataPreparation ? 'data' : 'rendering');
     }
+    overlay('ds-viewer', true);
+    if (needsPreparation) await prepare();
+    if (prepared?.slides.length) renderSlide();
   };
   async function queueDashboardPptExport(id, item) {
     let exportDefinition = item;
@@ -1102,7 +1171,7 @@
     rows.hidden = !rows.textContent;
   };
   const applyPreparedPayload = payload => {
-    prepared = payload; facetOptions = payload.options; facetFields = config.filter_fields || payload.filter_fields || facetFields; availableFields = payload.available_fields || payload.custom_fields || []; applyDateBounds(payload.date_bounds); facetsLoading = false; facetOptionRequests.clear();
+    prepared = payload; facetOptions = payload.options; facetFields = config.filter_fields || payload.filter_fields || facetFields; availableFields = payload.available_fields || payload.custom_fields || []; applyDateBounds(payload.date_bounds); facetsLoading = false; facetOptionRequests.clear(); setPreparationProgress(100, 'Dashboard dataset is ready');
     appliedFilterState = preparationStateFingerprint(definition);
     appliedSelectionState = selectionStateFingerprint(definition);
     appliedDashboardDefinition = JSON.parse(JSON.stringify(definition));
@@ -1117,19 +1186,21 @@
   };
   async function restorePrepared(id) {
     if (await restoreRememberedPrepared(id)) return true;
-    for (let attempt = 0; attempt < 480 && activeId === id; attempt += 1) {
-      try {
-        applyPreparedPayload(await api(`/prefetched/${encodeURIComponent(id)}`));
-        return true;
-      } catch (error) {
-        if (error.status !== 409) return false;
-        if (attempt === 0) setPreparationState('preparing');
-        await new Promise(resolve => setTimeout(resolve, 250));
-      }
+    try {
+      // Send the temporary universe as well as saved filters.  Scope, CDRs
+      // and dates are deliberately not stored in the Dashboard definition,
+      // yet they form part of the shared persistent preview-cache identity.
+      applyPreparedPayload(await api(`/prefetched/${encodeURIComponent(id)}`, 'POST', definition));
+      return true;
+    } catch (error) {
+      // A queued warm-up must never delay opening the visible Dashboard.
+      // Returning immediately lets its foreground preparation take priority.
+      if (error.status === 409) return false;
+      return false;
     }
-    return false;
   }
   function filterChanged() {
+    rememberUniverse();
     updateDirtyState();
     const currentFilterState = preparationStateFingerprint(definition);
     const cached = preparedPayloads.get(preparedPayloadKey(activeId, preparedStateFingerprint(definition)));
@@ -1139,7 +1210,9 @@
       status('Restored the previously prepared filters.');
       return;
     }
-    status('Universe or filter changes are ready to apply.');
+    status(hasUnappliedFilterChanges()
+      ? 'Filter changes are ready to apply.'
+      : 'Dataset Universe changes will be prepared when View Dashboard or Generate PPT is selected.');
   }
   function changed() {
     dismissPreparationStatus(); forgetPrepared();
@@ -1162,7 +1235,25 @@
       try { await preparing; } catch (error) { if (error.name !== 'AbortError') throw error; }
       return prepare();
     }
-    if (await restoreRememberedPrepared(activeId)) { status('Restored the previously prepared filters.'); return prepared; }
+    // Start the visible state before checking the shared cache.  Persistent
+    // cache validation can take noticeable time after a server restart, and
+    // the user must see that the Dashboard is working during that lookup.
+    setViewEnabled(false);
+    setPreparationState('preparing', needsDataPreparation ? 'data' : 'rendering');
+    // This also checks the workspace-shared persistent manifest, so a user
+    // selecting a universe already prepared by somebody else does not launch
+    // a duplicate data-preparation request. The lookup itself can read a
+    // manifest and validate its CDR revisions, so expose it immediately in
+    // the global task card instead of leaving only the yellow viewer notice.
+    const cacheLookupToken = backgroundPreparationToken = `cache-lookup-${++cacheLookupSequence}`;
+    setPreparationProgress(null, 'Checking persistent Dashboard cache');
+    emitPreparationStatus('processing', 'Checking persistent Dashboard cache', cacheLookupToken);
+    if (await restorePrepared(activeId)) {
+      if (backgroundPreparationToken === cacheLookupToken) dismissPreparationStatus();
+      status('Restored the previously prepared filters.');
+      return prepared;
+    }
+    if (backgroundPreparationToken === cacheLookupToken) dismissPreparationStatus();
     let preparationToken = '';
     let requestSequence = 0;
     const dashboardIdAtStart = activeId;
@@ -1177,6 +1268,7 @@
     if (!hasOpenFacetMenu()) facets();
     setViewEnabled(false);
     setPreparationState('preparing', needsDataPreparation ? 'data' : 'rendering');
+    monitorPreparationProgress(preparationToken);
     $('ds-rows').textContent = '';
     try {
       const params = new URLSearchParams();
@@ -1211,10 +1303,10 @@
     dismissPreparationStatus();
     clearTimeout(timer); ++sequence; controller?.abort(); preparing = null;
     stopPresentation();
-    activeId = id; $('ds-viewer-export-ppt').dataset.dashboardPptId = id; definition = runtimeDashboardDefinition(dashboards[id]); savedDefinition = definitionFingerprint(dashboards[id]); dirty = false; prepared = null; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; facetOptions = {}; availableFields = []; facetOptionRequests.clear(); slideIndex = 0; setViewEnabled(false); rememberOpen(id);
+    activeId = id; $('ds-viewer-export-ppt').dataset.dashboardPptId = id; definition = runtimeDashboardDefinition(dashboards[id], id); savedDefinition = definitionFingerprint(dashboards[id]); dirty = false; prepared = null; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; facetOptions = {}; availableFields = []; facetOptionRequests.clear(); slideIndex = 0; setViewEnabled(false); rememberOpen(id);
     resetViewerForDashboard();
     $('ds-name').value = definition.name; setNrMode(definition.technology || definition.template_technology, definition.template);
-    $('ds-filter-panel').hidden = false; $('ds-dashboard-name').textContent = `Dashboard: ${definition.name}`; sources(); facets(); library(); status(''); if (!await restorePrepared(id)) await prepare();
+    $('ds-filter-panel').hidden = false; $('ds-dashboard-name').textContent = `Dashboard: ${definition.name}`; sources(); facets(); library(); status(''); await prepare();
     // UI setup may fill omitted legacy defaults. Treat that normalization as the
     // persisted baseline, so opening another Dashboard does not prompt to discard it.
     savedDefinition = definitionFingerprint(definition); updateDirtyState();
@@ -1253,7 +1345,7 @@
   });
   bind('ds-save', save);
   bind('ds-apply-filters', async () => {
-    if (!definition || preparationStateFingerprint(definition) === appliedFilterState) return;
+    if (!hasUnappliedFilterChanges()) return;
     if (!$('ds-filter-overlay').hidden) await closeFilters();
     await prepare();
   });
@@ -1460,7 +1552,7 @@
   $('ds-chart-expanded-prev').onclick = safe(async () => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) - 1));
   $('ds-chart-expanded-next').onclick = safe(async () => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) + 1));
   $('ds-chart-expanded-last').onclick = safe(async () => navigateExpandedChart(expandedCharts().length - 1));
-  const openFloatingFilters = () => { const panel = $('ds-filter-panel'); panel.open = true; panel.querySelector('summary').tabIndex = -1; $('ds-filter-float').append(panel); setPreparationState($('ds-preparing').dataset.state || 'hidden'); $('ds-view').hidden = true; $('ds-filter-close-action').hidden = false; overlay('ds-filter-overlay', true); };
+  const openFloatingFilters = () => { const panel = $('ds-filter-panel'); panel.open = true; panel.querySelector('summary').tabIndex = -1; $('ds-filter-float').append(panel); setPreparationState($('ds-preparing').dataset.state || 'hidden'); $('ds-view').hidden = false; $('ds-filter-close-action').hidden = false; overlay('ds-filter-overlay', true); };
   const closeFilters = async () => {
     const panel = $('ds-filter-panel'); panel.querySelector('summary').removeAttribute('tabindex'); $('ds-filter-home').append(panel); setPreparationState($('ds-preparing').dataset.state || 'hidden'); $('ds-view').hidden = false; $('ds-filter-close-action').hidden = true; overlay('ds-filter-overlay', false);
     return true;
@@ -1730,7 +1822,9 @@
         }).catch(error => {
           if (prepared?.token === token) message.textContent = error.message || `Unable to render ${chart.title || 'chart'}.`;
         });
-      } else message.textContent = `Unavailable source type: select a ${chart.source ? chart.source.toUpperCase() : 'supported'} CDR dataset.`;
+      } else message.textContent = chart.source
+        ? `No CDR ${chart.source[0].toUpperCase()}${chart.source.slice(1)} dataset has been selected for this chart.`
+        : 'No compatible CDR dataset has been selected for this chart.';
       const data = node('button','', 'ds-chart-data'); data.type = 'button'; data.title = 'View dataset'; data.setAttribute('aria-label', 'View dataset'); data.disabled = !chart.available; data.onclick = safe(async () => { await openChartDataset(chart); });
       const expand = node('button', '', 'ds-chart-expand'); expand.type = 'button'; expand.title = 'Expand chart'; expand.setAttribute('aria-label', 'Expand chart'); expand.disabled = !chart.available; expand.onclick = safe(async event => { event.stopPropagation(); await openExpandedChart(chart, renderedPayload); });
       card.ondblclick = safe(async event => {
@@ -1987,9 +2081,10 @@
         && Object.values(cached).every(item => item && typeof item === 'object' && typeof item.name === 'string') ? cached : {};
       if (Object.keys(dashboards).length) library();
     } catch (_) { dashboards = {}; }
-    dashboards = await api(); library(); restoreScroll(); await Promise.all([refreshDashboardStatuses(), refreshDashboardPptJobs()]);
+    dashboards = await api(); library(); restoreScroll();
+    void refreshDashboardStatuses();
+    void refreshDashboardPptJobs();
     if (dashboards[last]) await openDashboard(last);
-    restoreScroll();
   })();
   window.setInterval(refreshDashboardStatuses, 2000);
   window.setInterval(refreshDashboardPptJobs, 2000);

@@ -897,8 +897,6 @@
 <script>
 (() => {
   let refreshTimer = null;
-  const initialNotice = new URLSearchParams(window.location.search).get('workspace_notice') || '';
-  const shouldPollCacheClear = initialNotice.startsWith('Workspace cache clearing started.');
   const setWorkspaceStatus = (status, state, label) => {
     status.textContent = label;
     status.className = `workspace-status-pill workspace-status-${state}`;
@@ -946,13 +944,6 @@
         showInfoDialog('The workspace duplication has completed successfully.', {title: 'Duplication completed'});
       }
       if (deleted) showInfoDialog('The workspace has been deleted successfully.', {title: 'Workspace deleted'});
-      const cacheClearPending = (payload.pending_cache_clear_workspace_ids || []).length > 0;
-      const cacheClearCompleted = (payload.cleared_cache_workspace_ids || []).length > 0;
-      const operationPending = Boolean(document.querySelector('.workspace-status-duplicating, .workspace-status-clearing-cache, .workspace-status-deleting'));
-      if (!cacheClearPending && !cacheClearCompleted && !operationPending && refreshTimer !== null) {
-        window.clearInterval(refreshTimer);
-        refreshTimer = null;
-      }
     } catch (_) { /* keep the next interval tick alive */ }
   };
   const startPolling = () => {
@@ -962,9 +953,10 @@
       refreshTable();
     }, 5000);
   };
-  if (document.querySelector('.workspace-status-duplicating, .workspace-status-clearing-cache, .workspace-status-deleting') || shouldPollCacheClear) {
-    startPolling();
-  }
+  // Cache artifacts are written by Dashboard workers after this page loads.
+  // Keep the size column current even while no workspace lifecycle operation
+  // is active; the server invalidates its size snapshot on every cache write.
+  startPolling();
   window.addEventListener('dashboard-analytic:workspace-cache-clear-started', startPolling);
   window.addEventListener('dashboard-analytic:workspace-deletion-started', startPolling);
 })();

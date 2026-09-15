@@ -121,11 +121,11 @@ E2E Dashboards is the main analysis module and the complete template-driven work
 - Use automatic date bounds and synchronized default filters for Market, Operator, Vendor, Region, City, Campaign, RAT, Session Type and Call Status.
 - Resolve Region, City, RAT and other known fields through ordered source-column aliases, with the supported priority visible in a tooltip.
 - Add any selected-CDR column or applicable Auto-calculated Field as an extra filter.
-- Apply a temporary selection, save it as the Dashboard default, reload the saved selection or clear it. Pending changes offer Apply, Discard, Save or Cancel before viewing or exporting.
+- Apply changed filters, save them as the Dashboard default, reload the saved filters or clear them. Scope, CDRs and dates prepare automatically when viewing or exporting; pending filter changes offer Apply, Discard, Save or Cancel.
 
 ### Preparation and reuse
 
-The module prepares a **Filtered Universe** once and reuses it across every template chart. Small selections retain exact row identities; large selections use equivalent SQL predicates. Narrow projections, persisted selection snapshots and versioned Canvas models avoid rebuilding an unchanged Dashboard after reopening it or restarting the application. One global gate permits only one Dashboard dataset-preparation phase at a time. A foreground Apply Filters request interrupts automatic warm-up, runs as soon as any active dataset scan releases the gate and requeues the interrupted Dashboards afterwards; a cancelled chart-rendering batch never holds that data gate. Opening a workspace removes cache artifacts written by older application or cache-format versions.
+The module prepares a **Filtered Universe** once and reuses it across every template chart. Small selections retain exact row identities; large selections use equivalent SQL predicates. Narrow projections, persisted selection snapshots and versioned Canvas models avoid rebuilding an unchanged Dashboard after reopening it or restarting the application. One global gate permits only one Dashboard dataset-preparation phase at a time. Foreground preparation interrupts automatic warm-up, runs as soon as any active dataset scan releases the gate and verifies that every other saved Dashboard returns to the serial queue afterwards; a cancelled chart-rendering batch never holds that data gate. Opening a workspace removes cache artifacts written by older application or cache-format versions.
 
 Status cards distinguish data loading, queued data, chart rendering, queued charts, Ready, missing charts and failures. The floating background-task card shows the same work while users move between modules.
 

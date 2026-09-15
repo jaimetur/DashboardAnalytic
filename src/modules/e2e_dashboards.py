@@ -102,6 +102,7 @@ ADAPTATIVE_FILTER_FIELDS = (
 DASHBOARD_RENDER_CACHE_VERSION = 1
 DASHBOARD_SELECTION_CACHE_VERSION = 9
 DASHBOARD_SELECTION_ROW_LIMIT = 25_000
+DASHBOARD_SELECTION_CACHE_LIMIT = 128
 DASHBOARD_PROFILE_SELECTION_THRESHOLD = 100_000
 DASHBOARD_PROJECTION_CACHE_VERSION = 1
 DASHBOARD_PROJECTION_DISK_LIMIT = 6
@@ -720,8 +721,18 @@ def install_dashboard_routes(core):
     def list_dashboards(user=Depends(dashboard_user)):
         with lock:
             dashboards = read_dashboards(bound_repository())
-        for dashboard_id, definition in dashboards.items():
-            enqueue_prefetch(dashboard_id, definition, user)
+        # Listing the library is on the page's critical path. Restoring a
+        # persistent manifest for every Dashboard can involve validating many
+        # CDR revisions, so enqueue those warm-ups after returning the list.
+        # The opened Dashboard prepares or restores independently and is never
+        # held behind this maintenance work.
+        definitions = [(dashboard_id, dict(definition)) for dashboard_id, definition in dashboards.items()]
+
+        def enqueue_library_prefetches():
+            for dashboard_id, definition in definitions:
+                enqueue_prefetch(dashboard_id, definition, user)
+
+        Thread(target=enqueue_library_prefetches, daemon=True, name='e2e-dashboard-library-prefetch').start()
         return JSONResponse(
                 dashboards,
             headers={'Cache-Control': 'no-store, max-age=0, must-revalidate'},
@@ -1313,6 +1324,24 @@ def install_dashboard_routes(core):
             requested.update(definition.filters)
             requested.update(alias for aliases in FILTER_COLUMNS.values() for alias in aliases)
             requested.update(('event_start_time', 'Test_Start_Time', 'Timestamp', 'Date'))
+            # copy_dataset_rows_to_reporting correctly repairs incomplete
+            # columns, but its verification aggregates every requested field
+            # over each CDR.  Remember a successful validation for this exact
+            # source revision and requested-column set so a cache hit does not
+            # re-scan the complete Dataset Universe before using its cached
+            # filtered selection.
+            signature_payload = {
+                'schema': 1,
+                'datasets': [
+                    (row['id'], row.get('updated_at'), row.get('processed_at'), row.get('normalization_version'), row.get('row_count'))
+                    for row in selected
+                ],
+                'requested': sorted(identity(column) for column in requested),
+            }
+            signature = sha256(json.dumps(signature_payload, sort_keys=True, default=str).encode()).hexdigest()
+            signature_key = f'dashboard_filter_projection_v1_{kind}'
+            if task_repository.get_workspace_state(signature_key) == signature:
+                continue
             changed = False
             for row in selected:
                 # Existing rows can still have NULL values for fields added by
@@ -1336,6 +1365,7 @@ def install_dashboard_routes(core):
                 changed = True
             if changed:
                 task_repository.set_workspace_state(f'combined_reporting_updated_{kind}', core.now_iso())
+            task_repository.set_workspace_state(signature_key, signature)
 
     def persistent_selection_key(definition, task_repository, dimensions, selected_by_kind):
         versions = {
@@ -1570,7 +1600,8 @@ def install_dashboard_routes(core):
                 (json.dumps(options), json.dumps(row_counts), int(materialized), selection_id),
             )
             stale = connection.execute(
-                'SELECT id FROM dashboard_filter_selections ORDER BY last_accessed_at DESC, id DESC LIMIT -1 OFFSET 8'
+                'SELECT id FROM dashboard_filter_selections ORDER BY last_accessed_at DESC, id DESC LIMIT -1 OFFSET ?',
+                (DASHBOARD_SELECTION_CACHE_LIMIT,),
             ).fetchall()
             for row in stale:
                 connection.execute('DELETE FROM dashboard_filter_selection_rows WHERE selection_id = ?', (row['id'],))
@@ -1612,12 +1643,17 @@ def install_dashboard_routes(core):
             raise HTTPException(400, f'The selected CDRs do not contain the {field_name} field.')
         return sorted(values, key=str.casefold)
 
-    def build_preview(definition, user, *, workspace: str | None = None, cancelled=None):
+    def build_preview(definition, user, *, workspace: str | None = None, cancelled=None, progress=None):
         def ensure_not_cancelled():
             if callable(cancelled) and cancelled():
                 raise RuntimeError('Dashboard preparation cancelled.')
 
+        def report(percent, detail):
+            if callable(progress):
+                progress(percent, detail)
+
         workspace = workspace or workspace_key()
+        report(5, 'Validating Dashboard sources')
         ensure_not_cancelled()
         task_repository = Repository(Path(workspace), core.repository.global_db_path)
         entries = validate(definition, task_repository)
@@ -1627,8 +1663,10 @@ def install_dashboard_routes(core):
             kind: sum(int(dataset.get('row_count') or 0) for dataset in selected)
             for kind, selected in selected_by_kind.items()
         }
+        report(20, 'Preparing Dashboard source columns')
         ensure_filter_projection(definition, task_repository, dimensions, selected_by_kind, entries)
         ensure_not_cancelled()
+        report(45, 'Resolving Dataset Universe dates')
         date_bounds = selected_date_bounds(task_repository, selected_by_kind)
         apply_selected_date_bounds(definition, date_bounds)
         selected_dataset_ids = {dataset_id for ids in definition.datasets.values() for dataset_id in ids}
@@ -1644,9 +1682,11 @@ def install_dashboard_routes(core):
             and str(definition.date_from) == date_bounds['min']
             and str(definition.date_to) == date_bounds['max']
         )
+        report(60, 'Building filtered Dashboard selection')
         selection_id, selection_key, selection_materialized, options, row_counts, rows_exact = materialize_selection(
             definition, task_repository, dimensions, selected_by_kind, fields, use_profile_options=use_profile_options,
         )
+        report(82, 'Preparing Dashboard slides')
         full_date_range = bool(
             date_bounds
             and str(definition.date_from) == date_bounds['min']
@@ -1705,10 +1745,13 @@ def install_dashboard_routes(core):
         # Build or restore the narrow source projections while the task is
         # still in its data-preparation phase. Chart rendering then reads a
         # small indexed table instead of paying this one-time cost per chart.
-        for kind in selected_by_kind:
+        projection_kinds = tuple(selected_by_kind)
+        for position, kind in enumerate(projection_kinds, start=1):
             ensure_not_cancelled()
+            report(68 + round((position - 1) * 14 / max(len(projection_kinds), 1)), f'Preparing {kind.title()} Dashboard projection')
             ensure_projection(snapshot, kind, task_repository)
         ensure_not_cancelled()
+        report(82, 'Dashboard dataset is ready')
         # Canvas inputs are chart work. Leave them to the warm-up queue so an
         # applied selection becomes usable as soon as its compact projections
         # are ready instead of reading and filtering the CDR once per chart.
@@ -1746,6 +1789,7 @@ def install_dashboard_routes(core):
             temporary = manifest_path.with_suffix(f'.{uuid4().hex}.tmp')
             temporary.write_text(json.dumps(manifest, separators=(',', ':')), encoding='utf-8')
             temporary.replace(manifest_path)
+            core.invalidate_workspace_size_cache(Path(workspace).parent)
         except OSError:
             pass
 
@@ -1795,6 +1839,43 @@ def install_dashboard_routes(core):
                 snapshots.popitem(last=False)
         return {**payload, 'token': token}
 
+    def preview_cache_identity(definition):
+        """Return the parts of a Dashboard definition that affect its prepared data."""
+        identity_definition = definition.model_dump(mode='json')
+        identity_definition.pop('name', None)
+        identity_definition.pop('slide_comments', None)
+        return identity_definition
+
+    def restore_matching_preview_manifest(workspace: str, dashboard_id: str, definition: DashboardDefinition):
+        """Restore a persistent preview by definition, including non-default session universes."""
+        task_repository = Repository(Path(workspace), core.repository.global_db_path)
+        requested = definition.model_copy(deep=True)
+        try:
+            apply_selected_date_bounds(requested, selected_date_bounds(
+                task_repository, selected_sources(requested, task_repository),
+            ))
+            requested_identity = preview_cache_identity(requested)
+            for manifest_path in preview_manifest_cache_dir(workspace).glob('*.json'):
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+                    if (
+                        manifest.get('version') != DASHBOARD_PREVIEW_MANIFEST_VERSION
+                        or manifest.get('dashboard_id') != dashboard_id
+                        or not isinstance(manifest.get('fingerprint'), str)
+                    ):
+                        continue
+                    stored_definition = DashboardDefinition.model_validate(manifest['definition'])
+                    if preview_cache_identity(stored_definition) != requested_identity:
+                        continue
+                    restored = restore_preview_manifest(workspace, dashboard_id, manifest['fingerprint'])
+                    if restored is not None:
+                        return restored
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError, OSError):
+                    continue
+        except (ValueError, sqlite3.Error):
+            return None
+        return None
+
     @app.post('/api/e2e-dashboards/prepare')
     def prepare(
         definition: DashboardDefinition,
@@ -1833,14 +1914,22 @@ def install_dashboard_routes(core):
                 'id': preparation_id, 'workspace': workspace, 'name': definition.name,
                 'dashboard_id': dashboard_id,
                 'rendering_only': rendering_only, 'cancellation': cancellation,
+                'progress': 0, 'detail': 'Starting Dashboard preparation',
             }
         try:
             def preparation_cancelled():
                 return bool(cancellation['requested'])
 
+            def update_preparation_progress(percent, detail):
+                with lock:
+                    task = direct_preparation_tasks.get(preparation_id)
+                    if task is not None:
+                        task.update(progress=percent, detail=detail)
+
             with dashboard_work_gate:
                 preview = build_preview(
                     definition, user, workspace=workspace, cancelled=preparation_cancelled,
+                    progress=update_preparation_progress,
                 )
             if dashboard_id:
                 enqueue_prefetch(
@@ -1859,17 +1948,40 @@ def install_dashboard_routes(core):
         finally:
             with lock:
                 direct_preparation_tasks.pop(preparation_id, None)
-            requeued = set()
-            for deferred_id, deferred_definition, deferred_user, deferred_workspace in deferred_prefetches:
-                deferred_key = (deferred_workspace, deferred_id)
-                if not deferred_id or deferred_key in requeued or (
-                    dashboard_id == deferred_id and workspace == deferred_workspace
-                ):
-                    continue
-                requeued.add(deferred_key)
-                enqueue_prefetch(
-                    deferred_id, deferred_definition, deferred_user, workspace=deferred_workspace,
-                )
+            def restore_deferred_prefetches():
+                requeued = set()
+                for deferred_id, deferred_definition, deferred_user, deferred_workspace in deferred_prefetches:
+                    deferred_key = (deferred_workspace, deferred_id)
+                    if not deferred_id or deferred_key in requeued or (
+                        dashboard_id == deferred_id and workspace == deferred_workspace
+                    ):
+                        continue
+                    requeued.add(deferred_key)
+                    enqueue_prefetch(
+                        deferred_id, deferred_definition, deferred_user, workspace=deferred_workspace,
+                    )
+                # A foreground request may arrive after an older implementation
+                # removed a warm-up from the in-memory queue. Re-read the saved
+                # definitions so every other Dashboard is restored to the serial
+                # warm-up queue, while the current Dashboard continues through
+                # its already-returned prepared preview.
+                if not dashboard_id:
+                    return
+                try:
+                    task_repository = Repository(Path(workspace), core.repository.global_db_path)
+                    for saved_id, saved_definition in read_dashboards(task_repository).items():
+                        saved_key = (workspace, str(saved_id))
+                        if str(saved_id) == dashboard_id or saved_key in requeued:
+                            continue
+                        requeued.add(saved_key)
+                        enqueue_prefetch(
+                            str(saved_id), saved_definition, user, workspace=workspace,
+                        )
+                except (OSError, sqlite3.Error, json.JSONDecodeError):
+                    pass
+            # Returning the completed selection must not wait for unrelated
+            # manifest lookups or warm-up queue reconstruction.
+            Thread(target=restore_deferred_prefetches, daemon=True, name='e2e-dashboard-prefetch-requeue').start()
 
     @app.post('/api/e2e-dashboards/filter-options')
     def filter_options(request: DashboardFilterOptionsRequest, user=Depends(dashboard_user)):
@@ -1888,16 +2000,22 @@ def install_dashboard_routes(core):
                 raise HTTPException(410, 'Dashboard preview expired. Refresh the Dashboard.')
             return {**snapshot.payload, 'token': token}
 
-    @app.get('/api/e2e-dashboards/prefetched/{dashboard_id}')
-    def prefetched_dashboard(dashboard_id: str, user=Depends(dashboard_user)):
+    @app.get('/api/e2e-dashboards/preparation-progress/{preparation_id}')
+    def preparation_progress(preparation_id: str, user=Depends(dashboard_user)):
         workspace = workspace_key()
-        task_repository = bound_repository()
         with lock:
-            dashboards = read_dashboards(task_repository)
-            raw_definition = dashboards.get(dashboard_id)
-            if not isinstance(raw_definition, dict):
-                raise HTTPException(404, 'Dashboard not found.')
-            raw_definition = runtime_dashboard_definition(raw_definition, task_repository)
+            task = direct_preparation_tasks.get(preparation_id)
+            if task is None or task.get('workspace') != workspace:
+                raise HTTPException(404, 'Dashboard preparation is no longer active.')
+            return {
+                'progress': task.get('progress', 0),
+                'detail': task.get('detail') or 'Preparing Dashboard dataset',
+            }
+
+    def prefetched_dashboard_response(dashboard_id: str, definition: DashboardDefinition, user):
+        workspace = workspace_key()
+        with lock:
+            raw_definition = definition.model_dump(mode='json')
             fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
             # Warm-up jobs are shared by every permitted user of the
             # workspace.  Their snapshot owner is the system user (`*`), so
@@ -1917,10 +2035,35 @@ def install_dashboard_routes(core):
             # 409 until that queue position starts.
             token = str(job.get('token') or '') if job and job.get('status') in {'queued', 'processing', 'ready'} else ''
             snapshot = snapshots.get(token)
-            if not token or snapshot is None or snapshot.owner not in {user.username, '*'}:
-                raise HTTPException(409, 'Dashboard preparation is still running.')
-            snapshots.move_to_end(token)
-            return {**snapshot.payload, 'token': token}
+            if token and snapshot is not None and snapshot.owner in {user.username, '*'}:
+                snapshots.move_to_end(token)
+                return {**snapshot.payload, 'token': token}
+        # Jobs and snapshots are intentionally in-memory, but this manifest is
+        # shared, revision-validated and survives server restarts.  Restore it
+        # before asking a user to prepare the same universe again.
+        restored = restore_matching_preview_manifest(workspace, dashboard_id, definition)
+        if restored is not None:
+            enqueue_prefetch(dashboard_id, definition.model_dump(mode='json'), user,
+                             workspace=workspace, prepared_preview=restored)
+            return restored
+        raise HTTPException(409, 'Dashboard preparation is still running.')
+
+    @app.get('/api/e2e-dashboards/prefetched/{dashboard_id}')
+    def prefetched_dashboard(dashboard_id: str, user=Depends(dashboard_user)):
+        task_repository = bound_repository()
+        with lock:
+            raw_definition = read_dashboards(task_repository).get(dashboard_id)
+            if not isinstance(raw_definition, dict):
+                raise HTTPException(404, 'Dashboard not found.')
+            definition = DashboardDefinition.model_validate(runtime_dashboard_definition(raw_definition, task_repository))
+        return prefetched_dashboard_response(dashboard_id, definition, user)
+
+    @app.post('/api/e2e-dashboards/prefetched/{dashboard_id}')
+    def prefetched_dashboard_for_definition(dashboard_id: str, definition: DashboardDefinition, user=Depends(dashboard_user)):
+        with lock:
+            if dashboard_id not in read_dashboards(bound_repository()):
+                raise HTTPException(404, 'Dashboard not found.')
+        return prefetched_dashboard_response(dashboard_id, definition, user)
 
     def source_spec(snapshot, kind, task_repository):
         selected = core._optional_reporting_datasets(
@@ -2099,6 +2242,7 @@ def install_dashboard_routes(core):
                     connection.execute('DELETE FROM projection_cache WHERE cache_key = ?', (stale_projection['cache_key'],))
                 ensure_snapshot_not_cancelled(snapshot)
                 connection.commit()
+                core.invalidate_workspace_size_cache(Path(snapshot.workspace).parent)
             except Exception:
                 connection.rollback()
                 try:
@@ -2559,6 +2703,7 @@ def install_dashboard_routes(core):
                 cached_models = sorted(model_dir.glob('*.json'), key=lambda path: path.stat().st_mtime, reverse=True)
                 for stale in cached_models[DASHBOARD_CHART_MODEL_DISK_LIMIT:]:
                     stale.unlink(missing_ok=True)
+                core.invalidate_workspace_size_cache(Path(snapshot.workspace).parent)
             except OSError:
                 pass
         with lock:
@@ -2721,7 +2866,8 @@ def install_dashboard_routes(core):
                 'restoring_cached_models': False, 'generation': generation, 'cancel_requested': False, 'priority_indexes': [],
                 'task_id': f'dashboard-prefetch:{dashboard_id}' if prepared_preview is None else f'dashboard-prefetch:{dashboard_id}:{fingerprint[:12]}',
                 'created_at': monotonic(), 'started_at': datetime.now(timezone.utc).timestamp(),
-                'raw_definition': dict(raw_definition), 'user': user}
+                'raw_definition': dict(raw_definition), 'user': user,
+                'progress': 0, 'detail': 'Queued'}
             if restored_preview is not None:
                 total = sum(
                     1 for slide in restored_preview['slides'] for chart in slide['charts'] if chart['available']
@@ -2753,9 +2899,15 @@ def install_dashboard_routes(core):
                                 or job.get('generation') != prefetch_generation.get(workspace, 0)
                             )
 
+                    def update_warmup_progress(percent, detail):
+                        with lock:
+                            if not job.get('cancel_requested'):
+                                job.update(progress=percent, detail=detail)
+
                     with dashboard_work_gate:
                         preview = build_preview(
                             definition, user, workspace=workspace, cancelled=preparation_cancelled,
+                            progress=update_warmup_progress,
                         )
                 persist_preview_manifest(workspace, dashboard_id, fingerprint, preview['token'])
                 charts = [chart['index'] for slide in preview['slides'] for chart in slide['charts'] if chart['available']]
@@ -2763,6 +2915,8 @@ def install_dashboard_routes(core):
                     preview_snapshot = snapshots.get(preview['token'])
                     job.update(
                         token=preview['token'], total=len(charts),
+                        progress=100 if not charts else 82,
+                        detail='Rendering Dashboard charts' if charts else 'Dashboard dataset is ready',
                         selection_key=preview_snapshot.selection_key if preview_snapshot else '',
                         definition=preview_snapshot.definition.model_dump(mode='json') if preview_snapshot else raw_definition,
                         model_paths=snapshot_canvas_model_paths(preview_snapshot) if preview_snapshot else [],
@@ -2801,6 +2955,8 @@ def install_dashboard_routes(core):
                             future.result()
                             with lock:
                                 job['completed'] += 1
+                                job['progress'] = round(82 + job['completed'] * 18 / max(job['total'], 1))
+                                job['detail'] = f'{job["completed"]} of {job["total"]} Canvas models'
                 with lock:
                     if job.get('cancel_requested') or job.get('generation') != prefetch_generation.get(workspace, 0):
                         job['status'] = 'cancelled'
@@ -2985,10 +3141,10 @@ def install_dashboard_routes(core):
                         'label': 'Rendering Dashboard Charts' if job['total'] else 'Preparing Dashboard dataset',
                         'detail': (
                             f'{job["completed"]} of {job["total"]} Canvas models'
-                            if job['total'] else 'Preparing filtered Dashboard selection'
+                            if job['total'] else str(job.get('detail') or 'Preparing filtered Dashboard selection')
                         ),
                         'started_at': job.get('started_at'),
-                        'progress': round(job['completed'] * 100 / job['total']) if job['total'] else None,
+                        'progress': round(job['completed'] * 100 / job['total']) if job['total'] else job.get('progress', 0),
                         'stop_task_id': f'dashboard-prepare:{job["task_id"]}',
                         'stop_url': f'/api/background-tasks/{workspace.id}/stop',
                     })
@@ -3010,9 +3166,9 @@ def install_dashboard_routes(core):
                 'detail': (
                     'Rendering charts with the current Dashboard scope'
                     if task.get('rendering_only')
-                    else 'Building filtered Dashboard selection'
+                    else str(task.get('detail') or 'Building filtered Dashboard selection')
                 ),
-                'progress': None,
+                'progress': task.get('progress', 0),
                 'stop_task_id': f'dashboard-prepare:{task["id"]}',
                 'stop_url': f'/api/background-tasks/{workspace.id}/stop',
             } for task in direct_tasks)

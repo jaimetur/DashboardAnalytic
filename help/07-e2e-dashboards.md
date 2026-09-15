@@ -28,7 +28,7 @@ The last open Dashboard and page scroll position are remembered in the browser s
 
 ## Dashboard Datasets & Filters
 
-The panel separates the comparison scope and selected universe from default and additional filters. **Unapplied filters** and **Unsaved filters** apply only to the filters on the right; changing Scope, CDRs or dates can require preparation but never produces those badges.
+The panel separates the comparison scope and selected universe under **Select Dataset Universe** from the default and additional filters under **Select Dataset Filters**. **Unapplied filters** and **Unsaved filters** apply only to the filters on the right; changing Scope, CDRs or dates can require preparation but never produces those badges or enables Apply Filters/Save Filters.
 
 ### Dashboard Scope
 
@@ -72,7 +72,7 @@ The circular `×` removes an additional filter or hides a default filter after c
 
 ### Apply, Save, Clear and Reload
 
-- **Apply Filters** prepares the current selection without changing the Dashboard defaults.
+- **Apply Filters** applies changed filters without changing the Dashboard defaults. It remains disabled for changes limited to Scope, CDRs or dates.
 - **Save Filters** applies and persists adaptive filters, additional fields and hidden filters.
 - **Clear Filters** removes adaptive-filter restrictions without changing the Dataset Universe.
 - **Reload Saved Filters** restores only the persisted filters and keeps the current Scope, CDRs and dates.
@@ -90,15 +90,15 @@ If View Dashboard or Generate PPT is requested with unapplied adaptive-filter ch
 
 Combined CDR tables are the source of record. Selections up to 25,000 rows can store exact `(dataset_id, source_row_id)` references; larger selections use SQL predicates. A narrow SQLite projection contains only fields required by the Dashboard, filters and template.
 
-Preparation is debounced and stale responses are ignored. A new request replaces the current one; an equivalent cached request restores immediately. A global gate allows only one Dashboard dataset-preparation phase to run at a time. Applying filters to the visible Dashboard interrupts automatic warm-up, waits only for an active dataset scan, runs the visible Dashboard first and then requeues the interrupted Dashboards. A cancelled chart-rendering batch does not retain the data gate or delay the foreground preparation.
+Preparation is debounced and stale responses are ignored. A new request replaces the current one; an equivalent cached request restores immediately. A global gate allows only one Dashboard dataset-preparation phase to run at a time. Foreground preparation for the visible Dashboard interrupts automatic warm-up, waits only for an active dataset scan, runs the visible Dashboard first and then verifies and requeues every other saved Dashboard. A cancelled chart-rendering batch does not retain the data gate or delay the foreground preparation.
 
-Manage Dashboards reports Loading data, Data queued, Rendering charts, Charts queued, Ready, Missing charts or Failed. The floating background-task card groups data preparation and chart rendering under the Dashboard name. Queued and running Dashboard tasks provide an **Interrupt task** action. View Dashboard and PPT actions remain disabled until their data and required models are ready.
+Manage Dashboards reports Loading data, Data queued, Rendering charts, Charts queued, Ready, Missing charts or Failed. The floating background-task card groups data preparation and chart rendering under the Dashboard name. Dataset preparation reports percentage progress through source-column, universe-selection and slide phases; chart rendering completes the final percentage from 82% to 100%. The same live progress bar appears in the yellow preparation notice below Dashboard Datasets & Filters and in the centred viewer notice. Queued and running Dashboard tasks provide an **Interrupt task** action. View Dashboard opens immediately after a universe change and centres a yellow **Preparing Dashboard dataset** card until the updated slides replace it. PPT actions remain unavailable until their required data and models are ready.
 
 `.dashboard-data-cache` stores bounded analytical projections, reusable preview manifests, Canvas chart models and legacy PIL artifacts. Cache keys include dataset revisions, required fields, selection, scope and renderer version. Opening a workspace removes artifacts from older application/cache versions while retaining current ones. Workspace Clear cache cancels active warming and removes derived cache only; definitions, CDRs, templates and generated jobs remain intact.
 
 ## View Dashboard
 
-Use View Dashboard or the library eye action. A centered preparation card remains until updated slides and charts are ready. The viewer uses approximately 96% of the viewport and preserves the template's 16:9 layout.
+Use View Dashboard or the library eye action. View Dashboard remains available from the floating Adaptative Filters panel; after resolving changes it closes that panel and returns to the viewer. A centered preparation card remains until updated slides and charts are ready. The viewer uses approximately 96% of the viewport and preserves the template's 16:9 layout.
 
 ### Slides and navigation
 
@@ -165,6 +165,7 @@ Dashboard export uses a versioned ZIP accepted by Admin Import. It contains the 
 
 - **View Dashboard or Generate PPT is disabled**: inspect the status badge and floating preparation task.
 - **A filter has no values**: verify its field/aliases exist and other filters leave matching rows.
+- **A chart says that no CDR dataset is selected**: select at least one CDR of the type required by that chart. The chart remains intentionally empty when its source type is absent from the Dataset Universe.
 - **A chart is empty**: compare Dataset Universe, Filtered Universe and chart rows; then check NR Mode and the template row in Administration.
 - **Multivendor is unavailable**: persist Vendor mapping for every selected CDR.
 - **Preparation is failed or remains queued**: inspect App Logs, retry and clear only the workspace Dashboard cache if derived data is invalid.

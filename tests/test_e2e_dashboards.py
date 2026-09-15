@@ -129,13 +129,16 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '"Region": ["Region", "G_Level_2", "G Level 2"]' in page.text
     assert '>Apply Filters<' in page.text
     assert page.text.index('>Apply Filters<') < page.text.index('>Save Filters<')
-    assert 'id="ds-apply-filters" title="Apply the current universe and filters without saving filters" disabled' in page.text
+    assert 'id="ds-apply-filters" title="Apply the current Dashboard filters without saving them" disabled' in page.text
     assert 'id="ds-refresh"' not in page.text
     assert '>Import Dashboard<' in page.text
     assert 'Total Dashboards: 0' in page.text
     assert '>Dashboard Datasets & Filters<' in page.text
     assert '>Dataset Universe<' in page.text
     assert '>Select Dataset Universe<' in page.text
+    assert '>Select Dataset Filters<' in page.text
+    assert page.text.index('>Select Dataset Universe<') < page.text.index('>Dashboard Scope<')
+    assert page.text.index('>Select Dataset Filters<') < page.text.index('>Default Filters<')
     assert '>Dashboard Scope<' in page.text
     assert '>Select Comparison Scope<' in page.text
     assert page.text.index('class="ds-scope-control"') < page.text.index('id="ds-sources"')
@@ -161,7 +164,12 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-preparing"' in page.text
     assert 'id="ds-preparing-title"' in page.text
     assert '>Preparing Dashboard dataset<' in page.text
+    assert 'id="ds-preparing-progress"' in page.text
+    assert 'id="ds-preparing-progress-bar"' in page.text
+    assert 'id="ds-preparing-progress-label">0%</span>' in page.text
     assert 'id="ds-viewer-preparing"' in page.text
+    assert 'id="ds-viewer-preparing-progress"' in page.text
+    assert 'id="ds-viewer-preparing-detail"' in page.text
     assert '>Auto-Calculated Fields<' in page.text
     assert 'class="ds-viewer-icon-action ds-viewer-refresh-action"' in page.text
     assert 'id="ds-chart-expanded-overlay"' in page.text
@@ -197,7 +205,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "savedDefinition = definitionFingerprint(dashboards[id]); dirty = false;" in dashboard_script
     assert "await warmDashboardModels();" not in dashboard_script
     assert "Rendering Dashboard Charts" in dashboard_script
-    assert "overlay('ds-viewer', true);\n      renderSlide();" in dashboard_script
+    assert "overlay('ds-viewer', true);\n    if (needsPreparation) await prepare();" in dashboard_script
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
     app_styles = (Path(__file__).parents[1] / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')
     assert '.multiselect-option[hidden], .multiselect-group-label[hidden] { display: none !important; }' in app_styles
@@ -277,7 +285,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "return 'saved';" in dashboard_script
     assert 'restoreAppliedFilterSelection();' in dashboard_script
     assert 'const openActiveDashboardViewer = async () =>' in dashboard_script
-    assert "if (!prepared || preparationStateFingerprint(definition) !== appliedFilterState) await prepare();" in dashboard_script
+    assert "if (!$('ds-filter-overlay').hidden) await closeFilters();" in dashboard_script
+    assert 'const needsPreparation = !prepared || preparationStateFingerprint(definition) !== appliedFilterState;' in dashboard_script
+    assert "setPreparationState('preparing', needsDataPreparation ? 'data' : 'rendering');" in dashboard_script
     assert "bind('ds-view', openActiveDashboardViewer);" in dashboard_script
     assert "const filterDecision = id === activeId ? await resolveUnappliedFilterChanges() : 'unchanged';" in dashboard_script
     assert "const host = node('label', label, 'ds-source-filter')" in dashboard_script
@@ -287,7 +297,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'await prepare();' in dashboard_script
     assert 'if (next.length === current.length && next.every(value => current.includes(value))) return;' in dashboard_script
     assert 'function filterChanged() {' in dashboard_script
-    assert "status('Universe or filter changes are ready to apply.');" in dashboard_script
+    assert "? 'Filter changes are ready to apply.'" in dashboard_script
+    assert ": 'Dataset Universe changes will be prepared when View Dashboard or Generate PPT is selected.'" in dashboard_script
     assert 'const cached = preparedPayloads.get(preparedPayloadKey(activeId, preparedStateFingerprint(definition)));' in dashboard_script
     assert 'if (preparing && cached && currentFilterState !== preparingFilterState)' in dashboard_script
     assert "status('Restored the previously prepared filters.');" in dashboard_script
@@ -328,8 +339,13 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "renderDashboardPptJobs(jobs, newlyReady[0]?.id || '');" in dashboard_script
     assert "const previous = String(preferredJobId || select.value);" in dashboard_script
     dashboard_module = (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
+    assert 'for saved_id, saved_definition in read_dashboards(task_repository).items()' in dashboard_module
     assert "'dashboard_name': task['name']," in dashboard_module
     assert "'label': 'Rendering Dashboard Charts' if task.get('rendering_only') else 'Preparing Dashboard dataset'," in dashboard_module
+    assert "'progress': task.get('progress', 0)," in dashboard_module
+    assert "@app.get('/api/e2e-dashboards/preparation-progress/{preparation_id}')" in dashboard_module
+    assert "report(60, 'Building filtered Dashboard selection')" in dashboard_module
+    assert "job['progress'] = round(82 + job['completed'] * 18 / max(job['total'], 1))" in dashboard_module
     assert 'direct_preparation_tasks: dict[str, dict] = {}' in dashboard_module
     assert "preparation_id: str | None = None," in dashboard_module
     assert "'label': 'Rendering Dashboard Charts' if job['total'] else 'Preparing Dashboard dataset'," in dashboard_module
@@ -337,14 +353,14 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "if (preparingFilterState === requestedFilterState) return preparing;" in dashboard_script
     assert "if (backgroundPreparationToken === preparationToken) dismissPreparationStatus();" in dashboard_script
     assert "bind('ds-apply-filters', async () => {" in dashboard_script
-    assert "if (!definition || preparationStateFingerprint(definition) === appliedFilterState) return;" in dashboard_script
+    assert "if (!hasUnappliedFilterChanges()) return;" in dashboard_script
     assert "api(`/prepare${params.size ? `?${params}` : ''}`,'POST',definition,controller.signal)" in dashboard_script
     assert "window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));" in dashboard_script
     assert "title: 'Unsaved Dashboard filters'" in dashboard_script
     assert "confirmLabel: 'Save Filters'" in dashboard_script
     assert "secondaryLabel: 'Discard'" in dashboard_script
     assert "window.location.assign(target.href);" in dashboard_script
-    assert "$('ds-apply-filters').disabled = !definition || preparationStateFingerprint(definition) === appliedFilterState || filterActionBusy;" in dashboard_script
+    assert "$('ds-apply-filters').disabled = !hasUnappliedFilterChanges() || filterActionBusy;" in dashboard_script
     assert "const dashboardStatuses = new Map();" in dashboard_script
     assert 'const dashboardPreparationTokens = new Map();' in dashboard_script
     assert "if (!dashboardPreparationTokens.has(id)) dashboardStatuses.set(id, value);" in dashboard_script
@@ -386,6 +402,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '.e2e-dashboards .ds-dashboard-view{background:linear-gradient(145deg,#167957,#29ae7d)' in dashboard_css
     assert '.ds-dashboard-status-loading-data{border-color:#d3aa45;background:#fff1c9;color:#77570a}' in dashboard_css
     assert '.ds-dashboard-status-data-queued,.ds-dashboard-status-charts-queued{border-color:#aaa3b2;background:#f0edf2;color:#655e6c}' in dashboard_css
+    assert '.ds-filter-groups{display:grid;grid-template-rows:max-content max-content minmax(0,1fr);gap:14px}' in dashboard_css
+    assert '.ds-default-filter-panel{border-color:#afd1e8;background:#f1f8fd}' in dashboard_css
     assert "d='M12 2v10'" in dashboard_css
     assert "bind('ds-viewer-refresh',prepare);" in dashboard_script
     assert "function resetAutomaticDatesForDatasetChange()" in dashboard_script
@@ -401,11 +419,21 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'const preparedPayloads = new Map();' in dashboard_script
     assert 'const restoreRememberedPrepared = async id =>' in dashboard_script
     assert 'const inMemory = preparedPayloads.get(preparedPayloadKey(id, fingerprint));' in dashboard_script
-    assert 'if (await restoreRememberedPrepared(activeId))' in dashboard_script
+    assert 'if (await restorePrepared(activeId))' in dashboard_script
     assert 'if (inMemory?.fingerprint === fingerprint) { applyPreparedPayload(inMemory.payload); return true; }' in dashboard_script
-    assert "api(`/prefetched/${encodeURIComponent(id)}`)" in dashboard_script
+    assert "api(`/prefetched/${encodeURIComponent(id)}`, 'POST', definition)" in dashboard_script
+    assert 'if (error.status === 409) return false;' in dashboard_script
+    assert 'No CDR ${chart.source[0].toUpperCase()}${chart.source.slice(1)} dataset has been selected for this chart.' in dashboard_script
     assert "api(`/prepared/${encodeURIComponent(cachedEntry.token)}`)" in dashboard_script
-    assert 'if (!await restorePrepared(id)) await prepare();' in dashboard_script
+    assert 'const monitorPreparationProgress = token =>' in dashboard_script
+    assert 'label.textContent = `${detail} · ${percent}%`;' in dashboard_script
+    assert 'api(`/preparation-progress/${encodeURIComponent(token)}`)' in dashboard_script
+    assert 'monitorPreparationProgress(preparationToken);' in dashboard_script
+    assert "status(''); await prepare();" in dashboard_script
+    assert "setPreparationState('preparing', needsDataPreparation ? 'data' : 'rendering');" in dashboard_script
+    assert 'void refreshDashboardStatuses();' in dashboard_script
+    assert 'void refreshDashboardPptJobs();' in dashboard_script
+    assert 'await Promise.all([refreshDashboardStatuses(), refreshDashboardPptJobs()]);' not in dashboard_script
     assert 'savedDefinition = definitionFingerprint(definition); updateDirtyState();\n    // Date defaults may be derived' in dashboard_script
     assert 'with the disabled Apply and Save buttons.\n    sources(); facets();' in dashboard_script
     assert "setPreparationState('preparing');" in dashboard_script
@@ -449,6 +477,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-filter-close-action"' in page.text
     assert '#ds-filter-close-action[hidden]{display:none!important}' in dashboard_css
     assert "bind('ds-filter-close-action', closeFilters);" in dashboard_script
+    assert "$('ds-view').hidden = false; $('ds-filter-close-action').hidden = false; overlay('ds-filter-overlay', true);" in dashboard_script
     assert '#ds-add-filter::before' in dashboard_css
     assert '#ds-ppt-jobs-delete-all::before' in dashboard_css
     assert '.e2e-dashboards .ds-ppt-charts-filters::before{' in dashboard_css
