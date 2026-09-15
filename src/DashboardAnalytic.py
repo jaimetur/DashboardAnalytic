@@ -49,6 +49,7 @@ DEFAULT_TRANSFER_PORT = 7278
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
+from src.modules.column_names import column_identity, resolve_column_name
 from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
@@ -189,7 +190,7 @@ LEGACY_VENDOR_MAPPING_FAILURE_MARKERS = (
     'assign vendors',
     'duplicate column name: vendor_2',
 )
-DATASET_NORMALIZATION_VERSION = 6
+DATASET_NORMALIZATION_VERSION = 7
 MAPPING_PREVIEW_NORMALIZED_COLUMNS = frozenset({
     'dataset_kind', 'source_file', 'source_sheet', 'campaign', 'market', 'period', 'campaign_year', 'campaign_quarter',
     'operator', 'session_type', 'test_name', 'direction', 'region', 'city', 'vendor', 'status',
@@ -329,7 +330,7 @@ def atomic_write_template(path: Path, content: bytes) -> None:
 
 
 def _normalise_catalogue_dimension_name(value: str) -> str:
-    return re.sub(r'[^a-z0-9]+', '', str(value).casefold())
+    return column_identity(value)
 
 
 def default_calculated_dimensions() -> list[dict[str, object]]:
@@ -1201,7 +1202,7 @@ def catalogue_editor_columns(datasets: Iterable[Any] | None = None, calculated_d
             if source in dimension.sources
         }
         for value in sorted(values | calculated, key=lambda item: ("_" in item, item.casefold())):
-            unique.setdefault(re.sub(r'[^a-z0-9]+', '', value.casefold()), value)
+            unique.setdefault(column_identity(value), value)
         result[source] = sorted(unique.values(), key=str.casefold)
     return result
 
@@ -6933,6 +6934,25 @@ def _preview_rows(frame: pd.DataFrame) -> list[dict[str, str]]:
     ]
 
 
+def _apply_preview_column_filters(
+    frame: pd.DataFrame, column_filters: dict[str, Iterable[str]],
+) -> pd.DataFrame:
+    result = frame
+    for requested, values in column_filters.items():
+        column = resolve_column_name(result.columns, requested)
+        if column is None:
+            continue
+        accepted = {str(value).strip().casefold() for value in values}
+        if not accepted:
+            return result.iloc[0:0]
+        result = result[
+            result[column].map(
+                lambda value: '' if pd.isna(value) else str(value).strip().casefold()
+            ).isin(accepted)
+        ]
+    return result
+
+
 def _dataset_preview_request(payload: Any, available_columns: list[str]) -> tuple[int, dict[str, list[str]], str | None]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='Invalid preview request.')
@@ -6943,16 +6963,16 @@ def _dataset_preview_request(payload: Any, available_columns: list[str]) -> tupl
     raw_filters = payload.get('column_filters', {})
     if not isinstance(raw_filters, dict):
         raise HTTPException(status_code=400, detail='Invalid column filters.')
-    allowed = set(available_columns)
-    filters = {
-        str(column): [str(value) for value in values]
-        for column, values in raw_filters.items()
-        if column in allowed and isinstance(values, list)
-    }
+    filters: dict[str, list[str]] = {}
+    for column, values in raw_filters.items():
+        resolved = resolve_column_name(available_columns, column)
+        if resolved is not None and isinstance(values, list):
+            filters[resolved] = [str(value) for value in values]
     filter_column = payload.get('filter_column')
-    if filter_column is not None and filter_column not in allowed:
+    resolved_filter_column = resolve_column_name(available_columns, filter_column) if filter_column is not None else None
+    if filter_column is not None and resolved_filter_column is None:
         raise HTTPException(status_code=400, detail='Invalid filter column.')
-    return page, filters, str(filter_column) if filter_column is not None else None
+    return page, filters, resolved_filter_column
 
 
 @app.get('/workspace/preview/{dataset_id}', response_class=HTMLResponse)
@@ -7340,10 +7360,7 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
             for rule in dimension.rules:
                 for condition in rule.conditions:
                     requested.update(part.strip() for part in condition.column.split('|') if part.strip())
-    requested_identities = {
-        re.sub(r'[^a-z0-9]', '', str(column).casefold())
-        for column in requested
-    }
+    requested_identities = {column_identity(column) for column in requested}
     # Calculated Tableau dimensions are reconstructed in the renderer. Include
     # their physical dependencies in the compact reporting table so job output
     # matches Interactive Preview and direct rendering.
@@ -7892,11 +7909,7 @@ async def temporary_chart_preview_data(request: Request, user: SessionUser = Dep
             while len(CHART_PREVIEW_DATA_CACHE) > 12:
                 CHART_PREVIEW_DATA_CACHE.pop(next(iter(CHART_PREVIEW_DATA_CACHE)))
         full_preview, base_summary = cached
-        filtered_preview = full_preview
-        for column, values in column_filters.items():
-            if column in filtered_preview.columns and values:
-                accepted = set(values)
-                filtered_preview = filtered_preview[filtered_preview[column].map(lambda value: '' if pd.isna(value) else str(value)).isin(accepted)]
+        filtered_preview = _apply_preview_column_filters(full_preview, column_filters)
         offset = page * page_size
         preview = filtered_preview.iloc[offset:offset + page_size].copy()
         summary = {
@@ -11289,11 +11302,7 @@ async def preview_report_template_chart(
             while len(CHART_PREVIEW_DATA_CACHE) > 12:
                 CHART_PREVIEW_DATA_CACHE.pop(next(iter(CHART_PREVIEW_DATA_CACHE)))
         full_preview, base_summary = cached
-        filtered_preview = full_preview
-        for column, values in column_filters.items():
-            if column in filtered_preview.columns and values:
-                accepted = set(values)
-                filtered_preview = filtered_preview[filtered_preview[column].map(lambda value: '' if pd.isna(value) else str(value)).isin(accepted)]
+        filtered_preview = _apply_preview_column_filters(full_preview, column_filters)
         offset = page * page_size
         preview = filtered_preview.iloc[offset:offset + page_size].copy()
         summary = {

@@ -78,6 +78,24 @@ def test_report_operator_aliases_share_filters_and_grouping_across_campaigns() -
     assert set(grouped[series]) == {"2025-Q4", "2026-Q2"}
 
 
+def test_catalog_filters_accept_case_separators_and_subscriber_spelling_alias() -> None:
+    frame = pd.DataFrame({
+        'Suscriber': ['Alpha User', 'Beta User'],
+        'Test_Result': ['Completed', 'Failed'],
+        'Campaign': ['UK_Q3_2026', 'UK_Q4_2026'],
+    })
+    entry = CatalogEntry(
+        slide=1, slide_title='', slide_subtitle='', layout='', chart_title='',
+        cdr_source='CDR-Data', kpi='test result', chart_type='Table', legend='',
+        filters='SUBSCRIBER = alpha user; test result = completed; campaign = uk_q3_2026',
+        grouping_rows='', grouping_columns='',
+    )
+
+    filtered = _apply_catalog_filters(frame, entry, False, 'test result')
+
+    assert filtered['Suscriber'].tolist() == ['Alpha User']
+
+
 def test_h3g_is_not_normalised_as_operator_three() -> None:
     frame = pd.DataFrame({"Operator": ["H3G", "H3G UK", "Three UK"]})
 

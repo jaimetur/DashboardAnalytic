@@ -1239,16 +1239,16 @@ def test_dashboard_custom_fields_and_snapshot_filters(client):
 
 def test_dashboard_loads_new_filter_values_without_preparing_a_snapshot(client):
     payload = setup_dashboard(client)
-    payload['custom_fields'] = ['Mean_Data_Rate']
-    payload['filters'] = {'City': ['London']}
+    payload['custom_fields'] = ['mean data rate']
+    payload['filters'] = {'CITY': ['lOnDoN']}
 
     response = client.post('/api/e2e-dashboards/filter-options', json={
         'definition': payload,
-        'field': 'Mean_Data_Rate',
+        'field': 'MEAN-DATA-RATE',
     })
 
     assert response.status_code == 200, response.text
-    assert response.json() == {'field': 'Mean_Data_Rate', 'values': ['10', '30']}
+    assert response.json() == {'field': 'MEAN-DATA-RATE', 'values': ['10', '30']}
 
 
 def test_dashboard_rat_filter_uses_dataset_preview_column_precedence(client):

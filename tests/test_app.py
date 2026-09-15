@@ -2743,16 +2743,16 @@ def test_cdr_preview_groups_every_non_source_field_after_source_sheet(tmp_path: 
 def test_cdr_preview_paginates_and_filters_every_column(client) -> None:
     login(client)
     cdr_rows = [
-        'Vodafone UK,Ericsson,ENDC,VoLTE,Completed,Streaming,YouTube playback,91',
-        '3,Nokia,NR,WhatsApp,Dropped,Interactivity,Chat,90',
+        'Vodafone UK,Ericsson,ENDC,VoLTE,Completed,Streaming,YouTube playback,91,Alpha User,UK_Q3_2026',
+        '3,Nokia,NR,WhatsApp,Dropped,Interactivity,Chat,90,Target User,UK_Q4_2026',
         *[
-            f'Vodafone UK,Ericsson,ENDC,VoLTE,Completed,Streaming,YouTube playback,{index}'
+            f'Vodafone UK,Ericsson,ENDC,VoLTE,Completed,Streaming,YouTube playback,{index},Alpha User,UK_Q3_2026'
             for index in range(100)
         ],
-        ',Ericsson,ENDC,VoLTE,Completed,Streaming,YouTube playback,blank-operator',
+        ',Ericsson,ENDC,VoLTE,Completed,Streaming,YouTube playback,blank-operator,Alpha User,UK_Q3_2026',
     ]
     cdr_content = (
-        'operator,vendor,RAT_A,Session_Type,Call_Status,Type_of_Test,Test_Name,score\n'
+        'operator,vendor,RAT_A,Session_Type,Call_Status,Type_of_Test,Test_Name,score,Suscriber,Campaign\n'
         + '\n'.join(cdr_rows)
         + '\n'
     ).encode()
@@ -2800,13 +2800,18 @@ def test_cdr_preview_paginates_and_filters_every_column(client) -> None:
 
     filtered_response = client.post('/api/workspace/preview/1/data', json={
         'page': 0,
-        'column_filters': {'operator': ['3'], 'vendor': ['Nokia'], 'RAT_A': ['NR']},
+        'column_filters': {
+            'OPERATOR': ['3'], 'Vendor': ['nOkIa'], 'rat a': ['nr'],
+            'SUBSCRIBER': ['target user'], 'campaign': ['uk_q4_2026'],
+        },
     })
     assert filtered_response.status_code == 200
     assert filtered_response.json()['total'] == 1
     assert filtered_response.json()['unfiltered_total'] == 103
     assert filtered_response.json()['rows'][0]['operator'] == '3'
     assert filtered_response.json()['rows'][0]['vendor'] == 'Nokia'
+    assert filtered_response.json()['rows'][0]['Suscriber'] == 'Target User'
+    assert filtered_response.json()['rows'][0]['Campaign'] == 'UK_Q4_2026'
 
     empty_selection = client.post('/api/workspace/preview/1/data', json={
         'page': 0, 'column_filters': {'operator': []},

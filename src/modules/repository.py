@@ -13,6 +13,7 @@ from typing import Any, Iterator
 import pandas as pd
 
 from src.modules.auth import hash_password
+from src.modules.column_names import column_identity
 
 
 DATABASE_BLANK_FILTER = '__database_blank__'
@@ -1300,7 +1301,7 @@ class Repository:
         ``G Level 4``.  Reporting templates use the readable form, while the
         shared reporting table must retain the physical source name.
         """
-        return re.sub(r'[^a-z0-9]+', '', str(column).casefold())
+        return column_identity(column)
 
     REPORTING_CORE_COLUMNS = (
         'source_sheet', 'Campaign', 'Operator', 'vendor', 'report_vendor', 'RAT', 'RAT_A', 'Sample_RAT_A',
@@ -1404,8 +1405,7 @@ class Repository:
             f"ON {quoted_table} (dataset_id, source_row_id)"
         )
         self._create_dataset_row_indexes(conn, table_name, columns)
-        normalized_columns = {str(column).strip().lower(): column for column in columns}
-        event_time_column = normalized_columns.get('event_start_time')
+        event_time_column = self._resolve_dataset_row_column_name(set(columns), 'event_start_time')
         if event_time_column:
             quoted_column = self._quote_identifier(event_time_column)
             quoted_index = self._quote_identifier(self._index_name(table_name, 'dataset_event_time', 'date'))
@@ -1527,13 +1527,13 @@ class Repository:
             resolved = self._resolve_dataset_row_column_name(existing_columns, key)
             if not resolved:
                 continue
-            values = [str(value).strip() for value in raw_values]
+            values = [str(value).strip().lower() for value in raw_values]
             if not values:
                 where_clauses.append('0 = 1')
                 continue
             placeholders = ', '.join('?' for _ in values)
             where_clauses.append(
-                f"COALESCE(TRIM(CAST({self._quote_identifier(resolved)} AS TEXT)), '') IN ({placeholders})"
+                f"LOWER(COALESCE(TRIM(CAST({self._quote_identifier(resolved)} AS TEXT)), '')) IN ({placeholders})"
             )
             params.extend(values)
 
@@ -1785,13 +1785,12 @@ class Repository:
             return pd.read_sql_query(query, conn, params=parameters)
 
     def _create_dataset_row_indexes(self, conn: sqlite3.Connection, table_name: str, columns: list[str]) -> None:
-        normalized_columns = {str(column).strip().lower(): column for column in columns}
         indexed_dimensions = [
             'market', 'period', 'operator', 'vendor', 'test_name', 'region', 'city',
             'session_type', 'direction', 'technology_primary', 'source_sheet', 'status',
         ]
         for requested_name in indexed_dimensions:
-            actual_name = normalized_columns.get(requested_name)
+            actual_name = self._resolve_dataset_row_column_name(set(columns), requested_name)
             if not actual_name:
                 continue
             quoted_table = self._quote_identifier(table_name)
@@ -1804,7 +1803,7 @@ class Repository:
                 """
             )
 
-        event_time_column = normalized_columns.get('event_start_time')
+        event_time_column = self._resolve_dataset_row_column_name(set(columns), 'event_start_time')
         if event_time_column:
             quoted_table = self._quote_identifier(table_name)
             quoted_column = self._quote_identifier(event_time_column)

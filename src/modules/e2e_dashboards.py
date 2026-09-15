@@ -22,6 +22,7 @@ from typing import Literal
 from uuid import uuid4
 
 import pandas as pd
+from src.modules.column_names import column_identity
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
@@ -98,7 +99,7 @@ class DashboardPrefetchPriority(BaseModel):
 
 
 def identity(value):
-    return re.sub(r'[^a-z0-9]', '', str(value).casefold())
+    return column_identity(value)
 
 
 FILTER_COLUMNS = {
@@ -191,7 +192,8 @@ def filter_mask(frame, definition, exclude=None):
         field_values = filter_value_series(frame, field)
         if field_values is None:
             return pd.Series(False, index=frame.index)
-        mask &= field_values.isin(values)
+        accepted = {str(value).strip().casefold() for value in values}
+        mask &= field_values.astype(str).str.strip().str.casefold().isin(accepted)
     concrete_from = definition.date_from if isinstance(definition.date_from, date) else None
     concrete_to = definition.date_to if isinstance(definition.date_to, date) else None
     if concrete_from or concrete_to:
@@ -1446,8 +1448,8 @@ def install_dashboard_routes(core):
                 clauses.append('0')
                 continue
             value_placeholders = ', '.join('?' for _ in values)
-            clauses.append(f"{value_expression} IN ({value_placeholders})")
-            params.extend(str(value) for value in values)
+            clauses.append(f"LOWER(TRIM({value_expression})) IN ({value_placeholders})")
+            params.extend(str(value).strip().lower() for value in values)
         concrete_from = definition.date_from if isinstance(definition.date_from, date) else None
         concrete_to = definition.date_to if isinstance(definition.date_to, date) else None
         if concrete_from or concrete_to:
@@ -2635,9 +2637,11 @@ def install_dashboard_routes(core):
             column = lookup.get(identity(requested))
             if column is None or not values:
                 return result.iloc[0:0]
-            accepted = set(values)
+            accepted = {str(value).strip().casefold() for value in values}
             result = result.loc[
-                result[column].map(lambda value: '' if pd.isna(value) else str(value)).isin(accepted)
+                result[column].map(
+                    lambda value: '' if pd.isna(value) else str(value).strip().casefold()
+                ).isin(accepted)
             ]
         return result
 
@@ -2749,9 +2753,9 @@ def install_dashboard_routes(core):
                 placeholders = ', '.join('?' for _value in values)
                 filtered_where = (
                     f'({filtered_where}) AND '
-                    f'COALESCE(CAST({quote(column)} AS TEXT), \'\') IN ({placeholders})'
+                    f'LOWER(TRIM(COALESCE(CAST({quote(column)} AS TEXT), \'\'))) IN ({placeholders})'
                 )
-                filtered_parameters.extend(values)
+                filtered_parameters.extend(str(value).strip().lower() for value in values)
             total = chart_total
             if column_filters:
                 total = int(connection.execute(

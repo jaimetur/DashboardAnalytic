@@ -6,6 +6,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.modules.column_names import resolve_column_name
+
 from src.modules.ingestion import DatasetSummary, infer_dataset_kind
 from src.utils.charts import build_chart_payload, build_multi_series_chart_payload
 
@@ -79,15 +81,7 @@ METRIC_AXIS_UNITS = {
 
 
 def _resolve_column(df: pd.DataFrame, requested: str) -> str | None:
-    if not requested:
-        return None
-    if requested in df.columns:
-        return requested
-    lowered = requested.strip().lower()
-    for column in df.columns:
-        if str(column).strip().lower() == lowered:
-            return column
-    return None
+    return resolve_column_name(df.columns, requested)
 
 
 def _coerce_filter_values(raw_value: Any) -> list[str]:

@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
 import pandas as pd
+from src.modules.column_names import column_identity, resolve_column_name
 import certifi
 from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
@@ -888,10 +889,8 @@ def _first_existing(df: pd.DataFrame, candidates: Iterable[str]) -> str | None:
     # be written as ``Cell_ID_A``, ``CELL ID A`` or ``cell-id-a``.  Treat only
     # spelling separators and case as insignificant, while retaining the
     # original column name for the caller.
-    normalise = lambda value: re.sub(r"[^a-z0-9]+", "", str(value).casefold())
-    lookup = {normalise(column): str(column) for column in df.columns}
     for candidate in candidates:
-        actual = lookup.get(normalise(candidate))
+        actual = resolve_column_name(df.columns, candidate)
         if actual:
             return actual
     return None
@@ -1197,7 +1196,7 @@ def _group_column(frame: pd.DataFrame, multivendor: bool) -> str | None:
 
 
 def _normalise_catalog_name(value: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", value.casefold())
+    return column_identity(value)
 
 
 def _calculated_condition_mask(frame: pd.DataFrame, condition: FilterCondition) -> pd.Series | None:
@@ -1830,10 +1829,15 @@ def preview_catalog_chart_data(
         for column in full_result.columns
     }
     for column, values in (column_filters or {}).items():
-        if column not in full_result.columns or not values:
+        resolved_column = resolve_column_name(full_result.columns, column)
+        if resolved_column is None or not values:
             continue
-        accepted = {str(value) for value in values}
-        full_result = full_result[full_result[column].map(lambda value: '' if pd.isna(value) else str(value)).isin(accepted)]
+        accepted = {str(value).strip().casefold() for value in values}
+        full_result = full_result[
+            full_result[resolved_column].map(
+                lambda value: '' if pd.isna(value) else str(value).strip().casefold()
+            ).isin(accepted)
+        ]
     # Callers that render a table still request small pages.  The template-editor
     # preview also uses this helper to build one temporary, server-side result so
     # later page changes do not need to recalculate the chart filters.

@@ -9,6 +9,8 @@ from typing import Callable, Iterable
 import pandas as pd
 from openpyxl import load_workbook
 
+from src.modules.column_names import resolve_column_name
+
 
 CDR_IGNORED_SHEETS = {
     'MASTER',
@@ -35,8 +37,9 @@ class DatasetSummary:
 
 def _first_available_series(df: pd.DataFrame, candidates: Iterable[str], default: object = pd.NA) -> pd.Series:
     for column in candidates:
-        if column in df.columns:
-            return df[column]
+        resolved = resolve_column_name(df.columns, column)
+        if resolved is not None:
+            return df[resolved]
     return pd.Series([default] * len(df), index=df.index, dtype='object')
 
 
