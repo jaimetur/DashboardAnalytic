@@ -578,6 +578,12 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert admin_response.status_code == 200
     assert 'Import / Export / Transfer' in admin_response.text
     assert 'Transfer to other server' in admin_response.text
+    assert 'name="export_target" multiple size="1" data-multiselect-single="true" data-multiselect-groups="true"' in admin_response.text
+    assert '<optgroup label="Configuration Content">' in admin_response.text
+    assert '<optgroup label="Workspace Content">' in admin_response.text
+    assert '<optgroup label="Full Workspace">' in admin_response.text
+    assert '<optgroup label="Full Environment">' in admin_response.text
+    assert admin_response.text.index('<optgroup label="Full Workspace">') < admin_response.text.index('<optgroup label="Full Environment">')
     assert 'Config</option>' in admin_response.text
     assert 'Full Environment (App Config + Dashboards + Report Templates + Auto-calculated Fields + Selected Workspaces)' in admin_response.text
     assert 'Workspace: Default' in admin_response.text
@@ -812,7 +818,7 @@ def test_full_environment_export_job_uses_selected_workspaces(client) -> None:
     assert [workspace['name'] for workspace in manifest['workspaces']] == ['Default']
 
 
-def test_workspace_export_can_exclude_generated_reports_and_chart_sets(client, tmp_path) -> None:
+def test_workspace_export_can_exclude_generated_dashboards_reports_and_chart_sets(client, tmp_path) -> None:
     import src.DashboardAnalytic as app_module
 
     login_super(client)
@@ -822,6 +828,9 @@ def test_workspace_export_can_exclude_generated_reports_and_chart_sets(client, t
     chart = app_module.settings.output_dir / 'charts' / '20260907-120000' / 'chart-1.png'
     chart.parent.mkdir(parents=True, exist_ok=True)
     chart.write_bytes(b'chart')
+    dashboard = app_module.settings.output_dir / 'dashboards' / '20260907_120000 - Dashboard' / 'dashboard.pptx'
+    dashboard.parent.mkdir(parents=True, exist_ok=True)
+    dashboard.write_bytes(b'dashboard')
 
     included_archive = tmp_path / 'included.zip'
     app_module.build_export_archive_file('workspace:default', included_archive, include_generated_outputs=True)
@@ -829,6 +838,7 @@ def test_workspace_export_can_exclude_generated_reports_and_chart_sets(client, t
         assert json.loads(archive.read('manifest.json'))['includes_generated_outputs'] is True
         assert 'workspaces/Default/output/reports/generated.pptx' in archive.namelist()
         assert 'workspaces/Default/output/charts/20260907-120000/chart-1.png' in archive.namelist()
+        assert 'workspaces/Default/output/dashboards/20260907_120000 - Dashboard/dashboard.pptx' in archive.namelist()
 
     excluded_archive = tmp_path / 'excluded.zip'
     app_module.build_export_archive_file('workspace:default', excluded_archive, include_generated_outputs=False)
@@ -844,7 +854,11 @@ def test_full_environment_selector_offers_generated_outputs_by_default(client) -
 
     assert response.status_code == 200
     assert 'data-full-environment-generated-outputs' in response.text
-    assert 'Include generated Reports, Chart Sets and Dashboard PPT jobs' in response.text
+    assert 'Include generated dashboards, reports and chart sets' in response.text
+    workspace_page = client.get('/workspace')
+    assert 'Also duplicate generated dashboards, reports and chart sets.' in workspace_page.text
+    app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+    assert "String(group.workspace_id) !== '__server__' && (Boolean(group.is_active) || group.dock === 'right')" in app_script
 
 
 def test_voice_and_speech_import_without_measured_kpis_remain_ready(client) -> None:
@@ -1570,7 +1584,16 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
     assert app_module.repository.db_path == default_db
     assert len(app_module.repository.list_datasets()) == 1
 
-    duplicated = client.post('/workspace/duplicate', data={'workspace_id': 'default'}, follow_redirects=False)
+    dashboard_output = app_module.settings.output_dir / 'dashboards' / '20260915_120000 - Default Dashboard' / 'dashboard.pptx'
+    dashboard_output.parent.mkdir(parents=True, exist_ok=True)
+    dashboard_output.write_bytes(b'dashboard')
+    with app_module.repository.connection() as conn:
+        conn.execute('CREATE TABLE dashboard_ppt_jobs (output_path TEXT NOT NULL)')
+        conn.execute('INSERT INTO dashboard_ppt_jobs (output_path) VALUES (?)', (str(dashboard_output),))
+
+    duplicated = client.post('/workspace/duplicate', data={
+        'workspace_id': 'default', 'include_generated_outputs': 'true',
+    }, follow_redirects=False)
     assert duplicated.status_code == 303
     copied_workspace = None
     for _attempt in range(100):
@@ -1586,6 +1609,10 @@ def test_workspace_management_isolates_dataset_databases_and_remembers_last_open
     assert app_module.repository.user_has_workspace_access('admin', copied_workspace.id)
     with app_module.repository.connection() as conn:
         assert conn.execute('SELECT COUNT(*) FROM datasets').fetchone()[0] == 1
+    copied_dashboard_output = copied_workspace.output_dir / 'dashboards' / '20260915_120000 - Default Dashboard' / 'dashboard.pptx'
+    assert copied_dashboard_output.read_bytes() == b'dashboard'
+    with sqlite3.connect(copied_workspace.database_path) as conn:
+        assert conn.execute('SELECT output_path FROM dashboard_ppt_jobs').fetchone()[0] == str(copied_dashboard_output)
 
     copied_selected = client.post('/workspace/select', data={'workspace_id': copied_workspace.id}, follow_redirects=False)
     assert copied_selected.status_code == 303

@@ -4335,6 +4335,14 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
                     'UPDATE generated_jobs SET output_path = REPLACE(output_path, ?, ?)',
                     (str(source_output_dir), str(workspace.output_dir)),
                 )
+            has_dashboard_ppt_jobs = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'dashboard_ppt_jobs'"
+            ).fetchone()
+            if source_output_dir and has_dashboard_ppt_jobs:
+                connection.execute(
+                    'UPDATE dashboard_ppt_jobs SET output_path = REPLACE(output_path, ?, ?)',
+                    (str(source_output_dir), str(workspace.output_dir)),
+                )
             if has_generated_jobs:
                 # Older archives did not always retain source output metadata.
                 # Resolve copied report files inside the destination workspace
@@ -5323,6 +5331,16 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             option for option in export_options
             if option['value'] in {'slides-templates', 'auto-calculated-fields', 'dashboards'} or option['value'].startswith('workspace:')
         ]
+    export_option_groups = [
+        ('Configuration Content', [option for option in export_options if option['value'] == 'config']),
+        ('Workspace Content', [
+            option for option in export_options
+            if option['value'] in {'dashboards', 'slides-templates', 'auto-calculated-fields'}
+        ]),
+        ('Full Workspace', [option for option in export_options if option['value'].startswith('workspace:')]),
+        ('Full Environment', [option for option in export_options if option['value'] == 'full-environment']),
+    ]
+    export_option_groups = [group for group in export_option_groups if group[1]]
     admin_users = [
         {**dict(row), 'created_at': format_local_timestamp(row['created_at']), 'workspace_ids': repository.list_user_workspace_ids(int(row['id']))}
         for row in repository.list_users()
@@ -5356,6 +5374,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             'catalogue_notice': request.query_params.get('catalogue_notice') or None,
             'catalogue_error': request.query_params.get('catalogue_error') or None,
             'export_options': export_options,
+            'export_option_groups': export_option_groups,
             'recovered_transfer_packages': recovered_transfer_packages() if user.role == 'super-admin' else [],
             'import_export_notice': request.query_params.get('import_export_notice') or None,
             'import_export_error': request.query_params.get('import_export_error') or None,

@@ -323,6 +323,20 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .database-backup-components .multiselect-group-label:first-of-type { margin-top: 0; }
 .database-backup-components .multiselect-option[data-multiselect-group] { padding-left: 1.35rem; }
 .database-backup-components .multiselect-option input { flex: 0 0 auto; order: -1; accent-color: #9d2b35; }
+.admin-export-components { display: grid; gap: 0.35rem; width: 100%; color: #8b2429; font-size: 0.85rem; font-weight: 700; }
+.admin-export-components .multiselect-shell { width: 100%; }
+.admin-export-components .multiselect-trigger { border-color: rgba(139, 29, 36, 0.30); background: linear-gradient(135deg, #fffafa, #fff0ef); color: #7d2731; box-shadow: none; }
+.admin-export-components .multiselect-trigger-label { color: #7d2731; }
+.admin-export-components .multiselect-trigger:hover:not(:disabled), .admin-export-components .multiselect-trigger:focus-visible { border-color: rgba(110, 24, 36, 0.66); background: linear-gradient(135deg, #f9dfdf, #f2cccc); color: #5c1721; box-shadow: 0 0 0 3px rgba(139, 29, 36, 0.13); }
+.admin-export-components .multiselect-trigger:hover .multiselect-trigger-label, .admin-export-components .multiselect-trigger:focus-visible .multiselect-trigger-label { color: #5c1721; }
+.admin-export-components .multiselect-menu { min-width: 100%; max-width: calc(100vw - 3rem); max-height: min(620px, calc(100vh - 3rem)); border-color: rgba(139, 29, 36, 0.40); background: #fffafa; z-index: 100; }
+.admin-export-components .multiselect-option { justify-content: flex-start; min-width: 0; color: #7d2731; overflow-wrap: anywhere; }
+.admin-export-components .multiselect-option span { min-width: 0; }
+.admin-export-components .multiselect-group-label { margin: 0.45rem 0 0.08rem; padding: 0.34rem 0.55rem; border-bottom: 1px solid rgba(139, 29, 36, 0.18); color: #6d222b; font-size: 0.76rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.admin-export-components .multiselect-group-label:first-of-type { margin-top: 0; }
+.admin-export-components .multiselect-option[data-multiselect-group] { padding-left: 1.35rem; }
+.admin-export-components .multiselect-option input { flex: 0 0 auto; order: -1; accent-color: #9d2b35; }
+.import-export-panel:has(.admin-export-components .multiselect-menu:not([hidden])), .import-export-panel:has(.admin-export-components .multiselect-menu:not([hidden])) .import-export-content, .import-export-panel:has(.admin-export-components .multiselect-menu:not([hidden])) .import-export-grid, .import-export-panel:has(.admin-export-components .multiselect-menu:not([hidden])) .form-stack { overflow: visible; position: relative; z-index: 50; }
 .database-backup-workspaces { display: grid; gap: 0.35rem; width: min(100%, 620px); color: #8b2429; font-size: 0.85rem; font-weight: 700; }
 .database-backup-workspaces[hidden] { display: none !important; }
 .database-backup-workspaces .multiselect-shell { width: min(100%, 620px); }
@@ -374,7 +388,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .database-backup-path-dialog [data-backup-path-select] { background: #1d7b70; border-color: #146158; color: #fff; }
 .admin-stack .database-backup-path-dialog [data-backup-path-select]:hover:not(:disabled), .admin-stack .database-backup-path-dialog [data-backup-path-select]:focus-visible { background: #12645b; border-color: #0b4c45; color: #fff; box-shadow: 0 0 0 3px rgba(29, 123, 112, 0.20); }
 .database-backup-status { margin: 0; padding-top: 0.75rem; border-top: 1px solid rgba(125, 39, 49, 0.14); color: #50363a; font-size: 0.9rem; }
-@media (max-width: 680px) { .database-backup-components, .database-backup-components .multiselect-shell { width: 100%; } .database-backup-components .multiselect-menu { min-width: 0; } .database-backup-components .multiselect-option { white-space: normal; } }
+@media (max-width: 680px) { .database-backup-components, .database-backup-components .multiselect-shell { width: 100%; } .database-backup-components .multiselect-menu { min-width: 0; } .database-backup-components .multiselect-option, .admin-export-components .multiselect-option { white-space: normal; } }
 .database-view-toolbar { display: flex; align-items: end; gap: 0.75rem; flex-wrap: wrap; }
 .database-view-toolbar label { display: grid; gap: 0.35rem; min-width: min(100%, 280px); color: #8b2429; font-size: 0.85rem; font-weight: 700; }
 .database-view-toolbar select { min-width: 260px; }

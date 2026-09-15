@@ -3236,6 +3236,7 @@ function setupCustomMultiSelects() {
     menu.className = 'multiselect-menu';
     menu.hidden = true;
     const singleChoice = select.dataset.multiselectSingle === 'true';
+    const singleChoiceName = singleChoice ? `multiselect-single-${select.id || Math.random().toString(36).slice(2)}` : '';
     const autoCloseDelay = Number.parseInt(select.dataset.multiselectAutoClose || '', 10);
     let autoCloseTimer = null;
     const cancelAutoClose = () => {
@@ -3336,7 +3337,7 @@ function setupCustomMultiSelects() {
 
       const checkbox = document.createElement('input');
       checkbox.type = singleChoice ? 'radio' : 'checkbox';
-      if (singleChoice) checkbox.name = `multiselect-single-${select.id || Math.random().toString(36).slice(2)}`;
+      if (singleChoice) checkbox.name = singleChoiceName;
       checkbox.checked = option.selected;
       checkbox.setAttribute('data-option-value', option.value);
       checkbox.disabled = option.disabled;
@@ -3397,7 +3398,7 @@ function setupCustomMultiSelects() {
     search.addEventListener('search', filterMultiSelect);
 
     const syncCheckboxes = () => {
-      Array.from(menu.querySelectorAll('input[type="checkbox"][data-option-value]')).forEach((checkbox) => {
+      Array.from(menu.querySelectorAll('input[data-option-value]')).forEach((checkbox) => {
         const option = Array.from(select.options).find((item) => item.value === checkbox.getAttribute('data-option-value'));
         if (option) {
           checkbox.checked = option.selected;
@@ -4182,11 +4183,11 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
       return true;
     }
     const result = await showConfirmDialog(
-      `Include generated reports and Chart Sets in this Workspace ${operation}?`,
+      `Include generated dashboards, reports and chart sets in this Workspace ${operation}?`,
       {
         title: `${operation} Workspace`,
         confirmLabel: operation,
-        optionLabel: 'Include generated reports and Chart Sets',
+        optionLabel: 'Include generated dashboards, reports and chart sets',
         optionChecked: true,
       },
     );
@@ -5807,7 +5808,7 @@ if (queueNode) {
     const signature = JSON.stringify(normalized);
     if (signature === renderedSignature) return;
     renderedSignature = signature;
-    const activeGroups = normalized.filter((group) => Boolean(group.is_active) || group.dock === 'right');
+    const activeGroups = normalized.filter((group) => String(group.workspace_id) !== '__server__' && (Boolean(group.is_active) || group.dock === 'right'));
     const systemGroups = normalized.filter((group) => String(group.workspace_id) === '__server__');
     const otherGroups = normalized.filter((group) => !group.is_active && group.dock !== 'right' && String(group.workspace_id) !== '__server__');
     activeDock.replaceChildren(...activeGroups.map(createTaskPanel));

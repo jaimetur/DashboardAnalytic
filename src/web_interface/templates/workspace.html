@@ -808,11 +808,11 @@
       event.preventDefault();
       const workspaceName = form.dataset.workspaceName || 'this workspace';
       const result = await showConfirmDialog(
-        `Duplicate workspace '${workspaceName}'? You can also include its generated reports and Chart Sets.`,
+        `Duplicate workspace '${workspaceName}'? You can also include its generated dashboards, reports and chart sets.`,
         {
           title: 'Duplicate workspace',
           confirmLabel: 'Duplicate workspace',
-          optionLabel: 'Also duplicate generated reports and Chart Sets.',
+          optionLabel: 'Also duplicate generated dashboards, reports and chart sets.',
           optionChecked: false,
         },
       );
@@ -830,7 +830,7 @@
       showLoadingOverlay(
         'Duplicating workspace',
         result.optionChecked
-          ? 'Please wait while the workspace database, datasets, reports and Chart Sets are copied.'
+          ? 'Please wait while the workspace database, datasets, dashboards, reports and chart sets are copied.'
           : 'Please wait while the workspace database, datasets and associated files are copied.',
       );
       HTMLFormElement.prototype.submit.call(form);

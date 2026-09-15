@@ -366,10 +366,10 @@
         <button type="submit" class="import-export-action">Import ZIP</button>
       </form>
       <form class="form-stack" action="/admin/import-export/export/jobs" method="post" data-export-package-form data-loading-label="Preparing export package" data-loading-copy="Please wait while Dashboard Analytic creates the selected export package. You can keep this page open while it runs.">
-        <h3>Export</h3>
-        <label>Content to export/transfer
-          <select name="export_target" aria-label="Content to export or transfer">
-            {% for option in export_options %}<option value="{{ option.value }}" {% if option.disabled | default(false) %}disabled{% endif %}>{{ option.label }}</option>{% endfor %}
+        <h3>Export / Transfer</h3>
+        <label class="admin-export-components">Content to export/transfer
+          <select name="export_target" multiple size="1" data-multiselect-single="true" data-multiselect-groups="true" data-multiselect-auto-close="1000" aria-label="Content to export or transfer">
+            {% set export_selection = namespace(selected=false) %}{% for group_label, options in export_option_groups %}<optgroup label="{{ group_label }}">{% for option in options %}<option value="{{ option.value }}" {% if option.disabled | default(false) %}disabled{% elif not export_selection.selected %}selected{% set export_selection.selected = true %}{% endif %}>{{ option.label }}</option>{% endfor %}</optgroup>{% endfor %}
           </select>
         </label>
         <p class="form-note">{% if user.role == 'super-admin' %}Choose configuration, Dashboards, Report Templates, the active workspace's Auto-calculated Fields, one workspace or the complete environment.{% else %}Admins can export or transfer the active workspace's Dashboards, Report Templates, Auto-calculated Fields and accessible workspaces.{% endif %}</p>
@@ -431,7 +431,7 @@
       </div>
       <label class="confirm-option full-environment-generated-outputs-option">
         <input type="checkbox" checked data-full-environment-generated-outputs>
-        <span>Include generated Reports, Chart Sets and Dashboard PPT jobs</span>
+        <span>Include generated dashboards, reports and chart sets</span>
       </label>
       <p class="full-environment-workspace-error" data-full-environment-workspace-error hidden>Select at least one workspace.</p>
       <div class="confirm-actions">

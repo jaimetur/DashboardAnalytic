@@ -365,8 +365,8 @@ class WorkspaceRegistry:
                 raise InterruptedError('Workspace duplication stopped by user.')
             # ``create`` has prepared the target root. Replace it with an
             # exact data copy, including its Slides Templates. Generated
-            # reports and Chart Sets are optional because they can account for
-            # most of a workspace's size.
+            # Generated Dashboards, reports and Chart Sets are optional
+            # because they can account for most of a workspace's size.
             shutil.rmtree(target_root)
             for source_path, target_path in (
                 (source.input_dir, duplicate.input_dir),
@@ -404,6 +404,17 @@ class WorkspaceRegistry:
                         )
                     else:
                         duplicate_conn.execute('DELETE FROM generated_jobs')
+                has_dashboard_ppt_jobs = duplicate_conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'dashboard_ppt_jobs'"
+                ).fetchone()
+                if has_dashboard_ppt_jobs:
+                    if include_generated_outputs:
+                        duplicate_conn.execute(
+                            'UPDATE dashboard_ppt_jobs SET output_path = REPLACE(output_path, ?, ?)',
+                            (str(source.output_dir), str(duplicate.output_dir)),
+                        )
+                    else:
+                        duplicate_conn.execute('DELETE FROM dashboard_ppt_jobs')
         except Exception:
             with self._connection() as conn:
                 conn.execute('DELETE FROM workspaces WHERE id = ?', (duplicate.id,))
