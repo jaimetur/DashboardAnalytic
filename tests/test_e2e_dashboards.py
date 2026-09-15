@@ -356,6 +356,12 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "drawFullHierarchyLabel(context, value, labelLeft + 3" in chart_script
     assert "const usableBottom = layout.position === 'bottom' ? layout.bottom : 884;" in chart_script
     assert 'Math.min(250, columnWidth * .72)' in chart_script
+    assert "const colour = payload.cell_colours?.[rowIndex]?.[columnIndex] || '#4E79A7';" in chart_script
+    assert "context.textAlign = 'center'; font(context, 22, true); context.fillText(fittedText(context, value" in chart_script
+    assert "font(context, 22, true); context.fillText(fittedText(context, String(columnKey.at(-1)" in chart_script
+    assert "line(context, left, layout.top + (level + 1) * 28 - 3, right" in chart_script
+    assert "const lineTop = layout.top + Math.min(changed, upperLevels) * 28;" in chart_script
+    assert "else dashedVertical(context, cellLeft, lineTop, chartTop + chartHeight + 22);" in chart_script
     assert 'function drawOutsideBarLabel(context, value, x, y, colour, size = 12)' in chart_script
     assert "context.fillStyle = 'rgba(255, 255, 255, 0.94)'" in chart_script
     assert "context.fillText(`${tick}%`, plot.left - 14, y - 10)" in chart_script

@@ -594,8 +594,22 @@
       const rowHeight = chartHeight / Math.max(rowKeys.length, 1), columnWidth = chartWidth / Math.max(columnKeys.length, 1);
       for (let level = 0; level < upperLevels; level += 1) hierarchySpans(columnKeys, level).forEach(([start, end, value]) => {
         const left = chartLeft + start * columnWidth, right = chartLeft + end * columnWidth;
-        context.fillStyle = '#405765'; context.textAlign = 'center'; font(context, 15, true); context.fillText(fittedText(context, value, right - left - 8), (left + right) / 2, layout.top + level * 28);
+        context.fillStyle = '#405765'; context.textAlign = 'center'; font(context, 22, true); context.fillText(fittedText(context, value, right - left - 8), (left + right) / 2, layout.top + level * 28);
+        line(context, left, layout.top + (level + 1) * 28 - 3, right, layout.top + (level + 1) * 28 - 3, '#C8D2D9');
       });
+      for (let columnIndex = 0; columnIndex < columnKeys.length; columnIndex += 1) {
+        const cellLeft = chartLeft + columnIndex * columnWidth;
+        if (!columnIndex) {
+          line(context, cellLeft, layout.top, cellLeft, chartTop + chartHeight + 22, '#AEBBC4', 2);
+          continue;
+        }
+        let changed = columnKeys[columnIndex - 1].findIndex((value, level) => value !== columnKeys[columnIndex][level]);
+        if (changed < 0) changed = columnKeys[columnIndex].length - 1;
+        const lineTop = layout.top + Math.min(changed, upperLevels) * 28;
+        if (changed === 0) line(context, cellLeft, lineTop, cellLeft, chartTop + chartHeight + 22, '#AEBBC4', 2);
+        else dashedVertical(context, cellLeft, lineTop, chartTop + chartHeight + 22);
+      }
+      line(context, chartLeft + chartWidth, layout.top, chartLeft + chartWidth, chartTop + chartHeight + 22, '#AEBBC4', 2);
       rowKeys.forEach((rowKey, rowIndex) => {
         const top = chartTop + rowIndex * rowHeight, bottom = top + rowHeight, next = rowKeys[rowIndex + 1];
         const changed = next ? rowKey.findIndex((value, level) => value !== next[level]) : 0;
@@ -605,10 +619,11 @@
           const value = Number(payload.cells?.[rowIndex]?.[columnIndex]); if (!Number.isFinite(value)) return;
           const cellLeft = chartLeft + columnIndex * columnWidth, height = Math.max(0, (rowHeight - 28) * value / Math.max(Number(payload.maximum), 1));
           const width = Math.max(14, Math.min(columnWidth * .68, 110)), x = cellLeft + (columnWidth - width) / 2, y = bottom - 10 - height;
-          context.fillStyle = '#4E79A7'; context.fillRect(x, y, width, height); const label = value.toFixed(2);
-          if (!(height >= 32 && drawInsideBarLabel(context, label, x, y, width, height, '#FFFFFF', 15))) { context.fillStyle = '#4E79A7'; context.textAlign = 'center'; font(context, 14, true); context.fillText(label, x + width / 2, Math.max(top + 2, y - 18)); }
+          const colour = payload.cell_colours?.[rowIndex]?.[columnIndex] || '#4E79A7';
+          context.fillStyle = colour; context.fillRect(x, y, width, height); const label = value.toFixed(2);
+          if (!(height >= 32 && drawInsideBarLabel(context, label, x, y, width, height, '#FFFFFF', 15))) { context.fillStyle = colour; context.textAlign = 'center'; font(context, 14, true); context.fillText(label, x + width / 2, Math.max(top + 2, y - 18)); }
           pushRectangleHit(state, transform, {x, y, width, height}, {label: displayKey([...rowKey, ...columnKey]), series: payload.aggregation || 'mean', value: label});
-          if (rowIndex === rowKeys.length - 1) { context.fillStyle = '#4E6271'; context.textAlign = 'center'; font(context, 14, true); context.fillText(fittedText(context, String(columnKey.at(-1) || ''), columnWidth - 8), cellLeft + columnWidth / 2, bottom + 3); }
+          if (rowIndex === rowKeys.length - 1) { context.fillStyle = '#4E6271'; context.textAlign = 'center'; font(context, 22, true); context.fillText(fittedText(context, String(columnKey.at(-1) || ''), columnWidth - 8), cellLeft + columnWidth / 2, bottom + 3); }
         });
       });
       drawLegend(context, payload.legend); return;

@@ -695,6 +695,39 @@ def test_interactive_mean_model_uses_reporting_aggregation_and_vendor_palette() 
     ]
 
 
+def test_interactive_mean_model_nests_column_only_hierarchies_by_parent() -> None:
+    entry = CatalogEntry(
+        1, 'Speech', '', '', 'Average POLQA', 'CDR-Speech', 'LQ',
+        'Average Vertical Bars', 'Vendor', '', '', 'Operator × Campaign', 'Right',
+    )
+    frame = pd.DataFrame({
+        # This is the natural order after appending one CDR per campaign.
+        'Operator': ['VF', '3', 'EE', 'VF', '3', 'EE'],
+        'Campaign': ['UK_Q1_2026'] * 3 + ['UK_Q2_2026'] * 3,
+        'LQ': [4.0, 3.8, 4.2, 4.1, 3.9, 4.3],
+    })
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert model['mode'] == 'hierarchy'
+    assert model['row_keys'] == [[]]
+    assert model['column_keys'] == [
+        ['VF', '2026-Q1'], ['VF', '2026-Q2'],
+        ['3', '2026-Q1'], ['3', '2026-Q2'],
+        ['EE', '2026-Q1'], ['EE', '2026-Q2'],
+    ]
+    assert model['cell_colours'] == [[
+        '#E15759', '#E15759',
+        '#F28E2B', '#F28E2B',
+        '#76B7B2', '#76B7B2',
+    ]]
+    filtered_entry = replace(entry, filters='Operator IN (VF, 3, EE)')
+    filtered = _apply_catalog_filters(frame, filtered_entry, False, 'LQ')
+    filtered_model = catalog_chart_payload(filtered, filtered_entry, prefiltered=True)
+    assert filtered_model['column_keys'] == model['column_keys']
+    assert filtered_model['cell_colours'] == model['cell_colours']
+
+
 def test_bar_value_label_rotates_when_it_only_fits_vertically() -> None:
     image = Image.new('RGB', (200, 200), 'white')
     draw = ImageDraw.Draw(image)

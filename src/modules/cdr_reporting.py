@@ -4658,13 +4658,17 @@ def catalog_chart_payload(
         means = aggregate.median() if aggregation == "median" else aggregate.mean()
         if means.empty:
             return empty("No valid samples for this KPI and technology filter")
-        if row_hierarchy:
+        # A column-only hierarchy still needs the matrix model. Rendering it
+        # as a flat sequence preserves source append order (for example every
+        # operator for Q1, then every operator for Q2) instead of nesting all
+        # campaigns beneath their operator.
+        if column_hierarchy or row_hierarchy:
             render_columns = column_hierarchy or ["__catalog_single_column"]
             if render_columns == ["__catalog_single_column"]:
                 values["__catalog_single_column"] = "(all)"
                 aggregate = values.dropna().groupby([*row_hierarchy, *render_columns], dropna=False, sort=False)[metric]
                 means = aggregate.median() if aggregation == "median" else aggregate.mean()
-            row_keys = _hierarchical_unique_keys(values, row_hierarchy)
+            row_keys = _hierarchical_unique_keys(values, row_hierarchy) if row_hierarchy else [()]
             column_keys = _hierarchical_unique_keys(values, render_columns)
             lookup = {key if len(axes) > 1 else key[0]: float(value) for key, value in means.items()}
             flat_keys = [label if isinstance(label, tuple) else (label,) for label in means.index]
@@ -4673,6 +4677,9 @@ def catalog_chart_payload(
                 key = (*row_key, *column_key)
                 lookup_key = key if len(key) > 1 else key[0]
                 return lookup.get(lookup_key)
+            def mean_colour(row_key: tuple[object, ...], column_key: tuple[object, ...]) -> str:
+                key = (*row_key, *column_key)
+                return colours.get(key, _colour(key))
             return {
                 **_chart_payload_base("mean_bar", title, render_entry, values, metric),
                 "mode": "hierarchy",
@@ -4682,6 +4689,7 @@ def catalog_chart_payload(
                 "row_keys": [serialise_key(key) for key in row_keys],
                 "column_keys": [serialise_key(key) for key in column_keys],
                 "cells": [[mean_value(row_key, column_key) for column_key in column_keys] for row_key in row_keys],
+                "cell_colours": [[mean_colour(row_key, column_key) for column_key in column_keys] for row_key in row_keys],
                 # Retain the flat values for existing API consumers. Canvas
                 # rendering uses the explicit row/column matrix above.
                 "bars": [
