@@ -98,6 +98,21 @@ def test_dashboard_keeps_dataset_universe_out_of_persisted_filters(client):
     assert prepared.json()['rows']['data'] == 3
 
 
+def test_dashboard_library_ppt_scope_builds_its_automatic_dataset_universe(client):
+    payload = setup_dashboard(client)
+    dashboard_id = 'library-ppt-scope'
+    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+
+    scope_only = {**payload, 'scope': 'single', 'datasets': {}, 'date_from': None, 'date_to': None}
+    prepared = client.post(
+        f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}&use_scope_universe=1', json=scope_only,
+    )
+
+    assert prepared.status_code == 200, prepared.text
+    assert prepared.json()['rows']['data'] == 3
+    assert prepared.json()['date_bounds'] == {'min': '2026-09-01', 'max': '2026-09-03'}
+
+
 def test_dashboards_lifecycle_and_layout(client):
     payload = setup_dashboard(client)
     page = client.get('/e2e-dashboards')
@@ -291,7 +306,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'const needsPreparation = !prepared || preparationStateFingerprint(definition) !== appliedFilterState;' in dashboard_script
     assert "setPreparationState('preparing', needsDataPreparation ? 'data' : 'rendering');" in dashboard_script
     assert "bind('ds-view', openActiveDashboardViewer);" in dashboard_script
-    assert "const filterDecision = id === activeId ? await resolveUnappliedFilterChanges() : 'unchanged';" in dashboard_script
+    assert "async function queueDashboardPptExport(id, item, {chooseScope = false} = {})" in dashboard_script
+    assert "title: 'Choose PowerPoint Scope'" in dashboard_script
+    assert "confirmLabel: 'Operator Comparison'" in dashboard_script
+    assert "secondaryLabel: 'Multivendor Comparison'" in dashboard_script
     assert "const host = node('label', label, 'ds-source-filter')" in dashboard_script
     assert "updateFilterControlState(facet, filterState(field));" in dashboard_script
     assert "updateFilterControlState(wrapper, dateState(key), true);" in dashboard_script
@@ -933,8 +951,8 @@ def test_dashboard_api_session_expires_on_application_process_restart(client):
     app_module.SESSIONS.clear()
 
     response = client.get('/api/e2e-dashboards', follow_redirects=False)
-    assert response.status_code == 303
-    assert response.headers['location'] == '/login'
+    assert response.status_code == 401
+    assert response.json()['detail'] == 'Your session has expired. Please sign in again.'
 
 
 def test_dashboard_preview_identifies_title_and_transition_slides(client):

@@ -682,6 +682,15 @@ def install_dashboard_routes(core):
         effective.setdefault('date_to', 'Newest')
         return effective
 
+    def automatic_scope_universe(definition: DashboardDefinition, task_repository) -> DashboardDefinition:
+        """Build the temporary latest-CDR universe used by library PPT exports."""
+        raw_definition = definition.model_dump(mode='json')
+        # Pydantic supplies empty defaults for these fields.  Remove them so
+        # runtime_dashboard_definition selects the latest CDRs for the Scope.
+        for field in ('datasets', 'date_from', 'date_to'):
+            raw_definition.pop(field, None)
+        return DashboardDefinition.model_validate(runtime_dashboard_definition(raw_definition, task_repository))
+
     def catalogue(definition, task_repository=None):
         task_repository = task_repository or core.repository
         rows = task_repository.list_report_templates(definition.template_technology)
@@ -1913,8 +1922,11 @@ def install_dashboard_routes(core):
         dashboard_id: str | None = None,
         rendering_only: bool = False,
         preparation_id: str | None = None,
+        use_scope_universe: bool = False,
         user=Depends(dashboard_user),
     ):
+        if use_scope_universe:
+            definition = automatic_scope_universe(definition, bound_repository())
         preparation_id = preparation_id or f'dashboard-preparation:{uuid4().hex}'
         workspace = workspace_key()
         cancellation = {'requested': False}
@@ -2090,10 +2102,18 @@ def install_dashboard_routes(core):
         return prefetched_dashboard_response(dashboard_id, definition, user)
 
     @app.post('/api/e2e-dashboards/prefetched/{dashboard_id}')
-    def prefetched_dashboard_for_definition(dashboard_id: str, definition: DashboardDefinition, user=Depends(dashboard_user)):
+    def prefetched_dashboard_for_definition(
+        dashboard_id: str,
+        definition: DashboardDefinition,
+        use_scope_universe: bool = False,
+        user=Depends(dashboard_user),
+    ):
+        task_repository = bound_repository()
         with lock:
-            if dashboard_id not in read_dashboards(bound_repository()):
+            if dashboard_id not in read_dashboards(task_repository):
                 raise HTTPException(404, 'Dashboard not found.')
+        if use_scope_universe:
+            definition = automatic_scope_universe(definition, task_repository)
         return prefetched_dashboard_response(dashboard_id, definition, user)
 
     def source_spec(snapshot, kind, task_repository):
@@ -3153,6 +3173,10 @@ def install_dashboard_routes(core):
                 if task['workspace'] == database_path
                 and not bool((task.get('cancellation') or {}).get('requested'))
             ]
+            direct_dashboard_ids = {
+                str(task.get('dashboard_id')) for task in direct_tasks
+                if task.get('dashboard_id')
+            }
             pending = [
                 job for job in prefetch_jobs.values()
                 if (
@@ -3162,7 +3186,14 @@ def install_dashboard_routes(core):
                     and job.get('generation') == prefetch_generation.get(job.get('workspace'), 0)
                 )
             ]
-            workspace_jobs = [job for job in pending if job['workspace'] == database_path]
+            # A direct request takes priority over automatic warming.  Do not
+            # show its cancelling warm-up as a second preparation card for the
+            # same Dashboard while the foreground task is already visible.
+            workspace_jobs = [
+                job for job in pending
+                if job['workspace'] == database_path
+                and str(job.get('dashboard_id') or '') not in direct_dashboard_ids
+            ]
             tasks = []
             for job in workspace_jobs:
                 if job['status'] == 'processing':

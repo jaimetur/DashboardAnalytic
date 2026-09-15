@@ -1456,7 +1456,7 @@ def workspace_cache_version_signature() -> dict[str, int | str]:
 
 
 def clear_outdated_workspace_caches(workspace: Workspace) -> bool:
-    """Remove persistent cache data when it was written by an older format or release."""
+    """Remove persistent cache data only when its stored format is incompatible."""
     workspace_root = workspace.database_path.parent
     cache_root = workspace_root / '.dashboard-data-cache'
     version_file = workspace_root / '.dashboard-cache-version.json'
@@ -1465,8 +1465,17 @@ def clear_outdated_workspace_caches(workspace: Workspace) -> bool:
         stored_signature = json.loads(version_file.read_text(encoding='utf-8'))
     except (OSError, json.JSONDecodeError):
         stored_signature = None
-    if stored_signature == current_signature:
-        return False
+    if isinstance(stored_signature, dict):
+        # The application version is informative.  A patch release can safely
+        # reuse a cache when every cache-format version remains unchanged.
+        stored_formats = {key: value for key, value in stored_signature.items() if key != 'application'}
+        current_formats = {key: value for key, value in current_signature.items() if key != 'application'}
+        if stored_formats == current_formats:
+            if stored_signature != current_signature:
+                temporary = version_file.with_suffix(f'.{uuid4().hex}.tmp')
+                temporary.write_text(json.dumps(current_signature, sort_keys=True), encoding='utf-8')
+                temporary.replace(version_file)
+            return False
 
     cancel_prefetch = getattr(sys.modules[__name__], 'e2e_dashboard_cancel_prefetch_workspace', None)
     if callable(cancel_prefetch):
@@ -2500,6 +2509,11 @@ def session_user(token: str | None) -> SessionUser | None:
 def current_user(request: Request) -> SessionUser:
     user = session_user(request.cookies.get(SESSION_COOKIE))
     if not user:
+        # API clients expect a JSON error.  Redirecting an expired browser
+        # session to the HTML login page makes fetch().json() fail before the
+        # interface can explain what actually happened.
+        if request.url.path.startswith('/api/'):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Your session has expired. Please sign in again.')
         raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={'Location': '/login'})
     return user
 

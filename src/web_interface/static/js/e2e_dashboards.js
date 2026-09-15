@@ -268,12 +268,20 @@
   };
   const api = async (path = '', method = 'GET', body, signal) => {
     const response = await fetch(`/api/e2e-dashboards${path}`, {method, signal, cache: 'no-store', headers: {'Content-Type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
-    const payload = await response.json();
+    const contentType = String(response.headers.get('content-type') || '').toLocaleLowerCase();
+    const payload = contentType.includes('application/json') ? await response.json() : null;
     if (!response.ok) {
+      if (!payload && (response.redirected || response.url.includes('/login'))) {
+        throw new Error('Your session has expired. Please sign in again.');
+      }
+      if (!payload) {
+        throw new Error(`The Dashboard API returned an unexpected ${response.status} response. Please reload the page and try again.`);
+      }
       const error = new Error(typeof payload.detail === 'string' ? payload.detail : JSON.stringify(payload.detail));
       error.status = response.status;
       throw error;
     }
+    if (!payload) throw new Error('The Dashboard API returned HTML instead of JSON. Please reload the page and try again.');
     return payload;
   };
   const safe = fn => async (...args) => { try { await fn(...args); } catch (error) { if (error.name !== 'AbortError') { status(error.message); if (window.showInfoDialog) window.showInfoDialog(error.message, {title:'E2E Dashboards',tone:'error'}); } } };
@@ -419,39 +427,77 @@
     if (needsPreparation) await prepare();
     if (prepared?.slides.length) renderSlide();
   };
-  async function queueDashboardPptExport(id, item) {
+  async function queueDashboardPptExport(id, item, {chooseScope = false} = {}) {
     let exportDefinition = item;
     let preparationToken = null;
-    const filterDecision = id === activeId ? await resolveUnappliedFilterChanges() : 'unchanged';
-    if (!filterDecision) return;
-    if (id === activeId && (!prepared || preparationStateFingerprint(definition) !== appliedFilterState)) await prepare();
-    if (id === activeId && prepared?.token) {
-      const exportAppliedDefinition = appliedDashboardDefinition || definition;
-      if (filterDecision !== 'unchanged') {
-        exportDefinition = JSON.parse(JSON.stringify(exportAppliedDefinition));
-        preparationToken = prepared.token;
-      } else if (hasAppliedUnsavedFilterChanges()) {
-        const choice = await window.showConfirmDialog(
-          'This Dashboard has applied filters that have not been saved. Which filters should the PowerPoint use?',
-          {
-            title: 'Choose PowerPoint filters',
-            confirmLabel: 'Use Current Filters',
-            secondaryLabel: 'Use Saved Filters',
-            cancelLabel: 'Cancel',
-            wideActions: true,
-          },
-        );
-        if (choice === 'confirm') {
+    let filterDecision = 'unchanged';
+    if (chooseScope) {
+      const scopeChoice = await window.showConfirmDialog(
+        `Choose the comparison scope for the PowerPoint presentation of “${item.name}”.`,
+        {
+          title: 'Choose PowerPoint Scope',
+          confirmLabel: 'Operator Comparison',
+          secondaryLabel: 'Multivendor Comparison',
+          cancelLabel: 'Cancel',
+          wideActions: true,
+        },
+      );
+      if (!scopeChoice) return;
+      exportDefinition = JSON.parse(JSON.stringify(item));
+      exportDefinition.scope = scopeChoice === 'secondary' ? 'multivendor' : 'single';
+      // Library exports always build their temporary universe from the latest
+      // CDRs appropriate to the Scope selected in this dialog.
+      delete exportDefinition.datasets;
+      delete exportDefinition.date_from;
+      delete exportDefinition.date_to;
+      let scopePreview;
+      try {
+        scopePreview = await api(`/prefetched/${encodeURIComponent(id)}?use_scope_universe=1`, 'POST', exportDefinition);
+      } catch (error) {
+        if (error.status !== 409) throw error;
+        scopePreview = await api(`/prepare?dashboard_id=${encodeURIComponent(id)}&use_scope_universe=1`, 'POST', exportDefinition);
+      }
+      const chartIndexes = (scopePreview.slides || []).flatMap(slide => (slide.charts || []))
+        .filter(chart => chart.available).map(chart => chart.index);
+      // A selected Scope may use a universe that has not been warmed yet.
+      // Generate every required model before handing the snapshot to the PPT
+      // worker, so the newly queued job always has a complete chart set.
+      for (const index of chartIndexes) {
+        await api(`/chart/${encodeURIComponent(scopePreview.token)}/${index}`);
+      }
+      preparationToken = scopePreview.token;
+    } else {
+      filterDecision = id === activeId ? await resolveUnappliedFilterChanges() : 'unchanged';
+      if (!filterDecision) return;
+      if (id === activeId && (!prepared || preparationStateFingerprint(definition) !== appliedFilterState)) await prepare();
+      if (id === activeId && prepared?.token) {
+        const exportAppliedDefinition = appliedDashboardDefinition || definition;
+        if (filterDecision !== 'unchanged') {
           exportDefinition = JSON.parse(JSON.stringify(exportAppliedDefinition));
           preparationToken = prepared.token;
-        } else if (choice === 'secondary') exportDefinition = savedDashboardDefinition();
-        else return;
-      } else {
-        exportDefinition = JSON.parse(JSON.stringify(exportAppliedDefinition));
-        preparationToken = prepared.token;
+        } else if (hasAppliedUnsavedFilterChanges()) {
+          const choice = await window.showConfirmDialog(
+            'This Dashboard has applied filters that have not been saved. Which filters should the PowerPoint use?',
+            {
+              title: 'Choose PowerPoint filters',
+              confirmLabel: 'Use Current Filters',
+              secondaryLabel: 'Use Saved Filters',
+              cancelLabel: 'Cancel',
+              wideActions: true,
+            },
+          );
+          if (choice === 'confirm') {
+            exportDefinition = JSON.parse(JSON.stringify(exportAppliedDefinition));
+            preparationToken = prepared.token;
+          } else if (choice === 'secondary') exportDefinition = savedDashboardDefinition();
+          else return;
+        } else {
+          exportDefinition = JSON.parse(JSON.stringify(exportAppliedDefinition));
+          preparationToken = prepared.token;
+        }
       }
     }
-    if (filterDecision === 'unchanged' && !hasAppliedUnsavedFilterChanges()) {
+    if (!chooseScope && filterDecision === 'unchanged' && !hasAppliedUnsavedFilterChanges()) {
       const accepted = await window.showConfirmDialog(
         `Generate a PowerPoint presentation for “${exportDefinition.name}”?`,
         {title: 'Generate PPT Dashboard', confirmLabel: 'Generate PPT'},
@@ -522,7 +568,7 @@
       }, id === activeId ? 'ds-dashboard-close' : 'ds-dashboard-open');
       action('Duplicate Dashboard', '⧉', async () => { if (await confirmDiscard()) await duplicateDashboard(id); });
       action('Export Dashboard', '', () => exportDashboard(id, item), 'ds-dashboard-export');
-      const ppt = action('Generate PPT Dashboard', '', () => queueDashboardPptExport(id, item), 'ds-dashboard-ppt');
+      const ppt = action('Generate PPT Dashboard', '', () => queueDashboardPptExport(id, item, {chooseScope: true}), 'ds-dashboard-ppt');
       ppt.dataset.dashboardPptId = id;
       ppt.disabled = dashboardStatus.state !== 'ready';
       action('Delete Dashboard', '×', async () => { await deleteDashboard(id); }, 'danger-button');

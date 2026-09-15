@@ -1763,6 +1763,13 @@ def test_opening_workspace_removes_only_cache_from_previous_versions(client) -> 
     app_module.activate_workspace(workspace.id)
     assert current_model.exists()
 
+    previous_patch_signature = dict(app_module.workspace_cache_version_signature())
+    previous_patch_signature['application'] = '0.3.0'
+    version_file.write_text(json.dumps(previous_patch_signature), encoding='utf-8')
+    app_module.activate_workspace(workspace.id)
+    assert current_model.exists()
+    assert json.loads(version_file.read_text(encoding='utf-8')) == app_module.workspace_cache_version_signature()
+
 
 def test_workspace_management_reports_every_supported_row_status(client, tmp_path: Path) -> None:
     import src.DashboardAnalytic as app_module
