@@ -44,7 +44,7 @@ Select one or more CDR Data, Voice and Speech sources. Date from/Date to default
 
 The ready summary distinguishes:
 
-- **Dataset Universe**: usable rows contributed by the selected CDRs before date and adaptive-filter restrictions;
+- **Dataset Universe**: rows contributed by the selected CDR sources; without date or adaptive-filter restrictions, the ready summary reuses the effective Dashboard count so it matches Filtered Universe;
 - **Filtered Universe**: rows remaining after dates and adaptive filters;
 - chart rows: the subset after the selected template row's own filters.
 
@@ -90,7 +90,7 @@ If View Dashboard or Generate PPT is requested with unapplied changes:
 
 Combined CDR tables are the source of record. Selections up to 25,000 rows can store exact `(dataset_id, source_row_id)` references; larger selections use SQL predicates. A narrow SQLite projection contains only fields required by the Dashboard, filters and template.
 
-Preparation is debounced and stale responses are ignored. A new request replaces the current one; an equivalent cached request restores immediately. A global gate allows only one Dashboard preparation or warm-up task to run at a time. Applying filters to the visible Dashboard interrupts any automatic warm-up, waits for that worker to release the gate, runs the visible Dashboard first and then requeues the interrupted Dashboards. Chart-model workers belong to that single displayed task.
+Preparation is debounced and stale responses are ignored. A new request replaces the current one; an equivalent cached request restores immediately. A global gate allows only one Dashboard dataset-preparation phase to run at a time. Applying filters to the visible Dashboard interrupts automatic warm-up, waits only for an active dataset scan, runs the visible Dashboard first and then requeues the interrupted Dashboards. A cancelled chart-rendering batch does not retain the data gate or delay the foreground preparation.
 
 Manage Dashboards reports Loading data, Data queued, Rendering charts, Charts queued, Ready, Missing charts or Failed. The floating background-task card groups data preparation and chart rendering under the Dashboard name. Queued and running Dashboard tasks provide an **Interrupt task** action. View Dashboard and PPT actions remain disabled until their data and required models are ready.
 

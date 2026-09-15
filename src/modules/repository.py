@@ -1550,11 +1550,11 @@ class Repository:
             # A column can already exist in the shared table because another
             # dataset introduced it, while this dataset's older cached rows
             # still contain only NULL for that column. Validate every field
-            # requested by the chart, not just derived dimensions. The two
-            # LIMIT 1 probes retain the fast path as soon as cached data exists.
+            # requested by the chart, not just derived dimensions.
             target_lookup = {self._column_identity(column): column for column in target_columns}
             columns_to_refresh: list[tuple[str, str]] = []
             if existing_rows:
+                existing_pairs: list[tuple[str, str]] = []
                 for requested in desired:
                     identity = self._column_identity(requested)
                     if identity not in source_lookup or identity not in target_lookup:
@@ -1564,19 +1564,30 @@ class Repository:
                     if identity not in previous_columns:
                         columns_to_refresh.append((target, source))
                         continue
-                    cached_value = conn.execute(
-                        f"SELECT 1 FROM {quoted_target} WHERE dataset_id = ? "
-                        f"AND {self._quote_identifier(target)} IS NOT NULL LIMIT 1",
+                    existing_pairs.append((target, source))
+                # Checking each requested field separately made an all-NULL
+                # field scan the same large CDR once per column. Inspect every
+                # existing field in one pass through the selected dataset and,
+                # only when needed, one pass through its source table.
+                if existing_pairs:
+                    target_presence = conn.execute(
+                        f"SELECT {', '.join(f'MAX(CASE WHEN {self._quote_identifier(target)} IS NOT NULL THEN 1 ELSE 0 END) AS present_{index}' for index, (target, _source) in enumerate(existing_pairs))} "
+                        f"FROM {quoted_target} WHERE dataset_id = ?",
                         (dataset_id,),
                     ).fetchone()
-                    if cached_value:
-                        continue
-                    source_value = conn.execute(
-                        f"SELECT 1 FROM {self._quote_identifier(source_table)} "
-                        f"WHERE {self._quote_identifier(source)} IS NOT NULL LIMIT 1"
-                    ).fetchone()
-                    if source_value:
-                        columns_to_refresh.append((target, source))
+                    missing_pairs = [
+                        pair for index, pair in enumerate(existing_pairs)
+                        if not int(target_presence[f'present_{index}'] or 0)
+                    ]
+                    if missing_pairs:
+                        source_presence = conn.execute(
+                            f"SELECT {', '.join(f'MAX(CASE WHEN {self._quote_identifier(source)} IS NOT NULL THEN 1 ELSE 0 END) AS present_{index}' for index, (_target, source) in enumerate(missing_pairs))} "
+                            f"FROM {self._quote_identifier(source_table)}"
+                        ).fetchone()
+                        columns_to_refresh.extend(
+                            pair for index, pair in enumerate(missing_pairs)
+                            if int(source_presence[f'present_{index}'] or 0)
+                        )
                 if not columns_to_refresh:
                     return False
                 # Adding a template field used to delete and recreate every

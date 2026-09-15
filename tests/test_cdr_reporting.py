@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime
 import pandas as pd
@@ -139,6 +140,38 @@ def test_reporting_cache_repairs_an_empty_requested_source_column(tmp_path) -> N
 
     loaded = repository.load_reporting_rows('data', [1], ['G Level 4'])
     assert loaded.to_dict(orient='records') == [{'G Level 4': 'London'}]
+
+
+def test_reporting_cache_checks_requested_columns_in_bounded_table_scans(tmp_path) -> None:
+    class TracedRepository(Repository):
+        def __init__(self, db_path: Path) -> None:
+            super().__init__(db_path)
+            self.statements: list[str] = []
+
+        @contextmanager
+        def connection(self):
+            with super().connection() as connection:
+                connection.set_trace_callback(self.statements.append)
+                yield connection
+
+    repository = TracedRepository(tmp_path / 'workspace.db')
+    repository.replace_dataset_rows(1, pd.DataFrame({
+        'first': ['A', 'B'], 'second': [None, None], 'third': ['C', None],
+    }))
+    repository.copy_dataset_rows_to_reporting(1, 'data', ['first', 'second', 'third'])
+    repository.statements.clear()
+
+    assert repository.copy_dataset_rows_to_reporting(1, 'data', ['first', 'second', 'third']) is False
+
+    presence_queries = [
+        statement for statement in repository.statements
+        if statement.startswith('SELECT MAX(CASE WHEN')
+    ]
+    assert len(presence_queries) == 2
+    assert '"first" IS NOT NULL' in presence_queries[0]
+    assert '"second" IS NOT NULL' in presence_queries[0]
+    assert '"third" IS NOT NULL' in presence_queries[0]
+    assert 'FROM "dataset_rows_1"' in presence_queries[1]
 
 
 def test_session_classification_and_multivendor_enrichment() -> None:

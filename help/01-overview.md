@@ -125,7 +125,7 @@ E2E Dashboards is the main analysis module and the complete template-driven work
 
 ### Preparation and reuse
 
-The module prepares a **Filtered Universe** once and reuses it across every template chart. Small selections retain exact row identities; large selections use equivalent SQL predicates. Narrow projections, persisted selection snapshots and versioned Canvas models avoid rebuilding an unchanged Dashboard after reopening it or restarting the application. One global gate permits only one Dashboard preparation or warm-up task at a time. A foreground Apply Filters request interrupts automatic warm-up, runs first and requeues the interrupted Dashboards afterwards. Opening a workspace removes cache artifacts written by older application or cache-format versions.
+The module prepares a **Filtered Universe** once and reuses it across every template chart. Small selections retain exact row identities; large selections use equivalent SQL predicates. Narrow projections, persisted selection snapshots and versioned Canvas models avoid rebuilding an unchanged Dashboard after reopening it or restarting the application. One global gate permits only one Dashboard dataset-preparation phase at a time. A foreground Apply Filters request interrupts automatic warm-up, runs as soon as any active dataset scan releases the gate and requeues the interrupted Dashboards afterwards; a cancelled chart-rendering batch never holds that data gate. Opening a workspace removes cache artifacts written by older application or cache-format versions.
 
 Status cards distinguish data loading, queued data, chart rendering, queued charts, Ready, missing charts and failures. The floating background-task card shows the same work while users move between modules.
 

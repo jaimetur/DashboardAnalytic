@@ -371,7 +371,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'template_filters_applied=template_filters_applied,' in dashboard_module
     assert 'ensure_projection(snapshot, kind, task_repository)' in dashboard_module
     assert 'aggregation_columns = chart_aggregation_columns(' in dashboard_module
-    assert "thread_name_prefix='e2e-dashboard-data'," in dashboard_module
+    assert "thread_name_prefix='e2e-dashboard-data'," not in dashboard_module
     dashboard_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
     assert '.e2e-dashboards .ds-unsaved-filters-badge' in dashboard_css
     assert '.e2e-dashboards .ds-unapplied-filters-badge' in dashboard_css
@@ -686,7 +686,7 @@ def test_prefetched_dashboard_reuses_completed_server_snapshot(client):
     assert manifests
 
 
-def test_foreground_preparation_replaces_the_same_dashboard_warmup(client, monkeypatch):
+def test_foreground_preparation_does_not_wait_for_cancelled_chart_warmup(client, monkeypatch):
     payload = setup_dashboard(client)
     import src.modules.e2e_dashboards as dashboards_module
 
@@ -712,21 +712,8 @@ def test_foreground_preparation_replaces_the_same_dashboard_warmup(client, monke
     ))
     try:
         foreground.start()
-        deadline = time.monotonic() + 5
-        tasks = []
-        while time.monotonic() < deadline:
-            tasks = [
-                task for group in client.get('/api/background-tasks').json()['groups']
-                for task in group['tasks'] if task.get('dashboard_name') == payload['name']
-            ]
-            if any(task['id'] == 'foreground-test' for task in tasks):
-                break
-            time.sleep(0.02)
-        assert [task['id'] for task in tasks] == ['foreground-test']
-        assert tasks[0]['stop_task_id'] == 'dashboard-prepare:foreground-test'
-        assert foreground.is_alive()
-        release.set()
         foreground.join(5)
+        assert not foreground.is_alive()
         prepared = result['response']
         assert prepared.status_code == 200, prepared.text
         tasks = [

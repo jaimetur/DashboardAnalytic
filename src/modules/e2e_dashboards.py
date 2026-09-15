@@ -224,7 +224,6 @@ def install_dashboard_routes(core):
     lock = RLock()
     snapshots = OrderedDict()
     images = OrderedDict()
-    universe_row_count_cache = OrderedDict()
     projection_load_locks: dict[str, RLock] = {}
     prefetch_jobs: dict[str, dict] = {}
     direct_preparation_tasks: dict[str, dict] = {}
@@ -1332,38 +1331,6 @@ def install_dashboard_routes(core):
         }
         return sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
-    def dataset_universe_row_counts(definition, task_repository, dimensions, selected_by_kind):
-        """Count the selected CDR rows before date and adaptive-filter restrictions."""
-        baseline = definition.model_copy(deep=True)
-        baseline.filters = {}
-        baseline.custom_fields = []
-        baseline.hidden_filters = []
-        baseline.date_from = None
-        baseline.date_to = None
-        cache_key = persistent_selection_key(baseline, task_repository, dimensions, selected_by_kind)
-        with lock:
-            cached = universe_row_count_cache.get(cache_key)
-            if cached is not None:
-                universe_row_count_cache.move_to_end(cache_key)
-                return dict(cached)
-        counts = {}
-        with task_repository.connection() as connection:
-            for kind, selected in selected_by_kind.items():
-                columns = task_repository.list_reporting_row_columns(kind)
-                where, params = selection_where(
-                    task_repository, kind, [int(row['id']) for row in selected], baseline, columns=columns,
-                )
-                table = task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))
-                counts[kind] = int(connection.execute(
-                    f'SELECT COUNT(*) AS count FROM {table} WHERE {where}', params,
-                ).fetchone()['count'])
-        with lock:
-            universe_row_count_cache[cache_key] = dict(counts)
-            universe_row_count_cache.move_to_end(cache_key)
-            while len(universe_row_count_cache) > 64:
-                universe_row_count_cache.popitem(last=False)
-        return counts
-
     def selected_date_bounds(task_repository, selected_by_kind):
         """Return the inclusive calendar bounds across the selected source datasets."""
         lower = upper = None
@@ -1615,6 +1582,10 @@ def install_dashboard_routes(core):
         entries = validate(definition, task_repository)
         dimensions = core.load_repository_calculated_dimensions(task_repository)
         selected_by_kind = selected_sources(definition, task_repository)
+        selected_source_rows = {
+            kind: sum(int(dataset.get('row_count') or 0) for dataset in selected)
+            for kind, selected in selected_by_kind.items()
+        }
         ensure_filter_projection(definition, task_repository, dimensions, selected_by_kind, entries)
         ensure_not_cancelled()
         date_bounds = selected_date_bounds(task_repository, selected_by_kind)
@@ -1641,8 +1612,8 @@ def install_dashboard_routes(core):
             and str(definition.date_to) == date_bounds['max']
         )
         universe_rows = (
-            dict(row_counts) if not definition.filters and full_date_range
-            else dataset_universe_row_counts(definition, task_repository, dimensions, selected_by_kind)
+            dict(row_counts) if not definition.filters and (full_date_range or not date_bounds)
+            else selected_source_rows
         )
         slides = OrderedDict()
         deck = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
@@ -1697,32 +1668,9 @@ def install_dashboard_routes(core):
             ensure_not_cancelled()
             ensure_projection(snapshot, kind, task_repository)
         ensure_not_cancelled()
-        # Load and filter the inputs for uncached Canvas models while the job
-        # is still preparing Dashboard data. The rendering phase then only
-        # performs the chart aggregation/serialisation work measured by its
-        # task, rather than charging SQLite reads to every individual chart.
-        pending_frames = [
-            index for index, entry in enumerate(snapshot.entries)
-            if entry.source_kind in selected_by_kind
-            and not canvas_model_path(snapshot, entry).is_file()
-        ]
-        with ThreadPoolExecutor(
-            max_workers=DASHBOARD_CHART_RENDER_WORKERS,
-            thread_name_prefix='e2e-dashboard-data',
-        ) as data_executor:
-            while pending_frames:
-                ensure_not_cancelled()
-                batch = pending_frames[:DASHBOARD_CHART_RENDER_WORKERS]
-                pending_frames = pending_frames[DASHBOARD_CHART_RENDER_WORKERS:]
-                futures = [
-                    data_executor.submit(
-                        snapshot_chart, token, index, user, expected_workspace=workspace,
-                    )
-                    for index in batch
-                ]
-                for future in as_completed(futures):
-                    future.result()
-                ensure_not_cancelled()
+        # Canvas inputs are chart work. Leave them to the warm-up queue so an
+        # applied selection becomes usable as soon as its compact projections
+        # are ready instead of reading and filtering the CDR once per chart.
         return {**payload, 'token': token}
 
     def preview_manifest_path(workspace: str, dashboard_id: str, fingerprint: str) -> Path:
@@ -2760,9 +2708,10 @@ def install_dashboard_routes(core):
                                 or job.get('generation') != prefetch_generation.get(workspace, 0)
                             )
 
-                    preview = build_preview(
-                        definition, user, workspace=workspace, cancelled=preparation_cancelled,
-                    )
+                    with dashboard_work_gate:
+                        preview = build_preview(
+                            definition, user, workspace=workspace, cancelled=preparation_cancelled,
+                        )
                 persist_preview_manifest(workspace, dashboard_id, fingerprint, preview['token'])
                 charts = [chart['index'] for slide in preview['slides'] for chart in slide['charts'] if chart['available']]
                 with lock:
@@ -2834,8 +2783,7 @@ def install_dashboard_routes(core):
                     else:
                         job.update(status='failed', error=str(exc))
         def run():
-            with dashboard_work_gate:
-                run_job()
+            run_job()
 
         with lock:
             job['runner'] = run
