@@ -1713,30 +1713,12 @@
     if (open && !expandedChartFilterControls) await loadExpandedChartFilters();
   });
   $('ds-chart-filter-close').onclick = () => setExpandedChartFiltersOpen(false);
-  expandedTemplateUpdate.onclick = safe(async () => {
-    if (!expandedChart || !expandedChartFilterControls) return;
-    const accepted = await window.showConfirmDialog(
-      'Update the current Report Template row with the values shown in Chart Definition?',
-      {title: 'Update Template?', confirmLabel: 'Update Template', tone: 'warning'},
-    );
-    if (!accepted) return;
-    expandedTemplateUpdate.disabled = true;
-    try {
-      const values = expandedChartFilterControls.definition();
-      await api(`/chart/${encodeURIComponent(expandedChartFilterToken)}/${expandedChartFilterIndex}/update-template`, 'POST', values);
-      window.showInfoDialog('The current Chart Definition values were saved to the Report Template.', {title: 'Template updated'});
-    } finally {
-      expandedTemplateUpdate.disabled = false;
-    }
-  });
-  $('ds-chart-filter-apply').onclick = safe(async () => {
+  const renderExpandedChartDefinition = async ({closePanel = true} = {}) => {
     const chart = expandedChart;
-    if (!chart || !expandedChartFilterControls) return;
-    const button = $('ds-chart-filter-apply');
+    if (!chart || !expandedChartFilterControls) return null;
     const canvas = $('ds-chart-expanded-canvas');
     const message = $('ds-chart-expanded-message');
-    button.disabled = true;
-    button.textContent = 'Applying…';
+    const previewDefinition = expandedChartFilterControls.definition();
     message.textContent = 'Rendering chart preview…';
     message.hidden = false;
     try {
@@ -1746,18 +1728,49 @@
         expandedChartFilterIndex = Number(preparedContext.chart_index);
       }
       if (!expandedChartFilterToken) throw new Error('The chart dataset could not be restored.');
-      const previewDefinition = expandedChartFilterControls.definition();
       const payload = await api(`/chart/${encodeURIComponent(expandedChartFilterToken)}/${expandedChartFilterIndex}/filter-preview`, 'POST', previewDefinition);
-      if (chart !== expandedChart) return;
+      if (chart !== expandedChart) return null;
       $('ds-chart-expanded-title').textContent = payload.title || chart.title || 'Expanded chart';
       expandedZoom.reset();
       canvas.hidden = false;
       globalThis.renderDashboardChart(canvas, payload);
       message.hidden = true;
-      setExpandedChartFiltersOpen(false);
+      if (closePanel) setExpandedChartFiltersOpen(false);
+      return {previewDefinition, payload};
     } catch (error) {
       message.hidden = true;
       throw error;
+    }
+  };
+  expandedTemplateUpdate.onclick = safe(async () => {
+    if (!expandedChart || !expandedChartFilterControls) return;
+    const accepted = await window.showConfirmDialog(
+      'Render the current Chart Definition and update its Report Template row?',
+      {title: 'Update Template?', confirmLabel: 'Update Template', tone: 'warning'},
+    );
+    if (!accepted) return;
+    expandedTemplateUpdate.disabled = true;
+    expandedTemplateUpdate.textContent = 'Rendering…';
+    try {
+      const rendered = await renderExpandedChartDefinition({closePanel: false});
+      if (!rendered) return;
+      expandedTemplateUpdate.textContent = 'Updating…';
+      await api(`/chart/${encodeURIComponent(expandedChartFilterToken)}/${expandedChartFilterIndex}/update-template`, 'POST', rendered.previewDefinition);
+      setExpandedChartFiltersOpen(false);
+      window.showInfoDialog('The current Chart Definition values were saved to the Report Template.', {title: 'Template updated'});
+    } finally {
+      expandedTemplateUpdate.disabled = false;
+      expandedTemplateUpdate.textContent = 'Update Template';
+    }
+  });
+  $('ds-chart-filter-apply').onclick = safe(async () => {
+    const chart = expandedChart;
+    if (!chart || !expandedChartFilterControls) return;
+    const button = $('ds-chart-filter-apply');
+    button.disabled = true;
+    button.textContent = 'Applying…';
+    try {
+      await renderExpandedChartDefinition();
     } finally {
       button.disabled = false;
       button.textContent = 'Apply';

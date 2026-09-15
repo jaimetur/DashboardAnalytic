@@ -355,6 +355,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "previewDefinition = expandedChartFilterControls.definition()" in dashboard_script
     assert "id = 'ds-chart-filter-update'" in dashboard_script
     assert "/update-template" in dashboard_script
+    assert 'const renderExpandedChartDefinition = async ({closePanel = true} = {}) =>' in dashboard_script
+    assert 'const rendered = await renderExpandedChartDefinition({closePanel: false});' in dashboard_script
+    assert dashboard_script.index('const rendered = await renderExpandedChartDefinition({closePanel: false});') < dashboard_script.index("/update-template`, 'POST', rendered.previewDefinition")
+    assert "const preparedContext = await api(`${expandedChartFilterContextPath}?prepare=true`);" in dashboard_script
     assert "if (open && !expandedChartFilterControls) await loadExpandedChartFilters();" in dashboard_script
     assert "expandedCanvasShell.classList.add('ds-hover')" in dashboard_script
     assert 'const scheduleExpandedChartFiltersClose = () =>' in dashboard_script
@@ -844,6 +848,61 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     assert deleted.json()['deleted'] == 1
     assert client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs'] == []
     assert not output_path.parent.exists()
+
+
+def test_relaunching_dashboard_ppt_uses_the_modified_report_template(client):
+    payload = setup_dashboard(client)
+    dashboard_id = 'updated-template-ppt'
+    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+
+    deadline = time.monotonic() + 15
+    prepared = client.get(f'/api/e2e-dashboards/prefetched/{dashboard_id}')
+    while time.monotonic() < deadline:
+        if prepared.status_code == 200:
+            break
+        time.sleep(0.05)
+        prepared = client.get(f'/api/e2e-dashboards/prefetched/{dashboard_id}')
+
+    assert prepared.status_code == 200, prepared.text
+    queued = client.post(f'/api/e2e-dashboards/{dashboard_id}/export-ppt', json={
+        'preparation_token': prepared.json()['token'],
+    })
+    assert queued.status_code == 202, queued.text
+    job_id = queued.json()['job_id']
+
+    def wait_for_job():
+        while time.monotonic() < deadline:
+            job = next(
+                item for item in client.get('/api/e2e-dashboards/ppt-jobs').json()['jobs']
+                if item['id'] == job_id
+            )
+            if job['status'] in {'ready', 'failed'}:
+                return job
+            time.sleep(0.05)
+        return job
+
+    assert wait_for_job()['status'] == 'ready'
+    original_charts = client.get(
+        f'/api/e2e-dashboards/ppt-jobs/{job_id}/charts.json'
+    ).json()['charts']
+    assert original_charts[0]['title'] == 'Rate'
+
+    template = core.repository.report_template_content('nsa', 'Dashboard test')
+    core.repository.set_report_template_content(
+        'nsa', 'Dashboard test', template.replace(b',Rate,CDR-Data,', b',Updated rate,CDR-Data,', 1),
+    )
+
+    relaunched = client.post(f'/api/e2e-dashboards/ppt-jobs/{job_id}/retry')
+    assert relaunched.status_code == 202, relaunched.text
+    deadline = time.monotonic() + 15
+    job = wait_for_job()
+    assert job['status'] == 'ready', job
+    refreshed_charts = client.get(job['charts_api_url']).json()['charts']
+    assert refreshed_charts[0]['title'] == 'Updated rate'
+    refreshed_model = client.get(refreshed_charts[0]['payload_url'])
+    assert refreshed_model.status_code == 200, refreshed_model.text
+    assert refreshed_model.json()['title'] == 'Updated rate'
+    assert client.get(job['download_url']).content.startswith(b'PK')
 
 
 def test_prefetched_dashboard_reuses_completed_server_snapshot(client):

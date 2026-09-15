@@ -438,9 +438,23 @@ def install_dashboard_routes(core):
             'delete_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/delete',
         }
 
+    def dashboard_preview_fingerprint(raw_definition, task_repository):
+        """Include the current Report Template content in the prepared-preview identity."""
+        definition = DashboardDefinition.model_validate(
+            runtime_dashboard_definition(raw_definition, task_repository)
+        )
+        template_content = task_repository.report_template_content(
+            definition.template_technology, definition.template,
+        )
+        material = {
+            'definition': definition.model_dump(mode='json'),
+            'template_content': sha256(template_content).hexdigest(),
+        }
+        return sha256(json.dumps(material, sort_keys=True, default=str).encode()).hexdigest()
+
     def dashboard_export_snapshot(dashboard_id, raw_definition, task_repository):
         workspace = str(Path(task_repository.db_path).resolve())
-        fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
+        fingerprint = dashboard_preview_fingerprint(raw_definition, task_repository)
         preview = restore_preview_manifest(workspace, dashboard_id, fingerprint)
         if preview is None:
             with lock:
@@ -475,7 +489,8 @@ def install_dashboard_routes(core):
         slide.shapes.add_picture(BytesIO(png), left, top, width, height)
 
     def render_dashboard_ppt_job(
-        job_id, run_token, task_repository, snapshot, destination, dashboard_id, preview_fingerprint,
+        job_id, run_token, task_repository, snapshot, definition, user,
+        destination, dashboard_id, preview_fingerprint,
     ):
         run_key = (str(Path(task_repository.db_path).resolve()), job_id)
 
@@ -489,6 +504,46 @@ def install_dashboard_routes(core):
         try:
             if not run_is_active():
                 return
+            if snapshot is None:
+                update_dashboard_ppt_job(task_repository, job_id, status='processing', progress=1, last_error='')
+
+                def preparation_progress(percent, _detail):
+                    if run_is_active():
+                        update_dashboard_ppt_job(
+                            task_repository, job_id, progress=max(1, min(4, round(percent * 0.04))),
+                        )
+
+                with dashboard_work_gate:
+                    preview = build_preview(
+                        definition, user, workspace=str(Path(task_repository.db_path).resolve()),
+                        cancelled=lambda: not run_is_active(), progress=preparation_progress,
+                    )
+                token = str(preview['token'])
+                with lock:
+                    snapshot = snapshots.get(token)
+                    dashboard_ppt_data_tokens[(
+                        str(Path(task_repository.db_path).resolve()), job_id, user.username,
+                    )] = token
+                if snapshot is None:
+                    raise RuntimeError('The refreshed Dashboard snapshot could not be created.')
+                persist_preview_manifest(
+                    str(Path(task_repository.db_path).resolve()), dashboard_id,
+                    preview_fingerprint, token,
+                )
+                indexes = list(dict.fromkeys(
+                    int(chart['index'])
+                    for slide in preview.get('slides', [])
+                    for chart in slide.get('charts', [])
+                    if chart.get('available')
+                ))
+                for index in indexes:
+                    if not run_is_active():
+                        return
+                    chart_model(
+                        token, index, user,
+                        expected_workspace=str(Path(task_repository.db_path).resolve()),
+                    )
+                snapshot = validate_dashboard_export_snapshot(snapshot, task_repository)
             update_dashboard_ppt_job(task_repository, job_id, status='processing', progress=5, last_error='')
             presentation = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
             _remove_all_slides(presentation)
@@ -818,6 +873,7 @@ def install_dashboard_routes(core):
         if not any((raw_definition.get('datasets') or {}).values()):
             raw_definition.pop('datasets', None)
             raw_definition = runtime_dashboard_definition(raw_definition, task_repository)
+        snapshot_definition = DashboardDefinition.model_validate(raw_definition)
         try:
             if preparation_token:
                 with lock:
@@ -835,9 +891,13 @@ def install_dashboard_routes(core):
             else:
                 snapshot = dashboard_export_snapshot(dashboard_id, raw_definition, task_repository)
         except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
+            if reuse_job_id is None:
+                raise HTTPException(409, str(exc)) from exc
+            # A deliberate relaunch may follow a Report Template edit. Build
+            # its new snapshot and Canvas models inside the replacement Job.
+            snapshot = None
         dashboard_name = str(raw_definition.get('name') or dashboard_id)
-        preview_fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
+        preview_fingerprint = dashboard_preview_fingerprint(raw_definition, task_repository)
         filters_json = json.dumps(dashboard_filter_lines(raw_definition, task_repository), ensure_ascii=False)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', dashboard_name).strip() or 'Dashboard'
@@ -882,7 +942,7 @@ def install_dashboard_routes(core):
         Thread(
             target=render_dashboard_ppt_job,
             args=(
-                job_id, run_token, task_repository, snapshot, destination,
+                job_id, run_token, task_repository, snapshot, snapshot_definition, user, destination,
                 dashboard_id, preview_fingerprint,
             ),
             name=f'dashboard-ppt-{job_id}', daemon=True,
@@ -1956,6 +2016,9 @@ def install_dashboard_routes(core):
         task_repository = Repository(Path(workspace), core.repository.global_db_path)
         requested = definition.model_copy(deep=True)
         try:
+            requested_fingerprint = dashboard_preview_fingerprint(
+                requested.model_dump(mode='json'), task_repository,
+            )
             apply_selected_date_bounds(requested, selected_date_bounds(
                 task_repository, selected_sources(requested, task_repository),
             ))
@@ -1967,6 +2030,7 @@ def install_dashboard_routes(core):
                         manifest.get('version') != DASHBOARD_PREVIEW_MANIFEST_VERSION
                         or manifest.get('dashboard_id') != dashboard_id
                         or not isinstance(manifest.get('fingerprint'), str)
+                        or manifest.get('fingerprint') != requested_fingerprint
                     ):
                         continue
                     stored_definition = DashboardDefinition.model_validate(manifest['definition'])
@@ -2122,9 +2186,10 @@ def install_dashboard_routes(core):
 
     def prefetched_dashboard_response(dashboard_id: str, definition: DashboardDefinition, user):
         workspace = workspace_key()
+        task_repository = Repository(Path(workspace), core.repository.global_db_path)
         with lock:
             raw_definition = definition.model_dump(mode='json')
-            fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
+            fingerprint = dashboard_preview_fingerprint(raw_definition, task_repository)
             # Warm-up jobs are shared by every permitted user of the
             # workspace.  Their snapshot owner is the system user (`*`), so
             # use the same key created by enqueue_prefetch rather than a
@@ -3108,10 +3173,11 @@ def install_dashboard_routes(core):
         """Move models from the currently visible slide ahead of later work."""
         workspace = workspace_key()
         with lock:
-            raw_definition = read_dashboards(bound_repository()).get(dashboard_id)
+            task_repository = bound_repository()
+            raw_definition = read_dashboards(task_repository).get(dashboard_id)
             if not isinstance(raw_definition, dict):
                 raise HTTPException(404, 'Dashboard not found.')
-            fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
+            fingerprint = dashboard_preview_fingerprint(raw_definition, task_repository)
             job = prefetch_jobs.get(f'{workspace}:{dashboard_id}:{fingerprint}')
             if not job or job.get('token') != payload.token:
                 job = next((
@@ -3149,7 +3215,7 @@ def install_dashboard_routes(core):
         workspace = workspace or workspace_key()
         task_repository = Repository(Path(workspace), core.repository.global_db_path)
         raw_definition = runtime_dashboard_definition(raw_definition, task_repository)
-        fingerprint = sha256(json.dumps(raw_definition, sort_keys=True, default=str).encode()).hexdigest()
+        fingerprint = dashboard_preview_fingerprint(raw_definition, task_repository)
         key = f'{workspace}:{dashboard_id}:{fingerprint}'
         definition = DashboardDefinition.model_validate(raw_definition)
         # The manifest is itself enough to restore the filtered selection and
