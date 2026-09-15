@@ -167,6 +167,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-preparing-progress"' in page.text
     assert 'id="ds-preparing-progress-bar"' in page.text
     assert 'id="ds-preparing-progress-label">0%</span>' in page.text
+    assert 'id="ds-preparing-refresh"' in page.text
+    assert 'id="ds-preparing-out-of-sync"' in page.text
     assert 'id="ds-viewer-preparing"' in page.text
     assert 'id="ds-viewer-preparing-progress"' in page.text
     assert 'id="ds-viewer-preparing-detail"' in page.text
@@ -426,6 +428,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'No CDR ${chart.source[0].toUpperCase()}${chart.source.slice(1)} dataset has been selected for this chart.' in dashboard_script
     assert "api(`/prepared/${encodeURIComponent(cachedEntry.token)}`)" in dashboard_script
     assert 'const monitorPreparationProgress = token =>' in dashboard_script
+    assert 'const dashboardNeedsRefresh = () => Boolean(' in dashboard_script
+    assert "$('ds-preparing-out-of-sync').hidden = !stale;" in dashboard_script
+    assert "bind('ds-preparing-refresh', async () => {" in dashboard_script
     assert 'label.textContent = `${detail} · ${percent}%`;' in dashboard_script
     assert 'api(`/preparation-progress/${encodeURIComponent(token)}`)' in dashboard_script
     assert 'monitorPreparationProgress(preparationToken);' in dashboard_script

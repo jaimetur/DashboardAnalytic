@@ -238,9 +238,33 @@
     prepared?.token && appliedDashboardDefinition
     && filterStateFingerprint(appliedDashboardDefinition) !== filterStateFingerprint(savedDashboardDefinition())
   );
+  const dashboardNeedsRefresh = () => Boolean(
+    definition && prepared && preparationStateFingerprint(definition) !== appliedFilterState,
+  );
+  const universeNeedsRefresh = () => {
+    if (!definition || !prepared) return false;
+    const universeFingerprint = value => {
+      const selection = canonicalSelectionDefinition(value);
+      return JSON.stringify(canonicalize({
+        datasets: selection.datasets, scope: selection.scope || 'single',
+        date_from: selection.date_from || 'Oldest', date_to: selection.date_to || 'Newest',
+      }));
+    };
+    return universeFingerprint(definition) !== universeFingerprint(appliedDashboardDefinition || definition);
+  };
+  const syncPreparationRefresh = () => {
+    const refresh = $('ds-preparing-refresh');
+    const ready = $('ds-preparing').dataset.state === 'ready';
+    const stale = universeNeedsRefresh() && ready;
+    refresh.hidden = !ready || !dashboardNeedsRefresh();
+    refresh.disabled = !dashboardNeedsRefresh() || !ready || Boolean(preparing);
+    $('ds-preparing-ready').hidden = stale;
+    $('ds-preparing-out-of-sync').hidden = !stale;
+  };
   const updateFilterActionState = () => {
     $('ds-save').disabled = !hasUnsavedFilterChanges() || filterActionBusy;
     $('ds-apply-filters').disabled = !hasUnappliedFilterChanges() || filterActionBusy;
+    syncPreparationRefresh();
   };
   const api = async (path = '', method = 'GET', body, signal) => {
     const response = await fetch(`/api/e2e-dashboards${path}`, {method, signal, cache: 'no-store', headers: {'Content-Type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
@@ -281,11 +305,14 @@
     const notice = $('ds-preparing'), viewerNotice = $('ds-viewer-preparing');
     notice.hidden = state === 'hidden';
     viewerNotice.hidden = state !== 'preparing' || $('ds-viewer').hidden;
-    if (state !== 'ready') { $('ds-preparing-rows').hidden = true; $('ds-preparing-rows').textContent = ''; }
-    if (state === 'hidden') return;
-    const ready = state === 'ready';
-    const floatingFilters = $('ds-filter-panel').parentElement?.id === 'ds-filter-float';
     notice.dataset.state = state;
+    if (state !== 'ready') { $('ds-preparing-rows').hidden = true; $('ds-preparing-rows').textContent = ''; }
+    const ready = state === 'ready';
+    const refresh = $('ds-preparing-refresh');
+    refresh.hidden = !ready || !dashboardNeedsRefresh();
+    syncPreparationRefresh();
+    if (state === 'hidden') return;
+    const floatingFilters = $('ds-filter-panel').parentElement?.id === 'ds-filter-float';
     $('ds-preparing-title').textContent = ready ? 'Dashboard dataset is ready' : phase === 'rendering' ? 'Rendering Dashboard Charts' : 'Preparing Dashboard dataset';
     $('ds-preparing-detail').textContent = floatingFilters
       ? (ready
@@ -1181,6 +1208,7 @@
     setViewEnabled(Boolean(payload.slides?.length));
     setPreparationRows(payload);
     setPreparationState('ready');
+    syncPreparationRefresh();
     chartPayloads.clear(); renderedChartPayloads.clear(); rememberPrepared(payload);
     if (!$('ds-viewer').hidden) renderSlide();
   };
@@ -1424,6 +1452,9 @@
     facets(); filterChanged();
   });
   bind('ds-viewer-refresh',prepare);
+  bind('ds-preparing-refresh', async () => {
+    if (dashboardNeedsRefresh()) await prepare();
+  });
   bind('ds-viewer-export-ppt', async () => {
     const item = dashboards[activeId];
     if (item) await queueDashboardPptExport(activeId, item);
