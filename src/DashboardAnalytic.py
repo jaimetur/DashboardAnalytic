@@ -74,6 +74,10 @@ STOP_REQUESTS: set[tuple[str, int]] = set()
 STOP_REQUESTS_LOCK = Lock()
 DATASET_PROCESSING_LOCKS: dict[str, Lock] = {}
 DATASET_PROCESSING_LOCKS_LOCK = Lock()
+DATASET_PROCESSING_EXECUTORS: dict[str, ThreadPoolExecutor] = {}
+DATASET_PROCESSING_EXECUTORS_LOCK = Lock()
+ACTIVE_DATASET_PROCESSING: set[tuple[str, int]] = set()
+ACTIVE_DATASET_PROCESSING_LOCK = Lock()
 REPORT_CHART_JOB_LOCKS: dict[str, Lock] = {}
 REPORT_CHART_JOB_LOCKS_LOCK = Lock()
 TEMPLATE_SAVE_LOCK = Lock()
@@ -1407,6 +1411,7 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
         if already_active:
             active_workspace = workspace
             clear_outdated_workspace_caches(workspace)
+            resume_interrupted_dataset_processing(workspace)
             return workspace
 
         # Authentication remains global; template files and metadata are workspace-owned.
@@ -1443,6 +1448,7 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
             # exact columns it needs lazily in ``_combined_reporting_frame``.
             for technology in TEMPLATE_NAMES:
                 synchronize_template_file_names(technology)
+        resume_interrupted_dataset_processing(workspace)
         return workspace
 
 
@@ -1636,7 +1642,7 @@ async def lifespan(_: FastAPI):
     _cleanup_expired_export_packages()
     if (workspace_id := workspace_registry.active_id()):
         activate_workspace(workspace_id)
-        interrupted_datasets, interrupted_reports = repository.fail_interrupted_background_jobs()
+        interrupted_datasets, interrupted_reports = repository.fail_interrupted_background_jobs(fail_datasets=False)
         interrupted_chart_jobs = repository.fail_interrupted_report_chart_jobs()
         if interrupted_datasets or interrupted_reports or interrupted_chart_jobs:
             repository.add_log(
@@ -1661,6 +1667,11 @@ async def lifespan(_: FastAPI):
         ).start()
     Thread(target=deferred_workspace_prefetch_loop, name='e2e-dashboard-idle-prefetch', daemon=True).start()
     yield
+    with DATASET_PROCESSING_EXECUTORS_LOCK:
+        dataset_executors = list(DATASET_PROCESSING_EXECUTORS.values())
+        DATASET_PROCESSING_EXECUTORS.clear()
+    for executor in dataset_executors:
+        executor.shutdown(wait=True)
 
 
 app = FastAPI(title=__app_name__, version=__version__, lifespan=lifespan)
@@ -2012,6 +2023,29 @@ def _dataset_stop_key(dataset_id: int, task_repository: Repository | None = None
     return (str((task_repository or repository).db_path.resolve()), dataset_id)
 
 
+def _register_dataset_processing(dataset_id: int, task_repository: Repository) -> bool:
+    key = _dataset_stop_key(dataset_id, task_repository)
+    with ACTIVE_DATASET_PROCESSING_LOCK:
+        if key in ACTIVE_DATASET_PROCESSING:
+            return False
+        ACTIVE_DATASET_PROCESSING.add(key)
+        return True
+
+
+def _dataset_processing_executor(task_repository: Repository) -> ThreadPoolExecutor:
+    workspace_key = str(task_repository.db_path.resolve())
+    with DATASET_PROCESSING_EXECUTORS_LOCK:
+        return DATASET_PROCESSING_EXECUTORS.setdefault(
+            workspace_key,
+            ThreadPoolExecutor(max_workers=1, thread_name_prefix='dataset-processing'),
+        )
+
+
+def _unregister_dataset_processing(dataset_id: int, task_repository: Repository) -> None:
+    with ACTIVE_DATASET_PROCESSING_LOCK:
+        ACTIVE_DATASET_PROCESSING.discard(_dataset_stop_key(dataset_id, task_repository))
+
+
 def request_stop(dataset_id: int, task_repository: Repository | None = None) -> None:
     with STOP_REQUESTS_LOCK:
         STOP_REQUESTS.add(_dataset_stop_key(dataset_id, task_repository))
@@ -2148,7 +2182,7 @@ def ensure_dataset_query_table(dataset: dict[str, Any], required_columns: list[s
     repository.replace_dataset_rows(dataset_id, df)
 
 
-def process_dataset(
+def _process_dataset(
     dataset_id: int,
     dataset_path: Path,
     username: str,
@@ -2240,6 +2274,28 @@ def process_dataset(
             invalidate_workspace_size_cache(task_repository.db_path.parent)
 
 
+def process_dataset(
+    dataset_id: int,
+    dataset_path: Path,
+    username: str,
+    vodafone_mapping_dataset_id: int | None = None,
+    three_mapping_dataset_id: int | None = None,
+    task_repository: Repository | None = None,
+    workspace: Workspace | None = None,
+) -> None:
+    """Run a dataset worker independently from sessions and active Workspace changes."""
+    task_repository = task_repository or repository
+    _register_dataset_processing(dataset_id, task_repository)
+    try:
+        _process_dataset(
+            dataset_id, dataset_path, username,
+            vodafone_mapping_dataset_id, three_mapping_dataset_id,
+            task_repository, workspace,
+        )
+    finally:
+        _unregister_dataset_processing(dataset_id, task_repository)
+
+
 def enqueue_dataset_processing(
     background_tasks: BackgroundTasks,
     dataset_id: int,
@@ -2256,7 +2312,12 @@ def enqueue_dataset_processing(
     for key in stale_dataset_keys:
         DATAFRAME_CACHE.pop(key, None)
     repository.update_dataset_profile(
-        dataset_id, status='queued', progress=0, last_error=None, processing_started_at=None, processed_at=None,
+        dataset_id, status='queued', progress=0, last_error=None,
+        processing_started_at=None, processed_at=None,
+        processing_options_json=json.dumps({
+            'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
+            'three_mapping_dataset_id': three_mapping_dataset_id,
+        }),
     )
     # BackgroundTasks runs after the response is sent. Capture the workspace
     # database now, rather than resolving the mutable active workspace later.
@@ -2265,16 +2326,69 @@ def enqueue_dataset_processing(
         (workspace for workspace in workspace_registry.list() if workspace.database_path == task_repository.db_path),
         None,
     )
-    background_tasks.add_task(
+    _register_dataset_processing(dataset_id, task_repository)
+    future = _dataset_processing_executor(task_repository).submit(
         process_dataset,
-        dataset_id,
-        dataset_path,
-        username,
-        vodafone_mapping_dataset_id,
-        three_mapping_dataset_id,
-        task_repository,
-        task_workspace,
+        *(
+            dataset_id,
+            dataset_path,
+            username,
+            vodafone_mapping_dataset_id,
+            three_mapping_dataset_id,
+            task_repository,
+            task_workspace,
+        ),
     )
+    # Keep Starlette aware of the work for graceful request/application
+    # shutdown, while the independent worker survives browser navigation,
+    # logout and Workspace changes.
+    background_tasks.add_task(future.result)
+
+
+def resume_interrupted_dataset_processing(workspace: Workspace) -> list[int]:
+    """Resume persisted dataset work without duplicating a live in-process worker."""
+    task_repository = Repository(
+        workspace.database_path,
+        global_db_path=repository.global_db_path,
+        workspace_registry_db_path=workspace_registry.registry_path,
+    )
+    resumed: list[int] = []
+    for row in task_repository.list_datasets():
+        if str(row['status'] or '').casefold() not in {'queued', 'processing'}:
+            continue
+        dataset_id = int(row['id'])
+        if not _register_dataset_processing(dataset_id, task_repository):
+            continue
+        dataset_path = Path(str(row['stored_path'] or ''))
+        if not dataset_path.is_file():
+            _unregister_dataset_processing(dataset_id, task_repository)
+            task_repository.update_dataset_profile(
+                dataset_id, status='failed', progress=100,
+                last_error='The source file is missing. Reupload the dataset before retrying.',
+                processed_at=now_iso(),
+            )
+            continue
+        try:
+            options = json.loads(str(row['processing_options_json'] or '{}'))
+        except (json.JSONDecodeError, TypeError):
+            options = {}
+        task_repository.update_dataset_profile(
+            dataset_id, status='queued', last_error=None, processed_at=None,
+        )
+        _dataset_processing_executor(task_repository).submit(
+            process_dataset,
+            *(
+                dataset_id,
+                dataset_path,
+                str(row['uploaded_by'] or 'system'),
+                options.get('vodafone_mapping_dataset_id'),
+                options.get('three_mapping_dataset_id'),
+                task_repository,
+                workspace,
+            ),
+        )
+        resumed.append(dataset_id)
+    return resumed
 
 
 def rebuild_dataset_artifacts(

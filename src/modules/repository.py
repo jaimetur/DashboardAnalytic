@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS dataset_profiles (
     last_error TEXT,
     processing_started_at TEXT,
     processed_at TEXT,
+    processing_options_json TEXT NOT NULL DEFAULT '{}',
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
 );
@@ -513,6 +514,8 @@ class Repository:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN vendor_values_complete INTEGER NOT NULL DEFAULT 0")
         if 'processing_started_at' not in existing_columns:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN processing_started_at TEXT")
+        if 'processing_options_json' not in existing_columns:
+            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN processing_options_json TEXT NOT NULL DEFAULT '{}'")
 
     def _migrate_legacy_vendor_mapping_profiles(self, conn: sqlite3.Connection) -> None:
         """Mark pre-profile mappings once, without reopening source CDR files."""
@@ -2144,7 +2147,8 @@ class Repository:
                        p.status, p.progress, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.dataset_kind, p.row_count, p.column_count,
                        p.default_metric, p.default_aggregation, p.available_metrics_json,
                        p.available_aggregations_json, p.filter_options_json, p.summary_json,
-                       p.kpis_json, p.last_error, p.processing_started_at, p.processed_at, p.updated_at
+                       p.kpis_json, p.last_error, p.processing_started_at, p.processed_at,
+                       p.processing_options_json, p.updated_at
                 FROM datasets d
                 LEFT JOIN dataset_profiles p ON p.dataset_id = d.id
                 WHERE d.id = ?
@@ -2161,7 +2165,8 @@ class Repository:
                            p.status, p.progress, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.dataset_kind, p.row_count, p.column_count,
                            p.default_metric, p.default_aggregation, p.available_metrics_json,
                            p.available_aggregations_json, p.filter_options_json, p.summary_json,
-                           p.kpis_json, p.last_error, p.processing_started_at, p.processed_at, p.updated_at
+                           p.kpis_json, p.last_error, p.processing_started_at, p.processed_at,
+                           p.processing_options_json, p.updated_at
                     FROM datasets d
                     LEFT JOIN dataset_profiles p ON p.dataset_id = d.id
                     ORDER BY d.uploaded_at DESC, d.id DESC
@@ -2294,7 +2299,7 @@ class Repository:
             )
             return cursor.rowcount == 1
 
-    def fail_interrupted_background_jobs(self) -> tuple[list[int], list[int]]:
+    def fail_interrupted_background_jobs(self, *, fail_datasets: bool = True) -> tuple[list[int], list[int]]:
         """Fail jobs left running when the application process stopped.
 
         In-process workers cannot survive an application restart.  Persisted
@@ -2311,7 +2316,7 @@ class Repository:
             report_rows = conn.execute(
                 "SELECT id FROM generated_jobs WHERE job_type = 'report' AND status IN ('queued', 'processing')"
             ).fetchall() if 'generated_jobs' in tables else []
-            dataset_ids = [int(row['dataset_id']) for row in dataset_rows]
+            dataset_ids = [int(row['dataset_id']) for row in dataset_rows] if fail_datasets else []
             report_ids = [int(row['id']) for row in report_rows]
             if dataset_ids:
                 placeholders = ','.join('?' for _ in dataset_ids)

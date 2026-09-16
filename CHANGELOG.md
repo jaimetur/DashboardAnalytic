@@ -46,6 +46,7 @@
 - CDR previews mark every field as `PINNED` or `UN_PINNED`; mapping previews hide empty optional and Analysis-derived fields while retaining metadata, Region, GCID, Operator and Technology_Primary.
 - Added application-wide Config settings for timezone, chart renderer, Chromium and event-time filtering, including searchable IANA timezones; event-time bypass disables only dataset date-range prefilters with an explanatory tooltip.
 - Background task cards can be moved and restored to their default dock position with a target control.
+- Dataset imports continue after logout or Workspace changes and automatically resume after an application restart with their original mapping selections.
 
 #### 🐛 Bug fixes:
 - Prevented a foreground Dashboard preparation and its automatic warm-up from appearing as duplicate background tasks.

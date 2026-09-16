@@ -2045,6 +2045,43 @@ def test_interrupted_background_jobs_become_retryable_failures(client) -> None:
     assert app_module.serialize_report_job(report)['retry_url'] == f'/e2e-reporting/jobs/{report_id}/retry'
 
 
+def test_interrupted_dataset_processing_is_resumed_instead_of_failed(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    source = workspace.input_dir / 'resume-interrupted.csv'
+    source.write_text('market,score\nES,91\n', encoding='utf-8')
+    dataset_id, _ = app_module.repository.add_dataset(source.name, str(source), 'admin')
+    app_module.repository.update_dataset_profile(
+        dataset_id,
+        status='processing',
+        progress=45,
+        dataset_kind='data',
+        processing_options_json=json.dumps({
+            'vodafone_mapping_dataset_id': None,
+            'three_mapping_dataset_id': None,
+        }),
+    )
+
+    datasets, reports = app_module.repository.fail_interrupted_background_jobs(fail_datasets=False)
+    assert datasets == []
+    assert reports == []
+    assert app_module.repository.get_dataset(dataset_id)['status'] == 'processing'
+
+    resumed = app_module.resume_interrupted_dataset_processing(workspace)
+    assert resumed == [dataset_id]
+    for _attempt in range(200):
+        if app_module.repository.get_dataset(dataset_id)['status'] == 'ready':
+            break
+        time.sleep(0.01)
+    completed = app_module.repository.get_dataset(dataset_id)
+    assert completed['status'] == 'ready'
+    assert completed['progress'] == 100
+    assert completed['last_error'] in {None, ''}
+
+
 def test_ready_chart_set_job_supports_relaunch_and_row_reuse(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -2202,11 +2239,17 @@ def test_dataset_background_task_reports_running_and_completed_duration(client) 
         processed_at=None,
     )
 
-    groups = client.get('/api/background-tasks').json()['groups']
-    running = next(
-        task for group in groups for task in group['tasks']
-        if task['id'] == f'dataset:{workspace.id}:{dataset_id}'
-    )
+    running = None
+    for _attempt in range(20):
+        tasks = app_module._workspace_background_tasks(workspace)
+        running = next((
+            task for task in tasks
+            if task['id'] == f'dataset:{workspace.id}:{dataset_id}'
+        ), None)
+        if running:
+            break
+        time.sleep(0.01)
+    assert running is not None
     assert running['detail'] == 'Processing'
     assert running['progress'] == 45
     assert running['duration_seconds'] >= 65
@@ -2217,11 +2260,17 @@ def test_dataset_background_task_reports_running_and_completed_duration(client) 
         progress=100,
         processed_at=finished_at.isoformat(),
     )
-    groups = client.get('/api/background-tasks').json()['groups']
-    completed = next(
-        task for group in groups for task in group['tasks']
-        if task['id'] == f'dataset:{workspace.id}:{dataset_id}'
-    )
+    completed = None
+    for _attempt in range(20):
+        tasks = app_module._workspace_background_tasks(workspace)
+        completed = next((
+            task for task in tasks
+            if task['id'] == f'dataset:{workspace.id}:{dataset_id}'
+        ), None)
+        if completed:
+            break
+        time.sleep(0.01)
+    assert completed is not None
     assert completed['detail'] == 'Completed'
     assert completed['progress'] == 100
     assert completed['duration_seconds'] == 65
@@ -2305,6 +2354,11 @@ def test_queued_import_continues_after_its_workspace_is_closed(client) -> None:
 
     tasks = BackgroundTasks()
     app_module.enqueue_dataset_processing(tasks, dataset_id, source_path, 'admin')
+    queued = app_module.repository.get_dataset(dataset_id)
+    assert json.loads(queued['processing_options_json']) == {
+        'vodafone_mapping_dataset_id': None,
+        'three_mapping_dataset_id': None,
+    }
     closed = client.post('/workspace/close', data={'workspace_id': 'default'}, follow_redirects=False)
     assert closed.status_code == 303
     assert app_module.active_workspace is None
