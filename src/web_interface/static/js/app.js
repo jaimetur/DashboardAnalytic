@@ -685,8 +685,20 @@ document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => 
   const table = panel?.querySelector('[data-server-preview-table]');
   const tbody = table?.querySelector('tbody');
   const headers = Array.from(table?.querySelectorAll('thead th') || []);
-  const clearFilters = toolbar.querySelector('[data-preview-clear-filters]');
-  const filterStatus = toolbar.querySelector('[data-preview-filter-status]');
+  const clearFilters = panel?.querySelector('[data-preview-clear-filters]');
+  const clearFiltersLabel = clearFilters?.querySelector('[data-preview-clear-label]');
+  const filterStatus = panel?.querySelector('[data-preview-filter-status]');
+  const filteringStatus = document.querySelector('[data-preview-filtering-status]');
+  const filteringStatusText = filteringStatus?.querySelector('[data-preview-filtering-text]');
+  const columnSearch = toolbar.querySelector('[data-server-preview-column-search]');
+  const tagFilter = toolbar.querySelector('[data-preview-tag-filter]');
+  const tagFilterToggle = tagFilter?.querySelector('[data-preview-tag-filter-toggle]');
+  const tagFilterLabel = tagFilterToggle?.querySelector('[data-preview-tag-filter-label]');
+  const tagFilterMenu = tagFilter?.querySelector('[data-preview-tag-filter-menu]');
+  const tagFilterAll = tagFilterMenu?.querySelector('[data-preview-tag-filter-all]');
+  const tagItems = Array.from(panel?.querySelectorAll('[data-preview-column-tag-item]') || []);
+  const tagStrip = panel?.querySelector('[data-preview-column-tag-strip]');
+  const tableWrap = panel?.querySelector('.dataset-preview-table-wrap');
   const rowPill = panel?.querySelector('[data-preview-row-pill]');
   const pageStatus = panel?.querySelector('[data-preview-page-status]');
   const firstPage = panel?.querySelector('[data-preview-first-page]');
@@ -698,11 +710,43 @@ document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => 
   const endpoint = toolbar.dataset.endpoint;
   const pageSize = Number(toolbar.dataset.pageSize || 100);
   const columnFilters = new Map();
+  const selectedTags = new Set();
   let currentPage = 0;
   let filteredTotal = Number(toolbar.dataset.totalRows || 0);
   let unfilteredTotal = filteredTotal;
   let openColumnMenu = null;
   let requestSequence = 0;
+  const termsFor = (value) => String(value || '').split(',').map((term) => term.trim().toLocaleLowerCase()).filter(Boolean);
+
+  const applyColumnSearch = () => {
+    const terms = termsFor(columnSearch?.value);
+    headers.forEach((header, index) => {
+      const label = (header.dataset.columnLabel || header.dataset.columnName || '').toLocaleLowerCase();
+      const matchesName = !terms.length || terms.some((term) => label.includes(term));
+      const matchesTag = !selectedTags.size || Array.from(selectedTags).some((tag) => (
+        tag === (header.dataset.columnKind || '')
+        || (tag === 'PINNED' && header.dataset.columnPinned === 'true')
+        || (tag === 'UN_PINNED' && header.dataset.columnPinned !== 'true')
+      ));
+      const visible = matchesName && matchesTag;
+      header.hidden = !visible;
+      if (tagItems[index]) tagItems[index].hidden = !visible;
+      Array.from(tbody.rows).forEach((row) => {
+        if (row.cells[index]) row.cells[index].hidden = !visible;
+      });
+    });
+    requestAnimationFrame(() => requestAnimationFrame(syncTagStrip));
+  };
+
+  const syncTagStrip = () => {
+    if (!tagStrip || !tableWrap) return;
+    tagItems.forEach((item) => { item.style.width = ''; });
+    tagStrip.style.width = `${table.scrollWidth}px`;
+    headers.forEach((header, index) => {
+      if (tagItems[index]) tagItems[index].style.width = `${header.getBoundingClientRect().width}px`;
+    });
+    tagStrip.style.transform = `translateX(${-tableWrap.scrollLeft}px)`;
+  };
 
   const closeColumnMenu = () => {
     if (!openColumnMenu) return;
@@ -713,7 +757,7 @@ document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => 
 
   const updateControls = (rowCount) => {
     const activeFilters = columnFilters.size;
-    clearFilters.textContent = `Clear ${activeFilters} Filter${activeFilters === 1 ? '' : 's'}`;
+    if (clearFiltersLabel) clearFiltersLabel.textContent = `Clear ${activeFilters} Filter${activeFilters === 1 ? '' : 's'}`;
     clearFilters.disabled = activeFilters === 0;
     const totalPages = Math.max(1, Math.ceil(filteredTotal / pageSize));
     const start = filteredTotal ? currentPage * pageSize + 1 : 0;
@@ -732,8 +776,10 @@ document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => 
     headers.forEach((header) => header.classList.toggle('has-value-filter', columnFilters.has(header.dataset.columnName)));
   };
 
-  const setLoading = (loading) => {
+  const setLoading = (loading, message = 'Loading dataset…') => {
     toolbar.setAttribute('aria-busy', String(loading));
+    if (filteringStatusText) filteringStatusText.textContent = message;
+    if (filteringStatus) filteringStatus.hidden = !loading;
     [firstPage, previousPage, nextPage, lastPage].forEach((button) => {
       if (button && loading) button.disabled = true;
     });
@@ -761,18 +807,19 @@ document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => 
       headers.forEach((header) => {
         const td = document.createElement('td');
         td.textContent = row[header.dataset.columnName] ?? '';
-        ['gcid-column', 'vendor-column', 'derived-cdr-column'].forEach((className) => {
+        ['gcid-column', 'vendor-column', 'derived-cdr-column', 'analysis-derived-cdr-column', 'main-cdr-column', 'auto-calculated-preview-column'].forEach((className) => {
           if (header.classList.contains(className)) td.classList.add(className);
         });
         tr.append(td);
       });
       tbody.append(tr);
     });
+    applyColumnSearch();
   };
 
-  const loadPage = async (page) => {
+  const loadPage = async (page, message = 'Loading dataset…') => {
     const sequence = ++requestSequence;
-    setLoading(true);
+    setLoading(true, message);
     closeColumnMenu();
     try {
       const payload = await requestPreview(page);
@@ -831,13 +878,10 @@ document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => 
       search.setAttribute('aria-label', `Search ${column} values`);
       const toolbarNode = document.createElement('div');
       toolbarNode.className = 'preview-column-filter-toolbar';
-      const selectAll = document.createElement('button');
-      selectAll.type = 'button';
-      selectAll.textContent = 'Select all';
-      const clearAll = document.createElement('button');
-      clearAll.type = 'button';
-      clearAll.textContent = 'Clear';
-      toolbarNode.append(selectAll, clearAll);
+      const selectAllNone = document.createElement('button');
+      selectAllNone.type = 'button';
+      selectAllNone.textContent = 'Select All/None';
+      toolbarNode.append(selectAllNone);
       const options = document.createElement('div');
       options.className = 'preview-column-filter-options';
       values.forEach((value) => {
@@ -866,22 +910,24 @@ document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => 
       footer.append(cancel, apply);
       menu.replaceChildren(search, toolbarNode, options, footer);
       positionMenu(menu, trigger);
-      const setVisibleCheckboxes = (checked) => options.querySelectorAll('.preview-column-filter-option:not([hidden]) input').forEach((checkbox) => { checkbox.checked = checked; });
       search.addEventListener('input', () => {
         const term = search.value.trim().toLocaleLowerCase();
         options.querySelectorAll('.preview-column-filter-option').forEach((option) => {
           option.hidden = Boolean(term) && !option.textContent.toLocaleLowerCase().includes(term);
         });
       });
-      selectAll.addEventListener('click', () => setVisibleCheckboxes(true));
-      clearAll.addEventListener('click', () => setVisibleCheckboxes(false));
+      selectAllNone.addEventListener('click', () => {
+        const visible = Array.from(options.querySelectorAll('.preview-column-filter-option:not([hidden]) input'));
+        const shouldSelect = visible.some((checkbox) => !checkbox.checked);
+        visible.forEach((checkbox) => { checkbox.checked = shouldSelect; });
+      });
       cancel.addEventListener('click', closeColumnMenu);
       apply.addEventListener('click', () => {
         const accepted = new Set(Array.from(options.querySelectorAll('[data-preview-value-option]:checked')).map((checkbox) => checkbox.value));
         if (accepted.size === values.length) columnFilters.delete(column);
         else columnFilters.set(column, accepted);
         closeColumnMenu();
-        loadPage(0);
+        loadPage(0, 'Filtering dataset…');
       });
       menu.addEventListener('click', (event) => event.stopPropagation());
       requestAnimationFrame(() => search.focus());
@@ -892,7 +938,7 @@ document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => 
   };
 
   headers.forEach((header) => {
-    const columnLabel = header.dataset.columnName || header.textContent.trim();
+    const columnLabel = header.dataset.columnLabel || header.dataset.columnName || header.textContent.trim();
     const trigger = document.createElement('button');
     trigger.type = 'button';
     trigger.className = 'preview-column-filter-trigger';
@@ -916,18 +962,118 @@ document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => 
 
   clearFilters.addEventListener('click', () => {
     columnFilters.clear();
-    loadPage(0);
+    loadPage(0, 'Clearing dataset filters…');
   });
+  columnSearch?.addEventListener('input', applyColumnSearch);
+  tagFilterToggle?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const opening = tagFilterMenu?.hidden ?? true;
+    if (tagFilterMenu) tagFilterMenu.hidden = !opening;
+    tagFilterToggle.setAttribute('aria-expanded', String(opening));
+  });
+  tagFilterMenu?.addEventListener('click', (event) => event.stopPropagation());
+  tagFilterAll?.addEventListener('click', () => {
+    selectedTags.clear();
+    tagFilterMenu?.querySelectorAll('input').forEach((checkbox) => { checkbox.checked = false; });
+    if (tagFilterLabel) tagFilterLabel.textContent = 'All Labels';
+    applyColumnSearch();
+    if (tagFilterMenu) tagFilterMenu.hidden = true;
+    tagFilterToggle?.setAttribute('aria-expanded', 'false');
+  });
+  tagFilterMenu?.querySelectorAll('input').forEach((checkbox) => checkbox.addEventListener('change', () => {
+    if (checkbox.checked) selectedTags.add(checkbox.value); else selectedTags.delete(checkbox.value);
+    if (tagFilterLabel) tagFilterLabel.textContent = selectedTags.size ? `${selectedTags.size} Label${selectedTags.size === 1 ? '' : 's'}` : 'All Labels';
+    applyColumnSearch();
+    requestAnimationFrame(syncTagStrip);
+  }));
   firstPage?.addEventListener('click', () => loadPage(0));
   previousPage?.addEventListener('click', () => loadPage(Math.max(0, currentPage - 1)));
   nextPage?.addEventListener('click', () => loadPage(currentPage + 1));
   lastPage?.addEventListener('click', () => loadPage(Math.max(0, Math.ceil(filteredTotal / pageSize) - 1)));
-  document.addEventListener('click', closeColumnMenu);
+  document.addEventListener('click', () => {
+    closeColumnMenu();
+    if (tagFilterMenu) tagFilterMenu.hidden = true;
+    tagFilterToggle?.setAttribute('aria-expanded', 'false');
+  });
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeColumnMenu(); });
   window.addEventListener('resize', closeColumnMenu);
-  panel.querySelector('.dataset-preview-table-wrap')?.addEventListener('scroll', closeColumnMenu, {passive: true});
+  tableWrap?.addEventListener('scroll', () => { closeColumnMenu(); syncTagStrip(); }, {passive: true});
+  window.addEventListener('resize', syncTagStrip);
   updateControls(tbody.rows.length);
+  applyColumnSearch();
+  requestAnimationFrame(syncTagStrip);
 });
+
+document.querySelectorAll('[data-preview-dataset-switch]').forEach((input) => {
+  const switcher = input.closest('.preview-dataset-switcher');
+  const menu = switcher?.querySelector('[data-preview-dataset-switch-menu]');
+  const toggle = switcher?.querySelector('[data-preview-dataset-switch-toggle]');
+  const options = Array.from(menu?.querySelectorAll('[data-url]') || []);
+  const updateOptions = () => {
+    const term = input.value.trim().toLocaleLowerCase();
+    options.forEach((option) => { option.hidden = Boolean(term) && !option.dataset.datasetLabel.toLocaleLowerCase().includes(term); });
+    if (menu) menu.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+  };
+  input.addEventListener('focus', () => {
+    input.select();
+    options.forEach((option) => { option.hidden = false; });
+    if (menu) menu.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+  });
+  input.addEventListener('input', updateOptions);
+  toggle?.addEventListener('click', () => {
+    const opening = menu?.hidden ?? true;
+    options.forEach((option) => { option.hidden = false; });
+    if (menu) menu.hidden = !opening;
+    input.setAttribute('aria-expanded', String(opening));
+    if (opening) { input.focus(); input.select(); }
+  });
+  options.forEach((option) => option.addEventListener('mousedown', (event) => {
+    event.preventDefault();
+    window.location.assign(option.dataset.url);
+  }));
+  document.addEventListener('click', (event) => {
+    if (switcher?.contains(event.target)) return;
+    if (menu) menu.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+  });
+});
+
+const previewRuleOverlay = document.querySelector('[data-preview-rule-overlay]');
+const previewBadgeTooltip = document.querySelector('[data-preview-badge-tooltip]');
+const closePreviewRule = () => { if (previewRuleOverlay) previewRuleOverlay.hidden = true; };
+document.addEventListener('click', (event) => {
+  const badge = event.target.closest?.('[data-preview-rule-badge]');
+  if (!badge || !previewRuleOverlay) return;
+  if (previewBadgeTooltip) previewBadgeTooltip.hidden = true;
+  previewRuleOverlay.querySelector('[data-preview-rule-title]').textContent = badge.dataset.columnLabel || 'Field';
+  previewRuleOverlay.querySelector('[data-preview-rule-kind]').textContent = badge.dataset.columnKind || 'Field rule';
+  previewRuleOverlay.querySelector('[data-preview-rule-text]').textContent = badge.dataset.columnRule || '';
+  previewRuleOverlay.hidden = false;
+});
+previewRuleOverlay?.querySelector('[data-preview-rule-close]')?.addEventListener('click', closePreviewRule);
+previewRuleOverlay?.addEventListener('click', (event) => { if (event.target === previewRuleOverlay) closePreviewRule(); });
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closePreviewRule(); });
+const hidePreviewBadgeTooltip = () => { if (previewBadgeTooltip) previewBadgeTooltip.hidden = true; };
+const showPreviewBadgeTooltip = (badge) => {
+  if (!previewBadgeTooltip) return;
+  previewBadgeTooltip.querySelector('[data-preview-badge-tooltip-kind]').textContent = badge.dataset.columnKind || 'Field rule';
+  previewBadgeTooltip.querySelector('[data-preview-badge-tooltip-title]').textContent = badge.dataset.columnLabel || 'Field';
+  previewBadgeTooltip.querySelector('[data-preview-badge-tooltip-rule]').textContent = badge.dataset.columnRule || '';
+  previewBadgeTooltip.hidden = false;
+  const bounds = badge.getBoundingClientRect();
+  const tooltipBounds = previewBadgeTooltip.getBoundingClientRect();
+  const left = Math.max(12, Math.min(bounds.left + bounds.width / 2 - tooltipBounds.width / 2, window.innerWidth - tooltipBounds.width - 12));
+  const below = bounds.bottom + 8;
+  const top = below + tooltipBounds.height < window.innerHeight - 12 ? below : Math.max(12, bounds.top - tooltipBounds.height - 8);
+  previewBadgeTooltip.style.left = `${left}px`;
+  previewBadgeTooltip.style.top = `${top}px`;
+};
+document.addEventListener('pointerover', (event) => { const badge = event.target.closest?.('[data-preview-rule-badge]'); if (badge) showPreviewBadgeTooltip(badge); });
+document.addEventListener('pointerout', (event) => { if (event.target.closest?.('[data-preview-rule-badge]')) hidePreviewBadgeTooltip(); });
+document.addEventListener('focusin', (event) => { const badge = event.target.closest?.('[data-preview-rule-badge]'); if (badge) showPreviewBadgeTooltip(badge); });
+document.addEventListener('focusout', (event) => { if (event.target.closest?.('[data-preview-rule-badge]')) hidePreviewBadgeTooltip(); });
 
 document.querySelectorAll('[data-preview-table-filters]').forEach((filters) => {
   const panel = filters.closest('.dataset-preview-panel');
@@ -935,11 +1081,20 @@ document.querySelectorAll('[data-preview-table-filters]').forEach((filters) => {
   const columnInput = filters.querySelector('[data-preview-column-filter]');
   const rowInput = filters.querySelector('[data-preview-row-filter]');
   const status = filters.querySelector('[data-preview-filter-status]');
+  const tagFilter = filters.querySelector('[data-preview-tag-filter]');
+  const tagFilterToggle = tagFilter?.querySelector('[data-preview-tag-filter-toggle]');
+  const tagFilterLabel = tagFilterToggle?.querySelector('[data-preview-tag-filter-label]');
+  const tagFilterMenu = tagFilter?.querySelector('[data-preview-tag-filter-menu]');
+  const tagFilterAll = tagFilterMenu?.querySelector('[data-preview-tag-filter-all]');
   if (!table || !columnInput || !rowInput) return;
 
   const headers = Array.from(table.querySelectorAll('thead th'));
   const rows = Array.from(table.querySelectorAll('tbody tr'));
+  const tagItems = Array.from(panel?.querySelectorAll('[data-preview-column-tag-item]') || []);
+  const tagStrip = panel?.querySelector('[data-preview-column-tag-strip]');
+  const tableWrap = panel?.querySelector('.dataset-preview-table-wrap');
   const valueFilters = new Map();
+  const selectedTags = new Set();
   let openColumnMenu = null;
   const termsFor = (input) => String(input.value || '')
     .split(',')
@@ -951,8 +1106,14 @@ document.querySelectorAll('[data-preview-table-filters]').forEach((filters) => {
     const columnTerms = termsFor(columnInput);
     const rowTerms = termsFor(rowInput);
     const visibleColumns = headers.map((header, index) => {
-      const visible = matchesAny(header.textContent.toLocaleLowerCase(), columnTerms);
+      const visible = matchesAny((header.dataset.columnLabel || header.textContent).toLocaleLowerCase(), columnTerms)
+        && (!selectedTags.size || Array.from(selectedTags).some((tag) => (
+          tag === (header.dataset.columnKind || '')
+          || (tag === 'PINNED' && header.dataset.columnPinned === 'true')
+          || (tag === 'UN_PINNED' && header.dataset.columnPinned !== 'true')
+        )));
       header.hidden = !visible;
+      if (tagItems[index]) tagItems[index].hidden = !visible;
       rows.forEach((row) => {
         const cell = row.cells[index];
         if (cell) cell.hidden = !visible;
@@ -977,6 +1138,17 @@ document.querySelectorAll('[data-preview-table-filters]').forEach((filters) => {
       const activeValueFilters = valueFilters.size ? ` · ${valueFilters.size} column filter${valueFilters.size === 1 ? '' : 's'} active` : '';
       status.textContent = `Showing ${visibleRowCount} of ${rows.length} rows · ${visibleColumnCount} of ${headers.length} columns${activeValueFilters}`;
     }
+    requestAnimationFrame(() => requestAnimationFrame(syncTagStrip));
+  };
+
+  const syncTagStrip = () => {
+    if (!tagStrip || !tableWrap) return;
+    tagItems.forEach((item) => { item.style.width = ''; });
+    tagStrip.style.width = `${table.scrollWidth}px`;
+    headers.forEach((header, index) => {
+      if (tagItems[index]) tagItems[index].style.width = `${header.getBoundingClientRect().width}px`;
+    });
+    tagStrip.style.transform = `translateX(${-tableWrap.scrollLeft}px)`;
   };
 
   const closeColumnMenu = () => {
@@ -986,19 +1158,21 @@ document.querySelectorAll('[data-preview-table-filters]').forEach((filters) => {
     openColumnMenu = null;
   };
 
-  const setCheckboxes = (menu, checked) => {
-    menu.querySelectorAll('[data-preview-value-option]').forEach((checkbox) => {
-      checkbox.checked = checked;
-    });
-  };
-
   const openValueMenu = (header, trigger, columnIndex) => {
     if (openColumnMenu?.trigger === trigger) {
       closeColumnMenu();
       return;
     }
     closeColumnMenu();
-    const values = Array.from(new Set(rows.map((row) => String(row.cells[columnIndex]?.textContent || '').trim())))
+    const rowTerms = termsFor(rowInput);
+    const availableRows = rows.filter((row) => {
+      const rowText = Array.from(row.cells).map((cell) => cell.textContent.toLocaleLowerCase()).join(' ');
+      const matchesOtherFilters = Array.from(valueFilters.entries()).every(([otherIndex, accepted]) => (
+        otherIndex === columnIndex || accepted.has(String(row.cells[otherIndex]?.textContent || '').trim())
+      ));
+      return matchesAny(rowText, rowTerms) && matchesOtherFilters;
+    });
+    const values = Array.from(new Set(availableRows.map((row) => String(row.cells[columnIndex]?.textContent || '').trim())))
       .sort((left, right) => left.localeCompare(right, undefined, {numeric: true, sensitivity: 'base'}));
     const activeValues = valueFilters.get(columnIndex);
     const selectedValues = new Set(activeValues ? Array.from(activeValues) : values);
@@ -1016,13 +1190,10 @@ document.querySelectorAll('[data-preview-table-filters]').forEach((filters) => {
 
     const toolbar = document.createElement('div');
     toolbar.className = 'preview-column-filter-toolbar';
-    const selectAll = document.createElement('button');
-    selectAll.type = 'button';
-    selectAll.textContent = 'Select all';
-    const clearAll = document.createElement('button');
-    clearAll.type = 'button';
-    clearAll.textContent = 'Clear';
-    toolbar.append(selectAll, clearAll);
+    const selectAllNone = document.createElement('button');
+    selectAllNone.type = 'button';
+    selectAllNone.textContent = 'Select All/None';
+    toolbar.append(selectAllNone);
 
     const options = document.createElement('div');
     options.className = 'preview-column-filter-options';
@@ -1073,8 +1244,11 @@ document.querySelectorAll('[data-preview-table-filters]').forEach((filters) => {
         option.hidden = Boolean(term) && !option.textContent.toLocaleLowerCase().includes(term);
       });
     });
-    selectAll.addEventListener('click', () => setCheckboxes(menu, true));
-    clearAll.addEventListener('click', () => setCheckboxes(menu, false));
+    selectAllNone.addEventListener('click', () => {
+      const visible = Array.from(options.querySelectorAll('.preview-column-filter-option:not([hidden]) input'));
+      const shouldSelect = visible.some((checkbox) => !checkbox.checked);
+      visible.forEach((checkbox) => { checkbox.checked = shouldSelect; });
+    });
     cancel.addEventListener('click', closeColumnMenu);
     apply.addEventListener('click', () => {
       const accepted = new Set(Array.from(options.querySelectorAll('[data-preview-value-option]:checked')).map((checkbox) => checkbox.value));
@@ -1113,13 +1287,41 @@ document.querySelectorAll('[data-preview-table-filters]').forEach((filters) => {
 
   columnInput.addEventListener('input', applyPreviewFilters);
   rowInput.addEventListener('input', applyPreviewFilters);
-  document.addEventListener('click', closeColumnMenu);
+  tagFilterToggle?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const opening = tagFilterMenu?.hidden ?? true;
+    if (tagFilterMenu) tagFilterMenu.hidden = !opening;
+    tagFilterToggle.setAttribute('aria-expanded', String(opening));
+  });
+  tagFilterMenu?.addEventListener('click', (event) => event.stopPropagation());
+  tagFilterAll?.addEventListener('click', () => {
+    selectedTags.clear();
+    tagFilterMenu?.querySelectorAll('input').forEach((checkbox) => { checkbox.checked = false; });
+    if (tagFilterLabel) tagFilterLabel.textContent = 'All Labels';
+    applyPreviewFilters();
+    requestAnimationFrame(() => requestAnimationFrame(syncTagStrip));
+    if (tagFilterMenu) tagFilterMenu.hidden = true;
+    tagFilterToggle?.setAttribute('aria-expanded', 'false');
+  });
+  tagFilterMenu?.querySelectorAll('input').forEach((checkbox) => checkbox.addEventListener('change', () => {
+    if (checkbox.checked) selectedTags.add(checkbox.value); else selectedTags.delete(checkbox.value);
+    if (tagFilterLabel) tagFilterLabel.textContent = selectedTags.size ? `${selectedTags.size} Label${selectedTags.size === 1 ? '' : 's'}` : 'All Labels';
+    applyPreviewFilters();
+    requestAnimationFrame(() => requestAnimationFrame(syncTagStrip));
+  }));
+  document.addEventListener('click', () => {
+    closeColumnMenu();
+    if (tagFilterMenu) tagFilterMenu.hidden = true;
+    tagFilterToggle?.setAttribute('aria-expanded', 'false');
+  });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') closeColumnMenu();
   });
   window.addEventListener('resize', closeColumnMenu);
-  panel.querySelector('.dataset-preview-table-wrap')?.addEventListener('scroll', closeColumnMenu, {passive: true});
+  tableWrap?.addEventListener('scroll', () => { closeColumnMenu(); syncTagStrip(); }, {passive: true});
+  window.addEventListener('resize', syncTagStrip);
   applyPreviewFilters();
+  requestAnimationFrame(syncTagStrip);
 });
 
 document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
@@ -2153,6 +2355,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         const header = document.createElement('tr');
         columns.forEach((column) => {
           const cell = document.createElement('th'); const button = document.createElement('button'); button.type = 'button'; button.className = 'report-chart-viewer-column-filter';
+          if (dataset.column_classes?.[column]) cell.classList.add(dataset.column_classes[column]);
           button.textContent = `${column} ▾`; button.classList.toggle('is-filtered', chartPreviewDatasetFilters.has(column));
           button.addEventListener('click', () => {
             chartPreviewDatasetFilterMenu?.remove();
@@ -2167,7 +2370,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         });
         const thead = document.createElement('thead'); thead.append(header); tableNode.append(thead);
         const body = document.createElement('tbody');
-        rows.forEach((row) => { const line = document.createElement('tr'); columns.forEach((column) => { const cell = document.createElement('td'); cell.textContent = row[column] ?? ''; line.append(cell); }); body.append(line); });
+        rows.forEach((row) => { const line = document.createElement('tr'); columns.forEach((column) => { const cell = document.createElement('td'); cell.textContent = row[column] ?? ''; if (dataset.column_classes?.[column]) cell.classList.add(dataset.column_classes[column]); line.append(cell); }); body.append(line); });
         tableNode.append(body);
         const pager = document.createElement('nav'); pager.className = 'report-chart-viewer-data-pager';
         const add = (label, target, title) => { const control = document.createElement('button'); control.type = 'button'; control.textContent = label; control.title = title; control.disabled = target === chartPreviewDatasetPage; control.addEventListener('click', () => renderPage(target).catch((error) => showInfoDialog(error.message, {title: 'Filtered dataset', tone: 'error'}))); pager.append(control); };
@@ -2835,6 +3038,7 @@ document.addEventListener('click', (event) => {
   }
   const openLink = event.target.closest('[data-datasets-analysis-open-link]');
   if (!openLink) return;
+  if (openLink.target === '_blank') return;
   const datasetId = openLink.dataset.datasetId;
   if (!datasetId) return;
   event.preventDefault();
@@ -5642,6 +5846,15 @@ if (queueNode) {
   queueTypeFilter?.addEventListener('change', applyQueueTypeFilter);
   applyQueueTypeFilter();
   const formatQueueTimestamp = (value) => String(value || '').replace('T', ' ').replace(' ', '\n');
+  const formatQueueElapsed = (value) => {
+    const total = Math.max(0, Math.floor(Number(value) || 0));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    if (hours) return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+    if (minutes) return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+    return `${seconds}s`;
+  };
 
   const updateQueueRow = (dataset) => {
     const row = document.querySelector(`[data-dataset-row][data-dataset-id="${dataset.id}"]`);
@@ -5652,6 +5865,8 @@ if (queueNode) {
     const statusPill = row.querySelector('[data-queue-status-pill]');
     const progressBar = row.querySelector('[data-queue-progress-bar]');
     const progressLabel = row.querySelector('[data-queue-progress-label]');
+    const progressPercent = row.querySelector('[data-queue-progress-percent]');
+    const elapsed = row.querySelector('[data-queue-elapsed]');
     const uploaded = row.querySelector('[data-queue-uploaded]');
     const updated = row.querySelector('[data-queue-updated]');
     const actions = row.querySelector('.queue-actions');
@@ -5674,7 +5889,13 @@ if (queueNode) {
       progressBar.style.width = `${dataset.progress || 0}%`;
       progressBar.className = `progress-bar status-${dataset.status}`;
     }
-    if (progressLabel) progressLabel.textContent = `${dataset.progress || 0}%`;
+    if (progressPercent) progressPercent.textContent = `${dataset.progress || 0}%`;
+    else if (progressLabel) progressLabel.textContent = `${dataset.progress || 0}%`;
+    if (elapsed) {
+      elapsed.textContent = dataset.elapsed_seconds === null || dataset.elapsed_seconds === undefined
+        ? '' : formatQueueElapsed(dataset.elapsed_seconds);
+      elapsed.hidden = !elapsed.textContent;
+    }
     if (uploaded) uploaded.textContent = formatQueueTimestamp(dataset.uploaded_at_local || dataset.uploaded_at);
     if (updated) updated.textContent = formatQueueTimestamp(dataset.updated_at_local || dataset.updated_at || dataset.uploaded_at_local || dataset.uploaded_at);
     // A profile can be in the small persistence window between status updates.
@@ -5970,6 +6191,59 @@ if (queueNode) {
     setMinimized(localStorage.getItem(minimizedKey) === '1');
     panel.append(minimize);
 
+    const positionKey = `dashboard-analytic:background-task-panel:${group.workspace_id}:position`;
+    const pin = document.createElement('button');
+    pin.type = 'button';
+    pin.className = 'background-task-pin-button';
+    pin.title = 'Panel is in its default position';
+    pin.setAttribute('aria-label', pin.title);
+    pin.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 4 6 6-3 1-4 4-1 5-2-2-2 2-2-2 2-2-2-2 5-1 4-4-1-3Z"/></svg>';
+    const restorePosition = () => {
+      panel.classList.remove('is-detached');
+      panel.style.left = '';
+      panel.style.top = '';
+      pin.disabled = true;
+      pin.title = 'Panel is in its default position';
+      pin.setAttribute('aria-label', pin.title);
+      try { localStorage.removeItem(positionKey); } catch (_error) { /* Ignore unavailable local storage. */ }
+    };
+    const applyPosition = (position) => {
+      if (!position || !Number.isFinite(position.left) || !Number.isFinite(position.top)) return restorePosition();
+      panel.classList.add('is-detached');
+      panel.style.left = `${position.left}px`;
+      panel.style.top = `${position.top}px`;
+      pin.disabled = false;
+      pin.title = 'Return panel to its default position';
+      pin.setAttribute('aria-label', pin.title);
+    };
+    try { applyPosition(JSON.parse(localStorage.getItem(positionKey) || 'null')); } catch (_error) { restorePosition(); }
+    pin.addEventListener('click', restorePosition);
+    panel.append(pin);
+
+    let dragging = null;
+    const stopDragging = () => {
+      if (!dragging) return;
+      panel.classList.remove('is-dragging');
+      dragging = null;
+    };
+    panel.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || event.target.closest('button, a, input, select, textarea, label')) return;
+      const bounds = panel.getBoundingClientRect();
+      dragging = {offsetX: event.clientX - bounds.left, offsetY: event.clientY - bounds.top};
+      panel.classList.add('is-dragging');
+      panel.setPointerCapture?.(event.pointerId);
+    });
+    panel.addEventListener('pointermove', (event) => {
+      if (!dragging) return;
+      const bounds = panel.getBoundingClientRect();
+      const left = Math.max(8, Math.min(event.clientX - dragging.offsetX, window.innerWidth - bounds.width - 8));
+      const top = Math.max(8, Math.min(event.clientY - dragging.offsetY, window.innerHeight - bounds.height - 8));
+      applyPosition({left, top});
+      try { localStorage.setItem(positionKey, JSON.stringify({left, top})); } catch (_error) { /* Ignore unavailable local storage. */ }
+    });
+    panel.addEventListener('pointerup', stopDragging);
+    panel.addEventListener('pointercancel', stopDragging);
+
     const heading = document.createElement('h3');
     heading.className = 'background-task-workspace';
     heading.textContent = group.workspace_id === '__server__'
@@ -6113,6 +6387,57 @@ if (queueNode) {
   window.addEventListener('focus', poll);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 })();
+
+/* Searchable timezone picker for application configuration. */
+document.querySelectorAll('[data-configuration-timezone-picker]').forEach((picker) => {
+  const input = picker.querySelector('[data-configuration-timezone-input]');
+  const toggle = picker.querySelector('[data-configuration-timezone-toggle]');
+  const menu = picker.querySelector('[data-configuration-timezone-menu]');
+  const options = Array.from(menu?.querySelectorAll('[data-timezone]') || []);
+  if (!input || !toggle || !menu) return;
+
+  const setOpen = (open) => {
+    menu.hidden = !open;
+    input.setAttribute('aria-expanded', String(open));
+    toggle.setAttribute('aria-expanded', String(open));
+  };
+  const filterOptions = () => {
+    const term = input.value.trim().toLocaleLowerCase();
+    options.forEach((option) => {
+      option.hidden = Boolean(term) && !String(option.dataset.timezone || '').toLocaleLowerCase().includes(term);
+    });
+  };
+  const selectTimezone = (timezone) => {
+    input.value = timezone;
+    filterOptions();
+    setOpen(false);
+    input.focus();
+  };
+
+  input.addEventListener('focus', () => { filterOptions(); setOpen(true); });
+  input.addEventListener('input', () => { filterOptions(); setOpen(true); });
+  toggle.addEventListener('click', () => {
+    const opening = menu.hidden;
+    filterOptions();
+    setOpen(opening);
+    if (opening) input.focus();
+  });
+  options.forEach((option) => option.addEventListener('mousedown', (event) => {
+    event.preventDefault();
+    selectTimezone(String(option.dataset.timezone || ''));
+  }));
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') setOpen(false);
+    if (event.key === 'ArrowDown' && menu.hidden) {
+      event.preventDefault();
+      filterOptions();
+      setOpen(true);
+    }
+  });
+  document.addEventListener('click', (event) => {
+    if (!picker.contains(event.target)) setOpen(false);
+  });
+});
 
 /* Reusable Excel-style value filters for compact job tables. */
 window.enableExcelColumnFilters = (table, {onChange, excludeLastColumn = true} = {}) => {

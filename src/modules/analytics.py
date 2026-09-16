@@ -6,7 +6,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.modules.column_names import resolve_column_name
+from src.modules.column_names import column_identity, resolve_column_name
+from src.modules.runtime_config import ignore_event_time_filtering
 
 from src.modules.ingestion import DatasetSummary, infer_dataset_kind
 from src.utils.charts import build_chart_payload, build_multi_series_chart_payload
@@ -96,7 +97,7 @@ def apply_filters(df: pd.DataFrame, filters: dict[str, Any]) -> pd.DataFrame:
     filtered = df.copy()
     date_from = filters.get('date_from')
     date_to = filters.get('date_to')
-    if 'event_start_time' in filtered.columns and (date_from or date_to):
+    if not ignore_event_time_filtering() and 'event_start_time' in filtered.columns and (date_from or date_to):
         event_times = pd.to_datetime(filtered['event_start_time'], errors='coerce')
         if date_from:
             filtered = filtered[event_times.dt.date >= pd.to_datetime(date_from).date()]
@@ -106,6 +107,8 @@ def apply_filters(df: pd.DataFrame, filters: dict[str, Any]) -> pd.DataFrame:
 
     for key, raw_value in filters.items():
         if key in {'aggregation', 'extra_filters', 'date_from', 'date_to'} or raw_value in (None, '', []):
+            continue
+        if ignore_event_time_filtering() and column_identity(key) in {'eventstarttime', 'eventendtime'}:
             continue
         column = _resolve_column(filtered, key)
         if not column:
@@ -117,6 +120,8 @@ def apply_filters(df: pd.DataFrame, filters: dict[str, Any]) -> pd.DataFrame:
         filtered = filtered[filtered[column].astype(str).str.strip().str.lower().isin(normalized_values)]
 
     for key, value in (filters.get('extra_filters') or {}).items():
+        if ignore_event_time_filtering() and column_identity(key) in {'eventstarttime', 'eventendtime'}:
+            continue
         column = _resolve_column(filtered, key)
         if not column:
             continue
@@ -341,6 +346,15 @@ def _rate(series: pd.Series) -> float:
     return _round(series.fillna(False).astype(bool).mean() * 100, 2)
 
 
+def _true_count(df: pd.DataFrame, column: str) -> int:
+    return int(df[column].fillna(False).astype(bool).sum()) if column in df.columns else 0
+
+
+def _distinct_nonblank_count(series: pd.Series) -> int:
+    values = series.dropna().astype(str).str.strip()
+    return int(values[values.ne('')].nunique())
+
+
 def _selected_count(filters: dict[str, Any], key: str) -> int | None:
     if key in {'market', 'period'}:
         selected = filters.get(key)
@@ -352,16 +366,25 @@ def _selected_count(filters: dict[str, Any], key: str) -> int | None:
 
 def _build_global_kpis(df: pd.DataFrame, dataset_kind: str, filters: dict[str, Any] | None = None) -> dict[str, Any]:
     filters = filters or {}
+    vendor_only_column = 'vendor_only' if 'vendor_only' in df.columns else 'vendor' if 'vendor' in df.columns else None
     kpis: dict[str, Any] = {
         'dataset_kind': dataset_kind,
         'rows': int(len(df.index)),
         'operators': _selected_count(filters, 'operator') if _selected_count(filters, 'operator') is not None else (int(df['operator'].dropna().nunique()) if 'operator' in df.columns else 0),
+        'vendors': _selected_count(filters, 'vendor_only') if _selected_count(filters, 'vendor_only') is not None else (_distinct_nonblank_count(df[vendor_only_column]) if vendor_only_column else 0),
         'regions': _selected_count(filters, 'region') if _selected_count(filters, 'region') is not None else (int(df['region'].dropna().nunique()) if 'region' in df.columns else 0),
         'cities': _selected_count(filters, 'city') if _selected_count(filters, 'city') is not None else (int(df['city'].dropna().nunique()) if 'city' in df.columns else 0),
-        'vendors': _selected_count(filters, 'vendor') if _selected_count(filters, 'vendor') is not None else (int(df['vendor'].dropna().nunique()) if 'vendor' in df.columns else 0),
+    }
+    if dataset_kind == 'data':
+        kpis['completed_tests'] = _true_count(df, 'success')
+    elif dataset_kind in {'voice', 'speech'}:
+        kpis['completed_calls'] = _true_count(df, 'success')
+    kpis.update({
+        'success_calls': _true_count(df, 'success'),
+        'failed_tests': _true_count(df, 'failure'),
         'success_rate_pct': _rate(df['success']) if 'success' in df.columns else 0.0,
         'failure_rate_pct': _rate(df['failure']) if 'failure' in df.columns else 0.0,
-    }
+    })
     if 'dropped' in df.columns:
         kpis['dropped_calls'] = int(df['dropped'].fillna(False).astype(bool).sum())
         kpis['drop_call_rate_pct'] = _rate(df['dropped'])
@@ -373,7 +396,6 @@ def _build_global_kpis(df: pd.DataFrame, dataset_kind: str, filters: dict[str, A
 
     if dataset_kind == 'voice':
         kpis.update({
-            'completed_calls': int(df['success'].sum()) if 'success' in df.columns else 0,
             'disturbed_rate_pct': _rate(df['disturbed']) if 'disturbed' in df.columns else 0.0,
             'impaired_rate_pct': _rate(df['impaired']) if 'impaired' in df.columns else 0.0,
             'avg_setup_time_s': _series_mean(df, 'setup_time_seconds'),
@@ -381,7 +403,6 @@ def _build_global_kpis(df: pd.DataFrame, dataset_kind: str, filters: dict[str, A
         })
     elif dataset_kind == 'speech':
         kpis.update({
-            'completed_calls': int(df['success'].sum()) if 'success' in df.columns else 0,
             'disturbed_rate_pct': _rate(df['disturbed']) if 'disturbed' in df.columns else 0.0,
             'impaired_rate_pct': _rate(df['impaired']) if 'impaired' in df.columns else 0.0,
             'avg_jitter_ms': _series_mean(df, 'jitter_ms'),
@@ -395,7 +416,6 @@ def _build_global_kpis(df: pd.DataFrame, dataset_kind: str, filters: dict[str, A
             success = pd.to_numeric(df['DNS_Resolution_Success'], errors='coerce')
             dns_success = (success / attempts.replace(0, np.nan)) * 100
         kpis.update({
-            'completed_tests': int(df['success'].sum()) if 'success' in df.columns else 0,
             'avg_access_time_s': _series_mean(df, 'setup_time_seconds'),
             'avg_test_duration_s': _series_mean(df, 'duration_seconds'),
             'avg_dns_success_pct': _round(dns_success.dropna().mean(), 2) if not dns_success.empty else 0.0,

@@ -1451,13 +1451,13 @@ def test_dashboard_reuses_normalized_snapshot_for_every_chart(client, monkeypatc
     import src.modules.e2e_dashboards as dashboards_module
 
     calls = []
-    original = dashboards_module.normalise_report_operator_aliases
+    original = dashboards_module.normalise_operator_aliases
 
     def tracked(frame):
         calls.append(len(frame))
         return original(frame)
 
-    monkeypatch.setattr(dashboards_module, 'normalise_report_operator_aliases', tracked)
+    monkeypatch.setattr(dashboards_module, 'normalise_operator_aliases', tracked)
     preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
     for index in (0, 1, 2):
         assert client.get(f"/api/e2e-dashboards/preview/{preview['token']}/{index}.png").status_code == 200

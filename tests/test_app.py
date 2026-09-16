@@ -31,6 +31,35 @@ def test_catalogue_editor_offers_result_group_for_every_cdr_source(client) -> No
     assert all('Result Group' in values for values in columns.values())
 
 
+def test_config_page_persists_runtime_overrides(client, monkeypatch) -> None:
+    monkeypatch.setenv('DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER', 'dashboard-canvas')
+    monkeypatch.setenv('IGNORE_EVENT_TIME_FILTERING', 'false')
+    login(client)
+    page = client.get('/config')
+    assert page.status_code == 200
+    assert 'Application Runtime' in page.text
+    assert 'href="/config"' in page.text
+    assert 'data-configuration-timezone-picker' in page.text
+    assert 'data-timezone="Europe/Madrid"' in page.text
+    assert page.text.count('data-configuration-card') == 3
+
+    response = client.post('/config', data={
+        'timezone_name': 'UTC',
+        'report_chart_renderer': 'pil',
+        'chromium_path': '',
+        'ignore_event_time_filtering': 'true',
+    }, follow_redirects=False)
+    assert response.status_code == 303
+    import src.DashboardAnalytic as app_module
+
+    persisted = app_module.runtime_configuration()
+    assert persisted['timezone'] == 'UTC'
+    assert persisted['report_chart_renderer'] == 'pil'
+    assert persisted['ignore_event_time_filtering'] is True
+    assert app_module.os.environ['DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER'] == 'pil'
+    assert app_module.os.environ['IGNORE_EVENT_TIME_FILTERING'] == 'true'
+
+
 def test_cdr_materialisation_adds_workspace_dimensions_to_dataset_rows() -> None:
     import pandas as pd
     import src.DashboardAnalytic as app_module
@@ -2733,11 +2762,28 @@ def test_cdr_preview_groups_every_non_source_field_after_source_sheet(tmp_path: 
     source = tmp_path / 'source.csv'
     source.write_text('Campaign,Operator,score\nUK_Q3_2026,VF,91\n', encoding='utf-8')
     ordered, derived = app_module._ordered_cdr_preview_columns(
-        ['Campaign', 'source_sheet', 'market', 'Operator', 'report_vendor', 'score'], [source],
+        ['Campaign', 'source_sheet', 'market', 'Operator', 'vendor', 'score'], [source],
     )
 
-    assert ordered == ['source_sheet', 'market', 'report_vendor', 'Campaign', 'Operator', 'score']
-    assert derived == {'market', 'report_vendor'}
+    assert ordered == ['source_sheet', 'Operator', 'vendor', 'Campaign', 'market', 'score']
+    assert derived == {'source_sheet', 'market', 'vendor'}
+
+
+def test_cdr_preview_uses_clean_duplicate_names_and_orders_vendor_only_after_vendor(tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.column_names import clean_column_name
+
+    source = tmp_path / 'source.csv'
+    source.write_text('Campaign,Vendor,Cell_Duplicate_2\nUK_Q3_2026,Ericsson,A\n', encoding='utf-8')
+    ordered, derived, main, _auto = app_module._preview_column_categories(
+        ['source_sheet', 'Campaign', 'Vendor', 'Vendor_Only', 'Cell_Duplicate_2'], [source],
+    )
+
+    assert clean_column_name('campaign__2') == 'campaign_Duplicate_2'
+    assert 'Cell_Duplicate_2' in ordered
+    assert ordered.index('Vendor_Only') == ordered.index('Vendor') + 1
+    assert 'Vendor_Only' in derived
+    assert {'Campaign', 'Vendor', 'Vendor_Only'} <= main
 
 
 def test_cdr_preview_paginates_and_filters_every_column(client) -> None:
@@ -2776,13 +2822,35 @@ def test_cdr_preview_paginates_and_filters_every_column(client) -> None:
     assert 'name="cdr_session_type"' not in default_preview.text
     assert 'name="cdr_call_status"' not in default_preview.text
     assert 'data-server-dataset-preview' in default_preview.text
-    assert 'data-preview-clear-filters disabled>Clear 0 Filters</button>' in default_preview.text
+    assert 'data-preview-clear-filters disabled>' in default_preview.text
+    assert '<span data-preview-clear-label>Clear 0 Filters</span>' in default_preview.text
     assert 'data-preview-next-page disabled' not in default_preview.text
+    footer = default_preview.text.split('<div class="preview-server-footer">', 1)[1].split('</div>', 1)[0]
+    assert '<nav class="preview-pagination"' in footer
+    assert footer.count('<svg viewBox="0 0 24 24"') == 5
+    assert 'data-preview-first-page disabled aria-label="First page"' in footer
+    assert 'data-preview-last-page aria-label="Last page"' in footer
     assert '>Call Family<' not in default_preview.text
-    assert 'class="derived-cdr-column">Test Family<' in default_preview.text
-    assert 'class="derived-cdr-column">Result Group<' in default_preview.text
+    assert 'class="auto-calculated-preview-column"' in default_preview.text
+    assert 'data-column-label="Test Family"' in default_preview.text
+    assert 'data-server-preview-column-search' in default_preview.text
+    assert 'data-preview-dataset-switch' in default_preview.text
+    assert 'data-preview-dataset-switch-menu' in default_preview.text
+    assert 'data-preview-tag-filter' in default_preview.text
+    assert 'data-preview-tag-filter-all>All Labels</button>' in default_preview.text
+    assert '>PINNED</button>' in default_preview.text
+    assert '>UN_PINNED</button>' in default_preview.text
+    assert 'Select Workspace Dataset' in default_preview.text
+    assert 'target="_blank" rel="noopener">Back to Workspace</a>' in default_preview.text
+    assert '>Auto-calculated</button>' in default_preview.text
+    assert 'data-column-label="Result Group"' in default_preview.text
     header = default_preview.text.split('<thead>', 1)[1].split('</thead>', 1)[0]
-    assert header.index('data-column-name="Result Group"') < header.index('data-column-name="operator"')
+    assert header.index('data-column-label="Source_File"') < header.index('data-column-label="Source_Sheet"')
+    assert header.index('data-column-label="Source_Sheet"') < header.index('data-column-label="Dataset_Kind"')
+    assert header.index('data-column-label="Operator"') < header.index('data-column-label="Campaign"')
+    assert header.index('data-column-label="Test_Name"') < header.index('data-column-label="Test_Result"') < header.index('data-column-label="Call_Status"')
+    assert 'preview-column-kind-badge' not in header
+    assert header.index('data-column-name="operator"') < header.index('data-column-name="Result Group"')
     assert header.index('data-column-name="Test Family"') < header.index('data-column-name="score"')
     values_response = client.post('/api/workspace/preview/1/data', json={
         'page': 0, 'column_filters': {}, 'filter_column': 'operator',
@@ -2790,6 +2858,13 @@ def test_cdr_preview_paginates_and_filters_every_column(client) -> None:
     assert values_response.status_code == 200
     assert values_response.json()['filter_values'] == ['', '3', 'Vodafone UK']
     assert values_response.json()['total'] == 103
+    assert all('report_vendor' not in column.casefold() for column in values_response.json()['columns'])
+
+    cascading_values = client.post('/api/workspace/preview/1/data', json={
+        'page': 0, 'column_filters': {'operator': ['3']}, 'filter_column': 'Session_Type',
+    })
+    assert cascading_values.status_code == 200
+    assert cascading_values.json()['filter_values'] == ['WhatsApp']
 
     second_page = client.post('/api/workspace/preview/1/data', json={
         'page': 1, 'column_filters': {},
@@ -2809,7 +2884,9 @@ def test_cdr_preview_paginates_and_filters_every_column(client) -> None:
     assert filtered_response.json()['total'] == 1
     assert filtered_response.json()['unfiltered_total'] == 103
     assert filtered_response.json()['rows'][0]['operator'] == '3'
-    assert filtered_response.json()['rows'][0]['vendor'] == 'Nokia'
+    vendor_key = next(key for key in filtered_response.json()['rows'][0] if key.casefold() == 'vendor')
+    assert filtered_response.json()['rows'][0][vendor_key] == 'Nokia'
+    assert filtered_response.json()['rows'][0]['Vendor_Only'] == 'Nokia'
     assert filtered_response.json()['rows'][0]['Suscriber'] == 'Target User'
     assert filtered_response.json()['rows'][0]['Campaign'] == 'UK_Q4_2026'
 
@@ -3112,7 +3189,7 @@ def test_vfuk_preview_limits_mapping_sheets_and_displays_materialised_gcid(clien
     assert '<option value="5G">5G</option>' in default_preview.text
     assert '2G' not in default_preview.text
     assert '3330049' in default_preview.text
-    assert '>source_sheet<' not in default_preview.text
+    assert '>Source_Sheet<' in default_preview.text
     assert 'class="gcid-column"' in default_preview.text
 
     five_g_preview = client.get('/workspace/preview/1?source_sheet=5G')
@@ -3136,13 +3213,13 @@ def test_three_mapping_preview_excludes_empty_normalized_columns(client) -> None
     assert 'MBNL_ID' in preview.text
     assert 'Cid__ECI' in preview.text
     assert 'Vendor' in preview.text
-    assert '>operator<' not in preview.text
+    assert '>Operator<' in preview.text
     assert '>vendor__2<' not in preview.text
-    assert '>technology_primary<' not in preview.text
+    assert '>Technology_Primary<' in preview.text
     assert '>GCID<' in preview.text
     assert '>123<' in preview.text
     assert preview.text.index('>GCID<') < preview.text.index('>MBNL_ID<')
-    assert 'class="vendor-column">Vendor<' in preview.text
+    assert 'data-column-label="Vendor"' in preview.text
 
 
 def test_mapping_preview_shows_every_source_column(client) -> None:
@@ -3194,7 +3271,7 @@ def test_mapping_preview_hides_unnamed_columns_but_keeps_cell_name(client) -> No
     assert '>Cell Name<' in preview.text
     assert '>Cell A<' in preview.text
     assert '>Unnamed_2<' not in preview.text
-    assert '>source_sheet<' not in preview.text
+    assert '>Source_Sheet<' in preview.text
 
 
 def test_vfuk_preview_uses_only_the_selected_source_sheet_columns(client) -> None:
@@ -3233,8 +3310,8 @@ def test_vfuk_preview_uses_only_the_selected_source_sheet_columns(client) -> Non
     assert five_g_preview.status_code == 200
     assert '>Only 5G<' in five_g_preview.text
     assert '>present only in 5G<' in five_g_preview.text
-    assert 'all 6 available columns' in five_g_preview.text
-    assert '<span>Available Columns</span><strong>6</strong>' in five_g_preview.text
+    assert 'available columns' in five_g_preview.text
+    assert '<span>Available Columns</span><strong>' in five_g_preview.text
 
 
 def test_mapping_preview_filters_by_vendor_and_gcid(client) -> None:
@@ -4306,14 +4383,14 @@ def test_dashboard_shows_date_range_filters_and_applies_them(client) -> None:
 def test_dashboard_adaptive_filters_include_city_and_multi_select_fields(client) -> None:
     login(client)
     csv_content = (
-        b"market,period,score,City,Region\n"
-        b"ES,2026-Q1,91,Madrid,Central\n"
-        b"ES,2026-Q1,87,Barcelona,East\n"
+        b"market,period,score,City,Region,Operator,Vendor\n"
+        b"ES,2026-Q1,91,Madrid,Central,Vodafone UK,Vodafone UK_Ericsson\n"
+        b"ES,2026-Q1,87,Barcelona,East,3,3_Ericsson\n"
     )
     upload_response = client.post(
         "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
-        files={"dataset_files": ("sample.csv", BytesIO(csv_content), "text/csv")},
+        files={"dataset_files": ("sample_data.csv", BytesIO(csv_content), "text/csv")},
         follow_redirects=False,
     )
     assert upload_response.status_code == 303
@@ -4322,8 +4399,16 @@ def test_dashboard_adaptive_filters_include_city_and_multi_select_fields(client)
     assert response.status_code == 200
     assert 'select name="city" multiple' in response.text
     assert 'select name="region" multiple' in response.text
+    assert 'select name="vendor" multiple' in response.text
+    assert 'select name="vendor_only" multiple' in response.text
+    assert response.text.index('select name="vendor" multiple') < response.text.index('select name="vendor_only" multiple')
     assert ">Madrid<" in response.text
     assert ">Barcelona<" in response.text
+    assert ">Ericsson<" in response.text
+    assert response.text.index('>operators<') < response.text.index('>vendors<')
+    assert response.text.index('>completed tests<') < response.text.index('>success calls<')
+    assert response.text.index('>success calls<') < response.text.index('>failed tests<')
+    assert response.text.index('>failed tests<') < response.text.index('>success rate pct<')
     assert "All values are selected by default. Clearing all values applies an empty filter." in response.text
 
 
@@ -4361,7 +4446,7 @@ def test_dashboard_adaptive_filters_populate_netcheck_a_columns_for_existing_cdr
     assert response.status_code == 200
     assert 'select name="operator" multiple' in response.text
     assert 'value="Vodafone UK"' in response.text
-    assert 'value="Three UK"' in response.text
+    assert 'value="3"' in response.text
     assert 'select name="session_type" multiple' in response.text
     assert 'value="VoLTE"' in response.text
     assert 'value="VoNR"' in response.text
@@ -4601,6 +4686,12 @@ def test_dashboard_refreshes_stale_dataset_normalization_before_render(client) -
     import src.DashboardAnalytic as app_module
 
     with app_module.repository.connection() as conn:
+        table_name = app_module.repository.dataset_rows_table_name(1)
+        conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN campaign__2 TEXT')
+        conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN operator__2 TEXT')
+        conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN report_vendor TEXT')
+        conn.execute(f'UPDATE "{table_name}" SET campaign__2 = Campaign, operator__2 = Operator')
+        conn.execute(f'UPDATE "{table_name}" SET report_vendor = ?', ('O2',))
         conn.execute(
             """
             UPDATE dataset_profiles
@@ -4624,6 +4715,14 @@ def test_dashboard_refreshes_stale_dataset_normalization_before_render(client) -
     refreshed = app_module.repository.get_dataset(1)
     assert refreshed is not None
     assert int(refreshed["normalization_version"]) == app_module.DATASET_NORMALIZATION_VERSION
+    refreshed_columns = app_module.repository.list_dataset_row_columns(1)
+    assert not any(column.endswith('__2') for column in refreshed_columns)
+    assert not any(app_module.column_identity(column) == 'reportvendor' for column in refreshed_columns)
+    migrated = app_module.repository.load_dataset_rows(1, ['Vendor'], {})
+    assert migrated['Vendor'].tolist() == ['O2', 'O2']
+    assert not any(
+        column.endswith('__2') for column in app_module.repository.list_reporting_row_columns('data')
+    )
 
 
 def test_dataset_status_endpoint_returns_queue_payload(client) -> None:
@@ -4641,6 +4740,30 @@ def test_dataset_status_endpoint_returns_queue_payload(client) -> None:
     assert "datasets" in payload
     assert payload["datasets"][0]["file_name"] == "sample.csv"
     assert payload["datasets"][0]["size_mb_label"].endswith("MB")
+
+
+def test_dataset_status_persists_completed_processing_duration(client) -> None:
+    login(client)
+    client.post(
+        "/datasets-analysis/upload",
+        data={"dataset_kinds": "data"},
+        files={"dataset_files": ("timed.csv", BytesIO(b"market,score\nES,91\n"), "text/csv")},
+        follow_redirects=False,
+    )
+    import src.DashboardAnalytic as app_module
+
+    app_module.repository.update_dataset_profile(
+        1,
+        status="ready",
+        progress=100,
+        processing_started_at="2026-09-16T10:00:00+02:00",
+        processed_at="2026-09-16T10:01:05+02:00",
+    )
+
+    dataset = client.get("/api/datasets/status").json()["datasets"][0]
+    assert dataset["elapsed_seconds"] == 65
+    assert dataset["elapsed_label"] == "1m 05s"
+    assert "1m 05s" in client.get("/workspace").text
 
 
 def test_dashboard_handles_missing_source_file_without_500(client) -> None:

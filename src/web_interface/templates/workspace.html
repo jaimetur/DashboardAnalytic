@@ -224,7 +224,10 @@
                 <div class="progress-shell visual-progress-shell">
                   <div class="progress-bar status-{{ dataset.status }}" data-queue-progress-bar style="width: {{ dataset.progress }}%"></div>
                 </div>
-                <span data-queue-progress-label>{{ dataset.progress }}%</span>
+                <span class="queue-progress-label" data-queue-progress-label>
+                  <span data-queue-progress-percent>{{ dataset.progress }}%</span>
+                  <span data-queue-elapsed{% if not dataset.elapsed_label %} hidden{% endif %}>{{ dataset.elapsed_label }}</span>
+                </span>
                 {% if dataset.last_error and dataset.status in ['failed', 'stopped'] %}
                 <p class="dataset-error" data-queue-error>{{ dataset.last_error }}</p>
                 {% endif %}

@@ -13,7 +13,8 @@ from typing import Any, Iterator
 import pandas as pd
 
 from src.modules.auth import hash_password
-from src.modules.column_names import column_identity
+from src.modules.column_names import MAIN_CDR_FIELDS, clean_column_name, column_identity
+from src.modules.runtime_config import ignore_event_time_filtering
 
 
 DATABASE_BLANK_FILTER = '__database_blank__'
@@ -65,6 +66,7 @@ CREATE TABLE IF NOT EXISTS dataset_profiles (
     summary_json TEXT NOT NULL DEFAULT '{}',
     kpis_json TEXT NOT NULL DEFAULT '{}',
     last_error TEXT,
+    processing_started_at TEXT,
     processed_at TEXT,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
@@ -112,6 +114,11 @@ CREATE TABLE IF NOT EXISTS autocalculated_fields (
     definition_json TEXT NOT NULL,
     position INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS operator_mappings (
+    source_value TEXT PRIMARY KEY COLLATE NOCASE,
+    canonical_value TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS generated_jobs (
@@ -320,6 +327,23 @@ class Repository:
         with self.connection() as conn:
             self._migrate_calculated_dimensions_table(conn)
             conn.executescript(SCHEMA)
+            mappings_seeded = conn.execute(
+                "SELECT 1 FROM workspace_state WHERE key = 'operator_mappings_seeded'"
+            ).fetchone()
+            if not mappings_seeded:
+                conn.executemany(
+                    'INSERT OR IGNORE INTO operator_mappings (source_value, canonical_value) VALUES (?, ?)',
+                    (
+                        ('Vodafone', 'Vodafone UK'), ('Vodafone UK', 'Vodafone UK'),
+                        ('VF', 'Vodafone UK'), ('VFUK', 'Vodafone UK'),
+                        ('Three', '3'), ('Three UK', '3'), ('3 UK', '3'), ('3UK', '3'),
+                        ('O2 UK', 'O2'), ('Telefonica', 'O2'), ('Telefónica', 'O2'),
+                        ('EE UK', 'EE'),
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO workspace_state (key, value) VALUES ('operator_mappings_seeded', '1')"
+                )
             self._ensure_dashboard_filter_selection_columns(conn)
             self._ensure_existing_reporting_indexes(conn)
             self._ensure_report_template_columns(conn)
@@ -487,6 +511,8 @@ class Repository:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN vendor_mapping_applied INTEGER NOT NULL DEFAULT 0")
         if 'vendor_values_complete' not in existing_columns:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN vendor_values_complete INTEGER NOT NULL DEFAULT 0")
+        if 'processing_started_at' not in existing_columns:
+            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN processing_started_at TEXT")
 
     def _migrate_legacy_vendor_mapping_profiles(self, conn: sqlite3.Connection) -> None:
         """Mark pre-profile mappings once, without reopening source CDR files."""
@@ -963,21 +989,25 @@ class Repository:
         return f'idx_{table_name}_{column_name}_{suffix}'
 
     def _sqlite_safe_frame(self, df: pd.DataFrame) -> pd.DataFrame:
-        renamed_columns: list[str] = []
-        seen: dict[str, int] = {}
-        for column in df.columns:
-            base = str(column).strip() or 'column'
-            normalized = base.lower()
-            occurrence = seen.get(normalized, 0)
-            if occurrence == 0:
-                renamed_columns.append(base)
-            else:
-                renamed_columns.append(f'{base}__{occurrence + 1}')
-            seen[normalized] = occurrence + 1
-        if renamed_columns == list(df.columns):
+        positions: dict[str, list[int]] = {}
+        original_names = [str(column).strip() or 'Column' for column in df.columns]
+        names = [clean_column_name(column) for column in original_names]
+        for index, name in enumerate(names):
+            positions.setdefault(name.casefold(), []).append(index)
+        if all(len(indices) == 1 for indices in positions.values()) and names == list(df.columns):
             return df
-        safe_df = df.copy()
-        safe_df.columns = renamed_columns
+        selected_indices: list[int] = []
+        selected_names: list[str] = []
+        for normalized, indices in positions.items():
+            selected_index = (
+                next((index for index in reversed(indices) if original_names[index] == 'vendor'), indices[0])
+                if normalized == 'vendor' else indices[0]
+            )
+            selected_indices.append(selected_index)
+            selected_names.append('Vendor' if normalized == 'vendor' else names[indices[0]])
+        ordered = sorted(zip(selected_indices, selected_names, strict=False), key=lambda item: item[0])
+        safe_df = df.iloc[:, [index for index, _name in ordered]].copy()
+        safe_df.columns = [name for _index, name in ordered]
         return safe_df
 
     def _cleanup_duplicate_datasets(self, conn: sqlite3.Connection) -> None:
@@ -1230,11 +1260,13 @@ class Repository:
 
     def get_application_state(self, key: str) -> str | None:
         with self.global_connection() as conn:
+            conn.executescript(GLOBAL_SCHEMA)
             row = conn.execute('SELECT value FROM application_state WHERE key = ?', (key,)).fetchone()
             return str(row['value']) if row else None
 
     def set_application_state(self, key: str, value: str) -> None:
         with self.global_connection() as conn:
+            conn.executescript(GLOBAL_SCHEMA)
             conn.execute(
                 'INSERT INTO application_state (key, value) VALUES (?, ?) '
                 'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
@@ -1247,6 +1279,32 @@ class Repository:
                 'SELECT name, definition_json, position, updated_at FROM autocalculated_fields ORDER BY position, name COLLATE NOCASE'
             ).fetchall()
         return [json.loads(str(row['definition_json'])) for row in rows]
+
+    def list_operator_mappings(self) -> dict[str, str]:
+        with self.connection() as conn:
+            rows = conn.execute(
+                'SELECT source_value, canonical_value FROM operator_mappings ORDER BY source_value COLLATE NOCASE'
+            ).fetchall()
+        return {str(row['source_value']).strip().casefold(): str(row['canonical_value']).strip() for row in rows}
+
+    def add_operator_mapping(self, source_value: str, canonical_value: str) -> None:
+        source = str(source_value).strip()
+        canonical = str(canonical_value).strip()
+        if not source or not canonical:
+            raise ValueError('Both operator mapping values are required.')
+        with self.connection() as conn:
+            conn.execute(
+                'INSERT INTO operator_mappings (source_value, canonical_value) VALUES (?, ?)',
+                (source, canonical),
+            )
+
+    def invalidate_cdr_normalization(self) -> None:
+        with self.connection() as conn:
+            conn.execute(
+                "UPDATE dataset_profiles SET normalization_version = 0, updated_at = ? "
+                "WHERE dataset_kind IN ('data', 'voice', 'speech') AND status = 'ready'",
+                (local_now_iso(),),
+            )
 
     def replace_calculated_dimensions(self, definitions: list[dict[str, Any]]) -> None:
         timestamp = local_now_iso()
@@ -1304,7 +1362,7 @@ class Repository:
         return column_identity(column)
 
     REPORTING_CORE_COLUMNS = (
-        'source_sheet', 'Campaign', 'Operator', 'vendor', 'report_vendor', 'RAT', 'RAT_A', 'Sample_RAT_A',
+        'source_sheet', *MAIN_CDR_FIELDS, 'vendor', 'Sample_RAT_A',
         'technology_primary', 'L1_Call_Mode_A', 'L2_Call_Mode_A', 'Session_Type',
         'session_type', 'Type_of_Test', 'Test_Name', 'test_name', 'Test_Type', 'test_type',
     )
@@ -1379,6 +1437,11 @@ class Repository:
         table_name = self.reporting_rows_table_name(dataset_kind)
         safe_df = self._sqlite_safe_frame(df)
         with self.connection() as conn:
+            # A combined-table recreation may run concurrently with dataset
+            # ingestion. Hold the writer lock while this operation creates or
+            # extends its reporting table, so a DROP TABLE cannot land between
+            # the schema probe and a following ALTER or INSERT.
+            conn.execute('BEGIN IMMEDIATE')
             table_name, existing = self._ensure_reporting_table(conn, dataset_kind)
             quoted_table = self._quote_identifier(table_name)
             existing = self._ensure_reporting_columns(conn, table_name, safe_df.columns.tolist(), list(self.REPORTING_CORE_COLUMNS))
@@ -1561,9 +1624,27 @@ class Repository:
             )
             if resolved_filter_column:
                 quoted_column = self._quote_identifier(resolved_filter_column)
+                facet_clauses: list[str] = []
+                facet_params: list[Any] = []
+                for key, raw_values in filters.items():
+                    resolved = self._resolve_dataset_row_column_name(existing_columns, key)
+                    if not resolved or resolved == resolved_filter_column:
+                        continue
+                    values = [str(value).strip().lower() for value in raw_values]
+                    if not values:
+                        facet_clauses.append('0 = 1')
+                        continue
+                    placeholders = ', '.join('?' for _ in values)
+                    facet_clauses.append(
+                        f"LOWER(COALESCE(TRIM(CAST({self._quote_identifier(resolved)} AS TEXT)), '')) "
+                        f"IN ({placeholders})"
+                    )
+                    facet_params.extend(values)
+                facet_where = f" WHERE {' AND '.join(facet_clauses)}" if facet_clauses else ''
                 rows = conn.execute(
                     f"SELECT DISTINCT COALESCE(TRIM(CAST({quoted_column} AS TEXT)), '') AS value "
-                    f"FROM {quoted_table} ORDER BY value COLLATE NOCASE"
+                    f"FROM {quoted_table}{facet_where} ORDER BY value COLLATE NOCASE",
+                    facet_params,
                 ).fetchall()
                 filter_values = [str(row['value'] or '') for row in rows]
             elif filter_column:
@@ -1624,6 +1705,9 @@ class Repository:
         source_table = self.dataset_rows_table_name(dataset_id)
         target_table = self.reporting_rows_table_name(dataset_kind)
         with self.connection() as conn:
+            # See replace_reporting_rows: the complete schema-and-copy step
+            # must be atomic relative to a background combined-table rebuild.
+            conn.execute('BEGIN IMMEDIATE')
             source_exists = conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (source_table,)
             ).fetchone()
@@ -1849,17 +1933,6 @@ class Repository:
 
         lowered = str(requested).strip().lower()
         requested_identity = self._column_identity(requested)
-        # Pandas preserves an original source column (for example ``Operator``)
-        # and stores the normalised equivalent as ``operator__2`` when their
-        # names collide case-insensitively.  A request for the normalised lower
-        # case field must prefer that generated column.
-        suffixed_matches = sorted(
-            column for column in existing_columns
-            if str(column).strip().lower().startswith(f'{lowered}__')
-        )
-        if suffixed_matches:
-            return suffixed_matches[0]
-
         case_matches = [column for column in existing_columns if str(column).strip().lower() == lowered]
         if case_matches:
             exact_lowercase = next((column for column in case_matches if column == lowered), None)
@@ -1961,6 +2034,8 @@ class Repository:
         where_clauses: list[str] = []
         params: list[Any] = []
         for key, value in filters.items():
+            if ignore_event_time_filtering() and column_identity(key) in {'eventstarttime', 'eventendtime'}:
+                continue
             resolved_key = self._resolve_dataset_row_column_name(existing_columns, key)
             if key in {'aggregation', 'extra_filters', 'date_from', 'date_to'} or value in (None, '') or not resolved_key:
                 continue
@@ -1987,7 +2062,7 @@ class Repository:
             params.extend(normalized_values)
 
         resolved_event_time = self._resolve_dataset_row_column_name(existing_columns, 'event_start_time')
-        if resolved_event_time:
+        if resolved_event_time and not ignore_event_time_filtering():
             date_from = filters.get('date_from')
             date_to = filters.get('date_to')
             if date_from:
@@ -1998,6 +2073,8 @@ class Repository:
                 params.append(str(date_to))
 
         for key, value in (filters.get('extra_filters') or {}).items():
+            if ignore_event_time_filtering() and column_identity(key) in {'eventstarttime', 'eventendtime'}:
+                continue
             resolved_key = self._resolve_dataset_row_column_name(existing_columns, key)
             if value in (None, '') or not resolved_key:
                 continue
@@ -2066,7 +2143,7 @@ class Repository:
                        p.status, p.progress, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.dataset_kind, p.row_count, p.column_count,
                        p.default_metric, p.default_aggregation, p.available_metrics_json,
                        p.available_aggregations_json, p.filter_options_json, p.summary_json,
-                       p.kpis_json, p.last_error, p.processed_at, p.updated_at
+                       p.kpis_json, p.last_error, p.processing_started_at, p.processed_at, p.updated_at
                 FROM datasets d
                 LEFT JOIN dataset_profiles p ON p.dataset_id = d.id
                 WHERE d.id = ?
@@ -2083,7 +2160,7 @@ class Repository:
                            p.status, p.progress, p.normalization_version, p.vendor_mapping_applied, p.vendor_values_complete, p.dataset_kind, p.row_count, p.column_count,
                            p.default_metric, p.default_aggregation, p.available_metrics_json,
                            p.available_aggregations_json, p.filter_options_json, p.summary_json,
-                           p.kpis_json, p.last_error, p.processed_at, p.updated_at
+                           p.kpis_json, p.last_error, p.processing_started_at, p.processed_at, p.updated_at
                     FROM datasets d
                     LEFT JOIN dataset_profiles p ON p.dataset_id = d.id
                     ORDER BY d.uploaded_at DESC, d.id DESC

@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, load_catalog_csv, normalise_report_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
 from src.modules.repository import Repository
 
 
@@ -69,7 +69,7 @@ def test_report_operator_aliases_share_filters_and_grouping_across_campaigns() -
         "Operator IN (Vodafone, O2, 3, EE)", "Operator", "Campaign",
     )
 
-    normalised = normalise_report_operator_aliases(frame)
+    normalised = normalise_operator_aliases(frame)
     filtered = _apply_catalog_filters(normalised, entry, False, "Call_Status")
     grouped, primary, series = _apply_catalog_grouping(filtered, entry, False, "Call_Status")
 
@@ -99,13 +99,13 @@ def test_catalog_filters_accept_case_separators_and_subscriber_spelling_alias() 
 def test_h3g_is_not_normalised_as_operator_three() -> None:
     frame = pd.DataFrame({"Operator": ["H3G", "H3G UK", "Three UK"]})
 
-    assert normalise_report_operator_aliases(frame)["Operator"].tolist() == ["H3G", "H3G UK", "3"]
+    assert normalise_operator_aliases(frame)["Operator"].tolist() == ["H3G", "H3G UK", "3"]
 
 
-def test_report_vendor_aliases_normalise_only_the_operator_prefix() -> None:
-    frame = pd.DataFrame({"report_vendor": ["Vodafone_Ericsson", "Three UK_Nokia", "O2 (UK)_Huawei", "EE_Ericsson", "H3G_Huawei"]})
+def test_vendor_aliases_normalise_only_the_operator_prefix() -> None:
+    frame = pd.DataFrame({"vendor": ["Vodafone_Ericsson", "Three UK_Nokia", "O2 (UK)_Huawei", "EE_Ericsson", "H3G_Huawei"]})
 
-    assert normalise_report_operator_aliases(frame)["report_vendor"].tolist() == [
+    assert normalise_operator_aliases(frame)["vendor"].tolist() == [
         "VF_Ericsson", "3_Nokia", "O2_Huawei", "EE_Ericsson", "H3G_Huawei",
     ]
 
@@ -145,6 +145,27 @@ def test_reporting_cache_resolves_separator_variants_and_refreshes_derived_dimen
 
     loaded = repository.load_reporting_rows('voice', [1], ['G Level 4', 'Call Family'])
     assert loaded.to_dict(orient='records') == [{'G Level 4': 'London', 'Call Family': 'VoLTE'}]
+
+
+def test_dataset_storage_coalesces_case_only_columns_without_sqlite_suffixes(tmp_path) -> None:
+    repository = Repository(tmp_path / 'workspace.db')
+    repository.replace_dataset_rows(1, pd.DataFrame({
+        'Campaign': ['UK_Q3_2026'], 'campaign': ['normalized-copy'],
+        'Vendor': ['source-vendor'], 'vendor': ['VF_Ericsson'],
+    }))
+
+    assert repository.list_dataset_row_columns(1) == ['Campaign', 'Vendor']
+    stored = repository.load_dataset_rows(1, ['Campaign', 'Vendor'], {})
+    assert stored.to_dict(orient='records') == [{'Campaign': 'UK_Q3_2026', 'Vendor': 'VF_Ericsson'}]
+
+
+def test_vendor_only_removes_equivalent_operator_alias_prefixes() -> None:
+    from src.modules.column_names import vendor_only_value
+
+    assert vendor_only_value('Vodafone_Ericsson', 'Vodafone UK') == 'Ericsson'
+    assert vendor_only_value('VF_Samsung', 'Vodafone UK') == 'Samsung'
+    assert vendor_only_value('3_Nokia', 'Three UK') == 'Nokia'
+    assert vendor_only_value('Huawei', 'Vodafone UK') == 'Huawei'
 
 
 def test_reporting_cache_repairs_an_empty_requested_source_column(tmp_path) -> None:
@@ -214,8 +235,8 @@ def test_session_classification_and_multivendor_enrichment() -> None:
 
     assert len(nsa) == 1
     assert len(sa) == 1
-    assert enrich_multivendor(nsa, vodafone_mapping, three_mapping)['report_vendor'].tolist() == ['Vodafone_Ericsson']
-    assert enrich_multivendor(sa, vodafone_mapping, three_mapping)['report_vendor'].tolist() == ['3_Mixed Vendor']
+    assert enrich_multivendor(nsa, vodafone_mapping, three_mapping)['vendor'].tolist() == ['Vodafone_Ericsson']
+    assert enrich_multivendor(sa, vodafone_mapping, three_mapping)['vendor'].tolist() == ['3_Mixed Vendor']
 
 
 def test_speech_session_classification_uses_call_mode_when_sample_rat_is_blank() -> None:
@@ -305,8 +326,7 @@ def test_workspace_vendor_assignment_writes_the_normalized_vendor_field() -> Non
 
     mapped = assign_cdr_vendors(cdr, vodafone_mapping, three_mapping)
 
-    assert mapped['vendor'].tolist() == ['Vodafone_Ericsson', '3_Mixed Vendor', pd.NA]
-    assert mapped['report_vendor'].tolist() == ['Vodafone_Ericsson', '3_Mixed Vendor', 'O2 (UK)']
+    assert mapped['vendor'].tolist() == ['Vodafone_Ericsson', '3_Mixed Vendor', 'O2 (UK)']
     assert mapped.columns[:2].tolist() == ['vendor', 'Operator']
 
 
@@ -326,7 +346,7 @@ def test_workspace_vendor_assignment_replaces_source_vendor_collisions() -> None
     assert 'Vendor' not in mapped.columns
     assert 'vendor__2' not in mapped.columns
     assert mapped.loc[0, 'vendor'] == '3_Nokia'
-    assert mapped.columns[-1] == 'report_vendor'
+    assert mapped.columns[1] == 'vendor'
 
 
 def test_workspace_vendor_assignment_supports_a_single_selected_mapping() -> None:
@@ -341,8 +361,7 @@ def test_workspace_vendor_assignment_supports_a_single_selected_mapping() -> Non
     mapped = assign_cdr_vendors(cdr, vodafone_mapping, None)
 
     assert mapped.loc[0, 'vendor'] == 'Vodafone_Ericsson'
-    assert pd.isna(mapped.loc[1, 'vendor'])
-    assert mapped['report_vendor'].tolist() == ['Vodafone_Ericsson', '3']
+    assert mapped['vendor'].tolist() == ['Vodafone_Ericsson', '3']
 
 
 def test_workspace_vendor_assignment_accepts_equivalent_global_cell_id_columns() -> None:
@@ -386,12 +405,12 @@ def test_catalogue_converter_assigns_layouts_for_missing_legacy_layouts() -> Non
     assert {entry.layout for entry in entries} == {'Title and 2 columns + Comments'}
 
 
-def test_legacy_workspace_mapping_gets_the_report_group_without_writing_operator_as_vendor() -> None:
+def test_vendor_group_fills_unmapped_operators_in_the_official_vendor_field() -> None:
     frame = pd.DataFrame({'Operator': ['Vodafone UK', 'O2 (UK)'], 'vendor': ['Vodafone_Ericsson', pd.NA]})
 
-    grouped = ensure_report_vendor_group(frame)
+    grouped = ensure_vendor_group(frame)
 
-    assert grouped['report_vendor'].tolist() == ['Vodafone_Ericsson', 'O2 (UK)']
+    assert grouped['vendor'].tolist() == ['Vodafone_Ericsson', 'O2 (UK)']
 
 
 def test_vodafone_mapping_derives_gcid_from_4g_enodeb_and_local_cell() -> None:
@@ -404,7 +423,7 @@ def test_vodafone_mapping_derives_gcid_from_4g_enodeb_and_local_cell() -> None:
     })
     three_mapping = pd.DataFrame({'Cid__ECI': [1], 'Vendor': ['Nokia']})
 
-    assert enrich_multivendor(cdr, vodafone_mapping, three_mapping)['report_vendor'].tolist() == ['Vodafone_Samsung']
+    assert enrich_multivendor(cdr, vodafone_mapping, three_mapping)['vendor'].tolist() == ['Vodafone_Samsung']
 
 
 def test_catalogue_csv_requires_the_report_chart_contract_columns() -> None:
@@ -560,7 +579,7 @@ def test_multivendor_cdf_legend_keeps_operator_and_vendor_for_each_curve() -> No
         'Operator', '', 'Operator', 'Campaign', 'Bottom',
     )
     frame = pd.DataFrame({
-        'report_vendor': ['VF_Ericsson'] * 3 + ['VF_Huawei'] * 3 + ['3_Ericsson'] * 3,
+        'vendor': ['VF_Ericsson'] * 3 + ['VF_Huawei'] * 3 + ['3_Ericsson'] * 3,
         'Campaign': ['2026 Q1'] * 9,
         'LQ': [1.0, 2.0, 3.0] * 3,
     })
@@ -1014,14 +1033,14 @@ def test_multivendor_rendering_rewrites_display_and_grouping_and_excludes_unreso
 
     frame = pd.DataFrame({
         'Operator': ['Vodafone UK', 'Vodafone UK', '3'],
-        'report_vendor': ['Vodafone_Ericsson', 'Vodafone_Mixed Vendor', '3_Nokia'],
+        'vendor': ['Vodafone_Ericsson', 'Vodafone_Mixed Vendor', '3_Nokia'],
         'Campaign': ['UK_Q2_SA_2026', 'UK_Q2_SA_2026', 'UK_Q2_SA_2026'],
         'LQ': [3.8, 3.6, 3.5],
     })
     filtered = _apply_catalog_filters(frame, rendered, True, 'LQ')
     grouped, primary, series = _apply_catalog_grouping(filtered, rendered, True, 'LQ')
     assert grouped[primary].tolist() == ['VF · Ericsson']
-    assert grouped[series].tolist() == ['VF · Ericsson · 2026-Q2']
+    assert grouped[series].tolist() == ['VF · Ericsson · 2026-Q2_SA']
 
     already_filtered = replace(entry, filters='vendor NOT CONTAINS (Mixed, Other)')
     assert prepare_multivendor_catalog_entry(already_filtered).filters == already_filtered.filters
@@ -1029,7 +1048,7 @@ def test_multivendor_rendering_rewrites_display_and_grouping_and_excludes_unreso
 
 def test_vendor_filters_accept_full_or_operator_independent_vendor_values() -> None:
     frame = pd.DataFrame({
-        'report_vendor': [
+        'vendor': [
             'VF_Ericsson', 'VF_Huawei', 'VF_Mixed Vendor', '3_Ericsson',
             '3_Huawei', '3_Samsung', '3_Mixed Vendor', 'O2_NSN',
         ],
@@ -1044,8 +1063,8 @@ def test_vendor_filters_accept_full_or_operator_independent_vendor_values() -> N
     bare = _apply_catalog_filters(frame, bare_entry, True, 'LQ')
     full = _apply_catalog_filters(frame, full_entry, True, 'LQ')
 
-    assert bare['report_vendor'].tolist() == frame['report_vendor'].tolist()
-    assert full['report_vendor'].tolist() == [
+    assert bare['vendor'].tolist() == frame['vendor'].tolist()
+    assert full['vendor'].tolist() == [
         'VF_Ericsson', 'VF_Huawei', 'VF_Mixed Vendor', '3_Ericsson',
         '3_Huawei', '3_Mixed Vendor', 'O2_NSN',
     ]
@@ -1060,7 +1079,7 @@ def test_multivendor_operator_filters_match_vendor_prefixes_and_keep_full_groupi
     rendered = prepare_multivendor_catalog_entry(entry)
     frame = pd.DataFrame({
         'Operator': ['Vodafone UK', 'Vodafone UK', '3', 'O2', 'EE'],
-        'report_vendor': ['Vodafone_Ericsson', 'Vodafone_Huawei', '3_Nokia', 'O2_Ericsson', 'EE_Nokia'],
+        'vendor': ['Vodafone_Ericsson', 'Vodafone_Huawei', '3_Nokia', 'O2_Ericsson', 'EE_Nokia'],
         'Campaign': ['2025 Q4', '2026 Q1', '2025 Q4', '2026 Q1', '2026 Q1'],
         'LQ': [3.8, 3.7, 3.6, 3.5, 3.4],
     })
@@ -1068,7 +1087,7 @@ def test_multivendor_operator_filters_match_vendor_prefixes_and_keep_full_groupi
     filtered = _apply_catalog_filters(frame, rendered, True, 'LQ')
     grouped, primary, series = _apply_catalog_grouping(filtered, rendered, True, 'LQ')
 
-    assert filtered['report_vendor'].tolist() == ['Vodafone_Ericsson', 'Vodafone_Huawei', '3_Nokia', 'O2_Ericsson']
+    assert filtered['vendor'].tolist() == ['Vodafone_Ericsson', 'Vodafone_Huawei', '3_Nokia', 'O2_Ericsson']
     assert grouped[primary].tolist() == ['VF · Ericsson', 'VF · Huawei', '3 · Nokia', 'O2 · Ericsson']
     assert grouped[series].tolist() == [
         'VF · Ericsson · 2025-Q4', 'VF · Huawei · 2026-Q1',
@@ -1085,7 +1104,7 @@ def test_grouping_orders_operators_vf_three_ee_o2_then_unknown_operators() -> No
         "", "", "Operator", "Campaign", "Top",
     )
     frame = pd.DataFrame({
-        "report_vendor": ["O2_NSN", "Lebara_NSN", "EE_NSN", "3_Ericsson", "VF_Huawei"],
+        "vendor": ["O2_NSN", "Lebara_NSN", "EE_NSN", "3_Ericsson", "VF_Huawei"],
         "Campaign": ["2026 Q2"] * 5,
         "LQ": [4.0] * 5,
     })
@@ -1103,7 +1122,7 @@ def test_multivendor_grouping_uses_the_same_vendor_order_for_each_operator() -> 
         "Vendor", "", "Vendor", "Campaign", "Top",
     )
     frame = pd.DataFrame({
-        "report_vendor": [
+        "vendor": [
             "VF_Samsung", "VF_NSN", "VF_Huawei", "VF_Ericsson",
             "3_Huawei", "3_Samsung", "3_Ericsson",
         ],
@@ -1168,8 +1187,8 @@ def test_campaign_grouping_displays_only_year_and_quarter() -> None:
     grouped, _primary, series = _apply_catalog_grouping(frame, entry, False, 'LQ')
 
     assert grouped['Campaign'].tolist() == ['2024 Q3 NSA', 'UK_Q4_2025', 'UK_Q2_SA_2026']
-    assert grouped['__catalog_column_0'].tolist() == ['2024-Q3', '2025-Q4', '2026-Q2']
-    assert grouped[series].tolist() == ['2024-Q3', '2025-Q4', '2026-Q2']
+    assert grouped['__catalog_column_0'].tolist() == ['2024-Q3_NSA', '2025-Q4', '2026-Q2_SA']
+    assert grouped[series].tolist() == ['2024-Q3_NSA', '2025-Q4', '2026-Q2_SA']
 
 
 def test_cdf_renders_a_curve_for_each_complete_rows_and_columns_combination() -> None:
@@ -1426,6 +1445,20 @@ def test_catalogue_filter_contract_supports_not_in_and_not_contains() -> None:
         'LQ': [3.2, 4.0, 3.8], 'Operator': ['EE', 'EE', 'O2'],
     })
     assert _apply_catalog_filters(frame, entry, False, 'LQ')['Operator'].tolist() == ['EE']
+
+
+def test_campaign_filters_accept_compact_permutations_without_merging_sa_and_nsa() -> None:
+    frame = pd.DataFrame({
+        'Campaign': ['UK_Q2_2026', 'UK_Q2_2026_SA', '2026_Q2_NSA_UK'],
+        'Metric': [1, 2, 3],
+    })
+    plain = replace(CatalogEntry(1, '', '', '', '', 'CDR-Data', 'Metric', 'Average Vertical Bars', '', '', '', '', '', ''), filters='Campaign = 2026-Q2')
+    sa = replace(plain, filters='Campaign = 2026-Q2_SA')
+    modes = replace(plain, filters='Campaign IN (2026-Q2_SA, UK_Q2_2026_NSA)')
+
+    assert _apply_catalog_filters(frame, plain, False, 'Metric')['Metric'].tolist() == [1]
+    assert _apply_catalog_filters(frame, sa, False, 'Metric')['Metric'].tolist() == [2]
+    assert _apply_catalog_filters(frame, modes, False, 'Metric')['Metric'].tolist() == [2, 3]
 
 
 def test_tableau_result_group_filter_uses_the_workbook_bins() -> None:

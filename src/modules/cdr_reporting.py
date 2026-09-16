@@ -28,7 +28,8 @@ from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
 import pandas as pd
-from src.modules.column_names import column_identity, resolve_column_name
+from src.modules.column_names import MAIN_CDR_FIELDS, column_identity, compact_campaign_value, resolve_column_name, vendor_only_value
+from src.modules.runtime_config import ignore_event_time_filtering
 import certifi
 from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
@@ -151,6 +152,11 @@ def _close_dashboard_canvas_renderer() -> None:
         if _DASHBOARD_CANVAS_RENDERER is not None:
             _DASHBOARD_CANVAS_RENDERER.close()
             _DASHBOARD_CANVAS_RENDERER = None
+
+
+def reset_dashboard_canvas_renderer() -> None:
+    """Restart the shared renderer after its executable configuration changes."""
+    _close_dashboard_canvas_renderer()
 
 
 atexit.register(_close_dashboard_canvas_renderer)
@@ -794,7 +800,7 @@ def _normalise_operator(value: object) -> str:
     return text
 
 
-def _normalise_report_operator(value: object) -> str:
+def _normalise_operator_label(value: object) -> str:
     """Return the canonical report label for known historical UK aliases."""
     text = _normalise_operator(value)
     key = re.sub(
@@ -811,35 +817,36 @@ def _normalise_report_operator(value: object) -> str:
     return text
 
 
-def _report_vendor_operator(value: object) -> str:
-    """Return the report operator prefix from an ``Operator_Vendor`` value."""
+def _vendor_operator(value: object) -> str:
+    """Return the operator prefix from an ``Operator_Vendor`` value."""
     text = str(value or "").strip()
     operator, _separator, _vendor = text.partition("_")
-    return _normalise_report_operator(operator or text)
+    return _normalise_operator_label(operator or text)
 
 
-def _normalise_report_vendor(value: object) -> str:
-    """Canonicalise only the operator prefix of a materialised vendor label."""
+def _normalise_vendor(value: object) -> str:
+    """Canonicalise only the operator prefix of a materialised Vendor label."""
     text = str(value or "").strip()
     operator, separator, vendor = text.partition("_")
-    normalized_operator = _normalise_report_operator(operator or text)
+    normalized_operator = _normalise_operator_label(operator or text)
     return f"{normalized_operator}_{vendor}" if separator else normalized_operator
 
 
-def normalise_report_operator_aliases(frame: pd.DataFrame) -> pd.DataFrame:
-    """Canonicalise report-only operator labels without mutating stored CDRs.
+def normalise_operator_aliases(frame: pd.DataFrame) -> pd.DataFrame:
+    """Canonicalise reporting operator labels without mutating stored CDRs.
 
     The normalisation applies to the physical ``Operator`` field used by
     template filters and to the operator prefix of materialised
-    ``report_vendor`` labels. Vendor suffixes remain intact, so for example
+    ``Vendor`` labels. Vendor suffixes remain intact, so for example
     ``Vodafone_Ericsson`` becomes ``VF_Ericsson``.
     """
     result = frame.copy()
     for column in result.columns:
         if _normalise_catalog_name(str(column)) == "operator":
-            result[column] = result[column].map(_normalise_report_operator)
-    if "report_vendor" in result.columns:
-        result["report_vendor"] = result["report_vendor"].map(_normalise_report_vendor)
+            result[column] = result[column].map(_normalise_operator_label)
+    vendor_column = _first_existing(result, ["Vendor", "vendor"])
+    if vendor_column:
+        result[vendor_column] = result[vendor_column].map(_normalise_vendor)
     return result
 
 
@@ -1004,7 +1011,7 @@ def enrich_multivendor(df: pd.DataFrame, vodafone_mapping: pd.DataFrame, three_m
         raise ValueError("The selected CDR must contain Operator and a supported Cell ID field for multivendor reporting.")
     vodafone_lookup = build_vodafone_vendor_lookup(vodafone_mapping)
     three_lookup = build_three_vendor_lookup(three_mapping)
-    result["report_vendor"] = [
+    result["vendor"] = [
         vendor_from_cells(
             operator,
             cells,
@@ -1028,14 +1035,11 @@ def assign_cdr_vendors(
     Workspace.
     """
     result = df.copy()
-    # CDR workbooks can already expose a source ``Vendor`` column.  Dataset
-    # normalisation also creates a lower-case vendor field, which SQLite keeps
-    # as ``vendor__2`` to avoid a case-insensitive name collision.  That source
-    # field is not the calculated multivendor result, so remove every such
-    # collision before writing the canonical, user-facing ``vendor`` column.
+    # A source Vendor is replaced by the calculated multivendor result. Keep
+    # one canonical field instead of persisting parallel source/derived names.
     vendor_collision_columns = [
         str(column) for column in result.columns
-        if str(column).casefold() == 'vendor' or re.fullmatch(r'vendor__\d+', str(column).casefold())
+        if column_identity(column) in {'vendor', 'reportvendor'} or re.fullmatch(r'vendor__\d+', str(column).casefold())
     ]
     if vendor_collision_columns:
         result = result.drop(columns=vendor_collision_columns)
@@ -1054,52 +1058,42 @@ def assign_cdr_vendors(
     vodafone_lookup = build_vodafone_vendor_lookup(vodafone_mapping) if vodafone_mapping is not None else {}
     three_lookup = build_three_vendor_lookup(three_mapping) if three_mapping is not None else {}
     assigned_vendors: list[object] = []
-    report_groups: list[str] = []
     for operator, cells in result[[operator_column, cell_column]].itertuples(index=False):
         normalized_operator = _normalise_operator(operator)
         if normalized_operator == "Vodafone UK":
             if vodafone_mapping is None:
-                assigned_vendors.append(pd.NA)
-                report_groups.append(normalized_operator)
+                assigned_vendors.append(normalized_operator)
             else:
                 mapped_value = vendor_from_cells(operator, cells, vodafone_lookup)
                 assigned_vendors.append(mapped_value)
-                report_groups.append(mapped_value)
         elif normalized_operator == "3":
             if three_mapping is None:
-                assigned_vendors.append(pd.NA)
-                report_groups.append(normalized_operator)
+                assigned_vendors.append(normalized_operator)
             else:
                 mapped_value = vendor_from_cells(operator, cells, three_lookup)
                 assigned_vendors.append(mapped_value)
-                report_groups.append(mapped_value)
         else:
-            # O2/EE are operators without a multivendor mapping.  They are not
-            # vendors and must not be materialised in the Vendor field.  Their
-            # operator remains available in the report-only comparison grouping,
-            # exactly as the final ELSE branch of the supplied formula requires.
-            assigned_vendors.append(pd.NA)
-            report_groups.append(normalized_operator)
+            # Operators without a multivendor mapping use their canonical
+            # Operator value as the official Vendor comparison identity.
+            assigned_vendors.append(normalized_operator)
     result["vendor"] = assigned_vendors
-    result["report_vendor"] = report_groups
+    vendor_only_column = resolve_column_name(result.columns, 'Vendor_Only') or 'Vendor_Only'
+    operator_values = result[operator_column].fillna('').astype(str).str.strip()
+    vendor_values = result['vendor'].fillna('').astype(str).str.strip()
+    result[vendor_only_column] = [
+        vendor_only_value(value, operator)
+        for value, operator in zip(vendor_values, operator_values, strict=False)
+    ]
     # Keep the calculated Vendor immediately after the source-sheet identifier
-    # (or first when no worksheet identifier exists).  ``report_vendor`` is an
-    # internal reporting comparison field and deliberately remains last.
+    # (or first when no worksheet identifier exists).
     leading_columns = [column for column in ('source_sheet', 'vendor') if column in result.columns]
-    remaining_columns = [column for column in result.columns if column not in {*leading_columns, 'report_vendor'}]
-    return result.loc[:, [*leading_columns, *remaining_columns, 'report_vendor']]
+    remaining_columns = [column for column in result.columns if column not in set(leading_columns)]
+    return result.loc[:, [*leading_columns, *remaining_columns]]
 
 
-def ensure_report_vendor_group(df: pd.DataFrame) -> pd.DataFrame:
-    """Provide the formula-compatible comparison field for mapped CDRs.
-
-    This also upgrades CDRs mapped before the report_vendor field was
-    materialised: mapped Vodafone/3UK Vendor values are used where present,
-    while O2/EE keep their operator as required by the formula's final ELSE.
-    """
+def ensure_vendor_group(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure the official Vendor field contains every comparison identity."""
     result = df.copy()
-    if "report_vendor" in result.columns:
-        return result
     operator_column = _first_existing(result, ["operator", "Operator"])
     vendor_column = _first_existing(result, ["vendor", "Vendor"])
     if not operator_column:
@@ -1107,9 +1101,12 @@ def ensure_report_vendor_group(df: pd.DataFrame) -> pd.DataFrame:
     operators = result[operator_column].fillna("").astype(str).str.strip()
     if vendor_column:
         vendors = result[vendor_column].fillna("").astype(str).str.strip()
-        result["report_vendor"] = vendors.where(vendors.ne(""), operators)
+        result[vendor_column] = vendors.where(vendors.ne(""), operators)
     else:
-        result["report_vendor"] = operators
+        result["Vendor"] = operators
+    legacy_column = _first_existing(result, ["report_vendor"])
+    if legacy_column:
+        result = result.drop(columns=[legacy_column])
     return result
 
 
@@ -1145,10 +1142,10 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
         expanded: list[str] = []
         for dimension in dimensions:
             normalized = _normalise_catalog_name(dimension)
-            if normalized in {"operator", "vendor", "reportvendor"}:
+            if normalized in {"operator", "vendor"}:
                 if not any(_normalise_catalog_name(item) == "operator" for item in expanded):
                     expanded.append("Operator")
-                if not any(_normalise_catalog_name(item) in {"vendor", "reportvendor"} for item in expanded):
+                if not any(_normalise_catalog_name(item) == "vendor" for item in expanded):
                     expanded.append("Vendor")
             else:
                 expanded.append(dimension)
@@ -1157,7 +1154,7 @@ def prepare_multivendor_catalog_entry(entry: CatalogEntry) -> CatalogEntry:
     filters = entry.filters.strip()
     vendor_exclusion = "vendor NOT CONTAINS (Mixed, Other)"
     has_vendor_exclusion = any(
-        _normalise_catalog_name(condition.column) in {"vendor", "reportvendor"}
+        _normalise_catalog_name(condition.column) == "vendor"
         and condition.operator == "NOT CONTAINS"
         and {value.casefold() for value in condition.values}.issuperset({"mixed", "other"})
         for condition in parse_catalog_filters(filters)
@@ -1192,7 +1189,7 @@ def _period_column(frame: pd.DataFrame) -> str | None:
 
 
 def _group_column(frame: pd.DataFrame, multivendor: bool) -> str | None:
-    return "report_vendor" if multivendor and "report_vendor" in frame.columns else _column(frame, ("Operator", "operator"))
+    return _column(frame, ("Vendor", "vendor")) if multivendor else _column(frame, ("Operator", "operator"))
 
 
 def _normalise_catalog_name(value: str) -> str:
@@ -1291,12 +1288,12 @@ def _catalog_column(
         return calculated
     if normalized == "operator":
         return _group_column(frame, multivendor) if operator_as_vendor else _column(frame, ("Operator", "operator"))
-    if normalized in {"vendor", "reportvendor"}:
+    if normalized == "vendor":
         return _group_column(frame, multivendor) if multivendor else _column(frame, ("Vendor", "vendor"))
     if normalized == "vendorv3":
         # Tableau's Vendor_V3 calculation is materialised by ingestion as the
-        # combined Operator_Vendor value in ``vendor``/``report_vendor``.
-        return _column(frame, ("report_vendor", "vendor", "Vendor"))
+        # official combined Operator_Vendor value in ``Vendor``.
+        return _column(frame, ("vendor", "Vendor"))
     if normalized == "lowratesession":
         rate = _column(frame, ("Mean_Data_Rate", "Mean Data Rate"))
         test = _column(frame, ("Test_Name", "Test Name"))
@@ -1474,12 +1471,7 @@ def _campaign_sort_key(value: object) -> tuple[int, int, str]:
 
 def _campaign_display_value(value: object) -> str:
     """Reduce NetCheck campaign identifiers to a stable year/quarter label."""
-    text = str(value).strip()
-    year_match = re.search(r"(?:19|20)\d{2}", text)
-    quarter_match = re.search(r"(?:^|[^A-Z0-9])Q\s*([1-4])(?:[^0-9]|$)", text, flags=re.I)
-    if year_match and quarter_match:
-        return f"{year_match.group(0)}-Q{quarter_match.group(1)}"
-    return text
+    return compact_campaign_value(value)
 
 
 def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor: bool, metric: str | None) -> pd.DataFrame:
@@ -1487,6 +1479,8 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
     result.attrs["catalogue_calculated_dimensions"] = entry.calculated_dimensions
     result.attrs["catalogue_cdr_source"] = entry.cdr_source
     for condition in parse_catalog_filters(entry.filters):
+        if ignore_event_time_filtering() and column_identity(condition.column) in {'eventstarttime', 'eventendtime'}:
+            continue
         if _normalise_catalog_name(condition.column) in {"threshold", "buckets"}:
             continue
         # A Vendor Comparison materialises values as Operator_Vendor. Template
@@ -1496,24 +1490,27 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
         # Mixed and Other vendor groups.
         normalized_condition = _normalise_catalog_name(condition.column)
         is_operator_filter = normalized_condition == "operator"
-        is_vendor_filter = normalized_condition in {"vendor", "reportvendor", "vendorv3"}
+        is_vendor_filter = normalized_condition in {"vendor", "vendorv3"}
         column = _group_column(result, True) if multivendor and is_operator_filter else _catalog_column(
             result, condition.column, multivendor, metric, operator_as_vendor=False,
         )
         if not column:
             raise ValueError(f"Slide {entry.slide}: filter column '{condition.column}' does not exist in {entry.cdr_source}.")
         series = result[column]
-        comparison_series = series.map(_report_vendor_operator) if multivendor and is_operator_filter else (
-            series.map(_normalise_report_operator) if is_operator_filter else series
+        comparison_series = series.map(_vendor_operator) if multivendor and is_operator_filter else (
+            series.map(_normalise_operator_label) if is_operator_filter else series
         )
+        is_campaign_filter = normalized_condition == 'campaign'
+        if is_campaign_filter:
+            comparison_series = series.map(compact_campaign_value)
         def vendor_match(target: str, *, contains: bool = False) -> pd.Series:
             """Match a full Operator_Vendor value or an operator-independent vendor."""
             text = str(target).strip()
             # An underscore explicitly selects one materialised operator/vendor
             # value. A bare name selects that vendor beneath every operator.
             full_value = "_" in text
-            candidates = series.map(_normalise_report_vendor).astype(str) if full_value else series.map(_vendor_label).astype(str)
-            expected = _normalise_report_vendor(text) if full_value else text
+            candidates = series.map(_normalise_vendor).astype(str) if full_value else series.map(_vendor_label).astype(str)
+            expected = _normalise_vendor(text) if full_value else text
             if contains:
                 return candidates.str.contains(expected, case=False, na=False, regex=False)
             return candidates.str.casefold().eq(expected.casefold())
@@ -1531,7 +1528,9 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
                 result = result.loc[comparison].copy()
                 continue
             if is_operator_filter:
-                target = _normalise_report_operator(target)
+                target = _normalise_operator_label(target)
+            elif is_campaign_filter:
+                target = compact_campaign_value(target)
             numeric = pd.to_numeric(series, errors="coerce")
             target_number = pd.to_numeric(pd.Series([target]), errors="coerce").iloc[0]
             if pd.notna(target_number):
@@ -1546,7 +1545,11 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
                 if comparison is None:
                     raise ValueError(f"Slide {entry.slide}: '{condition.operator}' requires a numeric value for '{condition.column}'.")
         elif condition.operator in {"CONTAINS", "NOT CONTAINS"}:
-            targets = tuple(_normalise_report_operator(item) if is_operator_filter else item for item in condition.values)
+            targets = tuple(
+                _normalise_operator_label(item) if is_operator_filter else
+                compact_campaign_value(item) if is_campaign_filter else item
+                for item in condition.values
+            )
             comparison = pd.Series(False, index=series.index)
             for target in targets:
                 comparison |= vendor_match(target, contains=True) if is_vendor_filter else comparison_series.astype(str).str.contains(target, case=False, na=False, regex=False)
@@ -1559,7 +1562,8 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
                     comparison |= vendor_match(target)
             else:
                 accepted = {
-                    (_normalise_report_operator(item) if is_operator_filter else item).casefold()
+                    (_normalise_operator_label(item) if is_operator_filter else
+                     compact_campaign_value(item) if is_campaign_filter else item).casefold()
                     for item in condition.values
                 }
                 comparison = comparison_series.astype(str).str.casefold().isin(accepted)
@@ -1603,10 +1607,10 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
     # ``Operator_Vendor`` field. Materialise its two display levels here so
     # every bar chart can render Operator above its individual vendors.
     if multivendor:
-        report_vendor = _group_column(frame, True)
-        if report_vendor:
-            frame["__catalog_multivendor_operator"] = frame[report_vendor].map(_report_vendor_operator)
-            frame["__catalog_multivendor_vendor"] = frame[report_vendor].map(_vendor_label)
+        vendor = _group_column(frame, True)
+        if vendor:
+            frame["__catalog_multivendor_operator"] = frame[vendor].map(_vendor_operator)
+            frame["__catalog_multivendor_vendor"] = frame[vendor].map(_vendor_label)
 
     def resolve_dimensions(dimensions: tuple[str, ...], axis: str) -> list[str]:
         resolved: list[str] = []
@@ -1614,7 +1618,7 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
             normalized = _normalise_catalog_name(dimension)
             if multivendor and normalized == "operator":
                 column = "__catalog_multivendor_operator" if "__catalog_multivendor_operator" in frame else None
-            elif multivendor and normalized in {"vendor", "reportvendor"}:
+            elif multivendor and normalized == "vendor":
                 column = "__catalog_multivendor_vendor" if "__catalog_multivendor_vendor" in frame else None
             else:
                 column = _catalog_column(frame, dimension, multivendor, metric, bucket_edges)
@@ -1649,7 +1653,7 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
                     key=_campaign_sort_key,
                 )
             elif normalized_dimension == "operator":
-                requested = [_normalise_report_operator(value) for value in requested]
+                requested = [_normalise_operator_label(value) for value in requested]
             configured_dimension_values[target] = list(dict.fromkeys(requested))
 
     row_display_columns: list[str] = []
@@ -1717,7 +1721,7 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
     ]
     vendor_columns = [
         column for column, dimension in hierarchy
-        if _normalise_catalog_name(dimension) in {"vendor", "reportvendor"}
+        if _normalise_catalog_name(dimension) == "vendor"
     ]
     split_vendor_hierarchy = multivendor and any(
         _normalise_catalog_name(dimension) == "operator" for _column_name, dimension in hierarchy
@@ -1756,7 +1760,7 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
             normalized_dimension = _normalise_catalog_name(dimension)
             if normalized_dimension == "campaign":
                 values = sorted(values, key=_campaign_sort_key)
-            elif normalized_dimension in {"vendor", "reportvendor"}:
+            elif normalized_dimension == "vendor":
                 values = sorted(values, key=vendor_sort_key)
             elif normalized_dimension == "operator":
                 values = sorted(values, key=_operator_display_sort_key)
@@ -1820,6 +1824,23 @@ def preview_catalog_chart_data(
         ).copy()
     else:
         full_result = grouped.copy()
+    existing_identities = {column_identity(column) for column in full_result.columns}
+    for source in grouped.columns:
+        if str(source).startswith('__catalog_') or column_identity(source) in existing_identities:
+            continue
+        full_result[source] = grouped[source]
+        existing_identities.add(column_identity(source))
+    main_identities = [column_identity(column) for column in MAIN_CDR_FIELDS]
+    ordered_columns: list[str] = []
+    source_sheet = resolve_column_name(full_result.columns, 'source_sheet')
+    if source_sheet:
+        ordered_columns.append(source_sheet)
+    for identity in main_identities:
+        column = next((item for item in full_result.columns if column_identity(item) == identity), None)
+        if column is not None and column not in ordered_columns:
+            ordered_columns.append(column)
+    ordered_columns.extend(column for column in full_result.columns if column not in ordered_columns)
+    full_result = full_result[ordered_columns]
     full_result.insert(len(full_result.columns), 'Legend dimensions', legend_dimensions)
     filter_values = {
         str(column): sorted(
@@ -1867,7 +1888,7 @@ def render_catalog_chart_preview(
     if not entry.source_kind:
         raise ValueError('Only chart rows with a CDR source can be previewed.')
     render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
-    render_frame = frame if prefiltered else normalise_report_operator_aliases(frame)
+    render_frame = frame if prefiltered else normalise_operator_aliases(frame)
     if report_chart_renderer_name(renderer) == "dashboard-canvas":
         payload = catalog_chart_payload(
             render_frame,
@@ -1906,7 +1927,7 @@ def render_catalog_chart_preview_with_hover(
     if not entry.source_kind:
         raise ValueError('Only chart rows with a CDR source can be previewed.')
     render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
-    render_frame = frame if prefiltered else normalise_report_operator_aliases(frame)
+    render_frame = frame if prefiltered else normalise_operator_aliases(frame)
     payload = catalog_chart_payload(
         render_frame, render_entry, multivendor=False, prefiltered=prefiltered,
     )
@@ -1954,7 +1975,7 @@ def catalog_chart_hover_targets(
                     ]
                 metric_targets.append(transformed)
         return metric_targets
-    data = frame.copy() if prefiltered else normalise_report_operator_aliases(frame)
+    data = frame.copy() if prefiltered else normalise_operator_aliases(frame)
     try:
         if not prefiltered:
             data = _apply_catalog_filters(data, render_entry, multivendor, _metric_column(data, spec))
@@ -2282,7 +2303,7 @@ def _vendor_colour_family(vendor: str) -> str | None:
 
 def _operator_display_sort_key(value: object) -> tuple[int, str]:
     """Order recognised operators before all other operators by display label."""
-    normalized = _normalise_report_operator(value)
+    normalized = _normalise_operator_label(value)
     rank = next(
         (index for index, operator in enumerate(OPERATOR_DISPLAY_ORDER) if normalized.casefold() == operator.casefold()),
         len(OPERATOR_DISPLAY_ORDER),
@@ -2294,7 +2315,7 @@ def _vendor_display_sort_key(value: object) -> tuple[int, str, int, str]:
     """Order ``Operator_Vendor`` values by operator then canonical vendor rank."""
     text = str(value).strip()
     operator, _separator, vendor = text.partition("_")
-    normalized_operator = _normalise_report_operator(operator or text)
+    normalized_operator = _normalise_operator_label(operator or text)
     normalized_vendor = _vendor_label(vendor or text).casefold()
     vendor_rank = next(
         (index for index, name in enumerate(VENDOR_DISPLAY_ORDER) if name in normalized_vendor),
@@ -4026,7 +4047,7 @@ def prepare_catalog_chart_preview_frame(
 ) -> tuple[pd.DataFrame, CatalogEntry]:
     """Return reusable chart rows after source and template filtering."""
     render_entry = prepare_multivendor_catalog_entry(entry) if multivendor else entry
-    normalised = frame if frame.attrs.get('report_operator_aliases_normalized') else normalise_report_operator_aliases(frame)
+    normalised = frame if frame.attrs.get('operator_aliases_normalized') else normalise_operator_aliases(frame)
     spec = _catalog_spec(render_entry)
     filtered, _group, _period = _source_for_spec({render_entry.source_kind: normalised}, spec, multivendor)
     filtered.attrs["catalogue_calculated_dimensions"] = render_entry.calculated_dimensions
@@ -4142,8 +4163,8 @@ def catalog_chart_payload(
         filtered = frame.copy(deep=False)
     else:
         source_frame = (
-            frame if frame.attrs.get("report_operator_aliases_normalized")
-            else normalise_report_operator_aliases(frame)
+            frame if frame.attrs.get("operator_aliases_normalized")
+            else normalise_operator_aliases(frame)
         )
         filtered, _group, _period = _source_for_spec({render_entry.source_kind: source_frame}, spec, multivendor)
         metric = _metric_column(filtered, spec)
@@ -5127,7 +5148,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
     # Keep only the source currently needed when a loader is supplied.  This
     # avoids retaining Data, Voice and Speech frames simultaneously for large
     # reports on resource-constrained servers.
-    cached_frames = {source: normalise_report_operator_aliases(frame) for source, frame in (frames or {}).items()}
+    cached_frames = {source: normalise_operator_aliases(frame) for source, frame in (frames or {}).items()}
     active_source: str | None = None
     def frame_for(source: str) -> pd.DataFrame:
         nonlocal active_source
@@ -5141,7 +5162,7 @@ def render_cdr_report(destination: Path, template: Path, frames: dict[str, pd.Da
         if source not in cached_frames:
             if frame_loader is None:
                 raise ValueError(f'No CDR frame is available for {source}.')
-            cached_frames[source] = normalise_report_operator_aliases(frame_loader(source))
+            cached_frames[source] = normalise_operator_aliases(frame_loader(source))
         active_source = source
         return cached_frames[source]
     presentation = Presentation(template)

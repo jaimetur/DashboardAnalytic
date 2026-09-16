@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-stack configuration-stack">
+  <article class="panel module-hero configuration-hero">
+    <div>
+      <p class="eyebrow">Application Configuration</p>
+      <h2>Config</h2>
+      <p class="lede">These persisted values take precedence over environment and Docker settings.</p>
+    </div>
+  </article>
+
+  {% if notice %}<p class="notice success-notice">{{ notice }}</p>{% endif %}
+
+  <article class="panel configuration-panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Runtime Settings</p>
+        <h2>Application Runtime</h2>
+      </div>
+      <span class="pill">Application-wide</span>
+    </div>
+    <form method="post" action="/config" class="configuration-form">
+      <section class="configuration-card" data-configuration-card>
+        <div class="configuration-card-head"><p class="eyebrow">Locale</p><h3>Timezone</h3></div>
+        <label>IANA Timezone
+          <span class="configuration-timezone-picker" data-configuration-timezone-picker>
+            <input type="text" name="timezone_name" value="{{ configuration.timezone }}" autocomplete="off" spellcheck="false" aria-autocomplete="list" aria-controls="configuration-timezones" aria-expanded="false" required data-configuration-timezone-input>
+            <button type="button" class="configuration-timezone-toggle" aria-label="Show available timezones" aria-expanded="false" data-configuration-timezone-toggle><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            <div id="configuration-timezones" class="configuration-timezone-menu" role="listbox" hidden data-configuration-timezone-menu>{% for timezone in timezone_options %}<button type="button" role="option" data-timezone="{{ timezone }}">{{ timezone }}</button>{% endfor %}</div>
+          </span>
+          <span class="table-help">Search all available IANA timezone names, for example Europe/Madrid.</span>
+        </label>
+      </section>
+
+      <section class="configuration-card" data-configuration-card>
+        <div class="configuration-card-head"><p class="eyebrow">Chart Rendering</p><h3>Renderer</h3></div>
+        <label>Report Chart Renderer
+          <select name="report_chart_renderer">
+            <option value="dashboard-canvas" {% if configuration.report_chart_renderer == 'dashboard-canvas' %}selected{% endif %}>Dashboard Canvas</option>
+            <option value="pil" {% if configuration.report_chart_renderer == 'pil' %}selected{% endif %}>PIL legacy renderer</option>
+          </select>
+          <span class="table-help">Overrides DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER.</span>
+        </label>
+        <label>Chromium Executable
+          <input type="text" name="chromium_path" value="{{ configuration.chromium_path }}" placeholder="Auto-detect Chromium or Chrome">
+          <span class="table-help">Overrides DASHBOARD_ANALYTIC_CHROMIUM. Leave empty to use deployment configuration or automatic detection.</span>
+        </label>
+      </section>
+
+      <section class="configuration-card configuration-field-wide" data-configuration-card>
+        <div class="configuration-card-head"><p class="eyebrow">Data Processing</p><h3>Timestamp Filters</h3></div>
+        <label class="configuration-toggle">
+          <input type="checkbox" name="ignore_event_time_filtering" value="true" {% if configuration.ignore_event_time_filtering %}checked{% endif %}>
+          <span><strong>Ignore event time filtering</strong><small>Ignore date filters and template conditions based on Event_Start_Time or Event_End_Time, retaining rows whose timestamps are missing or invalid.</small></span>
+        </label>
+      </section>
+
+      <div class="form-actions configuration-field-wide">
+        <button type="submit">Save Configuration</button>
+      </div>
+    </form>
+  </article>
+</section>
+{% endblock %}

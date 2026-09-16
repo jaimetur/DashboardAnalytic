@@ -18,6 +18,7 @@ import shutil
 import sqlite3
 import warnings
 import tempfile
+import time as time_module
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -31,6 +32,7 @@ from typing import Any, Iterable
 from typing import Callable
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from uuid import uuid4
+from zoneinfo import ZoneInfo, available_timezones
 
 import httpx
 import pandas as pd
@@ -49,11 +51,12 @@ DEFAULT_TRANSFER_PORT = 7278
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
-from src.modules.column_names import column_identity, resolve_column_name
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_report_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name
+from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
-from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
+from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE
+from src.modules.runtime_config import IGNORE_EVENT_TIME_FILTERING_ENV, env_flag
 from src.modules.workspaces import Workspace, WorkspaceRegistry
 from src.version import __app_name__, __release_date__, __version__
 from src.utils.filesystem import ensure_directories, safe_join
@@ -110,6 +113,54 @@ TRANSFER_OFFER_TTL = timedelta(minutes=15)
 DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
 application_config_dir = settings.database_path.parent
 application_data_dir = settings.data_dir
+RUNTIME_CONFIGURATION_STATE_KEY = 'runtime_configuration_v1'
+DEPLOYMENT_RUNTIME_DEFAULTS = {
+    'timezone': str(os.environ.get('TZ') or '').strip(),
+    'report_chart_renderer': str(os.environ.get('DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER') or 'dashboard-canvas').strip(),
+    'chromium_path': str(os.environ.get('DASHBOARD_ANALYTIC_CHROMIUM') or '').strip(),
+    'ignore_event_time_filtering': env_flag(IGNORE_EVENT_TIME_FILTERING_ENV),
+}
+
+
+def runtime_configuration() -> dict[str, Any]:
+    configured = False
+    values: dict[str, Any] = dict(DEPLOYMENT_RUNTIME_DEFAULTS)
+    try:
+        stored = json.loads(repository.get_application_state(RUNTIME_CONFIGURATION_STATE_KEY) or '{}')
+        if isinstance(stored, dict) and stored:
+            values.update(stored)
+            configured = True
+    except (json.JSONDecodeError, TypeError, sqlite3.Error):
+        pass
+    values['timezone'] = str(values.get('timezone') or DEPLOYMENT_RUNTIME_DEFAULTS['timezone'] or 'UTC').strip()
+    values['report_chart_renderer'] = str(values.get('report_chart_renderer') or 'dashboard-canvas').strip()
+    values['chromium_path'] = str(values.get('chromium_path') or '').strip()
+    values['ignore_event_time_filtering'] = bool(values.get('ignore_event_time_filtering'))
+    values['configured'] = configured
+    return values
+
+
+def apply_runtime_configuration(values: dict[str, Any]) -> None:
+    """Apply persisted application settings above deployment environment defaults."""
+    timezone_name = str(values.get('timezone') or '').strip()
+    if timezone_name:
+        ZoneInfo(timezone_name)
+        os.environ['TZ'] = timezone_name
+        if hasattr(time_module, 'tzset'):
+            time_module.tzset()
+    os.environ['DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER'] = str(
+        values.get('report_chart_renderer') or 'dashboard-canvas'
+    ).strip()
+    chromium_path = str(values.get('chromium_path') or '').strip()
+    if chromium_path:
+        os.environ['DASHBOARD_ANALYTIC_CHROMIUM'] = chromium_path
+    elif DEPLOYMENT_RUNTIME_DEFAULTS['chromium_path']:
+        os.environ['DASHBOARD_ANALYTIC_CHROMIUM'] = DEPLOYMENT_RUNTIME_DEFAULTS['chromium_path']
+    else:
+        os.environ.pop('DASHBOARD_ANALYTIC_CHROMIUM', None)
+    os.environ[IGNORE_EVENT_TIME_FILTERING_ENV] = (
+        'true' if bool(values.get('ignore_event_time_filtering')) else 'false'
+    )
 
 
 def _reporting_memory_mb() -> float:
@@ -139,18 +190,18 @@ _workspace_cache_size_cache: dict[str, tuple[float, int]] = {}
 _workspace_size_cache_lock = Lock()
 _WORKSPACE_SIZE_CACHE_SECONDS = 15.0
 FILTER_DIMENSIONS = [
-    'market', 'period', 'operator', 'vendor', 'test_name', 'region', 'city',
+    'market', 'period', 'operator', 'vendor', 'vendor_only', 'test_name', 'region', 'city',
     'session_type', 'direction', 'technology_primary', 'RAT', 'RAT_A',
     'Sample_RAT_A', 'source_sheet',
 ]
 FILTER_DIMENSIONS_BY_KIND = {
-    'voice': ['market', 'operator', 'vendor', 'region', 'city', 'session_type', 'technology_primary', 'source_sheet'],
-    'speech': ['market', 'operator', 'vendor', 'region', 'city', 'session_type', 'technology_primary', 'source_sheet'],
-    'data': ['market', 'operator', 'vendor', 'test_name', 'region', 'city', 'direction', 'technology_primary', 'source_sheet'],
-    'generic': ['market', 'operator', 'vendor', 'region', 'city', 'source_sheet'],
+    'voice': ['market', 'operator', 'vendor', 'vendor_only', 'region', 'city', 'session_type', 'technology_primary', 'source_sheet'],
+    'speech': ['market', 'operator', 'vendor', 'vendor_only', 'region', 'city', 'session_type', 'technology_primary', 'source_sheet'],
+    'data': ['market', 'operator', 'vendor', 'vendor_only', 'test_name', 'region', 'city', 'direction', 'technology_primary', 'source_sheet'],
+    'generic': ['market', 'operator', 'vendor', 'vendor_only', 'region', 'city', 'source_sheet'],
 }
 COMMON_ANALYSIS_COLUMNS = [
-    'dataset_kind', 'source_file', 'market', 'period', 'operator', 'vendor', 'test_name', 'region', 'city',
+    'dataset_kind', 'source_file', 'market', 'period', 'operator', 'vendor', 'vendor_only', 'test_name', 'region', 'city',
     'session_type', 'direction', 'technology_primary', 'source_sheet', 'event_start_time', 'status',
     'success', 'failure', 'dropped',
 ]
@@ -190,31 +241,7 @@ LEGACY_VENDOR_MAPPING_FAILURE_MARKERS = (
     'assign vendors',
     'duplicate column name: vendor_2',
 )
-DATASET_NORMALIZATION_VERSION = 7
-MAPPING_PREVIEW_NORMALIZED_COLUMNS = frozenset({
-    'dataset_kind', 'source_file', 'source_sheet', 'campaign', 'market', 'period', 'campaign_year', 'campaign_quarter',
-    'operator', 'session_type', 'test_name', 'direction', 'region', 'city', 'vendor', 'status',
-    'disturbed', 'impaired', 'dropped', 'unsustainable_call', 'success', 'failure',
-    'event_start_time', 'event_end_time', 'hour_bucket', 'day_bucket', 'setup_time_seconds',
-    'duration_seconds', 'quality_score', 'throughput_mbps', 'latency_ms', 'packet_loss_pct',
-    'jitter_ms', 'handovers', 'technology_primary', 'technology_secondary',
-})
-
-
-def is_mapping_preview_normalized_column(column: object) -> bool:
-    """Hide normalized fields, including SQLite's collision-safe ``__2`` names."""
-    source_name = str(column).strip()
-    # These are source mapping headers. The generated lower-case ``vendor``
-    # becomes ``vendor__2`` when SQLite keeps both names case-insensitively.
-    if source_name in {'Vendor', 'OP/ Vendor', 'OP_Vendor'}:
-        return False
-    normalized = source_name.casefold()
-    if normalized.startswith('unnamed'):
-        return True
-    base, separator, suffix = normalized.rpartition('__')
-    if separator and suffix.isdigit():
-        normalized = base
-    return normalized in MAPPING_PREVIEW_NORMALIZED_COLUMNS
+DATASET_NORMALIZATION_VERSION = 11
 
 
 def format_preview_gcid(value: object) -> object:
@@ -1536,6 +1563,9 @@ async def lifespan(_: FastAPI):
         shutil.rmtree(settings.slides_templates_dir)
     repository.set_global_database(settings.database_path.parent / 'application.db')
     repository.set_workspace_registry_database(workspace_registry.registry_path)
+    stored_runtime_configuration = runtime_configuration()
+    if stored_runtime_configuration['configured']:
+        apply_runtime_configuration(stored_runtime_configuration)
     migrate_workspace_template_registries()
     # Workspace schema cleanup and interrupted-job recovery happen when a
     # workspace becomes active.  Scanning every workspace here opens and
@@ -1697,9 +1727,10 @@ def restrict_frame_to_metric(df, metric: str):
 def derive_filter_options(df) -> dict[str, list[str]]:
     options: dict[str, list[str]] = {}
     for column in FILTER_DIMENSIONS:
-        if column not in df.columns:
+        resolved = resolve_column_name(df.columns, column)
+        if not resolved:
             continue
-        values = unique_values(df[column])
+        values = unique_values(df[resolved])
         if values:
             options[column] = values
     return options
@@ -1755,9 +1786,32 @@ def derive_available_aggregations(filter_options: dict[str, list[str]]) -> list[
     return [column for column, values in filter_options.items() if len(values) > 1]
 
 
+def parse_dataset_timestamp(value: Any) -> datetime | None:
+    raw = str(value or '').strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+        return parsed if parsed.tzinfo else parsed.astimezone()
+    except ValueError:
+        return None
+
+
+def format_elapsed_seconds(value: int | None) -> str:
+    if value is None:
+        return ''
+    hours, remainder = divmod(max(0, int(value)), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f'{hours}h {minutes:02d}m {seconds:02d}s'
+    if minutes:
+        return f'{minutes}m {seconds:02d}s'
+    return f'{seconds}s'
+
+
 def serialize_dataset_row(row) -> dict[str, Any]:
     item = dict(row)
-    for timestamp_key in ('uploaded_at', 'updated_at', 'processed_at', 'created_at'):
+    for timestamp_key in ('uploaded_at', 'updated_at', 'processing_started_at', 'processed_at', 'created_at'):
         if item.get(timestamp_key):
             item[f'{timestamp_key}_local'] = format_local_timestamp(item[timestamp_key])
     item['available_metrics'] = parse_json_field(item.get('available_metrics_json'), [])
@@ -1768,6 +1822,14 @@ def serialize_dataset_row(row) -> dict[str, Any]:
     item['status_label'] = STATUS_LABELS.get(item.get('status') or 'queued', 'Queued')
     item['input_kind_label'] = INPUT_KIND_LABELS.get(item.get('dataset_kind') or 'generic', 'Other')
     item['progress'] = int(item.get('progress') or 0)
+    started_at = parse_dataset_timestamp(item.get('processing_started_at'))
+    finished_at = parse_dataset_timestamp(item.get('processed_at'))
+    if started_at:
+        end_at = finished_at if finished_at and item.get('status') in {'ready', 'failed', 'stopped'} else datetime.now(started_at.tzinfo)
+        item['elapsed_seconds'] = max(0, int((end_at - started_at).total_seconds()))
+    else:
+        item['elapsed_seconds'] = None
+    item['elapsed_label'] = format_elapsed_seconds(item['elapsed_seconds'])
     item['normalization_version'] = int(item.get('normalization_version') or 1)
     item['vendor_mapping_applied'] = bool(item.get('vendor_mapping_applied'))
     item['vendor_values_complete'] = bool(item.get('vendor_values_complete'))
@@ -2024,7 +2086,9 @@ def process_dataset(
             clear_stop_request(dataset_id, task_repository)
             return
         clear_stop_request(dataset_id, task_repository)
-        task_repository.update_dataset_profile(dataset_id, status='processing', progress=10, last_error=None)
+        task_repository.update_dataset_profile(
+            dataset_id, status='processing', progress=10, last_error=None, processing_started_at=now_iso(), processed_at=None,
+        )
         try:
             def progress_update(value: int) -> None:
                 ensure_not_stopped(dataset_id, task_repository)
@@ -2096,7 +2160,9 @@ def enqueue_dataset_processing(
     stale_dataset_keys = [key for key in DATAFRAME_CACHE if str(dataset_path.resolve()) in key]
     for key in stale_dataset_keys:
         DATAFRAME_CACHE.pop(key, None)
-    repository.update_dataset_profile(dataset_id, status='queued', progress=0, last_error=None, processed_at=None)
+    repository.update_dataset_profile(
+        dataset_id, status='queued', progress=0, last_error=None, processing_started_at=None, processed_at=None,
+    )
     # BackgroundTasks runs after the response is sent. Capture the workspace
     # database now, rather than resolving the mutable active workspace later.
     task_repository = Repository(Path(repository.db_path))
@@ -2136,6 +2202,8 @@ def rebuild_dataset_artifacts(
     elif forced_dataset_kind == 'mapping_three':
         df = add_three_gcid_column(df)
     dataset_kind = df['dataset_kind'].iloc[0] if 'dataset_kind' in df.columns and not df.empty else (forced_dataset_kind or infer_dataset_kind(df, dataset_path.name))
+    if dataset_kind in CDR_DATASET_KINDS:
+        df = apply_operator_mappings(df, task_repository.list_operator_mappings())
     auto_vendor_mapping_applied = False
     auto_vendor_mapping_error: str | None = None
     if dataset_kind in CDR_DATASET_KINDS and (vodafone_mapping_dataset_id or three_mapping_dataset_id):
@@ -2249,6 +2317,7 @@ def persist_mapped_cdr_frame(dataset: dict[str, Any], frame: pd.DataFrame) -> No
     """Replace a materialized CDR after vendor mapping and refresh its profile."""
     dataset_id = int(dataset['id'])
     if str(dataset.get('dataset_kind') or '').casefold() in CDR_DATASET_KINDS:
+        frame = ensure_fixed_cdr_fields(frame)
         frame = materialize_cdr_derived_columns(frame, str(dataset.get('dataset_kind') or '').casefold())
     repository.replace_dataset_rows(dataset_id, frame)
     dataset_kind = str(dataset.get('dataset_kind') or '').casefold()
@@ -2291,40 +2360,6 @@ def persist_mapped_cdr_frame(dataset: dict[str, Any], frame: pd.DataFrame) -> No
     )
 
 
-def ensure_canonical_mapped_vendor_column(dataset: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Migrate already-mapped CDRs from the old ``vendor__2`` storage name."""
-    if not dataset or not dataset.get('is_ready') or not dataset.get('vendor_mapping_applied'):
-        return dataset
-    dataset_id = int(dataset['id'])
-    columns = repository.list_dataset_row_columns(dataset_id)
-    if 'vendor' in columns:
-        return dataset
-    legacy_vendor_column = next(
-        (column for column in columns if re.fullmatch(r'vendor__\d+', str(column).casefold())),
-        None,
-    )
-    if not legacy_vendor_column:
-        return dataset
-    frame = _reporting_frame(dataset_id)
-    calculated_vendor = frame[legacy_vendor_column].copy()
-    collisions = [
-        column for column in frame.columns
-        if str(column).casefold() == 'vendor' or re.fullmatch(r'vendor__\d+', str(column).casefold())
-    ]
-    frame = frame.drop(columns=collisions)
-    frame['vendor'] = calculated_vendor
-    leading_columns = [column for column in ('source_sheet', 'vendor') if column in frame.columns]
-    remaining_columns = [column for column in frame.columns if column not in {*leading_columns, 'report_vendor'}]
-    if 'report_vendor' in frame.columns:
-        frame = frame.loc[:, [*leading_columns, *remaining_columns, 'report_vendor']]
-    else:
-        frame = frame.loc[:, [*leading_columns, *remaining_columns]]
-    persist_mapped_cdr_frame(dataset, frame)
-    clear_dataset_analysis_cache(Path(dataset['stored_path']))
-    refreshed = repository.get_dataset(dataset_id)
-    return serialize_dataset_row(refreshed) if refreshed else dataset
-
-
 def process_vendor_mapping(
     dataset_id: int,
     username: str,
@@ -2337,7 +2372,9 @@ def process_vendor_mapping(
         return
     dataset = serialize_dataset_row(dataset_row)
     dataset_path = Path(dataset['stored_path'])
-    repository.update_dataset_profile(dataset_id, status='processing', progress=10, last_error=None)
+    repository.update_dataset_profile(
+        dataset_id, status='processing', progress=10, last_error=None, processing_started_at=now_iso(), processed_at=None,
+    )
     try:
         ensure_not_stopped(dataset_id)
         vodafone_mapping = (
@@ -2389,7 +2426,9 @@ def enqueue_vendor_mapping(
 ) -> None:
     """Queue one CDR mapping without blocking the Workspace request."""
     clear_stop_request(dataset_id)
-    repository.update_dataset_profile(dataset_id, status='queued', progress=0, last_error=None, processed_at=None)
+    repository.update_dataset_profile(
+        dataset_id, status='queued', progress=0, last_error=None, processing_started_at=None, processed_at=None,
+    )
     background_tasks.add_task(
         process_vendor_mapping,
         dataset_id,
@@ -2432,7 +2471,9 @@ def process_vendor_clearing(dataset_id: int, username: str) -> None:
         return
     dataset = serialize_dataset_row(dataset_row)
     dataset_path = Path(dataset['stored_path'])
-    repository.update_dataset_profile(dataset_id, status='processing', progress=10, last_error=None)
+    repository.update_dataset_profile(
+        dataset_id, status='processing', progress=10, last_error=None, processing_started_at=now_iso(), processed_at=None,
+    )
     try:
         ensure_not_stopped(dataset_id)
         rebuild_dataset_artifacts(
@@ -2459,7 +2500,9 @@ def process_vendor_clearing(dataset_id: int, username: str) -> None:
 def enqueue_vendor_clearing(background_tasks: BackgroundTasks, dataset_id: int, username: str) -> None:
     """Queue Vendor clearing so the Workspace remains available to the user."""
     clear_stop_request(dataset_id)
-    repository.update_dataset_profile(dataset_id, status='queued', progress=0, last_error=None, processed_at=None)
+    repository.update_dataset_profile(
+        dataset_id, status='queued', progress=0, last_error=None, processing_started_at=None, processed_at=None,
+    )
     background_tasks.add_task(process_vendor_clearing, dataset_id, username)
 
 
@@ -2476,7 +2519,60 @@ def refresh_selected_dataset_if_stale(selected_dataset: dict[str, Any] | None) -
         return selected_dataset
 
     dataset_id = int(selected_dataset['id'])
-    if repository.dataset_rows_table_exists(dataset_id) and repository.refresh_dataset_row_normalized_dimensions(dataset_id):
+    dataset_kind = str(selected_dataset.get('dataset_kind') or '').casefold()
+    if repository.dataset_rows_table_exists(dataset_id) and dataset_kind in CDR_DATASET_KINDS:
+        columns = repository.list_dataset_row_columns(dataset_id)
+        frame = repository.load_dataset_rows(dataset_id, columns, {})
+        source_columns: set[str] = set()
+        try:
+            source_columns.update(get_dataset_source_columns(Path(selected_dataset['stored_path'])))
+        except (OSError, ValueError, KeyError):
+            pass
+        base_lookup = {
+            column_identity(column): column for column in frame.columns
+            if not re.search(r'__\d+$', str(column))
+        }
+        for alias in [column for column in frame.columns if re.search(r'__\d+$', str(column))]:
+            cleaned_alias = clean_column_name(alias)
+            if cleaned_alias in source_columns:
+                frame = frame.rename(columns={alias: cleaned_alias})
+                continue
+            base_identity = column_identity(re.sub(r'__\d+$', '', str(alias)))
+            canonical = base_lookup.get(base_identity)
+            if canonical is None:
+                frame = frame.rename(columns={alias: cleaned_alias})
+                continue
+            alias_values = frame[alias]
+            if base_identity == 'vendor':
+                usable = alias_values.notna() & alias_values.astype(str).str.strip().ne('')
+                frame.loc[usable, canonical] = alias_values.loc[usable]
+            else:
+                blank = frame[canonical].isna() | frame[canonical].astype(str).str.strip().eq('')
+                frame.loc[blank, canonical] = alias_values.loc[blank]
+            frame = frame.drop(columns=[alias])
+        legacy_vendor_only = next((column for column in frame.columns if str(column).casefold() == 'vendor_2'), None)
+        current_vendor_only = next((column for column in frame.columns if str(column).casefold() == 'vendor_only'), None)
+        if legacy_vendor_only and not current_vendor_only:
+            frame = frame.rename(columns={legacy_vendor_only: 'Vendor_Only'})
+        legacy_report_vendor = resolve_column_name(frame.columns, 'report_vendor')
+        vendor_column = resolve_column_name(frame.columns, 'Vendor')
+        if legacy_report_vendor:
+            if vendor_column:
+                blank_vendor = frame[vendor_column].isna() | frame[vendor_column].astype(str).str.strip().eq('')
+                frame.loc[blank_vendor, vendor_column] = frame.loc[blank_vendor, legacy_report_vendor]
+            else:
+                frame['Vendor'] = frame[legacy_report_vendor]
+            frame = frame.drop(columns=[legacy_report_vendor])
+        frame = ensure_fixed_cdr_fields(frame)
+        frame = ensure_vendor_group(frame)
+        frame = apply_operator_mappings(frame, repository.list_operator_mappings())
+        frame = materialize_cdr_derived_columns(frame, dataset_kind)
+        repository.replace_dataset_rows(dataset_id, frame)
+        repository.replace_reporting_rows(dataset_id, dataset_kind, frame)
+        repository.copy_dataset_rows_to_reporting(
+            dataset_id, dataset_kind,
+            combined_reporting_required_columns(load_workspace_calculated_dimensions(), dataset_kind),
+        )
         filter_options = {
             dimension: values
             for dimension in FILTER_DIMENSIONS
@@ -2487,6 +2583,8 @@ def refresh_selected_dataset_if_stale(selected_dataset: dict[str, Any] | None) -
         repository.update_dataset_profile(
             dataset_id,
             normalization_version=DATASET_NORMALIZATION_VERSION,
+            row_count=len(frame),
+            column_count=len(frame.columns),
             filter_options_json=json.dumps(filter_options),
             available_aggregations_json=json.dumps(available_aggregations),
         )
@@ -5302,6 +5400,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         'dataset_profiles': 'Dataset profiles',
         'datasets': 'Datasets',
         'generated_jobs': 'Generated jobs',
+        'operator_mappings': 'Operator Mappings',
         'report_templates': 'Report Templates',
         'workspace_state': 'Workspace State',
         'transfer_offers': 'Server transfer offers',
@@ -6907,6 +7006,15 @@ def update_workspace_access(
 def _ordered_cdr_preview_columns(
     available_columns: list[str], source_paths: Iterable[str | Path],
 ) -> tuple[list[str], set[str]]:
+    ordered, derived_columns, _main_columns, _auto_columns = _preview_column_categories(
+        available_columns, source_paths,
+    )
+    return ordered, derived_columns
+
+
+def _preview_column_categories(
+    available_columns: list[str], source_paths: Iterable[str | Path],
+) -> tuple[list[str], set[str], set[str], set[str]]:
     source_columns: set[str] = set()
     for source_path in source_paths:
         try:
@@ -6915,14 +7023,170 @@ def _ordered_cdr_preview_columns(
                 source_columns.update(get_dataset_source_columns(path))
         except (OSError, ValueError, KeyError):
             continue
+    source_identities = {column_identity(column) for column in source_columns}
     derived_columns = {
         column for column in available_columns
-        if column != 'source_sheet' and column not in source_columns
+        if column != 'source_sheet' and column_identity(column) not in source_identities
     }
-    ordered = [column for column in ('source_sheet',) if column in available_columns]
-    ordered.extend(column for column in available_columns if column in derived_columns)
+    try:
+        auto_definitions = repository.list_calculated_dimensions()
+    except sqlite3.OperationalError:
+        auto_definitions = []
+    auto_identities = {column_identity(definition.get('name', '')) for definition in auto_definitions}
+    auto_columns = {column for column in available_columns if column_identity(column) in auto_identities}
+    main_columns: list[str] = []
+    for requested in MAIN_CDR_FIELDS:
+        matches = [column for column in available_columns if column_identity(column) == column_identity(requested)]
+        if matches:
+            main_columns.append(next((column for column in matches if column == requested), matches[0]))
+    metadata_columns: list[str] = []
+    for requested in PREVIEW_METADATA_FIELDS:
+        matches = [column for column in available_columns if column_identity(column) == column_identity(requested)]
+        if matches:
+            metadata_columns.append(matches[0])
+    derived_columns.update(metadata_columns)
+    ordered = list(metadata_columns)
+    ordered.extend(column for column in main_columns if column not in ordered)
+    ordered.extend(column for column in available_columns if column in auto_columns and column not in ordered)
+    ordered.extend(column for column in available_columns if column in derived_columns and column not in ordered)
     ordered.extend(column for column in available_columns if column not in ordered)
-    return ordered, derived_columns
+    return ordered, derived_columns, set(main_columns), auto_columns
+
+
+DERIVED_PREVIEW_RULES = {
+    'sourcefile': 'Stores the uploaded source file name.',
+    'sourcesheet': 'Stores the worksheet name from which the row was imported.',
+    'datasetkind': 'Stores the CDR type selected for the imported dataset.',
+    'benchmark': 'Uses Benchmark from the source; when the complete source column is empty, it copies Campaign.',
+    'campaignyear': 'Extracts the first four-digit year found in Campaign, falling back to Benchmark.',
+    'campaignquarter': 'Extracts Q1, Q2, Q3 or Q4 from Campaign, falling back to Benchmark.',
+    'period': 'Combines Campaign_Year and Campaign_Quarter as YYYY-Qn.',
+    'market': 'Extracts an ISO country code or English country name from Campaign, falling back to Benchmark.',
+    'region': 'Uses Region from the source and remains empty when the source column is absent.',
+    'zone': 'Uses Zone from the source, otherwise G_Level_3, otherwise remains empty.',
+    'city': 'Uses City from the source, otherwise G_Level_4, otherwise remains empty.',
+    'subscriber': 'Uses Subscriber or legacy Suscriber; when both are absent, it copies Operator.',
+    'vendor': 'Stores Operator_Vendor for operators resolved through a multivendor cell mapping and the canonical Operator for every other operator.',
+    'vendoronly': 'Copies Vendor after removing its Operator_ prefix.',
+    'technology': 'Keeps its source values; when the complete column is absent or empty, copies the first populated field from Technology, RAT, RAT_A, L2_Call_Mode_A and Playing_Technology, in that order.',
+    'rat': 'Keeps its source values; when the complete column is absent or empty, copies the first populated field from Technology, RAT, RAT_A, L2_Call_Mode_A and Playing_Technology, in that order.',
+    'rata': 'Keeps its source values; when the complete column is absent or empty, copies the first populated field from Technology, RAT, RAT_A, L2_Call_Mode_A and Playing_Technology, in that order.',
+    'l2callmodea': 'Keeps its source values; when the complete column is absent or empty, copies the first populated field from Technology, RAT, RAT_A, L2_Call_Mode_A and Playing_Technology, in that order.',
+    'playingtechnology': 'Keeps its source values; when the complete column is absent or empty, copies the first populated field from Technology, RAT, RAT_A, L2_Call_Mode_A and Playing_Technology, in that order.',
+    'sessiontype': 'Uses the source field; when its complete column is absent, copies the first populated session-family field.',
+    'typeoftest': 'Uses the source field; when its complete column is absent, copies the first populated session-family field.',
+    'callstatus': 'Uses the source field; when its complete column is absent, copies the first populated result-family field.',
+    'status': 'Uses the source field; when its complete column is absent, copies the first populated result-family field.',
+    'result': 'Uses the source field; when its complete column is absent, copies the first populated result-family field.',
+    'testresult': 'Uses the source field; when its complete column is absent, copies the first populated result-family field.',
+    'eventstarttime': 'Normalizes the first available call start date and time to ISO format with microseconds.',
+    'eventendtime': 'Normalizes the first available call end date and time to ISO format with microseconds.',
+    'hourbucket': 'Extracts the hour number (0-23) from Event_Start_Time.',
+    'daybucket': 'Extracts the day-of-month number (1-31) from Event_Start_Time.',
+    'direction': 'Uses the first available Direction_A, Direction or Call_Direction value.',
+    'disturbed': 'True when Disturbed_Call is Yes.',
+    'impaired': 'True when Impaired_Call is Yes.',
+    'dropped': 'True when status contains drop or Dropped_in_first_70s is Yes.',
+    'unsustainablecall': 'True when Unsustainable_Call is Yes.',
+    'success': 'True when the normalized status is Completed, Success, OK or Passed.',
+    'failure': 'True when status has a value and Success is false.',
+    'setuptimeseconds': 'Uses the first available setup or service-access duration and converts it to a number.',
+    'durationseconds': 'Uses the first available call, test, data, transfer or video duration and converts it to a number.',
+    'qualityscore': 'Uses the first available POLQA_LQ_Avg, LQ or Mean_Data_Rate value.',
+    'throughputmbps': 'Uses the first available Mean_Data_Rate, TCP_Throughput or Data_Throughput value.',
+    'latencyms': 'Uses the first available Receive_Delay, TCP_RTT_Service_Access_Delay or DNS_Service_Access_Delay value.',
+    'packetlosspct': 'Calculates the row mean of RTP_Packet_Loss_A, RTP_Packet_Loss_B and Packet_Loss_Score.',
+    'jitterms': 'Calculates the row mean of RTP_Jitter_Avg_A and RTP_Jitter_Avg_B.',
+    'handovers': 'Counts handover items in the first available Handovers_Info, Handovers_Info_A or Playing_Handovers field.',
+    'technologyprimary': 'Uses the first available RAT, RAT_A, L2_Call_Mode_A or Playing_Technology value.',
+    'technologysecondary': 'Uses the first available L2_Call_Mode_B, RAT_B, Recording_Technology or RAT_Timeline value.',
+    'attemptcount': 'Stores 1 per row so categorical CDR attempts can be counted.',
+}
+
+
+def _preview_display_name(column: str, source_columns: set[str], auto_columns: set[str]) -> str:
+    metadata = next((field for field in PREVIEW_METADATA_FIELDS if column_identity(field) == column_identity(column)), None)
+    if metadata:
+        return metadata
+    canonical = next((field for field in MAIN_CDR_FIELDS if column_identity(field) == column_identity(column)), None)
+    if canonical:
+        return canonical
+    if column in source_columns or column in auto_columns:
+        return column
+    return '_'.join(part[:1].upper() + part[1:] for part in re.split(r'[_\s-]+', column) if part)
+
+
+def _preview_column_metadata(
+    columns: list[str], source_paths: Iterable[str | Path], derived: set[str], main: set[str],
+    auto: set[str], dataset_kind: str,
+) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    source_columns: set[str] = set()
+    for source_path in source_paths:
+        try:
+            source_columns.update(get_dataset_source_columns(Path(source_path)))
+        except (OSError, ValueError, KeyError):
+            continue
+    definitions = {column_identity(item.get('name', '')): item for item in repository.list_calculated_dimensions()}
+    labels = {column: _preview_display_name(column, source_columns, auto) for column in columns}
+    kinds: dict[str, str] = {}
+    rules: dict[str, str] = {}
+    for column in columns:
+        identity = column_identity(column)
+        if column in auto:
+            kinds[column] = 'Auto-calculated'
+            definition = definitions.get(identity, {})
+            rules[column] = json.dumps(definition, ensure_ascii=False, indent=2) if definition else 'Workspace auto-calculated field.'
+        elif column in derived:
+            kinds[column] = 'Derived' if column in main or identity in {
+                column_identity(field) for field in PREVIEW_METADATA_FIELDS
+            } else 'Analysis-derived'
+            rules[column] = DERIVED_PREVIEW_RULES.get(identity, 'Derived during CDR ingestion from the available source fields.')
+        elif column in main:
+            kinds[column] = 'Main'
+            rules[column] = DERIVED_PREVIEW_RULES.get(
+                identity, 'Fixed primary CDR field stored directly from the source when available.',
+            )
+        else:
+            kinds[column] = f'CDR-{dataset_kind.title()}' if dataset_kind in CDR_DATASET_KINDS else 'Source'
+            rules[column] = 'Field stored directly from the source dataset.'
+    return labels, kinds, rules
+
+
+def _preview_dataset_options() -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    for row in repository.list_datasets():
+        item = serialize_dataset_row(row)
+        if item['is_ready']:
+            options.append({
+                'label': f"{item['file_name']} · {item['input_kind_label']} · #{item['id']}",
+                'url': f"/workspace/preview/{item['id']}",
+            })
+    return options
+
+
+def _normalize_combined_preview_datasets(dataset_kind: str) -> None:
+    """Upgrade every member and rebuild a legacy combined table without ``__N`` columns."""
+    datasets: list[dict[str, Any]] = []
+    upgraded = False
+    for row in repository.list_datasets():
+        item = serialize_dataset_row(row)
+        if not item['is_ready'] or item['dataset_kind'] != dataset_kind:
+            continue
+        previous_version = int(item.get('normalization_version') or 1)
+        item = refresh_selected_dataset_if_stale(item) or item
+        upgraded = upgraded or previous_version < DATASET_NORMALIZATION_VERSION
+        datasets.append(item)
+    reporting_columns = repository.list_reporting_row_columns(dataset_kind)
+    has_legacy_columns = any(
+        re.search(r'__\d+$', str(column)) or column_identity(column) == 'reportvendor'
+        for column in reporting_columns
+    )
+    if not upgraded and not has_legacy_columns:
+        return
+    repository.drop_reporting_table(dataset_kind)
+    required = combined_reporting_required_columns(load_workspace_calculated_dimensions(), dataset_kind)
+    for dataset in datasets:
+        repository.copy_dataset_rows_to_reporting(int(dataset['id']), dataset_kind, required)
 
 
 def _preview_rows(frame: pd.DataFrame) -> list[dict[str, str]]:
@@ -6932,6 +7196,25 @@ def _preview_rows(frame: pd.DataFrame) -> list[dict[str, str]]:
         {column: '' if pd.isna(value) else str(value) for column, value in row.items()}
         for row in frame.to_dict(orient='records')
     ]
+
+
+def _chart_preview_column_classes(columns: Iterable[str], datasets: Iterable[dict[str, Any]]) -> dict[str, str]:
+    available = [str(column) for column in columns]
+    source_paths = [dataset['stored_path'] for dataset in datasets if dataset.get('stored_path')]
+    _ordered, derived, main, auto = _preview_column_categories(available, source_paths)
+    classes: dict[str, str] = {}
+    for column in available:
+        if column_identity(column) in {column_identity(field) for field in PREVIEW_METADATA_FIELDS}:
+            classes[column] = 'gcid-column'
+        elif column in auto:
+            classes[column] = 'auto-calculated-preview-column'
+        elif column_identity(column) in VENDOR_FIELD_IDENTITIES:
+            classes[column] = 'derived-cdr-column'
+        elif column in derived:
+            classes[column] = 'derived-cdr-column' if column in main else 'analysis-derived-cdr-column'
+        elif column in main:
+            classes[column] = 'main-cdr-column'
+    return classes
 
 
 def _apply_preview_column_filters(
@@ -6991,9 +7274,15 @@ def preview_dataset(
     dataset = serialize_dataset_row(dataset_row)
     if not dataset['is_ready']:
         raise HTTPException(status_code=400, detail='Only processed datasets can be previewed.')
+    dataset = refresh_selected_dataset_if_stale(dataset) or dataset
     dataset = ensure_mapping_gcid(dataset)
-    dataset = ensure_canonical_mapped_vendor_column(dataset) or dataset
     available_columns = repository.list_dataset_row_columns(dataset_id)
+    if dataset['dataset_kind'] in {'mapping_vodafone', 'mapping_three'}:
+        available_columns = [column for column in available_columns if not str(column).casefold().startswith('unnamed')]
+    available_identities = {column_identity(column) for column in available_columns}
+    available_columns.extend(
+        field for field in (*PREVIEW_METADATA_FIELDS, *MAIN_CDR_FIELDS) if column_identity(field) not in available_identities
+    )
     vendor_preview_column = next(
         (column for column in ('Vendor', 'OP/ Vendor', 'OP_Vendor') if column in available_columns),
         None,
@@ -7014,6 +7303,21 @@ def preview_dataset(
                 preview_sheet_options[0],
             )
             preview_filters['source_sheet'] = preview_source_sheet
+            if Path(dataset['stored_path']).suffix.casefold() in {'.xlsx', '.xls'}:
+                selected_source_identities = {
+                    column_identity(column) for column in get_excel_sheet_columns(Path(dataset['stored_path']), preview_source_sheet)
+                }
+                all_source_identities = {
+                    column_identity(column) for column in get_dataset_source_columns(Path(dataset['stored_path']))
+                }
+                fixed_identities = {column_identity(column) for column in MAIN_CDR_FIELDS}
+                available_columns = [
+                    column for column in available_columns
+                    if column in {'source_sheet', 'GCID'}
+                    or column_identity(column) in selected_source_identities
+                    or column_identity(column) in fixed_identities
+                    or column_identity(column) not in all_source_identities
+                ]
     selected_mapping_vendor = mapping_vendor if mapping_vendor in vendor_filter_options else ''
     if selected_mapping_vendor and vendor_preview_column:
         preview_filters[vendor_preview_column] = selected_mapping_vendor
@@ -7022,28 +7326,21 @@ def preview_dataset(
         preview_filters['GCID'] = selected_gcid
     cdr_preview_filters: list[dict[str, object]] = []
 
-    if dataset['dataset_kind'] == 'mapping_vodafone':
-        source_columns = get_excel_sheet_columns(Path(dataset['stored_path']), preview_source_sheet) if preview_source_sheet else []
-        preview_columns = [column for column in ('GCID',) if column in available_columns]
-        preview_columns.extend(
-            column for column in source_columns
-            if column not in preview_columns and repository.resolve_dataset_row_column_name(dataset_id, column)
-        )
-        if not source_columns:
-            preview_columns.extend(
-                column for column in available_columns
-                if column not in preview_columns and not is_mapping_preview_normalized_column(column)
-            )
-    elif dataset['dataset_kind'] == 'mapping_three':
-        preview_columns = [column for column in ('GCID',) if column in available_columns]
-        preview_columns.extend(
-            column for column in available_columns
-            if column not in preview_columns and not is_mapping_preview_normalized_column(column)
-        )
-    else:
-        preview_columns, derived_preview_columns = _ordered_cdr_preview_columns(
-            available_columns, [dataset['stored_path']],
-        )
+    preview_columns, derived_preview_columns, main_preview_columns, auto_preview_columns = _preview_column_categories(
+        available_columns, [dataset['stored_path']],
+    )
+    vendor_preview_columns.update(
+        column for column in preview_columns if column_identity(column) in VENDOR_FIELD_IDENTITIES
+    )
+    if dataset['dataset_kind'] in CDR_DATASET_KINDS:
+        derived_preview_columns.update(vendor_preview_columns)
+    preview_column_labels, preview_column_kinds, preview_column_rules = _preview_column_metadata(
+        preview_columns, [dataset['stored_path']], derived_preview_columns, main_preview_columns, auto_preview_columns, dataset['dataset_kind'],
+    )
+    metadata_preview_columns = {
+        column for column in preview_columns
+        if column_identity(column) in {column_identity(field) for field in PREVIEW_METADATA_FIELDS}
+    }
     server_paginated_preview = dataset['dataset_kind'] in CDR_DATASET_KINDS
     if server_paginated_preview:
         preview_frame, _filtered_total, _filter_values = repository.load_dataset_preview_page(
@@ -7069,6 +7366,15 @@ def preview_dataset(
             'preview_source_sheet': preview_source_sheet,
             'vendor_preview_columns': vendor_preview_columns,
             'derived_preview_columns': derived_preview_columns,
+            'main_preview_columns': main_preview_columns,
+            'auto_preview_columns': auto_preview_columns,
+            'preview_column_labels': preview_column_labels,
+            'preview_column_kinds': preview_column_kinds,
+            'preview_column_rules': preview_column_rules,
+            'preview_available_tags': [*list(dict.fromkeys(preview_column_kinds.values())), 'PINNED', 'UN_PINNED'],
+            'metadata_preview_columns': metadata_preview_columns,
+            'preview_dataset_options': _preview_dataset_options(),
+            'preview_dataset_value': f"{dataset['file_name']} · {dataset['input_kind_label']} · #{dataset['id']}",
             'vendor_filter_options': vendor_filter_options,
             'selected_mapping_vendor': selected_mapping_vendor,
             'selected_gcid': selected_gcid,
@@ -7093,6 +7399,10 @@ async def dataset_preview_data(
     if not dataset['is_ready'] or dataset['dataset_kind'] not in CDR_DATASET_KINDS:
         raise HTTPException(status_code=400, detail='Only processed CDR datasets support paginated preview.')
     available_columns = repository.list_dataset_row_columns(dataset_id)
+    available_identities = {column_identity(column) for column in available_columns}
+    available_columns.extend(
+        field for field in (*PREVIEW_METADATA_FIELDS, *MAIN_CDR_FIELDS) if column_identity(field) not in available_identities
+    )
     columns, _derived = _ordered_cdr_preview_columns(available_columns, [dataset['stored_path']])
     page, filters, filter_column = _dataset_preview_request(await request.json(), columns)
     frame, total, filter_values = repository.load_dataset_preview_page(
@@ -7131,15 +7441,31 @@ def preview_combined_dataset(
                 f"{integrity['expected_row_count']} rows. Recreate it from Workspace > Datasets before using it."
             ),
         )
+    if not integrity['has_missing_rows']:
+        _normalize_combined_preview_datasets(normalized_kind)
     available_columns = repository.list_reporting_row_columns(normalized_kind)
     if not available_columns:
         raise HTTPException(status_code=404, detail='Combined dataset not found')
+    available_identities = {column_identity(column) for column in available_columns}
+    available_columns.extend(
+        field for field in (*PREVIEW_METADATA_FIELDS, *MAIN_CDR_FIELDS) if column_identity(field) not in available_identities
+    )
     source_paths = [
         dataset['stored_path'] for row in repository.list_datasets()
         if (dataset := serialize_dataset_row(row))['is_ready']
         and dataset['dataset_kind'] == normalized_kind
     ]
-    preview_columns, derived_preview_columns = _ordered_cdr_preview_columns(available_columns, source_paths)
+    preview_columns, derived_preview_columns, main_preview_columns, auto_preview_columns = _preview_column_categories(available_columns, source_paths)
+    derived_preview_columns.update(
+        column for column in preview_columns if column_identity(column) in VENDOR_FIELD_IDENTITIES
+    )
+    preview_column_labels, preview_column_kinds, preview_column_rules = _preview_column_metadata(
+        preview_columns, source_paths, derived_preview_columns, main_preview_columns, auto_preview_columns, normalized_kind,
+    )
+    metadata_preview_columns = {
+        column for column in preview_columns
+        if column_identity(column) in {column_identity(field) for field in PREVIEW_METADATA_FIELDS}
+    }
     preview_frame, _filtered_total, _filter_values = repository.load_reporting_preview_page(
         normalized_kind, preview_columns, {}, 0, 100,
     )
@@ -7164,8 +7490,17 @@ def preview_combined_dataset(
             'preview_rows': preview_rows,
             'preview_row_limit': 100,
             'preview_sheet_options': [], 'preview_source_sheet': None,
-            'vendor_preview_columns': set(),
+            'vendor_preview_columns': {column for column in preview_columns if column_identity(column) in VENDOR_FIELD_IDENTITIES},
             'derived_preview_columns': derived_preview_columns,
+            'main_preview_columns': main_preview_columns,
+            'auto_preview_columns': auto_preview_columns,
+            'preview_column_labels': preview_column_labels,
+            'preview_column_kinds': preview_column_kinds,
+            'preview_column_rules': preview_column_rules,
+            'preview_available_tags': [*list(dict.fromkeys(preview_column_kinds.values())), 'PINNED', 'UN_PINNED'],
+            'metadata_preview_columns': metadata_preview_columns,
+            'preview_dataset_options': _preview_dataset_options(),
+            'preview_dataset_value': '',
             'vendor_filter_options': [], 'selected_mapping_vendor': '', 'selected_gcid': '',
             'cdr_preview_filters': [],
             'visible_column_count': len(preview_columns),
@@ -7187,9 +7522,15 @@ async def combined_dataset_preview_data(
     normalized_kind = str(kind or '').casefold()
     if normalized_kind not in CDR_DATASET_KINDS:
         raise HTTPException(status_code=404, detail='Combined dataset not found')
+    if not combined_cdr_integrity(normalized_kind)['has_missing_rows']:
+        _normalize_combined_preview_datasets(normalized_kind)
     available_columns = repository.list_reporting_row_columns(normalized_kind)
     if not available_columns:
         raise HTTPException(status_code=404, detail='Combined dataset not found')
+    available_identities = {column_identity(column) for column in available_columns}
+    available_columns.extend(
+        field for field in (*PREVIEW_METADATA_FIELDS, *MAIN_CDR_FIELDS) if column_identity(field) not in available_identities
+    )
     source_paths = [
         dataset['stored_path'] for row in repository.list_datasets()
         if (dataset := serialize_dataset_row(row))['is_ready']
@@ -7254,7 +7595,6 @@ def datasets_analysis(
         return RedirectResponse('/workspace?workspace_warning=Open+a+workspace+before+using+Datasets+Analysis.', status_code=status.HTTP_303_SEE_OTHER)
     datasets, ready_datasets, input_kind_options, selected_dataset = build_dataset_view_state(dataset_id, input_kind, CDR_DATASET_KINDS)
     selected_dataset = refresh_selected_dataset_if_stale(selected_dataset)
-    selected_dataset = ensure_canonical_mapped_vendor_column(selected_dataset)
     selected_dataset = enrich_selected_dataset_for_analysis(selected_dataset)
     analysis, analyses, selected_metrics, filter_options, analysis_error, analysis_loaded = build_datasets_analysis_payload(selected_dataset, request, user.username)
 
@@ -7333,7 +7673,7 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
     longer transfers every historical source field just to render its charts.
     """
     requested = {
-        'source_sheet', 'Operator', 'Campaign', 'vendor', 'report_vendor',
+        'source_sheet', *MAIN_CDR_FIELDS, 'vendor',
         'RAT', 'RAT_A', 'Sample_RAT_A', 'technology_primary',
         'L1_Call_Mode_A', 'L2_Call_Mode_A', 'Session_Type', 'session_type',
         'Type_of_Test', 'Test_Name', 'test_name', 'Test_Type', 'test_type',
@@ -7360,12 +7700,17 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
             for rule in dimension.rules:
                 for condition in rule.conditions:
                     requested.update(part.strip() for part in condition.column.split('|') if part.strip())
+    try:
+        workspace_dimensions = repository.list_calculated_dimensions()
+    except sqlite3.OperationalError:
+        workspace_dimensions = []
+    requested.update(dimension.get('name', '') for dimension in workspace_dimensions)
     requested_identities = {column_identity(column) for column in requested}
     # Calculated Tableau dimensions are reconstructed in the renderer. Include
     # their physical dependencies in the compact reporting table so job output
     # matches Interactive Preview and direct rendering.
     derived_dependencies = {
-        'vendorv3': {'vendor', 'report_vendor'},
+        'vendorv3': {'vendor'},
         'firstltepccarfcn': {'LTE_PCC_EARFCN'},
         'tputabove': {'Mean_Data_Rate', 'Test_Name'},
         'tputbelow': {'Mean_Data_Rate', 'Test_Name'},
@@ -7385,8 +7730,26 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
         if identity in requested_identities:
             requested.update(dependencies)
     # Derived grouping/filter labels resolve from their source fields above;
-    # empty presentation fields are not database column requests.
-    return sorted(column for column in requested if str(column).strip())
+    # empty presentation fields are not database column requests. Keep the
+    # stable preview model first and workspace fields at the end.
+    available = [column for column in requested if str(column).strip()]
+    auto_identities = {
+        column_identity(dimension.get('name', '')) for dimension in workspace_dimensions
+    }
+    ordered = ['source_sheet'] if 'source_sheet' in available else []
+    for fixed in MAIN_CDR_FIELDS:
+        resolved = resolve_column_name(available, fixed)
+        if resolved and resolved not in ordered:
+            ordered.append(resolved)
+    ordered.extend(sorted(
+        (column for column in available if column not in ordered and column_identity(column) not in auto_identities),
+        key=str.casefold,
+    ))
+    ordered.extend(sorted(
+        (column for column in available if column not in ordered and column_identity(column) in auto_identities),
+        key=str.casefold,
+    ))
+    return ordered
 
 
 def _combined_reporting_frame(
@@ -7689,7 +8052,7 @@ async def temporary_chart_preview(request: Request, user: SessionUser = Depends(
     })
     def load_frame() -> pd.DataFrame:
         combined = _combined_reporting_frame(selected, technology, [entry], multivendor)
-        return ensure_report_vendor_group(combined) if multivendor else combined
+        return ensure_vendor_group(combined) if multivendor else combined
     frame = _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4)
     filtered = _cached_filtered_chart_frame(frame_key, frame, entry, multivendor)
     try:
@@ -7734,7 +8097,7 @@ def _temporary_chart_preview_hover_targets(payload: dict[str, Any]) -> list[dict
     })
     def load_frame() -> pd.DataFrame:
         combined = _combined_reporting_frame(selected, technology, [entry], multivendor)
-        return ensure_report_vendor_group(combined) if multivendor else combined
+        return ensure_vendor_group(combined) if multivendor else combined
     frame = _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4)
     filtered = _cached_filtered_chart_frame(frame_key, frame, entry, multivendor)
     targets = catalog_chart_hover_targets(filtered, entry, multivendor=multivendor, prefiltered=True)
@@ -7902,7 +8265,7 @@ async def temporary_chart_preview_data(request: Request, user: SessionUser = Dep
             selected = _reporting_datasets(preview_dataset_ids, entry.source_kind)
             frame = _combined_reporting_frame(selected, technology, [entry], multivendor)
             if multivendor:
-                frame = ensure_report_vendor_group(frame)
+                frame = ensure_vendor_group(frame)
             full_preview, base_summary = preview_catalog_chart_data(frame, entry, limit=100_000)
             cached = (full_preview, base_summary)
             CHART_PREVIEW_DATA_CACHE[cache_key] = cached
@@ -7924,6 +8287,10 @@ async def temporary_chart_preview_data(request: Request, user: SessionUser = Dep
         'rows': preview.where(pd.notna(preview), '').astype(str).to_dict(orient='records'),
         'summary': {key: value for key, value in summary.items() if key != 'filter_values'},
         'filter_values': summary.get('filter_values', {}),
+        'column_classes': _chart_preview_column_classes(
+            preview.columns,
+            [serialize_dataset_row(row) for dataset_id in preview_dataset_ids if (row := repository.get_dataset(dataset_id))],
+        ),
     })
 
 
@@ -8116,7 +8483,7 @@ def _run_netcheck_report_job_locked(
                 return frame
             frame = _combined_reporting_frame(selected[kind], technology, catalog_entries, multivendor, task_repository)
             if multivendor:
-                frame = ensure_report_vendor_group(frame)
+                frame = ensure_vendor_group(frame)
             loaded_kinds.add(kind)
             return frame
         def chart_rendered(entry: Any, source_rows: int, empty: bool) -> None:
@@ -8501,7 +8868,7 @@ def _run_report_chart_job(
                             continue
                         frame = _combined_reporting_frame(selected[kind], technology, catalog_entries, multivendor, task_repository)
                         if multivendor:
-                            frame = ensure_report_vendor_group(frame)
+                            frame = ensure_vendor_group(frame)
                         prepared_frames: dict[tuple[Any, ...], pd.DataFrame] = {}
                         task_repository.update_report_chart_job(job_id, status='processing', progress=12 + int(rendered * 83 / len(chart_entries)))
                         for order, entry in entries:
@@ -8562,7 +8929,7 @@ def _run_report_chart_job(
                                 gc.collect()
                                 frame = _combined_reporting_frame(selected[kind], technology, catalog_entries, multivendor, task_repository)
                                 if multivendor:
-                                    frame = ensure_report_vendor_group(frame)
+                                    frame = ensure_vendor_group(frame)
                                 try:
                                     prepared_frame, prepared_entry = prepare_catalog_chart_preview_frame(
                                         frame, entry, multivendor=multivendor,
@@ -9832,6 +10199,51 @@ def export_report(
     return FileResponse(destination, filename=download_name, media_type=media_type)
 
 
+@app.get('/config', response_class=HTMLResponse)
+def configuration_panel(request: Request, user: SessionUser = Depends(admin_user)) -> HTMLResponse:
+    return render_template(request, 'configuration.html', {
+        'user': user,
+        'configuration': runtime_configuration(),
+        'timezone_options': sorted(available_timezones()),
+        'notice': request.query_params.get('notice'),
+    })
+
+
+@app.post('/config')
+def save_configuration(
+    timezone_name: str = Form(...),
+    report_chart_renderer: str = Form(...),
+    chromium_path: str = Form(''),
+    ignore_event_time_filtering_value: bool = Form(False, alias='ignore_event_time_filtering'),
+    user: SessionUser = Depends(admin_user),
+) -> RedirectResponse:
+    timezone_name = timezone_name.strip()
+    try:
+        ZoneInfo(timezone_name)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail='Choose a valid IANA timezone.') from exc
+    try:
+        renderer = report_chart_renderer_name(report_chart_renderer)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    chromium_path = chromium_path.strip()
+    if chromium_path:
+        executable = Path(chromium_path).expanduser()
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            raise HTTPException(status_code=400, detail='Chromium path must identify an executable file on this server.')
+        chromium_path = str(executable.resolve())
+    values = {
+        'timezone': timezone_name,
+        'report_chart_renderer': renderer,
+        'chromium_path': chromium_path,
+        'ignore_event_time_filtering': bool(ignore_event_time_filtering_value),
+    }
+    repository.set_application_state(RUNTIME_CONFIGURATION_STATE_KEY, json.dumps(values, sort_keys=True))
+    apply_runtime_configuration(values)
+    reset_dashboard_canvas_renderer()
+    return RedirectResponse('/config?notice=Configuration+saved.', status_code=status.HTTP_303_SEE_OTHER)
+
+
 @app.get('/admin', response_class=HTMLResponse)
 def admin_panel(request: Request, user: SessionUser = Depends(admin_user)) -> HTMLResponse:
     return render_admin_template(request, user)
@@ -10794,6 +11206,9 @@ async def update_admin_database_table(request: Request, user: SessionUser = Depe
         raise HTTPException(status_code=400, detail='Send a valid table update payload.')
     table = str(payload.get('table') or '').strip()
     updates = payload.get('updates')
+    if table == 'operator_mappings' and isinstance(updates, dict):
+        if 'canonical_value' in updates and not str(updates['canonical_value']).strip():
+            raise HTTPException(status_code=400, detail='The canonical operator value is required.')
     try:
         rowid = int(payload.get('rowid'))
     except (TypeError, ValueError) as exc:
@@ -10806,8 +11221,28 @@ async def update_admin_database_table(request: Request, user: SessionUser = Depe
         raise HTTPException(status_code=400, detail=f'The update violates a database constraint: {exc}.') from exc
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
+    if table == 'operator_mappings':
+        repository.invalidate_cdr_normalization()
     repository.add_log(user.username, 'database_table_update', f'Updated row {rowid} in {table}.')
     return JSONResponse({'ok': True, 'message': 'Row saved.'})
+
+
+@app.post('/admin/operator-mappings')
+async def add_admin_operator_mapping(request: Request, user: SessionUser = Depends(admin_user)) -> JSONResponse:
+    if not active_workspace:
+        raise HTTPException(status_code=409, detail='Open a workspace before editing operator mappings.')
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='Send a valid operator mapping payload.')
+    try:
+        repository.add_operator_mapping(payload.get('source_value', ''), payload.get('canonical_value', ''))
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    repository.invalidate_cdr_normalization()
+    ANALYSIS_CACHE.clear()
+    DATAFRAME_CACHE.clear()
+    repository.add_log(user.username, 'operator_mapping_create', str(payload.get('source_value', '')).strip())
+    return JSONResponse({'ok': True, 'message': 'Operator mapping added.'})
 
 
 @app.post('/admin/database/table/delete')
@@ -10833,6 +11268,8 @@ async def delete_admin_database_table_row(request: Request, user: SessionUser = 
         raise HTTPException(status_code=400, detail=f'The row cannot be deleted because of a database constraint: {exc}.') from exc
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
+    if table == 'operator_mappings':
+        repository.invalidate_cdr_normalization()
     repository.add_log(user.username, 'database_table_delete', f'Deleted row {rowid} from {table}.')
     return JSONResponse({'ok': True, 'message': 'Row deleted.'})
 
@@ -11320,6 +11757,7 @@ async def preview_report_template_chart(
         'columns': summary.get('columns', []),
         'filter_values': summary.get('filter_values', {}),
         'rows': preview.where(pd.notna(preview), '').astype(str).to_dict(orient='records'),
+        'column_classes': _chart_preview_column_classes(preview.columns, selected_datasets),
     })
 
 

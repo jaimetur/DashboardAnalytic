@@ -8,8 +8,12 @@ from typing import Callable, Iterable
 
 import pandas as pd
 from openpyxl import load_workbook
+try:
+    import pycountry
+except ImportError:  # pragma: no cover - packaged installations include it.
+    pycountry = None
 
-from src.modules.column_names import resolve_column_name
+from src.modules.column_names import campaign_parts, clean_column_name, column_identity, resolve_column_name, vendor_only_value
 
 
 CDR_IGNORED_SHEETS = {
@@ -24,7 +28,6 @@ CDR_IGNORED_SHEETS = {
     'TMP_CLIPBOARD',
 }
 CDR_IGNORED_SHEET_KEYS = frozenset(name.strip().casefold() for name in CDR_IGNORED_SHEETS)
-CAMPAIGN_PATTERN = re.compile(r'(?P<market>[A-Z]{2})_Q(?P<quarter>\d)_(?P<year>\d{4})')
 
 
 @dataclass(slots=True)
@@ -105,20 +108,165 @@ def add_three_gcid_column(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _parse_campaign_dimension(value: object, part: str) -> object:
-    if pd.isna(value):
-        return pd.NA
-    match = CAMPAIGN_PATTERN.search(str(value))
-    if not match:
-        return pd.NA
-    if part == 'market':
-        return match.group('market')
+    year, quarter, _mode = campaign_parts(value)
     if part == 'year':
-        return int(match.group('year'))
+        return int(year) if year else pd.NA
     if part == 'quarter':
-        return f"Q{match.group('quarter')}"
+        return quarter or pd.NA
     if part == 'period':
-        return f"{match.group('year')}-Q{match.group('quarter')}"
+        return f'{year}-{quarter}' if year and quarter else pd.NA
     return pd.NA
+
+
+ISO_COUNTRY_CODES = frozenset((
+    'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ '
+    'CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR '
+    'GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO '
+    'JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR '
+    'MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO '
+    'RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW '
+    'TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW UK'
+).split())
+COUNTRY_NAME_TO_CODE = {
+    'united kingdom': 'UK', 'great britain': 'UK', 'england': 'UK', 'germany': 'DE',
+    'spain': 'ES', 'france': 'FR', 'italy': 'IT', 'portugal': 'PT', 'ireland': 'IE',
+    'netherlands': 'NL', 'belgium': 'BE', 'switzerland': 'CH', 'austria': 'AT',
+    'poland': 'PL', 'sweden': 'SE', 'norway': 'NO', 'denmark': 'DK', 'finland': 'FI',
+    'united states': 'US', 'united states of america': 'US', 'canada': 'CA', 'mexico': 'MX',
+    'brazil': 'BR', 'argentina': 'AR', 'chile': 'CL', 'colombia': 'CO',
+    'australia': 'AU', 'new zealand': 'NZ', 'india': 'IN', 'china': 'CN', 'japan': 'JP',
+    'south korea': 'KR', 'singapore': 'SG', 'south africa': 'ZA', 'turkey': 'TR',
+    'united arab emirates': 'AE', 'saudi arabia': 'SA',
+}
+if pycountry is not None:
+    for country in pycountry.countries:
+        for attribute in ('name', 'official_name', 'common_name'):
+            name = getattr(country, attribute, '')
+            if name:
+                COUNTRY_NAME_TO_CODE.setdefault(str(name).casefold(), str(country.alpha_2))
+# NetCheck uses UK rather than ISO's GB in campaign labels.
+COUNTRY_NAME_TO_CODE.update({'united kingdom': 'UK', 'great britain': 'UK', 'england': 'UK'})
+
+
+def _campaign_market(value: object) -> object:
+    text = '' if value is None else str(value).strip()
+    if text.casefold() in {'<na>', 'nan', 'nat', 'none'}:
+        return pd.NA
+    lowered = text.casefold()
+    for country_name, code in sorted(COUNTRY_NAME_TO_CODE.items(), key=lambda item: -len(item[0])):
+        if re.search(rf'(?:^|[_\- ]){re.escape(country_name)}(?:$|[_\- ])', lowered):
+            return code
+    code_matches = list(re.finditer(r'(?:^|[_\- ])([A-Za-z]{2})(?=$|[_\- ])', text))
+    country_codes = [match.group(1).upper() for match in code_matches if match.group(1).upper() in ISO_COUNTRY_CODES]
+    non_mode_codes = [code for code in country_codes if code != 'SA']
+    if non_mode_codes:
+        return non_mode_codes[0]
+    if country_codes == ['SA'] and text.upper().startswith('SA'):
+        return 'SA'
+    return pd.NA
+
+
+def _has_values(series: pd.Series) -> bool:
+    return series.notna().any() and series.fillna('').astype(str).str.strip().ne('').any()
+
+
+def _ensure_dataset_field(dataset: pd.DataFrame, target: str, candidates: Iterable[str], default: object = pd.NA) -> str:
+    actual = resolve_column_name(dataset.columns, target)
+    if actual is not None and _has_values(dataset[actual]):
+        return actual
+    source = next(
+        (resolved for candidate in candidates if (resolved := resolve_column_name(dataset.columns, candidate)) is not None and _has_values(dataset[resolved])),
+        None,
+    )
+    values = dataset[source] if source is not None else pd.Series([default] * len(dataset), index=dataset.index, dtype='object')
+    if actual is None:
+        dataset[target] = values
+        return target
+    dataset[actual] = values
+    return actual
+
+
+def ensure_fixed_cdr_fields(dataset: pd.DataFrame) -> pd.DataFrame:
+    legacy_report_columns = [column for column in dataset.columns if column_identity(column) == 'reportvendor']
+    if legacy_report_columns:
+        dataset = dataset.drop(columns=legacy_report_columns)
+    campaign = _ensure_dataset_field(dataset, 'Campaign', ('Campaign',))
+    benchmark = _ensure_dataset_field(dataset, 'Benchmark', ('Benchmark', campaign))
+    campaign_values = dataset[campaign]
+    benchmark_values = dataset[benchmark]
+
+    def extracted(part: str) -> pd.Series:
+        primary = campaign_values.map(lambda value: _parse_campaign_dimension(value, part))
+        fallback = benchmark_values.map(lambda value: _parse_campaign_dimension(value, part))
+        return primary.where(primary.notna(), fallback)
+
+    year = _ensure_dataset_field(dataset, 'Campaign_Year', ('Campaign_Year',))
+    quarter = _ensure_dataset_field(dataset, 'Campaign_Quarter', ('Campaign_Quarter',))
+    existing_year = dataset[year].copy()
+    existing_quarter = dataset[quarter].copy()
+    parsed_year = extracted('year')
+    parsed_quarter = extracted('quarter')
+    dataset[year] = parsed_year.where(parsed_year.notna(), existing_year)
+    dataset[quarter] = parsed_quarter.where(parsed_quarter.notna(), existing_quarter)
+    period = _ensure_dataset_field(dataset, 'Period', ('Period',))
+    existing_period = dataset[period].copy()
+    dataset[period] = [
+        f'{year_value}-{quarter_value}' if pd.notna(year_value) and pd.notna(quarter_value) else previous
+        for year_value, quarter_value, previous in zip(dataset[year], dataset[quarter], existing_period, strict=False)
+    ]
+    market = _ensure_dataset_field(dataset, 'Market', ('Market',))
+    existing_market = dataset[market].copy()
+    primary_market = campaign_values.map(_campaign_market)
+    fallback_market = benchmark_values.map(_campaign_market)
+    parsed_market = primary_market.where(primary_market.notna(), fallback_market)
+    dataset[market] = parsed_market.where(parsed_market.notna(), existing_market)
+    _ensure_dataset_field(dataset, 'Region', ('Region',))
+    _ensure_dataset_field(dataset, 'Zone', ('Zone', 'G_Level_3'))
+    _ensure_dataset_field(dataset, 'City', ('City', 'G_Level_4'))
+    operator = _ensure_dataset_field(dataset, 'Operator', ('Operator', 'Operator_A', 'Home_Operator_A', 'Home_Operator'))
+    _ensure_dataset_field(dataset, 'Subscriber', ('Subscriber', 'Suscriber', operator))
+    vendor = _ensure_dataset_field(dataset, 'Vendor', ('Vendor', 'vendor'))
+    vendor_only = _ensure_dataset_field(dataset, 'Vendor_Only', ('Vendor_Only',))
+    operators = dataset[operator].fillna('').astype(str).str.strip()
+    vendors = dataset[vendor].fillna('').astype(str).str.strip()
+    dataset[vendor_only] = [
+        vendor_only_value(value, prefix)
+        for value, prefix in zip(vendors, operators, strict=False)
+    ]
+    technology_fields = ('Technology', 'RAT', 'RAT_A', 'L2_Call_Mode_A', 'Playing_Technology')
+    for field in technology_fields:
+        _ensure_dataset_field(dataset, field, technology_fields)
+    session_fields = ('Session_Type', 'Type_Of_Test')
+    for field in session_fields:
+        _ensure_dataset_field(dataset, field, session_fields)
+    _ensure_dataset_field(dataset, 'Test_Name', ('Test_Name',))
+    status_fields = ('Call_Status', 'Status', 'Result', 'Test_Result')
+    for field in status_fields:
+        _ensure_dataset_field(dataset, field, status_fields)
+    return dataset
+
+
+def apply_operator_mappings(dataset: pd.DataFrame, mappings: dict[str, str]) -> pd.DataFrame:
+    """Apply workspace operator aliases without changing blank values."""
+    if not mappings:
+        return dataset
+    result = dataset.copy()
+    operator_column = resolve_column_name(result.columns, 'Operator')
+    subscriber_column = resolve_column_name(result.columns, 'Subscriber')
+    subscriber_is_derived = bool(
+        operator_column and subscriber_column
+        and result[operator_column].fillna('').astype(str).equals(result[subscriber_column].fillna('').astype(str))
+    )
+    for column in result.columns:
+        if column_identity(column) != 'operator':
+            continue
+        result[column] = result[column].map(
+            lambda value: value if pd.isna(value) or not str(value).strip()
+            else mappings.get(str(value).strip().casefold(), value)
+        )
+    if subscriber_is_derived and operator_column and subscriber_column:
+        result[subscriber_column] = result[operator_column]
+    return result
 
 
 def _count_items(value: object) -> float:
@@ -153,12 +301,13 @@ def _make_unique_headers(headers: Iterable[object]) -> list[str]:
     counts: dict[str, int] = {}
     unique_headers: list[str] = []
     for index, value in enumerate(headers, start=1):
-        base_name = str(value).strip() if value is not None else ''
+        base_name = clean_column_name(value) if value is not None and str(value).strip() else ''
         if not base_name:
             base_name = f'Unnamed_{index}'
-        counts[base_name] = counts.get(base_name, 0) + 1
-        occurrence = counts[base_name]
-        unique_headers.append(base_name if occurrence == 1 else f'{base_name}__{occurrence}')
+        identity = base_name.casefold()
+        counts[identity] = counts.get(identity, 0) + 1
+        occurrence = counts[identity]
+        unique_headers.append(base_name if occurrence == 1 else f'{base_name}_Duplicate_{occurrence}')
     return unique_headers
 
 
@@ -241,7 +390,7 @@ def _cached_dataset_source_columns(
     if suffix == '.csv':
         for encoding in ('utf-8-sig', 'cp1252', 'latin-1'):
             try:
-                return tuple(str(column) for column in pd.read_csv(file_path, nrows=0, encoding=encoding).columns)
+                return tuple(clean_column_name(column) for column in pd.read_csv(file_path, nrows=0, encoding=encoding).columns)
             except UnicodeDecodeError:
                 continue
         return ()
@@ -263,7 +412,7 @@ def _cached_dataset_source_columns(
         finally:
             workbook.close()
     if suffix == '.xls':
-        return tuple(str(column) for column in pd.read_excel(file_path, nrows=0).columns)
+        return tuple(clean_column_name(column) for column in pd.read_excel(file_path, nrows=0).columns)
     return ()
 
 
@@ -348,6 +497,14 @@ def infer_dataset_kind(df: pd.DataFrame, file_name: str = '') -> str:
 
 def _normalise_dataset(df: pd.DataFrame, file_path: Path) -> pd.DataFrame:
     dataset = df.copy()
+    dataset.columns = [clean_column_name(column) for column in dataset.columns]
+    legacy_vendor_only = next((column for column in dataset.columns if str(column).casefold() == 'vendor_2'), None)
+    current_vendor_only = next((column for column in dataset.columns if str(column).casefold() == 'vendor_only'), None)
+    if legacy_vendor_only:
+        if current_vendor_only:
+            dataset = dataset.drop(columns=[legacy_vendor_only])
+        else:
+            dataset = dataset.rename(columns={legacy_vendor_only: 'Vendor_Only'})
     dataset_kind = infer_dataset_kind(dataset, file_path.name)
     dataset['dataset_kind'] = dataset_kind
     dataset['source_file'] = file_path.name
@@ -364,7 +521,7 @@ def _normalise_dataset(df: pd.DataFrame, file_path: Path) -> pd.DataFrame:
 
     dataset['operator'] = _first_available_series(dataset, ['operator', 'Operator_A', 'Operator', 'Home_Operator_A', 'Home_Operator'])
     dataset['session_type'] = _first_available_series(dataset, ['session_type', 'Session_Type_A', 'Session_Type', 'Type_of_Test', 'type_of_test'])
-    dataset['test_name'] = _first_available_series(dataset, ['test_name', 'Test_Name', 'Session_Type_A', 'Session_Type', 'session_type'])
+    dataset['test_name'] = _first_available_series(dataset, ['test_name', 'Test_Name'])
     dataset['direction'] = _first_available_series(dataset, ['direction', 'Direction_A', 'Direction', 'Call_Direction', 'call_direction'])
     dataset['region'] = _first_available_series(dataset, ['region', 'Region'])
     dataset['city'] = _first_available_series(dataset, ['city', 'City'])
@@ -390,14 +547,14 @@ def _normalise_dataset(df: pd.DataFrame, file_path: Path) -> pd.DataFrame:
             dataset,
             ['Call_Start_Time', 'Call Start Time', 'Test_Start_Time', 'Test Start Time', 'Data_Start_Time', 'Data Start Time'],
         ),
-        errors='coerce',
+        errors='coerce', format='mixed',
     )
     dataset['event_end_time'] = pd.to_datetime(
         _first_available_series(
             dataset,
             ['Call_End_Time', 'Call End Time', 'Test_End_Time', 'Test End Time', 'Data_End_Time', 'Data End Time'],
         ),
-        errors='coerce',
+        errors='coerce', format='mixed',
     )
     dataset['hour_bucket'] = dataset['event_start_time'].dt.hour
     dataset['day_bucket'] = dataset['event_start_time'].dt.day
@@ -439,6 +596,18 @@ def _normalise_dataset(df: pd.DataFrame, file_path: Path) -> pd.DataFrame:
         dataset,
         ['L2_call_Mode_B', 'RAT_B', 'Recording_Technology', 'RAT_Timeline'],
     )
+
+    dataset = ensure_fixed_cdr_fields(dataset)
+    start_column = resolve_column_name(dataset.columns, 'Event_Start_Time') or 'event_start_time'
+    end_column = resolve_column_name(dataset.columns, 'Event_End_Time') or 'event_end_time'
+    start_times = pd.to_datetime(dataset[start_column], errors='coerce', format='mixed')
+    end_times = pd.to_datetime(dataset[end_column], errors='coerce', format='mixed')
+    dataset[start_column] = start_times.dt.strftime('%Y-%m-%d %H:%M:%S.%f').where(start_times.notna(), pd.NA)
+    dataset[end_column] = end_times.dt.strftime('%Y-%m-%d %H:%M:%S.%f').where(end_times.notna(), pd.NA)
+    hour_column = resolve_column_name(dataset.columns, 'Hour_Bucket') or 'hour_bucket'
+    day_column = resolve_column_name(dataset.columns, 'Day_Bucket') or 'day_bucket'
+    dataset[hour_column] = start_times.dt.hour.astype('Int64')
+    dataset[day_column] = start_times.dt.day.astype('Int64')
 
     return dataset
 

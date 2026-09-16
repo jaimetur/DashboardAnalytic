@@ -6,25 +6,58 @@
 ## Release: v0.3.1
 ### Release Date: 2026-09-15
 #### ⚠️ Breaking Changes:
+- Removed `Report_Vendor` from individual and combined CDR tables. Normalization version 11 migrates its values into the official `Vendor` field, which now drives filters, legends, analysis, Dashboards and Reporting.
 
 #### 🌟 New Features:
-- Dataset Preview now exposes the complete individual or combined CDR table through fixed 100-row pagination and Excel-style column menus whose values come from the full persisted column, support simultaneous filters and include a disabled-aware `Clear N Filters` action. It no longer applies Rows to preview, Operator, Vendor, RAT, Session Type or Call Status pre-filters; every processed field remains visible, with source fields preserving their original order and every derived field grouped after `source_sheet` in light gray.
+- Dataset Preview now pages the complete persisted dataset in fixed groups of 100 rows.
+- Added simultaneous Excel-style column filters with complete, cascading value lists and `Select All/None`.
+- Added comma-separated column search and multi-select label filtering with an `All Labels` option.
+- Added searchable Workspace Dataset selection directly in Dataset Preview.
+- Added external `Main`, `Derived`, `Auto-calculated`, `Analysis-derived` and CDR-type badges with rule details.
+- Added the `PINNED` badge for fields retained across dataset views.
+- Ordered previews as origin, Main, Auto-calculated, remaining derived and source CDR fields.
+- Added compact filter clearing, row totals and round green SVG pagination controls.
+- Added workspace Operator Mappings to Admin, with seeded NetCheck aliases and CDR rematerialization after edits.
 
 #### 🚀 Enhancements:
-- Persistent Dashboard caches now remain valid across application patch releases when their cache-format versions are unchanged; the stored manifest is updated to record the new application version without rebuilding cached selections, projections or chart models. The Dashboard viewer Refresh action now asks for confirmation, invalidates every rendered chart model in the active preview and rebuilds all of them, while Refresh Chart in the expanded single-chart viewer invalidates and rebuilds only the current chart. Prepared-preview identities now include the complete Report Template content, and relaunching a Dashboard PPT Job after editing that template automatically prepares its current snapshot and missing Canvas models before replacing the Job charts and presentation while retaining the original Job's exact Scope, datasets, dates and filters; incomplete Jobs without a manifest retain their recorded Scope while rebuilding the current saved universe.
-- Generate PPT from Manage Dashboards now asks for Operator or Multivendor Comparison and immediately queues the selected scope. The server derives its temporary Dataset Universe from the one newest CDR of each type for Multivendor or the two newest CDRs of each type for Operator Comparison, always using automatic oldest/newest dates; it restores a matching prepared universe when available or prepares its required chart models before starting the PowerPoint job.
-- PowerPoint Generation Jobs now keeps the five most recent visible jobs in its scroll area before older jobs require scrolling.
-- The expanded Dashboard chart viewer now moves to the previous or next available chart with the Left and Right Arrow keys, as well as its navigation controls.
-- Expanded Dashboard charts now provide a polished right-side collapsible Chart Definition panel for both live and generated-PPT charts. Its compact uppercase tab uses Dashboard panel eyebrow typography in bold so the complete title fits, floats with the chart controls and appears only while the chart is hovered or focused; opening it overlays the chart with the complete E2E Reporting Interactive Preview controls and it folds automatically five seconds after the pointer leaves or immediately when the user clicks outside it. The panel reads every value, including its single KPI value, from the template row and retains its loaded controls while it is collapsed. Generated-PPT definitions load directly from their small manifest and defer snapshot restoration until Apply. Rows and Columns support direct hierarchy-expression editing with `×` or a spaced `x` separator as well as multi-selection; typing preserves the complete in-progress expression while synchronizing recognised values to its selector, and clearing the text clears that selector. Apply renders from the complete current chart definition, including CDR type, datasets, KPI, filters, rows, columns, legend and legend position; it retains configured values while dropdown options are refreshed, builds a temporary narrow projection with any newly selected fields, resets zoom and repaints the current Canvas model. Admins can confirm a red **Update Template** action to render that same current definition first and then persist it into its exact source-template row in one operation, including when a generated-PPT snapshot must restore its chart dataset; it is hidden when that template is unavailable. Empty transient CDR type, KPI or chart-type values preserve the original template definition instead of overwriting it. Hierarchical row panes now display complete aggregation labels in dedicated, separated level panes with enough left margin to avoid the chart area, reducing label font size to fit and only horizontally condensing text as a last resort; column-only `Operator × Campaign` and comparable hierarchies also use their matrix model, keeping each parent group together regardless of an Operator filter while retaining the original 22 px aggregation captions, operator colours and solid/dashed separators. Bottom legends reserve a separate lower band and cannot overlap column captions. Average and median bar charts also render their declared row aggregations as hierarchical row panes.
-- Reloading E2E Dashboards now restores the current page scroll position after the dashboard and its asynchronous layout have loaded, retaining it reliably across normal page unload, tab hiding and refresh flows.
-- Updated `Template_CDR_analysis.pptx` PowerPoint template for a better design.
-- Unified CDR field resolution across ingestion, Dataset Analysis, Dashboard SQL projections, chart definitions, Auto-calculated Fields and individual or combined Dataset Previews. Field references now ignore case and separators such as spaces, underscores and hyphens, `Subscriber` and legacy `Suscriber` resolve as the same field, and selected text values are matched case-insensitively across filters and chart-data queries. Existing CDRs are rematerialized through normalization version 7 so the corrected rules also apply to previously uploaded datasets.
+- Dashboard caches remain valid across patch releases when their data formats do not change.
+- Dashboard Refresh confirms, invalidates and rebuilds every chart model in the active preview.
+- Refresh Chart invalidates and rebuilds only the current expanded chart.
+- Dashboard preview identities now include the complete Report Template content.
+- Relaunched Dashboard PPT Jobs rebuild charts and slides from the current edited template while retaining the recorded dataset universe and filters.
+- Manage Dashboards asks for Operator or Multivendor Comparison before queueing PPT generation.
+- Automatic PPT universes use the newest eligible CDRs and their full available date range.
+- PowerPoint Generation Jobs shows five recent rows before scrolling.
+- Expanded charts support previous and next navigation with buttons or arrow keys.
+- Added a collapsible Chart Definition panel to live and generated-PPT charts.
+- Chart Definition Apply renders the complete edited definition and any required temporary projection.
+- Update Template renders the current chart first and persists it to its exact template row in one confirmed action.
+- Improved hierarchical chart panes, aggregation labels, separators and bottom-legend spacing.
+- E2E Dashboards restores its scroll position after reload and asynchronous layout updates.
+- Updated `Template_CDR_analysis.pptx` styling.
+- Unified field-name resolution across ingestion, analysis, SQL projections, charts and previews.
+- Field references now ignore case and separators; `Subscriber` and legacy `Suscriber` resolve identically.
+- Campaign filters accept reordered country, year, quarter and SA/NSA tokens while preserving source values.
+- Normalized Benchmark, Period, Market, geography, technology, session, result and event-time field families.
+- Added `Vendor_Only` after `Vendor` in Datasets Analysis Adaptive Filters.
+- The Vendors metric now counts distinct `Vendor_Only` values and follows Operators.
+- Added Success Calls and Failed Tests metrics after Completed Tests and before Success Rate Pct.
+- Dataset queue progress now shows persisted elapsed time during processing and after completion.
+- Dataset Preview now marks every field as `PINNED` or `UN_PINNED`; both badges are interactive and explain availability.
+- Added application-wide Config settings for timezone, chart renderer, Chromium and event-time filtering, including searchable IANA timezone selection.
+- Background task cards can be moved and restored to their default dock position with a pin control.
 
 #### 🐛 Bug fixes:
-- The floating background-task card now suppresses an automatic Dashboard warm-up for the same Dashboard while its foreground preparation is running, so one preparation appears as one task.
+- Prevented a foreground Dashboard preparation and its automatic warm-up from appearing as duplicate background tasks.
+- Removed legacy `__N` collision columns while retaining genuine duplicate source headers as `_Duplicate_N`.
+- Fixed Dataset Preview badge alignment after restoring hidden columns.
 
 #### 📚 Documentation:
-- Updated Datasets Analysis help with the complete CDR Dataset Preview pagination, column-filter and derived-field layout, including normalized field-name and case-insensitive value semantics.
+- Reorganized Workspace Management help under NetCheck CDR Support with one rule per fixed field.
+- Documented CDR normalization, Campaign parsing, ISO dates, Operator Mappings and rematerialization.
+- Documented Preview ordering, label filtering, rule tooltips and `PINNED` fields.
+- Expanded VFUK and 3UK Vendor Mapping formats, GCID rules and Vendor assignment behavior.
+- Marked Smart Orchestrator Logs as listed but not yet supported for ingestion and analysis.
 
 ---
 
@@ -72,7 +105,7 @@
 - Fixed CDF previews discarding valid samples when optional Campaign metadata is empty, and kept every percentage label on the left axis fully inside the Canvas at all preview and expanded-view sizes.
 - Fixed recurring Report Template backups for workspaces whose database had not yet been initialized, and prevented obsolete compatibility CSV directories from being rescanned after their one-time database migration.
 - Fixed Dashboard creation, duplication and import in browsers that do not implement `crypto.randomUUID`.
-- Fixed E2E Dashboards adaptive-filter preparation by exposing every requested dimension immediately, displaying a loading state instead of empty facet values while selected CDRs are prepared, loading custom-field values when the field is added, reducing large CDR projections to the columns required for filtering and rendering, and enabling View Dashboard only after the combined data and dashboard definition are ready. Profile catalogues now resolve normalized collision columns such as `operator__2` through their canonical profile key, and combined-table fallbacks ignore the facet's own saved restriction, so the Operator selector exposes every value available under the other active filters instead of only its previously selected values. The Dataset Universe summary now reuses the already calculated effective row counts when no date or adaptive-filter restriction is active, so it matches Filtered Universe without launching separate full-table counting scans; restricted selections retain their inexpensive upload-profile source totals and make an active partial selection visible instead of presenting it as All values. Date fields now default to the earliest and latest values available across the selected CDRs and use a bounded calendar; navigating its months never changes the displayed date or refreshes the Dashboard, while selecting a day does. Bounds appear with CDR selection, NR Mode and Scope, while the redundant template filter has been removed. Non-applicable Auto-calculated Fields no longer advance combined-table revisions on every opening and invalidate otherwise reusable Dashboard data.
+- Fixed E2E Dashboards adaptive-filter preparation by exposing every requested dimension immediately, displaying a loading state instead of empty facet values while selected CDRs are prepared, loading custom-field values when the field is added, reducing large CDR projections to the columns required for filtering and rendering, and enabling View Dashboard only after the combined data and dashboard definition are ready. Profile catalogues resolve fields through their canonical profile key, and combined-table fallbacks ignore the facet's own saved restriction, so the Operator selector exposes every value available under the other active filters instead of only its previously selected values. The Dataset Universe summary now reuses the already calculated effective row counts when no date or adaptive-filter restriction is active, so it matches Filtered Universe without launching separate full-table counting scans; restricted selections retain their inexpensive upload-profile source totals and make an active partial selection visible instead of presenting it as All values. Date fields now default to the earliest and latest values available across the selected CDRs and use a bounded calendar; navigating its months never changes the displayed date or refreshes the Dashboard, while selecting a day does. Bounds appear with CDR selection, NR Mode and Scope, while the redundant template filter has been removed. Non-applicable Auto-calculated Fields no longer advance combined-table revisions on every opening and invalidate otherwise reusable Dashboard data.
 - Reserved a right-side lane for Dashboard failure-chart legends whenever the resolved legend contains items, preventing them from overflowing the chart canvas.
 - Fixed the shared Canvas chart renderer to prefer a working Chrome binary over Ubuntu's unavailable Chromium Snap wrapper in automated test environments. Dashboard creation, duplication and import now adopt the persisted canonical definition immediately, and Dashboard dirty-state comparison normalizes defaults and key order, preventing false unsaved-change warnings and stale client library state after reload.
 - Fixed a concurrent legacy-dataset materialization race that could recreate a SQLite dataset table between replacement steps and interrupt Dataset Analysis loading.

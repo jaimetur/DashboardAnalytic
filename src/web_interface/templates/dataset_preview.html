@@ -9,7 +9,11 @@
       </div>
       <span class="pill status-pill status-{{ dataset.status }}">{{ dataset.status_label }}</span>
     </div>
-    <p class="lede">{% if server_paginated_preview %}Read-only, paginated view of all processed rows and all {{ visible_column_count }} available columns. Light-gray columns are derived during CDR processing and are grouped after source_sheet.{% else %}Read-only sample of the processed dataset. The preview shows the first {{ preview_rows | length }} rows and all {{ visible_column_count }} available columns.{% if preview_sheet_options %} VFUK mapping previews are limited to the 4G and 5G source sheets.{% endif %}{% endif %}</p>
+    <div class="preview-dataset-switcher"><span>Select Workspace Dataset</span>
+      <div class="preview-dataset-switch-control"><input type="search" value="{{ preview_dataset_value }}" placeholder="Select Workspace Dataset" autocomplete="off" data-preview-dataset-switch aria-haspopup="listbox" aria-expanded="false"><button type="button" data-preview-dataset-switch-toggle aria-label="Open workspace datasets" title="Open workspace datasets"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7 5 6 5-6"/></svg></button></div>
+      <span class="preview-dataset-switch-menu" role="listbox" data-preview-dataset-switch-menu hidden>{% for option in preview_dataset_options %}<button type="button" role="option" data-url="{{ option.url }}" data-dataset-label="{{ option.label }}">{{ option.label }}</button>{% endfor %}</span>
+    </div>
+    <p class="lede">{% if server_paginated_preview %}Read-only, paginated view of all processed rows and all {{ visible_column_count }} available columns. Fixed derived fields are light green, analytical derivations are amber, and auto-calculated fields are purple.{% else %}Read-only sample of the processed dataset. The preview shows the first {{ preview_rows | length }} rows and all {{ visible_column_count }} available columns.{% if preview_sheet_options %} VFUK mapping previews are limited to the 4G and 5G source sheets.{% endif %}{% endif %}</p>
     {% if not server_paginated_preview %}
     <form class="preview-row-limit-form" action="{{ preview_action | default('/workspace/preview/' ~ dataset.id) }}" method="get" data-loading-label="Refreshing dataset preview">
       <label>Rows to preview
@@ -58,9 +62,9 @@
       <article><span>{{ preview_metadata_label | default('Uploaded By') }}</span><strong>{{ preview_metadata_value | default(dataset.uploaded_by) }}</strong></article>
     </section>
     <div class="inline-actions preview-actions">
-      <a class="ghost-link" href="/workspace">Back to Workspace</a>
+      <a class="ghost-link" href="/workspace" target="_blank" rel="noopener">Back to Workspace</a>
       {% if dataset.dataset_kind in ['data', 'voice', 'speech'] and not dataset.is_combined %}
-      <a class="ghost-link action-link-primary" href="/datasets-analysis?dataset_id={{ dataset.id }}&input_kind={{ dataset.dataset_kind }}" data-datasets-analysis-open-link data-dataset-id="{{ dataset.id }}" data-input-kind="{{ dataset.dataset_kind }}">Show Analysis</a>
+      <a class="ghost-link action-link-primary" href="/datasets-analysis?dataset_id={{ dataset.id }}&input_kind={{ dataset.dataset_kind }}" target="_blank" rel="noopener" data-datasets-analysis-open-link data-dataset-id="{{ dataset.id }}" data-input-kind="{{ dataset.dataset_kind }}">Show Analysis</a>
       {% endif %}
     </div>
   </article>
@@ -69,15 +73,21 @@
     <div class="section-head tight-head">
       <div>
         <p class="eyebrow">Processed rows</p>
-        <h2>{% if server_paginated_preview %}Full data{% else %}Sample data{% endif %}</h2>
+        <h2>{% if server_paginated_preview %}Processed Dataset Records{% else %}Dataset Sample{% endif %}</h2>
       </div>
       <span class="pill"{% if server_paginated_preview %} data-preview-row-pill{% endif %}>{% if preview_source_sheet %}{{ preview_source_sheet }} · {% endif %}{{ preview_rows | length }} rows shown</span>
     </div>
     {% if preview_columns %}
     {% if server_paginated_preview %}
     <div class="preview-server-toolbar" data-server-dataset-preview data-endpoint="{{ preview_data_endpoint }}" data-page-size="{{ preview_page_size }}" data-total-rows="{{ preview_total_rows }}">
-      <button type="button" class="ghost-link preview-clear-filters" data-preview-clear-filters disabled>Clear 0 Filters</button>
-      <p class="preview-table-filter-status" data-preview-filter-status aria-live="polite">Showing {{ preview_rows | length }} of {{ preview_total_rows }} rows</p>
+      <label class="preview-server-column-search">Search columns
+        <input type="search" data-server-preview-column-search placeholder="Type a column name" autocomplete="off">
+      </label>
+      <div class="preview-tag-filter" data-preview-tag-filter>
+        <span>Filter labels</span>
+        <button type="button" data-preview-tag-filter-toggle aria-expanded="false"><span data-preview-tag-filter-label>All Labels</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7 5 6 5-6"/></svg></button>
+        <div class="preview-tag-filter-menu" data-preview-tag-filter-menu hidden><button type="button" class="preview-tag-filter-all" data-preview-tag-filter-all>All Labels</button>{% for tag in preview_available_tags %}<label><input type="checkbox" value="{{ tag }}"> <span>{{ tag }}</span></label>{% endfor %}</div>
+      </div>
     </div>
     {% else %}
     <div class="preview-table-filters" data-preview-table-filters>
@@ -87,31 +97,51 @@
       <label>Filter rows
         <input type="search" data-preview-row-filter placeholder="Values, separated by commas" autocomplete="off">
       </label>
+      <div class="preview-tag-filter" data-preview-tag-filter>
+        <span>Filter labels</span>
+        <button type="button" data-preview-tag-filter-toggle aria-expanded="false"><span data-preview-tag-filter-label>All Labels</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7 5 6 5-6"/></svg></button>
+        <div class="preview-tag-filter-menu" data-preview-tag-filter-menu hidden><button type="button" class="preview-tag-filter-all" data-preview-tag-filter-all>All Labels</button>{% for tag in preview_available_tags %}<label><input type="checkbox" value="{{ tag }}"> <span>{{ tag }}</span></label>{% endfor %}</div>
+      </div>
       <p class="preview-table-filter-status" data-preview-filter-status aria-live="polite">Showing {{ preview_rows | length }} of {{ preview_rows | length }} rows · {{ visible_column_count }} of {{ visible_column_count }} columns</p>
     </div>
     {% endif %}
+    <div class="preview-column-tag-viewport" data-preview-column-tag-viewport>
+      <div class="preview-column-tag-strip" data-preview-column-tag-strip>{% for column in preview_columns %}{% set pinned = column in auto_preview_columns or column in main_preview_columns or column in derived_preview_columns %}<div class="preview-column-tag-item" data-preview-column-tag-item data-column-name="{{ column }}" data-column-label="{{ preview_column_labels.get(column, column) }}" data-column-kind="{{ preview_column_kinds.get(column, '') }}"><button type="button" class="preview-pinned-badge{% if not pinned %} is-unpinned{% endif %}" data-preview-rule-badge data-column-name="{{ column }}" data-column-label="{{ preview_column_labels.get(column, column) }}" data-column-kind="{{ 'PINNED' if pinned else 'UN_PINNED' }}" data-column-rule="{{ 'This field is pinned and remains available in every Dataset Preview.' if pinned else 'This source-only field is available when it exists in the selected dataset.' }}">{{ 'PINNED' if pinned else 'UN_PINNED' }}</button><button type="button" class="preview-column-kind-badge{% if column in auto_preview_columns %} is-auto{% elif preview_column_kinds.get(column, '') == 'Analysis-derived' %} is-analysis{% elif column in main_preview_columns and column not in derived_preview_columns %} is-main{% elif preview_column_kinds.get(column, '').startswith('CDR-') %} is-cdr{% elif column in metadata_preview_columns %} is-metadata{% endif %}" data-preview-rule-badge data-column-name="{{ column }}" data-column-label="{{ preview_column_labels.get(column, column) }}" data-column-kind="{{ preview_column_kinds.get(column, '') }}" data-column-rule="{{ preview_column_rules.get(column, '') }}">{{ preview_column_kinds.get(column, '') }}</button></div>{% endfor %}</div>
+    </div>
     <div class="table-wrap data-table-wrap dataset-preview-table-wrap" data-horizontal-wheel-scroll tabindex="0" aria-label="Dataset preview table; use Shift and the mouse wheel to scroll horizontally">
       <table class="dataset-preview-table" data-preview-filter-table{% if server_paginated_preview %} data-server-preview-table{% endif %}>
-        <thead><tr>{% for column in preview_columns %}<th data-column-name="{{ column }}"{% if column == 'GCID' or (dataset.dataset_kind in ['data', 'voice', 'speech'] and column == 'source_sheet') %} class="gcid-column"{% elif column in vendor_preview_columns %} class="vendor-column"{% elif column in derived_preview_columns %} class="derived-cdr-column"{% endif %}>{{ column }}</th>{% endfor %}</tr></thead>
+        <thead><tr>{% for column in preview_columns %}<th data-column-name="{{ column }}" data-column-label="{{ preview_column_labels.get(column, column) }}" data-column-kind="{{ preview_column_kinds.get(column, '') }}" data-column-pinned="{% if column in auto_preview_columns or column in main_preview_columns or column in derived_preview_columns %}true{% else %}false{% endif %}" data-column-rule="{{ preview_column_rules.get(column, '') }}"{% if column == 'GCID' or column in metadata_preview_columns %} class="gcid-column"{% elif column in auto_preview_columns %} class="auto-calculated-preview-column"{% elif preview_column_kinds.get(column, '') == 'Analysis-derived' %} class="analysis-derived-cdr-column"{% elif column in derived_preview_columns or column in vendor_preview_columns %} class="derived-cdr-column"{% elif column in main_preview_columns %} class="main-cdr-column"{% endif %}><span>{{ preview_column_labels.get(column, column) }}</span></th>{% endfor %}</tr></thead>
         <tbody>
           {% for row in preview_rows %}
-          <tr>{% for column in preview_columns %}<td{% if column == 'GCID' or (dataset.dataset_kind in ['data', 'voice', 'speech'] and column == 'source_sheet') %} class="gcid-column"{% elif column in vendor_preview_columns %} class="vendor-column"{% elif column in derived_preview_columns %} class="derived-cdr-column"{% endif %}>{{ row.get(column, '') }}</td>{% endfor %}</tr>
+          <tr>{% for column in preview_columns %}<td{% if column == 'GCID' or column in metadata_preview_columns %} class="gcid-column"{% elif column in auto_preview_columns %} class="auto-calculated-preview-column"{% elif preview_column_kinds.get(column, '') == 'Analysis-derived' %} class="analysis-derived-cdr-column"{% elif column in derived_preview_columns or column in vendor_preview_columns %} class="derived-cdr-column"{% elif column in main_preview_columns %} class="main-cdr-column"{% endif %}>{{ row.get(column, '') }}</td>{% endfor %}</tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
     {% if server_paginated_preview %}
-    <nav class="preview-pagination" aria-label="Dataset preview pages">
-      <button type="button" class="ghost-link" data-preview-first-page disabled>First</button>
-      <button type="button" class="ghost-link" data-preview-previous-page disabled>Previous</button>
-      <span data-preview-page-status>Page 1 of {{ ((preview_total_rows - 1) // preview_page_size) + 1 if preview_total_rows else 1 }}</span>
-      <button type="button" class="ghost-link" data-preview-next-page{% if preview_total_rows <= preview_page_size %} disabled{% endif %}>Next</button>
-      <button type="button" class="ghost-link" data-preview-last-page{% if preview_total_rows <= preview_page_size %} disabled{% endif %}>Last</button>
-    </nav>
+    <div class="preview-server-footer">
+      <button type="button" class="preview-clear-filters" data-preview-clear-filters disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M8 5V3h8v2m-9 3 .7 12h8.6L17 8M10 11v6m4-6v6"/></svg><span data-preview-clear-label>Clear 0 Filters</span></button>
+      <nav class="preview-pagination" aria-label="Dataset preview pages">
+        <button type="button" data-preview-first-page disabled aria-label="First page" title="First page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14M18 6l-6 6 6 6M12 6l-6 6 6 6"/></svg></button>
+        <button type="button" data-preview-previous-page disabled aria-label="Previous page" title="Previous page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+        <span data-preview-page-status>Page 1 of {{ ((preview_total_rows - 1) // preview_page_size) + 1 if preview_total_rows else 1 }}</span>
+        <button type="button" data-preview-next-page{% if preview_total_rows <= preview_page_size %} disabled{% endif %} aria-label="Next page" title="Next page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button type="button" data-preview-last-page{% if preview_total_rows <= preview_page_size %} disabled{% endif %} aria-label="Last page" title="Last page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 5v14M6 6l6 6-6 6M12 6l6 6-6 6"/></svg></button>
+      </nav>
+      <p class="preview-table-filter-status" data-preview-filter-status aria-live="polite">Showing {{ preview_rows | length }} of {{ preview_total_rows }} rows</p>
+    </div>
     {% endif %}
     {% else %}
     <section class="empty-state-inline">No processed rows are available for preview.</section>
     {% endif %}
   </article>
 </section>
+<div class="preview-filtering-status" data-preview-filtering-status role="status" aria-live="polite" hidden><span class="preview-filtering-spinner" aria-hidden="true"></span><strong data-preview-filtering-text>Filtering dataset…</strong></div>
+<div class="confirm-overlay preview-rule-overlay" data-preview-rule-overlay hidden>
+  <section class="confirm-dialog preview-rule-dialog" role="dialog" aria-modal="true" aria-labelledby="preview-rule-title">
+    <header class="preview-rule-dialog-header"><span class="preview-rule-dialog-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 7v5c0 5 3.4 8 8 9 4.6-1 8-4 8-9V7l-8-4Zm0 5v5m0 3h.01"/></svg></span><div><p data-preview-rule-kind>Field rule</p><h2 id="preview-rule-title" data-preview-rule-title>Field rule</h2></div><button type="button" class="preview-rule-dialog-close" data-preview-rule-close aria-label="Close field rule">×</button></header>
+    <div class="preview-rule-dialog-body"><p data-preview-rule-text></p></div>
+  </section>
+</div>
+<div class="preview-badge-tooltip" data-preview-badge-tooltip role="tooltip" hidden><span data-preview-badge-tooltip-kind></span><strong data-preview-badge-tooltip-title></strong><p data-preview-badge-tooltip-rule></p></div>
 {% endblock %}

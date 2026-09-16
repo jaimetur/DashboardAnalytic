@@ -14,6 +14,16 @@ Dashboard Analytic separates application settings, storage roots and Docker depl
 | `DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER` | Renderer for Reports, Chart Sets, previews and Dashboard exports. | `dashboard-canvas`; use `pil` only for the legacy painter |
 | `DASHBOARD_ANALYTIC_CHROMIUM` | Optional explicit Chromium-family executable used by the server Canvas renderer. | Auto-detected supported browser |
 | `TZ` | IANA timezone used by Docker and displayed/persisted timestamps. | `Europe/Madrid` |
+| `IGNORE_EVENT_TIME_FILTERING` | When true, ignores date and template filters based on Event_Start_Time or Event_End_Time. | `false` |
+
+## Config page
+
+Administrators can use the **Config** tab beside Admin to persist runtime settings in the application database. Values saved there take precedence over Docker and environment variables, and apply to every workspace.
+
+- **Timezone** accepts an IANA name such as `Europe/Madrid`. It controls displayed timestamps and newly stored local timestamps.
+- **Report Chart Renderer** selects `dashboard-canvas` or the legacy `pil` renderer.
+- **Chromium Executable** accepts an absolute executable path. Saving it restarts the shared Canvas renderer, so the next chart uses the selected browser.
+- **Ignore event time filtering** ignores Dashboard, Dataset Analysis and template conditions based on `Event_Start_Time` or `Event_End_Time`. Use it when source timestamps are incomplete and must not exclude valid rows.
 
 `0.0.0.0` is a server bind address, not a browser destination. When the application binds to it locally, open `http://127.0.0.1:7278` or `http://localhost:7278`. From another computer, use the server's reachable hostname or IP address and the published host port.
 

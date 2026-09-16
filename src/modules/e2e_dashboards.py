@@ -22,7 +22,7 @@ from typing import Literal
 from uuid import uuid4
 
 import pandas as pd
-from src.modules.column_names import column_identity
+from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, column_identity
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
@@ -33,12 +33,13 @@ from src.modules.cdr_reporting import (
     _catalog_spec, _clear_commentary, _layout_chart_frames, _legend_dimensions, _named_slide_layout,
     _remove_all_slides, _remove_template_chart_placeholders, _render_dashboard_payload,
     _set_commentary, _set_slide_header, _set_structural_slide_text, catalog_chart_payload,
-    ensure_report_vendor_group, normalise_report_operator_aliases, parse_catalog_filters,
+    ensure_vendor_group, normalise_operator_aliases, parse_catalog_filters,
     parse_catalog_grouping,
     prepare_catalog_chart_preview_frame, render_catalog_chart_preview,
 )
 
 from src.modules.repository import Repository
+from src.modules.runtime_config import ignore_event_time_filtering
 
 KINDS = ('data', 'voice', 'speech')
 STATE_KEY = 'e2e_dashboards_v2'
@@ -1192,6 +1193,7 @@ def install_dashboard_routes(core):
                     'rows': visible.fillna('').astype(str).values.tolist(),
                     'total': total, 'chart_total': chart_total,
                     'filter_values': filter_values, 'page': max(page, 0),
+                    'column_classes': chart_dataset_column_classes(snapshot, entry, visible.columns),
                 }
         _, _, frame = snapshot_chart(token, entry_index, user, expected_workspace=workspace)
         frame = unique_chart_dataset_rows(snapshot, entry, frame)
@@ -1209,6 +1211,7 @@ def install_dashboard_routes(core):
             'columns': list(visible.columns), 'rows': visible.values.tolist(),
             'total': len(frame), 'chart_total': chart_total,
             'filter_values': filter_values, 'page': page,
+            'column_classes': chart_dataset_column_classes(snapshot, entry, visible.columns),
         }
 
     @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/charts/{chart_file}')
@@ -1441,6 +1444,8 @@ def install_dashboard_routes(core):
             params.extend(int(dataset_id) for dataset_id in dataset_ids)
         excluded = identity(exclude) if exclude else ''
         for field_name, values in definition.filters.items():
+            if ignore_event_time_filtering() and identity(field_name) in {'eventstarttime', 'eventendtime'}:
+                continue
             if identity(field_name) == excluded:
                 continue
             value_expression = filter_sql_value_expression(task_repository, columns, field_name)
@@ -1450,8 +1455,8 @@ def install_dashboard_routes(core):
             value_placeholders = ', '.join('?' for _ in values)
             clauses.append(f"LOWER(TRIM({value_expression})) IN ({value_placeholders})")
             params.extend(str(value).strip().lower() for value in values)
-        concrete_from = definition.date_from if isinstance(definition.date_from, date) else None
-        concrete_to = definition.date_to if isinstance(definition.date_to, date) else None
+        concrete_from = definition.date_from if isinstance(definition.date_from, date) and not ignore_event_time_filtering() else None
+        concrete_to = definition.date_to if isinstance(definition.date_to, date) and not ignore_event_time_filtering() else None
         if concrete_from or concrete_to:
             date_column = next((resolve_sql_column(columns, candidate) for candidate in ('event_start_time', 'Test_Start_Time', 'Timestamp', 'Date') if resolve_sql_column(columns, candidate)), None)
             if date_column is None:
@@ -2482,13 +2487,7 @@ def install_dashboard_routes(core):
             for rule in dimension.rules:
                 for condition in rule.conditions:
                     explicit.update(part.strip() for part in condition.column.split('|') if part.strip())
-        explicit_keys = {identity(column) for column in explicit}
-        core_keys = {identity(column) for column in Repository.REPORTING_CORE_COLUMNS}
-        always = {identity('report_vendor')} if multivendor else set()
-        selected = [
-            column for column in reported
-            if identity(column) not in core_keys or identity(column) in explicit_keys or identity(column) in always
-        ]
+        selected = list(reported)
         selected.extend(('dataset_id', 'source_row_id'))
         return list(dict.fromkeys(selected))
 
@@ -2502,7 +2501,7 @@ def install_dashboard_routes(core):
             normalized = identity(condition.column)
             if normalized in {'threshold', 'buckets'}:
                 continue
-            if multivendor and normalized in {'operator', 'vendor', 'reportvendor', 'vendorv3'}:
+            if multivendor and normalized in {'operator', 'vendor', 'vendorv3'}:
                 complete = False
                 continue
             column = next((
@@ -2536,7 +2535,7 @@ def install_dashboard_routes(core):
                 if '' in values
                 else f'{quote(column)} COLLATE NOCASE'
             )
-            if normalized in {'vendor', 'reportvendor', 'vendorv3'} and condition.operator not in {'CONTAINS', 'NOT CONTAINS'}:
+            if normalized in {'vendor', 'vendorv3'} and condition.operator not in {'CONTAINS', 'NOT CONTAINS'}:
                 complete = False
                 continue
             if condition.operator in {'=', '!='} and len(values) > 1:
@@ -2629,6 +2628,35 @@ def install_dashboard_routes(core):
             )
             for column in frame.columns
         }
+
+    def chart_dataset_column_classes(snapshot, entry, columns):
+        task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
+        source_identities = set()
+        for dataset_id in snapshot.definition.datasets.get(entry.source_kind, []):
+            dataset = task_repository.get_dataset(int(dataset_id))
+            if dataset:
+                try:
+                    source_identities.update(
+                        identity(column) for column in core.get_dataset_source_columns(Path(str(dataset['stored_path'])))
+                    )
+                except (OSError, ValueError, KeyError):
+                    pass
+        auto_identities = {identity(dimension.name) for dimension in snapshot.dimensions}
+        main_identities = {identity(column) for column in MAIN_CDR_FIELDS}
+        classes = {}
+        for column in columns:
+            column_key = identity(column)
+            if column_key in {identity(field) for field in PREVIEW_METADATA_FIELDS}:
+                classes[str(column)] = 'gcid-column'
+            elif column_key in auto_identities:
+                classes[str(column)] = 'auto-calculated-preview-column'
+            elif column_key in VENDOR_FIELD_IDENTITIES:
+                classes[str(column)] = 'derived-cdr-column'
+            elif column_key not in source_identities:
+                classes[str(column)] = 'derived-cdr-column'
+            elif column_key in main_identities:
+                classes[str(column)] = 'main-cdr-column'
+        return classes
 
     def apply_chart_column_filters(frame, column_filters):
         result = frame
@@ -2777,8 +2805,8 @@ def install_dashboard_routes(core):
         finally:
             connection.close()
         if snapshot.multivendor:
-            visible = ensure_report_vendor_group(visible)
-        visible = normalise_report_operator_aliases(visible)
+            visible = ensure_vendor_group(visible)
+        visible = normalise_operator_aliases(visible)
         return visible, total, chart_total, filter_values
 
     def unique_chart_dataset_rows(snapshot, entry, frame):
@@ -2842,9 +2870,9 @@ def install_dashboard_routes(core):
                             aggregation_columns,
                         )
                         if snapshot.multivendor:
-                            raw_frame = ensure_report_vendor_group(raw_frame)
-                        raw_frame = normalise_report_operator_aliases(raw_frame)
-                        raw_frame.attrs['report_operator_aliases_normalized'] = True
+                            raw_frame = ensure_vendor_group(raw_frame)
+                        raw_frame = normalise_operator_aliases(raw_frame)
+                        raw_frame.attrs['operator_aliases_normalized'] = True
                         with lock:
                             snapshot.frames[raw_key] = raw_frame
             # A CDF and its companion Average/Median chart normally use the
@@ -3137,9 +3165,9 @@ def install_dashboard_routes(core):
             aggregation_columns,
         )
         if snapshot.multivendor:
-            raw_frame = ensure_report_vendor_group(raw_frame)
-        raw_frame = normalise_report_operator_aliases(raw_frame)
-        raw_frame.attrs['report_operator_aliases_normalized'] = True
+            raw_frame = ensure_vendor_group(raw_frame)
+        raw_frame = normalise_operator_aliases(raw_frame)
+        raw_frame.attrs['operator_aliases_normalized'] = True
         try:
             frame, _ = prepare_catalog_chart_preview_frame(
                 raw_frame, preview_entry, multivendor=snapshot.multivendor,
@@ -3694,6 +3722,7 @@ def install_dashboard_routes(core):
                     'rows': visible.fillna('').astype(str).values.tolist(),
                     'total': total, 'chart_total': chart_total,
                     'filter_values': filter_values, 'page': max(page, 0),
+                    'column_classes': chart_dataset_column_classes(snapshot, entry, visible.columns),
                 }
         _, _, frame = snapshot_chart(token, index, user)
         frame = unique_chart_dataset_rows(snapshot, entry, frame)
@@ -3708,4 +3737,5 @@ def install_dashboard_routes(core):
             'columns': list(visible.columns), 'rows': visible.values.tolist(),
             'total': len(frame), 'chart_total': chart_total,
             'filter_values': filter_values, 'page': page,
+            'column_classes': chart_dataset_column_classes(snapshot, entry, visible.columns),
         }

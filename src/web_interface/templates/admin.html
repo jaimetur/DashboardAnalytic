@@ -538,6 +538,7 @@
           </select>
         </label>
         <button type="button" class="database-refresh-button" data-database-refresh disabled>Refresh table</button>
+        <button type="button" class="database-refresh-button" data-add-operator-mapping hidden>Add operator mapping</button>
         <span class="pill" data-database-row-count>0 rows</span>
       </div>
       <div class="database-active-filters" data-database-active-filters hidden></div>
@@ -880,6 +881,7 @@
   const panel = document.querySelector('[data-database-view]');
   const select = document.querySelector('[data-database-table-select]');
   const refresh = document.querySelector('[data-database-refresh]');
+  const addOperatorMapping = document.querySelector('[data-add-operator-mapping]');
   const clearFilters = document.querySelector('[data-database-clear-filters]');
   const activeFilters = document.querySelector('[data-database-active-filters]');
   const table = document.querySelector('[data-database-editor-table]');
@@ -1033,6 +1035,20 @@
     table.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {bubbles: true, detail: {reset: true}}));
   };
 
+  addOperatorMapping?.addEventListener('click', async () => {
+    const sourceValue = window.prompt('Source operator value');
+    if (sourceValue === null || !sourceValue.trim()) return;
+    const canonicalValue = window.prompt('Canonical operator value', sourceValue.trim());
+    if (canonicalValue === null || !canonicalValue.trim()) return;
+    const response = await fetch('/admin/operator-mappings', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({source_value: sourceValue, canonical_value: canonicalValue}),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) { window.alert(payload.detail || 'Unable to add operator mapping.'); return; }
+    await loadTable(0);
+  });
+
   const loadTable = async () => {
     const selectedTable = select.value;
     refresh.disabled = !selectedTable;
@@ -1117,6 +1133,7 @@
   };
 
   select.addEventListener('change', () => {
+    if (addOperatorMapping) addOperatorMapping.hidden = select.value !== 'operator_mappings';
     offset = 0;
     filters = {};
     closeFilter();

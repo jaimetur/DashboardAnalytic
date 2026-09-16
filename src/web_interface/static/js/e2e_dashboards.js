@@ -8,7 +8,7 @@
   let sequence = 0, cacheLookupSequence = 0, timer, controller, preparing = null, preparingFilterState = '', preparationProgressTimer = 0, dirty = false, filterActionBusy = false, dataIndex = 0, dataPage = 0, dataToken = '', dataEndpoint = '', dataRequest = 0;
   const dataPages = new Map();
   const dataColumnFilters = new Map();
-  let dataFilterValues = {}, dataFilterValuesLoaded = false, dataChartTotal = 0, dataFilterMenu = null;
+  let dataFilterValues = {}, dataColumnClasses = {}, dataFilterValuesLoaded = false, dataChartTotal = 0, dataFilterMenu = null;
   let presentationTimer = 0;
   const presentation = {running: false, delay: 5000, effect: 'fade'};
   let facetOptions = {}, availableFields = [], facetFields = config.filter_fields || [], facetsLoading = false, facetsRefreshTimer = 0;
@@ -2257,6 +2257,7 @@
       dataFilterValues = payload.filter_values;
       dataFilterValuesLoaded = true;
     }
+    dataColumnClasses = payload.column_classes || {};
     dataChartTotal = Number(payload.chart_total) || 0;
     dataPage = payload.page;
     let table = host.querySelector('table');
@@ -2264,14 +2265,14 @@
     if (!table || table.dataset.columns !== columns) {
       closeDataFilterMenu();
       table = node('table'); table.dataset.columns = columns; table.classList.add('excel-filter-table');
-      const head = node('thead'), header = node('tr'); payload.columns.forEach(column => header.append(dataTableHeader(column))); head.append(header); table.append(head, node('tbody'));
+      const head = node('thead'), header = node('tr'); payload.columns.forEach(column => { const cell = dataTableHeader(column); if (dataColumnClasses[column]) cell.classList.add(dataColumnClasses[column]); header.append(cell); }); head.append(header); table.append(head, node('tbody'));
       host.replaceChildren(table);
     }
     [...table.tHead.rows[0].cells].forEach((header, columnIndex) => header.classList.toggle(
       'has-excel-column-filter', dataColumnFilters.has(payload.columns[columnIndex]),
     ));
     const body = table.tBodies[0];
-    body.replaceChildren(...payload.rows.map(row => { const tr = node('tr'); row.forEach(value => tr.append(node('td', value))); return tr; }));
+    body.replaceChildren(...payload.rows.map(row => { const tr = node('tr'); row.forEach((value, index) => { const cell = node('td', value); const className = dataColumnClasses[payload.columns[index]]; if (className) cell.classList.add(className); tr.append(cell); }); return tr; }));
     const totalPages = Math.max(1, Math.ceil(payload.total / 100));
     const filtered = dataColumnFilters.size > 0;
     const clearFilters = $('ds-data-clear-filters');

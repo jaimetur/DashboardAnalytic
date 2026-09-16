@@ -4,15 +4,26 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.modules.analytics import CDF_DEFAULT_Y_THRESHOLD, MAX_CDF_POINTS, MIN_CDF_POINTS_PER_SERIES, _top_records, build_analysis, compute_cdf
-from src.modules.ingestion import _normalise_dataset, add_three_gcid_column, add_vfuk_gcid_column, infer_dataset_kind, load_dataset
-from src.DashboardAnalytic import derive_available_metrics
+from src.modules.analytics import CDF_DEFAULT_Y_THRESHOLD, MAX_CDF_POINTS, MIN_CDF_POINTS_PER_SERIES, _top_records, apply_filters, build_analysis, compute_cdf
+from src.modules.ingestion import _normalise_dataset, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, infer_dataset_kind, load_dataset
+from src.modules.column_names import MAIN_CDR_FIELDS, column_identity
+from src.DashboardAnalytic import derive_available_metrics, derive_filter_options
 
 
 def test_compute_cdf_orders_and_normalizes_values() -> None:
     series = pd.Series([5, 1, 3])
     result = compute_cdf(series)
     assert result == [(1.0, 1 / 3), (3.0, 2 / 3), (5.0, 1.0)]
+
+
+def test_filter_options_include_capitalized_vendor_only_field() -> None:
+    options = derive_filter_options(pd.DataFrame({
+        "Vendor": ["Vodafone UK_Ericsson", "3_Ericsson"],
+        "Vendor_Only": ["Ericsson", "Ericsson"],
+    }))
+
+    assert options["vendor"] == ["3_Ericsson", "Vodafone UK_Ericsson"]
+    assert options["vendor_only"] == ["Ericsson"]
 
 
 def test_compute_cdf_caps_large_series_to_fixed_resolution() -> None:
@@ -141,7 +152,7 @@ def test_load_dataset_makes_duplicate_excel_headers_unique(tmp_path) -> None:
 
     assert dataset.columns.is_unique
     assert dataset["Cell Name"].iloc[0] == "Cell A"
-    assert dataset["Cell Name__2"].iloc[0] == "Cell A copy"
+    assert dataset["Cell Name_Duplicate_2"].iloc[0] == "Cell A copy"
 
 
 def test_vfuk_processing_materialises_gcid_for_4g_and_5g_rows() -> None:
@@ -182,6 +193,54 @@ def test_normalise_dataset_uses_rat_as_primary_technology_for_data() -> None:
     assert normalized["technology_primary"].iloc[0] == "5G NSA"
 
 
+def test_normalise_dataset_materializes_fixed_fields_and_preserves_campaign() -> None:
+    source = pd.DataFrame({
+        'Campaign': ['UK_Q2_2026_SA', 'unstructured'],
+        'Benchmark': ['ignored', 'Germany-2025-Q4'],
+        'Operator': ['VF', 'Three'],
+        'G_Level_3': ['North', 'South'],
+        'G Level 4': ['Leeds', 'Berlin'],
+        'RAT': ['NR', 'LTE'],
+        'Session_Type': ['VoLTE', 'Data'],
+        'Test_Result': ['Completed', 'Failed'],
+        'Test_Start_Time': ['2026-06-25T10:11:47.605', '25/06/2026 12:13:14'],
+        'Mean_Data_Rate': [1.0, 2.0],
+    })
+
+    normalized = _normalise_dataset(source, Path('sample_data.csv'))
+    identities = {column_identity(column) for column in normalized.columns}
+
+    assert {column_identity(column) for column in MAIN_CDR_FIELDS} <= identities
+    assert normalized['Campaign'].tolist() == ['UK_Q2_2026_SA', 'unstructured']
+    assert normalized['campaign_year'].tolist() == [2026, 2025]
+    assert normalized['campaign_quarter'].tolist() == ['Q2', 'Q4']
+    assert normalized['period'].tolist() == ['2026-Q2', '2025-Q4']
+    assert normalized['market'].tolist() == ['UK', 'DE']
+    assert normalized['Zone'].tolist() == ['North', 'South']
+    assert normalized['city'].tolist() == ['Leeds', 'Berlin']
+    assert normalized['event_start_time'].tolist() == [
+        '2026-06-25 10:11:47.605000', '2026-06-25 12:13:14.000000',
+    ]
+
+
+def test_operator_mapping_updates_derived_subscriber_but_preserves_source_subscriber() -> None:
+    derived = _normalise_dataset(
+        pd.DataFrame({'Operator': ['VF'], 'Mean_Data_Rate': [1.0]}), Path('data.csv'),
+    )
+    explicit = _normalise_dataset(
+        pd.DataFrame({'Operator': ['VF'], 'Subscriber': ['Customer A'], 'Mean_Data_Rate': [1.0]}),
+        Path('data.csv'),
+    )
+
+    mapped_derived = apply_operator_mappings(derived, {'vf': 'Vodafone UK'})
+    mapped_explicit = apply_operator_mappings(explicit, {'vf': 'Vodafone UK'})
+
+    assert mapped_derived['Operator'].tolist() == ['Vodafone UK']
+    assert mapped_derived['Subscriber'].tolist() == ['Vodafone UK']
+    assert mapped_explicit['Operator'].tolist() == ['Vodafone UK']
+    assert mapped_explicit['Subscriber'].tolist() == ['Customer A']
+
+
 def test_build_analysis_returns_voice_specific_kpis_and_aggregation() -> None:
     df = pd.DataFrame({
         "dataset_kind": ["voice", "voice", "voice"],
@@ -190,6 +249,7 @@ def test_build_analysis_returns_voice_specific_kpis_and_aggregation() -> None:
         "period": ["2025-Q3", "2025-Q3", "2025-Q3"],
         "region": ["NORD_OST", "NORD_OST", "NORD_OST"],
         "vendor": ["Huawei", "Huawei", "Huawei"],
+        "vendor_only": ["Huawei", "Huawei", "Huawei"],
         "success": [True, True, False],
         "failure": [False, False, True],
         "dropped": [False, False, True],
@@ -206,6 +266,8 @@ def test_build_analysis_returns_voice_specific_kpis_and_aggregation() -> None:
     assert analysis.global_kpis["dataset_kind"] == "voice"
     assert analysis.global_kpis["success_rate_pct"] == 66.67
     assert analysis.global_kpis["completed_calls"] == 2
+    assert analysis.global_kpis["success_calls"] == 2
+    assert analysis.global_kpis["failed_tests"] == 1
     assert analysis.metric_kpis["metric"] == "POLQA_LQ_Avg"
     assert analysis.metric_kpis["mean_metric"] == 3.8667
     assert analysis.metric_kpis["p10_metric"] == 3.28
@@ -239,7 +301,30 @@ def test_build_analysis_applies_date_range_filters_from_event_start_time() -> No
     assert analysis.global_kpis["rows"] == 2
     assert analysis.global_kpis["date_from"] == "2025-07-11"
     assert analysis.global_kpis["date_to"] == "2025-07-13"
+
+
+def test_build_analysis_can_ignore_event_time_filters(monkeypatch) -> None:
+    monkeypatch.setenv('IGNORE_EVENT_TIME_FILTERING', 'true')
+    df = pd.DataFrame({
+        'dataset_kind': ['data', 'data'],
+        'event_start_time': ['2026-01-01 09:00:00', None],
+        'score': [10, 20],
+    })
+
+    analysis = build_analysis(
+        df,
+        {'aggregation': 'all', 'date_from': '2026-01-01', 'date_to': '2026-01-01'},
+        'score',
+    )
+
+    assert analysis.metric_kpis['samples'] == 2
     assert analysis.metric_kpis["samples"] == 2
+
+    directly_filtered = apply_filters(df, {
+        'event_start_time': '2026-01-01 09:00:00',
+        'extra_filters': {'Event_End_Time': '2026-01-01 10:00:00'},
+    })
+    assert len(directly_filtered) == 2
 
 
 def test_build_analysis_supports_multi_value_city_and_region_filters() -> None:
@@ -383,6 +468,7 @@ def test_global_kpis_reflect_selected_dimension_counts_when_filters_are_active()
         "region": ["North", "North", "South"],
         "city": ["Madrid", "Barcelona", "Sevilla"],
         "vendor": ["Huawei", "Huawei", "Ericsson"],
+        "vendor_only": ["Ericsson", "Ericsson", "Ericsson"],
         "score": [10, 20, 30],
     })
 
@@ -395,7 +481,8 @@ def test_global_kpis_reflect_selected_dimension_counts_when_filters_are_active()
     assert analysis.global_kpis["operators"] == 2
     assert analysis.global_kpis["regions"] == 2
     assert analysis.global_kpis["cities"] == 2
-    assert analysis.global_kpis["vendors"] == 2
+    assert analysis.global_kpis["vendors"] == 1
+    assert list(analysis.global_kpis).index("vendors") == list(analysis.global_kpis).index("operators") + 1
 
 
 def test_infer_dataset_kind_detects_speech_and_data_from_columns() -> None:
