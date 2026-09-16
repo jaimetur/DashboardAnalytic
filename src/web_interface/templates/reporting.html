@@ -243,7 +243,7 @@
           </div>
           <button type="button" class="report-chart-viewer-close" data-report-chart-viewer-data-close aria-label="Close filtered dataset" title="Close">×</button>
         </header>
-        <div class="report-chart-viewer-data" data-report-chart-viewer-data-panel></div>
+        <div class="report-chart-viewer-data" data-report-chart-viewer-data-panel><button type="button" class="preview-export-csv" data-report-chart-viewer-data-export title="Export filtered rows as CSV"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span>Export CSV</span></button></div>
       </section>
     </div>
   </div>
@@ -343,17 +343,13 @@
     const reportChartViewerEditTemplate = document.querySelector('[data-report-chart-viewer-edit-template]');
     const reportChartViewerDataPanel = document.querySelector('[data-report-chart-viewer-data-panel]');
     const reportChartViewerDataOverlay = document.querySelector('[data-report-chart-viewer-data-overlay]');
-    let reportChartViewerDataset = null;
+    const reportChartViewerDataExport = document.querySelector('[data-report-chart-viewer-data-export]');
     let reportChartViewerTemplateRowIndex = null;
-    let reportChartViewerDatasetFilters = new Map();
-    let reportChartViewerDatasetPage = 0;
     const reportChartViewerDatasetPageSize = 100;
-    let reportChartViewerColumnFilterMenu = null;
     let reportChartHoverTargets = [];
     let reportChartHoverRequest = 0;
     let reportChartHoverController = null;
     let reportChartViewerSession = 0;
-    let reportChartViewerColumnFilterCloseTimer = null;
     compactChartViewerViewport.addEventListener('change', () => {
       if (reportChartViewer?.hidden || reportChartViewerInteractive?.hidden || !reportChartViewerSandbox) return;
       reportChartViewerSandbox.hidden = compactChartViewerViewport.matches;
@@ -1683,131 +1679,63 @@
         prefetchAdjacentChartViewerContexts(source, identifier);
       } catch (error) { showInfoDialog(error.message || 'Unable to load chart definition.', {title: 'Chart preview', tone: 'error'}); }
     };
-    const closeReportChartViewerColumnFilter = () => {
-      if (reportChartViewerColumnFilterCloseTimer) window.clearTimeout(reportChartViewerColumnFilterCloseTimer);
-      reportChartViewerColumnFilterCloseTimer = null;
-      reportChartViewerColumnFilterMenu?.remove();
-      reportChartViewerColumnFilterMenu = null;
-    };
-    const loadReportChartViewerDataset = async (page = 0, resetFilters = false) => {
+    const requestReportChartViewerDataset = async ({page = 0, column_filters = {}, filter_column = null} = {}) => {
       const [source, identifier] = String(reportChartSetSelect?.value || '').split(':', 2);
-      if (!source || !identifier || !reportChartViewerFields || !reportChartViewerDataPanel) return false;
-      if (resetFilters) reportChartViewerDatasetFilters = new Map();
-      const columnFilters = Object.fromEntries(Array.from(reportChartViewerDatasetFilters.entries()).map(([column, values]) => [column, Array.from(values)]));
-      reportChartViewerData.disabled = true;
-      if (resetFilters) showLoadingOverlay('Loading Filtered Dataset', 'Please wait while the filtered dataset is prepared.');
-      try {
-        const response = await fetch('/api/e2e-reporting/chart-preview/data', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({source, identifier, chart_index: reportChartIndex, definition: viewerPreviewDefinition(), page, page_size: reportChartViewerDatasetPageSize, column_filters: columnFilters})});
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.detail || 'Unable to load filtered dataset.');
-        reportChartViewerDataset = payload;
-        reportChartViewerDatasetPage = page;
-        renderReportChartViewerDataset();
-        return true;
-      } catch (error) { showInfoDialog(error.message || 'Unable to load filtered dataset.', {title: 'Filtered dataset', tone: 'error'}); return false; }
-      finally { if (resetFilters) hideLoadingOverlay(); reportChartViewerData.disabled = false; }
-    };
-    const renderReportChartViewerDataset = () => {
-      if (!reportChartViewerDataPanel || !reportChartViewerDataset) return;
-      const columns = reportChartViewerDataset.columns || [];
-      const rows = reportChartViewerDataset.rows || [];
-      const visibleRows = rows;
-      const totalVisibleRows = Number(reportChartViewerDataset.summary?.visible_rows ?? rows.length);
-      const pageCount = Math.max(1, Math.ceil(totalVisibleRows / reportChartViewerDatasetPageSize));
-      reportChartViewerDatasetPage = Math.max(0, Math.min(reportChartViewerDatasetPage, pageCount - 1));
-      const pageRows = visibleRows;
-      const table = document.createElement('table');
-      const header = document.createElement('tr');
-      columns.forEach((column) => {
-        const cell = document.createElement('th');
-        const button = document.createElement('button');
-        button.type = 'button'; button.className = 'report-chart-viewer-column-filter';
-        button.title = `Filter ${column}`; button.setAttribute('aria-label', `Filter ${column}`);
-        const label = document.createElement('span'); label.textContent = column;
-        const icon = document.createElement('span'); icon.className = 'report-chart-viewer-column-filter-icon'; icon.setAttribute('aria-hidden', 'true'); icon.textContent = '▾';
-        if (reportChartViewerDatasetFilters.has(column)) button.classList.add('is-filtered');
-        button.append(label, icon);
-        button.addEventListener('click', (event) => {
-          event.stopPropagation();
-          const providedValues = reportChartViewerDataset.filter_values?.[column];
-          const values = Array.isArray(providedValues) ? providedValues.map((value) => String(value))
-            : Array.from(new Set(rows.map((row) => String(row[column] ?? '')))).sort((left, right) => left.localeCompare(right, undefined, {numeric: true}));
-          closeReportChartViewerColumnFilter();
-          const menu = document.createElement('section'); menu.className = 'report-chart-preview-select-menu report-chart-viewer-column-filter-menu';
-          menu.setAttribute('aria-label', `Filter ${column}`);
-          const search = document.createElement('input'); search.type = 'search'; search.placeholder = `Search ${column}`;
-          const actions = document.createElement('div'); actions.className = 'report-chart-preview-select-actions';
-          const toggleAll = document.createElement('button'); toggleAll.type = 'button'; toggleAll.textContent = 'Select all / none';
-          const options = document.createElement('div'); options.className = 'report-chart-preview-select-options';
-          const selected = new Set(reportChartViewerDatasetFilters.get(column) || values);
-          const applySelection = () => {
-            if (selected.size === values.length) reportChartViewerDatasetFilters.delete(column);
-            else reportChartViewerDatasetFilters.set(column, new Set(selected));
-            loadReportChartViewerDataset(0);
-          };
-          const renderOptions = () => {
-            const query = search.value.trim().toLocaleLowerCase();
-            const matching = values.filter((value) => !query || value.toLocaleLowerCase().includes(query));
-            options.replaceChildren(...matching.map((value) => {
-              const option = document.createElement('label'); option.className = 'report-chart-preview-select-option is-multiple';
-              const input = document.createElement('input'); input.type = 'checkbox'; input.value = value; input.checked = selected.has(value);
-              const text = document.createElement('span'); text.textContent = value || '(Blanks)'; option.append(input, text);
-              input.addEventListener('change', () => { if (input.checked) selected.add(value); else selected.delete(value); applySelection(); });
-              return option;
-            }));
-          };
-          toggleAll.addEventListener('click', () => { const selectAll = values.some((value) => !selected.has(value)); if (selectAll) values.forEach((value) => selected.add(value)); else selected.clear(); applySelection(); renderOptions(); });
-          search.addEventListener('input', renderOptions);
-          actions.append(toggleAll); menu.append(search, actions, options);
-          reportChartViewerDataOverlay?.append(menu);
-          const bounds = button.getBoundingClientRect();
-          menu.style.left = `${Math.max(8, Math.min(bounds.left, window.innerWidth - 380))}px`;
-          menu.style.top = `${Math.min(bounds.bottom + 4, window.innerHeight - 310)}px`;
-          reportChartViewerColumnFilterMenu = menu;
-          const cancelClose = () => { if (reportChartViewerColumnFilterCloseTimer) window.clearTimeout(reportChartViewerColumnFilterCloseTimer); };
-          const scheduleClose = () => {
-            cancelClose();
-            reportChartViewerColumnFilterCloseTimer = window.setTimeout(() => {
-              if (reportChartViewerColumnFilterMenu === menu) closeReportChartViewerColumnFilter();
-            }, 550);
-          };
-          button.addEventListener('mouseenter', cancelClose); button.addEventListener('mouseleave', scheduleClose);
-          menu.addEventListener('mouseenter', cancelClose); menu.addEventListener('mouseleave', scheduleClose);
-          renderOptions(); search.focus();
-        });
-        cell.append(button); header.append(cell);
+      if (!source || !identifier || !reportChartViewerFields || !reportChartViewerDataPanel) throw new Error('The chart dataset is not available.');
+      const response = await fetch('/api/e2e-reporting/chart-preview/data', {
+        method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          source, identifier, chart_index: reportChartIndex, definition: viewerPreviewDefinition(),
+          page, page_size: reportChartViewerDatasetPageSize, column_filters, filter_column,
+        }),
       });
-      const thead = document.createElement('thead'); thead.append(header); table.append(thead);
-      const body = document.createElement('tbody');
-      pageRows.forEach((row) => { const line = document.createElement('tr'); columns.forEach((column) => { const cell = document.createElement('td'); cell.textContent = row[column] ?? ''; line.append(cell); }); body.append(line); });
-      table.append(body);
-      const summary = document.createElement('p'); summary.className = 'form-note';
-      summary.textContent = `${reportChartViewerDataset.summary?.matched_rows ?? 0} chart-filtered rows · ${totalVisibleRows} visible · ${rows.length} rows on this page · Page ${reportChartViewerDatasetPage + 1} of ${pageCount}`;
-      const children = [summary];
-      if (pageCount > 1) {
-        const pager = document.createElement('nav'); pager.className = 'report-chart-viewer-data-pager'; pager.setAttribute('aria-label', 'Dataset pages');
-        const addPageButton = (label, page, title) => {
-          const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.title = title; button.setAttribute('aria-label', title); button.disabled = page === reportChartViewerDatasetPage;
-          button.addEventListener('click', () => { loadReportChartViewerDataset(page); }); pager.append(button);
-        };
-        addPageButton('⏮', 0, 'First page');
-        addPageButton('←', Math.max(0, reportChartViewerDatasetPage - 1), 'Previous page');
-        const label = document.createElement('span'); label.textContent = `Page ${reportChartViewerDatasetPage + 1} / ${pageCount}`; pager.append(label);
-        addPageButton('→', Math.min(pageCount - 1, reportChartViewerDatasetPage + 1), 'Next page');
-        addPageButton('⏭', pageCount - 1, 'Last page');
-        children.push(pager);
-      }
-      const scrollArea = document.createElement('div');
-      scrollArea.className = 'report-chart-viewer-data-scroll';
-      scrollArea.append(table);
-      children.push(scrollArea);
-      reportChartViewerDataPanel.replaceChildren(...children);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Unable to load filtered dataset.');
+      return payload;
     };
-    document.addEventListener('click', (event) => {
-      if (reportChartViewerColumnFilterMenu && !reportChartViewerColumnFilterMenu.contains(event.target) && !event.target.closest('.report-chart-viewer-column-filter')) closeReportChartViewerColumnFilter();
-    });
+    const exportReportChartViewerDataset = async ({column_filters = {}} = {}) => {
+      const [source, identifier] = String(reportChartSetSelect?.value || '').split(':', 2);
+      const response = await fetch('/api/e2e-reporting/chart-preview/data', {
+        method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          source, identifier, chart_index: reportChartIndex, definition: viewerPreviewDefinition(),
+          column_filters, download: true,
+        }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || 'Unable to export the filtered dataset.');
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url; link.download = 'filtered-chart-dataset.csv';
+      document.body.append(link); link.click(); link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+    const loadReportChartViewerDataset = async () => {
+      if (!reportChartViewerDataPanel) return false;
+      reportChartViewerData.disabled = true;
+      showLoadingOverlay('Loading Filtered Dataset', 'Please wait while the filtered dataset is prepared.');
+      try {
+        const payload = await requestReportChartViewerDataset();
+        window.createUnifiedDatasetViewer({
+          host: reportChartViewerDataPanel,
+          payload,
+          requestPage: requestReportChartViewerDataset,
+          exportControl: reportChartViewerDataExport,
+          exportRequest: exportReportChartViewerDataset,
+        });
+        return true;
+      } catch (error) {
+        showInfoDialog(error.message || 'Unable to load filtered dataset.', {title: 'Filtered dataset', tone: 'error'});
+        return false;
+      } finally {
+        hideLoadingOverlay();
+        reportChartViewerData.disabled = false;
+      }
+    };
     reportChartViewerData?.addEventListener('click', async () => {
-      if (await loadReportChartViewerDataset(0, true)) {
+      if (await loadReportChartViewerDataset()) {
         reportChartViewerDataOverlay.hidden = false;
         reportChartViewerDataOverlay.querySelector('[data-report-chart-viewer-data-close]')?.focus();
       }
@@ -1819,12 +1747,12 @@
       reportChartViewerInteractive.setAttribute('aria-expanded', String(willOpen));
       if (willOpen) reportChartViewerFields?.querySelector('input, select, button')?.focus();
     });
-    const closeReportChartViewerData = () => {
-      closeReportChartViewerColumnFilter();
+    const closeReportChartViewerData = (restoreFocus = false) => {
       if (reportChartViewerDataOverlay) reportChartViewerDataOverlay.hidden = true;
+      if (restoreFocus) reportChartViewerData?.focus();
     };
     reportChartViewerDataOverlay?.addEventListener('click', (event) => {
-      if (event.target === reportChartViewerDataOverlay || event.target.closest('[data-report-chart-viewer-data-close]')) closeReportChartViewerData();
+      if (event.target === reportChartViewerDataOverlay || event.target.closest('[data-report-chart-viewer-data-close]')) closeReportChartViewerData(true);
     });
     const resetReportChartZoom = () => {
       if (!reportChartImage) return;
@@ -2021,6 +1949,7 @@
       if (event.key !== 'Escape' || reportChartViewer?.hidden || reportChartViewerDataOverlay?.hidden) return;
       event.preventDefault();
       event.stopImmediatePropagation();
+      closeReportChartViewerData(true);
     }, true);
     reportChartsButton?.addEventListener('click', async () => {
       if (!reportForm?.reportValidity() || !validateCdrSelection()) return;

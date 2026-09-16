@@ -154,6 +154,11 @@
 .ds-chart-expanded-overlay.ds-overlay { position: fixed; z-index: 2900; inset: 0; }
 /* Secondary dialogs opened from the expanded viewer must remain above it. */
 #ds-data-overlay.ds-overlay { z-index: 3000 !important; }
+#ds-data-overlay .ds-data-dialog { position: absolute; inset: 5%; display: grid; grid-template-rows: auto minmax(0, 1fr); width: auto !important; height: auto; max-width: none !important; max-height: none; overflow: hidden; }
+#ds-data-table { min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
+#ds-data-table .unified-dataset-viewer { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; height: 100%; }
+#ds-data-table .dataset-preview-table-wrap { height: 100%; max-height: none; margin-top: 0; }
+#ds-data-table .preview-export-csv { border-color: #08716c; background: linear-gradient(135deg,#0b7a75,#149d94); color: #fff; }
 #ds-editor-overlay.ds-overlay { z-index: 3100 !important; }
 
 

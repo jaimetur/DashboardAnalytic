@@ -7,10 +7,7 @@
   const eventTimeFilteringDisabledReason = 'Date filters are disabled because Ignore event time filtering is enabled in Config.';
   const filterAliases = config.filter_aliases || {};
   let dashboards = {}, activeId = '', definition = null, savedDefinition = '', appliedFilterState = '', appliedSelectionState = '', appliedDashboardDefinition = null, prepared = null, slideIndex = 0;
-  let sequence = 0, cacheLookupSequence = 0, timer, controller, preparing = null, preparingFilterState = '', preparationProgressTimer = 0, dirty = false, filterActionBusy = false, dataIndex = 0, dataPage = 0, dataToken = '', dataEndpoint = '', dataRequest = 0;
-  const dataPages = new Map();
-  const dataColumnFilters = new Map();
-  let dataFilterValues = {}, dataColumnClasses = {}, dataFilterValuesLoaded = false, dataChartTotal = 0, dataFilterMenu = null;
+  let sequence = 0, cacheLookupSequence = 0, timer, controller, preparing = null, preparingFilterState = '', preparationProgressTimer = 0, dirty = false, filterActionBusy = false, dataToken = '', dataEndpoint = '';
   let presentationTimer = 0;
   const presentation = {running: false, delay: 5000, effect: 'fade'};
   let facetOptions = {}, availableFields = [], facetFields = config.filter_fields || [], facetsLoading = false, facetsRefreshTimer = 0;
@@ -1792,18 +1789,19 @@
     }
   });
   async function openChartDataset(chart) {
-    dataIndex = chart.index;
-    dataPage = 0;
     dataToken = expandedChartMode === 'ppt' ? `ppt:${dashboardPptChartsJobId}` : prepared.token;
     dataEndpoint = expandedChartMode === 'ppt' ? String(chart.data_url || '') : `/data/${prepared.token}/${chart.index}`;
     if (!dataEndpoint) return;
-    closeDataFilterMenu();
-    dataColumnFilters.clear();
-    dataFilterValues = {};
-    dataFilterValuesLoaded = false;
-    dataChartTotal = 0;
-    dataPages.clear();
-    overlay('ds-data-overlay', true); await renderData();
+    window.showLoadingOverlay('Loading Filtered Dataset', 'Please wait while the filtered dataset is prepared.');
+    try {
+      await renderData();
+      overlay('ds-data-overlay', true);
+    } catch (error) {
+      overlay('ds-data-overlay', false);
+      throw error;
+    } finally {
+      window.hideLoadingOverlay();
+    }
   }
   $('ds-chart-expanded-data').onclick = safe(async () => { if (expandedChart) await openChartDataset(expandedChart); });
   const expandedCharts = () => expandedChartMode === 'ppt'
@@ -2171,157 +2169,36 @@
   closeOnOutsidePointer('ds-filter-overlay', closeFilters);
   closeOnOutsidePointer('ds-ppt-filter-overlay', closeDashboardPptFilters);
   closeOnOutsidePointer('ds-editor-overlay', closeTemplateEditor);
-  closeOnOutsidePointer('ds-data-overlay', () => { closeDataFilterMenu(); overlay('ds-data-overlay', false); });
+  closeOnOutsidePointer('ds-data-overlay', () => overlay('ds-data-overlay', false));
   closeOnOutsidePointer('ds-presentation-overlay', () => overlay('ds-presentation-overlay', false));
   bind('ds-viewer-close', async () => { stopPresentation(); if (!$('ds-chart-expanded-overlay').hidden) expandedChartOverlay(false); if (!$('ds-filter-overlay').hidden && !await closeFilters()) return; overlay('ds-viewer', false); });
-  const dataColumnFilterPayload = () => Object.fromEntries(
-    [...dataColumnFilters].map(([column, values]) => [column, [...values]]),
-  );
-  const dataColumnFilterFingerprint = () => JSON.stringify(dataColumnFilterPayload());
-  function loadDataPage(token, endpoint, page) {
-    const includeFilterValues = !dataFilterValuesLoaded;
-    const columnFilters = dataColumnFilterFingerprint();
-    const key = `${token}:${endpoint}:${page}:${columnFilters}:${includeFilterValues}`;
-    let request = dataPages.get(key);
-    if (!request) {
-      const parameters = new URLSearchParams({page: String(page)});
-      if (columnFilters !== '{}') parameters.set('column_filters', columnFilters);
-      if (includeFilterValues) parameters.set('include_filter_values', 'true');
-      request = api(`${endpoint}?${parameters}`);
-      dataPages.set(key, request);
-      request.catch(() => dataPages.delete(key));
-      while (dataPages.size > 24) dataPages.delete(dataPages.keys().next().value);
-    }
-    return request;
-  }
-  const prefetchDataPage = (token, endpoint, page, totalPages) => {
-    if (page >= 0 && page < totalPages) void loadDataPage(token, endpoint, page).catch(() => undefined);
-  };
-  function closeDataFilterMenu() {
-    if (!dataFilterMenu) return;
-    dataFilterMenu.trigger.setAttribute('aria-expanded', 'false');
-    dataFilterMenu.menu.remove();
-    dataFilterMenu = null;
-  }
-  function openDataFilterMenu(column, header, trigger) {
-    if (dataFilterMenu?.trigger === trigger) { closeDataFilterMenu(); return; }
-    closeDataFilterMenu();
-    const values = [...(dataFilterValues[column] || [])];
-    const selected = new Set(dataColumnFilters.get(column) || values);
-    const menu = node('section', undefined, 'excel-column-filter-menu ds-data-column-filter-menu');
-    menu.setAttribute('role', 'dialog');
-    menu.setAttribute('aria-label', `Filter ${column}`);
-    const search = document.createElement('input');
-    search.type = 'search'; search.placeholder = 'Search values'; search.autocomplete = 'off';
-    search.setAttribute('aria-label', `Search ${column} values`);
-    const toolbar = node('div', undefined, 'excel-column-filter-toolbar');
-    const selectAll = node('button', 'Select all'); selectAll.type = 'button';
-    const clear = node('button', 'Clear'); clear.type = 'button'; toolbar.append(selectAll, clear);
-    const options = node('div', undefined, 'excel-column-filter-options');
-    values.forEach(value => {
-      const item = document.createElement('label');
-      const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.value = value; checkbox.checked = selected.has(value);
-      const caption = node('span', value || '(Blank)'); item.append(checkbox, caption); options.append(item);
-    });
-    const footer = node('div', undefined, 'excel-column-filter-footer');
-    const cancel = node('button', 'Cancel'); cancel.type = 'button';
-    const apply = node('button', 'Apply'); apply.type = 'button'; footer.append(cancel, apply);
-    menu.append(search, toolbar, options, footer); document.body.append(menu);
-    const bounds = trigger.getBoundingClientRect();
-    const width = Math.min(300, window.innerWidth - 20);
-    menu.style.width = `${width}px`;
-    menu.style.left = `${Math.max(10, Math.min(bounds.left, window.innerWidth - width - 10))}px`;
-    const below = bounds.bottom + 5, height = menu.offsetHeight;
-    menu.style.top = `${below + height <= window.innerHeight - 10 ? below : Math.max(10, bounds.top - height - 5)}px`;
-    dataFilterMenu = {menu, trigger}; trigger.setAttribute('aria-expanded', 'true');
-    search.addEventListener('input', () => {
-      const term = search.value.trim().toLocaleLowerCase();
-      options.querySelectorAll('label').forEach(item => { item.hidden = Boolean(term) && !item.textContent.toLocaleLowerCase().includes(term); });
-    });
-    selectAll.addEventListener('click', () => options.querySelectorAll('input').forEach(input => { input.checked = true; }));
-    clear.addEventListener('click', () => options.querySelectorAll('input').forEach(input => { input.checked = false; }));
-    cancel.addEventListener('click', closeDataFilterMenu);
-    apply.addEventListener('click', () => {
-      const accepted = new Set([...options.querySelectorAll('input:checked')].map(input => input.value));
-      if (accepted.size === values.length) dataColumnFilters.delete(column);
-      else dataColumnFilters.set(column, accepted);
-      header.classList.toggle('has-excel-column-filter', dataColumnFilters.has(column));
-      dataPage = 0; dataPages.clear(); closeDataFilterMenu(); void renderData();
-    });
-    menu.addEventListener('pointerdown', event => event.stopPropagation());
-    requestAnimationFrame(() => search.focus());
-  }
-  function dataTableHeader(column) {
-    const header = node('th');
-    header.classList.toggle('has-excel-column-filter', dataColumnFilters.has(column));
-    const trigger = node('button', undefined, 'excel-column-filter-trigger');
-    trigger.type = 'button'; trigger.setAttribute('aria-label', `Filter ${column}`);
-    trigger.setAttribute('aria-haspopup', 'dialog'); trigger.setAttribute('aria-expanded', 'false');
-    trigger.append(node('span', column, 'excel-column-filter-caption'), node('span', '▾', 'excel-column-filter-icon'));
-    trigger.lastElementChild.setAttribute('aria-hidden', 'true');
-    trigger.addEventListener('click', event => { event.stopPropagation(); openDataFilterMenu(column, header, trigger); });
-    header.append(trigger); return header;
-  }
-  async function renderData() {
-    const token = dataToken, endpoint = dataEndpoint, index = dataIndex, requestedPage = dataPage, request = ++dataRequest;
-    const host = $('ds-data-table');
-    if (!host.querySelector('table')) host.textContent = 'Loading chart dataset…';
-    const payload = await loadDataPage(token, endpoint, requestedPage);
-    if (request !== dataRequest || token !== dataToken || endpoint !== dataEndpoint || index !== dataIndex) return;
-    if (payload.filter_values && typeof payload.filter_values === 'object' && Object.keys(payload.filter_values).length) {
-      dataFilterValues = payload.filter_values;
-      dataFilterValuesLoaded = true;
-    }
-    dataColumnClasses = payload.column_classes || {};
-    dataChartTotal = Number(payload.chart_total) || 0;
-    dataPage = payload.page;
-    let table = host.querySelector('table');
-    const columns = JSON.stringify(payload.columns);
-    if (!table || table.dataset.columns !== columns) {
-      closeDataFilterMenu();
-      table = node('table'); table.dataset.columns = columns; table.classList.add('excel-filter-table');
-      const head = node('thead'), header = node('tr'); payload.columns.forEach(column => { const cell = dataTableHeader(column); if (dataColumnClasses[column]) cell.classList.add(dataColumnClasses[column]); header.append(cell); }); head.append(header); table.append(head, node('tbody'));
-      host.replaceChildren(table);
-    }
-    [...table.tHead.rows[0].cells].forEach((header, columnIndex) => header.classList.toggle(
-      'has-excel-column-filter', dataColumnFilters.has(payload.columns[columnIndex]),
-    ));
-    const body = table.tBodies[0];
-    body.replaceChildren(...payload.rows.map(row => { const tr = node('tr'); row.forEach((value, index) => { const cell = node('td', value); const className = dataColumnClasses[payload.columns[index]]; if (className) cell.classList.add(className); tr.append(cell); }); return tr; }));
-    const totalPages = Math.max(1, Math.ceil(payload.total / 100));
-    const filtered = dataColumnFilters.size > 0;
-    const clearFilters = $('ds-data-clear-filters');
-    clearFilters.disabled = !filtered;
-    clearFilters.textContent = `Clear ${dataColumnFilters.size} filter${dataColumnFilters.size === 1 ? '' : 's'}`;
-    $('ds-data-page').textContent = `${payload.total.toLocaleString()} ${filtered ? 'rows after column filters' : 'chart-filtered rows'} · Page ${dataPage + 1} / ${totalPages}`;
-    const filterCount = $('ds-data-filter-count');
-    filterCount.hidden = !filtered;
-    filterCount.textContent = filtered ? `${payload.total.toLocaleString()} filtered rows of ${dataChartTotal.toLocaleString()}` : '';
-    $('ds-data-first').disabled = $('ds-data-prev').disabled = dataPage === 0;
-    $('ds-data-next').disabled = $('ds-data-last').disabled = dataPage >= totalPages - 1;
+  const dashboardDataRequest = async (request) => {
+    const parameters = new URLSearchParams({page: String(request.page || 0)});
+    const encodedFilters = JSON.stringify(request.column_filters || {});
+    if (encodedFilters !== '{}') parameters.set('column_filters', encodedFilters);
+    if (request.filter_column) parameters.set('filter_column', request.filter_column);
     const downloadParameters = new URLSearchParams({download: 'true'});
-    const columnFilters = dataColumnFilterFingerprint();
-    if (columnFilters !== '{}') downloadParameters.set('column_filters', columnFilters);
-    $('ds-data-download').href = `/api/e2e-dashboards${endpoint}?${downloadParameters}`;
-    prefetchDataPage(token, endpoint, dataPage - 1, totalPages);
-    prefetchDataPage(token, endpoint, dataPage + 1, totalPages);
-    prefetchDataPage(token, endpoint, totalPages - 1, totalPages);
+    if (encodedFilters !== '{}') downloadParameters.set('column_filters', encodedFilters);
+    $('ds-data-download').href = `/api/e2e-dashboards${dataEndpoint}?${downloadParameters}`;
+    return api(`${dataEndpoint}?${parameters}`);
+  };
+  async function renderData() {
+    const token = dataToken;
+    const endpoint = dataEndpoint;
+    const payload = await dashboardDataRequest({page: 0, column_filters: {}});
+    if (token !== dataToken || endpoint !== dataEndpoint) return;
+    window.createUnifiedDatasetViewer({
+      host: $('ds-data-table'),
+      payload,
+      requestPage: dashboardDataRequest,
+      exportControl: $('ds-data-download'),
+    });
   }
-  bind('ds-data-first', async () => { dataPage = 0; await renderData(); });
-  bind('ds-data-prev', async () => { dataPage = Math.max(0, dataPage - 1); await renderData(); });
-  bind('ds-data-next', async () => { dataPage += 1; await renderData(); });
-  bind('ds-data-last', async () => { const label = $('ds-data-page').textContent; const pages = Number(label.match(/\/ (\d+)$/)?.[1]) || 1; dataPage = pages - 1; await renderData(); });
-  bind('ds-data-clear-filters', async () => {
-    if (!dataColumnFilters.size) return;
-    closeDataFilterMenu(); dataColumnFilters.clear(); dataPage = 0; dataPages.clear(); await renderData();
-  });
-  bind('ds-data-close',()=>{ closeDataFilterMenu(); overlay('ds-data-overlay',false); });
-  bind('ds-data-close-bottom',()=>{ closeDataFilterMenu(); overlay('ds-data-overlay',false); });
+  bind('ds-data-close', () => overlay('ds-data-overlay', false));
   bind('ds-chart-expanded-close',()=>expandedChartOverlay(false));
   if ($('ds-edit')) bind('ds-edit',()=>{ const slide = prepared?.slides[slideIndex]; if (slide) openTemplateEditor(slide.focus_row); });
   bind('ds-editor-close', closeTemplateEditor);
   document.addEventListener('keydown',event=>{
-    if (event.key === 'Escape' && dataFilterMenu) { event.preventDefault(); closeDataFilterMenu(); return; }
     const visible = ['ds-ppt-filter-overlay','ds-chart-expanded-overlay','ds-editor-overlay','ds-data-overlay','ds-filter-overlay','ds-presentation-overlay','ds-viewer'].find(id=>!$(id).hidden && $(id).contains(document.activeElement)); if (!visible) return;
     const editing = event.target.closest?.('input,textarea,select,[contenteditable="true"]');
     if (visible === 'ds-chart-expanded-overlay' && !editing && event.key === 'ArrowLeft') {
@@ -2339,7 +2216,6 @@
     if (event.key === 'Escape') { event.preventDefault(); $({'ds-chart-expanded-overlay':'ds-chart-expanded-close','ds-editor-overlay':'ds-editor-close','ds-data-overlay':'ds-data-close','ds-filter-overlay':'ds-filter-close','ds-ppt-filter-overlay':'ds-ppt-filter-dialog-close','ds-presentation-overlay':'ds-presentation-close','ds-viewer':'ds-viewer-close'}[visible]).click(); }
     if (event.key === 'Tab') { const controls = [...$(visible).querySelectorAll('button:not(:disabled),a[href],input,select,summary,[tabindex="0"]')].filter(el=>el.getClientRects().length); if (!controls.length) return; const first = controls[0], last = controls.at(-1); if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
   });
-  document.addEventListener('pointerdown', event => { if (dataFilterMenu && !dataFilterMenu.menu.contains(event.target) && !dataFilterMenu.trigger.contains(event.target)) closeDataFilterMenu(); });
   window.addEventListener('message', event => {
     if (event.origin !== window.location.origin || event.source !== $('ds-editor-frame').contentWindow) return;
     if (event.data?.type === 'dashboard-analytic:template-saved') templateEditorSaved = true;

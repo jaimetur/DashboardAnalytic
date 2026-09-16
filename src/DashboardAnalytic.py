@@ -70,6 +70,7 @@ CHART_PREVIEW_DATA_CACHE: dict[str, tuple[pd.DataFrame, dict[str, Any]]] = {}
 CHART_PREVIEW_FRAME_CACHE: dict[str, pd.DataFrame] = {}
 CHART_PREVIEW_FILTER_CACHE: dict[str, pd.DataFrame] = {}
 CHART_PREVIEW_CACHE_LOCK = Lock()
+CHART_PREVIEW_LOAD_LOCKS: dict[tuple[int, str], Lock] = {}
 STOP_REQUESTS: set[tuple[str, int]] = set()
 STOP_REQUESTS_LOCK = Lock()
 DATASET_PROCESSING_LOCKS: dict[str, Lock] = {}
@@ -7477,6 +7478,33 @@ def _chart_preview_column_classes(columns: Iterable[str], datasets: Iterable[dic
     return classes
 
 
+def _chart_preview_column_metadata(
+    columns: Iterable[str], datasets: Iterable[dict[str, Any]], dataset_kind: str | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Describe chart-extract columns with the same rules used by Dataset Preview."""
+    available = [str(column) for column in columns]
+    dataset_list = list(datasets)
+    source_paths = [dataset['stored_path'] for dataset in dataset_list if dataset.get('stored_path')]
+    _ordered, derived, main, auto = _preview_column_categories(available, source_paths)
+    normalized_kind = str(
+        dataset_kind or next((dataset.get('dataset_kind') for dataset in dataset_list if dataset.get('dataset_kind')), 'generic')
+    ).casefold()
+    labels, kinds, rules = _preview_column_metadata(
+        available, source_paths, derived, main, auto, normalized_kind,
+    )
+    classes = _chart_preview_column_classes(available, dataset_list)
+    return {
+        column: {
+            'label': labels.get(column, column),
+            'kind': kinds.get(column, 'Source'),
+            'rule': rules.get(column, ''),
+            'pinned': column in derived or column in main or column in auto,
+            'class_name': classes.get(column, ''),
+        }
+        for column in available
+    }
+
+
 def _apply_preview_column_filters(
     frame: pd.DataFrame, column_filters: dict[str, Iterable[str]],
 ) -> pd.DataFrame:
@@ -7494,6 +7522,17 @@ def _apply_preview_column_filters(
             ).isin(accepted)
         ]
     return result
+
+
+def _preview_filter_values(frame: pd.DataFrame, requested_column: str) -> list[str]:
+    """Return every distinct value available after the other column filters."""
+    column = resolve_column_name(frame.columns, requested_column)
+    if column is None:
+        return []
+    return sorted(
+        {'' if pd.isna(value) else str(value) for value in frame[column]},
+        key=str.casefold,
+    )
 
 
 def _dataset_preview_request(payload: Any, available_columns: list[str]) -> tuple[int, dict[str, list[str]], str | None]:
@@ -8076,17 +8115,29 @@ def _chart_preview_cache_key(scope: str, material: dict[str, Any]) -> str:
 
 
 def _bounded_preview_frame(cache: dict[str, pd.DataFrame], key: str, loader: Callable[[], pd.DataFrame], limit: int) -> pd.DataFrame:
-    """Return one immutable cached frame while bounding preview memory usage."""
+    """Return one cached frame without loading the same expensive source twice."""
+    lock_key = (id(cache), key)
     with CHART_PREVIEW_CACHE_LOCK:
         cached = cache.get(key)
+        load_lock = CHART_PREVIEW_LOAD_LOCKS.setdefault(lock_key, Lock()) if cached is None else None
     if cached is not None:
         return cached
-    loaded = loader()
-    with CHART_PREVIEW_CACHE_LOCK:
-        cached = cache.setdefault(key, loaded)
-        while len(cache) > limit:
-            cache.pop(next(iter(cache)))
-    return cached
+    assert load_lock is not None
+    try:
+        with load_lock:
+            with CHART_PREVIEW_CACHE_LOCK:
+                cached = cache.get(key)
+            if cached is None:
+                loaded = loader()
+                with CHART_PREVIEW_CACHE_LOCK:
+                    cached = cache.setdefault(key, loaded)
+                    while len(cache) > limit:
+                        cache.pop(next(iter(cache)))
+            return cached
+    finally:
+        with CHART_PREVIEW_CACHE_LOCK:
+            if CHART_PREVIEW_LOAD_LOCKS.get(lock_key) is load_lock and not load_lock.locked():
+                CHART_PREVIEW_LOAD_LOCKS.pop(lock_key, None)
 
 
 def _cached_filtered_chart_frame(
@@ -8511,7 +8562,7 @@ async def temporary_chart_preview_hover(request: Request, user: SessionUser = De
 
 
 @app.post('/api/e2e-reporting/chart-preview/data')
-async def temporary_chart_preview_data(request: Request, user: SessionUser = Depends(current_user)) -> JSONResponse:
+async def temporary_chart_preview_data(request: Request, user: SessionUser = Depends(current_user)) -> Response:
     """Return the bounded filtered chart dataset for the viewer sandbox."""
     try:
         payload = await request.json()
@@ -8526,6 +8577,8 @@ async def temporary_chart_preview_data(request: Request, user: SessionUser = Dep
         page = max(0, int(payload.get('page', 0)))
         page_size = max(1, min(250, int(payload.get('page_size', 100))))
         raw_column_filters = payload.get('column_filters') if isinstance(payload.get('column_filters'), dict) else {}
+        filter_column = str(payload.get('filter_column') or '').strip()
+        download = bool(payload.get('download'))
         column_filters = {
             str(column): tuple(str(value) for value in values if value is not None)
             for column, values in raw_column_filters.items() if isinstance(values, list)
@@ -8536,6 +8589,10 @@ async def temporary_chart_preview_data(request: Request, user: SessionUser = Dep
         raise HTTPException(status_code=400, detail='Choose a valid CDR Source.')
     try:
         preview_dataset_ids = _temporary_preview_dataset_ids(editable, selected_ids, entry.source_kind)
+        preview_datasets = [
+            serialize_dataset_row(row)
+            for dataset_id in preview_dataset_ids if (row := repository.get_dataset(dataset_id))
+        ]
         cache_material = json.dumps({
             'scope': 'report-chart-viewer', 'workspace': str(active_workspace.database_path) if active_workspace else '',
             'source': source, 'identifier': identifier, 'chart_index': chart_index,
@@ -8545,16 +8602,39 @@ async def temporary_chart_preview_data(request: Request, user: SessionUser = Dep
         cached = CHART_PREVIEW_DATA_CACHE.get(cache_key)
         if cached is None:
             selected = _reporting_datasets(preview_dataset_ids, entry.source_kind)
-            frame = _combined_reporting_frame(selected, technology, [entry], multivendor)
-            if multivendor:
-                frame = ensure_vendor_group(frame)
-            full_preview, base_summary = preview_catalog_chart_data(frame, entry, limit=100_000)
+            frame_key = _chart_preview_cache_key('reporting-source-frame', {
+                'dataset_ids': preview_dataset_ids,
+                'dataset_versions': [
+                    (item['id'], item.get('updated_at'), item.get('processed_at'), item.get('normalization_version'))
+                    for item in selected
+                ],
+                'technology': technology, 'multivendor': multivendor,
+                'columns': reporting_query_columns(entry.source_kind, [entry], multivendor),
+            })
+            def load_frame() -> pd.DataFrame:
+                combined = _combined_reporting_frame(selected, technology, [entry], multivendor)
+                return ensure_vendor_group(combined) if multivendor else combined
+            frame = _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4)
+            full_preview, base_summary = preview_catalog_chart_data(
+                frame, entry, limit=100_000, include_filter_values=False,
+            )
             cached = (full_preview, base_summary)
             CHART_PREVIEW_DATA_CACHE[cache_key] = cached
             while len(CHART_PREVIEW_DATA_CACHE) > 12:
                 CHART_PREVIEW_DATA_CACHE.pop(next(iter(CHART_PREVIEW_DATA_CACHE)))
         full_preview, base_summary = cached
+        filters_for_values = {
+            column: values for column, values in column_filters.items()
+            if not filter_column or column_identity(column) != column_identity(filter_column)
+        }
+        values_preview = _apply_preview_column_filters(full_preview, filters_for_values)
         filtered_preview = _apply_preview_column_filters(full_preview, column_filters)
+        if download:
+            return Response(
+                content=filtered_preview.to_csv(index=False),
+                media_type='text/csv',
+                headers={'Content-Disposition': 'attachment; filename="filtered-chart-dataset.csv"'},
+            )
         offset = page * page_size
         preview = filtered_preview.iloc[offset:offset + page_size].copy()
         summary = {
@@ -8568,11 +8648,19 @@ async def temporary_chart_preview_data(request: Request, user: SessionUser = Dep
         'columns': [str(column) for column in preview.columns],
         'rows': preview.where(pd.notna(preview), '').astype(str).to_dict(orient='records'),
         'summary': {key: value for key, value in summary.items() if key != 'filter_values'},
-        'filter_values': summary.get('filter_values', {}),
-        'column_classes': _chart_preview_column_classes(
-            preview.columns,
-            [serialize_dataset_row(row) for dataset_id in preview_dataset_ids if (row := repository.get_dataset(dataset_id))],
+        'filter_values': (
+            _preview_filter_values(values_preview, filter_column) if filter_column
+            else summary.get('filter_values', {})
         ),
+        'column_classes': _chart_preview_column_classes(
+            preview.columns, preview_datasets,
+        ),
+        'column_metadata': (
+            _chart_preview_column_metadata(preview.columns, preview_datasets, entry.source_kind)
+            if page == 0 and not column_filters and not filter_column else {}
+        ),
+        'page': page, 'page_size': page_size,
+        'total': len(filtered_preview.index), 'chart_total': len(full_preview.index),
     })
 
 
@@ -11956,7 +12044,7 @@ async def preview_report_template_chart(
     technology: str,
     catalogue_id: str,
     user: SessionUser = Depends(admin_user),
-) -> JSONResponse:
+) -> Response:
     """Preview one unsaved editor chart against ready CDRs in this workspace."""
     if not active_workspace:
         raise HTTPException(status_code=400, detail='Open a workspace before previewing chart data.')
@@ -11984,6 +12072,8 @@ async def preview_report_template_chart(
         page = max(0, int(payload.get('page') or 0))
         page_size = max(1, min(int(payload.get('page_size') or 100), 250))
         raw_column_filters = payload.get('column_filters') if isinstance(payload.get('column_filters'), dict) else {}
+        filter_column = str(payload.get('filter_column') or '').strip()
+        download = bool(payload.get('download'))
         column_filters = {
             str(column): tuple(str(value) for value in values)
             for column, values in raw_column_filters.items() if isinstance(values, list)
@@ -12013,7 +12103,8 @@ async def preview_report_template_chart(
             # the materialized CDR rows, so use it rather than rebuilding a
             # pandas frame from every individual CDR table.
             full_preview, base_summary = preview_catalog_chart_data(
-                _combined_reporting_frame(selected_datasets, technology, [entry], False), entry, limit=100_000,
+                _combined_reporting_frame(selected_datasets, technology, [entry], False), entry,
+                limit=100_000, include_filter_values=False,
             )
             cached = (full_preview, base_summary)
             CHART_PREVIEW_DATA_CACHE[cache_key] = cached
@@ -12021,7 +12112,18 @@ async def preview_report_template_chart(
             while len(CHART_PREVIEW_DATA_CACHE) > 12:
                 CHART_PREVIEW_DATA_CACHE.pop(next(iter(CHART_PREVIEW_DATA_CACHE)))
         full_preview, base_summary = cached
+        filters_for_values = {
+            column: values for column, values in column_filters.items()
+            if not filter_column or column_identity(column) != column_identity(filter_column)
+        }
+        values_preview = _apply_preview_column_filters(full_preview, filters_for_values)
         filtered_preview = _apply_preview_column_filters(full_preview, column_filters)
+        if download:
+            return Response(
+                content=filtered_preview.to_csv(index=False),
+                media_type='text/csv',
+                headers={'Content-Disposition': 'attachment; filename="filtered-chart-dataset.csv"'},
+            )
         offset = page * page_size
         preview = filtered_preview.iloc[offset:offset + page_size].copy()
         summary = {
@@ -12037,9 +12139,18 @@ async def preview_report_template_chart(
         'filters': entry.filters or 'No filters',
         'summary': summary,
         'columns': summary.get('columns', []),
-        'filter_values': summary.get('filter_values', {}),
+        'filter_values': (
+            _preview_filter_values(values_preview, filter_column) if filter_column
+            else summary.get('filter_values', {})
+        ),
         'rows': preview.where(pd.notna(preview), '').astype(str).to_dict(orient='records'),
         'column_classes': _chart_preview_column_classes(preview.columns, selected_datasets),
+        'column_metadata': (
+            _chart_preview_column_metadata(preview.columns, selected_datasets, entry.source_kind)
+            if page == 0 and not column_filters and not filter_column else {}
+        ),
+        'page': page, 'page_size': page_size,
+        'total': len(filtered_preview.index), 'chart_total': len(full_preview.index),
     })
 
 

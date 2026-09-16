@@ -1779,6 +1779,7 @@ def preview_catalog_chart_data(
     limit: int = 200,
     offset: int = 0,
     column_filters: dict[str, tuple[str, ...]] | None = None,
+    include_filter_values: bool = True,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
     """Return the exact, post-filter rows supplied to one template chart.
 
@@ -1845,7 +1846,7 @@ def preview_catalog_chart_data(
             key=str.casefold,
         )
         for column in full_result.columns
-    }
+    } if include_filter_values else {}
     for column, values in (column_filters or {}).items():
         resolved_column = resolve_column_name(full_result.columns, column)
         if resolved_column is None or not values:

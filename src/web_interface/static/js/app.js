@@ -680,7 +680,7 @@ document.querySelectorAll('[data-horizontal-wheel-scroll]').forEach((container) 
   }, {passive: false});
 });
 
-document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => {
+const initializeServerDatasetPreview = (toolbar) => {
   const panel = toolbar.closest('.dataset-preview-panel');
   const table = panel?.querySelector('[data-server-preview-table]');
   const tbody = table?.querySelector('tbody');
@@ -710,6 +710,9 @@ document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => 
   const endpoint = toolbar.dataset.endpoint;
   const pageSize = Number(toolbar.dataset.pageSize || 100);
   const columnFilters = new Map();
+  toolbar.previewColumnFilters = () => Object.fromEntries(
+    Array.from(columnFilters, ([column, values]) => [column, Array.from(values)]),
+  );
   const selectedTags = new Set();
   let currentPage = 0;
   let filteredTotal = Number(toolbar.dataset.totalRows || 0);
@@ -736,6 +739,7 @@ document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => 
         if (row.cells[index]) row.cells[index].hidden = !visible;
       });
     });
+    updateControls(tbody.rows.length);
     requestAnimationFrame(() => requestAnimationFrame(syncTagStrip));
   };
 
@@ -764,9 +768,11 @@ document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => 
     const start = filteredTotal ? currentPage * pageSize + 1 : 0;
     const end = filteredTotal ? start + rowCount - 1 : 0;
     if (filterStatus) {
-      filterStatus.textContent = activeFilters
+      const rowSummary = activeFilters
         ? `Showing ${formatRowCount(start)}-${formatRowCount(end)} of ${formatRowCount(filteredTotal)} matching rows (${formatRowCount(unfilteredTotal)} total)`
         : `Showing ${formatRowCount(start)}-${formatRowCount(end)} of ${formatRowCount(unfilteredTotal)} rows`;
+      const visibleColumns = headers.filter((header) => !header.hidden).length;
+      filterStatus.textContent = `${rowSummary} · ${formatRowCount(visibleColumns)} of ${formatRowCount(headers.length)} columns`;
     }
     if (rowPill) rowPill.textContent = `${formatRowCount(rowCount)} rows shown`;
     if (pageStatus) pageStatus.textContent = `Page ${currentPage + 1} of ${totalPages}`;
@@ -787,6 +793,13 @@ document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => 
   };
 
   const requestPreview = async (page, filterColumn = null) => {
+    if (typeof toolbar.previewRequest === 'function') {
+      return toolbar.previewRequest({
+        page,
+        column_filters: Object.fromEntries(Array.from(columnFilters, ([column, values]) => [column, Array.from(values)])),
+        filter_column: filterColumn,
+      });
+    }
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
@@ -991,19 +1004,160 @@ document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => 
   previousPage?.addEventListener('click', () => loadPage(Math.max(0, currentPage - 1)));
   nextPage?.addEventListener('click', () => loadPage(currentPage + 1));
   lastPage?.addEventListener('click', () => loadPage(Math.max(0, Math.ceil(filteredTotal / pageSize) - 1)));
-  document.addEventListener('click', () => {
+  const closePreviewMenus = () => {
     closeColumnMenu();
     if (tagFilterMenu) tagFilterMenu.hidden = true;
     tagFilterToggle?.setAttribute('aria-expanded', 'false');
-  });
-  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeColumnMenu(); });
+  };
+  const closePreviewMenuOnEscape = (event) => { if (event.key === 'Escape') closeColumnMenu(); };
+  const syncTagsAfterScroll = () => { closeColumnMenu(); syncTagStrip(); };
+  document.addEventListener('click', closePreviewMenus);
+  document.addEventListener('keydown', closePreviewMenuOnEscape);
   window.addEventListener('resize', closeColumnMenu);
-  tableWrap?.addEventListener('scroll', () => { closeColumnMenu(); syncTagStrip(); }, {passive: true});
+  tableWrap?.addEventListener('scroll', syncTagsAfterScroll, {passive: true});
   window.addEventListener('resize', syncTagStrip);
   updateControls(tbody.rows.length);
   applyColumnSearch();
   requestAnimationFrame(syncTagStrip);
-});
+  return () => {
+    requestSequence += 1;
+    closeColumnMenu();
+    document.removeEventListener('click', closePreviewMenus);
+    document.removeEventListener('keydown', closePreviewMenuOnEscape);
+    window.removeEventListener('resize', closeColumnMenu);
+    tableWrap?.removeEventListener('scroll', syncTagsAfterScroll);
+    window.removeEventListener('resize', syncTagStrip);
+  };
+};
+
+document.querySelectorAll('[data-server-dataset-preview]').forEach(initializeServerDatasetPreview);
+
+window.createUnifiedDatasetViewer = ({host, payload, requestPage, exportControl = null, exportRequest = null}) => {
+  if (!(host instanceof HTMLElement) || !payload || typeof requestPage !== 'function') return null;
+  if (typeof host.unifiedDatasetViewerDestroy === 'function') host.unifiedDatasetViewerDestroy();
+  const columns = Array.isArray(payload.columns) ? payload.columns.map(String) : [];
+  const metadata = payload.column_metadata && typeof payload.column_metadata === 'object'
+    ? payload.column_metadata : {};
+  const element = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  const viewer = element('section', 'dataset-preview-panel unified-dataset-viewer');
+  const toolbar = element('div', 'preview-server-toolbar');
+  toolbar.setAttribute('data-server-dataset-preview', '');
+  toolbar.dataset.pageSize = String(payload.page_size || 100);
+  toolbar.dataset.totalRows = String(payload.unfiltered_total ?? payload.chart_total ?? payload.total ?? 0);
+  const searchLabel = element('label', 'preview-server-column-search', 'Search columns');
+  const search = element('input');
+  search.type = 'search'; search.placeholder = 'Column names, separated by commas'; search.autocomplete = 'off';
+  search.setAttribute('data-server-preview-column-search', ''); searchLabel.append(search);
+  const tagFilter = element('div', 'preview-tag-filter'); tagFilter.setAttribute('data-preview-tag-filter', '');
+  tagFilter.append(element('span', '', 'Filter labels'));
+  const tagToggle = element('button'); tagToggle.type = 'button'; tagToggle.setAttribute('data-preview-tag-filter-toggle', ''); tagToggle.setAttribute('aria-expanded', 'false');
+  const tagLabel = element('span', '', 'All Labels'); tagLabel.setAttribute('data-preview-tag-filter-label', '');
+  tagToggle.append(tagLabel);
+  const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); arrow.setAttribute('viewBox', '0 0 20 20'); arrow.setAttribute('aria-hidden', 'true');
+  const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path'); arrowPath.setAttribute('d', 'm5 7 5 6 5-6'); arrow.append(arrowPath); tagToggle.append(arrow);
+  const tagMenu = element('div', 'preview-tag-filter-menu'); tagMenu.setAttribute('data-preview-tag-filter-menu', ''); tagMenu.hidden = true;
+  const allTags = element('button', 'preview-tag-filter-all', 'All Labels'); allTags.type = 'button'; allTags.setAttribute('data-preview-tag-filter-all', ''); tagMenu.append(allTags);
+  const tags = [...new Set(columns.flatMap(column => {
+    const item = metadata[column] || {};
+    return [item.kind, item.pinned ? 'PINNED' : 'UN_PINNED'].filter(Boolean);
+  }))];
+  tags.forEach(tag => { const label = element('label'); const input = element('input'); input.type = 'checkbox'; input.value = tag; label.append(input, element('span', '', tag)); tagMenu.append(label); });
+  tagFilter.append(tagToggle, tagMenu); toolbar.append(searchLabel, tagFilter);
+  let exportHandler = null;
+  if (exportControl instanceof HTMLElement) {
+    toolbar.append(exportControl);
+    if (typeof exportRequest === 'function') {
+      exportHandler = async (event) => {
+        event.preventDefault();
+        if (exportControl.disabled) return;
+        exportControl.disabled = true;
+        try {
+          await exportRequest({
+            column_filters: toolbar.previewColumnFilters?.() || {},
+          });
+        } catch (error) {
+          showInfoDialog(error.message || 'Unable to export the filtered dataset.', {title: 'Export CSV', tone: 'error'});
+        } finally {
+          exportControl.disabled = false;
+        }
+      };
+      exportControl.addEventListener('click', exportHandler);
+    }
+  }
+  viewer.append(toolbar);
+
+  const tagViewport = element('div', 'preview-column-tag-viewport'); tagViewport.setAttribute('data-preview-column-tag-viewport', '');
+  const tagStrip = element('div', 'preview-column-tag-strip'); tagStrip.setAttribute('data-preview-column-tag-strip', '');
+  const classForKind = item => item.class_name || '';
+  columns.forEach(column => {
+    const item = metadata[column] || {};
+    const label = item.label || column;
+    const holder = element('div', 'preview-column-tag-item'); holder.setAttribute('data-preview-column-tag-item', '');
+    holder.dataset.columnName = column; holder.dataset.columnLabel = label; holder.dataset.columnKind = item.kind || 'Source';
+    const pin = element('button', `preview-pinned-badge${item.pinned ? '' : ' is-unpinned'}`, item.pinned ? 'PINNED' : 'UN_PINNED');
+    const kindClass = item.class_name === 'gcid-column' ? ' is-metadata' : item.kind === 'Auto-calculated' ? ' is-auto' : item.kind === 'Analysis-derived' ? ' is-analysis' : item.kind === 'CDR-Main' ? ' is-main' : String(item.kind || '').startsWith('CDR-') ? ' is-cdr' : '';
+    const kind = element('button', `preview-column-kind-badge${kindClass}`, item.kind || 'Source');
+    [pin, kind].forEach((badge, index) => {
+      badge.type = 'button'; badge.setAttribute('data-preview-rule-badge', ''); badge.dataset.columnName = column;
+      badge.dataset.columnLabel = label; badge.dataset.columnKind = index ? (item.kind || 'Source') : (item.pinned ? 'PINNED' : 'UN_PINNED');
+      badge.dataset.columnRule = index ? (item.rule || '') : (item.pinned ? 'This field is pinned and remains available in every Dataset Preview.' : 'This source-only field is available when it exists in the selected dataset.');
+    });
+    holder.append(pin, kind); tagStrip.append(holder);
+  });
+  tagViewport.append(tagStrip); viewer.append(tagViewport);
+
+  const wrap = element('div', 'table-wrap data-table-wrap dataset-preview-table-wrap'); wrap.setAttribute('data-horizontal-wheel-scroll', ''); wrap.tabIndex = 0;
+  const table = element('table', 'dataset-preview-table'); table.setAttribute('data-preview-filter-table', ''); table.setAttribute('data-server-preview-table', '');
+  const thead = element('thead'), headerRow = element('tr');
+  columns.forEach(column => { const item = metadata[column] || {}; const th = element('th', classForKind(item)); th.dataset.columnName = column; th.dataset.columnLabel = item.label || column; th.dataset.columnKind = item.kind || 'Source'; th.dataset.columnPinned = item.pinned ? 'true' : 'false'; th.dataset.columnRule = item.rule || ''; th.append(element('span', '', item.label || column)); headerRow.append(th); });
+  thead.append(headerRow); table.append(thead, element('tbody')); wrap.append(table); viewer.append(wrap);
+
+  const footer = element('div', 'preview-server-footer');
+  const svgIcon = pathData => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+    pathData.forEach(data => { const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', data); svg.append(path); });
+    return svg;
+  };
+  const clear = element('button', 'preview-clear-filters'); clear.type = 'button'; clear.disabled = true; clear.setAttribute('data-preview-clear-filters', '');
+  const clearLabel = element('span', '', 'Clear 0 Filters'); clearLabel.setAttribute('data-preview-clear-label', ''); clear.append(clearLabel);
+  clear.prepend(svgIcon(['M4 5h16', 'M8 5V3h8v2m-9 3 .7 12h8.6L17 8', 'M10 11v6m4-6v6']));
+  const pager = element('nav', 'preview-pagination'); pager.setAttribute('aria-label', 'Dataset preview pages');
+  const pageButton = (attribute, label, paths) => { const button = element('button'); button.type = 'button'; button.disabled = true; button.setAttribute(attribute, ''); button.setAttribute('aria-label', label); button.title = label; button.append(svgIcon(paths)); return button; };
+  const first = pageButton('data-preview-first-page', 'First page', ['M5 5v14', 'M18 6l-6 6 6 6', 'M12 6l-6 6 6 6']); const previous = pageButton('data-preview-previous-page', 'Previous page', ['M15 6l-6 6 6 6']);
+  const pageStatus = element('span', '', 'Page 1 of 1'); pageStatus.setAttribute('data-preview-page-status', '');
+  const next = pageButton('data-preview-next-page', 'Next page', ['M9 6l6 6-6 6']); const last = pageButton('data-preview-last-page', 'Last page', ['M19 5v14', 'M6 6l6 6-6 6', 'M12 6l6 6-6 6']);
+  pager.append(first, previous, pageStatus, next, last);
+  const status = element('p', 'preview-table-filter-status'); status.setAttribute('data-preview-filter-status', ''); status.setAttribute('aria-live', 'polite');
+  footer.append(clear, pager, status); viewer.append(footer); host.replaceChildren(viewer);
+  toolbar.previewRequest = async request => {
+    const response = await requestPage(request);
+    const responseRows = Array.isArray(response.rows) ? response.rows : [];
+    return {
+      ...response,
+      page: Number(response.page ?? request.page ?? 0),
+      total: Number(response.total ?? response.summary?.visible_rows ?? responseRows.length),
+      unfiltered_total: Number(response.unfiltered_total ?? response.chart_total ?? response.summary?.matched_rows ?? payload.chart_total ?? payload.total ?? responseRows.length),
+      rows: responseRows.map(row => Array.isArray(row) ? Object.fromEntries(columns.map((column, index) => [column, row[index] ?? ''])) : row),
+    };
+  };
+  const initialRows = Array.isArray(payload.rows) ? payload.rows : [];
+  table.tBodies[0].replaceChildren(...initialRows.map(row => {
+    const record = Array.isArray(row) ? Object.fromEntries(columns.map((column, index) => [column, row[index] ?? ''])) : row;
+    const tr = element('tr'); columns.forEach(column => { const td = element('td', classForKind(metadata[column] || {}), record[column] ?? ''); tr.append(td); }); return tr;
+  }));
+  const destroyPreview = initializeServerDatasetPreview(toolbar);
+  host.unifiedDatasetViewerDestroy = () => {
+    destroyPreview?.();
+    if (exportHandler) exportControl.removeEventListener('click', exportHandler);
+  };
+  return {viewer, reload: () => toolbar.previewRequest({page: 0, column_filters: {}, filter_column: null})};
+};
 
 document.querySelectorAll('[data-preview-dataset-switch]').forEach((input) => {
   const switcher = input.closest('.preview-dataset-switcher');
@@ -1047,19 +1201,32 @@ document.querySelectorAll('[data-preview-dataset-switch]').forEach((input) => {
 
 const previewRuleOverlay = document.querySelector('[data-preview-rule-overlay]');
 const previewBadgeTooltip = document.querySelector('[data-preview-badge-tooltip]');
-const closePreviewRule = () => { if (previewRuleOverlay) previewRuleOverlay.hidden = true; };
+let previewRuleTrigger = null;
+const closePreviewRule = (restoreFocus = false) => {
+  if (!previewRuleOverlay || previewRuleOverlay.hidden) return;
+  previewRuleOverlay.hidden = true;
+  if (restoreFocus) previewRuleTrigger?.focus();
+  previewRuleTrigger = null;
+};
 document.addEventListener('click', (event) => {
   const badge = event.target.closest?.('[data-preview-rule-badge]');
   if (!badge || !previewRuleOverlay) return;
+  previewRuleTrigger = badge;
   if (previewBadgeTooltip) previewBadgeTooltip.hidden = true;
   previewRuleOverlay.querySelector('[data-preview-rule-title]').textContent = badge.dataset.columnLabel || 'Field';
   previewRuleOverlay.querySelector('[data-preview-rule-kind]').textContent = badge.dataset.columnKind || 'Field rule';
   previewRuleOverlay.querySelector('[data-preview-rule-text]').textContent = badge.dataset.columnRule || '';
   previewRuleOverlay.hidden = false;
+  previewRuleOverlay.querySelector('[data-preview-rule-close]')?.focus();
 });
-previewRuleOverlay?.querySelector('[data-preview-rule-close]')?.addEventListener('click', closePreviewRule);
-previewRuleOverlay?.addEventListener('click', (event) => { if (event.target === previewRuleOverlay) closePreviewRule(); });
-document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closePreviewRule(); });
+previewRuleOverlay?.querySelector('[data-preview-rule-close]')?.addEventListener('click', () => closePreviewRule(true));
+previewRuleOverlay?.addEventListener('click', (event) => { if (event.target === previewRuleOverlay) closePreviewRule(true); });
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || !previewRuleOverlay || previewRuleOverlay.hidden) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  closePreviewRule(true);
+}, true);
 const hidePreviewBadgeTooltip = () => { if (previewBadgeTooltip) previewBadgeTooltip.hidden = true; };
 const showPreviewBadgeTooltip = (badge) => {
   if (!previewBadgeTooltip) return;
@@ -1361,6 +1528,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const chartPreviewData = editor.querySelector('[data-catalogue-chart-preview-data]');
   const chartPreviewDataOverlay = editor.querySelector('[data-catalogue-chart-preview-data-overlay]');
   const chartPreviewDataPanel = editor.querySelector('[data-catalogue-chart-preview-data-panel]');
+  const chartPreviewDataExport = editor.querySelector('[data-catalogue-chart-preview-data-export]');
   const chartPreviewUpdate = editor.querySelector('[data-catalogue-chart-preview-update]');
   const chartPreviewActionClose = editor.querySelector('[data-catalogue-chart-preview-action-close]');
   let chartPreviewImageUrl = '';
@@ -1368,10 +1536,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   let chartPreviewTimer = null;
   let chartPreviewController = null;
   let chartPreviewRequest = 0;
-  let chartPreviewDatasetPage = 0;
   const chartPreviewDatasetPageSize = 100;
-  const chartPreviewDatasetFilters = new Map();
-  let chartPreviewDatasetFilterMenu = null;
   if (!table || !saveForm || !contentField || !heading || !copy || !optionsLabel || !options || !apply || !helper) return;
 
   // The editor panel uses backdrop effects, which establish a containing block
@@ -2333,92 +2498,73 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const rowIndex = Array.from(table.querySelectorAll('tbody tr')).indexOf(chartPreviewRow);
     if (!endpoint || rowIndex < 0 || !chartPreviewDataPanel) return;
     chartPreviewData.disabled = true;
-    chartPreviewDatasetPage = 0;
-    chartPreviewDatasetFilters.clear();
     showLoadingOverlay('Loading Filtered Dataset', 'Please wait while the filtered dataset is prepared.');
     try {
       const activeDefinition = chartPreviewSandbox && !chartPreviewSandbox.hidden ? previewDefinition() : {};
-      const requestBody = (page) => ({catalogue_content: serialiseCatalogueContent(), row_index: rowIndex, definition: activeDefinition, page, page_size: chartPreviewDatasetPageSize, column_filters: Object.fromEntries(Array.from(chartPreviewDatasetFilters.entries()).map(([column, values]) => [column, Array.from(values)]))});
-      const response = await fetch(endpoint, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(requestBody(0))});
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.detail || 'Unable to load filtered dataset.');
-      const renderPage = async (page) => {
-        const request = await fetch(endpoint, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(requestBody(page))});
-        const next = await request.json().catch(() => ({}));
-        if (!request.ok) throw new Error(next.detail || 'Unable to load filtered dataset.');
-        chartPreviewDatasetPage = page;
-        renderDataset(next);
-      };
-      const renderDataset = (dataset) => {
-        const columns = dataset.columns || dataset.summary?.columns || [];
-        const rows = dataset.rows || [];
-        const visibleRows = Number(dataset.summary?.visible_rows ?? rows.length);
-        const sourceRows = Number(dataset.summary?.source_rows ?? 0);
-        const matchedRows = Number(dataset.summary?.matched_rows ?? visibleRows);
-        const pageCount = Math.max(1, Math.ceil(visibleRows / chartPreviewDatasetPageSize));
-        const tableNode = document.createElement('table');
-        const header = document.createElement('tr');
-        columns.forEach((column) => {
-          const cell = document.createElement('th'); const button = document.createElement('button'); button.type = 'button'; button.className = 'report-chart-viewer-column-filter';
-          if (dataset.column_classes?.[column]) cell.classList.add(dataset.column_classes[column]);
-          button.textContent = `${column} ▾`; button.classList.toggle('is-filtered', chartPreviewDatasetFilters.has(column));
-          button.addEventListener('click', () => {
-            chartPreviewDatasetFilterMenu?.remove();
-            const values = (dataset.filter_values?.[column] || []).map(String); const selected = new Set(chartPreviewDatasetFilters.get(column) || values);
-            const menu = document.createElement('section'); menu.className = 'report-chart-preview-select-menu report-chart-viewer-column-filter-menu';
-            const search = document.createElement('input'); search.type = 'search'; search.placeholder = `Search ${column}`;
-            const options = document.createElement('div'); options.className = 'report-chart-preview-select-options';
-            const draw = () => { const query = search.value.toLocaleLowerCase(); options.replaceChildren(...values.filter((value) => !query || value.toLocaleLowerCase().includes(query)).map((value) => { const item = document.createElement('label'); item.className = 'report-chart-preview-select-option is-multiple'; const check = document.createElement('input'); check.type = 'checkbox'; check.checked = selected.has(value); const text = document.createElement('span'); text.textContent = value || '(Blanks)'; check.addEventListener('change', () => { if (check.checked) selected.add(value); else selected.delete(value); if (selected.size === values.length) chartPreviewDatasetFilters.delete(column); else chartPreviewDatasetFilters.set(column, selected); menu.remove(); renderPage(0).catch((error) => showInfoDialog(error.message, {title: 'Filtered dataset', tone: 'error'})); }); item.append(check, text); return item; })); };
-            search.addEventListener('input', draw); menu.append(search, options); document.body.append(menu); chartPreviewDatasetFilterMenu = menu; const bounds = button.getBoundingClientRect(); menu.style.left = `${Math.max(8, Math.min(bounds.left, window.innerWidth - 380))}px`; menu.style.top = `${Math.min(bounds.bottom + 4, window.innerHeight - 310)}px`; draw(); search.focus();
-          });
-          cell.append(button); header.append(cell);
+      const requestPage = async ({page = 0, column_filters = {}, filter_column = null} = {}) => {
+        const response = await fetch(endpoint, {
+          method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            catalogue_content: serialiseCatalogueContent(), row_index: rowIndex,
+            definition: activeDefinition, page, page_size: chartPreviewDatasetPageSize,
+            column_filters, filter_column,
+          }),
         });
-        const thead = document.createElement('thead'); thead.append(header); tableNode.append(thead);
-        const body = document.createElement('tbody');
-        rows.forEach((row) => { const line = document.createElement('tr'); columns.forEach((column) => { const cell = document.createElement('td'); cell.textContent = row[column] ?? ''; if (dataset.column_classes?.[column]) cell.classList.add(dataset.column_classes[column]); line.append(cell); }); body.append(line); });
-        tableNode.append(body);
-        const pager = document.createElement('nav'); pager.className = 'report-chart-viewer-data-pager';
-        const add = (label, target, title) => { const control = document.createElement('button'); control.type = 'button'; control.textContent = label; control.title = title; control.disabled = target === chartPreviewDatasetPage; control.addEventListener('click', () => renderPage(target).catch((error) => showInfoDialog(error.message, {title: 'Filtered dataset', tone: 'error'}))); pager.append(control); };
-        add('⏮', 0, 'First page'); add('←', Math.max(0, chartPreviewDatasetPage - 1), 'Previous page');
-        const label = document.createElement('span'); label.textContent = `Page ${chartPreviewDatasetPage + 1} / ${pageCount}`; pager.append(label);
-        add('→', Math.min(pageCount - 1, chartPreviewDatasetPage + 1), 'Next page'); add('⏭', pageCount - 1, 'Last page');
-        const summary = document.createElement('p'); summary.className = 'form-note';
-        summary.textContent = `${sourceRows} total dataset rows · ${matchedRows} chart-filtered rows · ${visibleRows} visible after column filters · ${rows.length} rows shown on this page`;
-        // Only the table body scrolls.  Keep the result context and page
-        // controls in sight while inspecting a long page of rows.
-        const scrollArea = document.createElement('div'); scrollArea.className = 'report-chart-viewer-data-scroll';
-        scrollArea.append(tableNode);
-        chartPreviewDataPanel.replaceChildren(summary, pager, scrollArea);
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.detail || 'Unable to load filtered dataset.');
+        return payload;
       };
-      renderDataset(payload);
+      const payload = await requestPage();
+      const exportRequest = async ({column_filters = {}} = {}) => {
+        const response = await fetch(endpoint, {
+          method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            catalogue_content: serialiseCatalogueContent(), row_index: rowIndex,
+            definition: activeDefinition, column_filters, download: true,
+          }),
+        });
+        if (!response.ok) {
+          const errorPayload = await response.json().catch(() => ({}));
+          throw new Error(errorPayload.detail || 'Unable to export the filtered dataset.');
+        }
+        const url = URL.createObjectURL(await response.blob());
+        const link = document.createElement('a');
+        link.href = url; link.download = 'filtered-chart-dataset.csv';
+        document.body.append(link); link.click(); link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      };
+      window.createUnifiedDatasetViewer({
+        host: chartPreviewDataPanel, payload, requestPage,
+        exportControl: chartPreviewDataExport, exportRequest,
+      });
       if (chartPreviewSandbox) chartPreviewSandbox.hidden = true;
       if (chartPreview) chartPreview.hidden = false;
       if (chartPreviewDataOverlay) chartPreviewDataOverlay.hidden = false;
-    } catch (error) { showInfoDialog(error instanceof Error ? error.message : 'Unable to load filtered dataset.', {title: 'Filtered dataset', tone: 'error'}); }
-    finally { hideLoadingOverlay(); chartPreviewData.disabled = false; }
+    } catch (error) {
+      showInfoDialog(error instanceof Error ? error.message : 'Unable to load filtered dataset.', {title: 'Filtered dataset', tone: 'error'});
+    } finally {
+      hideLoadingOverlay();
+      chartPreviewData.disabled = false;
+    }
   });
-  const closeChartPreviewData = () => {
+  const closeChartPreviewData = (restoreFocus = false) => {
     if (!chartPreviewDataOverlay) return;
     chartPreviewDataOverlay.hidden = true;
-    chartPreviewDatasetFilterMenu?.remove(); chartPreviewDatasetFilterMenu = null;
     if (chartPreviewDialog?.classList.contains('is-dataset-only')) {
       chartPreviewDialog.classList.remove('is-dataset-only');
       if (chartPreview) chartPreview.hidden = true;
     } else if (chartPreviewSandbox) chartPreviewSandbox.hidden = false;
+    if (restoreFocus) chartPreviewData?.focus();
   };
   chartPreviewDataOverlay?.addEventListener('click', (event) => {
-    if (event.target === chartPreviewDataOverlay || event.target.closest('[data-catalogue-chart-preview-data-close]')) closeChartPreviewData();
+    if (event.target === chartPreviewDataOverlay || event.target.closest('[data-catalogue-chart-preview-data-close]')) closeChartPreviewData(true);
   });
   window.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || !chartPreviewDataOverlay || chartPreviewDataOverlay.hidden) return;
     event.preventDefault();
     event.stopImmediatePropagation();
+    closeChartPreviewData(true);
   }, true);
-  document.addEventListener('click', (event) => {
-    if (chartPreviewDatasetFilterMenu && !chartPreviewDatasetFilterMenu.contains(event.target) && !event.target.closest('.report-chart-viewer-column-filter')) {
-      chartPreviewDatasetFilterMenu.remove(); chartPreviewDatasetFilterMenu = null;
-    }
-  });
   const catalogueBlocks = () => {
     const blocks = [];
     Array.from(table.querySelectorAll('tbody tr')).map(rowValues).forEach((values) => {

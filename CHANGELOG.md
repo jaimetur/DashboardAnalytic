@@ -47,15 +47,18 @@
 - Added application-wide Config settings for timezone, chart renderer, Chromium and event-time filtering, including searchable IANA timezones; event-time bypass disables only dataset date-range prefilters with an explanatory tooltip.
 - Background task cards can be moved and restored to their default dock position with a target control.
 - Dataset imports continue after logout or Workspace changes and automatically resume after an application restart with their original mapping selections.
+- Unified CDR and filtered chart dataset viewers across Dashboards, PPT snapshots, Reporting, Chart Sets and Report Template editing, with column counts and lazy cached filter loading.
+- Chart dataset dialogs now use full-height 5%-inset layouts, right-aligned CSV export, light badge hover states and consistent close controls.
 
 #### 🐛 Bug fixes:
 - Prevented a foreground Dashboard preparation and its automatic warm-up from appearing as duplicate background tasks.
 - Removed legacy `__N` collision columns while retaining genuine duplicate source headers as `_Duplicate_N`.
-- Fixed Dataset Preview badge alignment after restoring hidden columns.
+- Fixed Dataset Preview badge alignment so hidden columns no longer leave stacked badges, while preserving semantic colours inside themed modules.
 - Startup warming now processes only the open Workspace sequentially; other Workspaces wait for 30 minutes of inactivity.
 - Excluded timestamp fields from analysis metrics; expired sessions stop passive polling without redirecting the current page or repeatedly returning unauthorized responses.
 - Task polling reads Workspace databases through short-lived read-only SQLite handles, registry handles close deterministically, size scans are cached and login no longer reruns active Workspace migrations, avoiding WAL checkpoints and database-lock contention.
 - Background task interruption remains successful when its non-critical audit entry encounters a temporary SQLite write lock.
+- Fixed dataset-dialog loading, Escape dismissal, E2E filter layering and duplicate Reporting frame loads.
 
 #### 📚 Documentation:
 - Reorganized Workspace Management help under NetCheck CDR Support with one rule per fixed field.

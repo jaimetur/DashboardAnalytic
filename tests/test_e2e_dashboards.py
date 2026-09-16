@@ -307,9 +307,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-chart-expanded-last"' in page.text
     assert 'id="ds-chart-expanded-canvas-shell"' in page.text
     assert 'id="ds-chart-expanded-position"' in page.text
-    assert 'id="ds-data-filter-count"' in page.text
-    assert 'id="ds-data-clear-filters"' in page.text
-    assert 'id="ds-data-close-bottom"' in page.text
+    assert 'id="ds-data-table"' in page.text
+    assert '<span>Export CSV</span>' in page.text
     assert 'class="ds-chart-expanded-footer"' in page.text
     assert 'id="ds-chart-expanded-controls"' in page.text
     assert 'id="ds-chart-expanded-controls"><button type="button" id="ds-chart-expanded-data"' in page.text
@@ -338,6 +337,13 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "preview_snapshot = replace(" in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     assert "The template owns these required chart attributes." in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+    assert 'window.createUnifiedDatasetViewer' in app_script
+    assert 'window.createUnifiedDatasetViewer' in dashboard_script
+    assert "exportControl: $('ds-data-download')" in dashboard_script
+    assert "window.showLoadingOverlay('Loading Filtered Dataset'" in dashboard_script
+    assert "await renderData();\n      overlay('ds-data-overlay', true);" in dashboard_script
+    app_styles = (Path(__file__).parents[1] / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')
+    assert '.preview-column-filter-menu { position: fixed; z-index: 10010;' in app_styles
     assert "\\s*×\\s*|\\s+\\bx\\b\\s+" in app_script
     assert "const configuredValues = multiFields.has(key)" in app_script
     assert "columns_by_source" in dashboard_script
@@ -349,6 +355,7 @@ def test_dashboards_lifecycle_and_layout(client):
     app_styles = (Path(__file__).parents[1] / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')
     dashboard_styles = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
     assert '.ds-chart-expanded-canvas.ds-hover .ds-chart-filter-panel' in dashboard_styles
+    assert '#ds-data-overlay .ds-data-dialog { position: absolute; inset: 5%;' in dashboard_styles
     assert '.ds-chart-filter-panel.is-open {' in dashboard_styles
     assert 'text-transform: uppercase;' in dashboard_styles
     assert 'height: 14rem;' in dashboard_styles
@@ -632,10 +639,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "['Filtered Universe', filtered, 'ds-preparing-filtered-label']" in dashboard_script
     assert 'rows.hidden = !rows.textContent;' in dashboard_script
     assert 'const zoomResetIcon = () =>' in dashboard_script
-    assert "Object.keys(payload.filter_values).length" in dashboard_script
-    assert "bind('ds-data-clear-filters', async () =>" in dashboard_script
-    assert "Clear ${dataColumnFilters.size} filter${dataColumnFilters.size === 1 ? '' : 's'}" in dashboard_script
-    assert "bind('ds-data-close-bottom',()=>" in dashboard_script
+    assert "if (request.filter_column) parameters.set('filter_column', request.filter_column);" in dashboard_script
+    assert "Clear ${activeFilters} Filter${activeFilters === 1 ? '' : 's'}" in app_script
+    assert "window.createUnifiedDatasetViewer" in dashboard_script
     assert "const reset = node('button', undefined, 'ds-chart-zoom-button ds-chart-zoom-reset');" in dashboard_script
     assert "bind('ds-clear-filters', () => { definition.filters = {}; facets(); filterChanged(); });" in dashboard_script
     assert "bind('ds-last-saved-filters', () => {" in dashboard_script
@@ -717,6 +723,14 @@ def test_dashboards_lifecycle_and_layout(client):
     assert not core.is_empty_catalog_chart(image.content, entry)
     data = client.get(f'/api/e2e-dashboards/data/{token}/0').json()
     assert data['total'] == 3
+    assert data['page_size'] == 100
+    assert data['unfiltered_total'] == 3
+    assert set(data['column_metadata']) == set(data['columns'])
+    assert all({'label', 'kind', 'rule', 'pinned', 'class_name'} <= set(item) for item in data['column_metadata'].values())
+    city_values = client.get(f'/api/e2e-dashboards/data/{token}/0', params={
+        'column_filters': json.dumps({'Operator': ['A']}), 'filter_column': 'City',
+    }).json()
+    assert city_values['filter_values'] == ['London']
     assert client.get(f'/api/e2e-dashboards/data/{token}/0?download=true').headers['content-type'].startswith('text/csv')
     assert client.delete('/api/e2e-dashboards/test').status_code == 200
     assert client.get('/api/e2e-dashboards').json() == {}

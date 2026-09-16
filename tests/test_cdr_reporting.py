@@ -2597,6 +2597,31 @@ def test_reporting_generates_template_chart_previews(client, monkeypatch) -> Non
     assert context_payload['dataset_ids'] == [expected_id]
     assert context_payload['datasets_by_source']['cdr-data'] == [{'value': '1', 'label': 'NetCheck_CDR_Data.csv'}]
     assert context_payload['datasets_by_source']['cdr-voice'] == [{'value': '2', 'label': 'NetCheck_CDR_Voice.csv'}]
+    dataset_preview = client.post('/api/e2e-reporting/chart-preview/data', json={
+        'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
+        'definition': {}, 'page': 0, 'page_size': 100, 'column_filters': {},
+    })
+    assert dataset_preview.status_code == 200, dataset_preview.text
+    dataset_payload = dataset_preview.json()
+    assert dataset_payload['page_size'] == 100
+    assert dataset_payload['filter_values'] == {}
+    assert set(dataset_payload['column_metadata']) == set(dataset_payload['columns'])
+    assert all({'label', 'kind', 'rule', 'pinned', 'class_name'} <= set(item) for item in dataset_payload['column_metadata'].values())
+    filter_values = client.post('/api/e2e-reporting/chart-preview/data', json={
+        'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
+        'definition': {}, 'page': 0, 'page_size': 100, 'column_filters': {},
+        'filter_column': dataset_payload['columns'][0],
+    })
+    assert filter_values.status_code == 200, filter_values.text
+    assert isinstance(filter_values.json()['filter_values'], list)
+    dataset_export = client.post('/api/e2e-reporting/chart-preview/data', json={
+        'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
+        'definition': {}, 'column_filters': {}, 'download': True,
+    })
+    assert dataset_export.status_code == 200, dataset_export.text
+    assert dataset_export.headers['content-type'].startswith('text/csv')
+    assert 'attachment; filename="filtered-chart-dataset.csv"' == dataset_export.headers['content-disposition']
+    assert dataset_payload['columns'][0] in dataset_export.text.splitlines()[0]
     wrong_id = next(value for value in ('1', '2', '3') if value != expected_id)
     invalid_dataset_type = client.post('/api/e2e-reporting/chart-preview', json={
         'source': 'standalone', 'identifier': payload['generation'], 'chart_index': 0,
@@ -2767,6 +2792,10 @@ def test_template_chart_image_preview_uses_combined_reporting_rows(client, monke
         '/admin/report-templates/nsa/Combined%20Preview/chart-preview',
         json={'catalogue_content': catalogue_content, 'row_index': 0},
     )
+    data_export = client.post(
+        '/admin/report-templates/nsa/Combined%20Preview/chart-preview',
+        json={'catalogue_content': catalogue_content, 'row_index': 0, 'download': True},
+    )
 
     preview = client.post(
         '/admin/report-templates/nsa/Combined%20Preview/chart-image-preview',
@@ -2775,6 +2804,9 @@ def test_template_chart_image_preview_uses_combined_reporting_rows(client, monke
 
     assert data_preview.status_code == 200
     assert data_preview.json()['rows'] == [{'Operator': 'EE'}]
+    assert set(data_preview.json()['column_metadata']) == {'Operator'}
+    assert data_export.headers['content-type'].startswith('text/csv')
+    assert data_export.text == 'Operator\nEE\n'
     assert preview.status_code == 200
     assert preview.content == b'PNG'
     assert observed['dataset_ids'] == [7]

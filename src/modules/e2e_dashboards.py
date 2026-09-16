@@ -1155,7 +1155,7 @@ def install_dashboard_routes(core):
     @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/data/{chart_index}')
     def dashboard_ppt_chart_data(
         job_id: int, chart_index: int, page: int = 0, download: bool = False,
-        column_filters: str = '', include_filter_values: bool = False,
+        column_filters: str = '', include_filter_values: bool = False, filter_column: str = '',
         user=Depends(dashboard_user),
     ):
         task_repository = bound_repository()
@@ -1190,7 +1190,7 @@ def install_dashboard_routes(core):
         selected_column_filters = parse_chart_column_filters(column_filters)
         if not download:
             projected_page = projection_chart_data_page(
-                snapshot, entry, page, selected_column_filters, include_filter_values,
+                snapshot, entry, page, selected_column_filters, include_filter_values, filter_column,
             )
             if projected_page is not None:
                 visible, total, chart_total, filter_values = projected_page
@@ -1200,11 +1200,19 @@ def install_dashboard_routes(core):
                     'total': total, 'chart_total': chart_total,
                     'filter_values': filter_values, 'page': max(page, 0),
                     'column_classes': chart_dataset_column_classes(snapshot, entry, visible.columns),
+                    'column_metadata': chart_dataset_column_metadata(snapshot, entry, visible.columns),
+                    'page_size': 100, 'unfiltered_total': chart_total,
                 }
         _, _, frame = snapshot_chart(token, entry_index, user, expected_workspace=workspace)
         frame = unique_chart_dataset_rows(snapshot, entry, frame)
         chart_total = len(frame)
-        filter_values = chart_dataset_filter_values(frame) if include_filter_values else {}
+        values_frame = apply_chart_column_filters(
+            frame, {column: values for column, values in selected_column_filters.items() if identity(column) != identity(filter_column)},
+        )
+        available_filter_values = chart_dataset_filter_values(values_frame) if filter_column else {}
+        filter_values = next(
+            (values for column, values in available_filter_values.items() if identity(column) == identity(filter_column)), []
+        ) if filter_column else (chart_dataset_filter_values(frame) if include_filter_values else {})
         frame = apply_chart_column_filters(frame, selected_column_filters)
         if download:
             return Response(
@@ -1218,6 +1226,8 @@ def install_dashboard_routes(core):
             'total': len(frame), 'chart_total': chart_total,
             'filter_values': filter_values, 'page': page,
             'column_classes': chart_dataset_column_classes(snapshot, entry, visible.columns),
+            'column_metadata': chart_dataset_column_metadata(snapshot, entry, visible.columns),
+            'page_size': 100, 'unfiltered_total': chart_total,
         }
 
     @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/charts/{chart_file}')
@@ -2663,6 +2673,15 @@ def install_dashboard_routes(core):
                 classes[str(column)] = 'main-cdr-column'
         return classes
 
+    def chart_dataset_column_metadata(snapshot, entry, columns):
+        task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
+        datasets = []
+        for dataset_id in snapshot.definition.datasets.get(entry.source_kind, []):
+            dataset = task_repository.get_dataset(int(dataset_id))
+            if dataset:
+                datasets.append(core.serialize_dataset_row(dataset))
+        return core._chart_preview_column_metadata(columns, datasets, entry.source_kind)
+
     def apply_chart_column_filters(frame, column_filters):
         result = frame
         lookup = {identity(column): column for column in frame.columns}
@@ -2695,7 +2714,7 @@ def install_dashboard_routes(core):
         return min(limits) if limits else 0
 
     def projection_chart_data_page(
-        snapshot, entry, page, column_filters=None, include_filter_values=False,
+        snapshot, entry, page, column_filters=None, include_filter_values=False, filter_column='',
     ):
         """Read one exact chart-data page without rebuilding its full DataFrame."""
         spec = _catalog_spec(entry)
@@ -2776,6 +2795,34 @@ def install_dashboard_routes(core):
                     )
                     for index, column in enumerate(selected_columns)
                 }
+            if filter_column:
+                requested_filter_column = lookup.get(identity(filter_column))
+                if requested_filter_column:
+                    values_where = where
+                    values_parameters = list(parameters)
+                    for requested, values in (column_filters or {}).items():
+                        if identity(requested) == identity(filter_column):
+                            continue
+                        column = lookup.get(identity(requested))
+                        if column is None or not values:
+                            values_where = f'({values_where}) AND 0'
+                            continue
+                        placeholders = ', '.join('?' for _value in values)
+                        values_where = (
+                            f'({values_where}) AND '
+                            f'LOWER(TRIM(COALESCE(CAST({quote(column)} AS TEXT), \'\'))) IN ({placeholders})'
+                        )
+                        values_parameters.extend(str(value).strip().lower() for value in values)
+                    filter_values = sorted(
+                        (
+                            str(row[0]) for row in connection.execute(
+                                f'SELECT DISTINCT COALESCE(CAST({quote(requested_filter_column)} AS TEXT), \'\') '
+                                f'FROM {quote(table_name)} WHERE {values_where}',
+                                values_parameters,
+                            )
+                        ),
+                        key=str.casefold,
+                    )
             filtered_where = where
             filtered_parameters = list(parameters)
             for requested, values in (column_filters or {}).items():
@@ -3710,14 +3757,14 @@ def install_dashboard_routes(core):
     @app.get('/api/e2e-dashboards/data/{token}/{index}')
     def chart_data(
         token: str, index: int, page: int = 0, download: bool = False,
-        column_filters: str = '', include_filter_values: bool = False,
+        column_filters: str = '', include_filter_values: bool = False, filter_column: str = '',
         user=Depends(dashboard_user),
     ):
         snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False)
         selected_column_filters = parse_chart_column_filters(column_filters)
         if not download:
             projected_page = projection_chart_data_page(
-                snapshot, entry, page, selected_column_filters, include_filter_values,
+                snapshot, entry, page, selected_column_filters, include_filter_values, filter_column,
             )
             if projected_page is not None:
                 visible, total, chart_total, filter_values = projected_page
@@ -3727,11 +3774,19 @@ def install_dashboard_routes(core):
                     'total': total, 'chart_total': chart_total,
                     'filter_values': filter_values, 'page': max(page, 0),
                     'column_classes': chart_dataset_column_classes(snapshot, entry, visible.columns),
+                    'column_metadata': chart_dataset_column_metadata(snapshot, entry, visible.columns),
+                    'page_size': 100, 'unfiltered_total': chart_total,
                 }
         _, _, frame = snapshot_chart(token, index, user)
         frame = unique_chart_dataset_rows(snapshot, entry, frame)
         chart_total = len(frame)
-        filter_values = chart_dataset_filter_values(frame) if include_filter_values else {}
+        values_frame = apply_chart_column_filters(
+            frame, {column: values for column, values in selected_column_filters.items() if identity(column) != identity(filter_column)},
+        )
+        available_filter_values = chart_dataset_filter_values(values_frame) if filter_column else {}
+        filter_values = next(
+            (values for column, values in available_filter_values.items() if identity(column) == identity(filter_column)), []
+        ) if filter_column else (chart_dataset_filter_values(frame) if include_filter_values else {})
         frame = apply_chart_column_filters(frame, selected_column_filters)
         if download:
             return Response(frame.to_csv(index=False), media_type='text/csv', headers={'Content-Disposition': 'attachment; filename="dashboard-chart-data.csv"'})
@@ -3742,4 +3797,6 @@ def install_dashboard_routes(core):
             'total': len(frame), 'chart_total': chart_total,
             'filter_values': filter_values, 'page': page,
             'column_classes': chart_dataset_column_classes(snapshot, entry, visible.columns),
+            'column_metadata': chart_dataset_column_metadata(snapshot, entry, visible.columns),
+            'page_size': 100, 'unfiltered_total': chart_total,
         }
