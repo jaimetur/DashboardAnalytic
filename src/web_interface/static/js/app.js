@@ -3083,6 +3083,10 @@ document.querySelectorAll('.collapsible-panel').forEach((panel) => {
     if (document.hidden) return;
     try {
       const response = await fetch('/api/workspaces/sizes', {credentials: 'same-origin', cache: 'no-store'});
+      if (response.status === 401) {
+        window.location.assign('/login');
+        return;
+      }
       if (!response.ok) return;
       const payload = await response.json();
       const sizes = payload.sizes || {};
@@ -6197,7 +6201,7 @@ if (queueNode) {
     pin.className = 'background-task-pin-button';
     pin.title = 'Panel is in its default position';
     pin.setAttribute('aria-label', pin.title);
-    pin.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 4 6 6-3 1-4 4-1 5-2-2-2 2-2-2 2-2-2-2 5-1 4-4-1-3Z"/></svg>';
+    pin.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2.4"/><path d="M8.5 4H4v4.5M15.5 4H20v4.5M20 15.5V20h-4.5M4 15.5V20h4.5"/></svg>';
     const restorePosition = () => {
       panel.classList.remove('is-detached');
       panel.style.left = '';
@@ -6369,6 +6373,12 @@ if (queueNode) {
       const response = await fetch('/api/background-tasks', {
         credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'},
       });
+      if (response.status === 401) {
+        // Sessions intentionally live only for the current server process.
+        // Stop passive polling after a PyCharm restart and let the user sign in.
+        window.location.assign('/login');
+        return;
+      }
       if (!response.ok) return;
       const payload = await response.json();
       serverGroups = Array.isArray(payload.groups) ? payload.groups : [];

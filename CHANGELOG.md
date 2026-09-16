@@ -41,16 +41,18 @@
 - Normalized Benchmark, Period, Market, geography, technology, session, result and event-time field families.
 - Added `Vendor_Only` after `Vendor` in Datasets Analysis Adaptive Filters.
 - The Vendors metric now counts distinct `Vendor_Only` values and follows Operators.
-- Added Success Calls and Failed Tests metrics after Completed Tests and before Success Rate Pct.
+- Global outcome cards now use Tests for Data and Calls for Voice/Speech; Completed counts the filtered total.
 - Dataset queue progress now shows persisted elapsed time during processing and after completion.
 - Dataset Preview now marks every field as `PINNED` or `UN_PINNED`; both badges are interactive and explain availability.
 - Added application-wide Config settings for timezone, chart renderer, Chromium and event-time filtering, including searchable IANA timezone selection.
-- Background task cards can be moved and restored to their default dock position with a pin control.
+- Background task cards can be moved and restored to their default dock position with a target control.
 
 #### 🐛 Bug fixes:
 - Prevented a foreground Dashboard preparation and its automatic warm-up from appearing as duplicate background tasks.
 - Removed legacy `__N` collision columns while retaining genuine duplicate source headers as `_Duplicate_N`.
 - Fixed Dataset Preview badge alignment after restoring hidden columns.
+- Startup warming now processes only the open Workspace sequentially; other Workspaces wait for 30 minutes of inactivity.
+- Excluded timestamp fields from analysis metrics and made expired-session polling return to sign-in.
 
 #### 📚 Documentation:
 - Reorganized Workspace Management help under NetCheck CDR Support with one rule per fixed field.

@@ -265,9 +265,9 @@ def test_build_analysis_returns_voice_specific_kpis_and_aggregation() -> None:
 
     assert analysis.global_kpis["dataset_kind"] == "voice"
     assert analysis.global_kpis["success_rate_pct"] == 66.67
-    assert analysis.global_kpis["completed_calls"] == 2
+    assert analysis.global_kpis["completed_calls"] == 3
     assert analysis.global_kpis["success_calls"] == 2
-    assert analysis.global_kpis["failed_tests"] == 1
+    assert analysis.global_kpis["failed_calls"] == 1
     assert analysis.metric_kpis["metric"] == "POLQA_LQ_Avg"
     assert analysis.metric_kpis["mean_metric"] == 3.8667
     assert analysis.metric_kpis["p10_metric"] == 3.28
@@ -278,6 +278,39 @@ def test_build_analysis_returns_voice_specific_kpis_and_aggregation() -> None:
     assert len(analysis.scorecard_groups) == 2
     assert analysis.scorecard_groups[0]["group"] == "Vodafone"
     assert [item["label"] for item in analysis.scorecard_groups[0]["items"]] == ["P10", "P25", "P50", "P75", "P90"]
+
+
+def test_global_kpis_use_test_terminology_and_total_rows_for_data_cdrs() -> None:
+    df = pd.DataFrame({
+        'dataset_kind': ['data', 'data', 'data'],
+        'score': [90.0, 80.0, 70.0],
+        'success': [True, False, False],
+        'failure': [False, True, False],
+    })
+
+    analysis = build_analysis(df, {'aggregation': 'all'}, 'score')
+
+    assert analysis.global_kpis['completed_tests'] == 3
+    assert analysis.global_kpis['success_tests'] == 1
+    assert analysis.global_kpis['failed_tests'] == 1
+    assert 'completed_calls' not in analysis.global_kpis
+    assert 'success_calls' not in analysis.global_kpis
+
+
+def test_global_kpis_use_call_terminology_and_total_rows_for_speech_cdrs() -> None:
+    df = pd.DataFrame({
+        'dataset_kind': ['speech', 'speech'],
+        'LQ': [4.0, 3.0],
+        'success': [True, False],
+        'failure': [False, True],
+    })
+
+    analysis = build_analysis(df, {'aggregation': 'all'}, 'LQ')
+
+    assert analysis.global_kpis['completed_calls'] == 2
+    assert analysis.global_kpis['success_calls'] == 1
+    assert analysis.global_kpis['failed_calls'] == 1
+    assert 'failed_tests' not in analysis.global_kpis
 
 
 def test_build_analysis_applies_date_range_filters_from_event_start_time() -> None:

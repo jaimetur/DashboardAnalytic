@@ -1724,23 +1724,23 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .background-task-dock-system { left: 50%; transform: translateX(-50%); }
 .background-task-panels.has-both-sides .background-task-dock { width: min(360px, calc(50vw - 1.5rem)); }
 .background-task-panels.has-three-docks .background-task-dock { width: min(360px, calc((100vw - 4rem) / 3)); }
-.background-task-panel { position: relative; pointer-events: auto; flex: 0 0 auto; box-sizing: border-box; overflow: hidden; padding: 0.85rem 3.55rem 0.85rem 0.9rem; border: 1px solid rgba(113, 36, 43, 0.38); border-radius: 14px; background: linear-gradient(150deg, rgba(255, 250, 248, 0.98), rgba(247, 230, 229, 0.98)); color: #492127; box-shadow: 0 14px 34px rgba(44, 24, 29, 0.24); backdrop-filter: blur(12px); touch-action: none; }
+.background-task-panel { position: relative; pointer-events: auto; flex: 0 0 auto; box-sizing: border-box; overflow: hidden; padding: 0.85rem 0.9rem; border: 1px solid rgba(113, 36, 43, 0.38); border-radius: 14px; background: linear-gradient(150deg, rgba(255, 250, 248, 0.98), rgba(247, 230, 229, 0.98)); color: #492127; box-shadow: 0 14px 34px rgba(44, 24, 29, 0.24); backdrop-filter: blur(12px); touch-action: none; }
 .background-task-panel.is-detached { position: fixed; z-index: 8600; width: min(360px, calc(100vw - 1rem)); max-height: min(70vh, 620px); overflow-y: auto; }
 .background-task-panel.is-dragging { cursor: grabbing; user-select: none; }
 .background-task-panel-active { border-color: rgba(170, 131, 23, 0.42); background: linear-gradient(150deg, rgba(255, 253, 234, 0.98), rgba(255, 244, 194, 0.98)); color: #665016; box-shadow: 0 14px 34px rgba(116, 88, 13, 0.18); }
 .background-task-panel-other { border-color: rgba(54, 119, 183, 0.42); background: linear-gradient(150deg, rgba(240, 248, 255, 0.98), rgba(196, 225, 249, 0.98)); color: #1d527f; box-shadow: 0 14px 34px rgba(32, 101, 162, 0.18); }
 .background-task-panel-system { border-color: rgba(178, 61, 69, 0.42); background: linear-gradient(150deg, rgba(255, 244, 244, 0.98), rgba(255, 211, 214, 0.98)); color: #772b34; box-shadow: 0 14px 34px rgba(139, 37, 48, 0.18); }
-.background-task-workspace { margin: 0 1.4rem 0.68rem 0; font-size: 0.78rem; font-weight: 850; letter-spacing: 0.045em; line-height: 1.25; text-transform: uppercase; overflow-wrap: anywhere; }
+.background-task-workspace { margin: 0 3.55rem 0.68rem 0; font-size: 0.78rem; font-weight: 850; letter-spacing: 0.045em; line-height: 1.25; text-transform: uppercase; overflow-wrap: anywhere; }
 .background-task-minimize-button { position: absolute; top: 0.46rem; right: 0.54rem; z-index: 1; display: grid; place-items: center; width: 1.35rem; height: 1.35rem; min-height: 0; padding: 0; border: 1px solid rgba(73, 33, 39, 0.28); border-radius: 7px; background: rgba(255, 255, 255, 0.58); color: #54232b; font-size: 1.2rem; font-weight: 900; line-height: 1; cursor: pointer; }
 .background-task-pin-button { position: absolute; top: 0.46rem; right: 2.06rem; z-index: 1; display: grid; place-items: center; width: 1.35rem; height: 1.35rem; min-height: 0; padding: 0; border: 1px solid rgba(73, 33, 39, 0.28); border-radius: 7px; background: rgba(255, 255, 255, 0.58); color: #54232b; box-shadow: none; cursor: pointer; }
-.background-task-pin-button svg { width: .9rem; height: .9rem; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.background-task-pin-button svg { width: .98rem; height: .98rem; fill: none; stroke: currentColor; stroke-width: 2.15; stroke-linecap: round; stroke-linejoin: round; }
 .background-task-pin-button:disabled { opacity: .45; cursor: default; }
 .background-task-pin-button:hover:not(:disabled) { background: rgba(255,255,255,.96); color: #8b1d24; }
 .background-task-panel-active .background-task-minimize-button { border-color: rgba(102, 80, 22, 0.28); color: #80610d; }
 .background-task-panel-other .background-task-minimize-button { border-color: rgba(29, 82, 127, 0.28); color: #286a9f; }
 .background-task-panel-system .background-task-minimize-button { border-color: rgba(119, 43, 52, 0.28); color: #962f3c; }
 .background-task-minimize-button:hover { background: rgba(255, 255, 255, 0.96); color: #8b1d24; }
-.background-task-panel.is-minimized { padding: 0.58rem 3.55rem 0.58rem 0.8rem; }
+.background-task-panel.is-minimized { padding: 0.58rem 0.8rem; }
 .background-task-panel.is-minimized .background-task-workspace { margin-bottom: 0; }
 .background-task-panel.is-minimized .background-task-list { display: none; }
 .background-task-panel-active .background-task-workspace { color: #80610d; }

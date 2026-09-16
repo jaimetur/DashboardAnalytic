@@ -2186,6 +2186,19 @@ class Repository:
                 (username, action, details, local_now_iso()),
             )
 
+    def try_add_log(self, username: str, action: str, details: str, *, timeout_seconds: float = 0.25) -> bool:
+        """Write non-critical diagnostics without waiting behind a long-running writer."""
+        try:
+            with sqlite3.connect(self.db_path, timeout=timeout_seconds) as conn:
+                conn.execute(f"PRAGMA busy_timeout = {max(1, int(timeout_seconds * 1000))}")
+                conn.execute(
+                    "INSERT INTO audit_logs (username, action, details, created_at) VALUES (?, ?, ?, ?)",
+                    (username, action, details, local_now_iso()),
+                )
+            return True
+        except sqlite3.OperationalError:
+            return False
+
     def add_report_run(self, *, report_type: str, technology: str, scope: str, data_dataset_id: int,
                        voice_dataset_id: int, speech_dataset_id: int, vodafone_mapping_dataset_id: int | None,
                        three_mapping_dataset_id: int | None,

@@ -1383,6 +1383,27 @@ def test_dashboard_disables_metrics_without_non_null_values(client) -> None:
     assert response.status_code == 200
     assert 'value="score"' in response.text
     assert 'value="latency_ms" disabled' in response.text
+
+
+def test_datasets_analysis_excludes_timestamp_columns_from_metrics(client) -> None:
+    login(client)
+    upload_response = client.post(
+        "/datasets-analysis/upload",
+        data={"dataset_kinds": "data"},
+        files={"dataset_files": ("sample.csv", BytesIO(
+            b"market,operator,score,Call_Start_Time\nES,3,91,2026-07-10 10:00:00\n"
+        ), "text/csv")},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    response = client.get(
+        "/datasets-analysis?dataset_id=1&metric=score&metric=Call_Start_Time&aggregation=all&load=1"
+    )
+    assert response.status_code == 200
+    assert 'value="Call_Start_Time"' not in response.text
+    assert 'value="operator"  disabled' in response.text
+    assert 'value="score"' in response.text
     assert "data-table-wrap" in response.text
     assert "Global Aggregation" in response.text
 

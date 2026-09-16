@@ -3368,12 +3368,11 @@ def install_dashboard_routes(core):
                     )
                 cached_indexes = cached_canvas_model_indexes(preview['token'])
                 pending_indexes = list(dict.fromkeys(charts))
-                # Keep Dashboards serial in the outer queue, but render a
-                # small batch of independent chart models concurrently.
-                # Their snapshot caches use per-frame locks, so companion
-                # charts still share their source data safely.
+                # Prewarming is intentionally sequential: one Dashboard is
+                # dispatched at a time and each chart model follows in order.
+                # This avoids multiplying memory pressure for large CDRs.
                 with ThreadPoolExecutor(
-                    max_workers=DASHBOARD_CHART_RENDER_WORKERS,
+                    max_workers=1,
                     thread_name_prefix='e2e-dashboard-chart',
                 ) as chart_executor:
                     while pending_indexes:
@@ -3387,7 +3386,7 @@ def install_dashboard_routes(core):
                             ordered_indexes = [*priority_indexes, *(
                                 index for index in pending_indexes if index not in priority_indexes
                             )]
-                            batch = ordered_indexes[:DASHBOARD_CHART_RENDER_WORKERS]
+                            batch = ordered_indexes[:1]
                             pending_indexes = [index for index in pending_indexes if index not in batch]
                             job['priority_indexes'] = [
                                 candidate for candidate in job.get('priority_indexes', []) if candidate not in batch

@@ -376,12 +376,22 @@ def _build_global_kpis(df: pd.DataFrame, dataset_kind: str, filters: dict[str, A
         'cities': _selected_count(filters, 'city') if _selected_count(filters, 'city') is not None else (int(df['city'].dropna().nunique()) if 'city' in df.columns else 0),
     }
     if dataset_kind == 'data':
-        kpis['completed_tests'] = _true_count(df, 'success')
+        # One Data CDR row represents one test. Completed is the complete
+        # filtered population, independently of its Success/Failure outcome.
+        kpis.update({
+            'completed_tests': int(len(df.index)),
+            'success_tests': _true_count(df, 'success'),
+            'failed_tests': _true_count(df, 'failure'),
+        })
     elif dataset_kind in {'voice', 'speech'}:
-        kpis['completed_calls'] = _true_count(df, 'success')
+        # Voice and Speech CDR rows represent calls, so keep their terminology
+        # and do not present successful calls as the completed total.
+        kpis.update({
+            'completed_calls': int(len(df.index)),
+            'success_calls': _true_count(df, 'success'),
+            'failed_calls': _true_count(df, 'failure'),
+        })
     kpis.update({
-        'success_calls': _true_count(df, 'success'),
-        'failed_tests': _true_count(df, 'failure'),
         'success_rate_pct': _rate(df['success']) if 'success' in df.columns else 0.0,
         'failure_rate_pct': _rate(df['failure']) if 'failure' in df.columns else 0.0,
     })
@@ -597,7 +607,17 @@ def build_analysis(df: pd.DataFrame, filters: dict[str, Any], metric: str, *, pr
     if filtered.empty:
         raise ValueError('No rows match the selected filters')
 
-    dataset_kind = infer_dataset_kind(filtered, str(filtered.get('source_file', pd.Series(dtype='object')).iloc[0]) if 'source_file' in filtered.columns else '')
+    declared_kind = _resolve_column(filtered, 'dataset_kind')
+    dataset_kind = ''
+    if declared_kind:
+        declared_values = filtered[declared_kind].dropna().astype(str).str.strip().str.casefold()
+        if not declared_values.empty and declared_values.iloc[0] in {'data', 'voice', 'speech', 'generic'}:
+            dataset_kind = declared_values.iloc[0]
+    if not dataset_kind:
+        dataset_kind = infer_dataset_kind(
+            filtered,
+            str(filtered.get('source_file', pd.Series(dtype='object')).iloc[0]) if 'source_file' in filtered.columns else '',
+        )
     selected_metric = _infer_metric(filtered, metric, dataset_kind)
     analysis_frame = filtered[pd.to_numeric(filtered[selected_metric], errors='coerce').notna()].copy()
     summary = DatasetSummary(

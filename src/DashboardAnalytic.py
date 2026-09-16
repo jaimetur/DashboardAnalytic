@@ -110,6 +110,10 @@ MANUAL_RESTORE_JOBS: dict[str, dict[str, Any]] = {}
 MANUAL_RESTORE_JOBS_LOCK = Lock()
 EXPORT_PACKAGE_TTL = timedelta(hours=24)
 TRANSFER_OFFER_TTL = timedelta(minutes=15)
+DEFERRED_WORKSPACE_PREFETCH_IDLE_SECONDS = 30 * 60
+APPLICATION_ACTIVITY_LOCK = Lock()
+APPLICATION_LAST_ACTIVITY_AT = monotonic()
+DEFERRED_WORKSPACE_PREFETCH_STARTED = False
 DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
 application_config_dir = settings.database_path.parent
 application_data_dir = settings.data_dir
@@ -161,6 +165,33 @@ def apply_runtime_configuration(values: dict[str, Any]) -> None:
     os.environ[IGNORE_EVENT_TIME_FILTERING_ENV] = (
         'true' if bool(values.get('ignore_event_time_filtering')) else 'false'
     )
+
+
+def record_application_activity() -> None:
+    """Restart the deferred non-active Workspace prefetch idle window."""
+    global APPLICATION_LAST_ACTIVITY_AT, DEFERRED_WORKSPACE_PREFETCH_STARTED
+    with APPLICATION_ACTIVITY_LOCK:
+        APPLICATION_LAST_ACTIVITY_AT = monotonic()
+        DEFERRED_WORKSPACE_PREFETCH_STARTED = False
+
+
+def deferred_workspace_prefetch_loop() -> None:
+    """Warm non-active Workspaces only after a sustained inactive interval."""
+    global DEFERRED_WORKSPACE_PREFETCH_STARTED
+    while True:
+        time_module.sleep(30)
+        with APPLICATION_ACTIVITY_LOCK:
+            idle_seconds = monotonic() - APPLICATION_LAST_ACTIVITY_AT
+            if DEFERRED_WORKSPACE_PREFETCH_STARTED or idle_seconds < DEFERRED_WORKSPACE_PREFETCH_IDLE_SECONDS:
+                continue
+            DEFERRED_WORKSPACE_PREFETCH_STARTED = True
+        active_id = workspace_registry.active_id()
+        inactive_workspaces = [workspace for workspace in workspace_registry.list() if workspace.id != active_id]
+        if not inactive_workspaces:
+            continue
+        dashboard_prefetch = getattr(sys.modules[__name__], 'e2e_dashboard_prefetch_workspace', None)
+        if callable(dashboard_prefetch):
+            dashboard_prefetch(inactive_workspaces)
 
 
 def _reporting_memory_mb() -> float:
@@ -1589,18 +1620,37 @@ async def lifespan(_: FastAPI):
                     'chart_jobs': interrupted_chart_jobs,
                 }),
             )
+    # Warm only the open Workspace immediately. E2E Dashboard serializes
+    # Dashboard and chart warming; every other Workspace waits for 30 minutes
+    # of inactivity so startup never opens all large CDR databases together.
     dashboard_prefetch = getattr(sys.modules[__name__], 'e2e_dashboard_prefetch_workspace', None)
-    if callable(dashboard_prefetch):
+    if active_workspace and callable(dashboard_prefetch):
         Thread(
             target=dashboard_prefetch,
-            args=(workspace_registry.list(),),
+            args=([active_workspace],),
             name='e2e-dashboard-startup-prefetch',
             daemon=True,
         ).start()
+    Thread(target=deferred_workspace_prefetch_loop, name='e2e-dashboard-idle-prefetch', daemon=True).start()
     yield
 
 
 app = FastAPI(title=__app_name__, version=__version__, lifespan=lifespan)
+
+
+@app.middleware('http')
+async def track_interactive_application_requests(request: Request, call_next):
+    """Track user navigation without counting the browser's passive polls."""
+    passive_paths = {
+        '/api/background-tasks',
+        '/api/workspaces/sizes',
+        '/api/e2e-dashboards/statuses',
+    }
+    if request.url.path not in passive_paths and not request.url.path.startswith('/static/'):
+        record_application_activity()
+    return await call_next(request)
+
+
 app.mount('/static', StaticFiles(directory=settings.static_dir), name='static')
 templates = Jinja2Templates(directory=str(settings.template_dir))
 
@@ -1743,12 +1793,19 @@ def is_metric_candidate(column: str) -> bool:
         'year', 'week', 'month', 'day', 'hour',
         'campaign_year', 'campaign_quarter', 'hour_bucket', 'day_bucket',
         'dataset_id', 'user_id', 'row_id', 'record_id', 'session_id', 'call_id', 'test_id', 'campaign_id',
+        'campaign', 'benchmark', 'period', 'market', 'region', 'zone', 'city',
+        'operator', 'subscriber', 'suscriber', 'vendor', 'vendor_only',
+        'technology', 'rat', 'rat_a', 'l2_call_mode_a', 'playing_technology',
+        'session_type', 'type_of_test', 'test_name',
+        'call_status', 'status', 'result', 'test_result',
+        'source_file', 'source_sheet', 'dataset_kind',
     }
     excluded_fragments = (
         '_id', ' id', 'uuid', 'guid',
         'latitude', 'longitude', 'gps_lat', 'gps_lon', 'coordinate', 'location_accuracy',
         'cell_id', 'cellid', 'global_ci', 'globalci', 'gcid', 'cgi', 'eci', 'enodeb',
         'local_cell', 'physical_cell', 'pci', 'arfcn', 'channel', 'mcc', 'mnc', 'tac', 'lac',
+        '_time', ' time', '_timestamp', ' timestamp', '_date', ' date',
     )
     excluded_normalized = {'lat', 'lon', 'latitude', 'longitude', 'altitude', 'bearing', 'accuracy', 'x_coordinate', 'y_coordinate'}
     if lowered in excluded_exact:
@@ -2615,6 +2672,11 @@ def current_user(request: Request) -> SessionUser:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Your session has expired. Please sign in again.')
         raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={'Location': '/login'})
     return user
+
+
+def add_analysis_audit_log(username: str, action: str, details: str) -> None:
+    """Record analysis diagnostics without turning a recoverable view error into a 500."""
+    repository.try_add_log(username, action, details)
 
 
 @app.post('/account/change-password')
@@ -5675,7 +5737,7 @@ def build_datasets_analysis_payload(selected_dataset: dict[str, Any] | None, req
                     analysis = store_cached_analysis(dataset_path, metric_filters, metric, build_analysis(df, metric_filters, metric, prefiltered=True))
                 if username:
                     for captured in captured_warnings:
-                        repository.add_log(
+                        add_analysis_audit_log(
                             username,
                             'analyze_dataset_warning',
                             json.dumps({
@@ -5688,7 +5750,7 @@ def build_datasets_analysis_payload(selected_dataset: dict[str, Any] | None, req
             analyses.append({'metric': metric, 'result': analysis})
         except ValueError as exc:
             if username:
-                repository.add_log(
+                add_analysis_audit_log(
                     username,
                     'analyze_dataset_failed',
                     json.dumps({
@@ -5703,7 +5765,7 @@ def build_datasets_analysis_payload(selected_dataset: dict[str, Any] | None, req
             return None, [], selected_metrics, filter_options, str(exc), False
         except Exception as exc:
             if username:
-                repository.add_log(
+                add_analysis_audit_log(
                     username,
                     'analyze_dataset_failed',
                     json.dumps({
