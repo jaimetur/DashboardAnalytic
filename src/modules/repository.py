@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 import shutil
 import re
+import csv
+import io
 from datetime import datetime
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
@@ -1675,6 +1677,67 @@ class Repository:
         return self._load_table_preview_page(
             self.reporting_rows_table_name(dataset_kind), set(self.list_reporting_row_columns(dataset_kind)),
             columns, filters, page, page_size, filter_column,
+        )
+
+    def _stream_table_preview_csv(
+        self, table_name: str, existing_columns: set[str], columns: list[str],
+        filters: dict[str, list[str]],
+    ) -> Iterator[str]:
+        """Stream all preview rows as CSV without materializing the dataset in memory."""
+        selected_columns = [
+            (column, self._resolve_dataset_row_column_name(existing_columns, column))
+            for column in columns
+        ]
+        where_clauses: list[str] = []
+        params: list[Any] = []
+        for key, raw_values in filters.items():
+            resolved = self._resolve_dataset_row_column_name(existing_columns, key)
+            if not resolved:
+                continue
+            values = [str(value).strip().lower() for value in raw_values]
+            if not values:
+                where_clauses.append('0 = 1')
+                continue
+            placeholders = ', '.join('?' for _ in values)
+            where_clauses.append(
+                f"LOWER(COALESCE(TRIM(CAST({self._quote_identifier(resolved)} AS TEXT)), '')) IN ({placeholders})"
+            )
+            params.extend(values)
+        select_clause = ', '.join(
+            f"{self._quote_identifier(actual)} AS {self._quote_identifier(requested)}"
+            if actual else f"'' AS {self._quote_identifier(requested)}"
+            for requested, actual in selected_columns
+        )
+        where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ''
+        output = io.StringIO(newline='')
+        writer = csv.writer(output)
+        writer.writerow(columns)
+        yield output.getvalue()
+        output.seek(0)
+        output.truncate(0)
+        with self.connection() as conn:
+            cursor = conn.execute(
+                f"SELECT {select_clause} FROM {self._quote_identifier(table_name)}{where_sql} ORDER BY rowid",
+                params,
+            )
+            while rows := cursor.fetchmany(1000):
+                writer.writerows(tuple('' if value is None else value for value in row) for row in rows)
+                yield output.getvalue()
+                output.seek(0)
+                output.truncate(0)
+
+    def stream_dataset_preview_csv(
+        self, dataset_id: int, columns: list[str], filters: dict[str, list[str]],
+    ) -> Iterator[str]:
+        return self._stream_table_preview_csv(
+            self.dataset_rows_table_name(dataset_id), set(self.list_dataset_row_columns(dataset_id)), columns, filters,
+        )
+
+    def stream_reporting_preview_csv(
+        self, dataset_kind: str, columns: list[str], filters: dict[str, list[str]],
+    ) -> Iterator[str]:
+        return self._stream_table_preview_csv(
+            self.reporting_rows_table_name(dataset_kind), set(self.list_reporting_row_columns(dataset_kind)), columns, filters,
         )
 
     def reporting_rows_exist_for_dataset(self, dataset_id: int, dataset_kind: str) -> bool:

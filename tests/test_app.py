@@ -2950,6 +2950,7 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     assert 'Vodafone UK' in preview_response.text
     assert 'action="/workspace/combined/data/preview"' not in preview_response.text
     assert 'data-endpoint="/api/workspace/combined/data/preview/data"' in preview_response.text
+    assert 'data-server-preview-export' in preview_response.text
     assert 'name="cdr_operator"' not in preview_response.text
     assert 'data-preview-column-filter' not in preview_response.text
     assert 'data-preview-row-filter' not in preview_response.text
@@ -2961,6 +2962,11 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     assert combined_page.status_code == 200
     assert combined_page.json()['total'] == 1
     assert combined_page.json()['filter_values'] == ['Vodafone UK']
+    combined_export = client.post('/api/workspace/combined/data/preview/data', json={
+        'column_filters': {'operator': ['Vodafone UK']}, 'download': True,
+    })
+    assert combined_export.headers['content-type'].startswith('text/csv')
+    assert 'Vodafone UK' in combined_export.text
 
 
 def test_combined_dataset_missing_rows_are_flagged_and_require_confirmation(client, tmp_path: Path) -> None:
@@ -3124,6 +3130,7 @@ def test_cdr_preview_paginates_and_filters_every_column(client) -> None:
     assert 'class="auto-calculated-preview-column"' in default_preview.text
     assert 'data-column-label="Test Family"' in default_preview.text
     assert 'data-server-preview-column-search' in default_preview.text
+    assert 'data-server-preview-export' in default_preview.text
     assert 'data-preview-dataset-switch' in default_preview.text
     assert 'data-preview-dataset-switch-menu' in default_preview.text
     assert "showLoadingOverlay(\n      'Loading Workspace Dataset'" in app_module.PROJECT_ROOT.joinpath(
@@ -3190,6 +3197,14 @@ def test_cdr_preview_paginates_and_filters_every_column(client) -> None:
     assert filtered_response.json()['rows'][0]['Vendor_Only'] == 'Nokia'
     assert filtered_response.json()['rows'][0]['Suscriber'] == 'Target User'
     assert filtered_response.json()['rows'][0]['Campaign'] == 'UK_Q4_2026'
+
+    filtered_export = client.post('/api/workspace/preview/1/data', json={
+        'column_filters': {'operator': ['3'], 'Vendor': ['nOkIa']}, 'download': True,
+    })
+    assert filtered_export.headers['content-type'].startswith('text/csv')
+    assert 'attachment; filename="dataset-1-preview.csv"' == filtered_export.headers['content-disposition']
+    assert ',3,Target User,Nokia,Nokia,' in filtered_export.text
+    assert 'Vodafone UK' not in filtered_export.text
 
     empty_selection = client.post('/api/workspace/preview/1/data', json={
         'page': 0, 'column_filters': {'operator': []},

@@ -88,6 +88,7 @@
         <button type="button" data-preview-tag-filter-toggle aria-expanded="false"><span data-preview-tag-filter-label>All Labels</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7 5 6 5-6"/></svg></button>
         <div class="preview-tag-filter-menu" data-preview-tag-filter-menu hidden><button type="button" class="preview-tag-filter-all" data-preview-tag-filter-all>All Labels</button>{% for tag in preview_available_tags %}<label><input type="checkbox" value="{{ tag }}"> <span>{{ tag }}</span></label>{% endfor %}</div>
       </div>
+      <button type="button" class="preview-export-csv" data-server-preview-export title="Export all filtered rows as CSV"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span>Export CSV</span></button>
     </div>
     {% else %}
     <div class="preview-table-filters" data-preview-table-filters>

@@ -38,7 +38,7 @@ import httpx
 import pandas as pd
 from PIL import Image
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
@@ -7712,7 +7712,7 @@ def preview_dataset(
 @app.post('/api/workspace/preview/{dataset_id}/data')
 async def dataset_preview_data(
     dataset_id: int, request: Request, user: SessionUser = Depends(current_user),
-) -> JSONResponse:
+) -> Response:
     dataset_row = repository.get_dataset(dataset_id)
     if not dataset_row:
         raise HTTPException(status_code=404, detail='Dataset not found')
@@ -7725,7 +7725,14 @@ async def dataset_preview_data(
         field for field in (*PREVIEW_METADATA_FIELDS, *MAIN_CDR_FIELDS) if column_identity(field) not in available_identities
     )
     columns, _derived = _ordered_cdr_preview_columns(available_columns, [dataset['stored_path']])
-    page, filters, filter_column = _dataset_preview_request(await request.json(), columns)
+    payload = await request.json()
+    page, filters, filter_column = _dataset_preview_request(payload, columns)
+    if bool(payload.get('download')):
+        return StreamingResponse(
+            repository.stream_dataset_preview_csv(dataset_id, columns, filters),
+            media_type='text/csv',
+            headers={'Content-Disposition': f'attachment; filename="dataset-{dataset_id}-preview.csv"'},
+        )
     frame, total, filter_values = repository.load_dataset_preview_page(
         dataset_id, columns, filters, page, 100, filter_column,
     )
@@ -7839,7 +7846,7 @@ def preview_combined_dataset(
 @app.post('/api/workspace/combined/{kind}/preview/data')
 async def combined_dataset_preview_data(
     kind: str, request: Request, user: SessionUser = Depends(current_user),
-) -> JSONResponse:
+) -> Response:
     normalized_kind = str(kind or '').casefold()
     if normalized_kind not in CDR_DATASET_KINDS:
         raise HTTPException(status_code=404, detail='Combined dataset not found')
@@ -7858,7 +7865,14 @@ async def combined_dataset_preview_data(
         and dataset['dataset_kind'] == normalized_kind
     ]
     columns, _derived = _ordered_cdr_preview_columns(available_columns, source_paths)
-    page, filters, filter_column = _dataset_preview_request(await request.json(), columns)
+    payload = await request.json()
+    page, filters, filter_column = _dataset_preview_request(payload, columns)
+    if bool(payload.get('download')):
+        return StreamingResponse(
+            repository.stream_reporting_preview_csv(normalized_kind, columns, filters),
+            media_type='text/csv',
+            headers={'Content-Disposition': f'attachment; filename="combined-cdr-{normalized_kind}-preview.csv"'},
+        )
     frame, total, filter_values = repository.load_reporting_preview_page(
         normalized_kind, columns, filters, page, 100, filter_column,
     )

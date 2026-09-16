@@ -48,7 +48,7 @@
 - Background task cards can be moved and restored to their default dock position with a target control.
 - Dataset imports continue after logout or Workspace changes and automatically resume after an application restart with their original mapping selections.
 - Unified CDR and filtered chart dataset viewers across Dashboards, PPT snapshots, Reporting, Chart Sets and Report Template editing, with column counts and lazy cached filter loading.
-- Chart dataset dialogs now use full-height 5%-inset layouts, right-aligned CSV export, light badge hover states and consistent close controls.
+- CDR and chart dataset viewers now provide right-aligned filtered CSV export; chart dialogs use full-height 5%-inset layouts, light badge hover states and consistent close controls.
 
 #### 🐛 Bug fixes:
 - Prevented a foreground Dashboard preparation and its automatic warm-up from appearing as duplicate background tasks.

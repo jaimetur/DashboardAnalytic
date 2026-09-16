@@ -691,6 +691,7 @@ const initializeServerDatasetPreview = (toolbar) => {
   const filteringStatus = document.querySelector('[data-preview-filtering-status]');
   const filteringStatusText = filteringStatus?.querySelector('[data-preview-filtering-text]');
   const columnSearch = toolbar.querySelector('[data-server-preview-column-search]');
+  const exportButton = toolbar.querySelector('[data-server-preview-export]');
   const tagFilter = toolbar.querySelector('[data-preview-tag-filter]');
   const tagFilterToggle = tagFilter?.querySelector('[data-preview-tag-filter-toggle]');
   const tagFilterLabel = tagFilterToggle?.querySelector('[data-preview-tag-filter-label]');
@@ -812,6 +813,38 @@ const initializeServerDatasetPreview = (toolbar) => {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.detail || 'Unable to load the dataset preview.');
     return payload;
+  };
+
+  const exportPreview = async () => {
+    if (!exportButton || !endpoint || exportButton.disabled) return;
+    exportButton.disabled = true;
+    showLoadingOverlay('Exporting Dataset', 'Please wait while the filtered rows are written to CSV.');
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+        body: JSON.stringify({
+          column_filters: Object.fromEntries(Array.from(columnFilters, ([column, values]) => [column, Array.from(values)])),
+          download: true,
+        }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || 'Unable to export the dataset preview.');
+      }
+      const disposition = response.headers.get('content-disposition') || '';
+      const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || 'dataset-preview.csv';
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url; link.download = filename;
+      document.body.append(link); link.click(); link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      showInfoDialog(error.message || 'Unable to export the dataset preview.', {title: 'Export CSV', tone: 'error'});
+    } finally {
+      hideLoadingOverlay();
+      exportButton.disabled = false;
+    }
   };
 
   const renderRows = (rows) => {
@@ -978,6 +1011,7 @@ const initializeServerDatasetPreview = (toolbar) => {
     columnFilters.clear();
     loadPage(0, 'Clearing dataset filters…');
   });
+  exportButton?.addEventListener('click', exportPreview);
   columnSearch?.addEventListener('input', applyColumnSearch);
   tagFilterToggle?.addEventListener('click', (event) => {
     event.stopPropagation();
@@ -1024,6 +1058,7 @@ const initializeServerDatasetPreview = (toolbar) => {
     closeColumnMenu();
     document.removeEventListener('click', closePreviewMenus);
     document.removeEventListener('keydown', closePreviewMenuOnEscape);
+    exportButton?.removeEventListener('click', exportPreview);
     window.removeEventListener('resize', closeColumnMenu);
     tableWrap?.removeEventListener('scroll', syncTagsAfterScroll);
     window.removeEventListener('resize', syncTagStrip);
