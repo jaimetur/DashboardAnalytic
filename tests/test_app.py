@@ -91,6 +91,27 @@ def test_expired_passive_polling_returns_an_inert_response_without_unauthorized_
     }
 
 
+def test_repository_reads_remain_available_while_a_background_writer_is_active(tmp_path: Path) -> None:
+    from src.modules.repository import Repository
+
+    database_path = tmp_path / 'concurrent-workspace.db'
+    repository = Repository(database_path)
+    repository.initialize()
+
+    with sqlite3.connect(database_path) as journal_connection:
+        assert journal_connection.execute('PRAGMA journal_mode').fetchone()[0].casefold() == 'wal'
+
+    writer = sqlite3.connect(database_path, timeout=1.0)
+    try:
+        writer.execute('BEGIN IMMEDIATE')
+        started_at = time.monotonic()
+        assert repository.list_datasets() == []
+        assert time.monotonic() - started_at < 1.0
+    finally:
+        writer.rollback()
+        writer.close()
+
+
 def test_report_template_timestamp_migration_does_not_rewrite_complete_rows(tmp_path: Path) -> None:
     from src.modules.repository import Repository
 

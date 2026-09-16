@@ -205,7 +205,6 @@ class Repository:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA busy_timeout = 30000")
-        conn.execute("PRAGMA synchronous = NORMAL")
         try:
             yield conn
             conn.commit()
@@ -218,7 +217,6 @@ class Repository:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA busy_timeout = 30000")
-        conn.execute("PRAGMA synchronous = NORMAL")
         try:
             yield conn
             conn.commit()
@@ -328,6 +326,7 @@ class Repository:
     def initialize(self) -> None:
         self.remove_legacy_global_tables()
         with self.connection() as conn:
+            self._configure_database_journal(conn)
             self._migrate_calculated_dimensions_table(conn)
             conn.executescript(SCHEMA)
             mappings_seeded = conn.execute(
@@ -363,6 +362,7 @@ class Repository:
                 (local_now_iso(),),
             )
         with self.global_connection() as conn:
+            self._configure_database_journal(conn)
             conn.executescript(GLOBAL_SCHEMA)
             self._ensure_user_workspace_columns(conn)
             # Seed the three local accounts exactly once, for a brand-new
@@ -404,6 +404,23 @@ class Repository:
                         'UPDATE users SET workspace_ids_json = ? WHERE id = ?',
                         (self._workspace_ids_json(workspace_ids), int(row['id'])),
                     )
+
+    @staticmethod
+    def _configure_database_journal(conn: sqlite3.Connection) -> None:
+        """Enable concurrent readers once, outside request-time connections.
+
+        Changing ``synchronous`` on every connection can itself fail while a
+        background writer owns the database.  WAL is persistent, so database
+        initialization is the appropriate place to select it; NORMAL then
+        applies to the initialization and migration work performed by this
+        connection without turning ordinary reads into configuration writes.
+        """
+        current_mode = str(conn.execute('PRAGMA journal_mode').fetchone()[0]).casefold()
+        if current_mode != 'wal':
+            selected_mode = str(conn.execute('PRAGMA journal_mode=WAL').fetchone()[0]).casefold()
+            if selected_mode != 'wal':
+                raise sqlite3.OperationalError(f'Unable to enable WAL journal mode (selected {selected_mode}).')
+        conn.execute('PRAGMA synchronous=NORMAL')
 
     @staticmethod
     def _workspace_ids_from_json(value: object) -> list[str]:
@@ -1791,6 +1808,12 @@ class Repository:
             previous_columns = {self._column_identity(column) for column in target_columns}
             source_lookup = {self._column_identity(column): column for column in source_columns}
             target_columns = self._ensure_reporting_columns(conn, target_table, source_columns, desired)
+            # Schema changes need the writer reservation above, but the
+            # following presence checks can scan hundreds of thousands of
+            # rows. Release the writer before those read-only scans so other
+            # background jobs can record progress and interactive writes do
+            # not queue behind the complete validation pass.
+            conn.commit()
             existing_rows = conn.execute(
                 f"SELECT 1 FROM {quoted_target} WHERE dataset_id = ? LIMIT 1", (dataset_id,)
             ).fetchone()
@@ -1842,6 +1865,7 @@ class Repository:
                 # Fill only the newly required or incomplete columns by their
                 # stable source-row id, keeping large dashboard preparations
                 # proportional to the added data rather than table width.
+                conn.execute('BEGIN IMMEDIATE')
                 for target, source in dict.fromkeys(columns_to_refresh):
                     conn.execute(
                         f"UPDATE {quoted_target} SET {self._quote_identifier(target)} = "
@@ -1852,6 +1876,7 @@ class Repository:
                     )
                 self._create_reporting_row_indexes(conn, target_table, target_columns)
                 return True
+            conn.execute('BEGIN IMMEDIATE')
             conn.execute(f"DELETE FROM {quoted_target} WHERE dataset_id = ?", (dataset_id,))
             insert_columns = ['dataset_id', 'source_row_id', *(column for column in target_columns if column not in {'dataset_id', 'source_row_id'})]
             select_columns = ['?', 'rowid']

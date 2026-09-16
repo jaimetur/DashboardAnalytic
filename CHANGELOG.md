@@ -56,7 +56,7 @@
 - Fixed Dataset Preview badge alignment so hidden columns no longer leave stacked badges, while preserving semantic colours inside themed modules.
 - Startup warming now processes only the open Workspace sequentially; other Workspaces wait for 30 minutes of inactivity.
 - Excluded timestamp fields from analysis metrics; expired sessions stop passive polling without redirecting the current page or repeatedly returning unauthorized responses.
-- Task polling reads Workspace databases through short-lived read-only SQLite handles, registry handles close deterministically, size scans are cached and login no longer reruns active Workspace migrations, avoiding WAL checkpoints and database-lock contention.
+- Task polling uses short-lived SQLite reads, registry handles close deterministically, size scans are cached and login skips repeated Workspace migrations. Workspace databases now enable WAL once during initialization, ordinary requests no longer change connection safety settings, and large CDR validation scans release the writer reservation, keeping pages responsive during Dashboard preparation.
 - Background task interruption remains successful when its non-critical audit entry encounters a temporary SQLite write lock.
 - Fixed dataset-dialog loading, Escape dismissal, E2E filter layering and duplicate Reporting frame loads.
 
