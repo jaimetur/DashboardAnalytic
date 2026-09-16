@@ -5891,6 +5891,7 @@ if (queueNode) {
     const progressBar = row.querySelector('[data-queue-progress-bar]');
     const progressLabel = row.querySelector('[data-queue-progress-label]');
     const progressPercent = row.querySelector('[data-queue-progress-percent]');
+    const progressSeparator = row.querySelector('[data-queue-progress-separator]');
     const elapsed = row.querySelector('[data-queue-elapsed]');
     const uploaded = row.querySelector('[data-queue-uploaded]');
     const updated = row.querySelector('[data-queue-updated]');
@@ -5920,6 +5921,7 @@ if (queueNode) {
       elapsed.textContent = dataset.elapsed_seconds === null || dataset.elapsed_seconds === undefined
         ? '' : formatQueueElapsed(dataset.elapsed_seconds);
       elapsed.hidden = !elapsed.textContent;
+      if (progressSeparator) progressSeparator.hidden = elapsed.hidden;
     }
     if (uploaded) uploaded.textContent = formatQueueTimestamp(dataset.uploaded_at_local || dataset.uploaded_at);
     if (updated) updated.textContent = formatQueueTimestamp(dataset.updated_at_local || dataset.updated_at || dataset.uploaded_at_local || dataset.uploaded_at);

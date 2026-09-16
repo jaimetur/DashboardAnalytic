@@ -42,8 +42,8 @@
 - Added `Vendor_Only` after `Vendor` in Datasets Analysis Adaptive Filters.
 - The Vendors metric now counts distinct `Vendor_Only` values and follows Operators.
 - Global outcome cards use Tests for Data and Calls for Voice/Speech; Completed counts the filtered total and Dropped Calls follows Failed for every CDR type.
-- Dataset queue progress now shows persisted elapsed time during processing and after completion.
-- Dataset Preview now marks every field as `PINNED` or `UN_PINNED`; both badges are interactive and explain availability.
+- Dataset processing shows percentage and persisted elapsed time together in both the Workspace queue and floating background-task card, including the completed state.
+- CDR previews mark every field as `PINNED` or `UN_PINNED`; mapping previews hide empty optional and Analysis-derived fields while retaining metadata, Region, GCID, Operator and Technology_Primary.
 - Added application-wide Config settings for timezone, chart renderer, Chromium and event-time filtering, including searchable IANA timezones; event-time bypass disables only dataset date-range prefilters with an explanatory tooltip.
 - Background task cards can be moved and restored to their default dock position with a target control.
 

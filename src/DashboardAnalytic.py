@@ -6273,22 +6273,39 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
                 for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
             }
             if {'datasets', 'dataset_profiles'} <= tables:
+                completed_cutoff = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
                 rows = connection.execute(
-                    """SELECT d.id, d.file_name, p.status, p.progress
+                    """SELECT d.id, d.file_name, p.status, p.progress,
+                              p.processing_started_at, p.processed_at
                        FROM datasets d
                        JOIN dataset_profiles p ON p.dataset_id = d.id
                        WHERE p.status IN ('queued', 'processing')
+                          OR (p.status = 'ready' AND p.processed_at IS NOT NULL
+                              AND datetime(p.processed_at) >= datetime(?))
                        ORDER BY d.uploaded_at, d.id"""
+                    , (completed_cutoff,)
                 ).fetchall()
                 for row in rows:
-                    task_status = str(row['status'] or 'queued').title()
+                    raw_status = str(row['status'] or 'queued').casefold()
+                    ready = raw_status == 'ready'
+                    started_at = parse_dataset_timestamp(row['processing_started_at'])
+                    completed_at = parse_dataset_timestamp(row['processed_at']) if ready else None
+                    duration_seconds = None
+                    if started_at:
+                        duration_end = completed_at or datetime.now(started_at.tzinfo)
+                        duration_seconds = max(0, (duration_end - started_at).total_seconds())
                     tasks.append({
                         'id': f'dataset:{workspace.id}:{row["id"]}',
                         'label': f'Processing dataset: {row["file_name"]}',
-                        'detail': task_status,
+                        'detail': 'Completed' if ready else raw_status.title(),
                         'progress': max(0, min(100, int(row['progress'] or 0))),
-                        'stop_task_id': f'dataset:{row["id"]}',
-                        'stop_url': f'/api/background-tasks/{workspace.id}/stop',
+                        'started_at': started_at.timestamp() if started_at else None,
+                        'completed_at': completed_at.timestamp() if completed_at else None,
+                        'duration_seconds': duration_seconds,
+                        **({
+                            'stop_task_id': f'dataset:{row["id"]}',
+                            'stop_url': f'/api/background-tasks/{workspace.id}/stop',
+                        } if not ready else {}),
                     })
             if 'generated_jobs' in tables:
                 rows = connection.execute(
@@ -7213,6 +7230,22 @@ DERIVED_PREVIEW_RULES = {
     'attemptcount': 'Stores 1 per row so categorical CDR attempts can be counted.',
 }
 
+MAPPING_PREVIEW_REQUIRED_IDENTITIES = frozenset({
+    column_identity(column)
+    for column in (
+        'Source_File', 'Source_Sheet', 'Dataset_Kind', 'Region', 'GCID',
+        'Operator', 'Technology_Primary',
+    )
+})
+
+
+def _mapping_preview_column_is_populated(frame: pd.DataFrame, column: str) -> bool:
+    """Treat zero as mapping data while excluding null and blank-only columns."""
+    if column not in frame.columns:
+        return False
+    values = frame[column]
+    return bool((values.notna() & values.astype(str).str.strip().ne('')).any())
+
 
 def _preview_display_name(column: str, source_columns: set[str], auto_columns: set[str]) -> str:
     metadata = next((field for field in PREVIEW_METADATA_FIELDS if column_identity(field) == column_identity(column)), None)
@@ -7249,7 +7282,10 @@ def _preview_column_metadata(
         elif column in derived:
             kinds[column] = 'Derived' if column in main or identity in {
                 column_identity(field) for field in PREVIEW_METADATA_FIELDS
-            } else 'Analysis-derived'
+            } or (
+                dataset_kind in {'mapping_vodafone', 'mapping_three'}
+                and identity in MAPPING_PREVIEW_REQUIRED_IDENTITIES
+            ) else 'Analysis-derived'
             rules[column] = DERIVED_PREVIEW_RULES.get(identity, 'Derived during CDR ingestion from the available source fields.')
         elif column in main:
             kinds[column] = 'CDR-Main'
@@ -7445,6 +7481,34 @@ def preview_dataset(
     )
     if dataset['dataset_kind'] in CDR_DATASET_KINDS:
         derived_preview_columns.update(vendor_preview_columns)
+    server_paginated_preview = dataset['dataset_kind'] in CDR_DATASET_KINDS
+    if server_paginated_preview:
+        preview_frame, _filtered_total, _filter_values = repository.load_dataset_preview_page(
+            dataset_id, preview_columns, {}, 0, 100,
+        )
+    else:
+        preview_frame = repository.load_dataset_rows(dataset_id, preview_columns, preview_filters)
+        if dataset['dataset_kind'] in {'mapping_vodafone', 'mapping_three'}:
+            _initial_labels, initial_kinds, _initial_rules = _preview_column_metadata(
+                preview_columns, [dataset['stored_path']], derived_preview_columns,
+                main_preview_columns, auto_preview_columns, dataset['dataset_kind'],
+            )
+            preview_columns = [
+                column for column in preview_columns
+                if column_identity(column) in MAPPING_PREVIEW_REQUIRED_IDENTITIES
+                or (
+                    initial_kinds.get(column) != 'Analysis-derived'
+                    and _mapping_preview_column_is_populated(preview_frame, column)
+                )
+            ]
+            derived_preview_columns.intersection_update(preview_columns)
+            main_preview_columns.intersection_update(preview_columns)
+            auto_preview_columns.intersection_update(preview_columns)
+            vendor_preview_columns.intersection_update(preview_columns)
+            preview_frame = preview_frame.reindex(
+                columns=[column for column in preview_columns if column in preview_frame.columns]
+            )
+        preview_frame = preview_frame.head(row_limit)
     preview_column_labels, preview_column_kinds, preview_column_rules = _preview_column_metadata(
         preview_columns, [dataset['stored_path']], derived_preview_columns, main_preview_columns, auto_preview_columns, dataset['dataset_kind'],
     )
@@ -7452,13 +7516,6 @@ def preview_dataset(
         column for column in preview_columns
         if column_identity(column) in {column_identity(field) for field in PREVIEW_METADATA_FIELDS}
     }
-    server_paginated_preview = dataset['dataset_kind'] in CDR_DATASET_KINDS
-    if server_paginated_preview:
-        preview_frame, _filtered_total, _filter_values = repository.load_dataset_preview_page(
-            dataset_id, preview_columns, {}, 0, 100,
-        )
-    else:
-        preview_frame = repository.load_dataset_rows(dataset_id, preview_columns, preview_filters).head(row_limit)
     if 'GCID' in preview_frame.columns:
         preview_frame = preview_frame.copy()
         preview_frame['GCID'] = preview_frame['GCID'].map(format_preview_gcid)

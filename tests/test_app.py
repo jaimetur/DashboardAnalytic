@@ -2183,6 +2183,51 @@ def test_background_task_poll_closes_workspace_database_connection(client, monke
     assert connection_calls[0][1]['uri'] is True
 
 
+def test_dataset_background_task_reports_running_and_completed_duration(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    source_path = app_module.settings.input_dir / 'timed-background-dataset.csv'
+    source_path.write_bytes(b'market,score\nES,91\n')
+    dataset_id, _ = app_module.repository.add_dataset(source_path.name, str(source_path), 'admin')
+    finished_at = app_module.datetime.now(app_module.timezone.utc)
+    started_at = finished_at - app_module.timedelta(seconds=65)
+    app_module.repository.update_dataset_profile(
+        dataset_id,
+        status='processing',
+        progress=45,
+        processing_started_at=started_at.isoformat(),
+        processed_at=None,
+    )
+
+    groups = client.get('/api/background-tasks').json()['groups']
+    running = next(
+        task for group in groups for task in group['tasks']
+        if task['id'] == f'dataset:{workspace.id}:{dataset_id}'
+    )
+    assert running['detail'] == 'Processing'
+    assert running['progress'] == 45
+    assert running['duration_seconds'] >= 65
+
+    app_module.repository.update_dataset_profile(
+        dataset_id,
+        status='ready',
+        progress=100,
+        processed_at=finished_at.isoformat(),
+    )
+    groups = client.get('/api/background-tasks').json()['groups']
+    completed = next(
+        task for group in groups for task in group['tasks']
+        if task['id'] == f'dataset:{workspace.id}:{dataset_id}'
+    )
+    assert completed['detail'] == 'Completed'
+    assert completed['progress'] == 100
+    assert completed['duration_seconds'] == 65
+    assert 'stop_url' not in completed
+
+
 def test_background_task_stop_endpoint_stops_accessible_workspace_work(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -3415,9 +3460,15 @@ def test_three_mapping_preview_excludes_empty_normalized_columns(client) -> None
     assert 'MBNL_ID' in preview.text
     assert 'Cid__ECI' in preview.text
     assert 'Vendor' in preview.text
-    assert '>Operator<' in preview.text
+    assert 'data-column-label="Source_File"' in preview.text
+    assert 'data-column-label="Source_Sheet"' in preview.text
+    assert 'data-column-label="Dataset_Kind"' in preview.text
+    assert 'data-column-label="Region"' in preview.text
+    assert 'data-column-label="GCID"' in preview.text
+    assert 'data-column-label="Operator"' in preview.text
     assert '>vendor__2<' not in preview.text
-    assert '>Technology_Primary<' in preview.text
+    assert 'data-column-label="Technology_Primary"' in preview.text
+    assert 'data-column-kind="Analysis-derived"' not in preview.text
     assert '>GCID<' in preview.text
     assert '>123<' in preview.text
     assert preview.text.index('>GCID<') < preview.text.index('>MBNL_ID<')
@@ -4991,6 +5042,21 @@ def test_dataset_status_persists_completed_processing_duration(client) -> None:
 
     app_module.repository.update_dataset_profile(
         1,
+        status="processing",
+        progress=45,
+        processing_started_at=app_module.now_iso(),
+        processed_at=None,
+    )
+    processing_dataset = client.get("/api/datasets/status").json()["datasets"][0]
+    assert processing_dataset["elapsed_seconds"] is not None
+    assert processing_dataset["elapsed_label"]
+    processing_html = client.get("/workspace").text
+    assert "45%" in processing_html
+    assert processing_dataset["elapsed_label"] in processing_html
+    assert 'data-queue-poll-ms="3000"' in processing_html
+
+    app_module.repository.update_dataset_profile(
+        1,
         status="ready",
         progress=100,
         processing_started_at="2026-09-16T10:00:00+02:00",
@@ -5000,7 +5066,11 @@ def test_dataset_status_persists_completed_processing_duration(client) -> None:
     dataset = client.get("/api/datasets/status").json()["datasets"][0]
     assert dataset["elapsed_seconds"] == 65
     assert dataset["elapsed_label"] == "1m 05s"
-    assert "1m 05s" in client.get("/workspace").text
+    workspace_html = client.get("/workspace").text
+    assert "100%" in workspace_html
+    assert "1m 05s" in workspace_html
+    assert 'data-queue-progress-separator' in workspace_html
+    assert 'title="Total processing time"' in workspace_html
 
 
 def test_dashboard_handles_missing_source_file_without_500(client) -> None:
