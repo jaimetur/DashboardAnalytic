@@ -406,6 +406,49 @@ def test_incremental_auto_fields_create_missing_combined_reporting_table(tmp_pat
     assert value == 'Video'
 
 
+def test_combined_tables_materialize_fixed_preview_fields_and_every_saved_template_kpi(tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, column_identity
+    from src.modules.repository import Repository
+
+    repository = Repository(tmp_path / 'template-kpis.db')
+    repository.initialize()
+    fixture = (app_module.PROJECT_ROOT / 'tests' / 'fixtures' / 'NSA Slide Template.csv').read_bytes()
+    entries = app_module.parse_catalog_csv(fixture, 'nsa', validate_filters=False)
+    data_entry = next(entry for entry in entries if entry.source_kind == 'data')
+    voice_entry = next(entry for entry in entries if entry.source_kind == 'voice')
+    repository.add_report_template(
+        'nsa', 'Data coordinates',
+        app_module.catalogue_csv([replace(data_entry, kpi='Latitude vs Longitude')]),
+    )
+    repository.add_report_template(
+        'sa', 'Voice quality',
+        app_module.catalogue_csv([replace(voice_entry, kpi='Voice_Metric | Voice_Backup')]),
+    )
+    dataset_id, _created = repository.add_dataset('data.csv', str(tmp_path / 'data.csv'), 'admin')
+    repository.update_dataset_profile(dataset_id, status='ready', dataset_kind='data', row_count=1)
+    with repository.connection() as connection:
+        connection.execute(
+            f'CREATE TABLE dataset_rows_{dataset_id} ('
+            'source_file TEXT, source_sheet TEXT, dataset_kind TEXT, Operator TEXT, '
+            'Latitude REAL, Longitude REAL)'
+        )
+        connection.execute(
+            f'INSERT INTO dataset_rows_{dataset_id} VALUES (?, ?, ?, ?, ?, ?)',
+            ('data.csv', 'CDR', 'data', 'EE', 51.5, -0.1),
+        )
+
+    required = app_module.combined_reporting_required_columns((), 'data', repository)
+    updated = app_module.materialize_workspace_combined_columns(repository, ())
+
+    required_identities = {column_identity(column) for column in required}
+    assert {column_identity(column) for column in (*PREVIEW_METADATA_FIELDS, *MAIN_CDR_FIELDS)} <= required_identities
+    assert {'Latitude', 'Longitude'} <= set(required)
+    assert 'Voice_Metric' not in required
+    assert updated == 1
+    assert {'Latitude', 'Longitude'} <= set(repository.list_reporting_row_columns('data'))
+
+
 def test_recreate_combined_table_recovers_empty_source_rows_and_required_columns(tmp_path: Path) -> None:
     import src.DashboardAnalytic as app_module
     from src.modules.repository import Repository

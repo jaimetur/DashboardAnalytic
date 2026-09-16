@@ -282,6 +282,7 @@ LEGACY_VENDOR_MAPPING_FAILURE_MARKERS = (
     'duplicate column name: vendor_2',
 )
 DATASET_NORMALIZATION_VERSION = 11
+COMBINED_REPORTING_TEMPLATE_COLUMNS_VERSION = 1
 
 
 def format_preview_gcid(value: object) -> object:
@@ -808,10 +809,44 @@ def _incremental_auto_field_table_update(
         return bool(updates or removable_keys or renames)
 
 
-def combined_reporting_required_columns(dimensions: Iterable[Any], kind: str) -> list[str]:
-    """Return source, preview-filter and calculated columns required by a combined CDR table."""
+def workspace_template_kpi_columns(task_repository: Repository, kind: str) -> list[str]:
+    """Return every physical KPI field referenced by saved workspace templates."""
+    requested: list[str] = []
+    for technology in TEMPLATE_NAMES:
+        for template in task_repository.list_report_templates(technology):
+            content = bytes(template['content'] or b'')
+            if not content:
+                continue
+            try:
+                entries = parse_catalog_csv(content, technology, validate_filters=False)
+            except (TypeError, ValueError):
+                # A malformed legacy template must not prevent CDR ingestion or
+                # the reconciliation of the remaining valid templates.
+                continue
+            for entry in entries:
+                if entry.source_kind != kind:
+                    continue
+                requested.extend(
+                    part.strip(' `')
+                    for part in re.split(r'\s+vs\s+|\s*\|\s*', entry.kpi, flags=re.IGNORECASE)
+                    if part.strip(' `')
+                )
+    return list(dict.fromkeys(requested))
+
+
+def combined_reporting_required_columns(
+    dimensions: Iterable[Any], kind: str, task_repository: Repository | None = None,
+) -> list[str]:
+    """Return every column that must remain materialized in a combined CDR table."""
+    task_repository = task_repository or repository
     source = f'cdr-{kind}'
-    requested = [*Repository.REPORTING_CORE_COLUMNS, 'attempt_count']
+    requested = [
+        *Repository.REPORTING_CORE_COLUMNS,
+        *PREVIEW_METADATA_FIELDS,
+        *MAIN_CDR_FIELDS,
+        'attempt_count',
+        *workspace_template_kpi_columns(task_repository, kind),
+    ]
     requested.extend(
         candidate
         for _parameter, _label, candidates in CDR_PREVIEW_FILTER_DEFINITIONS
@@ -830,6 +865,42 @@ def combined_reporting_required_columns(dimensions: Iterable[Any], kind: str) ->
             if alias.strip()
         )
     return list(dict.fromkeys(column for column in requested if str(column).strip()))
+
+
+def combined_reporting_template_columns_signature(task_repository: Repository) -> str:
+    """Fingerprint the complete saved-template KPI contract for combined CDR tables."""
+    material = {
+        'version': COMBINED_REPORTING_TEMPLATE_COLUMNS_VERSION,
+        'kpis': {
+            kind: sorted(
+                {column_identity(column) for column in workspace_template_kpi_columns(task_repository, kind)},
+            )
+            for kind in sorted(CDR_DATASET_KINDS)
+        },
+    }
+    return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
+
+
+def materialize_workspace_combined_columns(
+    task_repository: Repository, dimensions: Iterable[Any],
+) -> int:
+    """Backfill every fixed, calculated and saved-template KPI column once per CDR."""
+    changed_kinds: set[str] = set()
+    updated_datasets = 0
+    for dataset in task_repository.list_datasets():
+        kind = str(dataset['dataset_kind'] or '').casefold()
+        if dataset['status'] != 'ready' or kind not in CDR_DATASET_KINDS:
+            continue
+        changed = task_repository.copy_dataset_rows_to_reporting(
+            int(dataset['id']), kind,
+            combined_reporting_required_columns(dimensions, kind, task_repository),
+        )
+        if changed:
+            changed_kinds.add(kind)
+            updated_datasets += 1
+    for kind in changed_kinds:
+        task_repository.set_workspace_state(f'combined_reporting_updated_{kind}', now_iso())
+    return updated_datasets
 
 
 def materialize_workspace_auto_fields_incrementally(
@@ -862,7 +933,7 @@ def materialize_workspace_auto_fields_incrementally(
         if progress_callback:
             progress_callback(completed, total, f'Updating {dataset["file_name"]}')
     for kind in reporting_kinds:
-        required_columns = combined_reporting_required_columns(current, kind)
+        required_columns = combined_reporting_required_columns(current, kind, task_repository)
         # Reconcile membership before updating calculated columns. A combined
         # table may predate a newly processed CDR of the same type, so an
         # incremental column update alone would leave that dataset out.
@@ -1117,8 +1188,11 @@ def start_combined_cdr_recreation_job(
 
 
 def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
-    """Materialize a migrated workspace without blocking its management page."""
-    if repository.get_workspace_state('calculated_dimensions_need_materialization') not in {'1', 'processing'}:
+    """Reconcile calculated fields and template KPIs without blocking workspace use."""
+    dimensions_pending = repository.get_workspace_state('calculated_dimensions_need_materialization') in {'1', 'processing'}
+    template_signature = combined_reporting_template_columns_signature(repository)
+    templates_pending = repository.get_workspace_state('combined_reporting_template_columns_signature') != template_signature
+    if not dimensions_pending and not templates_pending:
         return
     with AUTO_CALCULATED_FIELD_JOBS_LOCK:
         if any(
@@ -1130,7 +1204,8 @@ def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
         if workspace.id in WORKSPACE_DIMENSION_MATERIALIZATION_THREADS:
             return
         WORKSPACE_DIMENSION_MATERIALIZATION_THREADS.add(workspace.id)
-    repository.set_workspace_state('calculated_dimensions_need_materialization', 'processing')
+    if dimensions_pending:
+        repository.set_workspace_state('calculated_dimensions_need_materialization', 'processing')
 
     def run() -> None:
         task_repository = Repository(
@@ -1140,12 +1215,35 @@ def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
         )
         try:
             dimensions = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
-            materialize_workspace_auto_fields_incrementally(
-                (), dimensions, {}, task_repository,
-                {'cdr-data', 'cdr-voice', 'cdr-speech'},
-            )
+            if dimensions_pending:
+                materialize_workspace_auto_fields_incrementally(
+                    (), dimensions, {}, task_repository,
+                    {'cdr-data', 'cdr-voice', 'cdr-speech'},
+                )
+            else:
+                materialize_workspace_combined_columns(task_repository, dimensions)
+            processed_signature = template_signature
+            task_repository.set_workspace_state('combined_reporting_template_columns_signature', processed_signature)
+            # A template can be saved while this background pass is scanning
+            # large CDRs. Repeat only when its KPI contract changed mid-run so
+            # the stored signature never claims columns that were not copied.
+            while True:
+                current_signature = combined_reporting_template_columns_signature(task_repository)
+                if current_signature == processed_signature:
+                    break
+                processed_signature = current_signature
+                materialize_workspace_combined_columns(task_repository, dimensions)
+                task_repository.set_workspace_state(
+                    'combined_reporting_template_columns_signature', processed_signature,
+                )
         except Exception:
-            task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
+            if dimensions_pending:
+                try:
+                    task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
+                except (OSError, sqlite3.Error):
+                    # The workspace may have been deleted while its background
+                    # reconciliation was shutting down.
+                    pass
         finally:
             with WORKSPACE_DIMENSION_MATERIALIZATION_THREADS_LOCK:
                 WORKSPACE_DIMENSION_MATERIALIZATION_THREADS.discard(workspace.id)
@@ -1169,6 +1267,8 @@ def persist_report_template(technology: str, name: str, content: bytes, *, is_de
     repository.set_report_template_content(technology, name, content)
     if is_default is None:
         is_default = bool(next(row for row in repository.list_report_templates(technology) if str(row['name']) == name)['is_default'])
+    if active_workspace:
+        queue_workspace_dimension_materialization(active_workspace)
 
 
 def synchronize_template_file_names(technology: str) -> None:
@@ -1413,6 +1513,7 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
             active_workspace = workspace
             clear_outdated_workspace_caches(workspace)
             resume_interrupted_dataset_processing(workspace)
+            queue_workspace_dimension_materialization(workspace)
             return workspace
 
         # Authentication remains global; template files and metadata are workspace-owned.
@@ -1450,6 +1551,7 @@ def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspa
             for technology in TEMPLATE_NAMES:
                 synchronize_template_file_names(technology)
         resume_interrupted_dataset_processing(workspace)
+        queue_workspace_dimension_materialization(workspace)
         return workspace
 
 
@@ -2446,7 +2548,7 @@ def rebuild_dataset_artifacts(
         task_repository.replace_reporting_rows(dataset_id, dataset_kind, df)
         task_repository.copy_dataset_rows_to_reporting(
             dataset_id, dataset_kind,
-            combined_reporting_required_columns(workspace_dimensions, dataset_kind),
+            combined_reporting_required_columns(workspace_dimensions, dataset_kind, task_repository),
         )
     if progress_callback:
         progress_callback(62)
@@ -2536,7 +2638,7 @@ def persist_mapped_cdr_frame(dataset: dict[str, Any], frame: pd.DataFrame) -> No
         repository.replace_reporting_rows(dataset_id, dataset_kind, frame)
         repository.copy_dataset_rows_to_reporting(
             dataset_id, dataset_kind,
-            combined_reporting_required_columns(workspace_dimensions, dataset_kind),
+            combined_reporting_required_columns(workspace_dimensions, dataset_kind, repository),
         )
     summary = summarise_dataset(frame)
     available_metrics = derive_available_metrics(frame)
@@ -2781,7 +2883,7 @@ def refresh_selected_dataset_if_stale(selected_dataset: dict[str, Any] | None) -
         repository.replace_reporting_rows(dataset_id, dataset_kind, frame)
         repository.copy_dataset_rows_to_reporting(
             dataset_id, dataset_kind,
-            combined_reporting_required_columns(load_workspace_calculated_dimensions(), dataset_kind),
+            combined_reporting_required_columns(load_workspace_calculated_dimensions(), dataset_kind, repository),
         )
         filter_options = {
             dimension: values
@@ -3110,7 +3212,7 @@ def recreate_combined_cdr_table(
         workspace_registry_db_path=workspace_registry.registry_path,
     )
     dimensions = load_repository_calculated_dimensions(task_repository)
-    required_columns = combined_reporting_required_columns(dimensions, kind)
+    required_columns = combined_reporting_required_columns(dimensions, kind, task_repository)
     all_datasets = list(task_repository.list_datasets())
     datasets = [
         dataset for dataset in all_datasets
@@ -7445,7 +7547,7 @@ def _normalize_combined_preview_datasets(dataset_kind: str) -> None:
     if not upgraded and not has_legacy_columns:
         return
     repository.drop_reporting_table(dataset_kind)
-    required = combined_reporting_required_columns(load_workspace_calculated_dimensions(), dataset_kind)
+    required = combined_reporting_required_columns(load_workspace_calculated_dimensions(), dataset_kind, repository)
     for dataset in datasets:
         repository.copy_dataset_rows_to_reporting(int(dataset['id']), dataset_kind, required)
 
@@ -11745,6 +11847,8 @@ def _import_report_catalogue(
         else:
             repository.add_report_template(technology, identifier, content)
             promote_report_template_to_default(technology, identifier)
+            if active_workspace:
+                queue_workspace_dimension_materialization(active_workspace)
         # Keep the registry aligned with the files promoted by this import.
         # This is intentionally limited to the template library; it no longer
         # rebuilds the PowerPoint help document.

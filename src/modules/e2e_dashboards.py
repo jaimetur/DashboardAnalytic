@@ -1495,7 +1495,7 @@ def install_dashboard_routes(core):
         selected_dimension_keys = {identity(name) for name in definition.custom_fields}
         active_dimensions = tuple(dimension for dimension in dimensions if identity(dimension.name) in selected_dimension_keys)
         for kind, selected in selected_by_kind.items():
-            requested = set(core.combined_reporting_required_columns(active_dimensions, kind))
+            requested = set(core.combined_reporting_required_columns(active_dimensions, kind, task_repository))
             requested.update(core.reporting_query_columns(kind, entries, definition.scope == 'multivendor'))
             requested.update(definition.custom_fields)
             requested.update(definition.filters)
@@ -2304,7 +2304,7 @@ def install_dashboard_routes(core):
         active_dimensions = tuple(
             dimension for dimension in snapshot.dimensions if identity(dimension.name) in requested_keys
         )
-        columns.update(core.combined_reporting_required_columns(active_dimensions, kind))
+        columns.update(core.combined_reporting_required_columns(active_dimensions, kind, task_repository))
         ordered_columns = sorted(columns, key=lambda column: (identity(column), str(column)))
         material = {
             'schema': DASHBOARD_PROJECTION_CACHE_VERSION,

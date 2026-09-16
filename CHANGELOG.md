@@ -49,6 +49,7 @@
 - Dataset imports continue after logout or Workspace changes and automatically resume after an application restart with their original mapping selections.
 - Unified CDR and filtered chart dataset viewers across Dashboards, PPT snapshots, Reporting, Chart Sets and Report Template editing, with column counts and lazy cached filter loading.
 - CDR and chart dataset viewers now provide right-aligned filtered CSV export; chart dialogs use full-height 5%-inset layouts, light badge hover states and consistent close controls.
+- Combined CDR tables now permanently materialize the fixed Dataset Preview fields and every KPI referenced by any saved workspace Report Template. A versioned template signature backfills existing tables in the background and invalidates only affected Dashboard projections, avoiding KPI-column repair during Dashboard preparation.
 
 #### 🐛 Bug fixes:
 - Prevented a foreground Dashboard preparation and its automatic warm-up from appearing as duplicate background tasks.
