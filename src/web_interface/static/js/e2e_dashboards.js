@@ -3,6 +3,8 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const config = JSON.parse($('ds-config').textContent);
+  const eventTimeFilteringDisabled = Boolean(config.ignore_event_time_filtering);
+  const eventTimeFilteringDisabledReason = 'Date filters are disabled because Ignore event time filtering is enabled in Config.';
   const filterAliases = config.filter_aliases || {};
   let dashboards = {}, activeId = '', definition = null, savedDefinition = '', appliedFilterState = '', appliedSelectionState = '', appliedDashboardDefinition = null, prepared = null, slideIndex = 0;
   let sequence = 0, cacheLookupSequence = 0, timer, controller, preparing = null, preparingFilterState = '', preparationProgressTimer = 0, dirty = false, filterActionBusy = false, dataIndex = 0, dataPage = 0, dataToken = '', dataEndpoint = '', dataRequest = 0;
@@ -1067,6 +1069,16 @@
     const automatic = node('button', automaticLabel, 'ds-date-auto-action'); automatic.type = 'button';
     automatic.setAttribute('aria-pressed', String(definition[key] === automaticValue));
     automatic.title = `${automaticLabel} date from the selected datasets`;
+    if (eventTimeFilteringDisabled) {
+      wrapper.classList.add('is-event-time-filtering-disabled');
+      wrapper.title = eventTimeFilteringDisabledReason;
+      wrapper.setAttribute('aria-label', `${label}. ${eventTimeFilteringDisabledReason}`);
+      input.disabled = true;
+      input.setAttribute('aria-disabled', 'true');
+      automatic.disabled = true;
+      automatic.setAttribute('aria-disabled', 'true');
+      automatic.title = eventTimeFilteringDisabledReason;
+    }
     const menu = node('div', undefined, 'ds-date-picker-menu'); menu.hidden = true; menu.setAttribute('role', 'dialog'); menu.setAttribute('aria-label', `${label} calendar`);
     const header = node('div', undefined, 'ds-date-picker-header');
     const previous = node('button', '‹', 'ds-date-picker-nav'); previous.type = 'button'; previous.setAttribute('aria-label', 'Previous month');
@@ -1175,7 +1187,10 @@
     if (!additionalHost.childElementCount) additionalHost.append(node('p', 'No additional filters have been added.', 'form-note ds-no-additional-filters'));
     const visible = [...fields].map(field => identity(field));
     const restorable = facetFields.filter(field => hidden.has(identity(field)));
-    const choices = [...restorable, ...availableFields].filter((field, index, all) => !visible.includes(identity(field)) && all.findIndex(item => identity(item) === identity(field)) === index);
+    const choices = [...restorable, ...availableFields].filter((field, index, all) => (
+      !visible.includes(identity(field))
+      && all.findIndex(item => identity(item) === identity(field)) === index
+    ));
     const fieldPicker = $('ds-custom-field');
     const previous = fieldPicker.value;
     fieldPicker.replaceChildren(...choices.map(field => option(field, field)));

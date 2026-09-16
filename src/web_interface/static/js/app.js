@@ -716,6 +716,7 @@ document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => 
   let unfilteredTotal = filteredTotal;
   let openColumnMenu = null;
   let requestSequence = 0;
+  const formatRowCount = value => new Intl.NumberFormat('en-US').format(Number(value) || 0);
   const termsFor = (value) => String(value || '').split(',').map((term) => term.trim().toLocaleLowerCase()).filter(Boolean);
 
   const applyColumnSearch = () => {
@@ -764,10 +765,10 @@ document.querySelectorAll('[data-server-dataset-preview]').forEach((toolbar) => 
     const end = filteredTotal ? start + rowCount - 1 : 0;
     if (filterStatus) {
       filterStatus.textContent = activeFilters
-        ? `Showing ${start}-${end} of ${filteredTotal} matching rows (${unfilteredTotal} total)`
-        : `Showing ${start}-${end} of ${unfilteredTotal} rows`;
+        ? `Showing ${formatRowCount(start)}-${formatRowCount(end)} of ${formatRowCount(filteredTotal)} matching rows (${formatRowCount(unfilteredTotal)} total)`
+        : `Showing ${formatRowCount(start)}-${formatRowCount(end)} of ${formatRowCount(unfilteredTotal)} rows`;
     }
-    if (rowPill) rowPill.textContent = `${rowCount} rows shown`;
+    if (rowPill) rowPill.textContent = `${formatRowCount(rowCount)} rows shown`;
     if (pageStatus) pageStatus.textContent = `Page ${currentPage + 1} of ${totalPages}`;
     if (firstPage) firstPage.disabled = currentPage === 0;
     if (previousPage) previousPage.disabled = currentPage === 0;
@@ -1031,7 +1032,11 @@ document.querySelectorAll('[data-preview-dataset-switch]').forEach((input) => {
   });
   options.forEach((option) => option.addEventListener('mousedown', (event) => {
     event.preventDefault();
-    window.location.assign(option.dataset.url);
+    showLoadingOverlay(
+      'Loading Workspace Dataset',
+      `Please wait while ${option.dataset.datasetLabel || 'the selected dataset'} is loaded.`,
+    );
+    window.requestAnimationFrame(() => window.location.assign(option.dataset.url));
   }));
   document.addEventListener('click', (event) => {
     if (switcher?.contains(event.target)) return;
@@ -3074,21 +3079,33 @@ document.querySelectorAll('.collapsible-panel').forEach((panel) => {
 })();
 
 (() => {
+  if (!document.body.dataset.authenticatedUser) return;
   const activeSize = document.querySelector('[data-header-active-workspace-size]');
   const headerOptions = Array.from(document.querySelectorAll('[data-header-workspace-option]'));
   const workspaceSelectOptions = Array.from(document.querySelectorAll('[data-workspace-select] option[data-workspace-name]'));
   const workspaceTableSizes = Array.from(document.querySelectorAll('[data-workspace-size][data-workspace-id]'));
   if (!activeSize && !headerOptions.length && !workspaceTableSizes.length) return;
+  let pollingStopped = false;
+  let pollingInterval = null;
+  const stopExpiredSessionPolling = () => {
+    if (pollingStopped) return;
+    pollingStopped = true;
+    if (pollingInterval !== null) window.clearInterval(pollingInterval);
+  };
   const refreshWorkspaceSizes = async () => {
-    if (document.hidden) return;
+    if (pollingStopped || document.hidden) return;
     try {
       const response = await fetch('/api/workspaces/sizes', {credentials: 'same-origin', cache: 'no-store'});
       if (response.status === 401) {
-        window.location.assign('/login');
+        stopExpiredSessionPolling();
         return;
       }
       if (!response.ok) return;
       const payload = await response.json();
+      if (payload.authenticated === false) {
+        stopExpiredSessionPolling();
+        return;
+      }
       const sizes = payload.sizes || {};
       if (activeSize) {
         const size = payload.active_workspace_id ? sizes[payload.active_workspace_id] : '';
@@ -3112,7 +3129,7 @@ document.querySelectorAll('.collapsible-panel').forEach((panel) => {
     }
   };
   refreshWorkspaceSizes();
-  window.setInterval(refreshWorkspaceSizes, 5000);
+  pollingInterval = window.setInterval(refreshWorkspaceSizes, 5000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshWorkspaceSizes(); });
 })();
 
@@ -3516,6 +3533,7 @@ function setupSearchableSingleSelects() {
     input.className = 'searchable-select-input';
     input.placeholder = 'Search values…';
     input.setAttribute('aria-label', select.getAttribute('aria-label') || 'Search values');
+    input.disabled = select.disabled;
     const menu = document.createElement('div');
     menu.className = 'searchable-select-menu';
     menu.hidden = true;
@@ -3679,6 +3697,8 @@ function setupCustomMultiSelects() {
     trigger.type = 'button';
     trigger.className = 'multiselect-trigger';
     trigger.setAttribute('aria-expanded', 'false');
+    trigger.disabled = select.disabled;
+    if (select.disabled) trigger.setAttribute('aria-disabled', 'true');
 
     const triggerLabel = document.createElement('span');
     triggerLabel.className = 'multiselect-trigger-label';
@@ -3960,6 +3980,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       if (select.classList.contains('report-chart-preview-select-native')) return;
       const shell = document.createElement('div'); shell.className = 'report-chart-preview-select';
       const trigger = document.createElement('button'); trigger.type = 'button'; trigger.className = 'report-chart-preview-select-trigger'; trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-expanded', 'false');
+      trigger.disabled = select.disabled;
       const triggerText = document.createElement('span'); triggerText.className = 'report-chart-preview-select-value'; trigger.append(triggerText);
       const menu = document.createElement('div'); menu.className = 'report-chart-preview-select-menu'; menu.hidden = true;
       const search = document.createElement('input'); search.type = 'search'; search.placeholder = 'Search values…'; search.setAttribute('aria-label', `Search ${select.getAttribute('aria-label') || 'values'}`);
@@ -6024,6 +6045,7 @@ if (queueNode) {
 }
 
 (() => {
+  if (!document.body.dataset.authenticatedUser) return;
   const root = document.getElementById('background-task-panels');
   if (!(root instanceof HTMLElement)) return;
   const activeDock = root.querySelector('[data-background-task-dock="active"]');
@@ -6031,6 +6053,8 @@ if (queueNode) {
   const systemDock = root.querySelector('[data-background-task-dock="system"]');
   if (!(activeDock instanceof HTMLElement) || !(otherDock instanceof HTMLElement) || !(systemDock instanceof HTMLElement)) return;
   let polling = false;
+  let pollingStopped = false;
+  let pollingInterval = null;
   let renderedSignature = '';
   let serverGroups = [];
   let previousServerTasks = new Map();
@@ -6367,20 +6391,24 @@ if (queueNode) {
   };
 
   const poll = async () => {
-    if (polling) return;
+    if (polling || pollingStopped) return;
     polling = true;
     try {
       const response = await fetch('/api/background-tasks', {
         credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'},
       });
       if (response.status === 401) {
-        // Sessions intentionally live only for the current server process.
-        // Stop passive polling after a PyCharm restart and let the user sign in.
-        window.location.assign('/login');
+        pollingStopped = true;
+        if (pollingInterval !== null) window.clearInterval(pollingInterval);
         return;
       }
       if (!response.ok) return;
       const payload = await response.json();
+      if (payload.authenticated === false) {
+        pollingStopped = true;
+        if (pollingInterval !== null) window.clearInterval(pollingInterval);
+        return;
+      }
       serverGroups = Array.isArray(payload.groups) ? payload.groups : [];
       retainCompletedServerTasks(serverGroups);
       render(mergedGroups());
@@ -6392,7 +6420,7 @@ if (queueNode) {
   };
 
   poll();
-  window.setInterval(poll, 2000);
+  pollingInterval = window.setInterval(poll, 2000);
   window.addEventListener('dashboard-analytic:refresh-background-tasks', poll);
   window.addEventListener('focus', poll);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });

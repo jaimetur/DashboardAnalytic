@@ -96,6 +96,23 @@ def test_catalog_filters_accept_case_separators_and_subscriber_spelling_alias() 
     assert filtered['Suscriber'].tolist() == ['Alpha User']
 
 
+def test_catalog_timestamp_conditions_remain_active_when_date_range_filtering_is_disabled(monkeypatch) -> None:
+    monkeypatch.setenv('IGNORE_EVENT_TIME_FILTERING', 'true')
+    frame = pd.DataFrame({
+        'Event_Start_Time': ['2026-09-01 10:00:00', '2026-09-02 10:00:00'],
+        'Metric': [1, 2],
+    })
+    entry = CatalogEntry(
+        slide=1, slide_title='', slide_subtitle='', layout='', chart_title='',
+        cdr_source='CDR-Data', kpi='Metric', chart_type='Table', legend='',
+        filters='Event_Start_Time = 2026-09-01 10:00:00', grouping_rows='', grouping_columns='',
+    )
+
+    filtered = _apply_catalog_filters(frame, entry, False, 'Metric')
+
+    assert filtered['Metric'].tolist() == [1]
+
+
 def test_h3g_is_not_normalised_as_operator_three() -> None:
     frame = pd.DataFrame({"Operator": ["H3G", "H3G UK", "Three UK"]})
 

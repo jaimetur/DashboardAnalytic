@@ -4,7 +4,7 @@ import sqlite3
 import shutil
 import re
 from datetime import datetime
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -249,7 +249,7 @@ class Repository:
         if not source.is_file():
             raise ValueError('The configuration archive does not contain application.db.')
         try:
-            with sqlite3.connect(f'file:{source}?mode=ro', uri=True) as conn:
+            with closing(sqlite3.connect(f'file:{source}?mode=ro', uri=True)) as conn, conn:
                 users_table = conn.execute(
                     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'users'"
                 ).fetchone()
@@ -641,8 +641,13 @@ class Repository:
         if 'updated_at' not in columns:
             conn.execute("ALTER TABLE report_templates ADD COLUMN updated_at TEXT")
         now = local_now_iso()
-        conn.execute("UPDATE report_templates SET created_at = COALESCE(created_at, ?)", (now,))
-        conn.execute("UPDATE report_templates SET updated_at = COALESCE(updated_at, created_at, ?)", (now,))
+        if conn.execute("SELECT 1 FROM report_templates WHERE created_at IS NULL LIMIT 1").fetchone():
+            conn.execute("UPDATE report_templates SET created_at = ? WHERE created_at IS NULL", (now,))
+        if conn.execute("SELECT 1 FROM report_templates WHERE updated_at IS NULL LIMIT 1").fetchone():
+            conn.execute(
+                "UPDATE report_templates SET updated_at = COALESCE(created_at, ?) WHERE updated_at IS NULL",
+                (now,),
+            )
         for technology in ('nsa', 'sa'):
             defaults = conn.execute(
                 "SELECT name FROM report_templates WHERE technology = ? AND is_default = 1 ORDER BY name",
@@ -2034,8 +2039,6 @@ class Repository:
         where_clauses: list[str] = []
         params: list[Any] = []
         for key, value in filters.items():
-            if ignore_event_time_filtering() and column_identity(key) in {'eventstarttime', 'eventendtime'}:
-                continue
             resolved_key = self._resolve_dataset_row_column_name(existing_columns, key)
             if key in {'aggregation', 'extra_filters', 'date_from', 'date_to'} or value in (None, '') or not resolved_key:
                 continue
@@ -2073,8 +2076,6 @@ class Repository:
                 params.append(str(date_to))
 
         for key, value in (filters.get('extra_filters') or {}).items():
-            if ignore_event_time_filtering() and column_identity(key) in {'eventstarttime', 'eventendtime'}:
-                continue
             resolved_key = self._resolve_dataset_row_column_name(existing_columns, key)
             if value in (None, '') or not resolved_key:
                 continue
@@ -2189,7 +2190,7 @@ class Repository:
     def try_add_log(self, username: str, action: str, details: str, *, timeout_seconds: float = 0.25) -> bool:
         """Write non-critical diagnostics without waiting behind a long-running writer."""
         try:
-            with sqlite3.connect(self.db_path, timeout=timeout_seconds) as conn:
+            with closing(sqlite3.connect(self.db_path, timeout=timeout_seconds)) as conn, conn:
                 conn.execute(f"PRAGMA busy_timeout = {max(1, int(timeout_seconds * 1000))}")
                 conn.execute(
                     "INSERT INTO audit_logs (username, action, details, created_at) VALUES (?, ?, ?, ?)",

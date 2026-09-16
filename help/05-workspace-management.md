@@ -172,8 +172,8 @@ Preview opens persisted rows in a separate view.
 - Default page size is 100 rows and navigation runs against the complete persisted table.
 - A searchable Workspace Dataset selector changes the active dataset. Column-name and label selectors can hide fields without filtering rows.
 - Every column menu loads its complete distinct-value list and supports simultaneous Excel-style filters. **Clear N Filters** removes all active value filters.
-- Preview order is origin fields, Main fields, Auto-calculated Fields, remaining derived fields and then source CDR fields.
-- `Main` identifies the fixed fields used most often by filters and charts. `Derived` identifies normalized ingestion fields, `Auto-calculated` identifies workspace-defined rules, and `Analysis-derived` identifies the remaining shared analytical calculations. `CDR-Data`, `CDR-Voice` or `CDR-Speech` identifies source fields from that CDR type. Each label and field family has its own colour.
+- Preview order is origin fields, main CDR fields, Auto-calculated Fields, remaining derived fields and then source CDR fields.
+- `CDR-Main` identifies source CDR fields used most often by filters and charts. `Derived` identifies normalized ingestion fields, `Auto-calculated` identifies workspace-defined rules, and `Analysis-derived` identifies the remaining shared analytical calculations. `CDR-Data`, `CDR-Voice` or `CDR-Speech` identifies other source fields from that CDR type. Each label and field family has its own colour.
 - `PINNED` marks origin, Main, Derived and Auto-calculated fields that remain available across dataset views. `UN_PINNED` marks source-only fields that are present only when supplied by the selected dataset.
 - Hover over a `Derived`, `Auto-calculated` or `Analysis-derived` badge to see a formatted tooltip with the field's calculation rule. Select the badge to open the complete rule in a floating details panel.
 - Use **Filter Labels** to select one or more labels and show only their columns. **All Labels** restores every column category; this column display filter does not change the dataset rows.

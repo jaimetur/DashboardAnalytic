@@ -195,8 +195,8 @@ def filter_mask(frame, definition, exclude=None):
             return pd.Series(False, index=frame.index)
         accepted = {str(value).strip().casefold() for value in values}
         mask &= field_values.astype(str).str.strip().str.casefold().isin(accepted)
-    concrete_from = definition.date_from if isinstance(definition.date_from, date) else None
-    concrete_to = definition.date_to if isinstance(definition.date_to, date) else None
+    concrete_from = definition.date_from if isinstance(definition.date_from, date) and not ignore_event_time_filtering() else None
+    concrete_to = definition.date_to if isinstance(definition.date_to, date) and not ignore_event_time_filtering() else None
     if concrete_from or concrete_to:
         time_column = next((columns[key] for key in ('eventstarttime', 'teststarttime', 'timestamp', 'datetime', 'date') if key in columns), None)
         if time_column is None:
@@ -373,8 +373,8 @@ def install_dashboard_routes(core):
             names = [str(dataset.get('file_name') or dataset.get('display_name') or dataset.get('id')) for dataset in datasets]
             if names:
                 lines.append(f'CDR {kind.title()}: {", ".join(names)}')
-        date_from = str(definition.get('date_from') or '').strip()
-        date_to = str(definition.get('date_to') or '').strip()
+        date_from = '' if ignore_event_time_filtering() else str(definition.get('date_from') or '').strip()
+        date_to = '' if ignore_event_time_filtering() else str(definition.get('date_to') or '').strip()
         if date_from and date_to:
             lines.append(f'Date: {date_from} to {date_to}')
         elif date_from:
@@ -776,7 +776,12 @@ def install_dashboard_routes(core):
     def validate(definition, task_repository=None):
         if not definition.name.strip():
             raise HTTPException(400, 'Enter a Dashboard name.')
-        if isinstance(definition.date_from, date) and isinstance(definition.date_to, date) and definition.date_from > definition.date_to:
+        if (
+            not ignore_event_time_filtering()
+            and isinstance(definition.date_from, date)
+            and isinstance(definition.date_to, date)
+            and definition.date_from > definition.date_to
+        ):
             raise HTTPException(400, 'The start date must not follow the end date.')
         if set(definition.datasets) - set(KINDS):
             raise HTTPException(400, 'Unsupported dataset type.')
@@ -796,6 +801,7 @@ def install_dashboard_routes(core):
             'dashboard_filter_aliases': {
                 field: list(aliases) for field, aliases in FILTER_COLUMNS.items() if len(aliases) > 1
             },
+            'dashboard_ignore_event_time_filtering': ignore_event_time_filtering(),
         })
 
     @app.get('/api/e2e-dashboards')
@@ -1444,8 +1450,6 @@ def install_dashboard_routes(core):
             params.extend(int(dataset_id) for dataset_id in dataset_ids)
         excluded = identity(exclude) if exclude else ''
         for field_name, values in definition.filters.items():
-            if ignore_event_time_filtering() and identity(field_name) in {'eventstarttime', 'eventendtime'}:
-                continue
             if identity(field_name) == excluded:
                 continue
             value_expression = filter_sql_value_expression(task_repository, columns, field_name)
@@ -2617,7 +2621,8 @@ def install_dashboard_routes(core):
             return {}
         return {
             str(column): [str(value) for value in values]
-            for column, values in payload.items() if isinstance(values, list)
+            for column, values in payload.items()
+            if isinstance(values, list)
         }
 
     def chart_dataset_filter_values(frame):

@@ -12,11 +12,11 @@
 - Dataset Preview now pages the complete persisted dataset in fixed groups of 100 rows.
 - Added simultaneous Excel-style column filters with complete, cascading value lists and `Select All/None`.
 - Added comma-separated column search and multi-select label filtering with an `All Labels` option.
-- Added searchable Workspace Dataset selection directly in Dataset Preview.
-- Added external `Main`, `Derived`, `Auto-calculated`, `Analysis-derived` and CDR-type badges with rule details.
+- Added searchable Workspace Dataset selection with a loading dialog directly in Dataset Preview.
+- Added external `CDR-Main`, `Derived`, `Auto-calculated`, `Analysis-derived` and CDR-type badges with rule details.
 - Added the `PINNED` badge for fields retained across dataset views.
-- Ordered previews as origin, Main, Auto-calculated, remaining derived and source CDR fields.
-- Added compact filter clearing, row totals and round green SVG pagination controls.
+- Ordered previews as origin, main CDR, Auto-calculated, remaining derived and source CDR fields.
+- Added compact filter clearing, thousands-separated row totals and round green SVG pagination controls.
 - Added workspace Operator Mappings to Admin, with seeded NetCheck aliases and CDR rematerialization after edits.
 
 #### 🚀 Enhancements:
@@ -41,10 +41,10 @@
 - Normalized Benchmark, Period, Market, geography, technology, session, result and event-time field families.
 - Added `Vendor_Only` after `Vendor` in Datasets Analysis Adaptive Filters.
 - The Vendors metric now counts distinct `Vendor_Only` values and follows Operators.
-- Global outcome cards now use Tests for Data and Calls for Voice/Speech; Completed counts the filtered total.
+- Global outcome cards use Tests for Data and Calls for Voice/Speech; Completed counts the filtered total and Dropped Calls follows Failed for every CDR type.
 - Dataset queue progress now shows persisted elapsed time during processing and after completion.
 - Dataset Preview now marks every field as `PINNED` or `UN_PINNED`; both badges are interactive and explain availability.
-- Added application-wide Config settings for timezone, chart renderer, Chromium and event-time filtering, including searchable IANA timezone selection.
+- Added application-wide Config settings for timezone, chart renderer, Chromium and event-time filtering, including searchable IANA timezones; event-time bypass disables only dataset date-range prefilters with an explanatory tooltip.
 - Background task cards can be moved and restored to their default dock position with a target control.
 
 #### 🐛 Bug fixes:
@@ -52,7 +52,9 @@
 - Removed legacy `__N` collision columns while retaining genuine duplicate source headers as `_Duplicate_N`.
 - Fixed Dataset Preview badge alignment after restoring hidden columns.
 - Startup warming now processes only the open Workspace sequentially; other Workspaces wait for 30 minutes of inactivity.
-- Excluded timestamp fields from analysis metrics and made expired-session polling return to sign-in.
+- Excluded timestamp fields from analysis metrics; expired sessions stop passive polling without redirecting the current page or repeatedly returning unauthorized responses.
+- Task polling reads Workspace databases through short-lived read-only SQLite handles, registry handles close deterministically, size scans are cached and login no longer reruns active Workspace migrations, avoiding WAL checkpoints and database-lock contention.
+- Background task interruption remains successful when its non-critical audit entry encounters a temporary SQLite write lock.
 
 #### 📚 Documentation:
 - Reorganized Workspace Management help under NetCheck CDR Support with one rule per fixed field.

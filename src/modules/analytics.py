@@ -108,8 +108,6 @@ def apply_filters(df: pd.DataFrame, filters: dict[str, Any]) -> pd.DataFrame:
     for key, raw_value in filters.items():
         if key in {'aggregation', 'extra_filters', 'date_from', 'date_to'} or raw_value in (None, '', []):
             continue
-        if ignore_event_time_filtering() and column_identity(key) in {'eventstarttime', 'eventendtime'}:
-            continue
         column = _resolve_column(filtered, key)
         if not column:
             continue
@@ -120,8 +118,6 @@ def apply_filters(df: pd.DataFrame, filters: dict[str, Any]) -> pd.DataFrame:
         filtered = filtered[filtered[column].astype(str).str.strip().str.lower().isin(normalized_values)]
 
     for key, value in (filters.get('extra_filters') or {}).items():
-        if ignore_event_time_filtering() and column_identity(key) in {'eventstarttime', 'eventendtime'}:
-            continue
         column = _resolve_column(filtered, key)
         if not column:
             continue
@@ -382,6 +378,7 @@ def _build_global_kpis(df: pd.DataFrame, dataset_kind: str, filters: dict[str, A
             'completed_tests': int(len(df.index)),
             'success_tests': _true_count(df, 'success'),
             'failed_tests': _true_count(df, 'failure'),
+            'dropped_calls': _true_count(df, 'dropped'),
         })
     elif dataset_kind in {'voice', 'speech'}:
         # Voice and Speech CDR rows represent calls, so keep their terminology
@@ -390,13 +387,13 @@ def _build_global_kpis(df: pd.DataFrame, dataset_kind: str, filters: dict[str, A
             'completed_calls': int(len(df.index)),
             'success_calls': _true_count(df, 'success'),
             'failed_calls': _true_count(df, 'failure'),
+            'dropped_calls': _true_count(df, 'dropped'),
         })
     kpis.update({
         'success_rate_pct': _rate(df['success']) if 'success' in df.columns else 0.0,
         'failure_rate_pct': _rate(df['failure']) if 'failure' in df.columns else 0.0,
     })
     if 'dropped' in df.columns:
-        kpis['dropped_calls'] = int(df['dropped'].fillna(False).astype(bool).sum())
         kpis['drop_call_rate_pct'] = _rate(df['dropped'])
     if 'event_start_time' in df.columns:
         event_times = pd.to_datetime(df['event_start_time'], errors='coerce').dropna()

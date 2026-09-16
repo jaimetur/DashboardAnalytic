@@ -63,6 +63,33 @@ def test_filter_empty_missing_and_inclusive_dates():
     assert len(filter_frame(geography, definition(filters={'City': ['London'], 'Region': ['England']}))) == 1
 
 
+def test_filter_frame_ignores_date_range_but_keeps_timestamp_field_filters(monkeypatch):
+    monkeypatch.setenv('IGNORE_EVENT_TIME_FILTERING', 'true')
+    frame = pd.DataFrame({
+        'Event_Start_Time': ['2026-09-01 10:00:00', None],
+        'Event_End_Time': ['2026-09-01 11:00:00', None],
+        'Value': [1, 2],
+    })
+
+    filtered = filter_frame(frame, definition(
+        date_from='2026-09-01', date_to='2026-09-01',
+        filters={'Event_Start_Time': ['2026-09-01 10:00:00']},
+    ))
+
+    assert len(filtered) == 1
+
+
+def test_dashboard_page_exposes_disabled_event_time_filtering(client, monkeypatch):
+    monkeypatch.setenv('IGNORE_EVENT_TIME_FILTERING', 'true')
+    setup_dashboard(client)
+
+    response = client.get('/e2e-dashboards')
+
+    assert response.status_code == 200
+    assert '"ignore_event_time_filtering": true' in response.text
+    assert 'data-ignore-event-time-filtering="true"' in response.text
+
+
 def test_dashboard_export_uses_the_admin_import_archive_format(client):
     payload = setup_dashboard(client)
     dashboard_id = 'portable-dashboard'
@@ -469,6 +496,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "if (!definitionValue.date_to) definitionValue.date_to = 'Newest';" in dashboard_script
     assert "const automaticLabel = key === 'date_from' ? 'Use oldest' : 'Use newest';" in dashboard_script
     assert "const automaticValue = key === 'date_from' ? 'Oldest' : 'Newest';" in dashboard_script
+    assert 'const eventTimeFilteringDisabled = Boolean(config.ignore_event_time_filtering);' in dashboard_script
+    assert "wrapper.classList.add('is-event-time-filtering-disabled');" in dashboard_script
+    assert "eventTimeFilteringDisabled && ['eventstarttime', 'eventendtime']" not in dashboard_script
     assert "if (value === 'Oldest') return dateBounds?.min ? `Oldest (${dateBounds.min})` : 'Oldest';" in dashboard_script
     assert "if (value === 'Newest') return dateBounds?.max ? `Newest (${dateBounds.max})` : 'Newest';" in dashboard_script
     assert "input.value = dateInputDisplayValue(key, definition[key]);" in dashboard_script

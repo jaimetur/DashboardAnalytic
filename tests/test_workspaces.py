@@ -3,9 +3,23 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from src.config import load_storage_paths
 from src.modules.repository import Repository
 from src.modules.workspaces import WorkspaceRegistry
+
+
+def test_registry_connection_context_closes_its_sqlite_handle(tmp_path: Path) -> None:
+    registry = WorkspaceRegistry(
+        tmp_path / 'workspace-registry.db', tmp_path / 'data', tmp_path / 'slides-templates',
+    )
+
+    with registry._connection() as connection:
+        connection.execute('CREATE TABLE marker (value TEXT)')
+
+    with pytest.raises(sqlite3.ProgrammingError, match='closed database'):
+        connection.execute('SELECT 1')
 
 
 def test_storage_paths_file_loads_roots_without_overriding_environment(tmp_path: Path) -> None:

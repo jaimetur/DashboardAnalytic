@@ -286,6 +286,7 @@ def test_global_kpis_use_test_terminology_and_total_rows_for_data_cdrs() -> None
         'score': [90.0, 80.0, 70.0],
         'success': [True, False, False],
         'failure': [False, True, False],
+        'dropped': [False, False, True],
     })
 
     analysis = build_analysis(df, {'aggregation': 'all'}, 'score')
@@ -293,8 +294,13 @@ def test_global_kpis_use_test_terminology_and_total_rows_for_data_cdrs() -> None
     assert analysis.global_kpis['completed_tests'] == 3
     assert analysis.global_kpis['success_tests'] == 1
     assert analysis.global_kpis['failed_tests'] == 1
+    assert analysis.global_kpis['dropped_calls'] == 1
+    assert list(analysis.global_kpis).index('dropped_calls') == list(analysis.global_kpis).index('failed_tests') + 1
+    assert analysis.global_kpis['drop_call_rate_pct'] == 33.33
     assert 'completed_calls' not in analysis.global_kpis
     assert 'success_calls' not in analysis.global_kpis
+    assert 'dropped_tests' not in analysis.global_kpis
+    assert 'drop_test_rate_pct' not in analysis.global_kpis
 
 
 def test_global_kpis_use_call_terminology_and_total_rows_for_speech_cdrs() -> None:
@@ -303,6 +309,7 @@ def test_global_kpis_use_call_terminology_and_total_rows_for_speech_cdrs() -> No
         'LQ': [4.0, 3.0],
         'success': [True, False],
         'failure': [False, True],
+        'dropped': [False, True],
     })
 
     analysis = build_analysis(df, {'aggregation': 'all'}, 'LQ')
@@ -310,7 +317,12 @@ def test_global_kpis_use_call_terminology_and_total_rows_for_speech_cdrs() -> No
     assert analysis.global_kpis['completed_calls'] == 2
     assert analysis.global_kpis['success_calls'] == 1
     assert analysis.global_kpis['failed_calls'] == 1
+    assert analysis.global_kpis['dropped_calls'] == 1
+    assert list(analysis.global_kpis).index('dropped_calls') == list(analysis.global_kpis).index('failed_calls') + 1
+    assert analysis.global_kpis['drop_call_rate_pct'] == 50.0
     assert 'failed_tests' not in analysis.global_kpis
+    assert 'dropped_tests' not in analysis.global_kpis
+    assert 'drop_test_rate_pct' not in analysis.global_kpis
 
 
 def test_build_analysis_applies_date_range_filters_from_event_start_time() -> None:
@@ -336,7 +348,7 @@ def test_build_analysis_applies_date_range_filters_from_event_start_time() -> No
     assert analysis.global_kpis["date_to"] == "2025-07-13"
 
 
-def test_build_analysis_can_ignore_event_time_filters(monkeypatch) -> None:
+def test_build_analysis_ignores_date_range_but_keeps_timestamp_field_filters(monkeypatch) -> None:
     monkeypatch.setenv('IGNORE_EVENT_TIME_FILTERING', 'true')
     df = pd.DataFrame({
         'dataset_kind': ['data', 'data'],
@@ -350,14 +362,13 @@ def test_build_analysis_can_ignore_event_time_filters(monkeypatch) -> None:
         'score',
     )
 
-    assert analysis.metric_kpis['samples'] == 2
     assert analysis.metric_kpis["samples"] == 2
 
     directly_filtered = apply_filters(df, {
         'event_start_time': '2026-01-01 09:00:00',
         'extra_filters': {'Event_End_Time': '2026-01-01 10:00:00'},
     })
-    assert len(directly_filtered) == 2
+    assert len(directly_filtered) == 1
 
 
 def test_build_analysis_supports_multi_value_city_and_region_filters() -> None:

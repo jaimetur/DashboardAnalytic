@@ -75,7 +75,7 @@
         <p class="eyebrow">Processed rows</p>
         <h2>{% if server_paginated_preview %}Processed Dataset Records{% else %}Dataset Sample{% endif %}</h2>
       </div>
-      <span class="pill"{% if server_paginated_preview %} data-preview-row-pill{% endif %}>{% if preview_source_sheet %}{{ preview_source_sheet }} · {% endif %}{{ preview_rows | length }} rows shown</span>
+      <span class="pill"{% if server_paginated_preview %} data-preview-row-pill{% endif %}>{% if preview_source_sheet %}{{ preview_source_sheet }} · {% endif %}{{ '{:,}'.format(preview_rows | length) }} rows shown</span>
     </div>
     {% if preview_columns %}
     {% if server_paginated_preview %}
@@ -102,7 +102,7 @@
         <button type="button" data-preview-tag-filter-toggle aria-expanded="false"><span data-preview-tag-filter-label>All Labels</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7 5 6 5-6"/></svg></button>
         <div class="preview-tag-filter-menu" data-preview-tag-filter-menu hidden><button type="button" class="preview-tag-filter-all" data-preview-tag-filter-all>All Labels</button>{% for tag in preview_available_tags %}<label><input type="checkbox" value="{{ tag }}"> <span>{{ tag }}</span></label>{% endfor %}</div>
       </div>
-      <p class="preview-table-filter-status" data-preview-filter-status aria-live="polite">Showing {{ preview_rows | length }} of {{ preview_rows | length }} rows · {{ visible_column_count }} of {{ visible_column_count }} columns</p>
+      <p class="preview-table-filter-status" data-preview-filter-status aria-live="polite">Showing {{ '{:,}'.format(preview_rows | length) }} of {{ '{:,}'.format(preview_rows | length) }} rows · {{ visible_column_count }} of {{ visible_column_count }} columns</p>
     </div>
     {% endif %}
     <div class="preview-column-tag-viewport" data-preview-column-tag-viewport>
@@ -128,7 +128,7 @@
         <button type="button" data-preview-next-page{% if preview_total_rows <= preview_page_size %} disabled{% endif %} aria-label="Next page" title="Next page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <button type="button" data-preview-last-page{% if preview_total_rows <= preview_page_size %} disabled{% endif %} aria-label="Last page" title="Last page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 5v14M6 6l6 6-6 6M12 6l6 6-6 6"/></svg></button>
       </nav>
-      <p class="preview-table-filter-status" data-preview-filter-status aria-live="polite">Showing {{ preview_rows | length }} of {{ preview_total_rows }} rows</p>
+      <p class="preview-table-filter-status" data-preview-filter-status aria-live="polite">Showing {% if preview_rows %}1-{{ '{:,}'.format(preview_rows | length) }}{% else %}0{% endif %} of {{ '{:,}'.format(preview_total_rows) }} rows</p>
     </div>
     {% endif %}
     {% else %}

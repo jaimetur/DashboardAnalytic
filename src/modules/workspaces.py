@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,11 +38,16 @@ class WorkspaceRegistry:
         self.legacy_slides_templates_dir = legacy_slides_templates_dir
         self.legacy_registry_path = legacy_registry_path
 
-    def _connection(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connection(self):
         self.registry_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.registry_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
 
     def initialize(self) -> None:
         self._migrate_legacy_registry_file()
@@ -264,7 +270,7 @@ class WorkspaceRegistry:
                         export_dir = target_path
             slides_templates_dir = self._relocate_path(workspace.slides_templates_dir, old_root, new_root)
             if input_dir != workspace.input_dir and new_database.exists():
-                with sqlite3.connect(new_database) as conn:
+                with closing(sqlite3.connect(new_database)) as conn, conn:
                     has_datasets = conn.execute(
                         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'datasets'"
                     ).fetchone()
@@ -383,7 +389,7 @@ class WorkspaceRegistry:
             else:
                 duplicate.output_dir.mkdir(parents=True, exist_ok=True)
             duplicate.database_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(source.database_path) as source_conn, sqlite3.connect(duplicate.database_path) as duplicate_conn:
+            with closing(sqlite3.connect(source.database_path)) as source_conn, source_conn, closing(sqlite3.connect(duplicate.database_path)) as duplicate_conn, duplicate_conn:
                 if should_stop and should_stop(duplicate):
                     raise InterruptedError('Workspace duplication stopped by user.')
                 source_conn.backup(duplicate_conn)
@@ -454,7 +460,7 @@ class WorkspaceRegistry:
             export_dir = self._relocate_path(workspace.export_dir, old_root, new_root)
             slides_templates_dir = self._relocate_path(workspace.slides_templates_dir, old_root, new_root)
             if input_dir != workspace.input_dir and new_database_path.exists():
-                with sqlite3.connect(new_database_path) as workspace_conn:
+                with closing(sqlite3.connect(new_database_path)) as workspace_conn, workspace_conn:
                     workspace_conn.execute(
                         'UPDATE datasets SET stored_path = REPLACE(stored_path, ?, ?)',
                         (str(workspace.input_dir), str(input_dir)),

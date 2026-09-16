@@ -405,11 +405,11 @@
             </select>
             <span class="table-help">Use the dropdown to select one, several, or all KPIs.</span>
           </label>
-          <label class="sidebar-date-field">Date From
-            <input type="date" name="date_from" value="{{ (analysis.filters.date_from if analysis else selected_date_from) or '' }}">
+          <label class="sidebar-date-field{% if ignore_event_time_filtering %} is-event-time-filtering-disabled{% endif %}"{% if ignore_event_time_filtering %} title="Date filters are disabled because Ignore event time filtering is enabled in Config."{% endif %}>Date From
+            <input type="date" name="date_from" value="{{ (analysis.filters.date_from if analysis else selected_date_from) or '' }}" {% if ignore_event_time_filtering %}disabled aria-disabled="true"{% endif %}>
           </label>
-          <label class="sidebar-date-field">Date To
-            <input type="date" name="date_to" value="{{ (analysis.filters.date_to if analysis else selected_date_to) or '' }}">
+          <label class="sidebar-date-field{% if ignore_event_time_filtering %} is-event-time-filtering-disabled{% endif %}"{% if ignore_event_time_filtering %} title="Date filters are disabled because Ignore event time filtering is enabled in Config."{% endif %}>Date To
+            <input type="date" name="date_to" value="{{ (analysis.filters.date_to if analysis else selected_date_to) or '' }}" {% if ignore_event_time_filtering %}disabled aria-disabled="true"{% endif %}>
           </label>
           {% for dimension in filter_dimensions %}
           {% set options = filter_options.get(dimension, []) %}

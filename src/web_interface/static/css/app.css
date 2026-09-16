@@ -1182,6 +1182,8 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .sidebar-filters > input[type="hidden"] { display: none; }
 .sidebar-field-full { grid-column: 1 / -1; }
 .sidebar-date-field { min-width: 0; max-width: 100%; }
+.is-event-time-filtering-disabled { opacity: 0.62; cursor: not-allowed; }
+.is-event-time-filtering-disabled :disabled { cursor: not-allowed; }
 .sidebar-filters > .sidebar-actions { grid-column: 1 / -1; }
 .sidebar-actions { display: flex; gap: 0.8rem; flex-wrap: wrap; }
 .dataset-selector-grid { display: grid; grid-template-columns: minmax(110px, 0.42fr) minmax(420px, 1.58fr) auto; gap: 1rem; align-items: end; margin-bottom: 1rem; }

@@ -22,6 +22,110 @@ def login(client) -> None:
     assert response.status_code == 303
 
 
+def test_login_does_not_reinitialize_the_active_workspace(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    initialize_calls = 0
+
+    def count_initialize() -> None:
+        nonlocal initialize_calls
+        initialize_calls += 1
+
+    monkeypatch.setattr(app_module.repository, 'initialize', count_initialize)
+    response = client.post(
+        '/login',
+        data={
+            'username': 'admin', 'password': 'admin123',
+            'workspace_id': app_module.active_workspace.id,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert initialize_calls == 0
+
+
+def test_login_reports_a_busy_workspace_without_an_internal_server_error(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    def fail_activation(_workspace_id: str) -> None:
+        raise sqlite3.OperationalError('database is locked')
+
+    monkeypatch.setattr(app_module, 'activate_workspace', fail_activation)
+    response = client.post(
+        '/login',
+        data={
+            'username': 'admin', 'password': 'admin123',
+            'workspace_id': app_module.active_workspace.id,
+        },
+    )
+
+    assert response.status_code == 503
+    assert 'Workspace database is busy' in response.text
+
+
+def test_passive_polling_stops_without_redirecting_after_an_expired_session() -> None:
+    import src.DashboardAnalytic as app_module
+
+    script = (app_module.PROJECT_ROOT / 'src' / 'web_interface' / 'static' / 'js' / 'app.js').read_text(encoding='utf-8')
+
+    assert script.count("if (!document.body.dataset.authenticatedUser) return;") >= 2
+    assert "window.clearInterval(pollingInterval)" in script
+    assert "window.location.replace('/login')" not in script
+
+
+def test_expired_passive_polling_returns_an_inert_response_without_unauthorized_errors(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    app_module.SESSIONS.clear()
+    client.cookies.clear()
+
+    tasks_response = client.get('/api/background-tasks')
+    sizes_response = client.get('/api/workspaces/sizes')
+
+    assert tasks_response.status_code == 200
+    assert tasks_response.json() == {'authenticated': False, 'active_workspace_id': None, 'groups': []}
+    assert sizes_response.status_code == 200
+    assert sizes_response.json() == {
+        'authenticated': False, 'active_workspace_id': None, 'sizes': {}, 'cache_sizes': {},
+    }
+
+
+def test_report_template_timestamp_migration_does_not_rewrite_complete_rows(tmp_path: Path) -> None:
+    from src.modules.repository import Repository
+
+    database_path = tmp_path / 'workspace.db'
+    repository = Repository(database_path)
+    with sqlite3.connect(database_path) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute(
+            '''
+            CREATE TABLE report_templates (
+                technology TEXT NOT NULL,
+                name TEXT NOT NULL,
+                content BLOB NOT NULL,
+                is_default INTEGER NOT NULL,
+                created_at TEXT,
+                updated_at TEXT
+            )
+            ''',
+        )
+        connection.execute(
+            "INSERT INTO report_templates VALUES ('nsa', 'Template', X'', 1, '2026-09-16', '2026-09-16')",
+        )
+        statements: list[str] = []
+        connection.set_trace_callback(statements.append)
+
+        repository._ensure_report_template_columns(connection)
+
+    timestamp_updates = [
+        statement for statement in statements
+        if statement.upper().startswith('UPDATE REPORT_TEMPLATES SET CREATED_AT')
+        or statement.upper().startswith('UPDATE REPORT_TEMPLATES SET UPDATED_AT')
+    ]
+    assert timestamp_updates == []
+
+
 def test_catalogue_editor_offers_result_group_for_every_cdr_source(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -2036,6 +2140,49 @@ def test_global_background_tasks_groups_active_and_other_workspaces(client) -> N
     assert other.id not in completed_groups
 
 
+def test_background_task_poll_closes_workspace_database_connection(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    real_connect = app_module.sqlite3.connect
+    closed_connections = []
+    connection_calls = []
+
+    class TrackedConnection:
+        def __init__(self, connection):
+            object.__setattr__(self, '_connection', connection)
+
+        def __getattr__(self, name):
+            return getattr(self._connection, name)
+
+        def __setattr__(self, name, value):
+            setattr(self._connection, name, value)
+
+        def __enter__(self):
+            self._connection.__enter__()
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return self._connection.__exit__(exc_type, exc_value, traceback)
+
+        def close(self):
+            self._connection.close()
+            closed_connections.append(True)
+
+    def tracked_connect(*args, **kwargs):
+        connection_calls.append((args, kwargs))
+        return TrackedConnection(real_connect(*args, **kwargs))
+
+    monkeypatch.setattr(app_module.sqlite3, 'connect', tracked_connect)
+
+    app_module._workspace_background_tasks(app_module.active_workspace)
+
+    assert closed_connections == [True]
+    assert connection_calls[0][0][0].startswith('file:')
+    assert connection_calls[0][0][0].endswith('?mode=ro')
+    assert connection_calls[0][1]['uri'] is True
+
+
 def test_background_task_stop_endpoint_stops_accessible_workspace_work(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -2079,6 +2226,26 @@ def test_background_task_stop_endpoint_stops_accessible_workspace_work(client) -
     with app_module.AUTO_CALCULATED_FIELD_JOBS_LOCK:
         assert app_module.AUTO_CALCULATED_FIELD_JOBS['stoppable-auto-fields']['cancel_requested'] is True
         app_module.AUTO_CALCULATED_FIELD_JOBS.pop('stoppable-auto-fields')
+
+
+def test_dashboard_interruption_succeeds_when_its_audit_log_is_locked(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    monkeypatch.setattr(app_module, 'e2e_dashboard_stop_task', lambda _database_path, _task_id: True)
+    monkeypatch.setattr(app_module.Repository, 'try_add_log', lambda *_args, **_kwargs: False)
+
+    response = client.post(
+        f'/api/background-tasks/{workspace.id}/stop',
+        data={'task_id': 'dashboard-prepare:dashboard-prefetch:locked-audit'},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        'stopping': 'dashboard-prepare:dashboard-prefetch:locked-audit',
+    }
 
 
 def test_queued_import_continues_after_its_workspace_is_closed(client) -> None:
@@ -2808,6 +2975,8 @@ def test_cdr_preview_uses_clean_duplicate_names_and_orders_vendor_only_after_ven
 
 
 def test_cdr_preview_paginates_and_filters_every_column(client) -> None:
+    import src.DashboardAnalytic as app_module
+
     login(client)
     cdr_rows = [
         'Vodafone UK,Ericsson,ENDC,VoLTE,Completed,Streaming,YouTube playback,91,Alpha User,UK_Q3_2026',
@@ -2846,6 +3015,7 @@ def test_cdr_preview_paginates_and_filters_every_column(client) -> None:
     assert 'data-preview-clear-filters disabled>' in default_preview.text
     assert '<span data-preview-clear-label>Clear 0 Filters</span>' in default_preview.text
     assert 'data-preview-next-page disabled' not in default_preview.text
+    assert 'Showing 1-100 of 103 rows' in default_preview.text
     footer = default_preview.text.split('<div class="preview-server-footer">', 1)[1].split('</div>', 1)[0]
     assert '<nav class="preview-pagination"' in footer
     assert footer.count('<svg viewBox="0 0 24 24"') == 5
@@ -2857,10 +3027,21 @@ def test_cdr_preview_paginates_and_filters_every_column(client) -> None:
     assert 'data-server-preview-column-search' in default_preview.text
     assert 'data-preview-dataset-switch' in default_preview.text
     assert 'data-preview-dataset-switch-menu' in default_preview.text
+    assert "showLoadingOverlay(\n      'Loading Workspace Dataset'" in app_module.PROJECT_ROOT.joinpath(
+        'src/web_interface/static/js/app.js',
+    ).read_text(encoding='utf-8')
+    assert "new Intl.NumberFormat('en-US')" in app_module.PROJECT_ROOT.joinpath(
+        'src/web_interface/static/js/app.js',
+    ).read_text(encoding='utf-8')
+    assert "'{:,}'.format(preview_total_rows)" in app_module.PROJECT_ROOT.joinpath(
+        'src/web_interface/templates/dataset_preview.html',
+    ).read_text(encoding='utf-8')
     assert 'data-preview-tag-filter' in default_preview.text
     assert 'data-preview-tag-filter-all>All Labels</button>' in default_preview.text
     assert '>PINNED</button>' in default_preview.text
     assert '>UN_PINNED</button>' in default_preview.text
+    assert '>CDR-Main</button>' in default_preview.text
+    assert '>Main</button>' not in default_preview.text
     assert 'Select Workspace Dataset' in default_preview.text
     assert 'target="_blank" rel="noopener">Back to Workspace</a>' in default_preview.text
     assert '>Auto-calculated</button>' in default_preview.text
@@ -4401,6 +4582,40 @@ def test_dashboard_shows_date_range_filters_and_applies_them(client) -> None:
     assert "2026-07-10" not in response.text
 
 
+def test_date_filters_are_disabled_and_ignored_when_event_time_filtering_is_disabled(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    monkeypatch.setenv('IGNORE_EVENT_TIME_FILTERING', 'true')
+    login(client)
+    csv_content = (
+        b"market,period,score,Call Start Time\n"
+        b"ES,2026-Q1,91,2026-07-10 10:00:00\n"
+        b"ES,2026-Q1,87,2026-07-11 12:00:00\n"
+    )
+    upload_response = client.post(
+        '/datasets-analysis/upload',
+        data={'dataset_kinds': 'data'},
+        files={'dataset_files': ('sample.csv', BytesIO(csv_content), 'text/csv')},
+        follow_redirects=False,
+    )
+    assert upload_response.status_code == 303
+
+    response = client.get('/datasets-analysis?dataset_id=1&metric=score&date_from=2026-07-11&load=1')
+
+    assert response.status_code == 200
+    assert response.text.count('Date filters are disabled because Ignore event time filtering is enabled in Config.') >= 2
+    assert 'name="date_from" value="" disabled aria-disabled="true"' in response.text
+    assert 'name="date_to" value="" disabled aria-disabled="true"' in response.text
+    page, filters, filter_column = app_module._dataset_preview_request({
+        'page': 0,
+        'column_filters': {'Event_Start_Time': ['2026-07-11 12:00:00']},
+        'filter_column': 'Event_End_Time',
+    }, ['Event_Start_Time', 'Event_End_Time'])
+    assert page == 0
+    assert filters == {'Event_Start_Time': ['2026-07-11 12:00:00']}
+    assert filter_column == 'Event_End_Time'
+
+
 def test_dashboard_adaptive_filters_include_city_and_multi_select_fields(client) -> None:
     login(client)
     csv_content = (
@@ -4427,9 +4642,10 @@ def test_dashboard_adaptive_filters_include_city_and_multi_select_fields(client)
     assert ">Barcelona<" in response.text
     assert ">Ericsson<" in response.text
     assert response.text.index('>operators<') < response.text.index('>vendors<')
-    assert response.text.index('>completed tests<') < response.text.index('>success calls<')
-    assert response.text.index('>success calls<') < response.text.index('>failed tests<')
-    assert response.text.index('>failed tests<') < response.text.index('>success rate pct<')
+    assert response.text.index('>completed tests<') < response.text.index('>success tests<')
+    assert response.text.index('>success tests<') < response.text.index('>failed tests<')
+    assert response.text.index('>failed tests<') < response.text.index('>dropped calls<')
+    assert response.text.index('>dropped calls<') < response.text.index('>success rate pct<')
     assert "All values are selected by default. Clearing all values applies an empty filter." in response.text
 
 

@@ -29,7 +29,6 @@ from typing import Callable, Iterable, Mapping
 
 import pandas as pd
 from src.modules.column_names import MAIN_CDR_FIELDS, column_identity, compact_campaign_value, resolve_column_name, vendor_only_value
-from src.modules.runtime_config import ignore_event_time_filtering
 import certifi
 from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
@@ -1479,8 +1478,6 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
     result.attrs["catalogue_calculated_dimensions"] = entry.calculated_dimensions
     result.attrs["catalogue_cdr_source"] = entry.cdr_source
     for condition in parse_catalog_filters(entry.filters):
-        if ignore_event_time_filtering() and column_identity(condition.column) in {'eventstarttime', 'eventendtime'}:
-            continue
         if _normalise_catalog_name(condition.column) in {"threshold", "buckets"}:
             continue
         # A Vendor Comparison materialises values as Operator_Vendor. Template

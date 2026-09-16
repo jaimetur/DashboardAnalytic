@@ -21,7 +21,7 @@ import tempfile
 import time as time_module
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
@@ -56,7 +56,7 @@ from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGET
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE
-from src.modules.runtime_config import IGNORE_EVENT_TIME_FILTERING_ENV, env_flag
+from src.modules.runtime_config import IGNORE_EVENT_TIME_FILTERING_ENV, env_flag, ignore_event_time_filtering
 from src.modules.workspaces import Workspace, WorkspaceRegistry
 from src.version import __app_name__, __release_date__, __version__
 from src.utils.filesystem import ensure_directories, safe_join
@@ -77,6 +77,8 @@ DATASET_PROCESSING_LOCKS_LOCK = Lock()
 REPORT_CHART_JOB_LOCKS: dict[str, Lock] = {}
 REPORT_CHART_JOB_LOCKS_LOCK = Lock()
 TEMPLATE_SAVE_LOCK = Lock()
+WORKSPACE_ACTIVATION_LOCK = Lock()
+INITIALIZED_WORKSPACE_DATABASES: set[tuple[str, int | None]] = set()
 CATALOGUE_LAYOUT_NAMES_CACHE: dict[str, tuple[int, int, list[str]]] = {}
 CATALOGUE_LAYOUT_NAMES_CACHE_LOCK = Lock()
 EXPORT_JOBS: dict[str, dict[str, Any]] = {}
@@ -219,7 +221,9 @@ active_workspace: Workspace | None = None
 _workspace_size_cache: dict[str, tuple[float, int]] = {}
 _workspace_cache_size_cache: dict[str, tuple[float, int]] = {}
 _workspace_size_cache_lock = Lock()
-_WORKSPACE_SIZE_CACHE_SECONDS = 15.0
+# Disk usage is invalidated by every managed write. A longer fallback avoids
+# repeatedly walking every large Workspace merely to refresh header labels.
+_WORKSPACE_SIZE_CACHE_SECONDS = 300.0
 FILTER_DIMENSIONS = [
     'market', 'period', 'operator', 'vendor', 'vendor_only', 'test_name', 'region', 'city',
     'session_type', 'direction', 'technology_primary', 'RAT', 'RAT_A',
@@ -1386,36 +1390,60 @@ def synchronize_reporting_row_store() -> None:
 def activate_workspace(workspace_id: str, *, initialize: bool = True) -> Workspace:
     """Make one isolated workspace the target for all dataset operations."""
     global active_workspace
-    workspace = workspace_registry.mark_opened(workspace_id)
-    # Authentication remains global; template files and metadata are workspace-owned.
-    repository.set_global_database(application_config_dir / 'application.db')
-    for path in (workspace.database_path.parent, workspace.input_dir, workspace.output_dir, workspace.export_dir):
-        path.mkdir(parents=True, exist_ok=True)
-    object.__setattr__(settings, 'database_path', workspace.database_path)
-    object.__setattr__(settings, 'input_dir', workspace.input_dir)
-    object.__setattr__(settings, 'output_dir', workspace.output_dir)
-    object.__setattr__(settings, 'export_dir', workspace.export_dir)
-    object.__setattr__(settings, 'slides_templates_dir', workspace.slides_templates_dir)
-    repository.db_path = workspace.database_path
-    ANALYSIS_CACHE.clear()
-    DATAFRAME_CACHE.clear()
-    _clear_chart_preview_caches()
-    active_workspace = workspace
-    if initialize:
-        repository.initialize()
-        clear_outdated_workspace_caches(workspace)
-        migration_marker = workspace.slides_templates_dir / '.migrate-library'
-        if migration_marker.exists():
-            register_workspace_template_files(workspace)
-            shutil.rmtree(workspace.slides_templates_dir, ignore_errors=True)
-        # The workspace database is self-contained.  In particular, a
-        # duplicate already includes its reporting-row store, so rebuilding
-        # every ready CDR here can take minutes and make opening the copied
-        # workspace look like a server failure.  Reporting materialises the
-        # exact columns it needs lazily in ``_combined_reporting_frame``.
-        for technology in TEMPLATE_NAMES:
-            synchronize_template_file_names(technology)
-    return workspace
+    with WORKSPACE_ACTIVATION_LOCK:
+        workspace = workspace_registry.mark_opened(workspace_id)
+        database_path = workspace.database_path.resolve()
+        try:
+            database_inode = database_path.stat().st_ino
+        except OSError:
+            database_inode = None
+        database_key = (str(database_path), database_inode)
+        already_active = (
+            active_workspace is not None
+            and active_workspace.id == workspace.id
+            and active_workspace.database_path.resolve() == workspace.database_path.resolve()
+            and (not initialize or database_key in INITIALIZED_WORKSPACE_DATABASES)
+        )
+        if already_active:
+            active_workspace = workspace
+            clear_outdated_workspace_caches(workspace)
+            return workspace
+
+        # Authentication remains global; template files and metadata are workspace-owned.
+        repository.set_global_database(application_config_dir / 'application.db')
+        for path in (workspace.database_path.parent, workspace.input_dir, workspace.output_dir, workspace.export_dir):
+            path.mkdir(parents=True, exist_ok=True)
+        object.__setattr__(settings, 'database_path', workspace.database_path)
+        object.__setattr__(settings, 'input_dir', workspace.input_dir)
+        object.__setattr__(settings, 'output_dir', workspace.output_dir)
+        object.__setattr__(settings, 'export_dir', workspace.export_dir)
+        object.__setattr__(settings, 'slides_templates_dir', workspace.slides_templates_dir)
+        repository.db_path = workspace.database_path
+        ANALYSIS_CACHE.clear()
+        DATAFRAME_CACHE.clear()
+        _clear_chart_preview_caches()
+        active_workspace = workspace
+        if initialize:
+            if database_key not in INITIALIZED_WORKSPACE_DATABASES:
+                repository.initialize()
+                try:
+                    initialized_inode = database_path.stat().st_ino
+                except OSError:
+                    initialized_inode = None
+                INITIALIZED_WORKSPACE_DATABASES.add((str(database_path), initialized_inode))
+            clear_outdated_workspace_caches(workspace)
+            migration_marker = workspace.slides_templates_dir / '.migrate-library'
+            if migration_marker.exists():
+                register_workspace_template_files(workspace)
+                shutil.rmtree(workspace.slides_templates_dir, ignore_errors=True)
+            # The workspace database is self-contained.  In particular, a
+            # duplicate already includes its reporting-row store, so rebuilding
+            # every ready CDR here can take minutes and make opening the copied
+            # workspace look like a server failure.  Reporting materialises the
+            # exact columns it needs lazily in ``_combined_reporting_frame``.
+            for technology in TEMPLATE_NAMES:
+                synchronize_template_file_names(technology)
+        return workspace
 
 
 def close_active_workspace() -> None:
@@ -1646,6 +1674,16 @@ async def track_interactive_application_requests(request: Request, call_next):
         '/api/workspaces/sizes',
         '/api/e2e-dashboards/statuses',
     }
+    if (
+        request.url.path in {'/api/background-tasks', '/api/workspaces/sizes'}
+        and session_user(request.cookies.get(SESSION_COOKIE)) is None
+    ):
+        payload = (
+            {'authenticated': False, 'active_workspace_id': None, 'groups': []}
+            if request.url.path == '/api/background-tasks'
+            else {'authenticated': False, 'active_workspace_id': None, 'sizes': {}, 'cache_sizes': {}}
+        )
+        return JSONResponse(payload, headers={'Cache-Control': 'no-store'})
     if request.url.path not in passive_paths and not request.url.path.startswith('/static/'):
         record_application_activity()
     return await call_next(request)
@@ -2733,6 +2771,7 @@ def render_template(request: Request, template_name: str, context: dict[str, Any
         'header_workspaces': header_workspaces,
         'header_workspace_access': header_workspace_access,
         'header_workspace_sizes': {item.id: format_workspace_size(workspace_disk_usage(item)) for item in header_workspaces},
+        'ignore_event_time_filtering': ignore_event_time_filtering(),
         **context,
     }
     response = templates.TemplateResponse(request, template_name, payload, status_code=status_code)
@@ -3199,7 +3238,7 @@ def _archive_database(
         return
     with tempfile.TemporaryDirectory(prefix='dashboard-analytic-export-', dir=scratch_dir) as temporary_dir:
         snapshot = Path(temporary_dir) / 'snapshot.db'
-        with sqlite3.connect(database_path) as source:
+        with closing(sqlite3.connect(database_path)) as source, source:
             page_count = int(source.execute('PRAGMA page_count').fetchone()[0])
             free_pages = int(source.execute('PRAGMA freelist_count').fetchone()[0])
             # VACUUM INTO creates a consistent, compact copy.  It is much faster
@@ -3208,10 +3247,10 @@ def _archive_database(
             if page_count and free_pages / page_count >= 0.10:
                 source.execute('VACUUM INTO ?', (str(snapshot),))
             else:
-                with sqlite3.connect(snapshot) as target:
+                with closing(sqlite3.connect(snapshot)) as target, target:
                     source.backup(target)
         if exclude_tables:
-            with sqlite3.connect(snapshot) as target:
+            with closing(sqlite3.connect(snapshot)) as target, target:
                 for table in exclude_tables:
                     target.execute(f'DELETE FROM "{table.replace(chr(34), chr(34) * 2)}"')
         _archive_file(archive, snapshot, archive_name, progress_callback)
@@ -4420,7 +4459,7 @@ def _replace_workspace_from_staging(existing: Workspace, staging: Workspace) -> 
         imported_database = existing_root / staged_database_name
         WorkspaceRegistry._move_database_bundle(imported_database, existing.database_path)
         if existing.database_path.exists():
-            with sqlite3.connect(existing.database_path) as connection:
+            with closing(sqlite3.connect(existing.database_path)) as connection, connection:
                 has_datasets = connection.execute(
                     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'datasets'"
                 ).fetchone()
@@ -4495,7 +4534,7 @@ def import_workspace_archive(payload: Path, workspace_info: dict[str, Any] | Non
             shutil.copy2(database_snapshot, workspace.database_path)
         source_input_dir = workspace_info.get('source_input_dir') if workspace_info else None
         source_output_dir = workspace_info.get('source_output_dir') if workspace_info else None
-        with sqlite3.connect(workspace.database_path) as connection:
+        with closing(sqlite3.connect(workspace.database_path)) as connection, connection:
             connection.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
             if source_input_dir:
                 connection.execute(
@@ -5692,8 +5731,8 @@ def build_datasets_analysis_payload(selected_dataset: dict[str, Any] | None, req
     filters = {
         'market': choose_filter_values(request.query_params.getlist('market'), filter_options, 'market'),
         'period': choose_filter_values(request.query_params.getlist('period'), filter_options, 'period'),
-        'date_from': request.query_params.get('date_from') or None,
-        'date_to': request.query_params.get('date_to') or None,
+        'date_from': None if ignore_event_time_filtering() else request.query_params.get('date_from') or None,
+        'date_to': None if ignore_event_time_filtering() else request.query_params.get('date_to') or None,
         'aggregation': aggregation,
         'cdf_grouping': cdf_grouping,
         'extra_filters': {},
@@ -5823,7 +5862,7 @@ def login(
     submitted_username = username.strip().casefold()
     record = repository.get_user(username)
     if not record or not record.active or not verify_password(password, record.password_hash):
-        repository.add_log(submitted_username or '(blank)', 'login', json.dumps({
+        repository.try_add_log(submitted_username or '(blank)', 'login', json.dumps({
             'success': False, 'result': 'failed', 'reason': 'invalid_credentials',
             'workspace_id': workspace_id or '',
         }))
@@ -5841,7 +5880,7 @@ def login(
 
     if workspace_id:
         if record.role != 'super-admin' and not repository.user_has_workspace_access(record.username, workspace_id):
-            repository.add_log(record.username, 'login', json.dumps({
+            repository.try_add_log(record.username, 'login', json.dumps({
                 'success': False, 'result': 'failed', 'reason': 'workspace_access_denied',
                 'workspace_id': workspace_id,
             }))
@@ -5854,21 +5893,25 @@ def login(
             }, status_code=403)
         try:
             activate_workspace(workspace_id)
-        except ValueError as exc:
-            repository.add_log(record.username, 'login', json.dumps({
+        except (ValueError, sqlite3.OperationalError) as exc:
+            repository.try_add_log(record.username, 'login', json.dumps({
                 'success': False, 'result': 'failed', 'reason': 'workspace_activation_failed',
                 'workspace_id': workspace_id, 'error': str(exc),
             }))
+            database_busy = isinstance(exc, sqlite3.OperationalError)
             return render_template(request, 'login.html', {
-                'error': str(exc), 'default_access_accounts': build_default_access_accounts(),
+                'error': (
+                    'The selected Workspace database is busy. Please try signing in again in a moment.'
+                    if database_busy else str(exc)
+                ), 'default_access_accounts': build_default_access_accounts(),
                 'workspaces': workspace_registry.list(), 'active_workspace': active_workspace,
                 'selected_workspace_id': workspace_id,
-            }, status_code=400)
+            }, status_code=503 if database_busy else 400)
 
     user = SessionUser(username=record.username, role=record.role)
     response = RedirectResponse('/documents/view/readme', status_code=status.HTTP_303_SEE_OTHER)
     create_session(response, user)
-    repository.add_log(record.username, 'login', json.dumps({
+    repository.try_add_log(record.username, 'login', json.dumps({
         'success': True, 'result': 'successful', 'role': record.role,
         'workspace_id': active_workspace.id if active_workspace else '',
         'workspace': active_workspace.name if active_workspace else '',
@@ -6220,8 +6263,11 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
     if not workspace.database_path.is_file():
         return tasks
     try:
-        with sqlite3.connect(workspace.database_path, timeout=0.15) as connection:
+        database_uri = f'{workspace.database_path.resolve().as_uri()}?mode=ro'
+        with closing(sqlite3.connect(database_uri, uri=True, timeout=0.15)) as connection:
             connection.row_factory = sqlite3.Row
+            connection.execute('PRAGMA query_only = ON')
+            connection.execute('PRAGMA busy_timeout = 150')
             tables = {
                 str(row['name'])
                 for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
@@ -6586,7 +6632,7 @@ def stop_background_task(
         task_repository.update_dataset_profile(
             dataset_id, status='stopped', last_error='Processing stopped by user.', processed_at=now_iso(),
         )
-        task_repository.add_log(user.username, 'stop_dataset_requested', json.dumps({'dataset_id': dataset_id}))
+        task_repository.try_add_log(user.username, 'stop_dataset_requested', json.dumps({'dataset_id': dataset_id}))
     elif prefix == 'generated':
         try:
             job_id = int(raw_identifier)
@@ -6602,7 +6648,7 @@ def stop_background_task(
         )
         if not stopped:
             raise HTTPException(status_code=409, detail='This generated job can no longer be stopped.')
-        task_repository.add_log(user.username, 'stop_generated_job', json.dumps({'job_id': job_id, 'job_type': job['job_type']}))
+        task_repository.try_add_log(user.username, 'stop_generated_job', json.dumps({'job_id': job_id, 'job_type': job['job_type']}))
     elif prefix == 'dashboard-ppt':
         try:
             job_id = int(raw_identifier)
@@ -6622,7 +6668,7 @@ def stop_background_task(
                 "UPDATE dashboard_ppt_jobs SET status = 'stopped', finished_at = ? WHERE id = ?",
                 (datetime.now(timezone.utc).isoformat(), job_id),
             )
-        task_repository.add_log(user.username, 'stop_dashboard_ppt_job', json.dumps({'job_id': job_id}))
+        task_repository.try_add_log(user.username, 'stop_dashboard_ppt_job', json.dumps({'job_id': job_id}))
     elif prefix == 'auto-fields':
         with AUTO_CALCULATED_FIELD_JOBS_LOCK:
             job = AUTO_CALCULATED_FIELD_JOBS.get(raw_identifier)
@@ -6633,7 +6679,9 @@ def stop_background_task(
         stop_dashboard = getattr(sys.modules[__name__], 'e2e_dashboard_stop_task', None)
         if not callable(stop_dashboard) or not stop_dashboard(workspace.database_path, raw_identifier):
             raise HTTPException(status_code=409, detail='This Dashboard task can no longer be interrupted.')
-        task_repository.add_log(user.username, 'interrupt_dashboard_preparation', json.dumps({'task_id': raw_identifier}))
+        task_repository.try_add_log(
+            user.username, 'interrupt_dashboard_preparation', json.dumps({'task_id': raw_identifier}),
+        )
     elif prefix == 'export':
         with EXPORT_JOBS_LOCK:
             job = EXPORT_JOBS.get(raw_identifier)
@@ -7204,7 +7252,7 @@ def _preview_column_metadata(
             } else 'Analysis-derived'
             rules[column] = DERIVED_PREVIEW_RULES.get(identity, 'Derived during CDR ingestion from the available source fields.')
         elif column in main:
-            kinds[column] = 'Main'
+            kinds[column] = 'CDR-Main'
             rules[column] = DERIVED_PREVIEW_RULES.get(
                 identity, 'Fixed primary CDR field stored directly from the source when available.',
             )
@@ -7315,7 +7363,8 @@ def _dataset_preview_request(payload: Any, available_columns: list[str]) -> tupl
             filters[resolved] = [str(value) for value in values]
     filter_column = payload.get('filter_column')
     resolved_filter_column = resolve_column_name(available_columns, filter_column) if filter_column is not None else None
-    if filter_column is not None and resolved_filter_column is None:
+    invalid_filter_column = filter_column is not None and resolved_filter_column is None
+    if invalid_filter_column:
         raise HTTPException(status_code=400, detail='Invalid filter column.')
     return page, filters, resolved_filter_column
 
@@ -7672,8 +7721,8 @@ def datasets_analysis(
             'analyses': analyses,
             'analysis_loaded': analysis_loaded,
             'selected_metrics': selected_metrics,
-            'selected_date_from': request.query_params.get('date_from') or '',
-            'selected_date_to': request.query_params.get('date_to') or '',
+            'selected_date_from': '' if ignore_event_time_filtering() else request.query_params.get('date_from') or '',
+            'selected_date_to': '' if ignore_event_time_filtering() else request.query_params.get('date_to') or '',
             'selected_aggregation': request.query_params.get('aggregation') or (selected_dataset.get('default_aggregation') if selected_dataset else 'all') or 'all',
             'aggregation_overrides': parse_aggregation_overrides(request.query_params.get('aggregation_overrides') or ''),
             'selected_cdf_grouping': request.query_params.get('cdf_grouping') or 'all',
@@ -10200,9 +10249,9 @@ def export_report(
     for value in period or []:
         if value:
             query_items.append(('period', value))
-    if date_from:
+    if date_from and not ignore_event_time_filtering():
         query_items.append(('date_from', date_from))
-    if date_to:
+    if date_to and not ignore_event_time_filtering():
         query_items.append(('date_to', date_to))
     if aggregation_overrides:
         query_items.append(('aggregation_overrides', aggregation_overrides))
