@@ -3366,6 +3366,7 @@ const datasetPreviewFrame = document.getElementById('dataset-preview-dialog-fram
 const datasetPreviewLoading = document.getElementById('dataset-preview-dialog-loading');
 const datasetPreviewClose = document.getElementById('dataset-preview-dialog-close');
 let datasetPreviewReturnFocus = null;
+let datasetPreviewFrameWindow = null;
 const confirmOverlay = document.getElementById('confirm-overlay');
 const confirmTitle = document.getElementById('confirm-title');
 const confirmCopy = document.getElementById('confirm-copy');
@@ -3401,9 +3402,23 @@ function closeDatasetPreviewDialog() {
   datasetPreviewReturnFocus = null;
 }
 
+function handleEmbeddedDatasetPreviewKeydown(event) {
+  if (event.key !== 'Escape' || !datasetPreviewOverlay || datasetPreviewOverlay.hidden) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  closeDatasetPreviewDialog();
+}
+
 datasetPreviewFrame?.addEventListener('load', () => {
   if (datasetPreviewOverlay && !datasetPreviewOverlay.hidden && datasetPreviewLoading) {
     datasetPreviewLoading.hidden = true;
+  }
+  try {
+    datasetPreviewFrameWindow?.removeEventListener('keydown', handleEmbeddedDatasetPreviewKeydown, true);
+    datasetPreviewFrameWindow = datasetPreviewFrame.contentWindow;
+    datasetPreviewFrameWindow?.addEventListener('keydown', handleEmbeddedDatasetPreviewKeydown, true);
+  } catch (_error) {
+    // The embedded preview is same-origin; ignore a transient inaccessible document during navigation.
   }
 });
 datasetPreviewClose?.addEventListener('click', closeDatasetPreviewDialog);

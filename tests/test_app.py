@@ -3145,6 +3145,8 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     assert 'openDatasetPreviewInNewTab' in preview_script.text
     assert 'openDatasetPreviewInDialog' in preview_script.text
     assert "if (event.target === datasetPreviewOverlay) closeDatasetPreviewDialog();" in preview_script.text
+    assert "datasetPreviewFrameWindow?.addEventListener('keydown', handleEmbeddedDatasetPreviewKeydown, true);" in preview_script.text
+    assert "event.stopImmediatePropagation();" in preview_script.text
 
     limited_preview_response = client.get("/workspace/preview/1?row_limit=25")
     assert limited_preview_response.status_code == 200
