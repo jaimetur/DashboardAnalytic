@@ -21,7 +21,7 @@ Stored below `APP_DATA_DIR/workspaces/<workspace>/`:
 - `output/reports/`: generated PowerPoint reports and their PNG charts.
 - `output/charts/`: standalone Chart Sets.
 - `output/dashboards/`: Dashboard PowerPoint jobs and their persistent PNG, tooltip and Canvas-model assets.
-- `.dashboard-data-cache/`: bounded, regenerable E2E Dashboard analytical projections, reusable preview manifests and live Canvas/legacy PIL chart artifacts. This cache is not a user dataset or source of record.
+- `.dashboard-data-cache/`: regenerable E2E Dashboard preview manifests and live Canvas/legacy PIL chart artifacts. Dashboard SQL reads the combined CDR tables in the workspace database directly; this directory is not a user dataset or source of record.
 - `.dashboard-cache-version.json`: signature used to invalidate caches written by older application or cache-format versions.
 
 Application-level derived data lives below `APP_DATA_DIR`: `transfer-packages/` holds temporary/recoverable portability archives, `scheduled-backups/` is the default Admin backup destination and `.map-tiles-cache/openstreetmap/` stores regenerable map tiles.
@@ -169,15 +169,14 @@ Changing only a title should therefore be much faster than changing datasets or 
 
 E2E Dashboard persistence has additional layers:
 
-- `dashboard_filter_selections` stores a versioned selection key, faceted filter values, row counts and whether the selection was materialised.
-- A selection of at most 25,000 rows stores exact `(dataset_id, source_row_id)` keys in `dashboard_filter_selection_rows`. Larger selections retain reproducible SQL predicates instead of writing every row identity.
-- `.dashboard-data-cache/dashboard-analytics.sqlite3` holds narrow, indexed projections containing only the fields needed by the Dashboard definition, its filters and its template.
+- `dashboard_filter_selections` stores a versioned selection key, faceted filter values and row counts; its predicates are reproduced from the saved Dashboard definition.
+- The shared `reporting_rows_data`, `reporting_rows_voice` and `reporting_rows_speech` combined tables supply Dashboard filters, chart datasets and chart rendering directly.
 - `.dashboard-data-cache/charts-canvas` stores compact interactive models; `charts-pil` contains legacy raster artifacts and `dashboard-previews` stores reusable preview manifests.
-- Cache keys include selected datasets and revisions, NR Mode, scope, dates, filters, required fields, template definition and renderer/cache versions. Equivalent value and dataset ordering resolves to the same selection.
+- Cache keys include selected datasets and revisions, NR Mode, scope, dates, filters, template definition and renderer/cache versions. Equivalent value and dataset ordering resolves to the same selection.
 
-When a workspace opens, the application compares its saved cache signature with the current application and every Dashboard cache-format version. A mismatch cancels queued warming, deletes obsolete projections, chart models, manifests and persisted selection rows, then records the current signature. Current-version artifacts remain available. The Workspace **Clear cache** action performs the same derived-data cleanup on demand without deleting definitions, datasets, templates or generated jobs.
+When a workspace opens, the application compares its saved cache signature with the current application and every Dashboard cache-format version. A mismatch deletes obsolete chart models, manifests and selection metadata, then records the current signature. Current-version artifacts remain available. The Workspace **Clear cache** action performs the same derived-data cleanup on demand without deleting definitions, datasets, combined CDR tables, templates or generated jobs.
 
-Dashboard warming uses a FIFO queue with one Dashboard preparation active at a time. Once its selection is ready, up to three independent chart models are prepared concurrently. The visible Dashboard receives priority, and completed background snapshots release their large temporary frames while retaining reusable selection metadata and disk-backed models.
+There is no Dashboard warm-up queue. Data preparation starts only for an explicit open, refresh or export operation, and chart models are generated when the corresponding chart is viewed or included in a requested PPT. Listing or saving Dashboards and opening or clearing a workspace do not schedule preparation.
 
 ## Filtered dataset preview
 
@@ -214,7 +213,7 @@ Dashboard PowerPoint generations use the separate `dashboard_ppt_jobs` table bec
 output/dashboards/<timestamp - dashboard-name>/
 ```
 
-The Dashboard jobs UI supports stop, retry, relaunch and deletion. A completed job can be reopened through Charts Panel without rerendering its charts, and its Filtered Chart Dataset resolves against the materialised selection or cached projection used at generation time.
+The Dashboard jobs UI supports stop, retry, relaunch and deletion. A completed job can be reopened through Charts Panel without rerendering its charts, and its Filtered Chart Dataset replays the saved selection directly against the combined CDR table used at generation time.
 
 Both job families continue after leaving the page or signing out. A process restart marks interrupted in-process jobs as failed and retryable because the current worker model runs inside the application process.
 
@@ -245,7 +244,7 @@ Incomplete transfer files are cleaned up. Complete packages that were not import
 - SQLite uses WAL mode, a busy timeout and normal synchronous mode.
 - Processed CDR rows are materialised per dataset and into combined tables by CDR type.
 - E2E Dashboard filter catalogues normally come from persisted dataset profiles. If an older profile lacks a current default or added field, the application reads only the missing catalogues from combined CDR tables in one grouped pass per CDR type.
-- Narrow, revision-keyed SQLite projections are warmed in the background and compact Canvas models persist across restarts. Live, expanded, historical and exported charts share aggregation, hierarchy, colour, title, legend and semantic-tooltip contracts with Reports and Chart Sets.
+- Combined CDR tables are queried directly and compact Canvas models persist across restarts after being requested. Live, expanded, historical and exported charts share aggregation, hierarchy, colour, title, legend and semantic-tooltip contracts with Reports and Chart Sets.
 - Interactive Preview caches combined and filtered frames separately.
 - Database import prefers bulk database/file replacement over row-by-row queries where safe.
 

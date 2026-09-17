@@ -199,22 +199,9 @@ CREATE TABLE IF NOT EXISTS dashboard_filter_selections (
     cache_key TEXT NOT NULL UNIQUE,
     options_json TEXT NOT NULL DEFAULT '{}',
     row_counts_json TEXT NOT NULL DEFAULT '{}',
-    materialized INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_accessed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
-CREATE TABLE IF NOT EXISTS dashboard_filter_selection_rows (
-    selection_id INTEGER NOT NULL,
-    dataset_kind TEXT NOT NULL,
-    dataset_id INTEGER NOT NULL,
-    source_row_id INTEGER NOT NULL,
-    PRIMARY KEY (selection_id, dataset_kind, dataset_id, source_row_id),
-    FOREIGN KEY(selection_id) REFERENCES dashboard_filter_selections(id) ON DELETE CASCADE
-) WITHOUT ROWID;
-
-CREATE INDEX IF NOT EXISTS idx_dashboard_filter_selection_kind
-ON dashboard_filter_selection_rows(selection_id, dataset_kind);
 
 
 
@@ -423,8 +410,14 @@ class Repository:
             conn.execute("ALTER TABLE dashboard_filter_selections ADD COLUMN options_json TEXT NOT NULL DEFAULT '{}'")
         if 'row_counts_json' not in columns:
             conn.execute("ALTER TABLE dashboard_filter_selections ADD COLUMN row_counts_json TEXT NOT NULL DEFAULT '{}'")
-        if 'materialized' not in columns:
-            conn.execute('ALTER TABLE dashboard_filter_selections ADD COLUMN materialized INTEGER NOT NULL DEFAULT 0')
+
+    @staticmethod
+    def _remove_legacy_dashboard_selection_rows(conn: sqlite3.Connection) -> None:
+        """Remove the unused row-key cache retained by older workspaces."""
+        conn.execute('DROP TABLE IF EXISTS dashboard_filter_selection_rows')
+        columns = {str(row['name']) for row in conn.execute('PRAGMA table_info(dashboard_filter_selections)').fetchall()}
+        if 'materialized' in columns:
+            conn.execute('ALTER TABLE dashboard_filter_selections DROP COLUMN materialized')
 
     def _ensure_existing_reporting_indexes(self, conn: sqlite3.Connection) -> None:
         for kind in ('data', 'voice', 'speech'):
@@ -459,6 +452,7 @@ class Repository:
                     "INSERT INTO workspace_state (key, value) VALUES ('operator_mappings_seeded', '1')"
                 )
             self._ensure_dashboard_filter_selection_columns(conn)
+            self._remove_legacy_dashboard_selection_rows(conn)
             self._ensure_existing_reporting_indexes(conn)
             self._ensure_report_template_columns(conn)
             self._ensure_dataset_profile_columns(conn)
@@ -2126,33 +2120,6 @@ class Repository:
         query = f"SELECT {select_clause} FROM {self._quote_identifier(table_name)} WHERE dataset_id IN ({placeholders})"
         with self.connection() as conn:
             return pd.read_sql_query(query, conn, params=[int(dataset_id) for dataset_id in dataset_ids])
-
-    def load_dashboard_selection_rows(
-        self, selection_id: int, dataset_kind: str, columns: list[str],
-    ) -> pd.DataFrame:
-        """Load only rows already selected by a persistent Dashboard filter."""
-        table_name = self.reporting_rows_table_name(dataset_kind)
-        existing_columns = set(self.list_reporting_row_columns(dataset_kind))
-        selected_columns: list[tuple[str, str]] = []
-        for column in columns:
-            resolved = self._resolve_dataset_row_column_name(existing_columns, column)
-            if resolved and all(actual != resolved for _requested, actual in selected_columns):
-                selected_columns.append((column, resolved))
-        if not selected_columns:
-            return pd.DataFrame()
-        select_clause = ', '.join(
-            f"data.{self._quote_identifier(actual)} AS {self._quote_identifier(requested)}"
-            if actual != requested else f"data.{self._quote_identifier(actual)}"
-            for requested, actual in selected_columns
-        )
-        query = (
-            f"SELECT {select_clause} FROM {self._quote_identifier(table_name)} AS data "
-            "INNER JOIN dashboard_filter_selection_rows AS selected "
-            "ON selected.dataset_id = data.dataset_id AND selected.source_row_id = data.source_row_id "
-            "WHERE selected.selection_id = ? AND selected.dataset_kind = ?"
-        )
-        with self.connection() as conn:
-            return pd.read_sql_query(query, conn, params=[int(selection_id), dataset_kind])
 
     def load_filtered_reporting_rows(
         self, dataset_kind: str, columns: list[str], where_sql: str, parameters: list[Any],

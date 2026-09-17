@@ -1914,7 +1914,7 @@ def test_workspace_cache_clear_removes_only_derived_dashboard_artifacts(client, 
             raise AssertionError('Cache clearing must not wait for Dashboard workers.')
 
     monkeypatch.setattr(
-        app_module, 'e2e_dashboard_cancel_prefetch_workspace',
+        app_module, 'e2e_dashboard_cancel_workspace_tasks',
         lambda _workspace: [StillRunningWorker()],
     )
 
@@ -2969,17 +2969,7 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
     app_module.repository.replace_dataset_rows(987, pd.DataFrame({"obsolete": ["row"]}))
     app_module.repository.replace_reporting_rows(987, 'data', pd.DataFrame({"Campaign": ["legacy"]}))
     with app_module.repository.connection() as conn:
-        selection_id = int(conn.execute(
-            "INSERT INTO dashboard_filter_selections (cache_key) VALUES ('database-viewer-test')"
-        ).lastrowid)
-        conn.execute(
-            """
-            INSERT INTO dashboard_filter_selection_rows (
-                selection_id, dataset_kind, dataset_id, source_row_id
-            ) VALUES (?, 'data', 987, 1)
-            """,
-            (selection_id,),
-        )
+        conn.execute("INSERT INTO dashboard_filter_selections (cache_key) VALUES ('database-viewer-test')")
     assert app_module.repository.dataset_rows_table_exists(987)
     admin = client.get("/admin")
     assert admin.status_code == 200
@@ -2996,8 +2986,7 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
     assert 'Workspace registry' in admin.text
     assert '<optgroup label="Workspace Tables">' in admin.text
     assert 'value="generated_jobs"' in admin.text
-    assert 'Dashboard selected rows' in admin.text
-    assert 'This internal table is read-only' in admin.text
+    assert 'Dashboard selected rows' not in admin.text
     assert 'Generated jobs' in admin.text
     assert 'value="report_chart_jobs"' not in admin.text
     assert 'value="report_runs"' not in admin.text
@@ -3008,18 +2997,6 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
     assert cleanup.status_code == 303
     assert not app_module.repository.dataset_rows_table_exists(987)
     assert app_module.repository.database_table_page('reporting_rows_data')['total_rows'] == 0
-
-    selected_rows = client.post(
-        '/admin/database/table/query',
-        json={'table': 'dashboard_filter_selection_rows', 'offset': 0, 'limit': 100, 'filters': {}},
-    )
-    assert selected_rows.status_code == 200
-    selected_payload = selected_rows.json()
-    assert selected_payload['editable'] is False
-    assert selected_payload['total_rows'] == 1
-    assert selected_payload['rows'][0]['selection_id'] == selection_id
-    assert selected_payload['rows'][0]['dataset_kind'] == 'data'
-    assert selected_payload['rows'][0]['__database_rowid__'] == 'read-only-0'
 
     workspace_registry = client.get('/admin/database/table', params={'table': '__workspace_registry__', 'limit': 100})
     assert workspace_registry.status_code == 200

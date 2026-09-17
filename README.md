@@ -48,7 +48,7 @@ Datasets Analysis analyses one ready Data, Voice or Speech CDR.
 
 ### E2E Dashboards
 
-Create, save, duplicate, import and export workspace Dashboards from an NSA/SA Report Template. The editor separates **Select Dataset Universe** from **Select Dataset Filters**: Scope, CDRs and dates remain temporary, while default, aliased and custom Auto-calculated Field filters can be applied, saved, reloaded or discarded explicitly. Switching scope automatically selects the newest CDR per type for Multivendor or the two newest per type for Operator Comparison. View Dashboard opens immediately and shows centred preparation progress until its navigable 16:9 slides and live Canvas charts are ready. Generate PPT uses the same prepared definition and waits for pending filter decisions. Versioned projections, selection snapshots and chart models keep large Dashboards responsive and remove obsolete cache versions when a workspace opens. See [E2E Dashboards Help](help/07-e2e-dashboards.md) for the operational workflow and [Administration → Report Template reference](help/10-administration.md#report-template-reference) for template authoring, supported chart types and examples.
+Create, save, duplicate, import and export workspace Dashboards from an NSA/SA Report Template. The editor separates **Select Dataset Universe** from **Select Dataset Filters**: Scope, CDRs and dates remain temporary, while default, aliased and custom Auto-calculated Field filters can be applied, saved, reloaded or discarded explicitly. Switching scope automatically selects the newest CDR per type for Multivendor or the two newest per type for Operator Comparison. View Dashboard opens immediately and shows centred preparation progress until its navigable 16:9 slides and live Canvas charts are ready. Generate PPT uses the same prepared definition and waits for pending filter decisions. Dashboard queries read the workspace's combined CDR tables directly; reusable selection manifests and chart models avoid recalculating unchanged work without any automatic background warm-up. See [E2E Dashboards Help](help/07-e2e-dashboards.md) for the operational workflow and [Administration → Report Template reference](help/10-administration.md#report-template-reference) for template authoring, supported chart types and examples.
 
 ### E2E Reporting
 
@@ -285,7 +285,7 @@ DashboardAnalytic/
 
 ## Current limitations
 
-- General analysis caches remain process-local; E2E Dashboard analytical projections and report-faithful compact chart models persist beside each workspace database and survive application restarts.
+- General analysis caches remain process-local; E2E Dashboard preview manifests and report-faithful compact chart models persist beside each workspace database and survive application restarts. Dashboard data itself is queried directly from the combined CDR tables.
 - SQLite is the current persistence model and may not suit very large concurrent deployments.
 - Smart Orchestrator Logs reporting is visible but not implemented.
 - Scoring and GAP automation remain planned work.

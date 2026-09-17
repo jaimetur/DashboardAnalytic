@@ -12,24 +12,20 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 import src.DashboardAnalytic as core
-from src.modules.e2e_dashboards import DashboardDefinition, dashboard_projection_scan_hint, filter_frame
+from src.modules.e2e_dashboards import DashboardDefinition, filter_frame
 
 
 def definition(**changes):
     return DashboardDefinition(name='Comparison', template='Dashboard test', datasets={'data': [1]}, **changes)
 
 
-def test_projection_scan_hint_only_bypasses_index_for_complete_selection():
-    assert dashboard_projection_scan_hint([2, 1], [1, 2]) == ' NOT INDEXED'
-    assert dashboard_projection_scan_hint([1], [1, 2]) == ''
-    assert dashboard_projection_scan_hint([], []) == ''
-
-
-def test_cache_clear_discards_invalidated_prefetch_jobs_before_requeuing():
+def test_dashboard_uses_combined_tables_without_projection_or_warmup_queue():
     source = (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
-    assert "existing.get('cancel_requested')" in source
-    assert "existing.get('generation') != generation" in source
-    assert "job.get('generation') == prefetch_generation.get(job.get('workspace'), 0)" in source
+    assert 'dashboard-analytics.sqlite3' not in source
+    assert 'def ensure_projection' not in source
+    assert 'def enqueue_prefetch' not in source
+    assert 'def prefetch_workspace_dashboards' not in source
+    assert 'def reporting_source(snapshot, kind, task_repository):' in source
 
 
 def setup_dashboard(client):
@@ -245,7 +241,6 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-save"' in page.text
     assert '>Save Filters<' in page.text
     assert page.text.index('id="ds-unapplied-filters-badge"') < page.text.index('id="ds-unsaved-filters-badge"')
-    assert page.text.index('id="ds-unsaved-filters-badge"') < page.text.index('id="ds-dashboard-name"')
     assert 'id="confirm-secondary"' in page.text
     assert 'id="confirm-tertiary"' in page.text
     assert '"filter_aliases"' in page.text
@@ -257,6 +252,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '>Import Dashboard<' in page.text
     assert 'Total Dashboards: 0' in page.text
     assert '>Dashboard Datasets & Filters<' in page.text
+    assert 'id="ds-active-dashboard-heading">Active Dashboard<' in page.text
     assert '>Dataset Universe<' in page.text
     assert '>Select Dataset Universe<' in page.text
     assert '>Select Dataset Filters<' in page.text
@@ -269,7 +265,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '>Additional Filters<' in page.text
     assert '>Clear Filters<' in page.text
     assert '>Reload Saved Filters<' in page.text
-    assert 'id="ds-dashboard-name">Dashboard: —' in page.text
+    assert 'id="ds-dashboard-name"' not in page.text
     assert 'title="Save and apply the current Dashboard filters"' in page.text
     assert 'title="Remove all filter restrictions"' in page.text
     assert 'title="Restore filters and additional fields from the last saved Dashboard"' in page.text
@@ -346,7 +342,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "window.addEventListener('beforeunload', rememberScroll);" in dashboard_script
     assert "document.addEventListener('visibilitychange'" in dashboard_script
     assert "document.documentElement.scrollHeight - window.innerHeight" in dashboard_script
-    assert "if (dashboards[last]) await openDashboard(last);\n    restoreScroll();" in dashboard_script
+    assert 'openStorageKey' not in dashboard_script
+    assert 'rememberOpen' not in dashboard_script
+    assert "if (dashboards[last]) await openDashboard(last);" not in dashboard_script
+    assert dashboard_script.index("action(id === activeId ? 'Close Dashboard' : 'Open Dashboard'") < dashboard_script.index("action('View Dashboard', '◉'")
     assert "preview_snapshot = replace(" in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     assert "The template owns these required chart attributes." in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
@@ -386,7 +385,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '.ds-chart-expanded-overlay .ds-chart-expanded-dialog { position: relative;' in dashboard_styles
     assert '.ds-chart-expanded-overlay .ds-chart-expanded-canvas { border:' in dashboard_styles
     assert '#ds-chart-expanded-close.report-chart-viewer-close, .e2e-dashboards .ds-viewer-header #ds-viewer-close.report-chart-viewer-close {' in dashboard_styles
-    assert '#ds-subtitle:empty{display:none}.ds-viewer-panel>.ds-actions{margin-top:.5rem}' in dashboard_styles
+    assert '#ds-subtitle{min-height:1.4em}.ds-viewer-panel>.ds-actions{margin-top:.5rem}' in dashboard_styles
+    assert '#ds-subtitle:empty{display:none}' not in dashboard_styles
     assert 'text-transform: uppercase;' in dashboard_styles
     assert 'height: 14rem;' in dashboard_styles
     assert '.multiselect-option[hidden], .multiselect-group-label[hidden] { display: none !important; }' in app_styles
@@ -572,16 +572,16 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "renderDashboardPptJobs(jobs, newlyReady[0]?.id || '');" in dashboard_script
     assert "const previous = String(preferredJobId || select.value);" in dashboard_script
     dashboard_module = (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
-    assert 'for saved_id, saved_definition in read_dashboards(task_repository).items()' in dashboard_module
+    assert 'for saved_id, saved_definition in read_dashboards(task_repository).items()' not in dashboard_module
     assert "'dashboard_name': task['name']," in dashboard_module
     assert "'label': 'Rendering Dashboard Charts' if task.get('rendering_only') else 'Preparing Dashboard dataset'," in dashboard_module
     assert "'progress': task.get('progress', 0)," in dashboard_module
     assert "@app.get('/api/e2e-dashboards/preparation-progress/{preparation_id}')" in dashboard_module
     assert "report(60, 'Building filtered Dashboard selection')" in dashboard_module
-    assert "job['progress'] = round(82 + job['completed'] * 18 / max(job['total'], 1))" in dashboard_module
+    assert "job['progress'] = round(82 + job['completed'] * 18 / max(job['total'], 1))" not in dashboard_module
     assert 'direct_preparation_tasks: dict[str, dict] = {}' in dashboard_module
     assert "preparation_id: str | None = None," in dashboard_module
-    assert "'label': 'Rendering Dashboard Charts' if job['total'] else 'Preparing Dashboard dataset'," in dashboard_module
+    assert "'label': 'Rendering Dashboard Charts' if job['total'] else 'Preparing Dashboard dataset'," not in dashboard_module
     assert "phase === 'rendering' ? 'Rendering Dashboard Charts' : 'Preparing Dashboard dataset'" in dashboard_script
     assert "if (preparingFilterState === requestedFilterState) return preparing;" in dashboard_script
     assert "if (backgroundPreparationToken === preparationToken) dismissPreparationStatus();" in dashboard_script
@@ -598,6 +598,13 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'const dashboardPreparationTokens = new Map();' in dashboard_script
     assert "if (!dashboardPreparationTokens.has(id)) dashboardStatuses.set(id, value);" in dashboard_script
     assert "bind('ds-generate-ppt', async () => {" in dashboard_script
+    assert "heading.replaceChildren(document.createTextNode(name ? 'Active Dashboard: ' : 'Active Dashboard'));" in dashboard_script
+    assert "heading.append(node('span', name.toUpperCase(), 'ds-active-dashboard-name'))" in dashboard_script
+    assert 'setActiveDashboardHeading(definition.name);' in dashboard_script
+    assert "setActiveDashboardHeading('');" in dashboard_script
+    assert "if (activePrepared) dashboardStatuses.set(id, {state: 'ready', label: 'Ready'});" in dashboard_script
+    assert "setDashboardStatus(activeId, 'ready', 'Ready');" in dashboard_script
+    assert "const payload = await api('/statuses', 'POST', statusDefinitions);" in dashboard_script
     assert "window.setInterval(refreshDashboardStatuses, 2000);" in dashboard_script
     assert "let previousDashboardName = '';" in app_script
     assert 'if (dashboardName && dashboardName !== previousDashboardName)' in app_script
@@ -611,21 +618,27 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "kind: sorted(set(dataset_ids))" in selection_key_source
     assert "field: sorted(set(values))" in selection_key_source
     assert '{snapshot.selection_key}:{snapshot.definition.scope}:{entry_key}' in dashboard_module
-    assert '{selection_key}:{candidate.scope}:{entry_key}' in dashboard_module
     assert "'rendering_only': rendering_only," in dashboard_module
     assert 'def materialize_selection(definition, task_repository, dimensions, selected_by_kind, fields, *, use_profile_options=False):' in dashboard_module
     assert 'use_profile_options=use_profile_options,' in dashboard_module
     assert 'DASHBOARD_CHART_RENDER_WORKERS = 3' in dashboard_module
     assert 'DASHBOARD_PREVIEW_MANIFEST_VERSION = 7' in dashboard_module
-    assert "thread_name_prefix='e2e-dashboard-chart'," in dashboard_module
-    assert 'def schedule_next_prefetch() -> None:' in dashboard_module
-    assert "job = min(candidates, key=lambda candidate: float(candidate.get('created_at') or 0))" in dashboard_module
+    assert "thread_name_prefix='e2e-dashboard-chart'," not in dashboard_module
+    assert 'def schedule_next_prefetch() -> None:' not in dashboard_module
+    assert 'def enqueue_prefetch(' not in dashboard_module
+    assert "void api(`/prefetched/${encodeURIComponent(activeId)}/priority`" not in dashboard_script
+    assert 'const proximityIndexes = (length, origin) =>' in dashboard_script
+    assert 'if (origin + distance < length) indexes.push(origin + distance);' in dashboard_script
+    assert 'if (origin - distance >= 0) indexes.push(origin - distance);' in dashboard_script
+    assert "charts.map(chart => loadChartPayload(chart, 'low'))" in dashboard_script
+    assert "await loadChartPayload(charts[target], 'low').catch(() => undefined);" in dashboard_script
+    assert 'scheduleNearbySlidePreload(preloadToken, preloadOrigin, visibleLoads);' in dashboard_script
+    assert 'scheduleNearbyExpandedChartPreload(contextKey, chart);' in dashboard_script
     assert 'template_where, template_parameters, template_filters_applied = chart_filter_sql(' in dashboard_module
     assert 'template_filters_applied=template_filters_applied,' in dashboard_module
-    assert 'ensure_projection(snapshot, kind, task_repository)' in dashboard_module
+    assert 'database_path, table_name, source_columns = reporting_source(' in dashboard_module
     assert 'ATTACH DATABASE' not in dashboard_module
-    assert "source.execute('PRAGMA query_only=ON')" in dashboard_module
-    assert 'while batch := rows.fetchmany(2_000):' in dashboard_module
+    assert 'sqlite3.connect(database_path, timeout=120.0)' in dashboard_module
     assert 'aggregation_columns = chart_aggregation_columns(' in dashboard_module
     assert "thread_name_prefix='e2e-dashboard-data'," not in dashboard_module
     dashboard_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
@@ -634,7 +647,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '.ds-scope-control.ds-filter-applied-unsaved select' in dashboard_css
     assert '.ds-date-picker.ds-date-picker-applied-unsaved .ds-date-picker-control>input' in dashboard_css
     assert '.e2e-dashboards .ds-dashboard-close::after' in dashboard_css
+    assert '.e2e-dashboards .ds-active-dashboard-name{color:#12664f;font-family:inherit;font-size:1.12em;font-weight:900}' in dashboard_css
     assert '.e2e-dashboards .ds-dashboard-close{background:linear-gradient(135deg,#e5989b,#f2b8b9)' in dashboard_css
+    assert '.e2e-dashboards .ds-dashboard-open{background:linear-gradient(145deg,#e87912,#ffad2f)' in dashboard_css
     assert '.e2e-dashboards .ds-dashboard-view{background:linear-gradient(145deg,#167957,#29ae7d)' in dashboard_css
     assert '.ds-dashboard-status-loading-data{border-color:#d3aa45;background:#fff1c9;color:#77570a}' in dashboard_css
     assert '.ds-dashboard-status-data-queued,.ds-dashboard-status-charts-queued{border-color:#aaa3b2;background:#f0edf2;color:#655e6c}' in dashboard_css
@@ -793,11 +808,9 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
 
     deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        if client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]['state'] == 'ready':
-            break
-        time.sleep(0.05)
-    assert client.get('/api/e2e-dashboards/statuses').json()[dashboard_id]['state'] == 'ready'
+    assert client.get('/api/e2e-dashboards/statuses').json()[dashboard_id] == {
+        'state': 'not-cached', 'label': 'Open to prepare',
+    }
 
     with core.repository.connection() as connection:
         connection.execute('UPDATE dataset_profiles SET vendor_mapping_applied = 1')
@@ -906,7 +919,7 @@ def test_ready_dashboard_exports_ppt_and_persistent_chart_files(client, monkeypa
     import src.modules.e2e_dashboards as dashboards_module
     monkeypatch.setattr(
         dashboards_module, 'prepare_catalog_chart_preview_frame',
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('The cached projection should serve dataset pages.')),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('The combined table should serve dataset pages.')),
     )
     chart_data = client.get(f"/api/e2e-dashboards{charts_payload['charts'][0]['data_url']}")
     assert chart_data.status_code == 200
@@ -1014,104 +1027,66 @@ def test_relaunching_dashboard_ppt_uses_the_modified_report_template(client):
     assert client.get(job['download_url']).content.startswith(b'PK')
 
 
-def test_prefetched_dashboard_reuses_completed_server_snapshot(client):
+def test_dashboard_is_prepared_only_when_opened_and_then_reuses_manifest(client):
     payload = setup_dashboard(client)
-    dashboard_id = 'warmed-dashboard'
+    dashboard_id = 'on-demand-dashboard'
     saved = client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload)
     assert saved.status_code == 200
 
-    deadline = time.monotonic() + 10
     response = client.get(f'/api/e2e-dashboards/prefetched/{dashboard_id}')
-    while response.status_code == 409 and time.monotonic() < deadline:
-        time.sleep(0.05)
-        response = client.get(f'/api/e2e-dashboards/prefetched/{dashboard_id}')
+    assert response.status_code == 409
+    assert not any(
+        task.get('dashboard_name') == payload['name']
+        for group in client.get('/api/background-tasks').json()['groups']
+        for task in group['tasks']
+    )
 
+    prepared = client.post(f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}', json=payload)
+    assert prepared.status_code == 200, prepared.text
+    response = client.get(f'/api/e2e-dashboards/prefetched/{dashboard_id}')
     assert response.status_code == 200, response.text
     assert response.json()['slides']
-    while time.monotonic() < deadline:
-        groups = client.get('/api/background-tasks').json()['groups']
-        if not any(
-            task['id'] == f'dashboard-prefetch:{dashboard_id}'
-            for group in groups for task in group['tasks']
-        ):
-            break
-        time.sleep(0.05)
     manifests = list(
         (Path(core.repository.db_path).parent / '.dashboard-data-cache' / 'dashboard-previews').glob('*.json')
     )
     assert manifests
 
 
-def test_foreground_preparation_does_not_wait_for_cancelled_chart_warmup(client, monkeypatch):
+def test_closed_dashboard_status_uses_its_remembered_session_universe(client):
+    payload = setup_dashboard(client)
+    dashboard_id = 'session-universe-dashboard'
+    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
+
+    session_definition = json.loads(json.dumps(payload))
+    session_definition['date_from'] = '2026-09-02'
+    session_definition['date_to'] = '2026-09-03'
+    prepared = client.post(
+        f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}', json=session_definition,
+    )
+    assert prepared.status_code == 200, prepared.text
+
+    assert client.get('/api/e2e-dashboards/statuses').json()[dashboard_id] == {
+        'state': 'not-cached', 'label': 'Open to prepare',
+    }
+    assert client.post('/api/e2e-dashboards/statuses', json={
+        dashboard_id: session_definition,
+    }).json()[dashboard_id] == {'state': 'ready', 'label': 'Ready'}
+
+
+def test_saving_dashboard_does_not_prepare_data_or_render_charts(client, monkeypatch):
     payload = setup_dashboard(client)
     import src.modules.e2e_dashboards as dashboards_module
-
-    started = Event()
-    release = Event()
-    original = dashboards_module.catalog_chart_payload
-
-    def delayed(*args, **kwargs):
-        started.set()
-        assert release.wait(5)
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(dashboards_module, 'catalog_chart_payload', delayed)
-    dashboard_id = 'foreground-dashboard'
+    monkeypatch.setattr(
+        dashboards_module,
+        'catalog_chart_payload',
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('Saving must not render charts.')),
+    )
+    dashboard_id = 'saved-dashboard'
     assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
-    assert started.wait(5)
-    result = {}
-    foreground = Thread(target=lambda: result.setdefault(
-        'response', client.post(
-            f'/api/e2e-dashboards/prepare?dashboard_id={dashboard_id}&preparation_id=foreground-test',
-            json=payload,
-        ),
-    ))
-    try:
-        foreground.start()
-        foreground.join(5)
-        assert not foreground.is_alive()
-        prepared = result['response']
-        assert prepared.status_code == 200, prepared.text
-        tasks = [
-            task for group in client.get('/api/background-tasks').json()['groups']
-            for task in group['tasks'] if task.get('dashboard_name') == payload['name']
-        ]
-        assert len(tasks) <= 1
-        if tasks:
-            assert tasks[0]['id'].startswith(f'dashboard-prefetch:{dashboard_id}:')
-    finally:
-        release.set()
-        foreground.join(5)
-
-
-def test_dashboard_background_preparation_can_be_interrupted(client, monkeypatch):
-    payload = setup_dashboard(client)
-    import src.modules.e2e_dashboards as dashboards_module
-
-    started = Event()
-    release = Event()
-    original = dashboards_module.catalog_chart_payload
-
-    def delayed(*args, **kwargs):
-        started.set()
-        assert release.wait(5)
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(dashboards_module, 'catalog_chart_payload', delayed)
-    dashboard_id = 'interruptible-dashboard'
-    assert client.put(f'/api/e2e-dashboards/{dashboard_id}', json=payload).status_code == 200
-    assert started.wait(5)
-    try:
-        task = next(
-            task for group in client.get('/api/background-tasks').json()['groups']
-            for task in group['tasks'] if task.get('dashboard_name') == payload['name']
-        )
-        assert task['stop_task_id'].startswith('dashboard-prepare:dashboard-prefetch:')
-        stopped = client.post(task['stop_url'], data={'task_id': task['stop_task_id']})
-        assert stopped.status_code == 200, stopped.text
-        assert stopped.json() == {'stopping': task['stop_task_id']}
-    finally:
-        release.set()
+    assert client.get(f'/api/e2e-dashboards/prefetched/{dashboard_id}').status_code == 409
+    assert client.get('/api/e2e-dashboards/statuses').json()[dashboard_id] == {
+        'state': 'not-cached', 'label': 'Open to prepare',
+    }
 
 
 def test_direct_dashboard_preparation_separates_queue_and_execution_timestamps(client, monkeypatch):
@@ -1172,87 +1147,57 @@ def test_direct_dashboard_preparation_separates_queue_and_execution_timestamps(c
     assert not queued.is_alive()
 
 
-def test_applying_filters_queues_all_chart_models_and_reuses_previous_cache(client, monkeypatch):
+def test_applying_filters_prepares_only_data_and_renders_charts_on_demand(client, monkeypatch):
     payload = setup_dashboard(client)
     import src.modules.e2e_dashboards as dashboards_module
 
     core.repository.set_workspace_state('e2e_dashboards_v2', json.dumps({'filtered-dashboard': payload}))
     uncached = client.get('/api/e2e-dashboards/statuses')
     assert uncached.status_code == 200
-    assert uncached.json()['filtered-dashboard'] == {'state': 'not-cached', 'label': 'Not cached'}
+    assert uncached.json()['filtered-dashboard'] == {'state': 'not-cached', 'label': 'Open to prepare'}
 
-    started = Event()
-    release = Event()
     calls = []
     original = dashboards_module.catalog_chart_payload
 
     def tracked(*args, **kwargs):
         calls.append(1)
-        started.set()
-        assert release.wait(5)
         return original(*args, **kwargs)
 
     monkeypatch.setattr(dashboards_module, 'catalog_chart_payload', tracked)
     response = client.post('/api/e2e-dashboards/prepare?dashboard_id=filtered-dashboard', json=payload)
     assert response.status_code == 200, response.text
-    assert started.wait(5)
-    try:
-        groups = client.get('/api/background-tasks').json()['groups']
-        tasks = [task for group in groups for task in group['tasks']]
-        assert any(
-            task['id'].startswith('dashboard-prefetch:filtered-dashboard:')
-            and task['dashboard_name'] == 'Comparison'
-            and task['label'] == 'Rendering Dashboard Charts'
-            for task in tasks
-        )
-        assert client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard']['label'] == 'Rendering'
-    finally:
-        release.set()
 
     cache_dir = Path(core.repository.db_path).parent / '.dashboard-data-cache' / 'charts-canvas'
-    deadline = time.monotonic() + 10
-    while len(list(cache_dir.glob('*.json'))) < 3 and time.monotonic() < deadline:
-        time.sleep(0.05)
-    first_models = {path.name for path in cache_dir.glob('*.json')}
-    assert len(first_models) == 3
+    assert not list(cache_dir.glob('*.json'))
+    assert calls == []
     assert client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard'] == {
         'state': 'ready', 'label': 'Ready',
     }
 
+    token = response.json()['token']
+    for index in range(3):
+        rendered = client.get(f'/api/e2e-dashboards/chart/{token}/{index}')
+        assert rendered.status_code == 200, rendered.text
+    first_models = {path.name for path in cache_dir.glob('*.json')}
+    assert len(first_models) == 3
+    assert len(calls) == 3
+
     payload['filters'] = {'City': ['London']}
     filtered = client.post('/api/e2e-dashboards/prepare?dashboard_id=filtered-dashboard', json=payload)
     assert filtered.status_code == 200, filtered.text
-    deadline = time.monotonic() + 10
-    while len(list(cache_dir.glob('*.json'))) < 6 and time.monotonic() < deadline:
-        time.sleep(0.05)
-    filtered_models = {path.name for path in cache_dir.glob('*.json')}
-    assert first_models < filtered_models
+    assert {path.name for path in cache_dir.glob('*.json')} == first_models
+    assert len(calls) == 3
 
     payload['filters'] = {}
     calls_before_restore = len(calls)
-    restored = client.post('/api/e2e-dashboards/prepare?dashboard_id=filtered-dashboard', json=payload)
+    restored = client.post('/api/e2e-dashboards/prefetched/filtered-dashboard', json=payload)
     assert restored.status_code == 200, restored.text
-    time.sleep(0.1)
     assert len(calls) == calls_before_restore
-    assert {path.name for path in cache_dir.glob('*.json')} == filtered_models
+    assert {path.name for path in cache_dir.glob('*.json')} == first_models
 
     core.repository.update_dataset_profile(1, progress=100)
     assert client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard'] == {
-        'state': 'data-needed', 'label': 'Data needed',
-    }
-    calls_before_revision = len(calls)
-    refreshed = client.post('/api/e2e-dashboards/prepare?dashboard_id=filtered-dashboard', json=payload)
-    assert refreshed.status_code == 200, refreshed.text
-    deadline = time.monotonic() + 10
-    while len(list(cache_dir.glob('*.json'))) < 9 and time.monotonic() < deadline:
-        time.sleep(0.05)
-    refreshed_models = {path.name for path in cache_dir.glob('*.json')}
-    assert filtered_models < refreshed_models
-    assert len(calls) == calls_before_revision + 3
-
-    (cache_dir / next(iter(refreshed_models - filtered_models))).unlink()
-    assert client.get('/api/e2e-dashboards/statuses').json()['filtered-dashboard'] == {
-        'state': 'charts-needed', 'label': 'Charts needed',
+        'state': 'not-cached', 'label': 'Open to prepare',
     }
 
 
@@ -1556,11 +1501,10 @@ def test_dashboard_selection_cache_ignores_filter_value_order(client):
         ).fetchone()['count'] == 1
 
 
-def test_dashboard_large_selection_uses_direct_sql_predicate(client, monkeypatch):
+def test_dashboard_selection_uses_direct_sql_predicate(client, monkeypatch):
     payload = setup_dashboard(client)
     import src.modules.e2e_dashboards as dashboards_module
 
-    monkeypatch.setattr(dashboards_module, 'DASHBOARD_SELECTION_ROW_LIMIT', 1)
     monkeypatch.setattr(dashboards_module, 'DASHBOARD_PROFILE_SELECTION_THRESHOLD', 1)
     payload['filters'] = {'City': ['London']}
     preview = client.post('/api/e2e-dashboards/prepare', json=payload)
@@ -1569,13 +1513,15 @@ def test_dashboard_large_selection_uses_direct_sql_predicate(client, monkeypatch
     assert preview.json()['rows_exact'] is True
     with core.repository.connection() as connection:
         selection = connection.execute(
-            'SELECT id, materialized FROM dashboard_filter_selections ORDER BY id DESC LIMIT 1'
+            'SELECT id FROM dashboard_filter_selections ORDER BY id DESC LIMIT 1'
         ).fetchone()
-        assert selection['materialized'] == 0
+        assert selection is not None
         assert connection.execute(
-            'SELECT COUNT(*) AS count FROM dashboard_filter_selection_rows WHERE selection_id = ?',
-            (selection['id'],),
-        ).fetchone()['count'] == 0
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'dashboard_filter_selection_rows'"
+        ).fetchone() is None
+        assert 'materialized' not in {
+            row['name'] for row in connection.execute('PRAGMA table_info(dashboard_filter_selections)')
+        }
     data = client.get(f"/api/e2e-dashboards/data/{preview.json()['token']}/0")
     assert data.status_code == 200
     assert data.json()['total'] == 2

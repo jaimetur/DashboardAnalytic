@@ -799,7 +799,7 @@
       event.preventDefault();
       const workspaceName = form.dataset.workspaceName || 'this workspace';
       const accepted = await showConfirmDialog(
-        `Clear the generated Dashboard cache for '${workspaceName}'? Dashboard data projections and rendered chart models will be rebuilt when needed.`,
+        `Clear the generated Dashboard cache for '${workspaceName}'? Reusable preview manifests and rendered chart models will be rebuilt when needed.`,
         {title: 'Clear workspace cache', confirmLabel: 'Clear cache'},
       );
       if (!accepted) return;

@@ -43,7 +43,7 @@ Runtime `config/` and `data/` directories use project-local defaults but are exc
 - `src/modules/analytics.py`: single-dataset analytical calculations.
 - `src/modules/exports.py`: Datasets Analysis Word and PowerPoint output.
 - `src/modules/cdr_reporting.py`: Report Template parsing, filters, aggregations, chart contracts, map tiles and classic report rendering.
-- `src/modules/e2e_dashboards.py`: Dashboard definitions, SQL selections, projection/model caches, live previews, filtered chart data and Dashboard PPT jobs.
+- `src/modules/e2e_dashboards.py`: Dashboard definitions, direct combined-CDR SQL selections, preview/model caches, live previews, filtered chart data and Dashboard PPT jobs.
 - `src/modules/dashboard_canvas_renderer.mjs`: Node/Chromium-compatible Canvas rendering used for consistent interactive and exported charts.
 - `src/modules/auth.py`: password and authentication helpers.
 - `src/utils/`: chart, filesystem and font utilities shared by modules.
@@ -69,7 +69,6 @@ APP_DATA_DIR/
 │       ├── <workspace>.db
 │       ├── .dashboard-cache-version.json
 │       ├── .dashboard-data-cache/
-│       │   ├── dashboard-analytics.sqlite3
 │       │   ├── dashboard-previews/
 │       │   ├── charts-canvas/
 │       │   └── charts-pil/
@@ -115,7 +114,7 @@ Report Templates become CSV files only inside portable export, transfer and back
 
 ### Regenerable Dashboard cache
 
-`.dashboard-cache-version.json` records the application and cache-format signature. Opening a workspace deletes older incompatible cache versions and selection rows. `.dashboard-data-cache` contains narrow SQLite projections, reusable preview manifests, Canvas chart models and legacy PIL artifacts. It can be cleared without removing datasets, Dashboard definitions, templates or generated jobs.
+`.dashboard-cache-version.json` records the application and cache-format signature. Opening a workspace deletes older incompatible cache versions and selection metadata. `.dashboard-data-cache` contains reusable preview manifests, Canvas chart models and legacy PIL artifacts. Dashboard rows remain only in the workspace's combined CDR tables. The cache can be cleared without removing datasets, Dashboard definitions, templates or generated jobs, and clearing it does not trigger an automatic rebuild.
 
 ### Generated output
 

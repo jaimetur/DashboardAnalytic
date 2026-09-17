@@ -68,7 +68,7 @@ Each multiselect provides search, **All**, **None** and individual values. All r
 
 **Select field to add new filter** searches all columns available in the selected CDRs and all applicable workspace Auto-calculated Fields. Adding a field loads its values in a separate request that respects the current CDRs, dates and other filters without preparing the complete Dashboard.
 
-The circular `×` removes an additional filter or hides a default filter after confirmation. A hidden default can be restored from the field picker. Auto-calculated Fields apply only to their declared CDR types and join the analytical projection when needed.
+The circular `×` removes an additional filter or hides a default filter after confirmation. A hidden default can be restored from the field picker. Auto-calculated Fields apply only to their declared CDR types and are materialized into the corresponding combined CDR table when first needed.
 
 ### Apply, Save, Clear and Reload
 
@@ -88,17 +88,19 @@ If View Dashboard or Generate PPT is requested with unapplied adaptive-filter ch
 
 ## Preparation lifecycle and cache
 
-Combined CDR tables are the source of record. Selections up to 25,000 rows can store exact `(dataset_id, source_row_id)` references; larger selections use SQL predicates. A narrow SQLite projection contains only fields required by the Dashboard, filters and template.
+Combined CDR tables are both the source of record and the direct SQL source for filters, chart datasets and chart rendering. Dashboard selection records retain compact counts, facets and reproducible predicates; they do not copy rows into a separate projection database.
 
-Preparation is debounced and stale responses are ignored. A new request replaces the current one; an equivalent cached request restores immediately. A global gate allows only one Dashboard dataset-preparation phase to run at a time. Foreground preparation for the visible Dashboard interrupts automatic warm-up, waits only for an active dataset scan, runs the visible Dashboard first and then verifies and requeues every other saved Dashboard. A cancelled chart-rendering batch does not retain the data gate or delay the foreground preparation.
+Preparation is debounced and stale responses are ignored. A new request replaces the current one; an equivalent cached request restores immediately. A global gate allows only one explicitly requested Dashboard dataset-preparation phase to run at a time. Listing or saving Dashboards, changing workspace, editing a template and clearing cache do not prepare other Dashboards in the background.
 
-Manage Dashboards reports Loading data, Data queued, Rendering charts, Charts queued, Ready, Missing charts or Failed. The floating background-task card groups data preparation and chart rendering under the Dashboard name. Dataset preparation reports percentage progress through source-column, universe-selection and slide phases; chart rendering completes the final percentage from 82% to 100%. The same live progress bar appears in the yellow preparation notice below Dashboard Datasets & Filters and in the centred viewer notice. Queued and running Dashboard tasks provide an **Interrupt task** action. View Dashboard opens immediately after a universe change and centres a yellow **Preparing Dashboard dataset** card until the updated slides replace it. PPT actions remain unavailable until their required data and models are ready.
+Manage Dashboards reports whether a reusable prepared selection is Ready or must be opened to prepare. The floating background-task card appears only for an explicit open, refresh or export request. Dataset preparation reports percentage progress through source-column, universe-selection and slide phases. Canvas models are generated only when their chart is viewed, refreshed or included in a requested PPT job. Queued and running user-requested tasks provide an **Interrupt task** action. View Dashboard opens immediately after a universe change and centres a yellow **Preparing Dashboard dataset** card until the updated slides replace it.
 
-`.dashboard-data-cache` stores bounded analytical projections, reusable preview manifests, Canvas chart models and legacy PIL artifacts. Cache keys include dataset revisions, required fields, selection, scope and renderer version. Opening a workspace removes artifacts from older application/cache versions while retaining current ones. Workspace Clear cache cancels active warming and removes derived cache only; definitions, CDRs, templates and generated jobs remain intact.
+`.dashboard-data-cache` stores reusable preview manifests, Canvas chart models and legacy PIL artifacts; it no longer contains `dashboard-analytics.sqlite3` or copied CDR projections. Cache keys include dataset revisions, selection, scope and renderer version. Opening a workspace removes artifacts from older application/cache versions while retaining current ones. Workspace Clear cache cancels active user-requested work and removes derived cache only; definitions, combined CDRs, templates and generated jobs remain intact. Nothing is automatically rebuilt after clearing it.
 
 ## View Dashboard
 
 Use View Dashboard or the library eye action. View Dashboard remains available from the floating Adaptative Filters panel; after resolving changes it closes that panel and returns to the viewer. A centered preparation card remains until updated slides and charts are ready. The viewer uses approximately 96% of the viewport and preserves the template's 16:9 layout.
+
+After the visible slide finishes loading, the browser silently caches the remaining slides by proximity: next, previous, two ahead, two behind, and so on. Opening an individual chart switches this behaviour to the chart sequence using the same alternating order. Moving to another position restarts the sequence around it, and closing the viewer stops scheduling further work. These requests reuse the normal Canvas-model cache and do not appear in the floating background-task card.
 
 ### Slides and navigation
 

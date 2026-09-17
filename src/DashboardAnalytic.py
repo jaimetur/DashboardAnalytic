@@ -119,10 +119,6 @@ MANUAL_RESTORE_JOBS: dict[str, dict[str, Any]] = {}
 MANUAL_RESTORE_JOBS_LOCK = Lock()
 EXPORT_PACKAGE_TTL = timedelta(hours=24)
 TRANSFER_OFFER_TTL = timedelta(minutes=15)
-DEFERRED_WORKSPACE_PREFETCH_IDLE_SECONDS = 30 * 60
-APPLICATION_ACTIVITY_LOCK = Lock()
-APPLICATION_LAST_ACTIVITY_AT = monotonic()
-DEFERRED_WORKSPACE_PREFETCH_STARTED = False
 DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
 application_config_dir = settings.database_path.parent
 application_data_dir = settings.data_dir
@@ -174,33 +170,6 @@ def apply_runtime_configuration(values: dict[str, Any]) -> None:
     os.environ[IGNORE_EVENT_TIME_FILTERING_ENV] = (
         'true' if bool(values.get('ignore_event_time_filtering')) else 'false'
     )
-
-
-def record_application_activity() -> None:
-    """Restart the deferred non-active Workspace prefetch idle window."""
-    global APPLICATION_LAST_ACTIVITY_AT, DEFERRED_WORKSPACE_PREFETCH_STARTED
-    with APPLICATION_ACTIVITY_LOCK:
-        APPLICATION_LAST_ACTIVITY_AT = monotonic()
-        DEFERRED_WORKSPACE_PREFETCH_STARTED = False
-
-
-def deferred_workspace_prefetch_loop() -> None:
-    """Warm non-active Workspaces only after a sustained inactive interval."""
-    global DEFERRED_WORKSPACE_PREFETCH_STARTED
-    while True:
-        time_module.sleep(30)
-        with APPLICATION_ACTIVITY_LOCK:
-            idle_seconds = monotonic() - APPLICATION_LAST_ACTIVITY_AT
-            if DEFERRED_WORKSPACE_PREFETCH_STARTED or idle_seconds < DEFERRED_WORKSPACE_PREFETCH_IDLE_SECONDS:
-                continue
-            DEFERRED_WORKSPACE_PREFETCH_STARTED = True
-        active_id = workspace_registry.active_id()
-        inactive_workspaces = [workspace for workspace in workspace_registry.list() if workspace.id != active_id]
-        if not inactive_workspaces:
-            continue
-        dashboard_prefetch = getattr(sys.modules[__name__], 'e2e_dashboard_prefetch_workspace', None)
-        if callable(dashboard_prefetch):
-            dashboard_prefetch(inactive_workspaces)
 
 
 def _reporting_memory_mb() -> float:
@@ -1660,7 +1629,6 @@ def workspace_cache_version_signature() -> dict[str, int | str]:
         'workspace_cache': 1,
         'dashboard_render': DASHBOARD_RENDER_CACHE_VERSION,
         'dashboard_selection': DASHBOARD_SELECTION_CACHE_VERSION,
-        'dashboard_projection': DASHBOARD_PROJECTION_CACHE_VERSION,
         'dashboard_chart_model': DASHBOARD_CHART_MODEL_CACHE_VERSION,
         'dashboard_preview_manifest': DASHBOARD_PREVIEW_MANIFEST_VERSION,
     }
@@ -1688,13 +1656,12 @@ def clear_outdated_workspace_caches(workspace: Workspace) -> bool:
                 temporary.replace(version_file)
             return False
 
-    cancel_prefetch = getattr(sys.modules[__name__], 'e2e_dashboard_cancel_prefetch_workspace', None)
-    if callable(cancel_prefetch):
-        cancel_prefetch(workspace.database_path)
+    cancel_dashboard_tasks = getattr(sys.modules[__name__], 'e2e_dashboard_cancel_workspace_tasks', None)
+    if callable(cancel_dashboard_tasks):
+        cancel_dashboard_tasks(workspace.database_path)
     shutil.rmtree(cache_root, ignore_errors=True)
     shutil.rmtree(workspace_root / '.dashboard-chart-cache', ignore_errors=True)
     with repository.connection() as connection:
-        connection.execute('DELETE FROM dashboard_filter_selection_rows')
         connection.execute('DELETE FROM dashboard_filter_selections')
     temporary = version_file.with_suffix(f'.{uuid4().hex}.tmp')
     temporary.write_text(json.dumps(current_signature, sort_keys=True), encoding='utf-8')
@@ -1772,18 +1739,6 @@ async def lifespan(_: FastAPI):
                     'chart_jobs': interrupted_chart_jobs,
                 }),
             )
-    # Warm only the open Workspace immediately. E2E Dashboard serializes
-    # Dashboard and chart warming; every other Workspace waits for 30 minutes
-    # of inactivity so startup never opens all large CDR databases together.
-    dashboard_prefetch = getattr(sys.modules[__name__], 'e2e_dashboard_prefetch_workspace', None)
-    if active_workspace and callable(dashboard_prefetch):
-        Thread(
-            target=dashboard_prefetch,
-            args=([active_workspace],),
-            name='e2e-dashboard-startup-prefetch',
-            daemon=True,
-        ).start()
-    Thread(target=deferred_workspace_prefetch_loop, name='e2e-dashboard-idle-prefetch', daemon=True).start()
     yield
     with DATASET_PROCESSING_EXECUTORS_LOCK:
         dataset_executors = list(DATASET_PROCESSING_EXECUTORS.values())
@@ -1797,12 +1752,7 @@ app = FastAPI(title=__app_name__, version=__version__, lifespan=lifespan)
 
 @app.middleware('http')
 async def track_interactive_application_requests(request: Request, call_next):
-    """Track user navigation without counting the browser's passive polls."""
-    passive_paths = {
-        '/api/background-tasks',
-        '/api/workspaces/sizes',
-        '/api/e2e-dashboards/statuses',
-    }
+    """Return lightweight unauthenticated responses for passive polling."""
     if (
         request.url.path in {'/api/background-tasks', '/api/workspaces/sizes'}
         and session_user(request.cookies.get(SESSION_COOKIE)) is None
@@ -1813,8 +1763,6 @@ async def track_interactive_application_requests(request: Request, call_next):
             else {'authenticated': False, 'active_workspace_id': None, 'sizes': {}, 'cache_sizes': {}}
         )
         return JSONResponse(payload, headers={'Cache-Control': 'no-store'})
-    if request.url.path not in passive_paths and not request.url.path.startswith('/static/'):
-        record_application_activity()
     return await call_next(request)
 
 
@@ -5855,7 +5803,6 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         'autocalculated_fields': 'Auto-calculated Fields',
         'audit_logs': 'Audit log',
         'dashboard_filter_selections': 'Dashboard filter selections',
-        'dashboard_filter_selection_rows': 'Dashboard selected rows',
         'dashboard_ppt_jobs': 'Dashboard PPT jobs',
         'dataset_profiles': 'Dataset profiles',
         'dataset_source_columns': 'Dataset source columns',
@@ -6785,7 +6732,7 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
         # A worker may briefly hold the database while publishing a progress
         # update. The next browser poll will retry without disrupting the page.
         pass
-    task_provider = getattr(sys.modules[__name__], 'e2e_dashboard_prefetch_tasks', None)
+    task_provider = getattr(sys.modules[__name__], 'e2e_dashboard_tasks', None)
     if callable(task_provider):
         tasks.extend(task_provider(workspace))
     return tasks
@@ -7442,9 +7389,9 @@ def delete_workspace_cache(
     if workspace is None:
         return RedirectResponse('/workspace?workspace_error=Workspace+not+found.', status_code=status.HTTP_303_SEE_OTHER)
     require_workspace_access(user, workspace_id)
-    cancel_dashboard_prefetch = getattr(sys.modules[__name__], 'e2e_dashboard_cancel_prefetch_workspace', None)
-    if callable(cancel_dashboard_prefetch):
-        cancel_dashboard_prefetch(workspace.database_path)
+    cancel_dashboard_tasks = getattr(sys.modules[__name__], 'e2e_dashboard_cancel_workspace_tasks', None)
+    if callable(cancel_dashboard_tasks):
+        cancel_dashboard_tasks(workspace.database_path)
     if active_workspace and active_workspace.id == workspace_id:
         ANALYSIS_CACHE.clear()
         DATAFRAME_CACHE.clear()
@@ -7493,12 +7440,6 @@ def delete_workspace_cache(
                         status='ready', progress=100, message='Cache cleared',
                         finished_at=datetime.now(timezone.utc).timestamp(),
                     )
-            # Queue a fresh generation after removing the derived files. Any
-            # invalidated worker is ignored by the Dashboard queue and cannot
-            # publish cache artifacts after this point.
-            prefetch_workspace = getattr(sys.modules[__name__], 'e2e_dashboard_prefetch_workspace', None)
-            if callable(prefetch_workspace):
-                prefetch_workspace([workspace])
         except Exception as exc:
             with WORKSPACE_LIFECYCLE_JOBS_LOCK:
                 job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
@@ -13225,7 +13166,6 @@ templates.env.globals['format_aggregation_label'] = format_aggregation_label
 from src.modules.e2e_dashboards import (
     DASHBOARD_CHART_MODEL_CACHE_VERSION,
     DASHBOARD_PREVIEW_MANIFEST_VERSION,
-    DASHBOARD_PROJECTION_CACHE_VERSION,
     DASHBOARD_RENDER_CACHE_VERSION,
     DASHBOARD_SELECTION_CACHE_VERSION,
     install_dashboard_routes,
