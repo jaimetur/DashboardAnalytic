@@ -4759,6 +4759,21 @@ def test_top_navigation_shows_document_links(client) -> None:
     assert 'href="/datasets-analysis"' in response.text
     assert 'class="module-tabs"' in response.text
     assert 'class="module-tabs-secondary"' in response.text
+    assert 'data-module-navigator' in response.text
+    assert '>Main Modules</h4>' in response.text
+    assert '>Administrative Modules</h4>' in response.text
+    assert '>Documentation</h4>' in response.text
+    assert '>Workspace Management</a>' in response.text
+    assert '>Dataset Analysis</a>' in response.text
+    assert '>E2E Dashboard</a>' in response.text
+    assert '>E2E Reporting</a>' in response.text
+    assert '>Chart Builder</a>' in response.text
+    assert '>Administrator Panel</a>' in response.text
+    assert '>Configuration Panel</a>' in response.text
+    assert '>Application Logs</a>' in response.text
+    assert '>Help</a>' in response.text
+    assert '>Readme</a>' in response.text
+    assert '>Changelog</a>' in response.text
     assert 'module-hero-datasets-analysis' not in response.text
     assert 'class="module-tab module-tab-workspace active" href="/workspace"' in response.text
     assert '<span class="module-tab-label-desktop">E2E Reporting</span>' in response.text
@@ -4795,6 +4810,9 @@ def test_non_admin_navigation_hides_admin_tab(client) -> None:
     assert 'href="/documents/view/changelog"' in workspace.text
     assert 'href="/documents/view/help"' in workspace.text
     assert 'href="/admin"' not in workspace.text
+    assert 'data-module-navigator' in workspace.text
+    assert '>Administrator Panel</span>' in workspace.text
+    assert '>Configuration Panel</span>' in workspace.text
     assert 'User: demo' in workspace.text
 
 

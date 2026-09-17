@@ -89,6 +89,52 @@
       </div>
       <button type="button" class="page-panel-navigator-tab" data-page-panel-navigator-toggle aria-expanded="false" aria-controls="page-panel-navigator" title="Navigate page sections"><span>Sections</span></button>
     </aside>
+    <aside class="page-panel-navigator module-navigator" id="module-navigator" aria-label="Application modules" data-module-navigator>
+      <div class="page-panel-navigator-drawer">
+        <header><strong>Modules</strong><button type="button" data-module-navigator-close aria-label="Close modules">&times;</button></header>
+        <div class="module-navigator-list">
+          <section class="module-navigator-category" aria-labelledby="module-navigator-main-title">
+            <h4 id="module-navigator-main-title">Main Modules</h4>
+            <nav aria-label="Main modules">
+              <a href="/workspace"{% if request.url.path == '/workspace' %} class="is-active" aria-current="page"{% endif %}>Workspace Management</a>
+              {% if active_workspace %}
+              <a href="/datasets-analysis"{% if request.url.path == '/datasets-analysis' %} class="is-active" aria-current="page"{% endif %}>Dataset Analysis</a>
+              <a href="/e2e-dashboards"{% if request.url.path == '/e2e-dashboards' %} class="is-active" aria-current="page"{% endif %}>E2E Dashboard</a>
+              <a href="/e2e-reporting"{% if request.url.path == '/e2e-reporting' %} class="is-active" aria-current="page"{% endif %}>E2E Reporting</a>
+              <a href="/chart-builder"{% if request.url.path == '/chart-builder' %} class="is-active" aria-current="page"{% endif %}>Chart Builder</a>
+              {% else %}
+              <span class="is-disabled" aria-disabled="true">Dataset Analysis</span>
+              <span class="is-disabled" aria-disabled="true">E2E Dashboard</span>
+              <span class="is-disabled" aria-disabled="true">E2E Reporting</span>
+              <span class="is-disabled" aria-disabled="true">Chart Builder</span>
+              {% endif %}
+            </nav>
+          </section>
+          <section class="module-navigator-category" aria-labelledby="module-navigator-administration-title">
+            <h4 id="module-navigator-administration-title">Administrative Modules</h4>
+            <nav aria-label="Administrative modules">
+              {% if user.role in ['admin', 'super-admin'] %}
+              <a href="/admin"{% if request.url.path == '/admin' %} class="is-active" aria-current="page"{% endif %}>Administrator Panel</a>
+              <a href="/config"{% if request.url.path == '/config' %} class="is-active" aria-current="page"{% endif %}>Configuration Panel</a>
+              {% else %}
+              <span class="is-disabled" aria-disabled="true">Administrator Panel</span>
+              <span class="is-disabled" aria-disabled="true">Configuration Panel</span>
+              {% endif %}
+              <a href="/app-logs"{% if request.url.path == '/app-logs' %} class="is-active" aria-current="page"{% endif %}>Application Logs</a>
+            </nav>
+          </section>
+          <section class="module-navigator-category" aria-labelledby="module-navigator-documentation-title">
+            <h4 id="module-navigator-documentation-title">Documentation</h4>
+            <nav aria-label="Documentation modules">
+              <a href="/documents/view/help"{% if request.url.path.startswith('/documents/view/help') %} class="is-active" aria-current="page"{% endif %}>Help</a>
+              <a href="/documents/view/readme"{% if request.url.path == '/documents/view/readme' %} class="is-active" aria-current="page"{% endif %}>Readme</a>
+              <a href="/documents/view/changelog"{% if request.url.path == '/documents/view/changelog' %} class="is-active" aria-current="page"{% endif %}>Changelog</a>
+            </nav>
+          </section>
+        </div>
+      </div>
+      <button type="button" class="page-panel-navigator-tab" data-module-navigator-toggle aria-expanded="false" aria-controls="module-navigator" title="Navigate application modules"><span>Modules</span></button>
+    </aside>
     {% endif %}
   </div>
   {% if user and not embedded_template_editor and not embedded_preview %}

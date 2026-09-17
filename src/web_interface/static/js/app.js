@@ -4419,6 +4419,33 @@ function setupPagePanelNavigator() {
   rebuild();
 }
 
+function setupModuleNavigator() {
+  const navigator = document.querySelector('[data-module-navigator]');
+  if (!navigator || navigator.dataset.ready === '1') return;
+  navigator.dataset.ready = '1';
+  const toggle = navigator.querySelector('[data-module-navigator-toggle]');
+  const close = navigator.querySelector('[data-module-navigator-close]');
+  if (!(toggle instanceof HTMLButtonElement) || !(close instanceof HTMLButtonElement)) return;
+
+  const sectionsNavigator = document.querySelector('[data-page-panel-navigator]');
+  navigator.dataset.theme = sectionsNavigator?.dataset.theme || 'utility';
+  const setOpen = (open) => {
+    navigator.classList.toggle('is-open', open);
+    toggle.setAttribute('aria-expanded', String(open));
+  };
+  toggle.addEventListener('click', () => setOpen(!navigator.classList.contains('is-open')));
+  close.addEventListener('click', () => setOpen(false));
+  navigator.querySelectorAll('a').forEach((link) => link.addEventListener('click', () => setOpen(false)));
+  document.addEventListener('pointerdown', (event) => {
+    if (navigator.classList.contains('is-open') && !navigator.contains(event.target)) setOpen(false);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !navigator.classList.contains('is-open')) return;
+    setOpen(false);
+    toggle.focus();
+  });
+}
+
 // The Chart Viewer and the Report Template editor deliberately share this
 // control surface. Keeping the filter builder and the searchable popovers in
 // one component prevents the two previews from drifting apart.
@@ -4767,6 +4794,7 @@ setupPersistentPanelState();
 setupWorkspaceUserPickers();
 setupCustomMultiSelects();
 setupPagePanelNavigator();
+setupModuleNavigator();
 setupSearchableSingleSelects();
 
 function maybeSyncPersistedGlobalDatasetsAnalysisSelectors() {
