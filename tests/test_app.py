@@ -578,6 +578,35 @@ def test_materialization_status_returns_every_active_workspace_job(client, monke
     assert all('username' not in job for job in response.json()['jobs'])
 
 
+def test_combined_table_progress_matches_its_active_recreation_job(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    client.post(
+        '/datasets-analysis/upload',
+        data={'dataset_kinds': 'data'},
+        files={'dataset_files': ('cdr_data.csv', BytesIO(b'operator,score\nVodafone UK,91\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    app_module.repository.copy_dataset_rows_to_reporting(1, 'data', ['score'])
+    workspace_id = app_module.active_workspace.id
+    monkeypatch.setattr(app_module, 'AUTO_CALCULATED_FIELD_JOBS', {
+        'queued-data': {
+            'id': 'queued-data', 'workspace_id': workspace_id, 'operation': 'combined_recreation',
+            'combined_kind': 'data', 'status': 'queued', 'completed': 0, 'total': 0, 'created_at': 1,
+        },
+    })
+
+    queued = next(item for item in app_module.workspace_combined_tables(workspace_id=workspace_id) if item['kind'] == 'data')
+    assert queued['is_recalculating'] is True
+    assert queued['recreation_status'] == 'queued'
+    assert queued['recreation_progress'] == 0
+
+    app_module.AUTO_CALCULATED_FIELD_JOBS['queued-data'].update(status='processing', completed=41, total=100)
+    processing = next(item for item in app_module.workspace_combined_tables(workspace_id=workspace_id) if item['kind'] == 'data')
+    assert processing['recreation_progress'] == 41
+
+
 def test_renaming_calculated_dimension_rebuilds_references_in_workspace_templates(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -3546,6 +3575,55 @@ def test_combined_recreation_returns_materialization_job_for_progress(client, mo
     assert response.json()['materialization_job'] == 'combined-job'
     assert response.json()['materialization_status_url'].endswith('/combined-job')
     assert 'individual CDR-VOICE tables' in response.json()['notice']
+
+
+def test_recreating_the_same_combined_kind_stops_the_previous_job_before_queueing_a_replacement(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    submitted: list[tuple[object, tuple[object, ...]]] = []
+
+    class CapturingExecutor:
+        def submit(self, callback, *args):
+            submitted.append((callback, args))
+
+    previous_id = 'existing-voice-recreation'
+    with app_module.AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        app_module.AUTO_CALCULATED_FIELD_JOBS[previous_id] = {
+            'id': previous_id, 'workspace_id': workspace.id, 'workspace_name': workspace.name,
+            'operation': 'combined_recreation', 'combined_kind': 'voice', 'status': 'processing',
+        }
+    monkeypatch.setattr(app_module, '_dataset_processing_executor', lambda _repository: CapturingExecutor())
+
+    replacement = app_module.start_combined_cdr_recreation_job(workspace, 'voice', 'admin')
+
+    with app_module.AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        previous = app_module.AUTO_CALCULATED_FIELD_JOBS[previous_id]
+        app_module.AUTO_CALCULATED_FIELD_JOBS.pop(previous_id)
+        app_module.AUTO_CALCULATED_FIELD_JOBS.pop(replacement['id'])
+    assert previous['cancel_requested'] is True
+    assert replacement['restarted_job_ids'] == [previous_id]
+    assert 'Waiting for the previous CDR-VOICE recreation to stop' in replacement['message']
+    assert len(submitted) == 1
+
+
+def test_combined_recreation_keeps_its_success_response_when_audit_logging_is_unavailable(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    monkeypatch.setattr(
+        app_module,
+        'start_combined_cdr_recreation_job',
+        lambda workspace, kind, username: {'id': 'combined-job'},
+    )
+    monkeypatch.setattr(app_module.repository, 'try_add_log', lambda *_args, **_kwargs: False)
+
+    response = client.post('/workspace/combined/voice/recreate')
+
+    assert response.status_code == 200
+    assert response.json()['materialization_job'] == 'combined-job'
 
 
 def test_queued_dataset_actions_remain_compact_icons_during_live_updates(client) -> None:

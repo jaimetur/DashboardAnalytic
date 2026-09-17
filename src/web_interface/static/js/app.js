@@ -33,17 +33,22 @@ const storedAutoCalculatedFieldJobs = () => {
   }
 };
 
+const materializationJobProgressPercent = (job) => {
+  const status = String(job?.status || '').toLowerCase();
+  if (status === 'queued') return 0;
+  if (status !== 'processing') return 100;
+  const total = Math.max(Number(job?.total) || 0, 0);
+  const completed = Math.max(Number(job?.completed) || 0, 0);
+  return total ? Math.min(99, Math.max(0, Math.round(completed * 100 / total))) : 0;
+};
+
 function updateCombinedDatasetRecreationRow(job) {
   if (job.operation !== 'combined_recreation' || !job.combined_kind) return;
   const row = document.querySelector(`[data-combined-dataset-row][data-dataset-kind="${job.combined_kind}"]`);
   if (!(row instanceof HTMLElement)) return;
   const processing = ['queued', 'processing'].includes(job.status);
   const failed = ['failed', 'stopped'].includes(job.status);
-  const total = Math.max(Number(job.total) || 0, 0);
-  const completed = Math.max(Number(job.completed) || 0, 0);
-  const percent = processing
-    ? (total ? Math.min(99, Math.max(5, Math.round(completed * 100 / total))) : 5)
-    : 100;
+  const percent = materializationJobProgressPercent(job);
   const status = row.querySelector('[data-combined-dataset-status]');
   const bar = row.querySelector('[data-combined-dataset-progress-bar]');
   const label = row.querySelector('[data-combined-dataset-progress-percent]');
@@ -117,7 +122,7 @@ window.addEventListener('load', () => {
 document.querySelectorAll('[data-combined-dataset-recreate]').forEach((button) => {
   button.addEventListener('click', async () => {
     const accepted = await showConfirmDialog(
-      `Check and migrate every individual CDR table of this type, then recreate ${button.dataset.combinedName || 'the combined CDR table'}? This runs in the background and can take several minutes.`,
+      `Check and migrate every individual CDR table of this type, then recreate ${button.dataset.combinedName || 'the combined CDR table'}? This runs in the background and can take several minutes. If a recreation of the same CDR type is already running, it will be stopped and restarted.`,
       {title: 'Recreate combined table', confirmLabel: 'Recreate table', tone: 'warning'},
     );
     if (!accepted) return;
@@ -129,6 +134,8 @@ document.querySelectorAll('[data-combined-dataset-recreate]').forEach((button) =
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || 'Unable to recreate the combined CDR table.');
       monitorAutoCalculatedFieldJob(payload.materialization_status_url);
+      // A confirmed second click intentionally restarts the same CDR type.
+      button.disabled = false;
     } catch (error) {
       button.disabled = false;
       showInfoDialog(error instanceof Error ? error.message : 'Unable to recreate the combined CDR table.', {
@@ -158,11 +165,7 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
     jobs.forEach((job) => {
       const processing = ['queued', 'processing'].includes(job.status);
       const failed = ['failed', 'stopped'].includes(job.status);
-      const total = Math.max(Number(job.total) || 0, 0);
-      const completed = Math.max(Number(job.completed) || 0, 0);
-      const percent = processing
-        ? (total ? Math.min(99, Math.max(5, Math.round(completed * 100 / total))) : 5)
-        : 100;
+      const percent = materializationJobProgressPercent(job);
       const article = document.createElement('article');
       article.className = `auto-calculated-field-job${processing ? ' is-processing' : ''}${failed ? ' is-failed' : ''}`;
       const heading = document.createElement('div');
@@ -6565,7 +6568,8 @@ if (queueNode) {
     const warning = Boolean(combined.has_missing_rows || combined.is_recalculating || combined.needs_recalculation);
     const statusLabel = combined.is_recalculating ? 'Recalculating' : combined.has_missing_rows
       ? 'Missing Rows' : combined.needs_recalculation ? 'Recalc Needed' : 'Ready';
-    const progressValue = combined.is_recalculating ? 5 : 100;
+    const progressValue = Number.isFinite(Number(combined.recreation_progress))
+      ? Math.max(0, Math.min(100, Number(combined.recreation_progress))) : 100;
     if (rows instanceof HTMLElement) rows.textContent = formatQueueCount(combined.row_count);
     if (columns instanceof HTMLElement) columns.textContent = formatQueueCount(combined.column_count);
     if (updated instanceof HTMLElement) updated.textContent = combined.updated_at_label || '—';
@@ -6573,7 +6577,8 @@ if (queueNode) {
     row.classList.toggle('combined-dataset-warning', warning);
     if (status instanceof HTMLElement) {
       status.className = `queue-status-pill queue-status-${warning ? 'warning' : 'ready'}`;
-      status.textContent = statusLabel;
+      status.textContent = combined.is_recalculating && combined.recreation_status === 'queued'
+        ? 'Queued' : statusLabel;
     }
     if (bar instanceof HTMLElement) {
       bar.className = `progress-bar status-${combined.is_recalculating ? 'processing' : 'ready'}`;

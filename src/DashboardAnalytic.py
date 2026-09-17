@@ -964,6 +964,18 @@ def ensure_auto_calculated_field_job_not_stopped(job_id: str) -> None:
             raise ProcessingStopped('Background job stopped by user.')
 
 
+def materialization_job_progress_percent(job: dict[str, Any]) -> int:
+    """Return the single UI progress value used by materialization task views."""
+    status = str(job.get('status') or '').casefold()
+    if status == 'queued':
+        return 0
+    if status != 'processing':
+        return 100
+    total = max(int(job.get('total') or 0), 0)
+    completed = max(int(job.get('completed') or 0), 0)
+    return min(99, max(0, round(completed * 100 / total))) if total else 0
+
+
 def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
     with AUTO_CALCULATED_FIELD_JOBS_LOCK:
         job = AUTO_CALCULATED_FIELD_JOBS[job_id]
@@ -1135,7 +1147,7 @@ def _run_combined_cdr_recreation_job(job_id: str, workspace: Workspace, kind: st
 def start_combined_cdr_recreation_job(
     workspace: Workspace, kind: str, username: str, *, background: bool = True,
 ) -> dict[str, Any]:
-    """Queue one combined-table rebuild in the shared materialization progress UI."""
+    """Restart one combined-table rebuild in the shared materialization progress UI."""
     job_id = uuid4().hex
     job = {
         'id': job_id, 'workspace_id': workspace.id, 'workspace_name': workspace.name,
@@ -1146,6 +1158,25 @@ def start_combined_cdr_recreation_job(
         'created_at': datetime.now(timezone.utc).timestamp(),
     }
     with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+        restarted_job_ids = []
+        for existing_id, existing in AUTO_CALCULATED_FIELD_JOBS.items():
+            if (
+                existing.get('workspace_id') == workspace.id
+                and existing.get('operation') == 'combined_recreation'
+                and str(existing.get('combined_kind') or '').casefold() == kind
+                and existing.get('status') in {'queued', 'processing'}
+            ):
+                existing.update(
+                    cancel_requested=True,
+                    message=f'Stopping this CDR-{kind.upper()} recreation before restarting it',
+                    restart_requested=True,
+                )
+                restarted_job_ids.append(existing_id)
+        if restarted_job_ids:
+            job['restarted_job_ids'] = restarted_job_ids
+            job['message'] = (
+                f'Waiting for the previous CDR-{kind.upper()} recreation to stop before restarting it'
+            )
         AUTO_CALCULATED_FIELD_JOBS[job_id] = job
     task_repository = Repository(
         workspace.database_path,
@@ -3234,15 +3265,25 @@ def workspace_combined_tables(
         task_repository.get_workspace_state('calculated_dimensions_need_materialization') or '0'
     )
     with AUTO_CALCULATED_FIELD_JOBS_LOCK:
-        active_recreations = {
-            str(job.get('combined_kind') or '').casefold()
-            for job in AUTO_CALCULATED_FIELD_JOBS.values()
+        active_recreations: dict[str, dict[str, Any]] = {}
+        for job in AUTO_CALCULATED_FIELD_JOBS.values():
             if (
-                job.get('operation') == 'combined_recreation'
-                and job.get('status') in {'queued', 'processing'}
-                and (workspace_id is None or str(job.get('workspace_id') or '') == workspace_id)
-            )
-        }
+                job.get('operation') != 'combined_recreation'
+                or job.get('status') not in {'queued', 'processing'}
+                or (workspace_id is not None and str(job.get('workspace_id') or '') != workspace_id)
+            ):
+                continue
+            kind = str(job.get('combined_kind') or '').casefold()
+            previous = active_recreations.get(kind)
+            # During a restart, retain the progress of the currently executing
+            # task until it stops; the replacement then begins at 0%.
+            if previous is None or (
+                previous.get('status') != 'processing' and job.get('status') == 'processing'
+            ) or (
+                previous.get('status') == job.get('status')
+                and float(job.get('created_at') or 0) > float(previous.get('created_at') or 0)
+            ):
+                active_recreations[kind] = dict(job)
     combined: list[dict[str, Any]] = []
     with task_repository.connection() as connection:
         for kind in ('data', 'voice', 'speech'):
@@ -3269,7 +3310,8 @@ def workspace_combined_tables(
                 if dataset['status'] == 'ready' and str(dataset['dataset_kind'] or '').casefold() == kind
             ]
             expected_row_count = sum(int(dataset['row_count'] or 0) for dataset in source_datasets)
-            is_recalculating = kind in active_recreations or materialization_state == 'processing'
+            recreation_job = active_recreations.get(kind)
+            is_recalculating = recreation_job is not None
             needs_recalculation = materialization_state in {'1', 'stopped'}
             combined.append({
                 'name': f'CDR-{kind.title()} (combined)',
@@ -3280,6 +3322,8 @@ def workspace_combined_tables(
                 'expected_row_count': expected_row_count,
                 'has_missing_rows': int(row_count or 0) != expected_row_count,
                 'is_recalculating': is_recalculating,
+                'recreation_status': str(recreation_job.get('status') or '') if recreation_job else '',
+                'recreation_progress': materialization_job_progress_percent(recreation_job) if recreation_job else 100,
                 'needs_recalculation': needs_recalculation,
                 'updated_at_label': format_local_timestamp(updated_at) if updated_at else '—',
             })
@@ -3336,6 +3380,8 @@ def recreate_combined_cdr_table(
         for mapping_kind in ('mapping_vodafone', 'mapping_three')
     }
     total = max(len(datasets) * 100 + 1, 1)
+    if progress_callback:
+        progress_callback(0, total, f'Checking individual CDR-{kind.upper()} tables')
     materialized_rows_by_dataset: dict[int, int] = {}
     for index, dataset in enumerate(datasets):
         dataset_id = int(dataset['id'])
@@ -3395,6 +3441,11 @@ def recreate_combined_cdr_table(
                 f'{dataset["file_name"]}',
             )
 
+    if progress_callback:
+        progress_callback(
+            len(datasets) * 80, total,
+            f'Preparing combined CDR-{kind.upper()} table recreation',
+        )
     # Do not discard the last valid combined table until every individual CDR
     # has passed migration/recovery successfully.
     task_repository.drop_reporting_table(kind)
@@ -6680,13 +6731,18 @@ def recreate_combined_cdr(
         raise HTTPException(status_code=404, detail='Unknown combined CDR table.')
     require_workspace_access(user, active_workspace.id)
     job = start_combined_cdr_recreation_job(active_workspace, normalized_kind, user.username)
-    repository.add_log(user.username, 'recreate_combined_cdr_table', json.dumps({
+    repository.try_add_log(user.username, 'recreate_combined_cdr_table', json.dumps({
         'workspace': active_workspace.id, 'kind': normalized_kind, 'materialization_job': job['id'],
+        'restarted_job_ids': job.get('restarted_job_ids', []),
     }))
+    restarting = bool(job.get('restarted_job_ids'))
     return JSONResponse({
         'materialization_job': job['id'],
         'materialization_status_url': f'/api/workspace/auto-calculated-fields/materialization/{job["id"]}',
+        'restarted_job_ids': job.get('restarted_job_ids', []),
         'notice': (
+            f'The previous CDR-{normalized_kind.upper()} recreation is being stopped and a new one has been queued.'
+            if restarting else
             f'All individual CDR-{normalized_kind.upper()} tables are being checked and migrated when needed; '
             'the combined table will then be recreated in the background.'
         ),
