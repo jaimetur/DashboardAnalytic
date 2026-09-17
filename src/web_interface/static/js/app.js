@@ -149,6 +149,7 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
   const manage = host.querySelector('[data-workspace-manage-calculated-dimensions]');
   const progressPanel = document.querySelector('[data-auto-calculated-field-progress]');
   const progressStatus = document.querySelector('[data-auto-calculated-field-progress-status]');
+  const progressQueuedStatus = document.querySelector('[data-auto-calculated-field-queued-status]');
   const progressJobList = document.querySelector('[data-auto-calculated-field-job-list]');
   const rematerializeButton = document.querySelector('[data-auto-calculated-field-rematerialize]');
   let progressTimer = null;
@@ -205,21 +206,28 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
       if (!response.ok) throw new Error(payload.detail || 'Unable to read materialization progress.');
       const activeJobs = Array.isArray(payload.jobs) ? payload.jobs : [];
       const jobs = activeJobs.length ? activeJobs : [payload];
-      const processing = jobs.some((job) => ['queued', 'processing'].includes(job.status));
-      const failed = !processing && jobs.some((job) => ['failed', 'stopped'].includes(job.status));
+      const processingJobs = activeJobs.filter((job) => job.status === 'processing');
+      const queuedJobs = activeJobs.filter((job) => job.status === 'queued');
+      const hasActiveJobs = processingJobs.length > 0 || queuedJobs.length > 0;
+      const failed = !hasActiveJobs && jobs.some((job) => ['failed', 'stopped'].includes(job.status));
       const stopped = failed && jobs.some((job) => job.status === 'stopped');
-      progressPanel.classList.toggle('is-processing', processing);
+      progressPanel.classList.toggle('is-processing', hasActiveJobs);
       progressPanel.classList.toggle('is-failed', failed);
       progressPanel.classList.toggle('is-stopped', stopped);
-      if (rematerializeButton instanceof HTMLButtonElement) rematerializeButton.disabled = processing;
+      if (rematerializeButton instanceof HTMLButtonElement) rematerializeButton.disabled = hasActiveJobs;
       if (progressStatus instanceof HTMLElement) {
-        progressStatus.className = `status-pill status-${failed ? 'failed' : processing ? 'processing' : 'ready'}`;
-        progressStatus.textContent = stopped ? 'Stopped' : failed ? 'Failed' : processing
-          ? `${activeJobs.length || 1} in progress` : 'Up to date';
+        progressStatus.className = `status-pill status-${failed ? 'failed' : hasActiveJobs ? 'processing' : 'ready'}`;
+        progressStatus.textContent = stopped ? 'Stopped' : failed ? 'Failed' : hasActiveJobs
+          ? `${processingJobs.length} in progress` : 'Up to date';
+      }
+      if (progressQueuedStatus instanceof HTMLElement) {
+        progressQueuedStatus.hidden = queuedJobs.length === 0;
+        progressQueuedStatus.className = 'status-pill status-processing';
+        progressQueuedStatus.textContent = `${queuedJobs.length} queued`;
       }
       renderMaterializationJobs(jobs);
       if (progressTimer) window.clearTimeout(progressTimer);
-      progressTimer = window.setTimeout(refreshMaterializationProgress, processing ? 900 : 5000);
+      progressTimer = window.setTimeout(refreshMaterializationProgress, hasActiveJobs ? 900 : 5000);
     } catch (error) {
       renderMaterializationJobs([{
         status: 'failed', error: error.message || 'Materialization status is temporarily unavailable.',
@@ -6963,9 +6971,10 @@ if (queueNode) {
       const detail = document.createElement('span');
       detail.className = 'background-task-detail';
       const numericProgress = Number(task.progress);
-      const hasProgress = task.progress !== null && task.progress !== undefined && Number.isFinite(numericProgress);
+      const queued = taskIsQueued(task);
+      const hasProgress = !queued && task.progress !== null && task.progress !== undefined && Number.isFinite(numericProgress);
       const duration = Number(task.duration_seconds);
-      const queuedLabel = taskIsQueued(task) ? formatQueuedAge(task.queued_at) : '';
+      const queuedLabel = queued ? formatQueuedAge(task.queued_at) : '';
       const taskDetail = queuedLabel || String(task.detail || 'Processing');
       detail.textContent = `${taskDetail}${hasProgress ? ` · ${Math.round(Math.max(0, Math.min(100, numericProgress)))}%` : ''}${!queuedLabel && formatTaskDuration(duration) ? ` · ${formatTaskDuration(duration)}` : ''}`;
       item.append(detail);
@@ -6976,7 +6985,10 @@ if (queueNode) {
       progress.setAttribute('aria-label', String(task.label || 'Background task'));
       const bar = document.createElement('div');
       bar.className = 'background-task-progress-bar';
-      if (!hasProgress) {
+      if (queued) {
+        progress.hidden = true;
+        progress.setAttribute('aria-valuetext', 'Queued');
+      } else if (!hasProgress) {
         progress.classList.add('is-indeterminate');
         progress.setAttribute('aria-valuetext', 'In progress');
       } else {

@@ -356,7 +356,10 @@
     <section class="auto-calculated-field-progress datasets-materialization-status" data-auto-calculated-field-progress data-status-url="/api/workspace/auto-calculated-fields/materialization" aria-live="polite">
       <div class="auto-calculated-field-progress-heading">
         <strong data-auto-calculated-field-progress-title>Materialization status</strong>
-        <span class="status-pill status-ready" data-auto-calculated-field-progress-status>Up to date</span>
+        <div class="auto-calculated-field-progress-statuses">
+          <span class="status-pill status-ready" data-auto-calculated-field-progress-status>Up to date</span>
+          <span class="status-pill status-ready" data-auto-calculated-field-queued-status hidden></span>
+        </div>
       </div>
       <div class="auto-calculated-field-job-list" data-auto-calculated-field-job-list>
         <article class="auto-calculated-field-job">

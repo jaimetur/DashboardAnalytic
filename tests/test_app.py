@@ -577,6 +577,15 @@ def test_materialization_status_returns_every_active_workspace_job(client, monke
     assert [job['id'] for job in response.json()['jobs']] == ['speech-job', 'data-job']
     assert all('username' not in job for job in response.json()['jobs'])
 
+    background_tasks = client.get('/api/background-tasks').json()['groups']
+    tasks = next(group['tasks'] for group in background_tasks if group['workspace_id'] == workspace_id)
+    task_by_id = {task['id']: task for task in tasks}
+    assert task_by_id['auto-fields:speech-job']['status'] == 'processing'
+    assert task_by_id['auto-fields:speech-job']['progress'] == 15
+    assert task_by_id['auto-fields:data-job']['status'] == 'queued'
+    assert task_by_id['auto-fields:data-job']['progress'] == 0
+    assert task_by_id['auto-fields:data-job']['started_at'] is None
+
 
 def test_combined_table_progress_matches_its_active_recreation_job(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module

@@ -523,6 +523,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .auto-calculated-field-progress { display: grid; gap: 0.55rem; padding: 0.8rem 0.95rem; border: 1px solid #cfe0e8; border-radius: 12px; background: linear-gradient(135deg, #f7fbfd, #eef7f6); }
 .auto-calculated-field-progress-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
 .auto-calculated-field-progress-heading strong { color: #294b5d; font-size: 0.84rem; }
+.auto-calculated-field-progress-statuses { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.4rem; }
 .auto-calculated-field-progress-heading .status-pill { min-width: 6rem; padding: 0.25rem 0.6rem; text-align: center; }
 .auto-calculated-field-job-list { display: grid; gap: 0.7rem; }
 .auto-calculated-field-job { display: grid; gap: 0.42rem; min-width: 0; padding-top: 0.68rem; border-top: 1px solid rgba(41, 75, 93, 0.16); }
@@ -534,7 +535,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .auto-calculated-field-progress-bar { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #0b7a75, #36b6a9); transition: width 220ms ease; }
 .auto-calculated-field-progress-percent { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #294b5d; font-size: 0.7rem; font-weight: 800; line-height: 1; }
 .auto-calculated-field-progress.is-processing { border-color: #e4c76f; background: #fff8d9; }
-.auto-calculated-field-progress.is-processing .auto-calculated-field-progress-bar { min-width: 5%; background: linear-gradient(90deg, #d49a20, #f0c44f); }
+.auto-calculated-field-progress.is-processing .auto-calculated-field-progress-bar { background: linear-gradient(90deg, #d49a20, #f0c44f); }
 .auto-calculated-field-progress.is-failed { border-color: #e2b8be; background: #fff5f5; }
 .auto-calculated-field-progress.is-failed .auto-calculated-field-progress-bar { background: #bd3232; }
 .auto-calculated-field-progress.is-stopped { border-color: #bd3232; background: #ffe8e8; }

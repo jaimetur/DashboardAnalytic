@@ -76,6 +76,8 @@ STOP_REQUESTS_LOCK = Lock()
 DATASET_PROCESSING_EXECUTORS: dict[str, ThreadPoolExecutor] = {}
 DATASET_PROCESSING_EXECUTORS_LOCK = Lock()
 DATASET_PROCESSING_WORKERS = 4
+COMBINED_CDR_RECREATION_EXECUTORS: dict[str, ThreadPoolExecutor] = {}
+COMBINED_CDR_RECREATION_EXECUTORS_LOCK = Lock()
 HEAVY_DATASET_PROCESSING_THRESHOLD_BYTES = 256 * 1024 * 1024
 HEAVY_DATASET_PROCESSING_LOCKS: dict[str, Lock] = {}
 HEAVY_DATASET_PROCESSING_LOCKS_GUARD = Lock()
@@ -1104,16 +1106,21 @@ def _run_combined_cdr_recreation_job(job_id: str, workspace: Workspace, kind: st
             if job:
                 job.update(completed=completed, total=total, message=message)
 
-    with AUTO_CALCULATED_FIELD_JOBS_LOCK:
-        AUTO_CALCULATED_FIELD_JOBS[job_id].update(
-            status='processing',
-            message=f'Checking all individual CDR-{kind.upper()} tables before recreating the combined table',
-            started_at=datetime.now(timezone.utc).timestamp(),
-        )
     try:
         with _auto_calculated_field_workspace_lock(workspace.id):
             with _dataset_processing_lock(task_repository):
                 ensure_auto_calculated_field_job_not_stopped(job_id)
+                # A job remains queued until it owns the exclusive locks and
+                # can actually start changing CDR tables.
+                with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+                    AUTO_CALCULATED_FIELD_JOBS[job_id].update(
+                        status='processing',
+                        message=(
+                            f'Checking all individual CDR-{kind.upper()} tables '
+                            'before recreating the combined table'
+                        ),
+                        started_at=datetime.now(timezone.utc).timestamp(),
+                    )
                 task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'processing')
                 stats = recreate_combined_cdr_table(workspace, kind, update_progress)
                 task_repository.set_workspace_state('calculated_dimensions_need_materialization', '0')
@@ -1190,10 +1197,9 @@ def start_combined_cdr_recreation_job(
         # it and application shutdown can wait for the complete operation.
         _run_combined_cdr_recreation_job(job_id, workspace, kind)
     elif background:
-        # Use the same single-worker queue as ingestion and Vendor mapping.
-        # This keeps every dataset-table writer ordered and lets application
-        # shutdown wait for the rebuild instead of leaving a detached thread.
-        _dataset_processing_executor(task_repository).submit(
+        # This serial queue cannot be starved by file ingestion or Vendor
+        # mapping workers; the worker still owns the workspace write lock.
+        _combined_cdr_recreation_executor(task_repository).submit(
             _run_combined_cdr_recreation_job, job_id, workspace, kind,
         )
     else:
@@ -1775,7 +1781,12 @@ async def lifespan(_: FastAPI):
     with DATASET_PROCESSING_EXECUTORS_LOCK:
         dataset_executors = list(DATASET_PROCESSING_EXECUTORS.values())
         DATASET_PROCESSING_EXECUTORS.clear()
+    with COMBINED_CDR_RECREATION_EXECUTORS_LOCK:
+        combined_recreation_executors = list(COMBINED_CDR_RECREATION_EXECUTORS.values())
+        COMBINED_CDR_RECREATION_EXECUTORS.clear()
     for executor in dataset_executors:
+        executor.shutdown(wait=True)
+    for executor in combined_recreation_executors:
         executor.shutdown(wait=True)
 
 
@@ -2136,6 +2147,16 @@ def _dataset_processing_executor(task_repository: Repository) -> ThreadPoolExecu
         return DATASET_PROCESSING_EXECUTORS.setdefault(
             workspace_key,
             ThreadPoolExecutor(max_workers=DATASET_PROCESSING_WORKERS, thread_name_prefix='dataset-processing'),
+        )
+
+
+def _combined_cdr_recreation_executor(task_repository: Repository) -> ThreadPoolExecutor:
+    """Return the serial per-workspace queue for manual combined CDR rebuilds."""
+    workspace_key = str(task_repository.db_path.resolve())
+    with COMBINED_CDR_RECREATION_EXECUTORS_LOCK:
+        return COMBINED_CDR_RECREATION_EXECUTORS.setdefault(
+            workspace_key,
+            ThreadPoolExecutor(max_workers=1, thread_name_prefix='combined-cdr-recreation'),
         )
 
 
@@ -7162,9 +7183,7 @@ def background_tasks_status(user: SessionUser = Depends(current_user)) -> JSONRe
         workspace_id = str(job.get('workspace_id') or '')
         if workspace_id not in accessible_ids or job.get('status') not in {'queued', 'processing'}:
             continue
-        total = max(0, int(job.get('total') or 0))
-        completed = max(0, int(job.get('completed') or 0))
-        progress = min(99, round(completed * 100 / total, 1)) if total else None
+        progress = materialization_job_progress_percent(job)
         group = grouped.setdefault(workspace_id, {
             'workspace_id': workspace_id,
             'workspace_name': str(job.get('workspace_name') or workspace_names.get(workspace_id) or 'Workspace'),
@@ -7179,6 +7198,7 @@ def background_tasks_status(user: SessionUser = Depends(current_user)) -> JSONRe
             'id': f'auto-fields:{job.get("id")}',
             'label': 'Recreating combined CDR table' if job.get('operation') == 'combined_recreation' else 'Materializing Auto-calculated Fields',
             'detail': str(job.get('message') or 'Processing'),
+            'status': str(job.get('status') or 'queued').casefold(),
             'progress': progress,
             **_background_task_timing(job),
             'stop_task_id': f'auto-fields:{job.get("id")}',
