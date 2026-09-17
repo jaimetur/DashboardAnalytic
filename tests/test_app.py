@@ -3604,7 +3604,7 @@ def test_recreating_the_same_combined_kind_stops_the_previous_job_before_queuein
             'id': previous_id, 'workspace_id': workspace.id, 'workspace_name': workspace.name,
             'operation': 'combined_recreation', 'combined_kind': 'voice', 'status': 'processing',
         }
-    monkeypatch.setattr(app_module, '_dataset_processing_executor', lambda _repository: CapturingExecutor())
+    monkeypatch.setattr(app_module, '_combined_cdr_recreation_executor', lambda _repository: CapturingExecutor())
 
     replacement = app_module.start_combined_cdr_recreation_job(workspace, 'voice', 'admin')
 
