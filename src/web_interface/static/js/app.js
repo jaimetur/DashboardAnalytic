@@ -86,11 +86,14 @@ function monitorAutoCalculatedFieldJob(statusUrl, notice = '') {
         window.localStorage.setItem(autoCalculatedFieldJobStorageKey, JSON.stringify([...current]));
         document.querySelectorAll('[data-combined-dataset-recreate]').forEach((button) => { button.disabled = false; });
         if (job.status === 'ready') {
+          window.dispatchEvent(new CustomEvent('workspace-dataset-table-refresh-requested'));
           showInfoDialog(job.message || 'Auto-calculated fields are ready.', {
             title: 'Materialization complete',
-            onClose: job.refresh_workspace ? () => window.location.reload() : undefined,
           });
         } else {
+          if (job.status === 'stopped') {
+            window.dispatchEvent(new CustomEvent('workspace-dataset-table-refresh-requested'));
+          }
           showInfoDialog(job.error || job.message || 'The CDR tables could not be updated.', {title: job.status === 'stopped' ? 'Materialization stopped' : 'Materialization failed', tone: 'error'});
         }
         return;
@@ -137,47 +140,87 @@ document.querySelectorAll('[data-combined-dataset-recreate]').forEach((button) =
 
 document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEach((host) => {
   const manage = host.querySelector('[data-workspace-manage-calculated-dimensions]');
-  const progressPanel = host.querySelector('[data-auto-calculated-field-progress]');
-  const progressStatus = host.querySelector('[data-auto-calculated-field-progress-status]');
-  const progressTrack = host.querySelector('[data-auto-calculated-field-progress-track]');
-  const progressBar = host.querySelector('[data-auto-calculated-field-progress-bar]');
-  const progressPercent = host.querySelector('[data-auto-calculated-field-progress-percent]');
-  const progressCopy = host.querySelector('[data-auto-calculated-field-progress-copy]');
-  const rematerializeButton = host.querySelector('[data-auto-calculated-field-rematerialize]');
+  const progressPanel = document.querySelector('[data-auto-calculated-field-progress]');
+  const progressStatus = document.querySelector('[data-auto-calculated-field-progress-status]');
+  const progressJobList = document.querySelector('[data-auto-calculated-field-job-list]');
+  const rematerializeButton = document.querySelector('[data-auto-calculated-field-rematerialize]');
   let progressTimer = null;
+  const materializationJobLabel = (job) => {
+    if (job.operation === 'combined_recreation' && job.combined_kind) {
+      return `Combined CDR-${String(job.combined_kind).toUpperCase()}`;
+    }
+    if (job.operation) return 'Auto-calculated Fields';
+    return 'Materialized CDR tables';
+  };
+  const renderMaterializationJobs = (jobs) => {
+    if (!(progressJobList instanceof HTMLElement)) return;
+    progressJobList.replaceChildren();
+    jobs.forEach((job) => {
+      const processing = ['queued', 'processing'].includes(job.status);
+      const failed = ['failed', 'stopped'].includes(job.status);
+      const total = Math.max(Number(job.total) || 0, 0);
+      const completed = Math.max(Number(job.completed) || 0, 0);
+      const percent = processing
+        ? (total ? Math.min(99, Math.max(5, Math.round(completed * 100 / total))) : 5)
+        : 100;
+      const article = document.createElement('article');
+      article.className = `auto-calculated-field-job${processing ? ' is-processing' : ''}${failed ? ' is-failed' : ''}`;
+      const heading = document.createElement('div');
+      heading.className = 'auto-calculated-field-job-heading';
+      const label = document.createElement('strong');
+      label.textContent = materializationJobLabel(job);
+      const state = document.createElement('span');
+      const stateLabel = job.status === 'queued' ? 'Queued' : job.status === 'processing' ? 'In progress' : job.status === 'stopped' ? 'Stopped' : job.status === 'failed' ? 'Failed' : 'Up to date';
+      state.textContent = `${stateLabel} · ${percent}%`;
+      heading.append(label, state);
+      const track = document.createElement('div');
+      track.className = 'auto-calculated-field-progress-track';
+      track.setAttribute('role', 'progressbar');
+      track.setAttribute('aria-label', `${label.textContent} materialization`);
+      track.setAttribute('aria-valuemin', '0');
+      track.setAttribute('aria-valuemax', '100');
+      track.setAttribute('aria-valuenow', String(percent));
+      const bar = document.createElement('span');
+      bar.className = 'auto-calculated-field-progress-bar';
+      bar.style.width = `${percent}%`;
+      const percentLabel = document.createElement('span');
+      percentLabel.className = 'auto-calculated-field-progress-percent';
+      percentLabel.textContent = `${percent}%`;
+      track.append(bar, percentLabel);
+      const copy = document.createElement('p');
+      copy.className = 'form-note';
+      copy.textContent = job.error || job.message || 'All materialized fields are up to date.';
+      article.append(heading, track, copy);
+      progressJobList.append(article);
+    });
+  };
   const refreshMaterializationProgress = async () => {
     if (!(progressPanel instanceof HTMLElement) || !progressPanel.dataset.statusUrl) return;
     try {
       const response = await fetch(progressPanel.dataset.statusUrl, {credentials: 'same-origin', cache: 'no-store'});
-      const job = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(job.detail || 'Unable to read materialization progress.');
-      const processing = ['queued', 'processing'].includes(job.status);
-      const failed = ['failed', 'stopped'].includes(job.status);
-      const stopped = job.status === 'stopped';
-      const total = Math.max(Number(job.total) || 0, 0);
-      const completed = Math.max(Number(job.completed) || 0, 0);
-      const percent = processing
-        ? (total ? Math.min(99, Math.round(completed * 100 / total)) : 5)
-        : failed ? 100 : 100;
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Unable to read materialization progress.');
+      const activeJobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+      const jobs = activeJobs.length ? activeJobs : [payload];
+      const processing = jobs.some((job) => ['queued', 'processing'].includes(job.status));
+      const failed = !processing && jobs.some((job) => ['failed', 'stopped'].includes(job.status));
+      const stopped = failed && jobs.some((job) => job.status === 'stopped');
       progressPanel.classList.toggle('is-processing', processing);
       progressPanel.classList.toggle('is-failed', failed);
       progressPanel.classList.toggle('is-stopped', stopped);
       if (rematerializeButton instanceof HTMLButtonElement) rematerializeButton.disabled = processing;
       if (progressStatus instanceof HTMLElement) {
         progressStatus.className = `status-pill status-${failed ? 'failed' : processing ? 'processing' : 'ready'}`;
-        progressStatus.textContent = stopped ? 'Stopped' : failed ? 'Failed' : processing ? 'In progress' : 'Up to date';
+        progressStatus.textContent = stopped ? 'Stopped' : failed ? 'Failed' : processing
+          ? `${activeJobs.length || 1} in progress` : 'Up to date';
       }
-      if (progressBar instanceof HTMLElement) progressBar.style.width = `${percent}%`;
-      if (progressPercent instanceof HTMLElement) progressPercent.textContent = `${percent}%`;
-      if (progressTrack instanceof HTMLElement) progressTrack.setAttribute('aria-valuenow', String(percent));
-      if (progressCopy instanceof HTMLElement) {
-        const counter = processing && total ? ` (${Math.min(completed, total)} of ${total} tables)` : '';
-        progressCopy.textContent = `${job.error || job.message || 'All materialized fields are up to date'}${counter}`;
-      }
+      renderMaterializationJobs(jobs);
       if (progressTimer) window.clearTimeout(progressTimer);
       progressTimer = window.setTimeout(refreshMaterializationProgress, processing ? 900 : 5000);
     } catch (error) {
-      if (progressCopy instanceof HTMLElement) progressCopy.textContent = error.message || 'Materialization status is temporarily unavailable.';
+      renderMaterializationJobs([{
+        status: 'failed', error: error.message || 'Materialization status is temporarily unavailable.',
+      }]);
       if (progressTimer) window.clearTimeout(progressTimer);
       progressTimer = window.setTimeout(refreshMaterializationProgress, 5000);
     }
@@ -6326,10 +6369,16 @@ if (queueNode) {
   const selectedDatasetField = document.querySelector('input[name="dataset_id"], select[name="dataset_id"]');
   const waitingPanel = document.querySelector('.queue-waiting-copy');
   const queueTypeFilter = document.querySelector('[data-queue-type-filter]');
+  const formatQueueCount = (value) => Math.max(0, Number(value) || 0).toLocaleString('en-US', {maximumFractionDigits: 0});
   const applyQueueTypeFilter = () => {
     const selectedKind = queueTypeFilter?.value || '';
+    const combinedRows = Array.from(document.querySelectorAll('[data-combined-dataset-row]'));
     document.querySelectorAll('[data-dataset-row]').forEach((row) => {
       row.hidden = Boolean(selectedKind && row.dataset.datasetKind !== selectedKind);
+    });
+    const hideCombinedStructure = !combinedRows.some((row) => !row.hidden);
+    document.querySelectorAll('[data-combined-dataset-structure-row]').forEach((row) => {
+      row.hidden = hideCombinedStructure;
     });
     queueNode.querySelector('.queue-table')?.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {bubbles: true, detail: {reset: true}}));
   };
@@ -6351,6 +6400,7 @@ if (queueNode) {
     if (!row) return;
     const kind = row.querySelector('[data-queue-kind]');
     const rows = row.querySelector('[data-queue-rows]');
+    const columns = row.querySelector('[data-queue-columns]');
     const size = row.querySelector('[data-queue-size]');
     const statusPill = row.querySelector('[data-queue-status-pill]');
     const progressBar = row.querySelector('[data-queue-progress-bar]');
@@ -6366,7 +6416,8 @@ if (queueNode) {
       || (statusPill?.classList.contains('queue-status-ready') ? 'ready' : '');
 
     if (kind) kind.textContent = dataset.input_kind_label || 'Other';
-    if (rows) rows.textContent = String(dataset.row_count || 0);
+    if (rows) rows.textContent = formatQueueCount(dataset.row_count);
+    if (columns) columns.textContent = formatQueueCount(dataset.column_count);
     if (size) size.textContent = dataset.size_mb_label || '0.00 MB';
     if (statusPill) {
       statusPill.textContent = dataset.status_label || dataset.status || 'Queued';
@@ -6474,18 +6525,54 @@ if (queueNode) {
     }
   };
 
-  const pollQueue = async () => {
+  const updateCombinedQueueRow = (combined) => {
+    const row = document.querySelector(`[data-combined-dataset-row][data-dataset-kind="${combined.kind}"]`);
+    if (!(row instanceof HTMLTableRowElement)) return;
+    const rows = row.querySelector('[data-combined-dataset-rows]');
+    const columns = row.querySelector('[data-combined-dataset-columns]');
+    const status = row.querySelector('[data-combined-dataset-status]');
+    const bar = row.querySelector('[data-combined-dataset-progress-bar]');
+    const percent = row.querySelector('[data-combined-dataset-progress-percent]');
+    const updated = row.querySelector('[data-combined-dataset-updated]');
+    const warning = Boolean(combined.has_missing_rows || combined.is_recalculating || combined.needs_recalculation);
+    const statusLabel = combined.is_recalculating ? 'Recalculating' : combined.has_missing_rows
+      ? 'Missing Rows' : combined.needs_recalculation ? 'Recalc Needed' : 'Ready';
+    const progressValue = combined.is_recalculating ? 5 : 100;
+    if (rows instanceof HTMLElement) rows.textContent = formatQueueCount(combined.row_count);
+    if (columns instanceof HTMLElement) columns.textContent = formatQueueCount(combined.column_count);
+    if (updated instanceof HTMLElement) updated.textContent = combined.updated_at_label || '—';
+    row.classList.toggle('combined-dataset-ready', !warning);
+    row.classList.toggle('combined-dataset-warning', warning);
+    if (status instanceof HTMLElement) {
+      status.className = `queue-status-pill queue-status-${warning ? 'warning' : 'ready'}`;
+      status.textContent = statusLabel;
+    }
+    if (bar instanceof HTMLElement) {
+      bar.className = `progress-bar status-${combined.is_recalculating ? 'processing' : 'ready'}`;
+      bar.style.width = `${progressValue}%`;
+    }
+    if (percent instanceof HTMLElement) percent.textContent = `${progressValue}%`;
+  };
+
+  const pollQueue = async ({scheduleNext = true, suppressReload = false} = {}) => {
     try {
       const response = await fetch(url, {cache: 'no-store', headers: {'Accept': 'application/json'}});
       if (!response.ok) return;
       const payload = await response.json();
       const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
       datasets.forEach(updateQueueRow);
+      const combinedTables = Array.isArray(payload.combined_tables) ? payload.combined_tables : [];
+      combinedTables.forEach(updateCombinedQueueRow);
+      applyQueueTypeFilter();
       if (refreshWorkspaceAfterCompletion) {
-        // A complete reload obtains the final server-rendered action set,
-        // including Map/Clear Vendors, after background processing finishes.
-        window.location.reload();
-        return;
+        if (suppressReload) {
+          refreshWorkspaceAfterCompletion = false;
+        } else {
+          // A complete reload obtains the final server-rendered action set,
+          // including Map/Clear Vendors, after background processing finishes.
+          window.location.reload();
+          return;
+        }
       }
       const selectedDatasetId = selectedDatasetField ? selectedDatasetField.value : '';
       if (waitingPanel && selectedDatasetId) {
@@ -6500,11 +6587,15 @@ if (queueNode) {
     } catch (_error) {
       // Ignore transient polling errors and keep the current UI state.
     } finally {
-      if (delay > 0) {
+      if (scheduleNext && delay > 0) {
         window.setTimeout(pollQueue, delay);
       }
     }
   };
+
+  window.addEventListener('workspace-dataset-table-refresh-requested', () => {
+    void pollQueue({scheduleNext: false, suppressReload: true});
+  });
 
   if (url && delay > 0) {
     window.setTimeout(pollQueue, delay);

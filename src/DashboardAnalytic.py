@@ -253,7 +253,7 @@ LEGACY_VENDOR_MAPPING_FAILURE_MARKERS = (
     'duplicate column name: vendor_2',
     'database is locked',
 )
-DATASET_NORMALIZATION_VERSION = 12
+DATASET_NORMALIZATION_VERSION = 13
 COMBINED_REPORTING_TEMPLATE_COLUMNS_VERSION = 1
 
 
@@ -2675,7 +2675,6 @@ def persist_mapped_cdr_frame(
         default_aggregation = available_aggregations[0]
     task_repository.update_dataset_profile(
         dataset_id,
-        normalization_version=DATASET_NORMALIZATION_VERSION,
         vendor_mapping_applied=True,
         vendor_values_complete=bool(
             'vendor' in frame.columns
@@ -2918,9 +2917,12 @@ def refresh_selected_dataset_if_stale(
     dataset_id = int(selected_dataset['id'])
     dataset_kind = str(selected_dataset.get('dataset_kind') or '').casefold()
     dataset_path = Path(str(selected_dataset.get('stored_path') or ''))
-    if previous_version == 11 and dataset_kind in CDR_DATASET_KINDS and not dataset_path.is_file():
+    requires_source_operator_recovery = (
+        previous_version in {11, 12} and dataset_kind in CDR_DATASET_KINDS
+    )
+    if requires_source_operator_recovery and not dataset_path.is_file():
         return selected_dataset
-    if previous_version == 11 and dataset_kind in CDR_DATASET_KINDS and dataset_path.is_file():
+    if requires_source_operator_recovery and dataset_path.is_file():
         try:
             options = json.loads(str(selected_dataset.get('processing_options_json') or '{}'))
         except (TypeError, json.JSONDecodeError):
@@ -3253,6 +3255,7 @@ def workspace_combined_tables(
             row_count = connection.execute(
                 f'SELECT COUNT(*) AS count FROM {task_repository._quote_identifier(table_name)}',
             ).fetchone()['count']
+            column_count = len(task_repository._table_columns(connection, table_name))
             updated_at = task_repository.get_workspace_state(f'combined_reporting_updated_{kind}')
             if not updated_at:
                 dataset_dates = [
@@ -3273,6 +3276,7 @@ def workspace_combined_tables(
                 'kind': kind,
                 'table_name': table_name,
                 'row_count': int(row_count or 0),
+                'column_count': column_count,
                 'expected_row_count': expected_row_count,
                 'has_missing_rows': int(row_count or 0) != expected_row_count,
                 'is_recalculating': is_recalculating,
@@ -10582,7 +10586,11 @@ def legacy_reporting_redirect(request: Request, legacy_path: str = '') -> Redire
 def dataset_status(user: SessionUser = Depends(current_user)) -> dict[str, Any]:
     datasets = [serialize_dataset_row(row) for row in repository.list_datasets()]
     add_workspace_vendor_capabilities(datasets)
-    return {'datasets': datasets}
+    combined_tables: list[dict[str, Any]] = []
+    if active_workspace:
+        require_workspace_access(user, active_workspace.id)
+        combined_tables = workspace_combined_tables(workspace_id=active_workspace.id)
+    return {'datasets': datasets, 'combined_tables': combined_tables}
 
 
 @app.post('/dashboard/upload', response_class=HTMLResponse, include_in_schema=False)
@@ -13205,10 +13213,24 @@ def latest_auto_calculated_field_materialization(
         active_jobs = [job for job in workspace_jobs if job.get('status') in {'queued', 'processing'}]
         processing_jobs = [job for job in active_jobs if job.get('status') == 'processing']
         job = max(processing_jobs or active_jobs or workspace_jobs, key=lambda item: float(item.get('created_at') or 0))
-        return JSONResponse({
+        public_job = {
             key: value for key, value in job.items()
             if key not in {'previous_definitions', 'affected_sources', 'renames', 'username'}
-        })
+        }
+        public_job['jobs'] = [
+            {
+                key: value for key, value in active_job.items()
+                if key not in {'previous_definitions', 'affected_sources', 'renames', 'username'}
+            }
+            for active_job in sorted(
+                active_jobs,
+                key=lambda item: (
+                    0 if item.get('status') == 'processing' else 1,
+                    float(item.get('created_at') or 0),
+                ),
+            )
+        ]
+        return JSONResponse(public_job)
     workspace_state = repository.get_workspace_state('calculated_dimensions_need_materialization')
     if workspace_state in {'1', 'processing'}:
         return JSONResponse({

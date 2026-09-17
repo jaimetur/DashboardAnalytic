@@ -505,16 +505,24 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     assert page.status_code == 200
     assert 'data-workspace-calculated-dimensions-panel' in page.text
     assert 'data-auto-calculated-field-progress' in page.text
-    assert '>Auto-calculated Fields</button>' in page.text
+    assert 'data-auto-calculated-field-job-list' in page.text
+    assert '>Edit</button>' in page.text
     assert 'Manage Auto-calculated Fields' not in page.text
     assert 'workspace-calculated-dimensions-import-panel' in page.text
     assert 'workspace-calculated-dimensions-list' in page.text
     assert 'combined-dataset-row' not in page.text
-    assert 'Export All Auto-calculated Fields' in page.text
+    assert '>Export</a>' in page.text
     assert '>Field<' in page.text
     assert '>Applied to<' in page.text
     assert page.text.index('workspace-calculated-dimensions-import-panel') < page.text.index('workspace-calculated-dimensions-list-panel')
     assert page.text.index('<h2>Datasets</h2>') < page.text.index('id="calculated-dimensions"')
+    assert page.text.index('data-auto-calculated-field-progress') < page.text.index('id="calculated-dimensions"')
+    calculated_panel = page.text.split('id="calculated-dimensions"', 1)[1]
+    assert 'workspace-calculated-dimensions-intro' in calculated_panel
+    assert '<span>Re-materialize auto-calculate fields</span>' in calculated_panel
+    assert calculated_panel.index('data-auto-calculated-field-rematerialize') < calculated_panel.index('workspace-calculated-dimensions-layout')
+    assert calculated_panel.index('data-auto-calculated-field-rematerialize') < calculated_panel.index('data-workspace-manage-calculated-dimensions')
+    assert calculated_panel.index('data-workspace-manage-calculated-dimensions') < calculated_panel.index('workspace-calculated-dimensions-export-link')
 
     status = client.get('/api/workspace/auto-calculated-fields/materialization')
     assert status.status_code == 200
@@ -541,6 +549,33 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     assert imported.status_code == 303
     assert any(item.name == 'Imported Group' for item in app_module.load_workspace_calculated_dimensions())
     assert not list(app_module.settings.slides_templates_dir.rglob('*.dimensions.json'))
+
+
+def test_materialization_status_returns_every_active_workspace_job(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace_id = app_module.active_workspace.id
+    monkeypatch.setattr(app_module, 'AUTO_CALCULATED_FIELD_JOBS', {
+        'speech-job': {
+            'id': 'speech-job', 'workspace_id': workspace_id, 'operation': 'combined_recreation',
+            'combined_kind': 'speech', 'status': 'processing', 'completed': 45, 'total': 301,
+            'message': 'Migrating individual CDR-SPEECH table 1 of 3', 'created_at': 1,
+            'username': 'admin',
+        },
+        'data-job': {
+            'id': 'data-job', 'workspace_id': workspace_id, 'operation': 'combined_recreation',
+            'combined_kind': 'data', 'status': 'queued', 'completed': 0, 'total': 0,
+            'message': 'Waiting to migrate individual CDR-DATA tables', 'created_at': 2,
+            'username': 'admin',
+        },
+    })
+
+    response = client.get('/api/workspace/auto-calculated-fields/materialization')
+
+    assert response.status_code == 200
+    assert [job['id'] for job in response.json()['jobs']] == ['speech-job', 'data-job']
+    assert all('username' not in job for job in response.json()['jobs'])
 
 
 def test_renaming_calculated_dimension_rebuilds_references_in_workspace_templates(client) -> None:
@@ -3340,7 +3375,9 @@ def test_operator_storage_migration_recovers_raw_values_from_the_source(client) 
     legacy['Operator'] = 'VF'
     app_module.repository.replace_dataset_rows(1, legacy)
     app_module.repository.replace_reporting_rows(1, 'data', legacy)
-    app_module.repository.update_dataset_profile(1, normalization_version=11)
+    # Version 12 could be recorded by a Vendor-only update without proving
+    # that the stored Operator had been restored from the source.
+    app_module.repository.update_dataset_profile(1, normalization_version=12)
 
     dataset = app_module.serialize_dataset_row(app_module.repository.get_dataset(1))
     app_module.refresh_selected_dataset_if_stale(dataset)
@@ -3372,7 +3409,8 @@ def test_combined_recreation_migrates_individual_operator_storage_before_rebuild
     legacy['Operator'] = 'VF'
     app_module.repository.replace_dataset_rows(1, legacy)
     app_module.repository.replace_reporting_rows(1, 'data', legacy)
-    app_module.repository.update_dataset_profile(1, normalization_version=11)
+    # Reproduce a table that the former migration incorrectly considered current.
+    app_module.repository.update_dataset_profile(1, normalization_version=12)
     progress: list[tuple[int, int, str]] = []
 
     app_module.recreate_combined_cdr_table(
@@ -3407,7 +3445,28 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     assert workspace_response.status_code == 200
     assert 'CDR-Data (combined)' in workspace_response.text
     assert 'data-dataset-row data-dataset-kind="data"' in workspace_response.text
+    assert workspace_response.text.count('<th') >= 22
+    assert workspace_response.text.count('>Columns</th>') == 2
+    assert 'data-combined-dataset-structure-row' in workspace_response.text
+    dataset_columns = int(app_module.repository.get_dataset(1)['column_count'])
+    assert f'data-queue-columns>{dataset_columns:,}</td>' in workspace_response.text
     assert 'href="/workspace/combined/data/preview"' in workspace_response.text
+    assert 'Combined CDR tables' in workspace_response.text
+    assert 'they cannot be uploaded or imported as separate datasets' in workspace_response.text
+    assert workspace_response.text.index('class="combined-dataset-section-row"') < workspace_response.text.index('data-combined-dataset-row')
+    assert workspace_response.text.index('data-combined-dataset-row') < workspace_response.text.index('data-auto-calculated-field-progress')
+    combined_columns = len(app_module.repository.list_reporting_row_columns('data'))
+    assert f'data-combined-dataset-columns>{combined_columns:,}</td>' in workspace_response.text
+    workspace_template = app_module.PROJECT_ROOT / 'src' / 'web_interface' / 'templates' / 'workspace.html'
+    assert workspace_template.read_text(encoding='utf-8').count("'{:,}'.format(") >= 4
+    live_status = client.get('/api/datasets/status')
+    assert live_status.status_code == 200
+    assert live_status.json()['combined_tables'][0]['kind'] == 'data'
+    assert live_status.json()['combined_tables'][0]['column_count'] == combined_columns
+    app_script = app_module.PROJECT_ROOT / 'src' / 'web_interface' / 'static' / 'js' / 'app.js'
+    script_text = app_script.read_text(encoding='utf-8')
+    assert 'workspace-dataset-table-refresh-requested' in script_text
+    assert 'combinedTables.forEach(updateCombinedQueueRow)' in script_text
     assert 'aria-label="Recreate combined table">↻</button>' in workspace_response.text
 
     preview_response = client.get('/workspace/combined/data/preview')
@@ -3777,6 +3836,8 @@ def test_workspace_uses_persisted_vendor_flags_without_reloading_cdr_files(clien
 
 
 def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mapping(client) -> None:
+    import src.DashboardAnalytic as app_module
+
     login(client)
     client.post(
         '/datasets-analysis/upload',
@@ -3803,12 +3864,16 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     live_status = client.get('/api/datasets/status').json()['datasets']
     assert next(dataset for dataset in live_status if dataset['id'] == 1)['can_map_vendors'] is True
 
+    # Vendor enrichment must not certify an older source normalization that it
+    # did not rebuild from the uploaded file.
+    app_module.repository.update_dataset_profile(1, normalization_version=12)
     response = client.post(
         '/workspace/map-vendors',
         data={'cdr_dataset_id': 1, 'three_mapping_dataset_id': 2},
         follow_redirects=False,
     )
     assert response.status_code == 303
+    assert int(app_module.repository.get_dataset(1)['normalization_version']) == 12
 
     preview = client.get('/workspace/preview/1')
     assert preview.status_code == 200

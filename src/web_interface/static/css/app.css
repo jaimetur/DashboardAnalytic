@@ -518,10 +518,18 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-calculated-dimensions-button { background: linear-gradient(145deg, #fff2ad, #efd66e); border-color: rgba(174, 132, 28, 0.54); color: #715211; box-shadow: 0 8px 18px rgba(167, 122, 19, 0.16); }
 .catalogue-calculated-dimensions-button:hover:not(:disabled) { background: linear-gradient(145deg, #ffea84, #dfbd45); color: #533b09; }
 .workspace-calculated-dimensions-content { display: grid; gap: 1rem; padding-top: 0.8rem; }
+.workspace-calculated-dimensions-intro { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.workspace-calculated-dimensions-intro .lede { min-width: 0; margin: 0; }
 .auto-calculated-field-progress { display: grid; gap: 0.55rem; padding: 0.8rem 0.95rem; border: 1px solid #cfe0e8; border-radius: 12px; background: linear-gradient(135deg, #f7fbfd, #eef7f6); }
 .auto-calculated-field-progress-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
 .auto-calculated-field-progress-heading strong { color: #294b5d; font-size: 0.84rem; }
 .auto-calculated-field-progress-heading .status-pill { min-width: 6rem; padding: 0.25rem 0.6rem; text-align: center; }
+.auto-calculated-field-job-list { display: grid; gap: 0.7rem; }
+.auto-calculated-field-job { display: grid; gap: 0.42rem; min-width: 0; padding-top: 0.68rem; border-top: 1px solid rgba(41, 75, 93, 0.16); }
+.auto-calculated-field-job:first-child { padding-top: 0; border-top: 0; }
+.auto-calculated-field-job-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; color: #526b79; font-size: 0.75rem; font-weight: 700; }
+.auto-calculated-field-job-heading strong { color: #294b5d; font-size: 0.78rem; }
+.auto-calculated-field-job .form-note { margin: 0; overflow-wrap: anywhere; }
 .auto-calculated-field-progress-track { position: relative; height: 1.25rem; overflow: hidden; border-radius: 999px; background: #dce8ed; box-shadow: inset 0 1px 2px rgba(29, 64, 82, 0.12); }
 .auto-calculated-field-progress-bar { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #0b7a75, #36b6a9); transition: width 220ms ease; }
 .auto-calculated-field-progress-percent { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #294b5d; font-size: 0.7rem; font-weight: 800; line-height: 1; }
@@ -533,7 +541,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .auto-calculated-field-progress.is-stopped .auto-calculated-field-progress-bar { background: #9e2028; }
 .auto-calculated-field-progress-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 0.8rem; }
 .auto-calculated-field-progress-footer .form-note { min-width: 0; margin: 0; }
-.auto-calculated-field-rematerialize-button { display: inline-flex; flex: 0 0 1.85rem; align-items: center; justify-content: center; width: 1.85rem; min-width: 1.85rem; height: 1.85rem; min-height: 1.85rem; padding: 0; border: 1px solid rgba(7, 93, 89, 0.45); border-radius: 50%; background: linear-gradient(135deg, #08736d, #149d94); color: #fff; font-size: 1.15rem; line-height: 1; box-shadow: 0 6px 14px rgba(8, 115, 109, 0.18); }
+.auto-calculated-field-rematerialize-button { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 0.45rem; width: auto; min-width: max-content; min-height: 2rem; padding: 0.38rem 0.72rem; border: 1px solid rgba(7, 93, 89, 0.45); border-radius: 999px; background: linear-gradient(135deg, #08736d, #149d94); color: #fff; font-size: 0.76rem; font-weight: 800; line-height: 1.1; white-space: nowrap; box-shadow: 0 6px 14px rgba(8, 115, 109, 0.18); }
+.auto-calculated-field-rematerialize-button svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .auto-calculated-field-rematerialize-button:hover:not(:disabled) { border-color: rgba(6, 78, 74, 0.54); background: linear-gradient(135deg, #065e59, #0d827b); color: #fff; }
 .auto-calculated-field-rematerialize-button:disabled { cursor: wait; opacity: 0.55; }
 .workspace-calculated-dimensions-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: stretch; }
@@ -551,9 +560,15 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .workspace-calculated-dimensions-list-panel { min-width: 0; }
 .workspace-calculated-dimensions-list-header { display: flex; align-items: start; justify-content: space-between; gap: 0.8rem; }
 .workspace-calculated-dimensions-list-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 0.5rem; }
-.workspace-calculated-dimensions-list-actions .catalogue-calculated-dimensions-button, .workspace-calculated-dimensions-export-link { min-width: 14rem; min-height: 2rem; padding: 0.38rem 0.7rem; font-size: 0.76rem; line-height: 1.1; white-space: nowrap; }
+.workspace-calculated-dimensions-list-actions .catalogue-calculated-dimensions-button, .workspace-calculated-dimensions-export-link { flex: 0 0 auto; width: auto; min-width: max-content; min-height: 2rem; padding: 0.38rem 0.7rem; font-size: 0.76rem; line-height: 1.1; white-space: nowrap; }
 .workspace-calculated-dimensions-export-link { background: linear-gradient(135deg, #08736d, #149d94); border-color: rgba(7, 93, 89, 0.45); color: #fff; font-weight: 700; box-shadow: 0 10px 24px rgba(8, 115, 109, 0.18); }
 .workspace-calculated-dimensions-export-link:hover { background: linear-gradient(135deg, #065e59, #0d827b); border-color: rgba(6, 78, 74, 0.54); color: #fff; }
+.queue-card > .datasets-materialization-status { margin: -0.55rem 1.45rem 1.45rem; padding: 0.8rem 0.95rem; }
+.queue-table tr.combined-dataset-section-row td { width: auto !important; padding: 1.05rem 0.9rem 0.8rem; border-top: 3px solid #8fa5b1; border-bottom: 1px solid #ccd8de; background: linear-gradient(135deg, #e9f0f3, #f6f9fa); color: #294b5d; }
+.queue-table tr.combined-dataset-columns-header th { position: static; padding: 0.62rem 0.75rem; border-bottom: 2px solid #aebfc8; background: #dfe8ec; color: #3d5867; font-size: 0.74rem; font-weight: 800; letter-spacing: 0.035em; text-transform: uppercase; }
+.combined-dataset-section-copy { display: grid; gap: 0.28rem; }
+.combined-dataset-section-copy strong { font-size: 0.9rem; letter-spacing: 0.035em; text-transform: uppercase; }
+.combined-dataset-section-copy p { max-width: 1100px; margin: 0; color: #526b79; font-size: 0.8rem; line-height: 1.45; }
 .workspace-calculated-dimensions-list { display: grid; align-content: start; gap: 0.4rem; min-height: 24rem; max-height: 24rem; overflow-y: auto; padding: 0.7rem; border: 1px solid #d9e6ed; border-radius: 10px; background: #fff; scrollbar-gutter: stable; }
 .workspace-calculated-dimension-columns, .workspace-calculated-dimension-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(7rem, auto); column-gap: 0.8rem; }
 .workspace-calculated-dimension-columns { align-items: center; padding: 0 0.6rem 0.2rem; color: #5a7383; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.035em; text-transform: uppercase; }
@@ -668,6 +683,7 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
     .calculated-dimension-item, .calculated-dimension-editor { grid-template-columns: 1fr; }
     .calculated-dimension-actions { justify-content: flex-start; }
     .calculated-dimension-editor .calculated-dimension-rules { grid-column: 1; }
+    .workspace-calculated-dimensions-intro { align-items: flex-start; flex-direction: column; }
     .workspace-calculated-dimensions-layout { grid-template-columns: 1fr; }
     .workspace-calculated-dimensions-list { min-height: 15rem; max-height: 15rem; }
     .workspace-calculated-dimension-columns { display: none; }
@@ -1725,9 +1741,9 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .active-row { background: rgba(11, 122, 117, 0.06); }
 .queue-table th:nth-child(1), .queue-table td:nth-child(1) { width: 60px; }
 .queue-table th:nth-child(2), .queue-table td:nth-child(2) { width: 220px; }
-.queue-table th:nth-child(7), .queue-table td:nth-child(7) { width: 210px; }
-.queue-table th:nth-child(8), .queue-table td:nth-child(8),
-.queue-table th:nth-child(9), .queue-table td:nth-child(9) { width: 116px; }
+.queue-table th:nth-child(8), .queue-table td:nth-child(8) { width: 210px; }
+.queue-table th:nth-child(9), .queue-table td:nth-child(9),
+.queue-table th:nth-child(10), .queue-table td:nth-child(10) { width: 116px; }
 .queue-table [data-queue-uploaded], .queue-table [data-queue-updated] { white-space: pre-line; overflow-wrap: normal; }
 .queue-progress-cell { min-width: 190px; display: grid; gap: 0.3rem; }
 .queue-progress-label { display: flex; align-items: center; justify-content: flex-start; gap: 0.35rem; color: var(--muted); font-size: 0.8rem; font-weight: 700; white-space: nowrap; }
@@ -2091,6 +2107,10 @@ body[data-embedded-dataset-preview] > .shell > main { width: 100%; max-width: no
   .queue-table tbody tr[data-dataset-row] > td[data-label="Progress"],
   .queue-table tbody tr[data-dataset-row] > td[data-label="Actions"] { grid-column: 1 / -1; }
   .queue-table tbody tr[data-dataset-row] > td[data-label="Actions"] { border-bottom: 0; }
+  .queue-table tbody tr.combined-dataset-section-row { display: block; }
+  .queue-table tbody tr.combined-dataset-section-row > td { display: block; box-sizing: border-box; width: 100% !important; padding: 0.85rem; }
+  .queue-table tbody tr.combined-dataset-columns-header { display: none; }
+  .queue-card > .datasets-materialization-status { margin: -0.35rem 1rem 1rem; }
   .queue-table .queue-dataset-path { font-size: 0.7rem; }
   .queue-table .queue-actions { min-width: 0; flex-wrap: nowrap; justify-content: flex-start; gap: 0.3rem; white-space: nowrap; }
   .queue-table .queue-actions > *, .queue-table .queue-actions form { flex: 0 0 auto; }

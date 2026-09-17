@@ -197,6 +197,7 @@
             <th>Dataset</th>
             <th>Input Type</th>
             <th>Rows</th>
+            <th>Columns</th>
             <th>Size</th>
             <th>Status</th>
             <th>Progress</th>
@@ -214,7 +215,8 @@
               <div class="queue-dataset-path" data-queue-file-path>{{ dataset.stored_path }}</div>
             </td>
             <td data-label="Input Type" data-queue-kind>{{ dataset.input_kind_label }}</td>
-            <td data-label="Rows" data-queue-rows>{{ dataset.row_count or 0 }}</td>
+            <td data-label="Rows" data-queue-rows>{{ '{:,}'.format(dataset.row_count or 0) }}</td>
+            <td data-label="Columns" data-queue-columns>{{ '{:,}'.format(dataset.column_count or 0) }}</td>
             <td data-label="Size" data-queue-size>{{ dataset.size_mb_label }}</td>
             <td data-label="Status">
               <span class="queue-status-pill queue-status-{{ dataset.status }}" data-queue-status-pill>{{ dataset.status_label }}</span>
@@ -292,10 +294,33 @@
           {% else %}
           {% if not combined_tables %}
           <tr>
-            <td colspan="10"><article class="empty-state-inline">No datasets available.</article></td>
+            <td colspan="11"><article class="empty-state-inline">No datasets available.</article></td>
           </tr>
           {% endif %}
           {% endfor %}
+          {% if combined_tables %}
+          <tr class="combined-dataset-section-row" data-combined-dataset-structure-row>
+            <td colspan="11">
+              <div class="combined-dataset-section-copy">
+                <strong>Combined CDR tables</strong>
+                <p>Read-only query sources generated from all ready individual CDRs of the same type. They are created automatically during CDR processing or rebuilt with Recreate; they cannot be uploaded or imported as separate datasets.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="combined-dataset-columns-header" data-combined-dataset-structure-row>
+            <th scope="col">ID</th>
+            <th scope="col">Dataset</th>
+            <th scope="col">Input Type</th>
+            <th scope="col">Rows</th>
+            <th scope="col">Columns</th>
+            <th scope="col">Size</th>
+            <th scope="col">Status</th>
+            <th scope="col">Progress</th>
+            <th scope="col">Uploaded</th>
+            <th scope="col">Updated</th>
+            <th scope="col">Actions</th>
+          </tr>
+          {% endif %}
           {% for combined in combined_tables %}
           {% set combined_warning = combined.has_missing_rows or combined.is_recalculating or combined.needs_recalculation %}
           <tr class="combined-dataset-row {{ 'combined-dataset-warning' if combined_warning else 'combined-dataset-ready' }}" data-combined-dataset-row data-dataset-row data-dataset-kind="{{ combined.kind }}">
@@ -305,7 +330,8 @@
               <div class="queue-dataset-path">SQLite table: {{ combined.table_name }}</div>
             </td>
             <td data-label="Input Type">CDR-{{ combined.kind|title }} (combined)</td>
-            <td data-label="Rows">{{ combined.row_count }}</td>
+            <td data-label="Rows" data-combined-dataset-rows>{{ '{:,}'.format(combined.row_count) }}</td>
+            <td data-label="Columns" data-combined-dataset-columns>{{ '{:,}'.format(combined.column_count) }}</td>
             <td data-label="Size">—</td>
             <td data-label="Status"><span class="queue-status-pill queue-status-{{ 'warning' if combined_warning else 'ready' }}" data-combined-dataset-status>{% if combined.is_recalculating %}Recalculating{% elif combined.has_missing_rows %}Missing Rows{% elif combined.needs_recalculation %}Recalc Needed{% else %}Ready{% endif %}</span></td>
             <td data-label="Progress">
@@ -315,7 +341,7 @@
               </div>
             </td>
             <td data-label="Uploaded">—</td>
-            <td data-label="Updated">{{ combined.updated_at_label }}</td>
+            <td data-label="Updated" data-combined-dataset-updated>{{ combined.updated_at_label }}</td>
             <td data-label="Actions">
               <div class="queue-actions">
                 <a class="ghost-link action-link-preview" href="/workspace/combined/{{ combined.kind }}/preview" target="_blank" rel="noopener" data-preview-open-link data-combined-dataset-preview data-dataset-kind="{{ combined.kind }}" data-integrity-url="/api/workspace/combined/{{ combined.kind }}/integrity" data-loading-label="Generating dataset preview" title="Preview combined dataset" aria-label="Preview combined dataset">Preview dataset</a>
@@ -327,6 +353,25 @@
         </tbody>
       </table>
     </div>
+    <section class="auto-calculated-field-progress datasets-materialization-status" data-auto-calculated-field-progress data-status-url="/api/workspace/auto-calculated-fields/materialization" aria-live="polite">
+      <div class="auto-calculated-field-progress-heading">
+        <strong data-auto-calculated-field-progress-title>Materialization status</strong>
+        <span class="status-pill status-ready" data-auto-calculated-field-progress-status>Up to date</span>
+      </div>
+      <div class="auto-calculated-field-job-list" data-auto-calculated-field-job-list>
+        <article class="auto-calculated-field-job">
+          <div class="auto-calculated-field-job-heading"><strong>Materialized CDR tables</strong><span>100%</span></div>
+          <div class="auto-calculated-field-progress-track" role="progressbar" aria-label="Auto-calculated Fields materialization" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+            <span class="auto-calculated-field-progress-bar" style="width: 100%"></span>
+            <span class="auto-calculated-field-progress-percent">100%</span>
+          </div>
+          <p class="form-note">All materialized fields are up to date.</p>
+        </article>
+      </div>
+      <div class="auto-calculated-field-progress-footer">
+        <p class="form-note">Each active materialization task is shown separately.</p>
+      </div>
+    </section>
   </details>
 
   <details id="calculated-dimensions" class="panel collapsible-panel workspace-calculated-dimensions-panel" open data-panel-state-key="workspace:calculated-dimensions" data-workspace-calculated-dimensions-panel data-calculated-dimensions='{{ calculated_dimensions | tojson }}' data-save-url="/api/workspace/calculated-dimensions">
@@ -341,21 +386,13 @@
       </div>
     </summary>
     <div class="workspace-calculated-dimensions-content">
-      <p class="lede">Auto-calculated fields belong to this workspace and are materialized in every applicable individual and combined CDR table.</p>
-      <section class="auto-calculated-field-progress" data-auto-calculated-field-progress data-status-url="/api/workspace/auto-calculated-fields/materialization" aria-live="polite">
-        <div class="auto-calculated-field-progress-heading">
-          <strong data-auto-calculated-field-progress-title>Materialization status</strong>
-          <span class="status-pill status-ready" data-auto-calculated-field-progress-status>Up to date</span>
-        </div>
-        <div class="auto-calculated-field-progress-track" role="progressbar" aria-label="Auto-calculated Fields materialization" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" data-auto-calculated-field-progress-track>
-          <span class="auto-calculated-field-progress-bar" data-auto-calculated-field-progress-bar style="width: 100%"></span>
-          <span class="auto-calculated-field-progress-percent" data-auto-calculated-field-progress-percent>100%</span>
-        </div>
-        <div class="auto-calculated-field-progress-footer">
-          <p class="form-note" data-auto-calculated-field-progress-copy>All materialized fields are up to date.</p>
-          <button type="button" class="auto-calculated-field-rematerialize-button" data-auto-calculated-field-rematerialize title="Rematerialize all auto-calculated fields" aria-label="Rematerialize all auto-calculated fields">↻</button>
-        </div>
-      </section>
+      <div class="workspace-calculated-dimensions-intro">
+        <p class="lede">Auto-calculated fields belong to this workspace and are materialized in every applicable individual and combined CDR table.</p>
+        <button type="button" class="auto-calculated-field-rematerialize-button" data-auto-calculated-field-rematerialize title="Re-materialize auto-calculate fields" aria-label="Re-materialize auto-calculate fields">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0 1.2 5.2M20 4v7h-7"/></svg>
+          <span>Re-materialize auto-calculate fields</span>
+        </button>
+      </div>
       <div class="workspace-calculated-dimensions-layout">
         <section class="workspace-calculated-dimensions-subpanel workspace-calculated-dimensions-import-panel">
           <header>
@@ -379,8 +416,8 @@
               <h3>Auto-calculated Fields</h3>
             </div>
             <div class="workspace-calculated-dimensions-list-actions">
-              <button type="button" class="catalogue-calculated-dimensions-button" data-workspace-manage-calculated-dimensions>Auto-calculated Fields</button>
-              <a class="ghost-link workspace-calculated-dimensions-export-link" href="/workspace/calculated-dimensions/export">Export All Auto-calculated Fields</a>
+              <button type="button" class="catalogue-calculated-dimensions-button" data-workspace-manage-calculated-dimensions>Edit</button>
+              <a class="ghost-link workspace-calculated-dimensions-export-link" href="/workspace/calculated-dimensions/export">Export</a>
             </div>
           </header>
           <div class="workspace-calculated-dimensions-list" aria-label="Auto-calculated fields">
