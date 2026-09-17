@@ -612,7 +612,20 @@ def _normalise_dataset(df: pd.DataFrame, file_path: Path) -> pd.DataFrame:
     return dataset
 
 
-def _load_excel_dataset(file_path: Path, progress_callback: Callable[[int], None] | None = None) -> pd.DataFrame:
+def _capture_source_columns(target: list[str] | None, columns: Iterable[object]) -> None:
+    if target is None:
+        return
+    for column in columns:
+        cleaned = clean_column_name(column)
+        if cleaned not in target:
+            target.append(cleaned)
+
+
+def _load_excel_dataset(
+    file_path: Path,
+    progress_callback: Callable[[int], None] | None = None,
+    source_columns: list[str] | None = None,
+) -> pd.DataFrame:
     workbook = load_workbook(filename=file_path, read_only=True, data_only=True)
     candidate_sheets = _operator_sheet_names(workbook)
     total_rows = sum(max(workbook[sheet_name].max_row or 0, 1) for sheet_name in candidate_sheets) or 1
@@ -624,6 +637,7 @@ def _load_excel_dataset(file_path: Path, progress_callback: Callable[[int], None
     progress_state = {'processed_rows': 0, 'last_progress': 14}
     for sheet_name in candidate_sheets:
         sheet = _read_openxml_sheet(workbook[sheet_name], progress_callback, progress_state, total_rows)
+        _capture_source_columns(source_columns, sheet.columns)
         sheet = sheet.dropna(axis=0, how='all').dropna(axis=1, how='all')
         if sheet.empty:
             continue
@@ -634,6 +648,7 @@ def _load_excel_dataset(file_path: Path, progress_callback: Callable[[int], None
 
     if not data_frames:
         df = pd.read_excel(file_path)
+        _capture_source_columns(source_columns, df.columns)
         if progress_callback:
             progress_callback(55)
         return df
@@ -664,17 +679,27 @@ def _read_csv_dataset(file_path: Path) -> pd.DataFrame:
     raise ValueError(f'Unable to read CSV file: {file_path.name}')
 
 
-def load_dataset(file_path: Path, progress_callback: Callable[[int], None] | None = None) -> pd.DataFrame:
+def load_dataset(
+    file_path: Path,
+    progress_callback: Callable[[int], None] | None = None,
+    source_columns: list[str] | None = None,
+) -> pd.DataFrame:
     suffix = file_path.suffix.lower()
     if suffix == '.csv':
-        df = _normalise_dataset(_read_csv_dataset(file_path), file_path)
+        source = _read_csv_dataset(file_path)
+        _capture_source_columns(source_columns, source.columns)
+        df = _normalise_dataset(source, file_path)
         if progress_callback:
             progress_callback(55)
         return df
     if suffix in {'.xlsx', '.xlsm'}:
-        return _load_excel_dataset(file_path, progress_callback=progress_callback)
+        return _load_excel_dataset(
+            file_path, progress_callback=progress_callback, source_columns=source_columns,
+        )
     if suffix == '.xls':
-        df = _normalise_dataset(pd.read_excel(file_path), file_path)
+        source = pd.read_excel(file_path)
+        _capture_source_columns(source_columns, source.columns)
+        df = _normalise_dataset(source, file_path)
         if progress_callback:
             progress_callback(55)
         return df

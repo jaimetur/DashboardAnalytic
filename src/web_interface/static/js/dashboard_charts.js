@@ -807,6 +807,34 @@
     return camera.zoom;
   }
 
+  function chartPanState(canvas) {
+    const camera = constrainCamera(cameraFor(canvas));
+    const maximumX = LOGICAL_WIDTH * (camera.zoom - 1) / 2;
+    const maximumY = LOGICAL_HEIGHT * (camera.zoom - 1) / 2;
+    return {
+      zoom: camera.zoom,
+      canPanLeft: camera.zoom > 1 && camera.panX < maximumX - 0.5,
+      canPanRight: camera.zoom > 1 && camera.panX > -maximumX + 0.5,
+      canPanUp: camera.zoom > 1 && camera.panY < maximumY - 0.5,
+      canPanDown: camera.zoom > 1 && camera.panY > -maximumY + 0.5,
+    };
+  }
+
+  function panChart(canvas, direction) {
+    const camera = cameraFor(canvas);
+    if (camera.zoom <= 1 || !['left', 'right', 'up', 'down'].includes(direction)) return chartPanState(canvas);
+    if (direction === 'left') camera.panX += LOGICAL_WIDTH * 0.16;
+    if (direction === 'right') camera.panX -= LOGICAL_WIDTH * 0.16;
+    if (direction === 'up') camera.panY += LOGICAL_HEIGHT * 0.16;
+    if (direction === 'down') camera.panY -= LOGICAL_HEIGHT * 0.16;
+    constrainCamera(camera);
+    const payload = models.get(canvas);
+    if (payload) draw(canvas, payload);
+    const state = chartPanState(canvas);
+    canvas.dispatchEvent(new CustomEvent('dashboardchartpan', {detail: state}));
+    return state;
+  }
+
   function selectionOverlayFor(canvas) {
     let overlay = canvas.parentElement?.querySelector(':scope > .ds-chart-zoom-selection');
     if (!overlay && canvas.parentElement) {
@@ -869,6 +897,7 @@
       pendingX = 0; pendingY = 0;
       constrainCamera(camera);
       draw(canvas, payload);
+      canvas.dispatchEvent(new CustomEvent('dashboardchartpan', {detail: chartPanState(canvas)}));
     };
     canvas.addEventListener('pointerdown', event => {
       if (event.button !== 0) return;
@@ -934,4 +963,6 @@
   globalThis.getDashboardChartHits = canvas => structuredClone(renderStates.get(canvas)?.hits || []);
   globalThis.setDashboardChartZoom = setChartZoom;
   globalThis.getDashboardChartZoom = canvas => cameraFor(canvas).zoom;
+  globalThis.panDashboardChart = panChart;
+  globalThis.getDashboardChartPanState = chartPanState;
 })();

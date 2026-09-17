@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 from threading import Lock, RLock
 from time import monotonic
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
 import pandas as pd
 
@@ -168,6 +168,18 @@ CREATE TABLE IF NOT EXISTS dataset_profiles (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS dataset_source_columns (
+    dataset_id INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    column_name TEXT NOT NULL,
+    column_identity TEXT NOT NULL,
+    PRIMARY KEY (dataset_id, position),
+    FOREIGN KEY(dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_dataset_source_columns_identity
+ON dataset_source_columns(dataset_id, column_identity);
 
 CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -960,6 +972,12 @@ class Repository:
     def _database_table_metadata(self, conn: sqlite3.Connection, table_name: str) -> list[sqlite3.Row]:
         return conn.execute(f"PRAGMA table_info({self._quote_identifier(table_name)})").fetchall()
 
+    def _database_table_has_rowid(self, conn: sqlite3.Connection, table_name: str) -> bool:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,),
+        ).fetchone()
+        return bool(row) and not re.search(r'\bWITHOUT\s+ROWID\b', str(row['sql'] or ''), flags=re.I)
+
     def _database_filter_clause(
         self,
         metadata: list[sqlite3.Row],
@@ -996,7 +1014,7 @@ class Repository:
         offset: int = 0,
         filters: dict[str, list[str]] | None = None,
     ) -> dict[str, Any]:
-        """Return one bounded page of a workspace table, addressed by SQLite rowid."""
+        """Return one bounded page, including tables that deliberately omit rowid."""
         if table_name not in self.list_database_tables():
             raise ValueError('The selected table does not exist in the active workspace database.')
         page_size = max(1, min(int(limit), 250))
@@ -1005,6 +1023,7 @@ class Repository:
         quoted_table = self._quote_identifier(physical_table_name)
         with self._table_connection(table_name)() as conn:
             column_rows = self._database_table_metadata(conn, physical_table_name)
+            has_rowid = self._database_table_has_rowid(conn, physical_table_name)
             where_clause, parameters = self._database_filter_clause(column_rows, filters)
             columns = [
                 {
@@ -1018,16 +1037,36 @@ class Repository:
                 }
                 for row in column_rows
             ]
+            primary_key_columns = [
+                str(row['name']) for row in sorted(column_rows, key=lambda item: int(item['pk']) or 10_000)
+                if int(row['pk']) > 0
+            ]
+            if has_rowid:
+                select_query = (
+                    f"SELECT rowid AS __database_rowid__, * FROM {quoted_table}{where_clause} "
+                    "ORDER BY rowid DESC LIMIT ? OFFSET ?"
+                )
+            else:
+                order_columns = primary_key_columns or [str(row['name']) for row in column_rows]
+                order_clause = ', '.join(
+                    f'{self._quote_identifier(column)} DESC' for column in order_columns
+                )
+                select_query = (
+                    f"SELECT * FROM {quoted_table}{where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
+                )
             rows = [
                 {
                     key: (value.decode('utf-8', errors='replace') if isinstance(value, (bytes, memoryview)) else value)
                     for key, value in dict(row).items()
                 }
                 for row in conn.execute(
-                    f"SELECT rowid AS __database_rowid__, * FROM {quoted_table}{where_clause} ORDER BY rowid DESC LIMIT ? OFFSET ?",
+                    select_query,
                     (*parameters, page_size, page_offset),
                 ).fetchall()
             ]
+            if not has_rowid:
+                for index, row in enumerate(rows, start=page_offset):
+                    row['__database_rowid__'] = f'read-only-{index}'
             total_rows = int(conn.execute(f"SELECT COUNT(*) AS total FROM {quoted_table}{where_clause}", parameters).fetchone()['total'])
             all_rows = total_rows if not where_clause else int(
                 conn.execute(f"SELECT COUNT(*) AS total FROM {quoted_table}").fetchone()['total']
@@ -1039,6 +1078,7 @@ class Repository:
             'all_rows': all_rows,
             'limit': page_size,
             'offset': page_offset,
+            'editable': has_rowid and table_name != WORKSPACE_REGISTRY_TABLE,
         }
 
     def database_table_distinct_values(
@@ -1085,6 +1125,8 @@ class Repository:
             raise ValueError('Enter at least one changed value before saving.')
         quoted_table = self._quote_identifier(table_name)
         with self._table_connection(table_name)() as conn:
+            if not self._database_table_has_rowid(conn, table_name):
+                raise ValueError('This internal table is read-only because it does not have SQLite row identifiers.')
             metadata = conn.execute(f"PRAGMA table_info({quoted_table})").fetchall()
             columns = {str(row['name']): row for row in metadata}
             unknown_columns = set(updates) - set(columns)
@@ -1110,6 +1152,8 @@ class Repository:
             raise ValueError('Use Workspace Management to remove workspace registry records.')
         quoted_table = self._quote_identifier(table_name)
         with self._table_connection(table_name)() as conn:
+            if not self._database_table_has_rowid(conn, table_name):
+                raise ValueError('This internal table is read-only because it does not have SQLite row identifiers.')
             result = conn.execute(f"DELETE FROM {quoted_table} WHERE rowid = ?", (int(rowid),))
             if result.rowcount != 1:
                 raise ValueError('The row no longer exists. Refresh the table and try again.')
@@ -1416,16 +1460,82 @@ class Repository:
             ).fetchall()
         return {str(row['source_value']).strip().casefold(): str(row['canonical_value']).strip() for row in rows}
 
-    def add_operator_mapping(self, source_value: str, canonical_value: str) -> None:
-        source = str(source_value).strip()
-        canonical = str(canonical_value).strip()
-        if not source or not canonical:
-            raise ValueError('Both operator mapping values are required.')
+    def list_operator_mapping_groups(self) -> list[dict[str, Any]]:
+        """Group source aliases by the canonical Operator shown in Admin."""
         with self.connection() as conn:
-            conn.execute(
+            rows = conn.execute(
+                'SELECT source_value, canonical_value FROM operator_mappings '
+                'ORDER BY canonical_value COLLATE NOCASE, source_value COLLATE NOCASE'
+            ).fetchall()
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            canonical = str(row['canonical_value']).strip()
+            key = canonical.casefold()
+            group = grouped.setdefault(key, {'canonical': canonical, 'aliases': []})
+            source = str(row['source_value']).strip()
+            if source.casefold() != key:
+                group['aliases'].append(source)
+        return sorted(grouped.values(), key=lambda group: str(group['canonical']).casefold())
+
+    def replace_operator_mapping_group(
+        self, original_canonical: str | None, canonical_value: str, aliases: Iterable[object],
+    ) -> None:
+        """Create or replace one canonical Operator and its complete alias set."""
+        canonical = str(canonical_value).strip()
+        if not canonical:
+            raise ValueError('Canonical Operator is required.')
+        original = str(original_canonical or '').strip()
+        desired_sources: dict[str, str] = {canonical.casefold(): canonical}
+        for raw_alias in aliases:
+            alias = str(raw_alias).strip()
+            if alias:
+                desired_sources.setdefault(alias.casefold(), alias)
+
+        with self.connection() as conn:
+            rows = conn.execute(
+                'SELECT source_value, canonical_value FROM operator_mappings'
+            ).fetchall()
+            if original and not any(
+                str(row['canonical_value']).strip().casefold() == original.casefold() for row in rows
+            ):
+                raise ValueError('The Operator Mapping group no longer exists.')
+            if any(
+                str(row['canonical_value']).strip().casefold() == canonical.casefold()
+                and str(row['canonical_value']).strip().casefold() != original.casefold()
+                for row in rows
+            ):
+                raise ValueError('Another Operator Mapping already uses this canonical label.')
+            conflicts = sorted({
+                str(row['source_value']).strip()
+                for row in rows
+                if str(row['source_value']).strip().casefold() in desired_sources
+                and str(row['canonical_value']).strip().casefold() != original.casefold()
+            }, key=str.casefold)
+            if conflicts:
+                raise ValueError(
+                    f"These aliases already belong to another canonical Operator: {', '.join(conflicts)}."
+                )
+            if original:
+                conn.execute(
+                    'DELETE FROM operator_mappings WHERE canonical_value = ? COLLATE NOCASE',
+                    (original,),
+                )
+            conn.executemany(
                 'INSERT INTO operator_mappings (source_value, canonical_value) VALUES (?, ?)',
-                (source, canonical),
+                [(source, canonical) for source in desired_sources.values()],
             )
+
+    def delete_operator_mapping_group(self, canonical_value: str) -> None:
+        canonical = str(canonical_value).strip()
+        if not canonical:
+            raise ValueError('Canonical Operator is required.')
+        with self.connection() as conn:
+            result = conn.execute(
+                'DELETE FROM operator_mappings WHERE canonical_value = ? COLLATE NOCASE',
+                (canonical,),
+            )
+            if result.rowcount < 1:
+                raise ValueError('The Operator Mapping group no longer exists.')
 
     def invalidate_cdr_normalization(self) -> None:
         with self.connection() as conn:
@@ -2328,6 +2438,31 @@ class Repository:
                 f"UPDATE dataset_profiles SET {assignments} WHERE dataset_id = ?",
                 (*values, dataset_id),
             )
+
+    def replace_dataset_source_columns(self, dataset_id: int, columns: Iterable[object]) -> None:
+        """Persist the physical source headers captured during dataset ingestion."""
+        unique_columns = list(dict.fromkeys(str(column) for column in columns))
+        with self.connection() as conn:
+            conn.execute('DELETE FROM dataset_source_columns WHERE dataset_id = ?', (dataset_id,))
+            conn.executemany(
+                """
+                INSERT INTO dataset_source_columns (dataset_id, position, column_name, column_identity)
+                VALUES (?, ?, ?, ?)
+                """,
+                [
+                    (dataset_id, position, column, self._column_identity(column))
+                    for position, column in enumerate(unique_columns)
+                ],
+            )
+
+    def list_dataset_source_columns(self, dataset_id: int) -> list[str]:
+        """Return physical source headers without reopening the uploaded file."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                'SELECT column_name FROM dataset_source_columns WHERE dataset_id = ? ORDER BY position',
+                (dataset_id,),
+            ).fetchall()
+        return [str(row['column_name']) for row in rows]
 
     def get_dataset(self, dataset_id: int) -> sqlite3.Row | None:
         with self.connection() as conn:

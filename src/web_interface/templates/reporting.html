@@ -198,6 +198,16 @@
     </div>
     <div class="report-chart-viewer-image" data-report-chart-viewer-image>
       <canvas data-report-chart-viewer-canvas aria-label="Selected report chart. Drag to select an area to zoom."></canvas>
+      <div class="report-chart-viewer-canvas-controls" data-report-chart-viewer-canvas-controls aria-label="Chart dataset and zoom controls">
+        <button type="button" class="report-chart-viewer-data-button report-chart-viewer-canvas-data-button" data-report-chart-viewer-data hidden title="View filtered dataset" aria-label="View filtered dataset">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 4h16v16H4zM4 9h16M4 14h16M10 4v16"/></svg>
+        </button>
+        <div class="report-chart-viewer-canvas-zoom" role="group" aria-label="Chart zoom">
+          <button type="button" class="report-chart-viewer-zoom-button" data-report-chart-zoom="in" title="Zoom in" aria-label="Zoom in"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8"></circle><path d="m16 16 6 6M6 10h8M10 6v8"></path></svg></button>
+          <button type="button" class="report-chart-viewer-zoom-button" data-report-chart-zoom="out" title="Zoom out" aria-label="Zoom out"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8"></circle><path d="m16 16 6 6M6 10h8"></path></svg></button>
+          <button type="button" class="report-chart-viewer-zoom-button" data-report-chart-zoom-reset title="Reset zoom" aria-label="Reset zoom"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8"></circle><path d="m16 16 6 6"></path><text x="10" y="10.5" text-anchor="middle" dominant-baseline="middle" fill="currentColor" stroke="none" font-family="Arial, sans-serif" font-size="8" font-weight="700">1:1</text></svg></button>
+        </div>
+      </div>
       <div class="report-chart-zoom-selection" data-report-chart-zoom-selection hidden></div>
       <div class="report-chart-hover-tooltip" data-report-chart-hover-tooltip role="status" hidden></div>
       <button type="button" class="report-chart-pan-button" data-report-chart-pan="up" title="Move chart up" aria-label="Move chart up" hidden><svg class="report-chart-arrow-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20V4m-7 7 7-7 7 7"></path></svg></button>
@@ -212,9 +222,6 @@
     </section>
     <div class="report-chart-viewer-actions" aria-label="Chart navigation and filtered data actions">
       <div class="report-chart-viewer-navigation" aria-label="Chart navigation">
-        <button type="button" class="report-chart-viewer-zoom-button" data-report-chart-zoom="in" title="Zoom in" aria-label="Zoom in"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8"></circle><path d="m16 16 6 6M6 10h8M10 6v8"></path></svg></button>
-        <button type="button" class="report-chart-viewer-zoom-button" data-report-chart-zoom="out" title="Zoom out" aria-label="Zoom out"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8"></circle><path d="m16 16 6 6M6 10h8"></path></svg></button>
-        <button type="button" class="report-chart-viewer-zoom-button" data-report-chart-zoom-reset title="Reset zoom" aria-label="Reset zoom"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8"></circle><path d="m16 16 6 6"></path><text x="10" y="10.5" text-anchor="middle" dominant-baseline="middle" fill="currentColor" stroke="none" font-family="Arial, sans-serif" font-size="8" font-weight="700">1:1</text></svg></button>
         <button type="button" data-report-chart-navigate="first" title="First chart" aria-label="First chart">⏮</button>
         <button type="button" data-report-chart-navigate="previous" title="Previous chart" aria-label="Previous chart"><svg class="report-chart-arrow-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 12H4m7-7-7 7 7 7"></path></svg></button>
         <button type="button" data-report-chart-navigate="next" title="Next chart" aria-label="Next chart"><svg class="report-chart-arrow-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 12h16m-7-7 7 7-7 7"></path></svg></button>
@@ -224,10 +231,6 @@
         <button type="button" class="report-chart-viewer-interactive-button" data-report-chart-viewer-interactive hidden aria-expanded="false" aria-controls="report-chart-viewer-interactive-panel">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5h16M4 12h16M4 19h16M8 3v4M16 10v4M11 17v4"/></svg>
         <span>Interactive panel</span>
-        </button>
-        <button type="button" class="report-chart-viewer-data-button" data-report-chart-viewer-data hidden>
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 4h16v16H4zM4 9h16M4 14h16M10 4v16"/></svg>
-        <span>View filtered dataset</span>
         </button>
         {% if user.role in ['admin', 'super-admin'] %}<button type="button" class="report-chart-viewer-edit-template-button" data-report-chart-viewer-edit-template hidden>
         <span aria-hidden="true">✎</span><span>Edit Template</span>
@@ -350,6 +353,25 @@
     let reportChartHoverRequest = 0;
     let reportChartHoverController = null;
     let reportChartViewerSession = 0;
+    let reportChartViewerControlsTimer = null;
+    const showReportChartViewerControls = () => {
+      if (reportChartViewerControlsTimer) window.clearTimeout(reportChartViewerControlsTimer);
+      reportChartViewerControlsTimer = null;
+      reportChartViewerImage?.classList.add('is-controls-visible');
+    };
+    const hideReportChartViewerControls = () => {
+      if (reportChartViewerControlsTimer) window.clearTimeout(reportChartViewerControlsTimer);
+      reportChartViewerControlsTimer = window.setTimeout(() => {
+        reportChartViewerImage?.classList.remove('is-controls-visible');
+        reportChartViewerControlsTimer = null;
+      }, 3000);
+    };
+    reportChartViewerImage?.addEventListener('pointerenter', showReportChartViewerControls);
+    reportChartViewerImage?.addEventListener('pointerleave', hideReportChartViewerControls);
+    reportChartViewerImage?.addEventListener('focusin', showReportChartViewerControls);
+    reportChartViewerImage?.addEventListener('focusout', () => {
+      if (!reportChartViewerImage.contains(document.activeElement)) hideReportChartViewerControls();
+    });
     compactChartViewerViewport.addEventListener('change', () => {
       if (reportChartViewer?.hidden || reportChartViewerInteractive?.hidden || !reportChartViewerSandbox) return;
       reportChartViewerSandbox.hidden = compactChartViewerViewport.matches;
@@ -1888,7 +1910,7 @@
       });
       reportChartViewer.hidden = false;
     };
-    const closeReportChartViewer = () => { ++reportChartViewerSession; reportChartHoverController?.abort(); reportChartHoverTargets = []; hideReportChartHoverTooltip(); closeReportChartViewerData(); if (reportChartViewer) reportChartViewer.hidden = true; if (reportChartPreviewUrl) { URL.revokeObjectURL(reportChartPreviewUrl); reportChartPreviewUrl = ''; } };
+    const closeReportChartViewer = () => { ++reportChartViewerSession; reportChartHoverController?.abort(); reportChartHoverTargets = []; hideReportChartHoverTooltip(); closeReportChartViewerData(); if (reportChartViewerControlsTimer) window.clearTimeout(reportChartViewerControlsTimer); reportChartViewerControlsTimer = null; reportChartViewerImage?.classList.remove('is-controls-visible'); if (reportChartViewer) reportChartViewer.hidden = true; if (reportChartPreviewUrl) { URL.revokeObjectURL(reportChartPreviewUrl); reportChartPreviewUrl = ''; } };
     reportChartsBody?.addEventListener('click', (event) => {
       const card = event.target.closest('[data-report-chart-index]');
       if (card) openReportChartViewer(Number(card.dataset.reportChartIndex));

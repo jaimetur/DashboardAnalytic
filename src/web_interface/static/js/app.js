@@ -866,6 +866,16 @@ const initializeServerDatasetPreview = (toolbar) => {
 
   const loadPage = async (page, message = 'Loading dataset…') => {
     const sequence = ++requestSequence;
+    const horizontalPosition = (() => {
+      if (!tableWrap) return {scrollLeft: 0, columnName: '', inset: 0};
+      const viewportLeft = tableWrap.getBoundingClientRect().left;
+      const anchor = headers.find((header) => !header.hidden && header.getBoundingClientRect().right > viewportLeft);
+      return {
+        scrollLeft: tableWrap.scrollLeft,
+        columnName: anchor?.dataset.columnName || '',
+        inset: anchor ? Math.max(0, viewportLeft - anchor.getBoundingClientRect().left) : 0,
+      };
+    })();
     setLoading(true, message);
     closeColumnMenu();
     try {
@@ -877,6 +887,22 @@ const initializeServerDatasetPreview = (toolbar) => {
       const rows = Array.isArray(payload.rows) ? payload.rows : [];
       renderRows(rows);
       updateControls(rows.length);
+      const restoreHorizontalOffset = () => {
+        if (sequence !== requestSequence || !tableWrap) return;
+        const anchor = horizontalPosition.columnName
+          ? headers.find((header) => header.dataset.columnName === horizontalPosition.columnName)
+          : null;
+        if (anchor && !anchor.hidden) {
+          const viewportLeft = tableWrap.getBoundingClientRect().left;
+          const anchorContentLeft = anchor.getBoundingClientRect().left - viewportLeft + tableWrap.scrollLeft;
+          tableWrap.scrollLeft = anchorContentLeft + horizontalPosition.inset;
+        } else {
+          tableWrap.scrollLeft = horizontalPosition.scrollLeft;
+        }
+        syncTagStrip();
+      };
+      restoreHorizontalOffset();
+      requestAnimationFrame(() => requestAnimationFrame(restoreHorizontalOffset));
     } catch (error) {
       showInfoDialog(error.message || 'Unable to load the dataset preview.', {title: 'Dataset preview', tone: 'error'});
       updateControls(tbody.rows.length);

@@ -2572,7 +2572,11 @@ def rebuild_dataset_artifacts(
 ) -> dict[str, Any]:
     task_repository = task_repository or repository
     workspace_dimensions = load_repository_calculated_dimensions(task_repository)
-    df = load_dataset(dataset_path, progress_callback=progress_callback)
+    source_columns: list[str] = []
+    df = load_dataset(
+        dataset_path, progress_callback=progress_callback, source_columns=source_columns,
+    )
+    task_repository.replace_dataset_source_columns(dataset_id, source_columns)
     if forced_dataset_kind in UPLOAD_DATASET_KINDS:
         df['dataset_kind'] = forced_dataset_kind
     if forced_dataset_kind == 'mapping_vodafone':
@@ -5854,6 +5858,7 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         'dashboard_filter_selection_rows': 'Dashboard selected rows',
         'dashboard_ppt_jobs': 'Dashboard PPT jobs',
         'dataset_profiles': 'Dataset profiles',
+        'dataset_source_columns': 'Dataset source columns',
         'datasets': 'Datasets',
         'generated_jobs': 'Generated jobs',
         'operator_mappings': 'Operator Mappings',
@@ -5936,6 +5941,9 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
             'template_names_by_technology': template_names_by_technology,
             'workspace_catalogues': workspace_catalogues,
             'database_table_groups': database_table_groups,
+            'operator_mapping_groups': repository.list_operator_mapping_groups() if active_workspace else [],
+            'operator_mapping_notice': request.query_params.get('operator_mapping_notice') or None,
+            'operator_mapping_error': request.query_params.get('operator_mapping_error') or None,
             'recurring_backup': recurring_backup_settings(),
             'recurring_backup_status': recurring_backup_status(recurring_backup_settings()),
             'database_notice': database_notice,
@@ -7534,32 +7542,73 @@ def update_workspace_access(
 
 
 def _ordered_cdr_preview_columns(
-    available_columns: list[str], source_paths: Iterable[str | Path],
+    available_columns: list[str], source_paths: Iterable[str | Path], dataset_ids: Iterable[int] = (),
+    source_repository: Repository | None = None,
 ) -> tuple[list[str], set[str]]:
     ordered, derived_columns, _main_columns, _auto_columns = _preview_column_categories(
-        available_columns, source_paths,
+        available_columns, source_paths, dataset_ids, source_repository,
     )
     return ordered, derived_columns
 
 
-def _preview_column_categories(
-    available_columns: list[str], source_paths: Iterable[str | Path],
-) -> tuple[list[str], set[str], set[str], set[str]]:
+def _preview_source_columns(
+    source_paths: Iterable[str | Path], dataset_ids: Iterable[int] = (),
+    source_repository: Repository | None = None,
+) -> tuple[set[str], bool]:
+    """Load persisted source headers, backfilling legacy datasets only once."""
+    paths = [Path(source_path) for source_path in source_paths]
+    identifiers = list(dataset_ids)
+    catalog_repository = source_repository or repository
     source_columns: set[str] = set()
-    for source_path in source_paths:
+    readable_count = 0
+    for index, path in enumerate(paths):
+        dataset_id = identifiers[index] if index < len(identifiers) else None
+        persisted_columns: list[str] = []
+        if dataset_id is not None:
+            try:
+                persisted_columns = catalog_repository.list_dataset_source_columns(dataset_id)
+            except sqlite3.OperationalError:
+                persisted_columns = []
+        if persisted_columns:
+            source_columns.update(persisted_columns)
+            readable_count += 1
+            continue
+        candidates = [path]
+        relocated_path = catalog_repository.db_path.parent / 'input' / path.name
+        if relocated_path != path:
+            candidates.append(relocated_path)
+        readable_path = next((candidate for candidate in candidates if candidate.exists()), None)
+        if readable_path is None:
+            continue
         try:
-            path = Path(source_path)
-            if path.exists():
-                source_columns.update(get_dataset_source_columns(path))
+            file_columns = get_dataset_source_columns(readable_path)
+            source_columns.update(file_columns)
+            if dataset_id is not None:
+                catalog_repository.replace_dataset_source_columns(dataset_id, file_columns)
+            readable_count += 1
         except (OSError, ValueError, KeyError):
             continue
+    return source_columns, bool(paths) and readable_count == len(paths)
+
+
+def _preview_column_categories(
+    available_columns: list[str], source_paths: Iterable[str | Path], dataset_ids: Iterable[int] = (),
+    source_repository: Repository | None = None,
+) -> tuple[list[str], set[str], set[str], set[str]]:
+    catalog_repository = source_repository or repository
+    source_columns, source_columns_complete = _preview_source_columns(
+        source_paths, dataset_ids, catalog_repository,
+    )
     source_identities = {column_identity(column) for column in source_columns}
     derived_columns = {
         column for column in available_columns
-        if column != 'source_sheet' and column_identity(column) not in source_identities
-    }
+        if column_identity(column) not in source_identities
+    } if source_columns_complete else set()
+    derived_columns.update(
+        column for column in available_columns if column_identity(column) == 'vendoronly'
+    )
     try:
-        auto_definitions = repository.list_calculated_dimensions()
+        auto_definitions = catalog_repository.list_calculated_dimensions()
     except sqlite3.OperationalError:
         auto_definitions = []
     auto_identities = {column_identity(definition.get('name', '')) for definition in auto_definitions}
@@ -7574,7 +7623,6 @@ def _preview_column_categories(
         matches = [column for column in available_columns if column_identity(column) == column_identity(requested)]
         if matches:
             metadata_columns.append(matches[0])
-    derived_columns.update(metadata_columns)
     ordered = list(metadata_columns)
     ordered.extend(column for column in main_columns if column not in ordered)
     ordered.extend(column for column in available_columns if column in auto_columns and column not in ordered)
@@ -7664,15 +7712,19 @@ def _preview_display_name(column: str, source_columns: set[str], auto_columns: s
 
 def _preview_column_metadata(
     columns: list[str], source_paths: Iterable[str | Path], derived: set[str], main: set[str],
-    auto: set[str], dataset_kind: str,
+    auto: set[str], dataset_kind: str, dataset_ids: Iterable[int] = (),
+    vendor_mapping_applied: bool = False,
+    source_repository: Repository | None = None,
 ) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
-    source_columns: set[str] = set()
-    for source_path in source_paths:
-        try:
-            source_columns.update(get_dataset_source_columns(Path(source_path)))
-        except (OSError, ValueError, KeyError):
-            continue
-    definitions = {column_identity(item.get('name', '')): item for item in repository.list_calculated_dimensions()}
+    catalog_repository = source_repository or repository
+    source_columns, _source_columns_complete = _preview_source_columns(
+        source_paths, dataset_ids, catalog_repository,
+    )
+    source_identities = {column_identity(column) for column in source_columns}
+    definitions = {
+        column_identity(item.get('name', '')): item
+        for item in catalog_repository.list_calculated_dimensions()
+    }
     labels = {column: _preview_display_name(column, source_columns, auto) for column in columns}
     kinds: dict[str, str] = {}
     rules: dict[str, str] = {}
@@ -7682,6 +7734,9 @@ def _preview_column_metadata(
             kinds[column] = 'Auto-calculated'
             definition = definitions.get(identity, {})
             rules[column] = json.dumps(definition, ensure_ascii=False, indent=2) if definition else 'Workspace auto-calculated field.'
+        elif identity == 'vendor' and vendor_mapping_applied:
+            kinds[column] = 'Vendor-Map'
+            rules[column] = 'Populated from the Vendor Mapping applied to this CDR.'
         elif column in derived:
             kinds[column] = 'Derived' if column in main or identity in {
                 column_identity(field) for field in PREVIEW_METADATA_FIELDS
@@ -7690,7 +7745,7 @@ def _preview_column_metadata(
                 and identity in MAPPING_PREVIEW_REQUIRED_IDENTITIES
             ) else 'Analysis-derived'
             rules[column] = DERIVED_PREVIEW_RULES.get(identity, 'Derived during CDR ingestion from the available source fields.')
-        elif column in main:
+        elif column in main and identity in source_identities:
             kinds[column] = 'CDR-Main'
             rules[column] = DERIVED_PREVIEW_RULES.get(
                 identity, 'Fixed primary CDR field stored directly from the source when available.',
@@ -7747,10 +7802,17 @@ def _preview_rows(frame: pd.DataFrame) -> list[dict[str, str]]:
     ]
 
 
-def _chart_preview_column_classes(columns: Iterable[str], datasets: Iterable[dict[str, Any]]) -> dict[str, str]:
+def _chart_preview_column_classes(
+    columns: Iterable[str], datasets: Iterable[dict[str, Any]],
+    source_repository: Repository | None = None,
+) -> dict[str, str]:
     available = [str(column) for column in columns]
-    source_paths = [dataset['stored_path'] for dataset in datasets if dataset.get('stored_path')]
-    _ordered, derived, main, auto = _preview_column_categories(available, source_paths)
+    source_datasets = [dataset for dataset in datasets if dataset.get('stored_path')]
+    source_paths = [dataset['stored_path'] for dataset in source_datasets]
+    dataset_ids = [int(dataset['id']) for dataset in source_datasets]
+    _ordered, derived, main, auto = _preview_column_categories(
+        available, source_paths, dataset_ids, source_repository,
+    )
     classes: dict[str, str] = {}
     for column in available:
         if column_identity(column) in {column_identity(field) for field in PREVIEW_METADATA_FIELDS}:
@@ -7768,19 +7830,26 @@ def _chart_preview_column_classes(columns: Iterable[str], datasets: Iterable[dic
 
 def _chart_preview_column_metadata(
     columns: Iterable[str], datasets: Iterable[dict[str, Any]], dataset_kind: str | None = None,
+    source_repository: Repository | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Describe chart-extract columns with the same rules used by Dataset Preview."""
     available = [str(column) for column in columns]
     dataset_list = list(datasets)
-    source_paths = [dataset['stored_path'] for dataset in dataset_list if dataset.get('stored_path')]
-    _ordered, derived, main, auto = _preview_column_categories(available, source_paths)
+    source_datasets = [dataset for dataset in dataset_list if dataset.get('stored_path')]
+    source_paths = [dataset['stored_path'] for dataset in source_datasets]
+    dataset_ids = [int(dataset['id']) for dataset in source_datasets]
+    _ordered, derived, main, auto = _preview_column_categories(
+        available, source_paths, dataset_ids, source_repository,
+    )
     normalized_kind = str(
         dataset_kind or next((dataset.get('dataset_kind') for dataset in dataset_list if dataset.get('dataset_kind')), 'generic')
     ).casefold()
     labels, kinds, rules = _preview_column_metadata(
-        available, source_paths, derived, main, auto, normalized_kind,
+        available, source_paths, derived, main, auto, normalized_kind, dataset_ids,
+        vendor_mapping_applied=any(dataset.get('vendor_mapping_applied') for dataset in source_datasets),
+        source_repository=source_repository,
     )
-    classes = _chart_preview_column_classes(available, dataset_list)
+    classes = _chart_preview_column_classes(available, dataset_list, source_repository)
     return {
         column: {
             'label': labels.get(column, column),
@@ -7916,13 +7985,11 @@ def preview_dataset(
     cdr_preview_filters: list[dict[str, object]] = []
 
     preview_columns, derived_preview_columns, main_preview_columns, auto_preview_columns = _preview_column_categories(
-        available_columns, [dataset['stored_path']],
+        available_columns, [dataset['stored_path']], [dataset_id],
     )
     vendor_preview_columns.update(
         column for column in preview_columns if column_identity(column) in VENDOR_FIELD_IDENTITIES
     )
-    if dataset['dataset_kind'] in CDR_DATASET_KINDS:
-        derived_preview_columns.update(vendor_preview_columns)
     server_paginated_preview = dataset['dataset_kind'] in CDR_DATASET_KINDS
     if server_paginated_preview:
         preview_frame, _filtered_total, _filter_values = repository.load_dataset_preview_page(
@@ -7933,7 +8000,8 @@ def preview_dataset(
         if dataset['dataset_kind'] in {'mapping_vodafone', 'mapping_three'}:
             _initial_labels, initial_kinds, _initial_rules = _preview_column_metadata(
                 preview_columns, [dataset['stored_path']], derived_preview_columns,
-                main_preview_columns, auto_preview_columns, dataset['dataset_kind'],
+                main_preview_columns, auto_preview_columns, dataset['dataset_kind'], [dataset_id],
+                vendor_mapping_applied=dataset['vendor_mapping_applied'],
             )
             preview_columns = [
                 column for column in preview_columns
@@ -7952,7 +8020,9 @@ def preview_dataset(
             )
         preview_frame = preview_frame.head(row_limit)
     preview_column_labels, preview_column_kinds, preview_column_rules = _preview_column_metadata(
-        preview_columns, [dataset['stored_path']], derived_preview_columns, main_preview_columns, auto_preview_columns, dataset['dataset_kind'],
+        preview_columns, [dataset['stored_path']], derived_preview_columns, main_preview_columns,
+        auto_preview_columns, dataset['dataset_kind'], [dataset_id],
+        vendor_mapping_applied=dataset['vendor_mapping_applied'],
     )
     metadata_preview_columns = {
         column for column in preview_columns
@@ -8014,7 +8084,9 @@ async def dataset_preview_data(
     available_columns.extend(
         field for field in (*PREVIEW_METADATA_FIELDS, *MAIN_CDR_FIELDS) if column_identity(field) not in available_identities
     )
-    columns, _derived = _ordered_cdr_preview_columns(available_columns, [dataset['stored_path']])
+    columns, _derived = _ordered_cdr_preview_columns(
+        available_columns, [dataset['stored_path']], [dataset_id],
+    )
     payload = await request.json()
     page, filters, filter_column = _dataset_preview_request(payload, columns)
     if bool(payload.get('download')):
@@ -8069,17 +8141,20 @@ def preview_combined_dataset(
     available_columns.extend(
         field for field in (*PREVIEW_METADATA_FIELDS, *MAIN_CDR_FIELDS) if column_identity(field) not in available_identities
     )
-    source_paths = [
-        dataset['stored_path'] for row in repository.list_datasets()
+    source_datasets = [
+        dataset for row in repository.list_datasets()
         if (dataset := serialize_dataset_row(row))['is_ready']
         and dataset['dataset_kind'] == normalized_kind
     ]
-    preview_columns, derived_preview_columns, main_preview_columns, auto_preview_columns = _preview_column_categories(available_columns, source_paths)
-    derived_preview_columns.update(
-        column for column in preview_columns if column_identity(column) in VENDOR_FIELD_IDENTITIES
+    source_paths = [dataset['stored_path'] for dataset in source_datasets]
+    dataset_ids = [int(dataset['id']) for dataset in source_datasets]
+    preview_columns, derived_preview_columns, main_preview_columns, auto_preview_columns = _preview_column_categories(
+        available_columns, source_paths, dataset_ids,
     )
     preview_column_labels, preview_column_kinds, preview_column_rules = _preview_column_metadata(
-        preview_columns, source_paths, derived_preview_columns, main_preview_columns, auto_preview_columns, normalized_kind,
+        preview_columns, source_paths, derived_preview_columns, main_preview_columns,
+        auto_preview_columns, normalized_kind, dataset_ids,
+        vendor_mapping_applied=any(dataset['vendor_mapping_applied'] for dataset in source_datasets),
     )
     metadata_preview_columns = {
         column for column in preview_columns
@@ -8151,12 +8226,14 @@ async def combined_dataset_preview_data(
     available_columns.extend(
         field for field in (*PREVIEW_METADATA_FIELDS, *MAIN_CDR_FIELDS) if column_identity(field) not in available_identities
     )
-    source_paths = [
-        dataset['stored_path'] for row in repository.list_datasets()
+    source_datasets = [
+        dataset for row in repository.list_datasets()
         if (dataset := serialize_dataset_row(row))['is_ready']
         and dataset['dataset_kind'] == normalized_kind
     ]
-    columns, _derived = _ordered_cdr_preview_columns(available_columns, source_paths)
+    source_paths = [dataset['stored_path'] for dataset in source_datasets]
+    dataset_ids = [int(dataset['id']) for dataset in source_datasets]
+    columns, _derived = _ordered_cdr_preview_columns(available_columns, source_paths, dataset_ids)
     payload = await request.json()
     page, filters, filter_column = _dataset_preview_request(payload, columns)
     if bool(payload.get('download')):
@@ -11887,6 +11964,8 @@ async def query_admin_database_table(request: Request, user: SessionUser = Depen
         ))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=500, detail=f'The database table could not be queried: {exc}.') from exc
 
 
 @app.get('/admin/database/table/values')
@@ -11941,22 +12020,69 @@ async def update_admin_database_table(request: Request, user: SessionUser = Depe
     return JSONResponse({'ok': True, 'message': 'Row saved.'})
 
 
-@app.post('/admin/operator-mappings')
-async def add_admin_operator_mapping(request: Request, user: SessionUser = Depends(admin_user)) -> JSONResponse:
+@app.post('/admin/operator-mappings/save')
+def save_admin_operator_mapping_group(
+    original_canonical: str = Form(''),
+    canonical_value: str = Form(...),
+    aliases: str = Form(''),
+    user: SessionUser = Depends(admin_user),
+) -> Response:
     if not active_workspace:
-        raise HTTPException(status_code=409, detail='Open a workspace before editing operator mappings.')
-    payload = await request.json()
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail='Send a valid operator mapping payload.')
+        return RedirectResponse(
+            f'/admin?{urlencode({"operator_mapping_error": "Open a workspace before editing Operator Mappings."})}',
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    parsed_aliases = [
+        value.strip() for value in re.split(r'[\n,;]+', aliases) if value.strip()
+    ]
     try:
-        repository.add_operator_mapping(payload.get('source_value', ''), payload.get('canonical_value', ''))
+        repository.replace_operator_mapping_group(
+            original_canonical or None, canonical_value, parsed_aliases,
+        )
     except (ValueError, sqlite3.IntegrityError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return RedirectResponse(
+            f'/admin?{urlencode({"operator_mapping_error": str(exc)})}',
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
     repository.invalidate_cdr_normalization()
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
-    repository.add_log(user.username, 'operator_mapping_create', str(payload.get('source_value', '')).strip())
-    return JSONResponse({'ok': True, 'message': 'Operator mapping added.'})
+    repository.add_log(user.username, 'operator_mapping_group_save', json.dumps({
+        'original_canonical': original_canonical,
+        'canonical': canonical_value.strip(),
+        'aliases': parsed_aliases,
+    }))
+    return RedirectResponse(
+        f'/admin?{urlencode({"operator_mapping_notice": "Operator Mapping saved."})}',
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post('/admin/operator-mappings/delete')
+def delete_admin_operator_mapping_group(
+    canonical_value: str = Form(...),
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    if not active_workspace:
+        return RedirectResponse(
+            f'/admin?{urlencode({"operator_mapping_error": "Open a workspace before editing Operator Mappings."})}',
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    try:
+        repository.delete_operator_mapping_group(canonical_value)
+    except ValueError as exc:
+        return RedirectResponse(
+            f'/admin?{urlencode({"operator_mapping_error": str(exc)})}',
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    repository.invalidate_cdr_normalization()
+    ANALYSIS_CACHE.clear()
+    DATAFRAME_CACHE.clear()
+    repository.add_log(user.username, 'operator_mapping_group_delete', canonical_value.strip())
+    return RedirectResponse(
+        f'/admin?{urlencode({"operator_mapping_notice": "Operator Mapping deleted."})}',
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.post('/admin/database/table/delete')

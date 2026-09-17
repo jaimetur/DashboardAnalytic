@@ -132,6 +132,50 @@
     </div>
   </details>
 
+  <details class="panel collapsible-panel operator-mappings-panel" open data-panel-state-key="admin:operator-mappings">
+    <summary class="collapsible-summary">
+      <div>
+        <p class="eyebrow">Workspace normalization</p>
+        <h2>Operator Mappings</h2>
+      </div>
+      <span class="collapse-chip">Collapse</span>
+    </summary>
+    <div class="collapsible-panel-body">
+      {% if active_workspace %}
+      <p class="lede">Manage the canonical Operator labels for <strong>"{{ active_workspace.name }}"</strong>. Each row shows one canonical label and every source label normalized to it. The canonical label maps to itself automatically.</p>
+      {% if operator_mapping_notice %}<div class="alert alert-success">{{ operator_mapping_notice }}</div>{% endif %}
+      {% if operator_mapping_error %}<div class="alert alert-error">{{ operator_mapping_error }}</div>{% endif %}
+      <div class="table-wrap operator-mappings-table-wrap">
+        <table class="operator-mappings-table">
+          <thead><tr><th>Canonical label</th><th>Mapped source labels</th><th>Actions</th></tr></thead>
+          <tbody>
+            {% for mapping in operator_mapping_groups %}
+            <tr>
+              <td>
+                <form id="operator-mapping-{{ loop.index }}" action="/admin/operator-mappings/save" method="post"></form>
+                <input type="hidden" name="original_canonical" value="{{ mapping.canonical }}" form="operator-mapping-{{ loop.index }}">
+                <input class="table-input operator-mapping-canonical" type="text" name="canonical_value" value="{{ mapping.canonical }}" form="operator-mapping-{{ loop.index }}" required>
+              </td>
+              <td><textarea class="operator-mapping-aliases" name="aliases" form="operator-mapping-{{ loop.index }}" rows="3" placeholder="One source label per line">{{ mapping.aliases | join('\n') }}</textarea></td>
+              <td><div class="table-actions"><button type="submit" form="operator-mapping-{{ loop.index }}" class="icon-action" aria-label="Save {{ mapping.canonical }} mapping" title="Save mapping">✓</button><form action="/admin/operator-mappings/delete" method="post" data-confirm="Delete the complete {{ mapping.canonical }} Operator Mapping group?"><input type="hidden" name="canonical_value" value="{{ mapping.canonical }}"><button type="submit" class="danger-button icon-action" aria-label="Delete {{ mapping.canonical }} mapping" title="Delete mapping">×</button></form></div></td>
+            </tr>
+            {% endfor %}
+            {% if not operator_mapping_groups %}<tr><td colspan="3">No Operator Mappings are configured.</td></tr>{% endif %}
+          </tbody>
+        </table>
+      </div>
+      <form class="operator-mapping-create" action="/admin/operator-mappings/save" method="post">
+        <label>Canonical label<input type="text" name="canonical_value" placeholder="Canonical Operator" required></label>
+        <label>Mapped source labels<textarea name="aliases" rows="3" placeholder="One source label per line"></textarea></label>
+        <button type="submit">Add canonical mapping</button>
+      </form>
+      <p class="form-note">Saving or deleting a group marks ready CDRs for normalization so future analysis uses the updated Operator labels.</p>
+      {% else %}
+      <p class="form-note">Open a workspace before managing Operator Mappings.</p>
+      {% endif %}
+    </div>
+  </details>
+
   <details class="panel collapsible-panel report-catalogue-panel" open data-panel-state-key="admin:slides-templates-management">
     <summary class="collapsible-summary">
       <div>
@@ -538,7 +582,6 @@
           </select>
         </label>
         <button type="button" class="database-refresh-button" data-database-refresh disabled>Refresh table</button>
-        <button type="button" class="database-refresh-button" data-add-operator-mapping hidden>Add operator mapping</button>
         <span class="pill" data-database-row-count>0 rows</span>
       </div>
       <div class="database-active-filters" data-database-active-filters hidden></div>
@@ -731,7 +774,7 @@
   const refreshBackupStatus = async () => {
     try {
       const response = await fetch('/api/admin/backup-status', {credentials: 'same-origin', cache: 'no-store'});
-      const payload = await response.json();
+      const payload = await response.json().catch(() => ({}));
       if (!response.ok) return;
       if (statusCount) statusCount.textContent = String(payload.count ?? '0');
       if (statusSize) statusSize.textContent = String(payload.size ?? '0 B');
@@ -881,7 +924,6 @@
   const panel = document.querySelector('[data-database-view]');
   const select = document.querySelector('[data-database-table-select]');
   const refresh = document.querySelector('[data-database-refresh]');
-  const addOperatorMapping = document.querySelector('[data-add-operator-mapping]');
   const clearFilters = document.querySelector('[data-database-clear-filters]');
   const activeFilters = document.querySelector('[data-database-active-filters]');
   const table = document.querySelector('[data-database-editor-table]');
@@ -1001,6 +1043,7 @@
   const renderTable = (payload) => {
     columns = payload.columns || [];
     const rows = payload.rows || [];
+    const editable = payload.editable !== false;
     totalRows = Number(payload.total_rows || 0);
     allRows = Number(payload.all_rows ?? totalRows);
     snapshot = new Map(rows.map((row) => [String(row.__database_rowid__), row]));
@@ -1013,9 +1056,13 @@
       const cells = columns.map((column) => {
         const columnName = escapeHtml(column.name);
         const filtered = Boolean(filters[column.name]?.length);
-        return `<td data-label="${columnName}"><div class="database-card-field-heading"><span>${columnName}${column.primary_key ? ' · key' : ''}</span><button type="button" class="database-column-filter ${filtered ? 'is-filtered' : ''}" data-database-column-filter="${columnName}" aria-label="Filter ${columnName}" title="Filter ${columnName}">⌄${filtered ? ` ${filters[column.name].length}` : ''}</button></div><input class="database-editor-cell" data-database-column="${columnName}" value="${escapeHtml(text(row[column.name]))}" ${column.primary_key ? 'disabled title="Primary-key values are protected"' : ''}></td>`;
+        const protectedCell = column.primary_key || !editable;
+        const protectedTitle = column.primary_key ? 'Primary-key values are protected' : 'This internal table is read-only';
+        return `<td data-label="${columnName}"><div class="database-card-field-heading"><span>${columnName}${column.primary_key ? ' · key' : ''}</span><button type="button" class="database-column-filter ${filtered ? 'is-filtered' : ''}" data-database-column-filter="${columnName}" aria-label="Filter ${columnName}" title="Filter ${columnName}">⌄${filtered ? ` ${filters[column.name].length}` : ''}</button></div><input class="database-editor-cell" data-database-column="${columnName}" value="${escapeHtml(text(row[column.name]))}" ${protectedCell ? `disabled title="${protectedTitle}"` : ''}></td>`;
       }).join('');
-      const actions = `<td class="database-editor-actions" data-label="Actions"><button type="button" class="icon-action" aria-label="Save row" title="Save row" data-database-save-row>✓</button><button type="button" class="database-editor-delete icon-action" aria-label="Delete row" title="Delete row" data-database-delete-row>×</button></td>`;
+      const actions = editable
+        ? `<td class="database-editor-actions" data-label="Actions"><button type="button" class="icon-action" aria-label="Save row" title="Save row" data-database-save-row>✓</button><button type="button" class="database-editor-delete icon-action" aria-label="Delete row" title="Delete row" data-database-delete-row>×</button></td>`
+        : '<td class="database-editor-actions" data-label="Actions"><span title="This internal table is read-only">View only</span></td>';
       return `<tr data-database-rowid="${escapeHtml(row.__database_rowid__)}">${actions}${cells}</tr>`;
     }).join('') : `<tr class="database-empty-row"><td colspan="${columns.length + 1}">No rows in this table.</td></tr>`;
     table.innerHTML = `<thead><tr><th class="database-editor-actions database-editor-actions-heading">Actions</th>${headers}</tr></thead><tbody>${body}</tbody>`;
@@ -1035,20 +1082,6 @@
     table.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {bubbles: true, detail: {reset: true}}));
   };
 
-  addOperatorMapping?.addEventListener('click', async () => {
-    const sourceValue = window.prompt('Source operator value');
-    if (sourceValue === null || !sourceValue.trim()) return;
-    const canonicalValue = window.prompt('Canonical operator value', sourceValue.trim());
-    if (canonicalValue === null || !canonicalValue.trim()) return;
-    const response = await fetch('/admin/operator-mappings', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({source_value: sourceValue, canonical_value: canonicalValue}),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) { window.alert(payload.detail || 'Unable to add operator mapping.'); return; }
-    await loadTable(0);
-  });
-
   const loadTable = async () => {
     const selectedTable = select.value;
     refresh.disabled = !selectedTable;
@@ -1062,7 +1095,9 @@
         method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({table: selectedTable, offset, limit: pageSize, filters}),
       });
-      const payload = await response.json();
+      const payload = await response.json().catch(() => ({
+        detail: `The server returned an invalid database response (HTTP ${response.status}).`,
+      }));
       if (!response.ok) throw new Error(payload.detail || 'The table could not be loaded.');
       renderTable(payload);
     } catch (error) {
@@ -1133,7 +1168,6 @@
   };
 
   select.addEventListener('change', () => {
-    if (addOperatorMapping) addOperatorMapping.hidden = select.value !== 'operator_mappings';
     offset = 0;
     filters = {};
     closeFilter();

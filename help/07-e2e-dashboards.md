@@ -102,7 +102,7 @@ Use View Dashboard or the library eye action. View Dashboard remains available f
 
 ### Slides and navigation
 
-- Select any template slide or use First, Previous, Next and Last.
+- Select any template slide or use the enlarged First, Previous, Next and Last controls, which match the individual chart viewer. Presentation, Refresh and Generate PPT are kept in a separate action group, in that order.
 - Left/Right Arrow navigates outside editable controls.
 - Title and Transition slides use branded Dashboard Analytic typography.
 - Chart rows preserve template order and placeholder geometry.
@@ -115,7 +115,7 @@ Hover or focus a chart to reveal Dataset, Expand, Refresh and Zoom controls. The
 - Zoom from 100% to 400% with `−`, `+` and `1:1` reset.
 - At 100%, drag a rectangle over the plot to zoom into it; drag a zoomed chart to pan.
 - Double-click or use Expand to open the focused chart.
-- The expanded viewer reuses the Canvas model and navigates all available charts with First/Previous/Next/Last.
+- View Dashboard and its expanded viewer stay above background-task cards and share Reporting's red Close control. The expanded viewer follows Reporting's full-screen card layout, with a descriptive header and an inset chart canvas, while retaining the purple Dashboard palette and floating Chart Definition panel. Both live and expanded charts show boundary-aware left, right, up and down arrows whenever zoom is active; these move the Canvas camera and disable at their respective limits. The expanded viewer's purple First/Previous/Next/Last controls use the same icons and spacing as Reporting.
 - Adaptative Filters, Auto-calculated Fields and Edit Template remain available in expanded view when permitted.
 - Edit Template focuses the exact template row for the chart. Saving refreshes the Dashboard; closing unchanged retains the current preparation.
 

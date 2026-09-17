@@ -22,7 +22,7 @@ from typing import Literal
 from uuid import uuid4
 
 import pandas as pd
-from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, column_identity
+from src.modules.column_names import column_identity
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
@@ -1932,6 +1932,7 @@ def install_dashboard_routes(core):
             if not entry.structural_type:
                 slide['charts'].append({
                     'index': index, 'title': entry.chart_title, 'source': entry.source_kind,
+                    'cdr_source': entry.cdr_source, 'chart_type': entry.chart_type,
                     'available': entry.source_kind in selected_by_kind, 'focus_row': editor_index,
                 })
         for slide in slides.values():
@@ -2688,32 +2689,12 @@ def install_dashboard_routes(core):
 
     def chart_dataset_column_classes(snapshot, entry, columns):
         task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
-        source_identities = set()
+        datasets = []
         for dataset_id in snapshot.definition.datasets.get(entry.source_kind, []):
             dataset = task_repository.get_dataset(int(dataset_id))
             if dataset:
-                try:
-                    source_identities.update(
-                        identity(column) for column in core.get_dataset_source_columns(Path(str(dataset['stored_path'])))
-                    )
-                except (OSError, ValueError, KeyError):
-                    pass
-        auto_identities = {identity(dimension.name) for dimension in snapshot.dimensions}
-        main_identities = {identity(column) for column in MAIN_CDR_FIELDS}
-        classes = {}
-        for column in columns:
-            column_key = identity(column)
-            if column_key in {identity(field) for field in PREVIEW_METADATA_FIELDS}:
-                classes[str(column)] = 'gcid-column'
-            elif column_key in auto_identities:
-                classes[str(column)] = 'auto-calculated-preview-column'
-            elif column_key in VENDOR_FIELD_IDENTITIES:
-                classes[str(column)] = 'derived-cdr-column'
-            elif column_key not in source_identities:
-                classes[str(column)] = 'derived-cdr-column'
-            elif column_key in main_identities:
-                classes[str(column)] = 'main-cdr-column'
-        return classes
+                datasets.append(core.serialize_dataset_row(dataset))
+        return core._chart_preview_column_classes(columns, datasets, task_repository)
 
     def chart_dataset_column_metadata(snapshot, entry, columns):
         task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
@@ -2722,7 +2703,9 @@ def install_dashboard_routes(core):
             dataset = task_repository.get_dataset(int(dataset_id))
             if dataset:
                 datasets.append(core.serialize_dataset_row(dataset))
-        return core._chart_preview_column_metadata(columns, datasets, entry.source_kind)
+        return core._chart_preview_column_metadata(
+            columns, datasets, entry.source_kind, task_repository,
+        )
 
     def apply_chart_column_filters(frame, column_filters):
         result = frame

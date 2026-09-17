@@ -9,15 +9,15 @@
 - Removed `Report_Vendor` from individual and combined CDR tables. Normalization version 11 migrates its values into the official `Vendor` field, which now drives filters, legends, analysis, Dashboards and Reporting.
 
 #### 🌟 New Features:
-- Dataset Preview now pages the complete persisted dataset in fixed groups of 100 rows.
+- Dataset Preview now pages the complete persisted dataset in fixed groups of 100 rows and every unified Dataset table preserves its exact horizontal column position when changing pages.
 - Added simultaneous Excel-style column filters with complete, cascading value lists and `Select All/None`.
 - Added comma-separated column search and multi-select label filtering with an `All Labels` option.
 - Added searchable Workspace Dataset selection with a loading dialog directly in Dataset Preview.
-- Added external `CDR-Main`, `Derived`, `Auto-calculated`, `Analysis-derived` and CDR-type badges with rule details.
+- Added persisted, provenance-based `CDR-Main`, `Vendor-Map`, `Derived`, `Auto-calculated`, `Analysis-derived` and CDR-type badges with rule details and distinct green shades for main and derived CDR fields, including darker `CDR-Main` headers for clear separation. Physical headers are catalogued once per dataset in the Workspace database instead of reopening source CDRs for each preview; `Vendor` reflects mapping provenance and `Vendor_Only` remains derived.
 - Added the `PINNED` badge for fields retained across dataset views.
 - Ordered previews as origin, main CDR, Auto-calculated, remaining derived and source CDR fields.
 - Added compact filter clearing, thousands-separated row totals and round green SVG pagination controls.
-- Added workspace Operator Mappings to Admin, with seeded NetCheck aliases and CDR rematerialization after edits.
+- Added a dedicated workspace Operator Mappings panel to Admin, preloading every existing mapping and grouping each editable canonical label with all its editable source aliases, with seeded NetCheck aliases and CDR rematerialization after edits.
 
 #### 🚀 Enhancements:
 - Dashboard caches remain valid across patch releases when their data formats do not change.
@@ -28,7 +28,7 @@
 - Manage Dashboards asks for Operator or Multivendor Comparison before queueing PPT generation.
 - Automatic PPT universes use the newest eligible CDRs and their full available date range.
 - PowerPoint Generation Jobs shows five recent rows before scrolling.
-- Expanded charts support previous and next navigation with buttons or arrow keys.
+- Expanded charts support previous and next navigation with buttons or arrow keys. E2E Dashboard matches Reporting's chart-navigation icons and spacing in its own purple palette; its individual-chart viewer now also uses Reporting's full-screen card composition, descriptive header, inset canvas and red Close control while retaining the floating Chart Definition panel. View Dashboard shares that red Close control, keeps the slide title and controls compact when no subtitle is present, uses the same enlarged slide-navigation controls and separates its enlarged Presentation, Refresh and Generate PPT actions in that order. Both its live and expanded charts provide boundary-aware left, right, up and down panning arrows whenever zoom is active, while View Dashboard and the expanded viewer stay above floating background-task cards. Reporting chart canvases expose a larger floating top-right filtered-dataset icon followed by zoom controls on hover, then hide the controls three seconds after the pointer leaves.
 - Added a collapsible Chart Definition panel to live and generated-PPT charts.
 - Chart Definition Apply renders the complete edited definition and any required temporary projection.
 - Update Template renders the current chart first and persists it to its exact template row in one confirmed action.
@@ -61,6 +61,7 @@
 - Task polling uses short-lived SQLite reads, registry handles close deterministically, size scans are cached and login skips repeated Workspace migrations. Workspace databases now enable WAL once during initialization, ordinary requests no longer change connection safety settings, and every Repository transaction shares a per-workspace write coordinator while read, parsing, analysis, Dataset processing and PPT-rendering phases remain parallel. Dataset workers retain parallelism for ordinary files but admit only one 256 MB-or-larger source per workspace at a time, preventing simultaneous pandas materializations from exhausting memory and making the web interface unavailable. Dashboard projections copy from a read-only Workspace connection into their independent cache without an attached cross-database write transaction, and selection scans finish before their short cache write. This prevents E2E Dashboard preparation from colliding with Dataset ingestion, Vendor mapping/clearing, Auto-calculated Field materialization or combined-CDR recreation; legacy lock recovery queues without writing from the Workspace request, so a busy database can no longer turn that page into an Internal Server Error, and failed mappings leave their source CDR ready for use and remapping.
 - Background task interruption remains successful when its non-critical audit entry encounters a temporary SQLite write lock.
 - Fixed dataset-dialog loading, Escape dismissal, E2E filter layering and duplicate Reporting frame loads.
+- Database Viewer now opens `WITHOUT ROWID` internal tables such as Dashboard selected rows as safely paginated, filterable, read-only data instead of failing with an invalid JSON error.
 
 #### 📚 Documentation:
 - Reorganized Workspace Management help under NetCheck CDR Support with one rule per fixed field.

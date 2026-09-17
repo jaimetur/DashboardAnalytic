@@ -423,7 +423,7 @@ The **Generated jobs** table contains Report and Chart Set rows, distinguished b
 
 The **Report Templates** table is the active workspace's `report_templates` table. It stores each template name, technology, default flag, timestamps and CSV content. Existing CSV templates are migrated automatically when their workspace is opened; compatibility CSV copies are generated only for portable packages.
 
-The **Operator Mappings** table stores case-insensitive source aliases and their canonical Operator value for the active workspace. Select that table and use **Add operator mapping** to create an alias; edit its canonical value or delete the row with the normal Database Viewer controls. A mapping change marks ready CDRs for rematerialization so their Operator value, and Subscriber when it was derived from Operator, use the updated mapping the next time those datasets are prepared.
+The dedicated **Operator Mappings** panel loads every existing mapping from the active workspace and groups them by canonical Operator. Each row shows the editable canonical label beside every editable source label mapped to it; enter one alias per line, then save or delete the complete group. Use **Add canonical mapping** to create another group. The canonical label always maps to itself automatically. Any change marks ready CDRs for rematerialization so their Operator value, and Subscriber when it was derived from Operator, use the updated mapping the next time those datasets are prepared.
 
 Capabilities:
 

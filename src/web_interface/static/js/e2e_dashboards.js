@@ -1615,6 +1615,42 @@
     controls.reset = () => apply(1);
     sync(1); controls.append(zoomOut, level, zoomIn, reset); return controls;
   }
+  const chartPanDirections = ['left', 'right', 'up', 'down'];
+  const chartPanPaths = {
+    left: 'M15 5 8 12l7 7', right: 'm9 5 7 7-7 7',
+    up: 'M5 15 12 8l7 7', down: 'm5 9 7 7 7-7',
+  };
+  const createChartPanButton = (direction, className) => {
+    const button = node('button', undefined, className);
+    button.type = 'button';
+    button.title = `Move view ${direction}`;
+    button.setAttribute('aria-label', `Move view ${direction}`);
+    button.hidden = true;
+    button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${chartPanPaths[direction]}"/></svg>`;
+    return button;
+  };
+  const bindChartPanControls = (canvas, buttons) => {
+    const sync = () => {
+      const state = globalThis.getDashboardChartPanState?.(canvas) || {zoom: 1};
+      const zoomed = Number(state.zoom) > 1;
+      chartPanDirections.forEach(direction => {
+        const button = buttons[direction];
+        button.hidden = !zoomed;
+        button.disabled = !zoomed || !state[`canPan${direction[0].toUpperCase()}${direction.slice(1)}`];
+      });
+    };
+    chartPanDirections.forEach(direction => {
+      buttons[direction].onclick = event => {
+        event.stopPropagation();
+        globalThis.panDashboardChart?.(canvas, direction);
+        sync();
+      };
+    });
+    canvas.addEventListener('dashboardchartzoom', sync);
+    canvas.addEventListener('dashboardchartpan', sync);
+    sync();
+    return sync;
+  };
   const expandedOverlayHost = $('ds-chart-expanded-overlay');
   expandedOverlayHost.classList.add('ds-overlay', 'e2e-dashboards');
   document.body.append(expandedOverlayHost);
@@ -1623,6 +1659,16 @@
   const expandedZoom = chartZoomControls($('ds-chart-expanded-canvas'));
   $('ds-chart-expanded-zoom').append(expandedZoom);
   const expandedCanvasShell = $('ds-chart-expanded-canvas-shell');
+  const expandedCanvas = $('ds-chart-expanded-canvas');
+  const expandedPanUp = createChartPanButton('up', 'ds-chart-expanded-pan ds-chart-expanded-pan-up');
+  expandedPanUp.id = 'ds-chart-expanded-pan-up';
+  const expandedPanDown = createChartPanButton('down', 'ds-chart-expanded-pan ds-chart-expanded-pan-down');
+  expandedPanDown.id = 'ds-chart-expanded-pan-down';
+  expandedCanvas.after(expandedPanUp, expandedPanDown);
+  bindChartPanControls(expandedCanvas, {
+    left: $('ds-chart-expanded-pan-left'), right: $('ds-chart-expanded-pan-right'),
+    up: expandedPanUp, down: expandedPanDown,
+  });
   let expandedControlsTimer;
   let expandedFiltersCloseTimer;
   const showExpandedCanvasControls = () => {
@@ -1742,7 +1788,7 @@
       if (!expandedChartFilterToken) throw new Error('The chart dataset could not be restored.');
       const payload = await api(`/chart/${encodeURIComponent(expandedChartFilterToken)}/${expandedChartFilterIndex}/filter-preview`, 'POST', previewDefinition);
       if (chart !== expandedChart) return null;
-      $('ds-chart-expanded-title').textContent = payload.title || chart.title || 'Expanded chart';
+      setExpandedChartHeader({...chart, chart_type: previewDefinition.chart_type, cdr_source: previewDefinition.cdr_source}, payload.title);
       expandedZoom.reset();
       canvas.hidden = false;
       globalThis.renderDashboardChart(canvas, payload);
@@ -1807,6 +1853,22 @@
   const expandedCharts = () => expandedChartMode === 'ppt'
     ? dashboardPptCharts
     : prepared?.slides.flatMap(slide => slide.charts).filter(chart => chart.available) || [];
+  const expandedChartSlide = chart => expandedChartMode === 'ppt'
+    ? {number: chart?.slide}
+    : prepared?.slides.find(slide => slide.charts.some(item => item.index === chart?.index));
+  const expandedChartSourceLabel = chart => {
+    const source = String(chart?.cdr_source || chart?.source || '').trim();
+    if (!source) return '';
+    if (/^cdr-/i.test(source)) return `CDR-${source.slice(4)}`;
+    return `CDR-${source.charAt(0).toUpperCase()}${source.slice(1)}`;
+  };
+  const setExpandedChartHeader = (chart, title = '') => {
+    const slide = expandedChartSlide(chart);
+    const chartTitle = String(title || chart?.title || 'Expanded chart');
+    $('ds-chart-expanded-title').textContent = slide?.number ? `Slide ${slide.number} · ${chartTitle}` : chartTitle;
+    $('ds-chart-expanded-meta').textContent = [expandedChartSourceLabel(chart), chart?.chart_type]
+      .filter(Boolean).join(' · ');
+  };
   const syncExpandedChartNavigation = () => {
     const charts = expandedCharts();
     const index = charts.findIndex(chart => chart.index === expandedChart?.index);
@@ -1973,7 +2035,7 @@
     $('ds-chart-expanded-filters').title = 'Adaptative Filters';
     expandedZoom.reset(); expandedZoom.hidden = true;
     const initialTitle = renderedPayload?.title || chart.title || 'Expanded chart';
-    $('ds-chart-expanded-title').textContent = initialTitle;
+    setExpandedChartHeader(chart, initialTitle);
     canvas.setAttribute('aria-label', initialTitle);
     canvas.hidden = true;
     message.hidden = false;
@@ -1989,7 +2051,7 @@
     const currentContextKey = () => expandedChartMode === 'ppt' ? dashboardPptChartsJobId : prepared?.token;
     if (request !== expandedChartRequest || contextKey !== currentContextKey() || $('ds-chart-expanded-overlay').hidden) return;
     const title = payload?.title || chart.title || 'Expanded chart';
-    $('ds-chart-expanded-title').textContent = title;
+    setExpandedChartHeader(chart, title);
     canvas.setAttribute('aria-label', title);
     canvas.hidden = false;
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -2108,6 +2170,11 @@
       const message = node('div',`Rendering ${chart.title || 'chart'}…`,'ds-chart-message'); card.append(message);
       const canvas = document.createElement('canvas'); canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', chart.title); canvas.hidden = true; card.append(canvas);
       const zoom = chartZoomControls(canvas); card.append(zoom);
+      const panButtons = Object.fromEntries(chartPanDirections.map(direction => [
+        direction, createChartPanButton(direction, `ds-chart-pan-button ds-chart-pan-${direction}`),
+      ]));
+      Object.values(panButtons).forEach(button => card.append(button));
+      bindChartPanControls(canvas, panButtons);
       if (chart.available) {
         const token = prepared.token;
         loadChartPayload(chart).then(payload => {

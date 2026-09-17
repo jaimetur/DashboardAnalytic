@@ -2738,6 +2738,67 @@ def test_admin_panel_is_available_for_admin(client) -> None:
     assert 'form="user-update-1" disabled title="Only super-admins can modify super-admin accounts">Save</button>' not in response.text
 
 
+def test_admin_operator_mapping_panel_groups_and_edits_aliases(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    app_module.repository.replace_operator_mapping_group(
+        None, 'Legacy Carrier', ['Legacy A', 'Legacy B'],
+    )
+    page = client.get('/admin')
+    assert page.status_code == 200
+    assert 'data-panel-state-key="admin:operator-mappings"' in page.text
+    assert '<h2>Operator Mappings</h2>' in page.text
+    assert 'value="Vodafone UK"' in page.text
+    assert 'VF\nVFUK\nVodafone' in page.text
+    assert 'value="Legacy Carrier"' in page.text
+    assert 'Legacy A\nLegacy B' in page.text
+    assert 'Add operator mapping' not in page.text
+    assert 'data-add-operator-mapping' not in page.text
+
+    created = client.post('/admin/operator-mappings/save', data={
+        'canonical_value': 'Example Mobile',
+        'aliases': 'Example\nEX; Example Telecom',
+    }, follow_redirects=False)
+    assert created.status_code == 303
+    assert app_module.repository.list_operator_mappings()['example'] == 'Example Mobile'
+    assert app_module.repository.list_operator_mappings()['ex'] == 'Example Mobile'
+    assert app_module.repository.list_operator_mappings()['example telecom'] == 'Example Mobile'
+    assert app_module.repository.list_operator_mappings()['example mobile'] == 'Example Mobile'
+
+    updated = client.post('/admin/operator-mappings/save', data={
+        'original_canonical': 'Example Mobile',
+        'canonical_value': 'Example Wireless',
+        'aliases': 'Example\nEW',
+    }, follow_redirects=False)
+    assert updated.status_code == 303
+    mappings = app_module.repository.list_operator_mappings()
+    assert mappings['example'] == 'Example Wireless'
+    assert mappings['ew'] == 'Example Wireless'
+    assert mappings['example wireless'] == 'Example Wireless'
+    assert 'ex' not in mappings
+    assert 'example mobile' not in mappings
+
+    deleted = client.post('/admin/operator-mappings/delete', data={
+        'canonical_value': 'Example Wireless',
+    }, follow_redirects=False)
+    assert deleted.status_code == 303
+    assert not any(value == 'Example Wireless' for value in app_module.repository.list_operator_mappings().values())
+
+
+def test_paginated_dataset_viewers_preserve_the_exact_horizontal_scroll_offset() -> None:
+    import src.DashboardAnalytic as app_module
+
+    script = app_module.PROJECT_ROOT.joinpath(
+        'src/web_interface/static/js/app.js',
+    ).read_text(encoding='utf-8')
+
+    assert "columnName: anchor?.dataset.columnName || ''," in script
+    assert "inset: anchor ? Math.max(0, viewportLeft - anchor.getBoundingClientRect().left) : 0," in script
+    assert "tableWrap.scrollLeft = anchorContentLeft + horizontalPosition.inset;" in script
+    assert "requestAnimationFrame(() => requestAnimationFrame(restoreHorizontalOffset));" in script
+
+
 def test_admin_recurring_backup_settings_are_persisted(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -2907,6 +2968,18 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
     )
     app_module.repository.replace_dataset_rows(987, pd.DataFrame({"obsolete": ["row"]}))
     app_module.repository.replace_reporting_rows(987, 'data', pd.DataFrame({"Campaign": ["legacy"]}))
+    with app_module.repository.connection() as conn:
+        selection_id = int(conn.execute(
+            "INSERT INTO dashboard_filter_selections (cache_key) VALUES ('database-viewer-test')"
+        ).lastrowid)
+        conn.execute(
+            """
+            INSERT INTO dashboard_filter_selection_rows (
+                selection_id, dataset_kind, dataset_id, source_row_id
+            ) VALUES (?, 'data', 987, 1)
+            """,
+            (selection_id,),
+        )
     assert app_module.repository.dataset_rows_table_exists(987)
     admin = client.get("/admin")
     assert admin.status_code == 200
@@ -2923,6 +2996,8 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
     assert 'Workspace registry' in admin.text
     assert '<optgroup label="Workspace Tables">' in admin.text
     assert 'value="generated_jobs"' in admin.text
+    assert 'Dashboard selected rows' in admin.text
+    assert 'This internal table is read-only' in admin.text
     assert 'Generated jobs' in admin.text
     assert 'value="report_chart_jobs"' not in admin.text
     assert 'value="report_runs"' not in admin.text
@@ -2933,6 +3008,18 @@ def test_admin_database_management_lists_and_updates_active_workspace_tables(cli
     assert cleanup.status_code == 303
     assert not app_module.repository.dataset_rows_table_exists(987)
     assert app_module.repository.database_table_page('reporting_rows_data')['total_rows'] == 0
+
+    selected_rows = client.post(
+        '/admin/database/table/query',
+        json={'table': 'dashboard_filter_selection_rows', 'offset': 0, 'limit': 100, 'filters': {}},
+    )
+    assert selected_rows.status_code == 200
+    selected_payload = selected_rows.json()
+    assert selected_payload['editable'] is False
+    assert selected_payload['total_rows'] == 1
+    assert selected_payload['rows'][0]['selection_id'] == selection_id
+    assert selected_payload['rows'][0]['dataset_kind'] == 'data'
+    assert selected_payload['rows'][0]['__database_rowid__'] == 'read-only-0'
 
     workspace_registry = client.get('/admin/database/table', params={'table': '__workspace_registry__', 'limit': 100})
     assert workspace_registry.status_code == 200
@@ -3315,7 +3402,60 @@ def test_cdr_preview_uses_clean_duplicate_names_and_orders_vendor_only_after_ven
     assert {'Campaign', 'Vendor', 'Vendor_Only'} <= main
 
 
-def test_cdr_preview_paginates_and_filters_every_column(client) -> None:
+def test_cdr_preview_badges_follow_physical_source_columns(tmp_path: Path, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    monkeypatch.setattr(app_module.repository, 'list_calculated_dimensions', lambda: [])
+
+    source = tmp_path / 'source.csv'
+    source.write_text(
+        'Operator,Vendor,Vendor_Only,Campaign,Source_File\n'
+        'Vodafone UK,Ericsson,Ericsson,UK_Q3_2026,original.csv\n',
+        encoding='utf-8',
+    )
+    columns = [
+        'Operator', 'Vendor', 'Campaign', 'Source_File', 'Source_Sheet',
+        'Vendor_Only', 'Campaign_Year',
+    ]
+
+    _ordered, derived, main, auto = app_module._preview_column_categories(columns, [source])
+    _labels, kinds, _rules = app_module._preview_column_metadata(
+        columns, [source], derived, main, auto, 'data',
+    )
+
+    assert kinds['Operator'] == 'CDR-Main'
+    assert kinds['Vendor'] == 'CDR-Main'
+    assert kinds['Campaign'] == 'CDR-Main'
+    assert kinds['Source_File'] == 'CDR-Data'
+    assert kinds['Source_Sheet'] == 'Derived'
+    assert kinds['Vendor_Only'] == 'Derived'
+    assert kinds['Campaign_Year'] == 'Derived'
+
+    source_identities = {
+        app_module.column_identity(column)
+        for column in app_module.get_dataset_source_columns(source)
+    }
+    cdr_main_columns = {column for column, kind in kinds.items() if kind == 'CDR-Main'}
+    derived_columns = {column for column, kind in kinds.items() if kind == 'Derived'}
+    assert all(app_module.column_identity(column) in source_identities for column in cdr_main_columns)
+    assert all(
+        app_module.column_identity(column) not in source_identities
+        or app_module.column_identity(column) == 'vendoronly'
+        for column in derived_columns
+    )
+
+    missing_source = tmp_path / 'missing.csv'
+    _ordered, unknown_derived, unknown_main, unknown_auto = app_module._preview_column_categories(
+        columns, [missing_source],
+    )
+    _labels, unknown_kinds, _rules = app_module._preview_column_metadata(
+        columns, [missing_source], unknown_derived, unknown_main, unknown_auto, 'data',
+    )
+    assert 'CDR-Main' not in unknown_kinds.values()
+    assert {column for column, kind in unknown_kinds.items() if kind == 'Derived'} == {'Vendor_Only'}
+
+
+def test_cdr_preview_paginates_and_filters_every_column(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 
     login(client)
@@ -3342,6 +3482,16 @@ def test_cdr_preview_paginates_and_filters_every_column(client) -> None:
             'text/csv',
         )},
         follow_redirects=False,
+    )
+
+    assert app_module.repository.list_dataset_source_columns(1) == [
+        'operator', 'vendor', 'RAT_A', 'Session_Type', 'Call_Status',
+        'Type_of_Test', 'Test_Name', 'score', 'Suscriber', 'Campaign',
+    ]
+    monkeypatch.setattr(
+        app_module,
+        'get_dataset_source_columns',
+        lambda _path: (_ for _ in ()).throw(AssertionError('Preview reopened the source CDR.')),
     )
 
     default_preview = client.get('/workspace/preview/1')
@@ -3383,6 +3533,17 @@ def test_cdr_preview_paginates_and_filters_every_column(client) -> None:
     assert '>PINNED</button>' in default_preview.text
     assert '>UN_PINNED</button>' in default_preview.text
     assert '>CDR-Main</button>' in default_preview.text
+    vendor_badge = default_preview.text.split('data-column-label="Vendor"', 1)[1][:100]
+    vendor_only_badge = default_preview.text.split('data-column-label="Vendor_Only"', 1)[1][:100]
+    assert 'data-column-kind="CDR-Main"' in vendor_badge
+    assert 'data-column-kind="Derived"' in vendor_only_badge
+    preview_css = app_module.PROJECT_ROOT.joinpath(
+        'src/web_interface/static/css/app.css',
+    ).read_text(encoding='utf-8')
+    assert '.dataset-preview-table .main-cdr-column { background: #ccebd9;' in preview_css
+    assert '.dataset-preview-table .derived-cdr-column { background: #e6f7ed;' in preview_css
+    assert '.dataset-preview-table thead th.main-cdr-column { background: #78bd94;' in preview_css
+    assert '.dataset-preview-table thead th.derived-cdr-column { background: #9fd8b7;' in preview_css
     assert '>Main</button>' not in default_preview.text
     assert 'Select Workspace Dataset' in default_preview.text
     assert 'target="_blank" rel="noopener">Back to Workspace</a>' in default_preview.text
@@ -3637,6 +3798,10 @@ def test_workspace_upload_can_map_selected_cdr_vendor_during_processing(client) 
     preview = client.get('/workspace/preview/2')
     assert preview.status_code == 200
     assert '>3_Nokia<' in preview.text
+    vendor_badge = preview.text.split('data-column-label="Vendor"', 1)[1][:100]
+    vendor_only_badge = preview.text.split('data-column-label="Vendor_Only"', 1)[1][:100]
+    assert 'data-column-kind="Vendor-Map"' in vendor_badge
+    assert 'data-column-kind="Derived"' in vendor_only_badge
 
     import src.DashboardAnalytic as app_module
     dataset = app_module.serialize_dataset_row(app_module.repository.get_dataset(2))
@@ -4673,6 +4838,32 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     selected_export = client.get('/admin/report-templates/export-selected?catalogue_selection=nsa:Updated%20Q4')
     assert selected_export.status_code == 200
     assert 'filename="Updated Q4.csv"' in selected_export.headers['content-disposition']
+
+
+def test_reporting_chart_viewer_uses_hover_canvas_dataset_and_zoom_controls(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    reporting = client.get('/reporting')
+    assert reporting.status_code == 200
+    controls = reporting.text.split('data-report-chart-viewer-canvas-controls', 1)[1].split('</div>', 2)[0]
+    assert controls.index('data-report-chart-viewer-data') < controls.index('data-report-chart-zoom="in"')
+    assert controls.count('data-report-chart-zoom=') == 2
+    assert 'data-report-chart-zoom-reset' in controls
+    assert '<span>View filtered dataset</span>' not in reporting.text
+    navigation = reporting.text.split('class="report-chart-viewer-navigation"', 1)[1].split('</div>', 1)[0]
+    assert 'data-report-chart-zoom' not in navigation
+    assert "addEventListener('pointerenter', showReportChartViewerControls)" in reporting.text
+    assert "addEventListener('pointerleave', hideReportChartViewerControls)" in reporting.text
+    assert '}, 3000);' in reporting.text
+    css = app_module.PROJECT_ROOT.joinpath(
+        'src/web_interface/static/css/app.css',
+    ).read_text(encoding='utf-8')
+    assert '.report-chart-viewer-canvas-controls { position: absolute; top: 0.6rem; right: 0.6rem;' in css
+    assert '.report-chart-viewer-image.is-controls-visible .report-chart-viewer-canvas-controls' in css
+    assert '.report-chart-viewer-canvas-data-button { width: 2.5rem;' in css
+    assert '.report-chart-viewer-canvas-data-button svg { width: 1.4rem;' in css
+
 
 def test_admin_catalogue_rename_supports_background_json_save(client) -> None:
     import src.DashboardAnalytic as app_module

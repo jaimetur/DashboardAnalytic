@@ -297,7 +297,14 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-viewer-preparing-detail"' in page.text
     assert '>Auto-Calculated Fields<' in page.text
     assert 'class="ds-viewer-icon-action ds-viewer-refresh-action"' in page.text
+    assert 'class="ds-viewer-tool-actions" role="group" aria-label="Dashboard actions"' in page.text
+    assert 'id="ds-viewer-close" class="report-chart-viewer-close" title="Close"' in page.text
+    assert page.text.index('id="ds-presentation"') < page.text.index('id="ds-viewer-refresh"') < page.text.index('id="ds-viewer-export-ppt"')
+    assert 'id="ds-prev" class="ds-slide-nav-button" title="Previous slide" aria-label="Previous slide"><svg class="ds-slide-arrow-icon"' in page.text
+    assert 'id="ds-next" class="ds-slide-nav-button" title="Next slide" aria-label="Next slide"><svg class="ds-slide-arrow-icon"' in page.text
     assert 'id="ds-chart-expanded-overlay"' in page.text
+    assert 'class="ds-chart-expanded-meta" id="ds-chart-expanded-meta"' in page.text
+    assert 'id="ds-chart-expanded-close" class="report-chart-viewer-close" title="Close"' in page.text
     assert 'id="ds-chart-expanded-canvas"' in page.text
     assert 'id="ds-chart-expanded-data"' in page.text
     assert 'id="ds-chart-expanded-zoom"' in page.text
@@ -305,6 +312,12 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-chart-expanded-edit"' in page.text
     assert 'id="ds-chart-expanded-first"' in page.text
     assert 'id="ds-chart-expanded-last"' in page.text
+    assert 'id="ds-chart-expanded-pan-left"' in page.text
+    assert 'id="ds-chart-expanded-pan-right"' in page.text
+    assert 'id="ds-chart-expanded-first" title="First chart" aria-label="First chart">⏮</button>' in page.text
+    assert 'id="ds-chart-expanded-prev" title="Previous chart" aria-label="Previous chart"><svg class="ds-chart-expanded-arrow-icon"' in page.text
+    assert 'id="ds-chart-expanded-next" title="Next chart" aria-label="Next chart"><svg class="ds-chart-expanded-arrow-icon"' in page.text
+    assert 'id="ds-chart-expanded-last" title="Last chart" aria-label="Last chart">⏭</button>' in page.text
     assert 'id="ds-chart-expanded-canvas-shell"' in page.text
     assert 'id="ds-chart-expanded-position"' in page.text
     assert 'id="ds-data-table"' in page.text
@@ -357,6 +370,23 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '.ds-chart-expanded-canvas.ds-hover .ds-chart-filter-panel' in dashboard_styles
     assert '#ds-data-overlay .ds-data-dialog { position: absolute; inset: 5%;' in dashboard_styles
     assert '.ds-chart-filter-panel.is-open {' in dashboard_styles
+    assert '.ds-chart-expanded-overlay.ds-overlay { position: fixed; z-index: 9000;' in dashboard_styles
+    assert '#ds-viewer.ds-overlay{z-index:8800}' in dashboard_styles
+    assert '#ds-data-overlay.ds-overlay, #ds-filter-overlay.ds-overlay, #ds-presentation-overlay.ds-overlay { z-index: 9100 !important; }' in dashboard_styles
+    assert '#ds-editor-overlay.ds-overlay { z-index: 9200 !important; }' in dashboard_styles
+    assert '.e2e-dashboards .ds-chart-expanded-navigation { gap: 0.65rem; }' in dashboard_styles
+    assert '.e2e-dashboards .ds-chart-expanded-arrow-icon {' in dashboard_styles
+    assert '.e2e-dashboards .ds-slide-navigation { gap: 0.65rem; }' in dashboard_styles
+    assert '.e2e-dashboards .ds-slide-arrow-icon {' in dashboard_styles
+    assert '.ds-viewer-tool-actions { display: flex;' in dashboard_styles
+    assert '.e2e-dashboards .ds-viewer-tool-actions .ds-viewer-icon-action {' in dashboard_styles
+    assert '.e2e-dashboards .ds-chart-expanded-pan-up {' in dashboard_styles
+    assert '.e2e-dashboards .ds-chart-expanded-pan-down {' in dashboard_styles
+    assert '.e2e-dashboards .ds-chart-pan-button {' in dashboard_styles
+    assert '.ds-chart-expanded-overlay .ds-chart-expanded-dialog { position: relative;' in dashboard_styles
+    assert '.ds-chart-expanded-overlay .ds-chart-expanded-canvas { border:' in dashboard_styles
+    assert '#ds-chart-expanded-close.report-chart-viewer-close, .e2e-dashboards .ds-viewer-header #ds-viewer-close.report-chart-viewer-close {' in dashboard_styles
+    assert '#ds-subtitle:empty{display:none}.ds-viewer-panel>.ds-actions{margin-top:.5rem}' in dashboard_styles
     assert 'text-transform: uppercase;' in dashboard_styles
     assert 'height: 14rem;' in dashboard_styles
     assert '.multiselect-option[hidden], .multiselect-group-label[hidden] { display: none !important; }' in app_styles
@@ -379,7 +409,15 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'preview.replaceChildren(cachedImage(chart))' in dashboard_script
     assert "card.ondblclick = safe(async event =>" in dashboard_script
     assert "const syncExpandedChartNavigation" in dashboard_script
+    assert 'const setExpandedChartHeader = (chart, title = \'\') =>' in dashboard_script
+    assert "$('ds-chart-expanded-meta').textContent" in dashboard_script
     assert "navigateExpandedChart(expandedCharts().length - 1)" in dashboard_script
+    assert "const chartPanDirections = ['left', 'right', 'up', 'down'];" in dashboard_script
+    assert "expandedPanUp.id = 'ds-chart-expanded-pan-up';" in dashboard_script
+    assert "expandedPanDown.id = 'ds-chart-expanded-pan-down';" in dashboard_script
+    assert 'bindChartPanControls(expandedCanvas, {' in dashboard_script
+    assert 'bindChartPanControls(canvas, panButtons);' in dashboard_script
+    assert 'globalThis.panDashboardChart?.(canvas, direction);' in dashboard_script
     assert "visible === 'ds-chart-expanded-overlay' && !editing && event.key === 'ArrowLeft'" in dashboard_script
     assert "visible === 'ds-chart-expanded-overlay' && !editing && event.key === 'ArrowRight'" in dashboard_script
     assert "ds-chart-filter-panel" in page.text
@@ -415,6 +453,12 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "if (templateChanged && expandedChartMode !== 'ppt') await prepare();" in dashboard_script
     assert "event.data?.type === 'dashboard-analytic:template-saved'" in dashboard_script
     chart_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/dashboard_charts.js').read_text(encoding='utf-8')
+    assert 'function chartPanState(canvas)' in chart_script
+    assert 'function panChart(canvas, direction)' in chart_script
+    assert "['left', 'right', 'up', 'down'].includes(direction)" in chart_script
+    assert "if (direction === 'up') camera.panY += LOGICAL_HEIGHT * 0.16;" in chart_script
+    assert "if (direction === 'down') camera.panY -= LOGICAL_HEIGHT * 0.16;" in chart_script
+    assert 'globalThis.panDashboardChart = panChart;' in chart_script
     assert 'function legendLayout(legend, fontSize = 15)' in chart_script
     assert "position = items.length ? String(legend?.position || 'none').toLowerCase() : 'none';" in chart_script
     assert "left: position === 'left' ? 300 : 70" in chart_script
@@ -707,6 +751,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert len(preview['slides']) == 2
     assert len(preview['slides'][0]['charts']) == 2
     assert preview['slides'][0]['charts'][0]['focus_row'] == 0
+    assert preview['slides'][0]['charts'][0]['cdr_source']
+    assert preview['slides'][0]['charts'][0]['chart_type']
     assert preview['slides'][0]['charts'][1]['focus_row'] == 1
     assert preview['slides'][0]['charts'][0]['position'][0] < preview['slides'][0]['charts'][1]['position'][0]
     token = preview['token']
