@@ -64,7 +64,7 @@
     </div>
   </details>
 
-  <details class="panel collapsible-panel reporting-panel report-charts-panel" open data-panel-state-key="reporting:report-charts" data-reporting-module-panel="cdr" data-report-charts-panel hidden>
+  <details class="panel collapsible-panel reporting-panel report-charts-panel" id="report-charts-panel" open data-panel-state-key="reporting:report-charts" data-reporting-module-panel="cdr" data-report-charts-panel hidden>
     <summary class="collapsible-summary">
       <div>
         <p class="eyebrow">Selected report definition</p><h2>Charts Panel</h2>
@@ -296,6 +296,7 @@
         const chartsReady = panel.dataset.reportChartsReady === 'true';
         panel.hidden = panel.dataset.reportingModulePanel !== module || (isChartPanel && !chartsReady);
       });
+      document.dispatchEvent(new CustomEvent('page-panel-navigation:update'));
     };
     reportingModule?.addEventListener('change', updateReportingModule);
     updateReportingModule();

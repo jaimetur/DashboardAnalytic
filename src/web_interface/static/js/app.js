@@ -4215,6 +4215,149 @@ function setupCustomMultiSelects() {
   });
 }
 
+function setupPagePanelNavigator() {
+  const navigator = document.querySelector('[data-page-panel-navigator]');
+  const main = document.querySelector('main');
+  if (!navigator || !main || navigator.dataset.ready === '1') return;
+  navigator.dataset.ready = '1';
+  const toggle = navigator.querySelector('[data-page-panel-navigator-toggle]');
+  const close = navigator.querySelector('[data-page-panel-navigator-close]');
+  const list = navigator.querySelector('[data-page-panel-navigator-list]');
+  const empty = navigator.querySelector('[data-page-panel-navigator-empty]');
+  let panels = [];
+  let rebuildTimer = 0;
+  let sectionObserver = null;
+  let generatedPanelId = 0;
+
+  const activeTab = document.querySelector('.module-tab.active');
+  const themeClasses = {
+    'module-tab-workspace': 'workspace',
+    'module-tab-datasets-analysis': 'datasets',
+    'module-tab-e2e-dashboards': 'dashboards',
+    'module-tab-reporting': 'reporting',
+    'module-tab-chart-builder': 'builder',
+    'module-tab-utility': 'utility',
+    'module-tab-app-logs': 'logs',
+    'module-tab-config': 'config',
+    'module-tab-admin': 'admin',
+  };
+  navigator.dataset.theme = Object.entries(themeClasses).find(([className]) => activeTab?.classList.contains(className))?.[1]
+    || (window.location.pathname.startsWith('/datasets/') ? 'datasets' : 'utility');
+
+  const setOpen = (open) => {
+    navigator.classList.toggle('is-open', open);
+    toggle.setAttribute('aria-expanded', String(open));
+  };
+  const panelIsVisible = (panel) => {
+    if (panel.hidden || panel.closest('[hidden]')) return false;
+    const style = window.getComputedStyle(panel);
+    return style.display !== 'none' && style.visibility !== 'hidden' && panel.getClientRects().length > 0;
+  };
+  const panelLabel = (panel, index) => {
+    const summary = panel.matches('details') ? panel.querySelector(':scope > summary') : null;
+    const heading = summary?.querySelector('h1,h2,h3,h4') || panel.querySelector('h1,h2,h3,h4');
+    const eyebrow = summary?.querySelector('.eyebrow') || panel.querySelector('.eyebrow');
+    const explicitLabel = panel.dataset.pagePanelLabel;
+    const label = explicitLabel || (index === 0 ? eyebrow?.textContent || heading?.textContent : heading?.textContent || eyebrow?.textContent);
+    return String(label || `Panel ${index + 1}`).trim();
+  };
+  const visibleMainPanels = () => {
+    const topLevelPanels = Array.from(main.querySelectorAll('article.panel, details.panel, section.panel')).filter((panel) => {
+      const parentPanel = panel.parentElement?.closest('article.panel, details.panel, section.panel');
+      return !parentPanel;
+    });
+    return topLevelPanels.filter((panel) => (
+      panelIsVisible(panel)
+      && panel.dataset.pagePanelNavigation !== 'exclude'
+      && !panel.closest('.confirm-overlay, .dataset-preview-overlay, [role="dialog"]')
+    ));
+  };
+  const markActive = (panel) => {
+    list.querySelectorAll('[data-page-panel-target]').forEach((button) => {
+      const active = button.dataset.pagePanelTarget === panel?.id;
+      button.classList.toggle('is-active', active);
+      if (active) button.setAttribute('aria-current', 'location');
+      else button.removeAttribute('aria-current');
+    });
+  };
+  const rebuild = () => {
+    panels = visibleMainPanels();
+    list.replaceChildren();
+    sectionObserver?.disconnect();
+    const mainMenu = document.createElement('button');
+    mainMenu.type = 'button';
+    mainMenu.className = 'page-panel-main-menu';
+    mainMenu.dataset.pagePanelTarget = 'main-menu';
+    const mainMenuLabel = document.createElement('span');
+    mainMenuLabel.textContent = 'Main Menu';
+    const mainMenuIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    mainMenuIcon.setAttribute('viewBox', '0 0 24 24');
+    mainMenuIcon.setAttribute('aria-hidden', 'true');
+    const mainMenuPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    mainMenuPath.setAttribute('d', 'M3 11.5 12 4l9 7.5M5.5 10v10h13V10M9.5 20v-6h5v6');
+    mainMenuIcon.append(mainMenuPath);
+    mainMenu.append(mainMenuLabel, mainMenuIcon);
+    mainMenu.addEventListener('click', () => {
+      window.scrollTo({top: 0, left: 0, behavior: 'smooth'});
+      markActive({id: 'main-menu'});
+      setOpen(false);
+    });
+    list.append(mainMenu);
+    panels.forEach((panel, index) => {
+      while (!panel.id) {
+        generatedPanelId += 1;
+        const candidate = `page-panel-${generatedPanelId}`;
+        if (!document.getElementById(candidate)) panel.id = candidate;
+      }
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.pagePanelTarget = panel.id;
+      button.textContent = panelLabel(panel, index);
+      button.addEventListener('click', () => {
+        panel.scrollIntoView({behavior: 'smooth', block: 'start'});
+        markActive(panel);
+        setOpen(false);
+      });
+      list.append(button);
+    });
+    empty.hidden = true;
+    sectionObserver = new IntersectionObserver((entries) => {
+      const visible = entries.filter((entry) => entry.isIntersecting).sort((left, right) => left.boundingClientRect.top - right.boundingClientRect.top);
+      if (visible[0]) markActive(visible[0].target);
+    }, {rootMargin: '-12% 0px -70% 0px', threshold: 0});
+    panels.forEach((panel) => sectionObserver.observe(panel));
+  };
+  const scheduleRebuild = () => {
+    window.clearTimeout(rebuildTimer);
+    rebuildTimer = window.setTimeout(rebuild, 60);
+  };
+
+  toggle.addEventListener('click', () => {
+    const opening = !navigator.classList.contains('is-open');
+    if (opening) rebuild();
+    setOpen(opening);
+  });
+  close.addEventListener('click', () => setOpen(false));
+  document.addEventListener('pointerdown', (event) => {
+    if (navigator.classList.contains('is-open') && !navigator.contains(event.target)) setOpen(false);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && navigator.classList.contains('is-open')) {
+      setOpen(false);
+      toggle.focus();
+    }
+  });
+  document.addEventListener('page-panel-navigation:update', scheduleRebuild);
+  window.addEventListener('resize', scheduleRebuild, {passive: true});
+  new MutationObserver(scheduleRebuild).observe(main, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['hidden', 'class', 'style'],
+  });
+  rebuild();
+}
+
 // The Chart Viewer and the Report Template editor deliberately share this
 // control surface. Keeping the filter builder and the searchable popovers in
 // one component prevents the two previews from drifting apart.
@@ -4562,6 +4705,7 @@ setupPersistentControls();
 setupPersistentPanelState();
 setupWorkspaceUserPickers();
 setupCustomMultiSelects();
+setupPagePanelNavigator();
 setupSearchableSingleSelects();
 
 function maybeSyncPersistedGlobalDatasetsAnalysisSelectors() {

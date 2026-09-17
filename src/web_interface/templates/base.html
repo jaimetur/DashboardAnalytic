@@ -80,6 +80,16 @@
       {% endif %}
       {% block content %}{% endblock %}
     </main>
+    {% if user and not embedded_template_editor and not embedded_preview %}
+    <aside class="page-panel-navigator" id="page-panel-navigator" aria-label="Page sections" data-page-panel-navigator>
+      <div class="page-panel-navigator-drawer">
+        <header><strong>Page sections</strong><button type="button" data-page-panel-navigator-close aria-label="Close page sections">&times;</button></header>
+        <nav data-page-panel-navigator-list aria-label="Panels in this page"></nav>
+        <p data-page-panel-navigator-empty hidden>No panels available.</p>
+      </div>
+      <button type="button" class="page-panel-navigator-tab" data-page-panel-navigator-toggle aria-expanded="false" aria-controls="page-panel-navigator" title="Navigate page sections"><span>Sections</span></button>
+    </aside>
+    {% endif %}
   </div>
   {% if user and not embedded_template_editor and not embedded_preview %}
   <div id="background-task-panels" class="background-task-panels" aria-live="polite" aria-label="Background tasks" hidden>

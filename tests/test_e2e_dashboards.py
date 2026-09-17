@@ -221,6 +221,8 @@ def test_dashboards_lifecycle_and_layout(client):
     payload = setup_dashboard(client)
     page = client.get('/e2e-dashboards')
     assert page.status_code == 200
+    assert 'id="page-panel-navigator"' in page.text
+    assert 'data-page-panel-navigator-list' in page.text
     assert page.text.index('>Datasets Analysis<') < page.text.index('>E2E Dashboards<') < page.text.index('>E2E Reporting<')
     assert client.get('/e2e-reporting').status_code == 200
     legacy_reporting = client.get('/reporting', follow_redirects=False)
@@ -342,7 +344,11 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "window.addEventListener('beforeunload', rememberScroll);" in dashboard_script
     assert "document.addEventListener('visibilitychange'" in dashboard_script
     assert "document.documentElement.scrollHeight - window.innerHeight" in dashboard_script
-    assert "const restoreOpenDashboard = navigation?.type === 'reload';" in dashboard_script
+    assert "const restorePageState = navigationEntry?.type === 'reload';" in dashboard_script
+    assert "const restoreOpenDashboard = restorePageState;" in dashboard_script
+    assert "if (!restorePageState) resetScroll();" in dashboard_script
+    assert "if (restorePageState) restoreScroll(); else resetScroll();" in dashboard_script
+    assert "sessionStorage.removeItem(scrollStorageKey);" in dashboard_script
     assert "last = restoreOpenDashboard ? sessionStorage.getItem(openStorageKey) || '' : '';" in dashboard_script
     assert "if (!restoreOpenDashboard) sessionStorage.removeItem(openStorageKey);" in dashboard_script
     assert "if (dashboards[last]) await openDashboard(last);" in dashboard_script
@@ -350,6 +356,46 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "preview_snapshot = replace(" in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     assert "The template owns these required chart attributes." in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+    assert 'function setupPagePanelNavigator()' in app_script
+    assert "mainMenuLabel.textContent = 'Main Menu';" in app_script
+    assert "mainMenuPath.setAttribute('d', 'M3 11.5 12 4l9 7.5M5.5 10v10h13V10M9.5 20v-6h5v6');" in app_script
+    assert "window.scrollTo({top: 0, left: 0, behavior: 'smooth'});" in app_script
+    assert "'module-tab-e2e-dashboards': 'dashboards'" in app_script
+    assert "panel.scrollIntoView({behavior: 'smooth', block: 'start'});" in app_script
+    assert "const topLevelPanels = Array.from(main.querySelectorAll('article.panel, details.panel, section.panel'))" in app_script
+    assert 'return topLevelPanels.filter((panel) =>' in app_script
+    assert "index === 0 ? eyebrow?.textContent || heading?.textContent" in app_script
+    assert 'const explicitLabel = panel.dataset.pagePanelLabel;' in app_script
+    assert 'panel.getClientRects().length > 0' in app_script
+    assert "attributeFilter: ['hidden', 'class', 'style']" in app_script
+    assert 'childList: true' in app_script
+    assert "window.addEventListener('resize', scheduleRebuild, {passive: true});" in app_script
+    assert "if (opening) rebuild();" in app_script
+    assert "document.addEventListener('page-panel-navigation:update', scheduleRebuild);" in app_script
+    assert "panel.dataset.pagePanelNavigation !== 'exclude'" in app_script
+    assert 'setupPagePanelNavigator();' in app_script
+    reporting_template = (Path(__file__).parents[1] / 'src/web_interface/templates/reporting.html').read_text(encoding='utf-8')
+    assert 'id="report-charts-panel"' in reporting_template
+    assert "document.dispatchEvent(new CustomEvent('page-panel-navigation:update'));" in reporting_template
+    dashboard_template = (Path(__file__).parents[1] / 'src/web_interface/templates/e2e_dashboards.html').read_text(encoding='utf-8')
+    assert 'id="ds-ppt-charts-panel" open data-panel-state-key="e2e-dashboards:ppt-charts" hidden' in dashboard_template
+    assert "$('ds-ppt-charts-panel').hidden = false;" in dashboard_script
+    assert "$('ds-ppt-charts-panel').hidden = true;" in dashboard_script
+    assert "$('ds-filter-panel').hidden = false; document.dispatchEvent(new CustomEvent('page-panel-navigation:update'));" in dashboard_script
+    assert "$('ds-filter-panel').hidden = true; document.dispatchEvent(new CustomEvent('page-panel-navigation:update'));" in dashboard_script
+    chart_builder_template = (Path(__file__).parents[1] / 'src/web_interface/templates/chart_builder.html').read_text(encoding='utf-8')
+    assert '<p class="eyebrow">Chart Builder</p><h2>Ad-Hoc Analysis</h2>' in chart_builder_template
+    assert 'data-page-panel-label="Interactive Preview"' in chart_builder_template
+    assert '<p class="eyebrow">Chart Builder</p>\n        <h2>Interactive Preview</h2>' in chart_builder_template
+    assert '<p class="eyebrow">Chart Definition</p>' in chart_builder_template
+    workspace_template = (Path(__file__).parents[1] / 'src/web_interface/templates/workspace.html').read_text(encoding='utf-8')
+    assert '<p class="eyebrow">Workspaces Management</p>\n        <h2>Select Workspace</h2>' in workspace_template
+    datasets_analysis_template = (Path(__file__).parents[1] / 'src/web_interface/templates/datasets_analysis.html').read_text(encoding='utf-8')
+    assert '<p class="eyebrow">Dataset Analysis</p>\n            <h2>{{ selected_dataset.file_name if selected_dataset else \'Select Dataset\' }}</h2>' in datasets_analysis_template
+    app_logs_template = (Path(__file__).parents[1] / 'src/web_interface/templates/app_logs.html').read_text(encoding='utf-8')
+    assert '<p class="eyebrow">Application activity</p>\n        <h2>App Logs</h2>' in app_logs_template
+    documentation_template = (Path(__file__).parents[1] / 'src/web_interface/templates/doc_view.html').read_text(encoding='utf-8')
+    assert 'class="panel doc-panel" data-page-panel-label="{{ doc_name }}"' in documentation_template
     assert "const selectAllOrNone = () => {\n      cancelAutoClose();" in app_script
     assert "dispatchNativeChange();\n      menu.hidden = true;\n      syncTrigger();\n      trigger.focus();" not in app_script
     assert 'window.createUnifiedDatasetViewer' in app_script
@@ -358,6 +404,12 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "window.showLoadingOverlay('Loading Filtered Dataset'" in dashboard_script
     assert "await renderData();\n      overlay('ds-data-overlay', true);" in dashboard_script
     app_styles = (Path(__file__).parents[1] / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')
+    assert '.page-panel-navigator{position:fixed;' in app_styles
+    assert '.page-panel-navigator-tab{' in app_styles
+    assert '.page-panel-navigator[data-theme="datasets"]' in app_styles
+    assert '.page-panel-navigator[data-theme="dashboards"]' in app_styles
+    assert '.page-panel-navigator[data-theme="reporting"]' in app_styles
+    assert '.page-panel-navigator .page-panel-main-menu{' in app_styles
     assert '.preview-column-filter-menu { position: fixed; z-index: 10010;' in app_styles
     assert "\\s*×\\s*|\\s+\\bx\\b\\s+" in app_script
     assert "const configuredValues = multiFields.has(key)" in app_script

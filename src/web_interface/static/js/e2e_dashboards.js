@@ -33,6 +33,8 @@
   const scrollStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:scroll`;
   const preparedStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:prepared`;
   const universeStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:universes`;
+  const navigationEntry = performance.getEntriesByType?.('navigation')?.[0];
+  const restorePageState = navigationEntry?.type === 'reload';
   const dashboardId = () => {
     if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
     const bytes = new Uint8Array(16);
@@ -60,7 +62,12 @@
       requestAnimationFrame(() => requestAnimationFrame(restore));
     } catch (_) { /* Storage is optional. */ }
   };
+  const resetScroll = () => {
+    try { sessionStorage.removeItem(scrollStorageKey); } catch (_) { /* Storage is optional. */ }
+    window.scrollTo({top: 0, left: 0, behavior: 'auto'});
+  };
   if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+  if (!restorePageState) resetScroll();
   window.addEventListener('pagehide', rememberScroll);
   window.addEventListener('beforeunload', rememberScroll);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') rememberScroll(); });
@@ -721,6 +728,7 @@
     await openExpandedChart(chart, payload, 'ppt');
   };
   const renderDashboardPptCharts = (payload, job) => {
+    $('ds-ppt-charts-panel').hidden = false;
     dashboardPptCharts = Array.isArray(payload.charts) ? payload.charts : [];
     dashboardPptChartsJobId = String(job?.id || '');
     $('ds-ppt-charts-count').textContent = `${dashboardPptCharts.length} chart${dashboardPptCharts.length === 1 ? '' : 's'}`;
@@ -776,6 +784,7 @@
   const loadDashboardPptCharts = async (jobId, scrollIntoView = false) => {
     const job = dashboardPptJobs.find(item => String(item.id) === String(jobId));
     if (!job?.charts_api_url) return;
+    $('ds-ppt-charts-panel').hidden = false;
     const request = ++dashboardPptChartsRequest;
     dashboardPptChartsJobId = String(job.id);
     $('ds-ppt-chart-job').value = String(job.id);
@@ -884,6 +893,7 @@
       $('ds-ppt-charts-empty').hidden = false;
       $('ds-ppt-charts-copy').textContent = 'Select a completed Dashboard PowerPoint job to inspect its cached charts. Click any chart to enlarge it.';
       setDashboardPptChartBadges(null);
+      $('ds-ppt-charts-panel').hidden = true;
       return;
     }
     if (dashboardPptChartsJobId !== select.value) void loadDashboardPptCharts(select.value);
@@ -1438,7 +1448,7 @@
     activeId = id; $('ds-viewer-export-ppt').dataset.dashboardPptId = id; definition = runtimeDashboardDefinition(dashboards[id], id); savedDefinition = definitionFingerprint(dashboards[id]); dirty = false; prepared = null; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; facetOptions = {}; availableFields = []; facetOptionRequests.clear(); slideIndex = 0; setViewEnabled(false); rememberOpen(id);
     resetViewerForDashboard();
     $('ds-name').value = definition.name; setNrMode(definition.technology || definition.template_technology, definition.template);
-    $('ds-filter-panel').hidden = false; setActiveDashboardHeading(definition.name); sources(); facets(); library(); status(''); await prepare();
+    $('ds-filter-panel').hidden = false; document.dispatchEvent(new CustomEvent('page-panel-navigation:update')); setActiveDashboardHeading(definition.name); sources(); facets(); library(); status(''); await prepare();
     // UI setup may fill omitted legacy defaults. Treat that normalization as the
     // persisted baseline, so opening another Dashboard does not prompt to discard it.
     savedDefinition = definitionFingerprint(definition); updateDirtyState();
@@ -1502,7 +1512,7 @@
   }
   bind('ds-import',() => $('ds-import-file').click());
   $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name); const id = dashboardId(), result = await api(`/${id}`,'PUT',payload.definition); dashboards[id] = result.definition; await openDashboard(id); $('ds-import-file').value = ''; });
-  function closeDashboard() { delete $('ds-viewer-export-ppt').dataset.dashboardPptId; $('ds-viewer-export-ppt').disabled = true; clearTimeout(facetsRefreshTimer); dismissPreparationStatus(); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; savedDefinition = ''; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; prepared = null; dirty = false; updateUnsavedFiltersBadge(); setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; setActiveDashboardHeading(''); $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
+  function closeDashboard() { delete $('ds-viewer-export-ppt').dataset.dashboardPptId; $('ds-viewer-export-ppt').disabled = true; clearTimeout(facetsRefreshTimer); dismissPreparationStatus(); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; savedDefinition = ''; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; prepared = null; dirty = false; updateUnsavedFiltersBadge(); setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; document.dispatchEvent(new CustomEvent('page-panel-navigation:update')); setActiveDashboardHeading(''); $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
   $('ds-name').oninput = () => { if (definition) { definition.name = $('ds-name').value; updateDirtyState(); } };
   $('ds-nr-mode').onchange = () => {
     const selected = setNrMode($('ds-nr-mode').value);
@@ -2442,8 +2452,7 @@
   window.addEventListener('beforeunload',event=>{ if (dirty) { event.preventDefault(); event.returnValue = ''; } });
   window.addEventListener('auto-calculated-field-job-status',event=>{ const job = event.detail; if (definition && job?.id && ['ready','completed'].includes(job.status) && !completedFieldJobs.has(job.id)) { completedFieldJobs.add(job.id); changed(); } });
   safe(async ()=>{
-    const navigation = performance.getEntriesByType?.('navigation')?.[0];
-    const restoreOpenDashboard = navigation?.type === 'reload';
+    const restoreOpenDashboard = restorePageState;
     let last = '';
     try {
       last = restoreOpenDashboard ? sessionStorage.getItem(openStorageKey) || '' : '';
@@ -2453,11 +2462,12 @@
         && Object.values(cached).every(item => item && typeof item === 'object' && typeof item.name === 'string') ? cached : {};
       if (Object.keys(dashboards).length) library();
     } catch (_) { dashboards = {}; }
-    dashboards = await api(); library(); restoreScroll();
+    dashboards = await api(); library();
+    if (restorePageState) restoreScroll(); else resetScroll();
     void refreshDashboardStatuses();
     void refreshDashboardPptJobs();
     if (dashboards[last]) await openDashboard(last);
-    restoreScroll();
+    if (restorePageState) restoreScroll(); else resetScroll();
   })();
   window.setInterval(refreshDashboardStatuses, 2000);
   window.setInterval(refreshDashboardPptJobs, 2000);

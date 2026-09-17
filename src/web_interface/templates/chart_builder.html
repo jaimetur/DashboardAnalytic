@@ -2,10 +2,16 @@
 {% block content %}
 <section class="dashboard-stack spacious-stack reporting-stack">
   <article class="panel hero-panel chart-builder-hero" style="background:linear-gradient(135deg,#b85b20,#e99b45)!important;color:#fff">
-    <p class="eyebrow">Ad-hoc analysis</p><h2>Chart Builder</h2>
+    <p class="eyebrow">Chart Builder</p><h2>Ad-Hoc Analysis</h2>
     <p class="lede">Select one or more processed CDR Sources, then build and refine a temporary chart.</p>
   </article>
-  <article class="panel">
+  <article class="panel" data-page-panel-label="Interactive Preview">
+    <div class="section-head tight-head">
+      <div>
+        <p class="eyebrow">Chart Builder</p>
+        <h2>Interactive Preview</h2>
+      </div>
+    </div>
     <label class="chart-builder-sources">CDR Type
       <select data-chart-builder-type><option value="data">Data</option><option value="voice">Voice</option><option value="speech">Speech</option></select>
     </label>
@@ -15,7 +21,7 @@
     <div class="chart-builder-layout">
       <div class="chart-builder-canvas" data-chart-builder-canvas><p>Select CDR Sources and configure the Interactive Preview.</p></div>
       <section class="report-chart-viewer-sandbox" data-chart-builder-sandbox>
-        <p class="eyebrow">Interactive preview</p><p class="form-note">Changes regenerate only this temporary preview.</p>
+        <p class="eyebrow">Chart Definition</p><p class="form-note">Changes regenerate only this temporary preview.</p>
         <div class="report-chart-viewer-fields" data-chart-builder-fields></div>
       </section>
     </div>

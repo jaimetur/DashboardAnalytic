@@ -4,8 +4,8 @@
   <article class="panel dataset-summary-panel select-dataset-card module-hero-datasets-analysis" style="background: linear-gradient(135deg, #0c4c8c, #68b8ff) !important; color: #ffffff;">
         <div class="section-head tight-head">
           <div>
-            <p class="eyebrow">Selected Dataset</p>
-            <h2>{{ selected_dataset.file_name if selected_dataset else 'No dataset yet' }}</h2>
+            <p class="eyebrow">Dataset Analysis</p>
+            <h2>{{ selected_dataset.file_name if selected_dataset else 'Select Dataset' }}</h2>
           </div>
           {% if selected_dataset %}<span class="pill status-pill status-{{ selected_dataset.status }}">{{ selected_dataset.status_label }}</span>{% endif %}
         </div>
@@ -382,7 +382,7 @@
     </main>
 
     <aside class="datasets-analysis-sidebar">
-      <article class="panel dataset-summary-panel sticky-panel adaptive-filters-panel">
+      <article class="panel dataset-summary-panel sticky-panel adaptive-filters-panel" data-page-panel-navigation="exclude">
         <div class="section-head tight-head">
           <div>
             <p class="eyebrow">Adaptive Filters</p>
