@@ -1531,6 +1531,41 @@ class Repository:
             if result.rowcount < 1:
                 raise ValueError('The Operator Mapping group no longer exists.')
 
+    def replace_operator_mapping_groups(self, groups: Iterable[dict[str, Any]]) -> None:
+        """Replace every Operator Mapping group with one validated portable payload."""
+        rows: list[tuple[str, str]] = []
+        assigned_sources: dict[str, str] = {}
+        canonical_labels: set[str] = set()
+        for group in groups:
+            if not isinstance(group, dict):
+                raise ValueError('Each Operator Mapping group must be an object.')
+            canonical = str(group.get('canonical') or '').strip()
+            if not canonical:
+                raise ValueError('Every Operator Mapping group requires a canonical label.')
+            canonical_key = canonical.casefold()
+            if canonical_key in canonical_labels:
+                raise ValueError(f'Duplicate canonical Operator Mapping: {canonical}.')
+            canonical_labels.add(canonical_key)
+            aliases = group.get('aliases')
+            if not isinstance(aliases, list):
+                raise ValueError(f'Operator Mapping aliases for {canonical} must be a list.')
+            for source in [canonical, *(str(value).strip() for value in aliases)]:
+                if not source:
+                    continue
+                source_key = source.casefold()
+                previous = assigned_sources.get(source_key)
+                if previous and previous.casefold() != canonical_key:
+                    raise ValueError(f'Operator alias {source} belongs to more than one canonical label.')
+                if previous:
+                    continue
+                assigned_sources[source_key] = canonical
+                rows.append((source, canonical))
+        with self.connection() as conn:
+            conn.execute('DELETE FROM operator_mappings')
+            conn.executemany(
+                'INSERT INTO operator_mappings (source_value, canonical_value) VALUES (?, ?)', rows,
+            )
+
     def invalidate_cdr_normalization(self) -> None:
         with self.connection() as conn:
             conn.execute(

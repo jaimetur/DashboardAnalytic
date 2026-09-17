@@ -674,7 +674,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "kind: sorted([" in selection_key_source
     assert "kind: sorted(set(dataset_ids))" in selection_key_source
     assert "field: sorted(set(values))" in selection_key_source
-    assert '{snapshot.selection_key}:{snapshot.definition.scope}:{entry_key}' in dashboard_module
+    assert '{entry_key}:{operator_mapping_key}' in dashboard_module
     assert "'rendering_only': rendering_only," in dashboard_module
     assert 'def materialize_selection(definition, task_repository, dimensions, selected_by_kind, fields, *, use_profile_options=False):' in dashboard_module
     assert 'use_profile_options=use_profile_options,' in dashboard_module
@@ -1605,6 +1605,21 @@ def test_dashboard_profile_facets_show_values_outside_the_saved_filter(client, m
     assert preview.status_code == 200, preview.text
     assert preview.json()['rows']['data'] == 2
     assert preview.json()['options']['Operator'] == ['A', 'B']
+
+
+def test_dashboard_operator_facets_keep_the_values_stored_in_the_combined_table(client):
+    payload = setup_dashboard(client)
+    core.repository.replace_operator_mapping_group(None, 'Alpha', ['A'])
+
+    preview = client.post('/api/e2e-dashboards/prepare', json=payload)
+
+    assert preview.status_code == 200, preview.text
+    assert preview.json()['options']['Operator'] == ['A', 'B']
+    options = client.post('/api/e2e-dashboards/filter-options', json={
+        'definition': payload, 'field': 'Operator',
+    })
+    assert options.status_code == 200, options.text
+    assert options.json()['values'] == ['A', 'B']
 
 
 def test_dashboard_reuses_normalized_snapshot_for_every_chart(client, monkeypatch):

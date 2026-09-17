@@ -64,7 +64,7 @@ The global floating task cards remain visible while workspace work continues. Th
 
 The processor materialises every fixed field even when all its values are empty. Dataset Preview places them after `Source_File`, `Source_Sheet` and `Dataset_Kind` in the order shown below. Each field follows its own rule:
 
-- **`Operator`** — Imports the source `Operator`, `Operator_A`, `Home_Operator_A` or `Home_Operator` value and normalises it through the editable workspace Operator Mappings.
+- **`Operator`** — Imports and preserves the source `Operator`, `Operator_A`, `Home_Operator_A` or `Home_Operator` value. Workspace Operator Mappings affect chart presentation and chart-template filters only; Dataset Preview, Dataset Analysis selectors and combined CDR tables remain source-faithful.
 - **`Subscriber`** — Keeps the source `Subscriber` or legacy `Suscriber` value. If the complete field is absent or empty, it copies `Operator`.
 - **`Vendor`** — Stores `Operator_Vendor` for operators resolved through a multivendor cell mapping and the canonical `Operator` for all other operators. This is the single official comparison field used by filters, legends and reports.
 - **`Vendor_Only`** — Derives from `Vendor` by removing a recognised operator prefix, including configured Vodafone/VF, Three/3/H3G, O2 and EE aliases.
@@ -121,7 +121,7 @@ The following ingestion fields are part of the current analytics model. They pro
 
 Analytics uses the success/failure/call-quality flags and the normalized time, quality, throughput, latency, loss, jitter and handover metrics directly. E2E Reporting also uses these normalized metrics as fallbacks for heterogeneous CDR layouts. `Technology_Primary` drives filters and grouping, `Vendor` drives multivendor comparisons, and `Attempt_Count` supplies a stable row-count metric. `Technology_Secondary` and `Unsustainable_Call` have fewer built-in consumers but remain addressable by templates, filters and Auto-calculated Fields, so they must not be removed without checking workspace definitions and migrating the model.
 
-Normalization version 11 rematerialises older CDR datasets and rebuilds combined tables with these rules. It removes obsolete `__N` collision columns and the former `Report_Vendor` duplicate without deleting the uploaded source file; genuine duplicate source headers retain their explicit `_Duplicate_N` names.
+Normalization version 12 rematerialises version-11 CDR datasets once from their uploaded source so `Operator` values previously replaced by a canonical mapping are restored. It retains the version-11 cleanup of obsolete `__N` collision columns and the former `Report_Vendor` duplicate without deleting the uploaded source file; genuine duplicate source headers retain their explicit `_Duplicate_N` names.
 
 ### Combined CDR Tables
 

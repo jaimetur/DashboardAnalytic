@@ -246,6 +246,14 @@ def ensure_fixed_cdr_fields(dataset: pd.DataFrame) -> pd.DataFrame:
     return dataset
 
 
+def canonical_operator_value(value: object, mappings: dict[str, str]) -> object:
+    """Return the current workspace label for one non-blank Operator value."""
+    if pd.isna(value) or not str(value).strip():
+        return value
+    text = str(value).strip()
+    return mappings.get(text.casefold(), text)
+
+
 def apply_operator_mappings(dataset: pd.DataFrame, mappings: dict[str, str]) -> pd.DataFrame:
     """Apply workspace operator aliases without changing blank values."""
     if not mappings:
@@ -260,10 +268,7 @@ def apply_operator_mappings(dataset: pd.DataFrame, mappings: dict[str, str]) -> 
     for column in result.columns:
         if column_identity(column) != 'operator':
             continue
-        result[column] = result[column].map(
-            lambda value: value if pd.isna(value) or not str(value).strip()
-            else mappings.get(str(value).strip().casefold(), value)
-        )
+        result[column] = result[column].map(lambda value: canonical_operator_value(value, mappings))
     if subscriber_is_derived and operator_column and subscriber_column:
         result[subscriber_column] = result[operator_column]
     return result

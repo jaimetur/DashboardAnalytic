@@ -782,7 +782,8 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert '<optgroup label="Full Environment">' in admin_response.text
     assert admin_response.text.index('<optgroup label="Full Workspace">') < admin_response.text.index('<optgroup label="Full Environment">')
     assert 'Config</option>' in admin_response.text
-    assert 'Full Environment (App Config + Dashboards + Report Templates + Auto-calculated Fields + Selected Workspaces)' in admin_response.text
+    assert 'Operator Mappings (from active workspace)' in admin_response.text
+    assert 'Full Environment (App Config + Dashboards + Report Templates + Operator Mappings + Auto-calculated Fields + Selected Workspaces)' in admin_response.text
     assert 'Workspace: Default' in admin_response.text
 
     config_response = client.get('/admin/import-export/export?export_target=config')
@@ -879,6 +880,46 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     )
     assert full_import_response.status_code == 303
     assert len(app_module.workspace_registry.list()) == 1
+
+
+def test_operator_mappings_export_and_import_replace_the_selected_workspace_groups(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login_super(client)
+    app_module.repository.replace_operator_mapping_group(None, 'Portable Carrier', ['Portable Alias'])
+
+    exported = client.get('/admin/import-export/export?export_target=operator-mappings')
+
+    assert exported.status_code == 200
+    with zipfile.ZipFile(BytesIO(exported.content)) as archive:
+        manifest = json.loads(archive.read('manifest.json'))
+        payload = json.loads(archive.read(manifest['archive_path']))
+    assert manifest['kind'] == 'operator-mappings'
+    assert manifest['workspace_components'] == ['operator_mappings']
+    assert payload['format'] == 'dashboard-analytic-operator-mappings'
+    assert any(group['canonical'] == 'Portable Carrier' for group in payload['mappings'])
+
+    app_module.repository.delete_operator_mapping_group('Portable Carrier')
+    inspected = client.post(
+        '/admin/import-export/inspect',
+        files={'package': ('operator-mappings.zip', BytesIO(exported.content), 'application/zip')},
+    )
+    assert inspected.status_code == 200
+    assert inspected.json()['kind'] == 'operator-mappings'
+    assert inspected.json()['destination_workspaces'] == [{'id': 'default', 'name': 'Default'}]
+    started = client.post('/admin/import-export/import/jobs', data={
+        'upload_id': inspected.headers['X-Import-Upload-Id'],
+        'confirmed_import': 'true',
+        'workspace_ids': 'default',
+    })
+    assert started.status_code == 200
+    for _attempt in range(100):
+        status_payload = client.get(started.json()['status_url']).json()
+        if status_payload['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.01)
+    assert status_payload['status'] == 'ready'
+    assert app_module.repository.list_operator_mappings()['portable alias'] == 'Portable Carrier'
 
 
 def test_full_environment_import_remaps_permissions_to_replaced_workspace_id(client, tmp_path: Path) -> None:
@@ -2749,6 +2790,7 @@ def test_admin_operator_mapping_panel_groups_and_edits_aliases(client) -> None:
     assert page.status_code == 200
     assert 'data-panel-state-key="admin:operator-mappings"' in page.text
     assert '<h2>Operator Mappings</h2>' in page.text
+    assert page.text.index('<h2>Report Templates Management</h2>') < page.text.index('<h2>Operator Mappings</h2>')
     assert 'value="Vodafone UK"' in page.text
     assert 'VF\nVFUK\nVodafone' in page.text
     assert 'value="Legacy Carrier"' in page.text
@@ -2940,6 +2982,30 @@ def test_dashboard_backup_declares_dashboard_component_for_selective_restore(cli
     assert manifest['workspace_components'] == ['dashboards']
     assert 'workspaces/Default/dashboards/dashboards.json' in names
     assert app_module._backup_archive_components(archive_path) == ['dashboards']
+
+
+def test_operator_mapping_backup_supports_selective_restore(client, tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    app_module.repository.replace_operator_mapping_group(None, 'Backup Carrier', ['Backup Alias'])
+    archive_path = app_module.create_recurring_database_backup({
+        'components': ['operator_mappings'],
+        'backup_path': str(tmp_path / 'backups'),
+        'max_backups': 30,
+        'workspace_ids': ['default'],
+    })
+
+    with zipfile.ZipFile(archive_path) as archive:
+        manifest = json.loads(archive.read('manifest.json'))
+        assert 'workspaces/Default/operator-mappings/operator-mappings.json' in archive.namelist()
+    assert manifest['workspace_components'] == ['operator_mappings']
+    assert app_module._backup_archive_components(archive_path) == ['operator_mappings']
+
+    app_module.repository.delete_operator_mapping_group('Backup Carrier')
+    app_module.restore_database_backup(archive_path, ['operator_mappings'])
+
+    assert app_module.repository.list_operator_mappings()['backup alias'] == 'Backup Carrier'
 
 
 def test_login_and_admin_remain_available_after_closing_the_active_workspace(client) -> None:
@@ -3219,6 +3285,70 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     dashboard_response = client.get('/datasets-analysis?dataset_id=1&input_kind=data')
     assert dashboard_response.status_code == 200
     assert 'href="/workspace/preview/1" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview">Preview Dataset</a>' in dashboard_response.text
+
+
+def test_operator_mapping_is_applied_to_charts_but_not_materialized_tables(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    app_module.repository.replace_operator_mapping_group(
+        'Vodafone UK', 'VF', ['Vodafone UK', 'Vodafone', 'VFUK'],
+    )
+    response = client.post(
+        '/datasets-analysis/upload',
+        data={'dataset_kinds': 'data'},
+        files={'dataset_files': (
+            'cdr_data.csv', BytesIO(b'Operator,Mean_Data_Rate\nVodafone UK,91\nO2,87\n'), 'text/csv',
+        )},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    dataset = app_module.serialize_dataset_row(app_module.repository.get_dataset(1))
+    materialized = app_module.repository.load_dataset_rows(1, ['Operator'], {})
+    combined = app_module.repository.load_reporting_rows('data', [1], ['Operator'])
+    chart_frame = app_module._combined_reporting_frame([dataset], 'nsa', [], False)
+
+    assert materialized['Operator'].tolist() == ['Vodafone UK', 'O2']
+    assert combined['Operator'].tolist() == ['Vodafone UK', 'O2']
+    assert chart_frame['Operator'].tolist() == ['VF', 'O2']
+    operator_options = next(
+        values for field, values in dataset['filter_options'].items()
+        if app_module.column_identity(field) == 'operator'
+    )
+    assert operator_options == ['O2', 'Vodafone UK']
+
+
+def test_operator_storage_migration_recovers_raw_values_from_the_source(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    app_module.repository.replace_operator_mapping_group(
+        'Vodafone UK', 'VF', ['Vodafone UK', 'Vodafone', 'VFUK'],
+    )
+    client.post(
+        '/datasets-analysis/upload',
+        data={'dataset_kinds': 'data'},
+        files={'dataset_files': (
+            'cdr_data.csv', BytesIO(b'Operator,Mean_Data_Rate\nVodafone UK,91\n'), 'text/csv',
+        )},
+        follow_redirects=False,
+    )
+    legacy = app_module.repository.load_dataset_rows(
+        1, app_module.repository.list_dataset_row_columns(1), {},
+    )
+    legacy['Operator'] = 'VF'
+    app_module.repository.replace_dataset_rows(1, legacy)
+    app_module.repository.replace_reporting_rows(1, 'data', legacy)
+    app_module.repository.update_dataset_profile(1, normalization_version=11)
+
+    dataset = app_module.serialize_dataset_row(app_module.repository.get_dataset(1))
+    app_module.refresh_selected_dataset_if_stale(dataset)
+
+    materialized = app_module.repository.load_dataset_rows(1, ['Operator'], {})
+    combined = app_module.repository.load_reporting_rows('data', [1], ['Operator'])
+    assert materialized['Operator'].tolist() == ['Vodafone UK']
+    assert combined['Operator'].tolist() == ['Vodafone UK']
 
 
 def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(client) -> None:
@@ -5284,7 +5414,7 @@ def test_dashboard_adaptive_filters_populate_netcheck_a_columns_for_existing_cdr
     assert response.status_code == 200
     assert 'select name="operator" multiple' in response.text
     assert 'value="Vodafone UK"' in response.text
-    assert 'value="3"' in response.text
+    assert 'value="Three UK"' in response.text
     assert 'select name="session_type" multiple' in response.text
     assert 'value="VoLTE"' in response.text
     assert 'value="VoNR"' in response.text

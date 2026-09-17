@@ -253,7 +253,7 @@ LEGACY_VENDOR_MAPPING_FAILURE_MARKERS = (
     'duplicate column name: vendor_2',
     'database is locked',
 )
-DATASET_NORMALIZATION_VERSION = 11
+DATASET_NORMALIZATION_VERSION = 12
 COMBINED_REPORTING_TEMPLATE_COLUMNS_VERSION = 1
 
 
@@ -2532,8 +2532,6 @@ def rebuild_dataset_artifacts(
     elif forced_dataset_kind == 'mapping_three':
         df = add_three_gcid_column(df)
     dataset_kind = df['dataset_kind'].iloc[0] if 'dataset_kind' in df.columns and not df.empty else (forced_dataset_kind or infer_dataset_kind(df, dataset_path.name))
-    if dataset_kind in CDR_DATASET_KINDS:
-        df = apply_operator_mappings(df, task_repository.list_operator_mappings())
     auto_vendor_mapping_applied = False
     auto_vendor_mapping_error: str | None = None
     if dataset_kind in CDR_DATASET_KINDS and (vodafone_mapping_dataset_id or three_mapping_dataset_id):
@@ -2905,20 +2903,41 @@ def clear_dataset_analysis_cache(dataset_path: Path) -> None:
         ANALYSIS_CACHE.pop(key, None)
 
 
-def refresh_selected_dataset_if_stale(selected_dataset: dict[str, Any] | None) -> dict[str, Any] | None:
+def refresh_selected_dataset_if_stale(
+    selected_dataset: dict[str, Any] | None,
+    task_repository: Repository | None = None,
+) -> dict[str, Any] | None:
+    task_repository = task_repository or repository
     if not selected_dataset or not selected_dataset.get('is_ready'):
         return selected_dataset
-    if int(selected_dataset.get('normalization_version') or 1) >= DATASET_NORMALIZATION_VERSION:
+    previous_version = int(selected_dataset.get('normalization_version') or 1)
+    if previous_version >= DATASET_NORMALIZATION_VERSION:
         return selected_dataset
 
     dataset_id = int(selected_dataset['id'])
     dataset_kind = str(selected_dataset.get('dataset_kind') or '').casefold()
-    if repository.dataset_rows_table_exists(dataset_id) and dataset_kind in CDR_DATASET_KINDS:
-        columns = repository.list_dataset_row_columns(dataset_id)
-        frame = repository.load_dataset_rows(dataset_id, columns, {})
+    dataset_path = Path(str(selected_dataset.get('stored_path') or ''))
+    if previous_version == 11 and dataset_kind in CDR_DATASET_KINDS and not dataset_path.is_file():
+        return selected_dataset
+    if previous_version == 11 and dataset_kind in CDR_DATASET_KINDS and dataset_path.is_file():
+        try:
+            options = json.loads(str(selected_dataset.get('processing_options_json') or '{}'))
+        except (TypeError, json.JSONDecodeError):
+            options = {}
+        rebuild_dataset_artifacts(
+            dataset_id,
+            dataset_path,
+            forced_dataset_kind=dataset_kind,
+            vodafone_mapping_dataset_id=options.get('vodafone_mapping_dataset_id'),
+            three_mapping_dataset_id=options.get('three_mapping_dataset_id'),
+            task_repository=task_repository,
+        )
+    elif task_repository.dataset_rows_table_exists(dataset_id) and dataset_kind in CDR_DATASET_KINDS:
+        columns = task_repository.list_dataset_row_columns(dataset_id)
+        frame = task_repository.load_dataset_rows(dataset_id, columns, {})
         source_columns: set[str] = set()
         try:
-            source_columns.update(get_dataset_source_columns(Path(selected_dataset['stored_path'])))
+            source_columns.update(get_dataset_source_columns(dataset_path))
         except (OSError, ValueError, KeyError):
             pass
         base_lookup = {
@@ -2958,22 +2977,23 @@ def refresh_selected_dataset_if_stale(selected_dataset: dict[str, Any] | None) -
             frame = frame.drop(columns=[legacy_report_vendor])
         frame = ensure_fixed_cdr_fields(frame)
         frame = ensure_vendor_group(frame)
-        frame = apply_operator_mappings(frame, repository.list_operator_mappings())
         frame = materialize_cdr_derived_columns(frame, dataset_kind)
-        repository.replace_dataset_rows(dataset_id, frame)
-        repository.replace_reporting_rows(dataset_id, dataset_kind, frame)
-        repository.copy_dataset_rows_to_reporting(
+        task_repository.replace_dataset_rows(dataset_id, frame)
+        task_repository.replace_reporting_rows(dataset_id, dataset_kind, frame)
+        task_repository.copy_dataset_rows_to_reporting(
             dataset_id, dataset_kind,
-            combined_reporting_required_columns(load_workspace_calculated_dimensions(), dataset_kind, repository),
+            combined_reporting_required_columns(
+                load_repository_calculated_dimensions(task_repository), dataset_kind, task_repository,
+            ),
         )
         filter_options = {
             dimension: values
             for dimension in FILTER_DIMENSIONS
-            if (values := repository.list_distinct_dataset_row_values(dataset_id, dimension))
+            if (values := task_repository.list_distinct_dataset_row_values(dataset_id, dimension))
         }
         available_aggregations = derive_available_aggregations(filter_options)
 
-        repository.update_dataset_profile(
+        task_repository.update_dataset_profile(
             dataset_id,
             normalization_version=DATASET_NORMALIZATION_VERSION,
             row_count=len(frame),
@@ -2982,7 +3002,7 @@ def refresh_selected_dataset_if_stale(selected_dataset: dict[str, Any] | None) -
             available_aggregations_json=json.dumps(available_aggregations),
         )
 
-    refreshed = repository.get_dataset(int(selected_dataset['id']))
+    refreshed = task_repository.get_dataset(int(selected_dataset['id']))
     return serialize_dataset_row(refreshed) if refreshed else selected_dataset
 
 
@@ -3410,7 +3430,8 @@ ARCHIVE_COMPONENTS = frozenset({
     'app_database', 'workspace_components',
 })
 WORKSPACE_ARCHIVE_COMPONENTS = frozenset({
-    'workspace_database', 'input', 'output', 'dashboards', 'report_templates', 'auto_calculated_fields',
+    'workspace_database', 'input', 'output', 'dashboards', 'report_templates', 'operator_mappings',
+    'auto_calculated_fields',
 })
 ARCHIVE_KIND_COMPONENTS = {
     'config': ('app_database',),
@@ -3419,6 +3440,7 @@ ARCHIVE_KIND_COMPONENTS = {
     'slides-templates': ('workspace_components',),
     'auto-calculated-fields': ('workspace_components',),
     'dashboards': ('workspace_components',),
+    'operator-mappings': ('workspace_components',),
 }
 UNCOMPRESSED_ARCHIVE_SUFFIXES = frozenset({
     '.7z', '.avi', '.docx', '.gif', '.gz', '.jpeg', '.jpg', '.mp3', '.mp4', '.pdf', '.png', '.pptx', '.rar',
@@ -3467,6 +3489,7 @@ def archive_workspace_components(manifest: dict[str, Any]) -> list[str]:
         'slides-templates': ('report_templates',),
         'auto-calculated-fields': ('auto_calculated_fields',),
         'dashboards': ('dashboards',),
+        'operator-mappings': ('operator_mappings',),
     }
     return list(fallback.get(str(manifest.get('kind') or ''), ()))
 
@@ -3487,7 +3510,7 @@ def full_workspace_archive_components(*, include_input_files: bool = True, inclu
         components.append('input')
     if include_generated_outputs:
         components.append('output')
-    return [*components, 'dashboards', 'report_templates', 'auto_calculated_fields']
+    return [*components, 'dashboards', 'report_templates', 'operator_mappings', 'auto_calculated_fields']
 
 
 def archive_workspace_components_for_target(target: str, *, include_generated_outputs: bool = True) -> list[str]:
@@ -3498,6 +3521,8 @@ def archive_workspace_components_for_target(target: str, *, include_generated_ou
         return ['auto_calculated_fields']
     if target == 'dashboards':
         return ['dashboards']
+    if target == 'operator-mappings':
+        return ['operator_mappings']
     if target.startswith('workspace:') or target in {'workspace', 'full-environment'}:
         return full_workspace_archive_components(include_generated_outputs=include_generated_outputs)
     return []
@@ -3570,7 +3595,10 @@ def recurring_backup_settings() -> dict[str, Any]:
     """Load the persistent recurring-backup configuration with safe defaults."""
     defaults = {
         'enabled': False,
-        'components': ['app_database', 'workspace_database', 'dashboards', 'report_templates', 'auto_calculated_fields'],
+        'components': [
+            'app_database', 'workspace_database', 'dashboards', 'report_templates',
+            'operator_mappings', 'auto_calculated_fields',
+        ],
         'workspace_ids': [],
         'recurrence': 'daily', 'execution_time': '02:00', 'weekly_day': 0, 'monthly_day': 1, 'max_backups': 30,
         'backup_path': str(application_data_dir / 'scheduled-backups'), 'last_run_period': '',
@@ -3589,7 +3617,7 @@ def recurring_backup_settings() -> dict[str, Any]:
             ('auto_calculated_fields', 'include_auto_calculated_fields'),
         ) if saved.get(legacy_key, True)]
     legacy_components = {
-        'full_workspaces': ('workspace_database', 'report_templates', 'auto_calculated_fields'),
+        'full_workspaces': ('workspace_database', 'report_templates', 'operator_mappings', 'auto_calculated_fields'),
         'slides_templates': ('report_templates',),
     }
     migrated_components: list[str] = []
@@ -3697,7 +3725,10 @@ def create_recurring_database_backup(
     ]
     components = set(config['components'])
     workspace_manifest_components = [
-        component for component in ('workspace_database', 'dashboards', 'input', 'output', 'report_templates', 'auto_calculated_fields')
+        component for component in (
+            'workspace_database', 'dashboards', 'input', 'output', 'report_templates',
+            'operator_mappings', 'auto_calculated_fields',
+        )
         if component in components
     ]
     def report_progress(message: str, progress: float) -> None:
@@ -3722,6 +3753,8 @@ def create_recurring_database_backup(
                 for technology in TEMPLATE_NAMES
                 for row in template_repository.list_report_templates(technology)
             )
+        if 'operator_mappings' in components:
+            total_bytes += len(_operator_mappings_archive_payload(workspace))
         if 'input' in components:
             total_bytes += source_tree_size(workspace.input_dir)
         if 'output' in components:
@@ -3760,6 +3793,9 @@ def create_recurring_database_backup(
             if 'report_templates' in components:
                 report_progress(f'Archiving Report Templates for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                 _archive_workspace_report_templates(archive, workspace, f'{archive_workspace_root}/report-templates', archived_bytes)
+            if 'operator_mappings' in components:
+                report_progress(f'Exporting Operator Mappings for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                _archive_workspace_operator_mappings(archive, workspace, archive_workspace_root, archived_bytes)
             if 'auto_calculated_fields' in components:
                 report_progress(f'Exporting Auto-calculated Fields for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
                 task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
@@ -3958,6 +3994,8 @@ def _backup_archive_components(archive_path: Path) -> list[str]:
         components.append('dashboards')
     if any(name.startswith('workspaces/') and '/report-templates/' in name for name in names):
         components.append('report_templates')
+    if any(name.startswith('workspaces/') and '/operator-mappings/operator-mappings.json' in name for name in names):
+        components.append('operator_mappings')
     if any(name.startswith('workspaces/') and '/auto-calculated-fields/' in name and name.endswith('.json') for name in names):
         components.append('auto_calculated_fields')
     if any(name.startswith('workspaces/') and '/input/' in name for name in names):
@@ -4050,6 +4088,10 @@ def restore_database_backup(archive_path: Path, components: Iterable[str]) -> No
                             task_repository.set_default_report_template(technology, template_name)
                     shutil.rmtree(workspace.slides_templates_dir, ignore_errors=True)
                 shutil.rmtree(workspace.database_path.parent / 'slides-templates', ignore_errors=True)
+            if 'operator_mappings' in selected:
+                member = f'{prefix}operator-mappings/operator-mappings.json'
+                if member in names:
+                    _restore_workspace_operator_mappings(workspace, archive.read(member))
             if 'auto_calculated_fields' in selected:
                 member = next((candidate for candidate in (
                     f'{prefix}auto-calculated-fields/auto-calculated-fields.json',
@@ -4133,6 +4175,54 @@ def _workspace_archive_metadata(workspace: Workspace) -> dict[str, Any]:
 
 DASHBOARD_STATE_KEY = 'e2e_dashboards_v2'
 
+
+def _operator_mappings_archive_payload(workspace: Workspace) -> bytes:
+    """Serialize complete canonical Operator groups for portable workspace operations."""
+    task_repository = Repository(
+        workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
+    )
+    groups = task_repository.list_operator_mapping_groups()
+    return json.dumps({
+        'format': 'dashboard-analytic-operator-mappings',
+        'version': 1,
+        'mappings': groups,
+    }, ensure_ascii=False, indent=2).encode('utf-8')
+
+
+def _archive_workspace_operator_mappings(
+    archive: zipfile.ZipFile,
+    workspace: Workspace,
+    archive_prefix: str,
+    progress_callback: Callable[[int], None] | None = None,
+) -> None:
+    payload = _operator_mappings_archive_payload(workspace)
+    archive.writestr(f'{archive_prefix}/operator-mappings/operator-mappings.json', payload)
+    if progress_callback:
+        progress_callback(len(payload))
+
+
+def _restore_workspace_operator_mappings(workspace: Workspace, payload: bytes) -> None:
+    try:
+        document = json.loads(payload.decode('utf-8'))
+        groups = document.get('mappings') if isinstance(document, dict) else None
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f'Operator Mappings for "{workspace.name}" are invalid.') from exc
+    if (
+        not isinstance(document, dict)
+        or document.get('format') != 'dashboard-analytic-operator-mappings'
+        or document.get('version') != 1
+        or not isinstance(groups, list)
+    ):
+        raise ValueError(f'Operator Mappings for "{workspace.name}" are invalid.')
+    task_repository = Repository(
+        workspace.database_path, repository.global_db_path, workspace_registry.registry_path,
+    )
+    task_repository.replace_operator_mapping_groups(groups)
+    if active_workspace and workspace.id == active_workspace.id:
+        ANALYSIS_CACHE.clear()
+        DATAFRAME_CACHE.clear()
+        _clear_chart_preview_caches()
+
 def _dashboard_archive_payload(workspace: Workspace) -> bytes:
     """Serialize saved Dashboard definitions only; generated chart caches are excluded."""
     task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
@@ -4181,6 +4271,7 @@ def _archive_workspace(
     )
     _archive_workspace_dashboards(archive, workspace, archive_prefix, progress_callback)
     _archive_workspace_report_templates(archive, workspace, f'{archive_prefix}/report-templates', progress_callback)
+    _archive_workspace_operator_mappings(archive, workspace, archive_prefix, progress_callback)
     archive.writestr(
         f'{archive_prefix}/auto-calculated-fields/auto-calculated-fields.json',
         json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
@@ -4206,6 +4297,9 @@ def export_archive_filename(target: str) -> str:
     if target == 'dashboards':
         workspace_name = active_workspace.name if active_workspace else 'workspace'
         return f'{workspace_name}_dashboards_{generated_at}.zip'
+    if target == 'operator-mappings':
+        workspace_name = active_workspace.name if active_workspace else 'workspace'
+        return f'{workspace_name}_operator-mappings_{generated_at}.zip'
     if target == 'config-with-templates':
         return f'dashboard-analytic-config-with-slides-templates_{generated_at}.zip'
     if target == 'full-environment':
@@ -4302,6 +4396,22 @@ def build_export_archive_file(
             )
             archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
             _archive_workspace_dashboards(archive, source_workspace, f'workspaces/{source_workspace.name}', progress_callback)
+        elif target == 'operator-mappings':
+            source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
+            source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
+            if not source_workspace:
+                raise ValueError('Open a workspace before exporting Operator Mappings.')
+            archive_path = f'workspaces/{source_workspace.name}/operator-mappings/operator-mappings.json'
+            manifest = archive_manifest(
+                'operator-mappings',
+                source_workspace={'id': source_workspace.id, 'name': source_workspace.name},
+                workspace_components=archive_workspace_components_for_target(target),
+                archive_path=archive_path,
+            )
+            archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
+            _archive_workspace_operator_mappings(
+                archive, source_workspace, f'workspaces/{source_workspace.name}', progress_callback,
+            )
         elif target == 'auto-calculated-fields':
             source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
             source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
@@ -4425,6 +4535,10 @@ def estimate_export_bytes(
             )
             definitions = parse_calculated_dimensions(source_repository.list_calculated_dimensions())
             total = len(json.dumps(calculated_dimensions_json(definitions)).encode('utf-8'))
+    elif target == 'operator-mappings':
+        source_workspace_id = next(iter(workspace_ids or ()), active_workspace.id if active_workspace else '')
+        source_workspace = workspace_registry.get(source_workspace_id) if source_workspace_id else None
+        total = len(_operator_mappings_archive_payload(source_workspace)) if source_workspace else 0
     elif target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
         if workspace:
@@ -4515,6 +4629,10 @@ def _recovered_transfer_details(manifest: dict[str, Any]) -> tuple[str, list[str
         source = manifest.get('source_workspace')
         name = str(source.get('name') or '') if isinstance(source, dict) else ''
         return ('Auto-calculated Fields', [name] if name else [])
+    if kind == 'operator-mappings':
+        source = manifest.get('source_workspace')
+        name = str(source.get('name') or '') if isinstance(source, dict) else ''
+        return ('Operator Mappings', [name] if name else [])
     if kind == 'workspace':
         workspace = manifest.get('workspace')
         name = str(workspace.get('name') or '') if isinstance(workspace, dict) else ''
@@ -4550,7 +4668,10 @@ def _recover_unimported_transfer_packages() -> None:
         try:
             manifest = read_import_manifest(package_path)
             kind = str(manifest.get('kind') or '')
-            if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields', 'dashboards', 'database-backup'}:
+            if kind not in {
+                'config', 'workspace', 'full-environment', 'slides-templates',
+                'auto-calculated-fields', 'dashboards', 'operator-mappings', 'database-backup',
+            }:
                 raise ValueError('Unsupported transfer package.')
         except (OSError, ValueError, zipfile.BadZipFile):
             package_path.unlink(missing_ok=True)
@@ -4655,7 +4776,7 @@ def start_export_job(
     job_id = uuid4().hex
     destination = package_dir / f'{job_id}.zip'
     selected_workspace_ids = list(workspace_ids) if workspace_ids is not None else None
-    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards'}:
+    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'}:
         if not active_workspace:
             raise ValueError('Open a workspace before exporting workspace templates or fields.')
         if target == 'auto-calculated-fields':
@@ -5189,6 +5310,26 @@ def _apply_import_archive(
             for workspace in destinations:
                 _restore_workspace_dashboards(workspace, payload)
             return f'Imported Dashboards into {len(destinations)} workspaces.'
+        if kind == 'operator-mappings':
+            member = str(manifest.get('archive_path') or '')
+            if (
+                member not in archive.namelist()
+                or not re.fullmatch(r'workspaces/[^/]+/operator-mappings/operator-mappings\.json', member)
+            ):
+                raise ValueError('The package does not contain valid Operator Mappings.')
+            destinations = [workspace_registry.get(workspace_id) for workspace_id in destination_workspace_ids]
+            destinations = [workspace for workspace in destinations if workspace]
+            if not destinations:
+                source = manifest.get('source_workspace')
+                if isinstance(source, dict) and source.get('id'):
+                    candidate = workspace_registry.get(str(source['id']))
+                    destinations = [candidate] if candidate else []
+            if not destinations:
+                raise ValueError('Select at least one destination workspace.')
+            payload = archive.read(member)
+            for workspace in destinations:
+                _restore_workspace_operator_mappings(workspace, payload)
+            return f'Imported Operator Mappings into {len(destinations)} workspaces.'
         if kind == 'auto-calculated-fields':
             try:
                 member = next((candidate for candidate in (
@@ -5353,7 +5494,7 @@ def _transfer_workspace_names(workspace_ids: list[str] | None) -> list[str]:
 
 
 def _transfer_offer_workspace_names(target: str, workspace_ids: list[str] | None) -> list[str]:
-    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards'}:
+    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'}:
         return _transfer_workspace_names(workspace_ids)
     if target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
@@ -5369,6 +5510,7 @@ def _transfer_content_label(target: str) -> str:
         'full-environment': 'Full Environment',
         'auto-calculated-fields': 'Auto-calculated Fields',
         'dashboards': 'Dashboards',
+        'operator-mappings': 'Operator Mappings',
     }
     if target.startswith('workspace:'):
         workspace = workspace_registry.get(target.removeprefix('workspace:'))
@@ -5660,7 +5802,7 @@ def start_transfer_job(
     destination = normalize_transfer_destination(destination_url, destination_port)
     _cleanup_expired_export_packages()
     selected_workspace_ids = list(workspace_ids) if workspace_ids is not None else None
-    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards'}:
+    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'}:
         if not active_workspace:
             raise ValueError('Open a workspace before transferring workspace templates or fields.')
         if target == 'auto-calculated-fields':
@@ -5704,7 +5846,9 @@ def transfer_job_payload(job_id: str, user: SessionUser) -> dict[str, Any] | Non
 
 def require_import_export_permission(user: SessionUser, target: str) -> None:
     """Authorize imports; admins may restore templates and fields into accessible workspaces."""
-    if user.role == 'super-admin' or target in {'slides-templates', 'auto-calculated-fields', 'dashboards'}:
+    if user.role == 'super-admin' or target in {
+        'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings',
+    }:
         return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -5716,7 +5860,7 @@ def require_export_permission(user: SessionUser, target: str) -> None:
     """Authorize exports and transfers without exposing other workspaces."""
     if user.role == 'super-admin':
         return
-    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards'}:
+    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'}:
         if active_workspace and repository.user_has_workspace_access(user.username, active_workspace.id):
             return
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Open a workspace you can access first.')
@@ -5838,8 +5982,9 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         {'value': 'config', 'label': 'App Config'},
         {'value': 'dashboards', 'label': 'Dashboards (from active workspace)', 'disabled': not active_workspace},
         {'value': 'slides-templates', 'label': 'Report Templates (from active workspace)', 'disabled': not active_workspace},
+        {'value': 'operator-mappings', 'label': 'Operator Mappings (from active workspace)', 'disabled': not active_workspace},
         {'value': 'auto-calculated-fields', 'label': 'Auto-calculated Fields (from active workspace)', 'disabled': not active_workspace},
-        {'value': 'full-environment', 'label': 'Full Environment (App Config + Dashboards + Report Templates + Auto-calculated Fields + Selected Workspaces)'},
+        {'value': 'full-environment', 'label': 'Full Environment (App Config + Dashboards + Report Templates + Operator Mappings + Auto-calculated Fields + Selected Workspaces)'},
         *[
             {'value': f'workspace:{workspace.id}', 'label': f'Full Workspace: {workspace.name}'}
             for workspace in accessible_workspaces(user)
@@ -5851,13 +5996,15 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         # admin's first export/transfer request had no export_target at all.
         export_options = [
             option for option in export_options
-            if option['value'] in {'slides-templates', 'auto-calculated-fields', 'dashboards'} or option['value'].startswith('workspace:')
+            if option['value'] in {
+                'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings',
+            } or option['value'].startswith('workspace:')
         ]
     export_option_groups = [
         ('Configuration Content', [option for option in export_options if option['value'] == 'config']),
         ('Workspace Content', [
             option for option in export_options
-            if option['value'] in {'dashboards', 'slides-templates', 'auto-calculated-fields'}
+            if option['value'] in {'dashboards', 'slides-templates', 'operator-mappings', 'auto-calculated-fields'}
         ]),
         ('Full Workspace', [option for option in export_options if option['value'].startswith('workspace:')]),
         ('Full Environment', [option for option in export_options if option['value'] == 'full-environment']),
@@ -6070,6 +6217,10 @@ def build_datasets_analysis_payload(selected_dataset: dict[str, Any] | None, req
             return None, [], selected_metrics, filter_options, 'The processed dataset is registered, but its source file is missing and no materialized query table exists. Reupload or retry processing this dataset.', False
         df = load_cached_dataset(dataset_path)
         repository.replace_dataset_rows(selected_dataset['id'], df)
+    if str(selected_dataset.get('dataset_kind') or '').casefold() in CDR_DATASET_KINDS:
+        # General Dataset Analysis filters use source-faithful table values.
+        # Canonical Operator labels belong only to the in-memory chart frame.
+        df = apply_operator_mappings(df, repository.list_operator_mappings())
     analyses: list[dict[str, Any]] = []
     for metric in selected_metrics:
         try:
@@ -8286,6 +8437,7 @@ def _reporting_dataset(
         raise HTTPException(status_code=400, detail=f"{payload['file_name']} has not finished processing.")
     if payload.get('dataset_kind') != expected_kind:
         raise HTTPException(status_code=400, detail=f"{payload['file_name']} is not a {expected_kind.title()} CDR.")
+    payload = refresh_selected_dataset_if_stale(payload, task_repository) or payload
     return payload
 
 
@@ -8417,6 +8569,11 @@ def _combined_reporting_frame(
     if 'source_sheet' in combined.columns:
         source_sheet_keys = combined['source_sheet'].fillna('').astype(str).str.strip().str.casefold()
         combined = combined.loc[~source_sheet_keys.isin(CDR_IGNORED_SHEET_KEYS)].copy()
+    try:
+        operator_mappings = task_repository.list_operator_mappings()
+    except sqlite3.OperationalError:
+        operator_mappings = {}
+    combined = apply_operator_mappings(combined, operator_mappings)
     # Data tests may legitimately fall back to LTE or report NR SA at the
     # failure instant. Treating that sample RAT as a report-wide NSA/SA filter
     # silently removes valid attempts and corrupts completion percentages.
@@ -9338,7 +9495,9 @@ def _chart_builder_context(payload: dict[str, Any]) -> tuple[pd.DataFrame, Catal
         ]
         if not frames:
             raise HTTPException(status_code=400, detail='The selected CDR Sources are not ready.')
-        return pd.concat(frames, ignore_index=True, sort=False)
+        return apply_operator_mappings(
+            pd.concat(frames, ignore_index=True, sort=False), repository.list_operator_mappings(),
+        )
     return _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4), entry
 
 
@@ -11240,7 +11399,10 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail='The transfer offer is invalid.')
     kind = str(payload.get('kind') or '')
-    if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields', 'dashboards', 'database-backup'}:
+    if kind not in {
+        'config', 'workspace', 'full-environment', 'slides-templates',
+        'auto-calculated-fields', 'dashboards', 'operator-mappings', 'database-backup',
+    }:
         raise HTTPException(status_code=400, detail='The offered export type is not supported.')
     if payload.get('archive_version') != ARCHIVE_VERSION:
         raise HTTPException(status_code=409, detail='The source server uses an incompatible export package version.')
@@ -11511,7 +11673,9 @@ async def accept_transfer_offer(
         if not offer:
             raise HTTPException(status_code=404, detail='The pending transfer offer no longer exists.')
         if offer.get('status') == 'pending':
-            if offer.get('kind') in {'auto-calculated-fields', 'slides-templates', 'dashboards'}:
+            if offer.get('kind') in {
+                'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings',
+            }:
                 workspaces = workspace_registry.list()
                 available = {workspace.id for workspace in workspaces}
                 # The browser normally opens the destination picker. Retain a
@@ -11711,7 +11875,10 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
     """Validate and retain an already disk-backed import upload."""
     manifest = read_import_manifest(package_path)
     kind = str(manifest.get('kind') or '')
-    if kind not in {'config', 'workspace', 'full-environment', 'slides-templates', 'auto-calculated-fields', 'dashboards', 'database-backup'}:
+    if kind not in {
+        'config', 'workspace', 'full-environment', 'slides-templates',
+        'auto-calculated-fields', 'dashboards', 'operator-mappings', 'database-backup',
+    }:
         raise ValueError('The export package type is not supported.')
     require_import_export_permission(user, kind)
     with IMPORT_JOBS_LOCK:
@@ -11727,7 +11894,7 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
         'includes_slides_templates': bool(manifest.get('includes_slides_templates')),
         'workspace_collisions': import_workspace_collisions(manifest),
     }
-    if kind in {'auto-calculated-fields', 'slides-templates', 'dashboards'}:
+    if kind in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'}:
         response_payload['selected_workspace_ids'] = matching_template_workspaces(manifest, accessible_workspaces(user))
         response_payload['destination_workspaces'] = [
             {'id': workspace.id, 'name': workspace.name} for workspace in accessible_workspaces(user)
@@ -11797,8 +11964,8 @@ def create_admin_import_job(
         kind = str(upload['manifest'].get('kind') or '')
     require_import_export_permission(user, kind)
     selected_workspaces = list(dict.fromkeys(workspace_ids or []))
-    if kind in {'auto-calculated-fields', 'slides-templates', 'dashboards'}:
-        if not selected_workspaces and kind in {'slides-templates', 'dashboards'}:
+    if kind in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'}:
+        if not selected_workspaces and kind in {'slides-templates', 'dashboards', 'operator-mappings'}:
             selected_workspaces = matching_template_workspaces(upload['manifest'], accessible_workspaces(user))
         allowed = {workspace.id for workspace in accessible_workspaces(user)}
         if not selected_workspaces:
@@ -11839,7 +12006,7 @@ async def import_admin_package(
             raise ValueError('Confirm the import warning before applying this package.')
         require_import_export_permission(user, str(manifest.get('kind')))
         destinations = []
-        if manifest.get('kind') in {'slides-templates', 'dashboards'}:
+        if manifest.get('kind') in {'slides-templates', 'dashboards', 'operator-mappings'}:
             destinations = matching_template_workspaces(manifest, accessible_workspaces(user))
             if not destinations:
                 raise ValueError('Select destination workspaces using the Import / Export / Transfer panel.')
@@ -11970,7 +12137,7 @@ async def update_admin_database_table(request: Request, user: SessionUser = Depe
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
     if table == 'operator_mappings':
-        repository.invalidate_cdr_normalization()
+        _clear_chart_preview_caches()
     repository.add_log(user.username, 'database_table_update', f'Updated row {rowid} in {table}.')
     return JSONResponse({'ok': True, 'message': 'Row saved.'})
 
@@ -11999,9 +12166,9 @@ def save_admin_operator_mapping_group(
             f'/admin?{urlencode({"operator_mapping_error": str(exc)})}',
             status_code=status.HTTP_303_SEE_OTHER,
         )
-    repository.invalidate_cdr_normalization()
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
+    _clear_chart_preview_caches()
     repository.add_log(user.username, 'operator_mapping_group_save', json.dumps({
         'original_canonical': original_canonical,
         'canonical': canonical_value.strip(),
@@ -12030,9 +12197,9 @@ def delete_admin_operator_mapping_group(
             f'/admin?{urlencode({"operator_mapping_error": str(exc)})}',
             status_code=status.HTTP_303_SEE_OTHER,
         )
-    repository.invalidate_cdr_normalization()
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
+    _clear_chart_preview_caches()
     repository.add_log(user.username, 'operator_mapping_group_delete', canonical_value.strip())
     return RedirectResponse(
         f'/admin?{urlencode({"operator_mapping_notice": "Operator Mapping deleted."})}',
@@ -12064,7 +12231,7 @@ async def delete_admin_database_table_row(request: Request, user: SessionUser = 
     ANALYSIS_CACHE.clear()
     DATAFRAME_CACHE.clear()
     if table == 'operator_mappings':
-        repository.invalidate_cdr_normalization()
+        _clear_chart_preview_caches()
     repository.add_log(user.username, 'database_table_delete', f'Deleted row {rowid} from {table}.')
     return JSONResponse({'ok': True, 'message': 'Row deleted.'})
 

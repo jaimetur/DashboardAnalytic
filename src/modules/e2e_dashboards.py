@@ -38,6 +38,7 @@ from src.modules.cdr_reporting import (
 
 from src.modules.repository import Repository
 from src.modules.runtime_config import ignore_event_time_filtering
+from src.modules.ingestion import apply_operator_mappings
 
 KINDS = ('data', 'voice', 'speech')
 STATE_KEY = 'e2e_dashboards_v2'
@@ -400,6 +401,7 @@ def install_dashboard_routes(core):
         material = {
             'definition': definition.model_dump(mode='json'),
             'template_content': sha256(template_content).hexdigest(),
+            'operator_mappings': task_repository.list_operator_mappings(),
         }
         return sha256(json.dumps(material, sort_keys=True, default=str).encode()).hexdigest()
 
@@ -2186,7 +2188,7 @@ def install_dashboard_routes(core):
         selected.extend(('dataset_id', 'source_row_id'))
         return list(dict.fromkeys(selected))
 
-    def chart_filter_sql(entry, columns, multivendor):
+    def chart_filter_sql(entry, columns, multivendor, task_repository):
         """Push safe physical template filters into SQLite before DataFrame creation."""
         clauses = []
         parameters = []
@@ -2209,6 +2211,7 @@ def install_dashboard_routes(core):
                 continue
             values = [str(value) for value in condition.values]
             if normalized == 'operator':
+                workspace_mappings = task_repository.list_operator_mappings()
                 operator_aliases = {
                     'vf': ('VF', 'Vodafone', 'Vodafone UK'),
                     'vodafone': ('VF', 'Vodafone', 'Vodafone UK'),
@@ -2225,6 +2228,21 @@ def install_dashboard_routes(core):
                     for value in values
                     for alias in operator_aliases.get(identity(value), (value,))
                 ))
+                canonical_values = {
+                    workspace_mappings.get(value.strip().casefold(), value.strip()).casefold()
+                    for value in values
+                }
+                values = list(dict.fromkeys([
+                    *values,
+                    *(
+                        source for source, canonical in workspace_mappings.items()
+                        if canonical.casefold() in canonical_values
+                    ),
+                    *(
+                        canonical for canonical in workspace_mappings.values()
+                        if canonical.casefold() in canonical_values
+                    ),
+                ]))
             selected = (
                 f"COALESCE(CAST({quote(column)} AS TEXT), '') COLLATE NOCASE"
                 if '' in values
@@ -2413,7 +2431,7 @@ def install_dashboard_routes(core):
             where = f'({where}) AND ({expression})'
             parameters.extend(f'%{str(value).casefold()}%' for value in values)
         template_where, template_parameters, filters_applied = chart_filter_sql(
-            entry, source_columns, snapshot.multivendor,
+            entry, source_columns, snapshot.multivendor, task_repository,
         )
         if not filters_applied:
             return None
@@ -2521,7 +2539,9 @@ def install_dashboard_routes(core):
             connection.close()
         if snapshot.multivendor:
             visible = ensure_vendor_group(visible)
-        visible = normalise_operator_aliases(visible)
+        visible = normalise_operator_aliases(
+            apply_operator_mappings(visible, task_repository.list_operator_mappings())
+        )
         return visible, total, chart_total, filter_values
 
     def unique_chart_dataset_rows(snapshot, entry, frame):
@@ -2560,7 +2580,7 @@ def install_dashboard_routes(core):
             )
             requested_columns = chart_query_columns(entry, snapshot.multivendor)
             template_where, template_parameters, template_filters_applied = chart_filter_sql(
-                entry, source_columns, snapshot.multivendor,
+                entry, source_columns, snapshot.multivendor, task_repository,
             )
             if template_where:
                 where = f'({where}) AND ({template_where})'
@@ -2571,6 +2591,7 @@ def install_dashboard_routes(core):
             raw_key = sha256(json.dumps({
                 'kind': entry.source_kind, 'columns': requested_columns, 'where': where, 'parameters': parameters,
                 'aggregation_columns': aggregation_columns,
+                'operator_mappings': task_repository.list_operator_mappings(),
             }, sort_keys=True, default=str).encode()).hexdigest()
             with lock:
                 raw_frame = snapshot.frames.get(raw_key)
@@ -2586,7 +2607,9 @@ def install_dashboard_routes(core):
                         )
                         if snapshot.multivendor:
                             raw_frame = ensure_vendor_group(raw_frame)
-                        raw_frame = normalise_operator_aliases(raw_frame)
+                        raw_frame = normalise_operator_aliases(
+                            apply_operator_mappings(raw_frame, task_repository.list_operator_mappings())
+                        )
                         raw_frame.attrs['operator_aliases_normalized'] = True
                         with lock:
                             snapshot.frames[raw_key] = raw_frame
@@ -2673,8 +2696,13 @@ def install_dashboard_routes(core):
     def canvas_model_path(snapshot, entry) -> Path:
         """Return the persistent Canvas-model location for one chart entry."""
         entry_key = sha256(repr(entry).encode()).hexdigest()
+        task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
+        operator_mapping_key = sha256(json.dumps(
+            task_repository.list_operator_mappings(), sort_keys=True,
+        ).encode()).hexdigest()
         filename = sha256(
-            f'{DASHBOARD_CHART_MODEL_CACHE_VERSION}:{snapshot.selection_key}:{snapshot.definition.scope}:{entry_key}'.encode()
+            f'{DASHBOARD_CHART_MODEL_CACHE_VERSION}:{snapshot.selection_key}:{snapshot.definition.scope}:'
+            f'{entry_key}:{operator_mapping_key}'.encode()
         ).hexdigest()
         return canvas_model_cache_dir(snapshot.workspace) / f'{filename}.json'
 
@@ -2817,7 +2845,7 @@ def install_dashboard_routes(core):
         )
         requested_columns = chart_query_columns(preview_entry, snapshot.multivendor)
         template_where, template_parameters, template_filters_applied = chart_filter_sql(
-            preview_entry, source_columns, snapshot.multivendor,
+            preview_entry, source_columns, snapshot.multivendor, task_repository,
         )
         if template_where:
             where = f'({where}) AND ({template_where})'
@@ -2831,7 +2859,9 @@ def install_dashboard_routes(core):
         )
         if snapshot.multivendor:
             raw_frame = ensure_vendor_group(raw_frame)
-        raw_frame = normalise_operator_aliases(raw_frame)
+        raw_frame = normalise_operator_aliases(
+            apply_operator_mappings(raw_frame, task_repository.list_operator_mappings())
+        )
         raw_frame.attrs['operator_aliases_normalized'] = True
         try:
             frame, _ = prepare_catalog_chart_preview_frame(
@@ -3004,10 +3034,15 @@ def install_dashboard_routes(core):
     def chart(token: str, index: int, user=Depends(dashboard_user)):
         snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False)
         entry_key = sha256(repr(entry).encode()).hexdigest()
-        key = (snapshot.selection_key, snapshot.definition.scope, entry_key)
+        task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
+        operator_mapping_key = sha256(json.dumps(
+            task_repository.list_operator_mappings(), sort_keys=True,
+        ).encode()).hexdigest()
+        key = (snapshot.selection_key, snapshot.definition.scope, entry_key, operator_mapping_key)
         cache_dir = pil_chart_cache_dir(snapshot.workspace)
         cache_path = cache_dir / sha256(
-            f'{DASHBOARD_RENDER_CACHE_VERSION}:{snapshot.selection_key}:{snapshot.definition.scope}:{entry_key}'.encode()
+            f'{DASHBOARD_RENDER_CACHE_VERSION}:{snapshot.selection_key}:{snapshot.definition.scope}:'
+            f'{entry_key}:{operator_mapping_key}'.encode()
         ).hexdigest()
         cache_path = cache_path.with_suffix('.png')
         # PIL chart renderers have no shared global canvas. Let browser image

@@ -27,6 +27,8 @@ Only a super-admin can change workspace access. Leave a password field empty whe
 
 Templates belong to the active workspace and are stored in that workspace database's `report_templates` table. Import, export, backup and transfer packages serialize them as portable CSV files, but those files are package artifacts rather than the live source of record. Obsolete `slides-templates` directories are removed by the current migration and portability flows.
 
+The **Operator Mappings** panel appears immediately below Report Templates Management. Its canonical labels and aliases can be exported, imported or transferred independently as one portable JSON component.
+
 Available actions:
 
 - New
@@ -347,13 +349,14 @@ Historical aliases resolve to `VF`, `O2`, `3` and `EE` for display without chang
 - App Config
 - Dashboards from the active workspace
 - Report Templates from the active workspace
+- Operator Mappings from the active workspace
 - Auto-calculated Fields from the active workspace
 - An accessible workspace
 - Full Environment with selected workspaces
 
-Admins can export/transfer the active workspace's Dashboards, Report Templates and Auto-calculated Fields, plus complete workspaces they can access. Super-admins can also export App Config and a Full Environment. Dashboard, template and field packages preselect a destination workspace with the same name as their source, where available, and allow one or more accessible destinations to be selected.
+Admins can export/transfer the active workspace's Dashboards, Report Templates, Operator Mappings and Auto-calculated Fields, plus complete workspaces they can access. Super-admins can also export App Config and a Full Environment. Dashboard, template, mapping and field packages preselect a destination workspace with the same name as their source, where available, and allow one or more accessible destinations to be selected.
 
-A Full Environment always contains App Config and the complete database/input content, Dashboard definitions, Report Templates and Auto-calculated Fields for every selected workspace. **Include generated Reports, Chart Sets and Dashboard PPT jobs** controls whether their `output/` trees are included. At least one workspace is required.
+A Full Environment always contains App Config and the complete database/input content, Dashboard definitions, Report Templates, Operator Mappings and Auto-calculated Fields for every selected workspace. **Include generated Reports, Chart Sets and Dashboard PPT jobs** controls whether their `output/` trees are included. At least one workspace is required.
 
 Exports run as disk-backed jobs and show estimated progress. The ZIP download starts when package creation finishes.
 
@@ -361,7 +364,7 @@ Exports run as disk-backed jobs and show estimated progress. The ZIP download st
 
 1. Select a Dashboard Analytic ZIP and wait for its disk-backed upload.
 2. Review the manifest-detected content, affected workspaces and overwrite warnings.
-3. For Dashboard, Report Template or Auto-calculated Field packages, choose one or more accessible destination workspaces; a matching source name is preselected when available.
+3. For Dashboard, Report Template, Operator Mapping or Auto-calculated Field packages, choose one or more accessible destination workspaces; a matching source name is preselected when available.
 4. Confirm import.
 5. Follow the background import in the floating task card.
 
@@ -394,11 +397,12 @@ In **Backup**, select one or more content types:
 - **Workspace Content: Workspace Database** stores the selected workspace SQLite databases.
 - **Workspace Content: Dashboards** stores one JSON file with every Dashboard definition and its comments for each selected workspace.
 - **Workspace Content: Report Templates** stores one CSV file for each Report Template.
+- **Workspace Content: Operator Mappings** stores one JSON file containing every canonical label and alias.
 - **Workspace Content: Auto-calculated Fields** stores one JSON file containing every selected workspace definition.
 - **Workspace Content: Input** stores raw dataset files when explicitly selected.
 - **Workspace Content: Output** stores generated Reports, Chart Sets and Dashboard PowerPoint jobs when explicitly selected.
 
-Application database, Workspace Database, Dashboards, Report Templates and Auto-calculated Fields are selected by default. Input and Output are opt-in. Selecting any workspace content reveals **Workspaces to include**, containing only workspaces you can access. Dashboard JSON and Report Template CSV files use `workspaces/<workspace name>/dashboards/` and `workspaces/<workspace name>/report-templates/` in Backup and Export ZIPs; these portable paths are independent from the application's internal workspace folder name. Use **Backup folder** and **Browse** to choose the server-visible destination, then use **Backup Now** to create a ZIP in the background from the current content and workspace selection. Content, workspace and folder selections are saved for the scheduler without enabling it; the job appears in the floating background-task card and keeps the Admin panel in place.
+Application database, Workspace Database, Dashboards, Report Templates, Operator Mappings and Auto-calculated Fields are selected by default. Input and Output are opt-in. Selecting any workspace content reveals **Workspaces to include**, containing only workspaces you can access. Dashboard, template and mapping JSON/CSV files use dedicated paths below `workspaces/<workspace name>/` in Backup and Export ZIPs; these portable paths are independent from the application's internal workspace folder name. Use **Backup folder** and **Browse** to choose the server-visible destination, then use **Backup Now** to create a ZIP in the background from the current content and workspace selection. Content, workspace and folder selections are saved for the scheduler without enabling it; the job appears in the floating background-task card and keeps the Admin panel in place.
 
 In **Restore**, choose a server-visible **Backup folder** and one of its ZIP files. The application reads the selected backup's manifest to detect its granular content and affected workspace names, with a structural fallback for older ZIPs, then shows a structured overwrite confirmation grouped into **Configuration Content** and **Workspace Content**. Choose the individual parts to restore only after reviewing that existing data will be replaced. Restore work also runs in the floating background-task card. The ZIP selector refreshes after an immediate backup and periodically while Admin remains open, so completed scheduled backups appear without a page reload.
 
@@ -423,7 +427,7 @@ The **Generated jobs** table contains Report and Chart Set rows, distinguished b
 
 The **Report Templates** table is the active workspace's `report_templates` table. It stores each template name, technology, default flag, timestamps and CSV content. Existing CSV templates are migrated automatically when their workspace is opened; compatibility CSV copies are generated only for portable packages.
 
-The dedicated **Operator Mappings** panel loads every existing mapping from the active workspace and groups them by canonical Operator. Each row shows the editable canonical label beside every editable source label mapped to it; enter one alias per line, then save or delete the complete group. Use **Add canonical mapping** to create another group. The canonical label always maps to itself automatically. Any change marks ready CDRs for rematerialization so their Operator value, and Subscriber when it was derived from Operator, use the updated mapping the next time those datasets are prepared.
+The dedicated **Operator Mappings** panel loads every existing mapping from the active workspace and groups them by canonical Operator. Each row shows the editable canonical label beside every editable source label mapped to it; enter one alias per line, then save or delete the complete group. Use **Add canonical mapping** to create another group. The canonical label always maps to itself automatically. Mappings are applied only to temporary chart data and chart-template Operator filters. Individual and combined CDR tables, Dataset Preview filters, Dataset Analysis selectors and E2E Dashboard filters retain the exact source values. Changing a mapping invalidates chart caches but does not rematerialize CDRs.
 
 Capabilities:
 
