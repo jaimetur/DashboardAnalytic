@@ -2146,6 +2146,81 @@ def test_interrupted_dataset_processing_is_resumed_instead_of_failed(client) -> 
     assert completed['last_error'] in {None, ''}
 
 
+def test_legacy_vendor_recovery_queues_without_writing_in_workspace_request(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    source = workspace.input_dir / 'legacy-locked.csv'
+    source.write_text('market,score\nES,91\n', encoding='utf-8')
+    dataset_id, _ = app_module.repository.add_dataset(source.name, str(source), 'admin')
+    app_module.repository.update_dataset_profile(
+        dataset_id,
+        status='failed',
+        progress=100,
+        dataset_kind='data',
+        last_error='database is locked',
+        processing_options_json='{}',
+    )
+    dataset = app_module.serialize_dataset_row(app_module.repository.get_dataset(dataset_id))
+
+    class DeferredFuture:
+        @staticmethod
+        def result():
+            return None
+
+    class CapturingExecutor:
+        submitted = False
+
+        def submit(self, *_args, **_kwargs):
+            self.submitted = True
+            return DeferredFuture()
+
+    executor = CapturingExecutor()
+    monkeypatch.setattr(app_module, '_dataset_processing_executor', lambda _repository: executor)
+    monkeypatch.setattr(
+        app_module.repository,
+        'update_dataset_profile',
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('request attempted a synchronous write')),
+    )
+    tasks = BackgroundTasks()
+    try:
+        queued = app_module.queue_legacy_vendor_mapping_recovery(tasks, [dataset], 'admin')
+    finally:
+        app_module._unregister_dataset_processing(dataset_id, app_module.repository)
+
+    assert queued is True
+    assert executor.submitted is True
+    assert len(tasks.tasks) == 1
+
+
+def test_dataset_executor_allows_parallel_background_processing(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    assert app_module._dataset_processing_executor(app_module.repository)._max_workers > 1
+
+
+def test_large_datasets_share_one_memory_slot_per_workspace(client, monkeypatch, tmp_path) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.repository import Repository
+
+    monkeypatch.setattr(app_module, 'HEAVY_DATASET_PROCESSING_THRESHOLD_BYTES', 10)
+    large = tmp_path / 'large.csv'
+    large.write_bytes(b'x' * 11)
+    small = tmp_path / 'small.csv'
+    small.write_bytes(b'x')
+
+    repository = Repository(tmp_path / 'workspace.db')
+    other_repository = Repository(tmp_path / 'other-workspace.db')
+    first = app_module._dataset_resource_slot(repository, large)
+    second = app_module._dataset_resource_slot(repository, large)
+    other = app_module._dataset_resource_slot(other_repository, large)
+
+    assert first is second
+    assert first is not other
+    assert app_module._dataset_resource_slot(repository, small) is not first
+
+
 def test_ready_chart_set_job_supports_relaunch_and_row_reuse(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -2349,7 +2424,8 @@ def test_every_global_background_task_exposes_execution_timing(client) -> None:
     with app_module.MANUAL_BACKUP_JOBS_LOCK:
         app_module.MANUAL_BACKUP_JOBS['timed-task'] = {
             'id': 'timed-task', 'owner': 'admin', 'status': 'processing',
-            'message': 'Testing task timing', 'progress': 40, 'created_at': started_at,
+            'message': 'Testing task timing', 'progress': 40,
+            'created_at': started_at - 30, 'started_at': started_at,
         }
     try:
         tasks = app_module._global_background_tasks(next(iter(app_module.SESSIONS.values())), set())
@@ -2362,6 +2438,29 @@ def test_every_global_background_task_exposes_execution_timing(client) -> None:
     assert task['duration_seconds'] >= 12
 
 
+def test_queued_background_task_reports_queue_age_without_execution_duration(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    queued_at = time.time() - 420
+    with app_module.MANUAL_BACKUP_JOBS_LOCK:
+        app_module.MANUAL_BACKUP_JOBS['queued-timing-task'] = {
+            'id': 'queued-timing-task', 'owner': 'admin', 'status': 'queued',
+            'message': 'Waiting to create backup', 'progress': 0, 'created_at': queued_at,
+        }
+    try:
+        tasks = app_module._global_background_tasks(next(iter(app_module.SESSIONS.values())), set())
+    finally:
+        with app_module.MANUAL_BACKUP_JOBS_LOCK:
+            app_module.MANUAL_BACKUP_JOBS.pop('queued-timing-task', None)
+
+    task = next(item for item in tasks if item['id'] == 'manual-backup:queued-timing-task')
+    assert task['status'] == 'queued'
+    assert task['queued_at'] == queued_at
+    assert task['started_at'] is None
+    assert task['duration_seconds'] is None
+
+
 def test_workspace_dataset_upload_uses_non_blocking_progress_card(client) -> None:
     login(client)
 
@@ -2372,6 +2471,11 @@ def test_workspace_dataset_upload_uses_non_blocking_progress_card(client) -> Non
     assert "new XMLHttpRequest()" in page.text
     assert "dashboard-analytic:background-task" in page.text
     assert 'data-loading-label="Uploading datasets"' not in page.text
+
+    app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+    assert 'formatQueuedAge' in app_script
+    assert 'const minimizedPanels = new Map();' in app_script
+    assert ':minimized`' not in app_script
 
     upload = client.post(
         '/datasets-analysis/upload',

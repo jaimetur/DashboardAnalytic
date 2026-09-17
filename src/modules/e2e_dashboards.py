@@ -317,6 +317,7 @@ def install_dashboard_routes(core):
                 output_path TEXT NOT NULL,
                 created_by TEXT NOT NULL,
                 created_at TEXT NOT NULL,
+                started_at TEXT,
                 status TEXT NOT NULL DEFAULT 'queued',
                 progress INTEGER NOT NULL DEFAULT 0,
                 slide_count INTEGER NOT NULL DEFAULT 0,
@@ -338,6 +339,10 @@ def install_dashboard_routes(core):
             if 'filters_json' not in columns:
                 connection.execute(
                     f"ALTER TABLE {DASHBOARD_PPT_JOBS_TABLE} ADD COLUMN filters_json TEXT NOT NULL DEFAULT '[]'"
+                )
+            if 'started_at' not in columns:
+                connection.execute(
+                    f"ALTER TABLE {DASHBOARD_PPT_JOBS_TABLE} ADD COLUMN started_at TEXT"
                 )
             if first_check:
                 connection.execute(
@@ -405,11 +410,11 @@ def install_dashboard_routes(core):
         charts_ready = ready and (charts_dir / 'manifest.json').is_file()
         job_id = int(row['id'])
         duration = None
-        if row['finished_at']:
+        if row['finished_at'] and row['started_at']:
             try:
                 duration = max(0, (
                     datetime.fromisoformat(str(row['finished_at']))
-                    - datetime.fromisoformat(str(row['created_at']))
+                    - datetime.fromisoformat(str(row['started_at']))
                 ).total_seconds())
             except ValueError:
                 pass
@@ -507,8 +512,14 @@ def install_dashboard_routes(core):
         try:
             if not run_is_active():
                 return
+            update_dashboard_ppt_job(
+                task_repository, job_id, status='processing',
+                started_at=datetime.now(timezone.utc).isoformat(),
+            )
             if snapshot is None:
-                update_dashboard_ppt_job(task_repository, job_id, status='processing', progress=1, last_error='')
+                update_dashboard_ppt_job(
+                    task_repository, job_id, progress=1, last_error='',
+                )
 
                 def preparation_progress(percent, _detail):
                     if run_is_active():
@@ -547,7 +558,7 @@ def install_dashboard_routes(core):
                         expected_workspace=str(Path(task_repository.db_path).resolve()),
                     )
                 snapshot = validate_dashboard_export_snapshot(snapshot, task_repository)
-            update_dashboard_ppt_job(task_repository, job_id, status='processing', progress=5, last_error='')
+            update_dashboard_ppt_job(task_repository, job_id, progress=5, last_error='')
             presentation = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
             _remove_all_slides(presentation)
             grouped = defaultdict(list)
@@ -940,7 +951,7 @@ def install_dashboard_routes(core):
                 scope=str(raw_definition.get('scope') or 'single'), filters_json=filters_json,
                 output_file=output_file, output_path=str(destination), created_at=datetime.now(timezone.utc).isoformat(),
                 status='queued', progress=0, slide_count=0, chart_count=0,
-                last_error='', finished_at=None,
+                last_error='', started_at=None, finished_at=None,
             )
         run_token = uuid4().hex
         with lock:
@@ -1742,8 +1753,6 @@ def install_dashboard_routes(core):
                     int(cached['id']), cache_key, bool(cached['materialized']),
                     json.loads(cached['options_json']), json.loads(cached['row_counts_json']), True,
                 )
-            cursor = connection.execute('INSERT INTO dashboard_filter_selections (cache_key) VALUES (?)', (cache_key,))
-            selection_id = int(cursor.lastrowid)
             predicates = {}
             row_counts = {}
             for kind, selected in selected_by_kind.items():
@@ -1755,13 +1764,6 @@ def install_dashboard_routes(core):
                     f'SELECT COUNT(*) AS count FROM {table} WHERE {where}', params,
                 ).fetchone()['count'])
             materialized = sum(row_counts.values()) <= DASHBOARD_SELECTION_ROW_LIMIT
-            if materialized:
-                for kind, (where, params, table) in predicates.items():
-                    connection.execute(
-                        'INSERT INTO dashboard_filter_selection_rows (selection_id, dataset_kind, dataset_id, source_row_id) '
-                        f'SELECT ?, ?, dataset_id, source_row_id FROM {table} WHERE {where}',
-                        (selection_id, kind, *params),
-                    )
             # A full, unfiltered CDR selection can use its upload-time profile
             # catalogue. This avoids wide DISTINCT scans while row counts and
             # chart previews remain exact from the combined reporting tables.
@@ -1802,10 +1804,22 @@ def install_dashboard_routes(core):
                             encoded_values = row[f'facet_{index}'] if row else '[]'
                             options[field_name].update(str(value) for value in json.loads(encoded_values or '[]'))
                 options = {field_name: sorted(values, key=str.casefold) for field_name, values in options.items()}
-            connection.execute(
-                'UPDATE dashboard_filter_selections SET options_json = ?, row_counts_json = ?, materialized = ? WHERE id = ?',
-                (json.dumps(options), json.dumps(row_counts), int(materialized), selection_id),
+            # Expensive counts and facet scans above are read-only. Start the
+            # coordinated Workspace write transaction only once their final
+            # cache payload is ready.
+            cursor = connection.execute(
+                'INSERT INTO dashboard_filter_selections '
+                '(cache_key, options_json, row_counts_json, materialized) VALUES (?, ?, ?, ?)',
+                (cache_key, json.dumps(options), json.dumps(row_counts), int(materialized)),
             )
+            selection_id = int(cursor.lastrowid)
+            if materialized:
+                for kind, (where, params, table) in predicates.items():
+                    connection.execute(
+                        'INSERT INTO dashboard_filter_selection_rows (selection_id, dataset_kind, dataset_id, source_row_id) '
+                        f'SELECT ?, ?, dataset_id, source_row_id FROM {table} WHERE {where}',
+                        (selection_id, kind, *params),
+                    )
             stale = connection.execute(
                 'SELECT id FROM dashboard_filter_selections ORDER BY last_accessed_at DESC, id DESC LIMIT -1 OFFSET ?',
                 (DASHBOARD_SELECTION_CACHE_LIMIT,),
@@ -2128,6 +2142,8 @@ def install_dashboard_routes(core):
                 'id': preparation_id, 'workspace': workspace, 'name': definition.name,
                 'dashboard_id': dashboard_id,
                 'rendering_only': rendering_only, 'cancellation': cancellation,
+                'status': 'queued', 'queued_at': datetime.now(timezone.utc).timestamp(),
+                'started_at': None,
                 'progress': 0, 'detail': 'Starting Dashboard preparation',
             }
         try:
@@ -2141,6 +2157,15 @@ def install_dashboard_routes(core):
                         task.update(progress=percent, detail=detail)
 
             with dashboard_work_gate:
+                with lock:
+                    task = direct_preparation_tasks.get(preparation_id)
+                    if task is not None:
+                        if cancellation['requested']:
+                            raise RuntimeError('Dashboard preparation cancelled.')
+                        task.update(
+                            status='processing',
+                            started_at=datetime.now(timezone.utc).timestamp(),
+                        )
                 preview = build_preview(
                     definition, user, workspace=workspace, cancelled=preparation_cancelled,
                     progress=update_preparation_progress,
@@ -2376,34 +2401,51 @@ def install_dashboard_routes(core):
             connection = projection_connection(cache_path)
             temporary = f'building_{kind}_{uuid4().hex}'
             try:
-                connection.execute('ATTACH DATABASE ? AS workspace_source', (snapshot.workspace,))
-                connection.execute(f'PRAGMA workspace_source.cache_size=-{DASHBOARD_PROJECTION_CACHE_KIB}')
-                connection.execute(f'PRAGMA workspace_source.mmap_size={DASHBOARD_PROJECTION_MMAP_SIZE}')
                 connection.execute('BEGIN IMMEDIATE')
                 found = connection.execute(
                     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,),
                 ).fetchone()
                 if not found:
                     dataset_ids = [int(row['id']) for row in selected]
-                    available_dataset_ids = [
-                        int(row['dataset_id']) for row in connection.execute(
-                            f'SELECT DISTINCT dataset_id FROM workspace_source.'
-                            f'{task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))}'
-                        ).fetchall()
-                    ]
-                    scan_hint = dashboard_projection_scan_hint(dataset_ids, available_dataset_ids)
-                    placeholders = ', '.join('?' for _ in dataset_ids)
-                    select_clause = ', '.join(
-                        task_repository._quote_identifier(column) for column in projected_columns
-                    )
-                    connection.execute(
-                        f'CREATE TABLE {task_repository._quote_identifier(temporary)} AS '
-                        f'SELECT {select_clause} FROM workspace_source.'
-                        f'{task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))}'
-                        f'{scan_hint} '
-                        f'WHERE dataset_id IN ({placeholders})',
-                        dataset_ids,
-                    )
+                    workspace_uri = f'file:{Path(snapshot.workspace).resolve()}?mode=ro'
+                    source = sqlite3.connect(workspace_uri, uri=True, timeout=30.0)
+                    try:
+                        source.execute('PRAGMA query_only=ON')
+                        source.execute('PRAGMA busy_timeout=30000')
+                        source.execute(f'PRAGMA cache_size=-{DASHBOARD_PROJECTION_CACHE_KIB}')
+                        source.execute(f'PRAGMA mmap_size={DASHBOARD_PROJECTION_MMAP_SIZE}')
+                        source.execute('BEGIN')
+                        source_table = task_repository._quote_identifier(
+                            task_repository.reporting_rows_table_name(kind)
+                        )
+                        available_dataset_ids = [
+                            int(row[0]) for row in source.execute(
+                                f'SELECT DISTINCT dataset_id FROM {source_table}'
+                            ).fetchall()
+                        ]
+                        scan_hint = dashboard_projection_scan_hint(dataset_ids, available_dataset_ids)
+                        placeholders = ', '.join('?' for _ in dataset_ids)
+                        quoted_columns = [
+                            task_repository._quote_identifier(column) for column in projected_columns
+                        ]
+                        quoted_temporary = task_repository._quote_identifier(temporary)
+                        connection.execute(
+                            f'CREATE TABLE {quoted_temporary} ({", ".join(quoted_columns)})'
+                        )
+                        rows = source.execute(
+                            f'SELECT {", ".join(quoted_columns)} FROM {source_table}{scan_hint} '
+                            f'WHERE dataset_id IN ({placeholders})',
+                            dataset_ids,
+                        )
+                        insert_sql = (
+                            f'INSERT INTO {quoted_temporary} ({", ".join(quoted_columns)}) '
+                            f'VALUES ({", ".join("?" for _ in projected_columns)})'
+                        )
+                        while batch := rows.fetchmany(2_000):
+                            ensure_snapshot_not_cancelled(snapshot)
+                            connection.executemany(insert_sql, batch)
+                    finally:
+                        source.close()
                     ensure_snapshot_not_cancelled(snapshot)
                     connection.execute(
                         f'ALTER TABLE {task_repository._quote_identifier(temporary)} '
@@ -3362,7 +3404,7 @@ def install_dashboard_routes(core):
                 'name': str(raw_definition.get('name') or dashboard_id), 'status': 'queued', 'completed': 0, 'total': 0,
                 'restoring_cached_models': False, 'generation': generation, 'cancel_requested': False, 'priority_indexes': [],
                 'task_id': f'dashboard-prefetch:{dashboard_id}' if prepared_preview is None else f'dashboard-prefetch:{dashboard_id}:{fingerprint[:12]}',
-                'created_at': monotonic(), 'started_at': datetime.now(timezone.utc).timestamp(),
+                'created_at': monotonic(), 'queued_at': datetime.now(timezone.utc).timestamp(), 'started_at': None,
                 'raw_definition': dict(raw_definition), 'user': user,
                 'progress': 0, 'detail': 'Queued'}
             if restored_preview is not None:
@@ -3387,7 +3429,6 @@ def install_dashboard_routes(core):
                     if job.get('cancel_requested') or job.get('generation') != prefetch_generation.get(workspace, 0):
                         job['status'] = 'cancelled'
                         return
-                    job['status'] = 'processing'
                 if preview is None:
                     def preparation_cancelled():
                         with lock:
@@ -3402,9 +3443,23 @@ def install_dashboard_routes(core):
                                 job.update(progress=percent, detail=detail)
 
                     with dashboard_work_gate:
+                        with lock:
+                            if job.get('cancel_requested') or job.get('generation') != prefetch_generation.get(workspace, 0):
+                                job['status'] = 'cancelled'
+                                return
+                            job.update(
+                                status='processing',
+                                started_at=datetime.now(timezone.utc).timestamp(),
+                            )
                         preview = build_preview(
                             definition, user, workspace=workspace, cancelled=preparation_cancelled,
                             progress=update_warmup_progress,
+                        )
+                else:
+                    with lock:
+                        job.update(
+                            status='processing',
+                            started_at=datetime.now(timezone.utc).timestamp(),
                         )
                 persist_preview_manifest(workspace, dashboard_id, fingerprint, preview['token'])
                 charts = [chart['index'] for slide in preview['slides'] for chart in slide['charts'] if chart['available']]
@@ -3650,6 +3705,8 @@ def install_dashboard_routes(core):
                             f'{job["completed"]} of {job["total"]} Canvas models'
                             if job['total'] else str(job.get('detail') or 'Preparing filtered Dashboard selection')
                         ),
+                        'status': 'processing',
+                        'queued_at': job.get('queued_at'),
                         'started_at': job.get('started_at'),
                         'progress': round(job['completed'] * 100 / job['total']) if job['total'] else job.get('progress', 0),
                         'stop_task_id': f'dashboard-prepare:{job["task_id"]}',
@@ -3661,7 +3718,9 @@ def install_dashboard_routes(core):
                         'dashboard_name': job['name'],
                         'label': 'Queued Dashboard Charts' if job['total'] else 'Queued Dashboard dataset',
                         'detail': 'Queued',
-                        'started_at': job.get('started_at'),
+                        'status': 'queued',
+                        'queued_at': job.get('queued_at'),
+                        'started_at': None,
                         'progress': 0,
                         'stop_task_id': f'dashboard-prepare:{job["task_id"]}',
                         'stop_url': f'/api/background-tasks/{workspace.id}/stop',
@@ -3675,6 +3734,9 @@ def install_dashboard_routes(core):
                     if task.get('rendering_only')
                     else str(task.get('detail') or 'Building filtered Dashboard selection')
                 ),
+                'status': task.get('status', 'processing'),
+                'queued_at': task.get('queued_at'),
+                'started_at': task.get('started_at'),
                 'progress': task.get('progress', 0),
                 'stop_task_id': f'dashboard-prepare:{task["id"]}',
                 'stop_url': f'/api/background-tasks/{workspace.id}/stop',

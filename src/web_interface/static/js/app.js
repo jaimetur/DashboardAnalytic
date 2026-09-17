@@ -6243,6 +6243,7 @@ if (queueNode) {
   let previousServerTasks = new Map();
   const completedServerTasks = new Map();
   const transientTasks = new Map();
+  const minimizedPanels = new Map();
   const completedTaskRetentionMs = 5000;
   let completedTaskExpiryTimer = null;
   const formatTaskDuration = (seconds) => {
@@ -6250,6 +6251,13 @@ if (queueNode) {
     if (seconds < 60) return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
     const minutes = Math.floor(seconds / 60);
     return `${minutes}m ${Math.round(seconds % 60)}s`;
+  };
+  const taskIsQueued = (task) => String(task?.status || '').toLowerCase() === 'queued'
+    || String(task?.detail || '').toLowerCase() === 'queued';
+  const formatQueuedAge = (queuedAt) => {
+    const timestamp = Number(queuedAt);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
+    return `Queued ${Math.max(0, Math.floor((Date.now() / 1000 - timestamp) / 60))}m ago`;
   };
 
   window.addEventListener('dashboard-analytic:background-task', (event) => {
@@ -6266,7 +6274,7 @@ if (queueNode) {
             workspace_name: previous.workspace_name || 'Active workspace',
             is_active: Boolean(previous.is_active), tasks: [],
           },
-          task: {...previous, detail: 'Completed', progress: 100, completed_at: completedAt / 1000,
+          task: {...previous, status: 'completed', detail: 'Completed', progress: 100, completed_at: completedAt / 1000,
             duration_seconds: Math.max(0, (completedAt - startedAt) / 1000)},
           position: 0, expiresAt: completedAt + completedTaskRetentionMs,
         });
@@ -6274,14 +6282,17 @@ if (queueNode) {
       transientTasks.delete(String(task.id));
     } else {
       const previous = transientTasks.get(String(task.id));
-      const startedAt = task.started_at || previous?.started_at || Date.now() / 1000;
+      const queued = taskIsQueued(task);
+      const queuedAt = task.queued_at || previous?.queued_at || Date.now() / 1000;
+      const startedAt = queued ? null : (task.started_at || previous?.started_at || Date.now() / 1000);
       transientTasks.set(String(task.id), {
         ...task,
+        queued_at: queuedAt,
         started_at: startedAt,
-        duration_seconds: task.duration_seconds !== null && task.duration_seconds !== undefined
+        duration_seconds: !queued && task.duration_seconds !== null && task.duration_seconds !== undefined
           && Number.isFinite(Number(task.duration_seconds))
           ? Number(task.duration_seconds)
-          : Math.max(0, Date.now() / 1000 - Number(startedAt)),
+          : (!queued && startedAt ? Math.max(0, Date.now() / 1000 - Number(startedAt)) : null),
       });
     }
     render(mergedGroups());
@@ -6340,9 +6351,12 @@ if (queueNode) {
       (Array.isArray(group.tasks) ? group.tasks : []).forEach((task, position) => {
         if (!task?.id) return;
         const previous = previousServerTasks.get(String(task.id));
-        const observedAt = Number(task.started_at) * 1000 || previous?.observedAt || now;
-        if (!Number(task.started_at)) task.started_at = observedAt / 1000;
-        if ((task.duration_seconds === null || task.duration_seconds === undefined)
+        const queued = taskIsQueued(task);
+        const observedAt = queued ? null : (Number(task.started_at) * 1000 || previous?.observedAt || now);
+        if (!queued && !Number(task.started_at)) task.started_at = observedAt / 1000;
+        if (queued) {
+          task.duration_seconds = null;
+        } else if ((task.duration_seconds === null || task.duration_seconds === undefined)
             || !Number.isFinite(Number(task.duration_seconds))) {
           task.duration_seconds = Math.max(0, (now - observedAt) / 1000);
         }
@@ -6359,14 +6373,15 @@ if (queueNode) {
         ? Math.max(now, completedAt) + completedTaskRetentionMs
         : now + completedTaskRetentionMs;
       const durationSeconds = Number(previous.task.duration_seconds);
+      const observedAt = Number(previous.observedAt);
       if (expiresAt <= now) return;
       completedServerTasks.set(taskId, {
         group: previous.group,
         task: {
-          ...previous.task, detail: 'Completed', progress: 100, completed_at: completedAt / 1000,
+          ...previous.task, status: 'completed', detail: 'Completed', progress: 100, completed_at: completedAt / 1000,
           duration_seconds: Number.isFinite(durationSeconds)
             ? durationSeconds
-            : Math.max(0, (completedAt - previous.observedAt) / 1000),
+            : (Number.isFinite(observedAt) ? Math.max(0, (completedAt - observedAt) / 1000) : 0),
         },
         position: previous.position,
         expiresAt,
@@ -6398,7 +6413,7 @@ if (queueNode) {
     panel.className = `background-task-panel background-task-panel-${panelKind}`;
     panel.setAttribute('aria-label', `Background tasks for ${group.workspace_name || 'workspace'}`);
 
-    const minimizedKey = `dashboard-analytic:background-task-panel:${group.workspace_id}:minimized`;
+    const panelStateKey = String(group.workspace_id);
     const minimize = document.createElement('button');
     minimize.type = 'button';
     minimize.className = 'background-task-minimize-button';
@@ -6408,10 +6423,10 @@ if (queueNode) {
       minimize.textContent = value ? '+' : '−';
       minimize.title = value ? 'Expand background tasks' : 'Minimize background tasks';
       minimize.setAttribute('aria-label', minimize.title);
-      localStorage.setItem(minimizedKey, value ? '1' : '0');
+      minimizedPanels.set(panelStateKey, value);
     };
     minimize.addEventListener('click', () => setMinimized(!panel.classList.contains('is-minimized')));
-    setMinimized(localStorage.getItem(minimizedKey) === '1');
+    setMinimized(minimizedPanels.get(panelStateKey) === true);
     panel.append(minimize);
 
     const positionKey = `dashboard-analytic:background-task-panel:${group.workspace_id}:position`;
@@ -6542,7 +6557,9 @@ if (queueNode) {
       const numericProgress = Number(task.progress);
       const hasProgress = task.progress !== null && task.progress !== undefined && Number.isFinite(numericProgress);
       const duration = Number(task.duration_seconds);
-      detail.textContent = `${String(task.detail || 'Processing')}${hasProgress ? ` · ${Math.round(Math.max(0, Math.min(100, numericProgress)))}%` : ''}${formatTaskDuration(duration) ? ` · ${formatTaskDuration(duration)}` : ''}`;
+      const queuedLabel = taskIsQueued(task) ? formatQueuedAge(task.queued_at) : '';
+      const taskDetail = queuedLabel || String(task.detail || 'Processing');
+      detail.textContent = `${taskDetail}${hasProgress ? ` · ${Math.round(Math.max(0, Math.min(100, numericProgress)))}%` : ''}${!queuedLabel && formatTaskDuration(duration) ? ` · ${formatTaskDuration(duration)}` : ''}`;
       item.append(detail);
 
       const progress = document.createElement('div');
@@ -6571,7 +6588,15 @@ if (queueNode) {
 
   const render = (groups) => {
     const normalized = Array.isArray(groups) ? groups.filter((group) => Array.isArray(group.tasks) && group.tasks.length) : [];
-    const signature = JSON.stringify(normalized);
+    const visiblePanelKeys = new Set(normalized.map(group => String(group.workspace_id)));
+    minimizedPanels.forEach((_value, key) => {
+      if (!visiblePanelKeys.has(key)) minimizedPanels.delete(key);
+    });
+    const queuedAgeSignature = normalized.flatMap(group => group.tasks || []).filter(taskIsQueued).map((task) => {
+      const queuedAt = Number(task.queued_at);
+      return `${task.id}:${Number.isFinite(queuedAt) ? Math.max(0, Math.floor((Date.now() / 1000 - queuedAt) / 60)) : ''}`;
+    });
+    const signature = JSON.stringify([normalized, queuedAgeSignature]);
     if (signature === renderedSignature) return;
     renderedSignature = signature;
     const activeGroups = normalized.filter((group) => String(group.workspace_id) !== '__server__' && (Boolean(group.is_active) || group.dock === 'right'));

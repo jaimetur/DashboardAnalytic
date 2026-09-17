@@ -579,6 +579,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'template_where, template_parameters, template_filters_applied = chart_filter_sql(' in dashboard_module
     assert 'template_filters_applied=template_filters_applied,' in dashboard_module
     assert 'ensure_projection(snapshot, kind, task_repository)' in dashboard_module
+    assert 'ATTACH DATABASE' not in dashboard_module
+    assert "source.execute('PRAGMA query_only=ON')" in dashboard_module
+    assert 'while batch := rows.fetchmany(2_000):' in dashboard_module
     assert 'aggregation_columns = chart_aggregation_columns(' in dashboard_module
     assert "thread_name_prefix='e2e-dashboard-data'," not in dashboard_module
     dashboard_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
@@ -1063,6 +1066,64 @@ def test_dashboard_background_preparation_can_be_interrupted(client, monkeypatch
         assert stopped.json() == {'stopping': task['stop_task_id']}
     finally:
         release.set()
+
+
+def test_direct_dashboard_preparation_separates_queue_and_execution_timestamps(client, monkeypatch):
+    payload = setup_dashboard(client)
+    entered = Event()
+    release = Event()
+    original = core.Repository.list_dataset_row_columns
+
+    def delayed(repository, *args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        return original(repository, *args, **kwargs)
+
+    monkeypatch.setattr(core.Repository, 'list_dataset_row_columns', delayed)
+    responses = {}
+    running = Thread(target=lambda: responses.setdefault(
+        'running', client.post(
+            '/api/e2e-dashboards/prepare?preparation_id=direct-running', json=payload,
+        ),
+    ))
+    queued = Thread(target=lambda: responses.setdefault(
+        'queued', client.post(
+            '/api/e2e-dashboards/prepare?preparation_id=direct-queued', json=payload,
+        ),
+    ))
+    try:
+        running.start()
+        assert entered.wait(5)
+        running_task = next(
+            task for group in client.get('/api/background-tasks').json()['groups']
+            for task in group['tasks'] if task['id'] == 'direct-running'
+        )
+        assert running_task['status'] == 'processing'
+        assert running_task['started_at'] >= running_task['queued_at']
+
+        queued.start()
+        deadline = time.monotonic() + 5
+        queued_task = None
+        while time.monotonic() < deadline:
+            queued_task = next((
+                task for group in client.get('/api/background-tasks').json()['groups']
+                for task in group['tasks'] if task['id'] == 'direct-queued'
+            ), None)
+            if queued_task is not None:
+                break
+            time.sleep(0.02)
+        assert queued_task is not None
+        assert queued_task['status'] == 'queued'
+        assert queued_task['queued_at'] is not None
+        assert queued_task['started_at'] is None
+    finally:
+        release.set()
+        running.join(5)
+        if queued.ident is not None:
+            queued.join(5)
+
+    assert not running.is_alive()
+    assert not queued.is_alive()
 
 
 def test_applying_filters_queues_all_chart_models_and_reuses_previous_cache(client, monkeypatch):

@@ -9,7 +9,10 @@ from datetime import datetime
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 import json
+import logging
 from pathlib import Path
+from threading import Lock, RLock
+from time import monotonic
 from typing import Any, Iterator
 
 import pandas as pd
@@ -21,6 +24,97 @@ from src.modules.runtime_config import ignore_event_time_filtering
 
 DATABASE_BLANK_FILTER = '__database_blank__'
 WORKSPACE_REGISTRY_TABLE = '__workspace_registry__'
+
+_WORKSPACE_WRITE_LOCKS: dict[str, RLock] = {}
+_WORKSPACE_WRITE_LOCKS_GUARD = Lock()
+_SQLITE_WRITE_ACTIONS = {
+    sqlite3.SQLITE_INSERT,
+    sqlite3.SQLITE_UPDATE,
+    sqlite3.SQLITE_DELETE,
+    sqlite3.SQLITE_CREATE_INDEX,
+    sqlite3.SQLITE_CREATE_TABLE,
+    sqlite3.SQLITE_CREATE_TEMP_INDEX,
+    sqlite3.SQLITE_CREATE_TEMP_TABLE,
+    sqlite3.SQLITE_CREATE_TEMP_TRIGGER,
+    sqlite3.SQLITE_CREATE_TEMP_VIEW,
+    sqlite3.SQLITE_CREATE_TRIGGER,
+    sqlite3.SQLITE_CREATE_VIEW,
+    sqlite3.SQLITE_DROP_INDEX,
+    sqlite3.SQLITE_DROP_TABLE,
+    sqlite3.SQLITE_DROP_TEMP_INDEX,
+    sqlite3.SQLITE_DROP_TEMP_TABLE,
+    sqlite3.SQLITE_DROP_TEMP_TRIGGER,
+    sqlite3.SQLITE_DROP_TEMP_VIEW,
+    sqlite3.SQLITE_DROP_TRIGGER,
+    sqlite3.SQLITE_DROP_VIEW,
+    sqlite3.SQLITE_ALTER_TABLE,
+    sqlite3.SQLITE_REINDEX,
+    sqlite3.SQLITE_ANALYZE,
+    sqlite3.SQLITE_TRANSACTION,
+}
+logger = logging.getLogger(__name__)
+
+
+def workspace_write_lock(db_path: Path | str) -> RLock:
+    """Return the process-wide write coordinator for one Workspace database."""
+    key = str(Path(db_path).resolve())
+    with _WORKSPACE_WRITE_LOCKS_GUARD:
+        return _WORKSPACE_WRITE_LOCKS.setdefault(key, RLock())
+
+
+class _CoordinatedConnection(sqlite3.Connection):
+    """Acquire a per-Workspace lock lazily when a connection starts writing."""
+
+    _workspace_lock: RLock | None = None
+    _workspace_key = ''
+    _workspace_lock_acquired = False
+    _workspace_lock_acquired_at = 0.0
+
+    def configure_workspace_write_coordinator(self, db_path: Path | str) -> None:
+        self._workspace_key = str(Path(db_path).resolve())
+        self._workspace_lock = workspace_write_lock(db_path)
+        self.set_authorizer(self._authorize_statement)
+
+    def _authorize_statement(self, action, _argument_1, _argument_2, _database, _trigger):
+        if action in _SQLITE_WRITE_ACTIONS and not self._workspace_lock_acquired:
+            wait_started = monotonic()
+            assert self._workspace_lock is not None
+            self._workspace_lock.acquire()
+            acquired_at = monotonic()
+            self._workspace_lock_acquired = True
+            self._workspace_lock_acquired_at = acquired_at
+            waited = acquired_at - wait_started
+            if waited >= 1.0:
+                logger.warning('Workspace database writer waited %.3fs: %s', waited, self._workspace_key)
+        return sqlite3.SQLITE_OK
+
+    def _release_workspace_lock(self) -> None:
+        if not self._workspace_lock_acquired:
+            return
+        held = monotonic() - self._workspace_lock_acquired_at
+        self._workspace_lock_acquired = False
+        assert self._workspace_lock is not None
+        self._workspace_lock.release()
+        if held >= 2.0:
+            logger.warning('Workspace database writer held lock for %.3fs: %s', held, self._workspace_key)
+
+    def commit(self) -> None:
+        try:
+            super().commit()
+        finally:
+            self._release_workspace_lock()
+
+    def rollback(self) -> None:
+        try:
+            super().rollback()
+        finally:
+            self._release_workspace_lock()
+
+    def close(self) -> None:
+        try:
+            super().close()
+        finally:
+            self._release_workspace_lock()
 
 
 def local_now_iso() -> str:
@@ -140,6 +234,7 @@ CREATE TABLE IF NOT EXISTS generated_jobs (
     output_file TEXT NOT NULL DEFAULT '',
     created_by TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TEXT,
     dataset_ids_json TEXT NOT NULL DEFAULT '{}',
     dataset_names_json TEXT NOT NULL DEFAULT '{}',
     slide_count INTEGER NOT NULL DEFAULT 0,
@@ -201,10 +296,11 @@ class Repository:
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        conn = sqlite3.connect(self.db_path, timeout=30.0, factory=_CoordinatedConnection)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA busy_timeout = 30000")
+        conn.configure_workspace_write_coordinator(self.db_path)
         try:
             yield conn
             conn.commit()
@@ -213,10 +309,11 @@ class Repository:
 
     @contextmanager
     def global_connection(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.global_db_path, timeout=30.0)
+        conn = sqlite3.connect(self.global_db_path, timeout=30.0, factory=_CoordinatedConnection)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA busy_timeout = 30000")
+        conn.configure_workspace_write_coordinator(self.global_db_path)
         try:
             yield conn
             conn.commit()
@@ -235,9 +332,12 @@ class Repository:
     def workspace_registry_connection(self) -> Iterator[sqlite3.Connection]:
         if self.workspace_registry_db_path is None:
             raise ValueError('The workspace registry database is not available.')
-        conn = sqlite3.connect(self.workspace_registry_db_path, timeout=30.0)
+        conn = sqlite3.connect(
+            self.workspace_registry_db_path, timeout=30.0, factory=_CoordinatedConnection,
+        )
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout = 30000")
+        conn.configure_workspace_write_coordinator(self.workspace_registry_db_path)
         try:
             yield conn
             conn.commit()
@@ -626,6 +726,8 @@ class Repository:
         columns = {str(row['name']) for row in conn.execute("PRAGMA table_info(generated_jobs)").fetchall()}
         if 'generate_tooltips' not in columns:
             conn.execute("ALTER TABLE generated_jobs ADD COLUMN generate_tooltips INTEGER NOT NULL DEFAULT 1")
+        if 'started_at' not in columns:
+            conn.execute("ALTER TABLE generated_jobs ADD COLUMN started_at TEXT")
 
     def _ensure_legacy_report_run_columns(self, conn: sqlite3.Connection) -> None:
         columns = {row['name'] for row in conn.execute("PRAGMA table_info(report_runs)").fetchall()}
@@ -2350,6 +2452,9 @@ class Repository:
         if status is not None:
             assignments.append('status = ?')
             values.append(status)
+            if status == 'processing':
+                assignments.append('started_at = COALESCE(started_at, ?)')
+                values.append(local_now_iso())
         if progress is not None:
             assignments.append('progress = ?')
             values.append(max(0, min(100, int(progress))))
@@ -2381,7 +2486,8 @@ class Repository:
         now = local_now_iso()
         with self.connection() as conn:
             cursor = conn.execute(
-                "UPDATE generated_jobs SET status = 'queued', progress = 0, last_error = '', finished_at = NULL, created_at = ?, updated_at = ? "
+                "UPDATE generated_jobs SET status = 'queued', progress = 0, last_error = '', finished_at = NULL, "
+                "started_at = NULL, created_at = ?, updated_at = ? "
                 "WHERE id = ? AND job_type = 'report' AND status IN ('failed', 'stopped', 'ready')",
                 (now, now, report_id),
             )
@@ -2462,6 +2568,9 @@ class Repository:
         if status is not None:
             assignments.append('status = ?')
             values.append(status)
+            if status == 'processing':
+                assignments.append('started_at = COALESCE(started_at, ?)')
+                values.append(local_now_iso())
         if progress is not None:
             assignments.append('progress = ?')
             values.append(max(0, min(100, int(progress))))
@@ -2499,7 +2608,7 @@ class Repository:
         now = local_now_iso()
         with self.connection() as conn:
             cursor = conn.execute(
-                "UPDATE generated_jobs SET status = 'queued', progress = 0, last_error = '', chart_count = 0, "
+                "UPDATE generated_jobs SET status = 'queued', progress = 0, last_error = '', chart_count = 0, started_at = NULL, "
                 "generation = CASE WHEN status = 'ready' THEN NULL ELSE generation END, finished_at = NULL, created_at = ?, updated_at = ? "
                 "WHERE id = ? AND job_type = 'chart_set' AND status IN ('failed', 'stopped', 'ready')",
                 (now, now, job_id),
