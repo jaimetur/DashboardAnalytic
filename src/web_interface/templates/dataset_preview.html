@@ -16,6 +16,7 @@
     <p class="lede">{% if server_paginated_preview %}Read-only, paginated view of all processed rows and all {{ visible_column_count }} available columns. Fixed derived fields are light green, analytical derivations are amber, and auto-calculated fields are purple.{% else %}Read-only sample of the processed dataset. The preview shows the first {{ preview_rows | length }} rows and all {{ visible_column_count }} available columns.{% if preview_sheet_options %} VFUK mapping previews are limited to the 4G and 5G source sheets.{% endif %}{% endif %}</p>
     {% if not server_paginated_preview %}
     <form class="preview-row-limit-form" action="{{ preview_action | default('/workspace/preview/' ~ dataset.id) }}" method="get" data-loading-label="Refreshing dataset preview">
+      {% if embedded_preview %}<input type="hidden" name="embedded" value="1">{% endif %}
       <label>Rows to preview
         <input type="number" name="row_limit" value="{{ preview_row_limit }}" min="1" max="5000" step="1" required>
       </label>
@@ -62,7 +63,9 @@
       <article><span>{{ preview_metadata_label | default('Uploaded By') }}</span><strong>{{ preview_metadata_value | default(dataset.uploaded_by) }}</strong></article>
     </section>
     <div class="inline-actions preview-actions">
+      {% if not embedded_preview %}
       <a class="ghost-link" href="/workspace" target="_blank" rel="noopener">Back to Workspace</a>
+      {% endif %}
       {% if dataset.dataset_kind in ['data', 'voice', 'speech'] and not dataset.is_combined %}
       <a class="ghost-link action-link-primary" href="/datasets-analysis?dataset_id={{ dataset.id }}&input_kind={{ dataset.dataset_kind }}" target="_blank" rel="noopener" data-datasets-analysis-open-link data-dataset-id="{{ dataset.id }}" data-input-kind="{{ dataset.dataset_kind }}">Show Analysis</a>
       {% endif %}

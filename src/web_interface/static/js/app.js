@@ -3186,11 +3186,54 @@ document.querySelectorAll('[data-catalogue-import-form]').forEach((form) => {
   });
 });
 
+function datasetPreviewUrl(url, embedded = false) {
+  const target = new URL(url, window.location.origin);
+  if (embedded) target.searchParams.set('embedded', '1');
+  else target.searchParams.delete('embedded');
+  return target.toString();
+}
+
+function openDatasetPreviewInNewTab(url) {
+  const previewWindow = window.open('', '_blank');
+  if (!previewWindow) {
+    showInfoDialog('The browser blocked the new Dataset preview tab. Allow pop-ups for this site and try again.', {
+      title: 'Unable to open Dataset preview', tone: 'error',
+    });
+    return;
+  }
+  previewWindow.opener = null;
+  previewWindow.document.write(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Loading Dataset</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;background:#eef4f6;color:#17384b;font-family:Segoe UI,sans-serif}.panel{width:min(84vw,460px);box-sizing:border-box;padding:28px;border-radius:24px;background:#fff;box-shadow:0 30px 70px rgba(15,40,55,.22)}.spinner{width:42px;height:42px;border:4px solid rgba(11,122,117,.18);border-top-color:#0b7a75;border-radius:50%;animation:spin .95s linear infinite}h1{margin:16px 0 8px;font-size:24px}p{margin:0;color:#607681}.bar{height:10px;margin-top:18px;overflow:hidden;border-radius:999px;background:#e5edf0}.bar:after{content:"";display:block;width:45%;height:100%;border-radius:inherit;background:linear-gradient(90deg,#0b7a75,#53d7c8);animation:slide 1.4s ease-in-out infinite}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slide{0%{transform:translateX(-120%)}50%{transform:translateX(125%)}100%{transform:translateX(250%)}}</style></head><body><main class="panel" role="status" aria-live="assertive"><div class="spinner" aria-hidden="true"></div><h1>Loading Dataset</h1><p>Please wait while the Dataset preview is loaded.</p><div class="bar" aria-hidden="true"></div></main></body></html>`);
+  previewWindow.document.close();
+  previewWindow.location.replace(datasetPreviewUrl(url));
+}
+
+function openDatasetPreviewInDialog(url, trigger) {
+  if (!datasetPreviewOverlay || !datasetPreviewFrame || !datasetPreviewLoading) return;
+  datasetPreviewReturnFocus = trigger || document.activeElement;
+  datasetPreviewLoading.hidden = false;
+  datasetPreviewOverlay.hidden = false;
+  document.body.classList.add('loading-active');
+  datasetPreviewFrame.src = datasetPreviewUrl(url, true);
+  datasetPreviewDialog?.focus();
+}
+
+async function chooseDatasetPreviewDestination(url, trigger) {
+  const destination = await showConfirmDialog(
+    'Choose where you want to open this Dataset preview.',
+    {
+      title: 'Open Dataset Preview', confirmLabel: 'New tab',
+      secondaryLabel: 'Current tab', cancelLabel: 'Cancel', wideActions: true,
+    },
+  );
+  if (destination === 'confirm') openDatasetPreviewInNewTab(url);
+  if (destination === 'secondary') openDatasetPreviewInDialog(url, trigger);
+}
+
 document.addEventListener('click', (event) => {
   const previewLink = event.target.closest('[data-preview-open-link]');
   if (previewLink) {
+    event.preventDefault();
     if (previewLink.matches('[data-combined-dataset-preview]')) {
-      event.preventDefault();
       const openPreview = async () => {
         try {
           const response = await fetch(previewLink.dataset.integrityUrl || '', {credentials: 'same-origin', cache: 'no-store'});
@@ -3207,8 +3250,7 @@ document.addEventListener('click', (event) => {
             target.searchParams.set('allow_incomplete', '1');
             url = target.toString();
           }
-          if (previewLink.target === '_blank') window.open(url, '_blank', 'noopener');
-          else window.location.assign(url);
+          await chooseDatasetPreviewDestination(url, previewLink);
         } catch (error) {
           showInfoDialog(error instanceof Error ? error.message : 'Unable to verify the combined dataset.', {
             title: 'Combined dataset unavailable', tone: 'error',
@@ -3218,8 +3260,7 @@ document.addEventListener('click', (event) => {
       void openPreview();
       return;
     }
-    if (previewLink.target === '_blank') return;
-    showLoadingOverlay(previewLink.dataset.loadingLabel || 'Generating dataset preview');
+    void chooseDatasetPreviewDestination(previewLink.href, previewLink);
     return;
   }
   const openLink = event.target.closest('[data-datasets-analysis-open-link]');
@@ -3319,6 +3360,12 @@ const loadingTitle = document.getElementById('loading-title');
 const loadingCopy = document.getElementById('loading-copy');
 const loadingProgressBar = document.querySelector('.loading-progress-bar');
 const loadingCancel = document.getElementById('loading-cancel');
+const datasetPreviewOverlay = document.getElementById('dataset-preview-overlay');
+const datasetPreviewDialog = datasetPreviewOverlay?.querySelector('.dataset-preview-dialog');
+const datasetPreviewFrame = document.getElementById('dataset-preview-dialog-frame');
+const datasetPreviewLoading = document.getElementById('dataset-preview-dialog-loading');
+const datasetPreviewClose = document.getElementById('dataset-preview-dialog-close');
+let datasetPreviewReturnFocus = null;
 const confirmOverlay = document.getElementById('confirm-overlay');
 const confirmTitle = document.getElementById('confirm-title');
 const confirmCopy = document.getElementById('confirm-copy');
@@ -3343,6 +3390,32 @@ const infoEyebrow = document.getElementById('info-eyebrow');
 const infoIcon = document.getElementById('info-icon');
 const inputKindSelect = document.querySelector('[data-input-kind-select]');
 const datasetSelect = document.querySelector('[data-dataset-select]');
+
+function closeDatasetPreviewDialog() {
+  if (!datasetPreviewOverlay || datasetPreviewOverlay.hidden) return;
+  datasetPreviewOverlay.hidden = true;
+  document.body.classList.remove('loading-active');
+  if (datasetPreviewFrame) datasetPreviewFrame.src = 'about:blank';
+  datasetPreviewLoading && (datasetPreviewLoading.hidden = false);
+  datasetPreviewReturnFocus?.focus?.();
+  datasetPreviewReturnFocus = null;
+}
+
+datasetPreviewFrame?.addEventListener('load', () => {
+  if (datasetPreviewOverlay && !datasetPreviewOverlay.hidden && datasetPreviewLoading) {
+    datasetPreviewLoading.hidden = true;
+  }
+});
+datasetPreviewClose?.addEventListener('click', closeDatasetPreviewDialog);
+datasetPreviewOverlay?.addEventListener('click', (event) => {
+  if (event.target === datasetPreviewOverlay) closeDatasetPreviewDialog();
+});
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && datasetPreviewOverlay && !datasetPreviewOverlay.hidden) {
+    event.preventDefault();
+    closeDatasetPreviewDialog();
+  }
+});
 const logTypeFilter = document.querySelector('[data-log-type-filter]');
 const persistencePathnames = new Set(['/datasets-analysis', '/admin']);
 const datasetsAnalysisStateKey = 'dashboard-analytic:/datasets-analysis:last-query';

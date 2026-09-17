@@ -7701,14 +7701,14 @@ def _preview_column_metadata(
     return labels, kinds, rules
 
 
-def _preview_dataset_options() -> list[dict[str, str]]:
+def _preview_dataset_options(*, embedded: bool = False) -> list[dict[str, str]]:
     options: list[dict[str, str]] = []
     for row in repository.list_datasets():
         item = serialize_dataset_row(row)
         if item['is_ready']:
             options.append({
                 'label': f"{item['file_name']} · {item['input_kind_label']} · #{item['id']}",
-                'url': f"/workspace/preview/{item['id']}",
+                'url': f"/workspace/preview/{item['id']}{'?embedded=1' if embedded else ''}",
             })
     return options
 
@@ -7854,6 +7854,7 @@ def preview_dataset(
     source_sheet: str | None = Query(default=None),
     mapping_vendor: str | None = Query(default=None),
     gcid: str | None = Query(default=None),
+    embedded: bool = Query(default=False),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
     dataset_row = repository.get_dataset(dataset_id)
@@ -7982,7 +7983,7 @@ def preview_dataset(
             'preview_column_rules': preview_column_rules,
             'preview_available_tags': [*list(dict.fromkeys(preview_column_kinds.values())), 'PINNED', 'UN_PINNED'],
             'metadata_preview_columns': metadata_preview_columns,
-            'preview_dataset_options': _preview_dataset_options(),
+            'preview_dataset_options': _preview_dataset_options(embedded=embedded),
             'preview_dataset_value': f"{dataset['file_name']} · {dataset['input_kind_label']} · #{dataset['id']}",
             'vendor_filter_options': vendor_filter_options,
             'selected_mapping_vendor': selected_mapping_vendor,
@@ -7993,6 +7994,7 @@ def preview_dataset(
             'preview_data_endpoint': f'/api/workspace/preview/{dataset_id}/data',
             'preview_page_size': 100,
             'preview_total_rows': repository.dataset_row_count(dataset_id),
+            'embedded_preview': embedded,
         },
     )
 
@@ -8042,6 +8044,7 @@ def preview_combined_dataset(
     kind: str,
     request: Request,
     allow_incomplete: bool = Query(default=False),
+    embedded: bool = Query(default=False),
     user: SessionUser = Depends(current_user),
 ) -> HTMLResponse:
     """Render a combined CDR through the same preview interface as an individual CDR."""
@@ -8115,7 +8118,7 @@ def preview_combined_dataset(
             'preview_column_rules': preview_column_rules,
             'preview_available_tags': [*list(dict.fromkeys(preview_column_kinds.values())), 'PINNED', 'UN_PINNED'],
             'metadata_preview_columns': metadata_preview_columns,
-            'preview_dataset_options': _preview_dataset_options(),
+            'preview_dataset_options': _preview_dataset_options(embedded=embedded),
             'preview_dataset_value': '',
             'vendor_filter_options': [], 'selected_mapping_vendor': '', 'selected_gcid': '',
             'cdr_preview_filters': [],
@@ -8127,6 +8130,7 @@ def preview_combined_dataset(
             'preview_data_endpoint': f'/api/workspace/combined/{normalized_kind}/preview/data',
             'preview_page_size': 100,
             'preview_total_rows': total_row_count,
+            'embedded_preview': embedded,
         },
     )
 

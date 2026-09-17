@@ -3111,6 +3111,10 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     assert 'data-queue-type-filter' in workspace_response.text
     assert 'value="">All Types' in workspace_response.text
     assert 'href="/workspace/preview/1" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview"' in workspace_response.text
+    assert 'id="dataset-preview-overlay"' in workspace_response.text
+    assert 'id="dataset-preview-dialog-close"' in workspace_response.text
+    assert 'aria-label="Close Dataset preview" title="Close Dataset preview">×</button>' in workspace_response.text
+    assert 'id="dataset-preview-dialog-loading"' in workspace_response.text
     assert 'Show Analysis</a>' in workspace_response.text
 
     preview_response = client.get("/workspace/preview/1")
@@ -3123,10 +3127,24 @@ def test_workspace_preview_and_cdr_dashboard_action(client) -> None:
     assert 'data-preview-column-filter' not in preview_response.text
     assert 'data-preview-row-filter' not in preview_response.text
     assert 'data-preview-filter-table' in preview_response.text
+    embedded_preview = client.get('/workspace/preview/1?embedded=1')
+    assert embedded_preview.status_code == 200
+    assert 'data-embedded-dataset-preview' in embedded_preview.text
+    assert 'class="topbar"' not in embedded_preview.text
+    assert 'class="module-tabs"' not in embedded_preview.text
+    assert 'id="background-task-panels"' not in embedded_preview.text
+    assert 'Back to Workspace' not in embedded_preview.text
+    assert 'data-url="/workspace/preview/1?embedded=1"' in embedded_preview.text
     preview_script = client.get('/static/js/app.js')
     assert preview_script.status_code == 200
     assert 'preview-column-filter-trigger' in preview_script.text
     assert 'data-preview-value-option' in preview_script.text
+    assert "title: 'Open Dataset Preview'" in preview_script.text
+    assert "confirmLabel: 'New tab'" in preview_script.text
+    assert "secondaryLabel: 'Current tab'" in preview_script.text
+    assert 'openDatasetPreviewInNewTab' in preview_script.text
+    assert 'openDatasetPreviewInDialog' in preview_script.text
+    assert "if (event.target === datasetPreviewOverlay) closeDatasetPreviewDialog();" in preview_script.text
 
     limited_preview_response = client.get("/workspace/preview/1?row_limit=25")
     assert limited_preview_response.status_code == 200
@@ -3168,6 +3186,10 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     assert 'data-preview-row-filter' not in preview_response.text
     assert 'data-preview-clear-filters disabled' in preview_response.text
     assert 'Show Analysis' not in preview_response.text
+    embedded_combined = client.get('/workspace/combined/data/preview?embedded=1')
+    assert embedded_combined.status_code == 200
+    assert 'data-embedded-dataset-preview' in embedded_combined.text
+    assert 'id="background-task-panels"' not in embedded_combined.text
     combined_page = client.post('/api/workspace/combined/data/preview/data', json={
         'page': 0, 'column_filters': {'operator': ['Vodafone UK']}, 'filter_column': 'operator',
     })

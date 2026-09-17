@@ -10,8 +10,9 @@
   <link rel="apple-touch-icon" sizes="180x180" href="{{ static_path('img/apple-touch-icon.png') }}?v={{ asset_version('img/apple-touch-icon.png') }}">
   <link rel="stylesheet" href="{{ static_path('css/app.css') }}?v={{ asset_version('css/app.css') }}">
 </head>
-<body data-ignore-event-time-filtering="{{ 'true' if ignore_event_time_filtering else 'false' }}"{% if user %} data-authenticated-user="{{ user.username | lower }}" data-authenticated-role="{{ user.role }}"{% endif %}{% if embedded_template_editor %} data-embedded-template-editor{% endif %}>
+<body data-ignore-event-time-filtering="{{ 'true' if ignore_event_time_filtering else 'false' }}"{% if user %} data-authenticated-user="{{ user.username | lower }}" data-authenticated-role="{{ user.role }}"{% endif %}{% if embedded_template_editor %} data-embedded-template-editor{% endif %}{% if embedded_preview %} data-embedded-dataset-preview{% endif %}>
   <div class="shell">
+    {% if not embedded_preview %}
     <header class="topbar">
       <div class="title-block">
         <p class="eyebrow">NetCheck / Smart Orchestrator Analytics</p>
@@ -49,8 +50,9 @@
       </nav>
       {% endif %}
     </header>
+    {% endif %}
     <main>
-      {% if user %}
+      {% if user and not embedded_preview %}
       <nav class="module-tabs" aria-label="E2E modules">
         <div class="module-tabs-primary">
           <a class="module-tab module-tab-workspace{% if request.url.path == '/workspace' %} active{% endif %}" href="/workspace" title="Open Workspace management">Workspace</a>
@@ -79,11 +81,24 @@
       {% block content %}{% endblock %}
     </main>
   </div>
-  {% if user and not embedded_template_editor %}
+  {% if user and not embedded_template_editor and not embedded_preview %}
   <div id="background-task-panels" class="background-task-panels" aria-live="polite" aria-label="Background tasks" hidden>
     <div class="background-task-dock background-task-dock-other" data-background-task-dock="other"></div>
     <div class="background-task-dock background-task-dock-system" data-background-task-dock="system"></div>
     <div class="background-task-dock background-task-dock-active" data-background-task-dock="active"></div>
+  </div>
+  {% endif %}
+  {% if user and not embedded_preview %}
+  <div id="dataset-preview-overlay" class="dataset-preview-overlay" hidden>
+    <section class="dataset-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="dataset-preview-dialog-title" tabindex="-1">
+      <header class="dataset-preview-dialog-header"><h2 id="dataset-preview-dialog-title">Dataset preview</h2><button id="dataset-preview-dialog-close" type="button" class="report-chart-viewer-close" aria-label="Close Dataset preview" title="Close Dataset preview">×</button></header>
+      <div class="dataset-preview-dialog-body">
+        <iframe id="dataset-preview-dialog-frame" class="dataset-preview-dialog-frame" title="Dataset preview"></iframe>
+        <div id="dataset-preview-dialog-loading" class="dataset-preview-dialog-loading" role="status" aria-live="assertive">
+          <div class="loading-panel"><div class="loading-spinner" aria-hidden="true"></div><h3>Loading Dataset</h3><p>Please wait while the Dataset preview is loaded.</p><div class="loading-progress-shell"><div class="loading-progress-bar"></div></div></div>
+        </div>
+      </div>
+    </section>
   </div>
   {% endif %}
   <div id="loading-overlay" class="loading-overlay" hidden>
