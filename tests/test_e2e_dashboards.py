@@ -342,9 +342,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "window.addEventListener('beforeunload', rememberScroll);" in dashboard_script
     assert "document.addEventListener('visibilitychange'" in dashboard_script
     assert "document.documentElement.scrollHeight - window.innerHeight" in dashboard_script
-    assert 'openStorageKey' not in dashboard_script
-    assert 'rememberOpen' not in dashboard_script
-    assert "if (dashboards[last]) await openDashboard(last);" not in dashboard_script
+    assert "const restoreOpenDashboard = navigation?.type === 'reload';" in dashboard_script
+    assert "last = restoreOpenDashboard ? sessionStorage.getItem(openStorageKey) || '' : '';" in dashboard_script
+    assert "if (!restoreOpenDashboard) sessionStorage.removeItem(openStorageKey);" in dashboard_script
+    assert "if (dashboards[last]) await openDashboard(last);" in dashboard_script
     assert dashboard_script.index("action(id === activeId ? 'Close Dashboard' : 'Open Dashboard'") < dashboard_script.index("action('View Dashboard', '◉'")
     assert "preview_snapshot = replace(" in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     assert "The template owns these required chart attributes." in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
