@@ -350,6 +350,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "preview_snapshot = replace(" in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     assert "The template owns these required chart attributes." in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+    assert "const selectAllOrNone = () => {\n      cancelAutoClose();" in app_script
+    assert "dispatchNativeChange();\n      menu.hidden = true;\n      syncTrigger();\n      trigger.focus();" not in app_script
     assert 'window.createUnifiedDatasetViewer' in app_script
     assert 'window.createUnifiedDatasetViewer' in dashboard_script
     assert "exportControl: $('ds-data-download')" in dashboard_script
@@ -530,8 +532,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'function filterChanged() {' in dashboard_script
     assert "? 'Filter changes are ready to apply.'" in dashboard_script
     assert ": 'Dataset Universe changes will be prepared when View Dashboard or Generate PPT is selected.'" in dashboard_script
-    assert 'const cached = preparedPayloads.get(preparedPayloadKey(activeId, preparedStateFingerprint(definition)));' in dashboard_script
-    assert 'if (preparing && cached && currentFilterState !== preparingFilterState)' in dashboard_script
+    assert 'if (preparing && cached && currentFilterState !== preparingFilterState)' not in dashboard_script
     assert "status('Restored the previously prepared filters.');" in dashboard_script
     assert "const payload = await api('/filter-options', 'POST', {definition, field});" in dashboard_script
     assert "facetOptionRequests.has(field) ? 'Loading values…'" in dashboard_script
@@ -605,6 +606,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "setActiveDashboardHeading('');" in dashboard_script
     assert "if (activePrepared) dashboardStatuses.set(id, {state: 'ready', label: 'Ready'});" in dashboard_script
     assert "setDashboardStatus(activeId, 'ready', 'Ready');" in dashboard_script
+    assert "view.dataset.dashboardViewId = id;" in dashboard_script
+    assert "button.disabled = dashboardIsPreparing(id) || (id === activeId && $('ds-view').disabled);" in dashboard_script
+    assert "const setViewEnabled = enabled => { $('ds-view').disabled = !enabled; syncDashboardViewActions(); syncDashboardPptActions(); };" in dashboard_script
     assert "const payload = await api('/statuses', 'POST', statusDefinitions);" in dashboard_script
     assert "window.setInterval(refreshDashboardStatuses, 2000);" in dashboard_script
     assert "let previousDashboardName = '';" in app_script
@@ -674,7 +678,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'const restoreRememberedPrepared = async id =>' in dashboard_script
     assert 'const inMemory = preparedPayloads.get(preparedPayloadKey(id, fingerprint));' in dashboard_script
     assert 'if (await restorePrepared(activeId))' in dashboard_script
-    assert 'if (inMemory?.fingerprint === fingerprint) { applyPreparedPayload(inMemory.payload); return true; }' in dashboard_script
+    assert "const payload = await api(`/prepared/${encodeURIComponent(inMemory.payload.token)}`);" in dashboard_script
+    assert 'forgetPreparedToken(inMemory.payload.token);' in dashboard_script
+    assert "status('Restoring the expired Dashboard preview…');" in dashboard_script
+    assert "if (!await restorePrepared(activeId)) await prepare();" in dashboard_script
     assert "api(`/prefetched/${encodeURIComponent(id)}`, 'POST', definition)" in dashboard_script
     assert 'if (error.status === 409) return false;' in dashboard_script
     assert 'No CDR ${chart.source[0].toUpperCase()}${chart.source.slice(1)} dataset has been selected for this chart.' in dashboard_script
@@ -697,7 +704,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "bind('ds-refresh',prepare);" not in dashboard_script
     assert 'const setPreparationRows = payload =>' in dashboard_script
     assert 'setPreparationRows(payload);' in dashboard_script
-    assert 'applyPreparedPayload(cached.payload);' in dashboard_script
+    assert 'applyPreparedPayload(cached.payload);' not in dashboard_script
     assert "['Dataset Universe', universe, 'ds-preparing-universe-label']" in dashboard_script
     assert "['Filtered Universe', filtered, 'ds-preparing-filtered-label']" in dashboard_script
     assert 'rows.hidden = !rows.textContent;' in dashboard_script
@@ -1051,6 +1058,10 @@ def test_dashboard_is_prepared_only_when_opened_and_then_reuses_manifest(client)
         (Path(core.repository.db_path).parent / '.dashboard-data-cache' / 'dashboard-previews').glob('*.json')
     )
     assert manifests
+    token = prepared.json()['token']
+    for _ in range(130):
+        assert client.get('/api/e2e-dashboards/statuses').status_code == 200
+    assert client.get(f'/api/e2e-dashboards/prepared/{token}').status_code == 200
 
 
 def test_closed_dashboard_status_uses_its_remembered_session_universe(client):

@@ -295,6 +295,10 @@
   const safe = fn => async (...args) => { try { await fn(...args); } catch (error) { if (error.name !== 'AbortError') { status(error.message); if (window.showInfoDialog) window.showInfoDialog(error.message, {title:'E2E Dashboards',tone:'error'}); } } };
   const bind = (id, fn) => $(id).addEventListener('click', safe(fn));
   const dashboardIsReady = id => Boolean(id && !dashboardPreparationTokens.has(id) && dashboardStatuses.get(id)?.state === 'ready');
+  const dashboardIsPreparing = id => Boolean(id && (
+    dashboardPreparationTokens.has(id)
+    || ['loading-data', 'rendering', 'data-queued', 'charts-queued'].includes(dashboardStatuses.get(id)?.state)
+  ));
   const setActiveDashboardHeading = name => {
     const heading = $('ds-active-dashboard-heading');
     heading.replaceChildren(document.createTextNode(name ? 'Active Dashboard: ' : 'Active Dashboard'));
@@ -308,7 +312,13 @@
     $('ds-generate-ppt').disabled = !activePptReady;
     $('ds-viewer-export-ppt').disabled = !activePptReady;
   };
-  const setViewEnabled = enabled => { $('ds-view').disabled = !enabled; syncDashboardPptActions(); };
+  const syncDashboardViewActions = () => {
+    document.querySelectorAll('[data-dashboard-view-id]').forEach(button => {
+      const id = button.dataset.dashboardViewId;
+      button.disabled = dashboardIsPreparing(id) || (id === activeId && $('ds-view').disabled);
+    });
+  };
+  const setViewEnabled = enabled => { $('ds-view').disabled = !enabled; syncDashboardViewActions(); syncDashboardPptActions(); };
   const updateUnsavedFiltersBadge = () => {
     $('ds-unapplied-filters-badge').hidden = !hasUnappliedFilterChanges();
     $('ds-unsaved-filters-badge').hidden = !hasUnsavedFilterChanges();
@@ -570,7 +580,7 @@
         if (id === activeId) { if (await confirmDiscard()) closeDashboard(); }
         else if (await confirmDiscard()) await openDashboard(id);
       }, id === activeId ? 'ds-dashboard-close' : 'ds-dashboard-open');
-      action('View Dashboard', '◉', async () => {
+      const view = action('View Dashboard', '◉', async () => {
         if (id !== activeId) {
           if (!await confirmDiscard()) return;
           const loading = openDashboard(id);
@@ -580,6 +590,8 @@
           await openActiveDashboardViewer();
         }
       }, 'ds-dashboard-view');
+      view.dataset.dashboardViewId = id;
+      view.disabled = dashboardIsPreparing(id) || (id === activeId && $('ds-view').disabled);
       action('Duplicate Dashboard', '⧉', async () => { if (await confirmDiscard()) await duplicateDashboard(id); });
       action('Export Dashboard', '', () => exportDashboard(id, item), 'ds-dashboard-export');
       const ppt = action('Generate PPT Dashboard', '', () => queueDashboardPptExport(id, item, {chooseScope: true}), 'ds-dashboard-ppt');
@@ -596,6 +608,7 @@
       badge.textContent = value.label;
       badge.title = value.detail || value.label;
     });
+    syncDashboardViewActions();
     syncDashboardPptActions();
   };
   const jobAction = (label, className, handler, glyph = '') => {
@@ -1225,10 +1238,33 @@
       sessionStorage.setItem(preparedStorageKey, JSON.stringify({dashboardId: activeId, entries: entries.slice(-8)}));
     } catch (_) { /* Session storage is optional. */ }
   };
+  const forgetPreparedToken = token => {
+    if (!token) return;
+    for (const [key, entry] of preparedPayloads.entries()) {
+      if (entry?.payload?.token === token) preparedPayloads.delete(key);
+    }
+    try {
+      const stored = JSON.parse(sessionStorage.getItem(preparedStorageKey) || 'null');
+      if (!stored) return;
+      const entries = (stored.entries || []).filter(item => item?.token !== token);
+      if (stored.token === token) delete stored.token;
+      sessionStorage.setItem(preparedStorageKey, JSON.stringify({...stored, entries}));
+    } catch (_) { /* Session storage is optional. */ }
+  };
   const restoreRememberedPrepared = async id => {
     const fingerprint = preparedStateFingerprint(definition);
     const inMemory = preparedPayloads.get(preparedPayloadKey(id, fingerprint));
-    if (inMemory?.fingerprint === fingerprint) { applyPreparedPayload(inMemory.payload); return true; }
+    if (inMemory?.fingerprint === fingerprint && inMemory.payload?.token) {
+      try {
+        const payload = await api(`/prepared/${encodeURIComponent(inMemory.payload.token)}`);
+        if (activeId !== id || preparedStateFingerprint(definition) !== fingerprint) return false;
+        applyPreparedPayload(payload);
+        return true;
+      } catch (error) {
+        if (error.status !== 410 && !error.message.includes('expired')) return false;
+        forgetPreparedToken(inMemory.payload.token);
+      }
+    }
     let stored;
     try { stored = JSON.parse(sessionStorage.getItem(preparedStorageKey) || 'null'); }
     catch (_) { return false; }
@@ -1242,11 +1278,8 @@
       applyPreparedPayload(payload);
       return true;
     } catch (error) {
-      if (!error.message.includes('expired')) return false;
-      try {
-        const entries = (stored.entries || []).filter(item => item?.fingerprint !== fingerprint);
-        sessionStorage.setItem(preparedStorageKey, JSON.stringify({...stored, entries}));
-      } catch (_) { /* Session storage is optional. */ }
+      if (error.status !== 410 && !error.message.includes('expired')) return false;
+      forgetPreparedToken(cachedEntry.token);
       return false;
     }
   };
@@ -1309,14 +1342,6 @@
   function filterChanged() {
     rememberUniverse();
     updateDirtyState();
-    const currentFilterState = preparationStateFingerprint(definition);
-    const cached = preparedPayloads.get(preparedPayloadKey(activeId, preparedStateFingerprint(definition)));
-    if (preparing && cached && currentFilterState !== preparingFilterState) {
-      clearTimeout(timer); ++sequence; controller?.abort(); controller = null; preparing = null; preparingFilterState = ''; filterActionBusy = false; updateFilterActionState();
-      dismissPreparationStatus(); facetsLoading = false; applyPreparedPayload(cached.payload);
-      status('Restored the previously prepared filters.');
-      return;
-    }
     status(hasUnappliedFilterChanges()
       ? 'Filter changes are ready to apply.'
       : 'Dataset Universe changes will be prepared when View Dashboard or Generate PPT is selected.');
@@ -1537,14 +1562,25 @@
       {title: 'Refresh Dashboard charts?', confirmLabel: 'Refresh Charts', tone: 'warning'},
     );
     if (!accepted) return;
-    const token = prepared.token;
+    let token = prepared.token;
     const refreshButton = $('ds-viewer-refresh');
     refreshButton.disabled = true;
     setViewEnabled(false);
     setPreparationState('preparing', 'rendering');
     status('Rendering every Dashboard chart again…');
     try {
-      await api(`/charts/${encodeURIComponent(token)}/refresh`, 'POST');
+      try {
+        await api(`/charts/${encodeURIComponent(token)}/refresh`, 'POST');
+      } catch (error) {
+        if (error.status !== 410 && !error.message.includes('expired')) throw error;
+        status('Restoring the expired Dashboard preview…');
+        forgetPreparedToken(token);
+        prepared = null;
+        if (!await restorePrepared(activeId)) await prepare();
+        token = prepared?.token || '';
+        if (!token) throw new Error('The Dashboard preview could not be restored. Reopen the Dashboard and try again.');
+        await api(`/charts/${encodeURIComponent(token)}/refresh`, 'POST');
+      }
       if (prepared?.token !== token) return;
       chartPayloads.clear();
       renderedChartPayloads.clear();

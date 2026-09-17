@@ -1919,6 +1919,8 @@ def install_dashboard_routes(core):
         workspace: str,
         dashboard_id: str,
         fingerprint: str,
+        *,
+        materialize: bool = True,
     ) -> dict | None:
         manifest_path = preview_manifest_path(workspace, dashboard_id, fingerprint)
         try:
@@ -1950,6 +1952,8 @@ def install_dashboard_routes(core):
                 return None
         except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError, sqlite3.Error):
             return None
+        if not materialize:
+            return dict(payload)
         token = uuid4().hex
         with lock:
             snapshots[token] = Snapshot(
@@ -1973,7 +1977,9 @@ def install_dashboard_routes(core):
         }
         return identity_definition
 
-    def restore_matching_preview_manifest(workspace: str, dashboard_id: str, definition: DashboardDefinition):
+    def restore_matching_preview_manifest(
+        workspace: str, dashboard_id: str, definition: DashboardDefinition, *, materialize: bool = True,
+    ):
         """Restore a persistent preview by definition, including non-default session universes."""
         task_repository = Repository(Path(workspace), core.repository.global_db_path)
         requested = definition.model_copy(deep=True)
@@ -1998,7 +2004,9 @@ def install_dashboard_routes(core):
                     stored_definition = DashboardDefinition.model_validate(manifest['definition'])
                     if preview_cache_identity(stored_definition) != requested_identity:
                         continue
-                    restored = restore_preview_manifest(workspace, dashboard_id, manifest['fingerprint'])
+                    restored = restore_preview_manifest(
+                        workspace, dashboard_id, manifest['fingerprint'], materialize=materialize,
+                    )
                     if restored is not None:
                         return restored
                 except (KeyError, TypeError, ValueError, json.JSONDecodeError, OSError):
@@ -2915,7 +2923,9 @@ def install_dashboard_routes(core):
                     )
                     if persisted_requested == persisted_current:
                         definition = requested_definition
-                prepared = restore_matching_preview_manifest(workspace, dashboard_id, definition) is not None
+                prepared = restore_matching_preview_manifest(
+                    workspace, dashboard_id, definition, materialize=False,
+                ) is not None
             except (HTTPException, KeyError, OSError, sqlite3.Error, TypeError, ValueError):
                 prepared = False
             result[dashboard_id] = (

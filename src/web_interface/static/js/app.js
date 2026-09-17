@@ -4072,6 +4072,7 @@ function setupCustomMultiSelects() {
     };
 
     const selectAllOrNone = () => {
+      cancelAutoClose();
       const options = Array.from(select.options).filter((option) => !option.disabled);
       const shouldSelectAll = options.some((option) => !option.selected);
       options.forEach((option) => {
@@ -4083,9 +4084,6 @@ function setupCustomMultiSelects() {
         }
       });
       dispatchNativeChange();
-      menu.hidden = true;
-      syncTrigger();
-      trigger.focus();
     };
 
     if (!singleChoice) actionButton.addEventListener('click', selectAllOrNone);
