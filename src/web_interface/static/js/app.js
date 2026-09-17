@@ -6274,8 +6274,14 @@ if (queueNode) {
       transientTasks.delete(String(task.id));
     } else {
       const previous = transientTasks.get(String(task.id));
+      const startedAt = task.started_at || previous?.started_at || Date.now() / 1000;
       transientTasks.set(String(task.id), {
-        ...task, started_at: task.started_at || previous?.started_at || Date.now() / 1000,
+        ...task,
+        started_at: startedAt,
+        duration_seconds: task.duration_seconds !== null && task.duration_seconds !== undefined
+          && Number.isFinite(Number(task.duration_seconds))
+          ? Number(task.duration_seconds)
+          : Math.max(0, Date.now() / 1000 - Number(startedAt)),
       });
     }
     render(mergedGroups());
@@ -6334,9 +6340,15 @@ if (queueNode) {
       (Array.isArray(group.tasks) ? group.tasks : []).forEach((task, position) => {
         if (!task?.id) return;
         const previous = previousServerTasks.get(String(task.id));
+        const observedAt = Number(task.started_at) * 1000 || previous?.observedAt || now;
+        if (!Number(task.started_at)) task.started_at = observedAt / 1000;
+        if ((task.duration_seconds === null || task.duration_seconds === undefined)
+            || !Number.isFinite(Number(task.duration_seconds))) {
+          task.duration_seconds = Math.max(0, (now - observedAt) / 1000);
+        }
         nextTasks.set(String(task.id), {
           group: {...group, tasks: []}, task: {...task}, position,
-          observedAt: Number(task.started_at) * 1000 || previous?.observedAt || now,
+          observedAt,
         });
       });
     });

@@ -138,7 +138,7 @@
     </summary>
     <div class="upload-panel-content">
       <p class="lede">Bring the source files that feed every product workflow into one managed workspace: NetCheck CDR workbooks (Data, Voice and Speech), Smart Orchestrator Logs, and Vodafone UK (VFUK) or Three UK (3UK) Multivendor Mappings. Workspace proposes a type from each filename, lets you confirm it per file and, for CDRs, can apply an existing mapping or one uploaded in the same batch. Batch mappings are processed before their selected CDRs.</p>
-      <form class="upload-dropzone" action="/datasets-analysis/upload" method="post" enctype="multipart/form-data" data-loading-label="Uploading datasets" data-loading-copy="Saving the selected files. Processing and optional Vendor mapping continue in the Data Processing queue." data-upload-type-form data-vodafone-mapping-options='{{ vodafone_mapping_datasets | default([]) | tojson }}' data-three-mapping-options='{{ three_mapping_datasets | default([]) | tojson }}'>
+      <form class="upload-dropzone" action="/datasets-analysis/upload" method="post" enctype="multipart/form-data" data-background-upload data-workspace-id="{{ active_workspace.id }}" data-workspace-name="{{ active_workspace.name }}" data-upload-type-form data-vodafone-mapping-options='{{ vodafone_mapping_datasets | default([]) | tojson }}' data-three-mapping-options='{{ three_mapping_datasets | default([]) | tojson }}'>
       <label class="dropzone-field" data-upload-dropzone>
         <span class="dropzone-title">Drop workbooks or browse</span>
         <span class="dropzone-copy">Accepted: CSV, XLS, XLSX, XLSM</span>
@@ -548,6 +548,7 @@
   };
   const vodafoneMappings = parseMappingOptions('vodafoneMappingOptions');
   const threeMappings = parseMappingOptions('threeMappingOptions');
+  let uploadInProgress = false;
 
   function inferType(fileName) {
     const normalized = String(fileName || '').toLowerCase().replace(/[_-]+/g, ' ');
@@ -637,6 +638,73 @@
     refreshMappingChoices();
     list.hidden = files.length === 0;
     list.classList.toggle('upload-type-confirmation', needsConfirmation);
+  });
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (uploadInProgress || !form.reportValidity()) return;
+    uploadInProgress = true;
+    const submitButton = form.querySelector('button[type="submit"]');
+    const files = Array.from(picker.files || []);
+    const taskId = `dataset-upload:${Date.now()}`;
+    const startedAt = Date.now() / 1000;
+    const taskBase = {
+      id: taskId,
+      workspace_id: form.dataset.workspaceId || '__client__',
+      workspace_name: form.dataset.workspaceName || 'Active workspace',
+      is_active: true,
+      label: `Uploading ${files.length} dataset${files.length === 1 ? '' : 's'}`,
+      started_at: startedAt,
+    };
+    const publish = (detail) => window.dispatchEvent(new CustomEvent(
+      'dashboard-analytic:background-task', {detail: {...taskBase, ...detail}},
+    ));
+    const request = new XMLHttpRequest();
+    submitButton.disabled = true;
+    submitButton.textContent = 'Uploading in background…';
+    publish({status: 'processing', detail: 'Starting upload', progress: 0, duration_seconds: 0});
+    const timer = window.setInterval(() => publish({
+      status: 'processing', detail: 'Uploading files', progress: null,
+      duration_seconds: Math.max(0, Date.now() / 1000 - startedAt),
+    }), 1000);
+    request.upload.addEventListener('progress', (progressEvent) => {
+      const progress = progressEvent.lengthComputable && progressEvent.total > 0
+        ? Math.min(99, progressEvent.loaded * 100 / progressEvent.total) : null;
+      publish({
+        status: 'processing', detail: 'Uploading files', progress,
+        duration_seconds: Math.max(0, Date.now() / 1000 - startedAt),
+      });
+    });
+    const finish = () => {
+      window.clearInterval(timer);
+      uploadInProgress = false;
+      submitButton.disabled = false;
+      submitButton.textContent = 'Upload and process';
+    };
+    request.addEventListener('load', () => {
+      finish();
+      if (request.status >= 200 && request.status < 400) {
+        let payload = {};
+        try { payload = JSON.parse(request.responseText || '{}'); } catch (_error) { /* Use the fallback URL. */ }
+        publish({status: 'completed', detail: 'Upload completed', progress: 100});
+        window.location.assign(payload.redirect_url || '/workspace');
+        return;
+      }
+      publish({status: 'cancelled'});
+      showInfoDialog('The datasets could not be uploaded. Review the selected files and try again.', {
+        title: 'Dataset upload', tone: 'error',
+      });
+    });
+    request.addEventListener('error', () => {
+      finish();
+      publish({status: 'cancelled'});
+      showInfoDialog('The upload connection failed. No processing task was started.', {
+        title: 'Dataset upload', tone: 'error',
+      });
+    });
+    request.open('POST', form.action);
+    request.setRequestHeader('Accept', 'application/json');
+    request.send(new FormData(form));
   });
 
   const dropzone = form.querySelector('[data-upload-dropzone]');

@@ -2341,6 +2341,50 @@ def test_dataset_background_task_reports_running_and_completed_duration(client) 
     assert 'stop_url' not in completed
 
 
+def test_every_global_background_task_exposes_execution_timing(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    started_at = time.time() - 12
+    with app_module.MANUAL_BACKUP_JOBS_LOCK:
+        app_module.MANUAL_BACKUP_JOBS['timed-task'] = {
+            'id': 'timed-task', 'owner': 'admin', 'status': 'processing',
+            'message': 'Testing task timing', 'progress': 40, 'created_at': started_at,
+        }
+    try:
+        tasks = app_module._global_background_tasks(next(iter(app_module.SESSIONS.values())), set())
+    finally:
+        with app_module.MANUAL_BACKUP_JOBS_LOCK:
+            app_module.MANUAL_BACKUP_JOBS.pop('timed-task', None)
+
+    task = next(item for item in tasks if item['id'] == 'manual-backup:timed-task')
+    assert task['started_at'] == started_at
+    assert task['duration_seconds'] >= 12
+
+
+def test_workspace_dataset_upload_uses_non_blocking_progress_card(client) -> None:
+    login(client)
+
+    page = client.get('/workspace')
+
+    assert page.status_code == 200
+    assert 'data-background-upload' in page.text
+    assert "new XMLHttpRequest()" in page.text
+    assert "dashboard-analytic:background-task" in page.text
+    assert 'data-loading-label="Uploading datasets"' not in page.text
+
+    upload = client.post(
+        '/datasets-analysis/upload',
+        data={'dataset_kinds': 'data'},
+        files={'dataset_files': ('background-upload.csv', BytesIO(b'market,score\nES,91\n'), 'text/csv')},
+        headers={'Accept': 'application/json'},
+    )
+    assert upload.status_code == 202
+    assert upload.json() == {
+        'dataset_ids': [1], 'redirect_url': '/workspace?dataset_id=1', 'status': 'queued',
+    }
+
+
 def test_background_task_stop_endpoint_stops_accessible_workspace_work(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -3469,6 +3513,77 @@ def test_workspace_upload_can_map_selected_cdr_vendor_during_processing(client) 
     import src.DashboardAnalytic as app_module
     dataset = app_module.serialize_dataset_row(app_module.repository.get_dataset(2))
     assert dataset['vendor_mapping_applied'] is True
+
+
+def test_retry_reuses_persisted_vendor_mapping_selections(client) -> None:
+    login(client)
+    client.post(
+        '/datasets-analysis/upload',
+        data={'dataset_kinds': 'mapping_three'},
+        files={'dataset_files': ('Multivendor_Mapping_3UK.csv', BytesIO(b'Cid__ECI,Vendor\n200,Nokia\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    client.post(
+        '/datasets-analysis/upload',
+        data={
+            'dataset_kinds': 'data',
+            'vodafone_mapping_dataset_ids': '',
+            'three_mapping_dataset_ids': '1',
+        },
+        files={'dataset_files': ('retry_mapped.csv', BytesIO(b'Operator,Cell_ID_A,score\n3,200 -> 200,91\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    import src.DashboardAnalytic as app_module
+
+    original = app_module.repository.get_dataset(2)
+    assert original is not None
+    assert json.loads(original['processing_options_json'])['three_mapping_dataset_id'] == 1
+    app_module.repository.update_dataset_profile(
+        2, status='failed', progress=100, vendor_mapping_applied=False,
+        last_error='Synthetic retry request',
+    )
+
+    response = client.post('/datasets-analysis/retry/2', follow_redirects=False)
+
+    assert response.status_code == 303
+    retried = app_module.serialize_dataset_row(app_module.repository.get_dataset(2))
+    assert retried['status'] == 'ready'
+    assert retried['vendor_mapping_applied'] is True
+    assert '>3_Nokia<' in client.get('/workspace/preview/2').text
+
+
+def test_workspace_recovers_database_lock_failure_with_saved_vendor_mapping(client) -> None:
+    login(client)
+    client.post(
+        '/datasets-analysis/upload',
+        data={'dataset_kinds': 'mapping_three'},
+        files={'dataset_files': ('Multivendor_Mapping_3UK.csv', BytesIO(b'Cid__ECI,Vendor\n200,Nokia\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    client.post(
+        '/datasets-analysis/upload',
+        data={
+            'dataset_kinds': 'data',
+            'vodafone_mapping_dataset_ids': '',
+            'three_mapping_dataset_ids': '1',
+        },
+        files={'dataset_files': ('locked_mapped.csv', BytesIO(b'Operator,Cell_ID_A,score\n3,200 -> 200,91\n'), 'text/csv')},
+        follow_redirects=False,
+    )
+    import src.DashboardAnalytic as app_module
+
+    app_module.repository.update_dataset_profile(
+        2, status='failed', progress=100, vendor_mapping_applied=False,
+        last_error='database is locked',
+    )
+
+    response = client.get('/workspace')
+
+    assert response.status_code == 200
+    recovered = app_module.serialize_dataset_row(app_module.repository.get_dataset(2))
+    assert recovered['status'] == 'ready'
+    assert recovered['vendor_mapping_applied'] is True
+    assert '>3_Nokia<' in client.get('/workspace/preview/2').text
 
 
 def test_workspace_batch_upload_keeps_vendor_mapping_choices_aligned_per_file(client) -> None:

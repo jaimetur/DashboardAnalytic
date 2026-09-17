@@ -42,11 +42,11 @@
 - Added `Vendor_Only` after `Vendor` in Datasets Analysis Adaptive Filters.
 - The Vendors metric now counts distinct `Vendor_Only` values and follows Operators.
 - Global outcome cards use Tests for Data and Calls for Voice/Speech; Completed counts the filtered total and Dropped Calls follows Failed for every CDR type.
-- Dataset processing shows percentage and persisted elapsed time together in both the Workspace queue and floating background-task card, including the completed state.
+- Every background task shows a live execution timer in the floating task card, including client-side dataset uploads and the completed state. Dataset processing, Reports, Chart Sets and Dashboard PowerPoint jobs also derive and retain their elapsed time from persisted start/finish timestamps in their corresponding tables.
 - CDR previews mark every field as `PINNED` or `UN_PINNED`; mapping previews hide empty optional and Analysis-derived fields while retaining metadata, Region, GCID, Operator and Technology_Primary.
 - Added application-wide Config settings for timezone, chart renderer, Chromium and event-time filtering, including searchable IANA timezones; event-time bypass disables only dataset date-range prefilters with an explanatory tooltip.
 - Background task cards can be moved and restored to their default dock position with a target control.
-- Dataset imports continue after logout or Workspace changes and automatically resume after an application restart with their original mapping selections.
+- Dataset file uploads run without a blocking page overlay and report byte progress plus elapsed time in the floating background-task card; processing continues after logout or Workspace changes and automatically resumes after an application restart. Import-time VFUK/3UK mapping selections are persisted and reused by retries, legacy lock recovery and explicit reprocessing, while clearing Vendors deliberately clears those selections.
 - Unified CDR and filtered chart dataset viewers across Dashboards, PPT snapshots, Reporting, Chart Sets and Report Template editing, with column counts and lazy cached filter loading.
 - CDR and chart dataset viewers now provide right-aligned filtered CSV export; chart dialogs use full-height 5%-inset layouts, light badge hover states and consistent close controls.
 - Combined CDR tables now permanently materialize the fixed Dataset Preview fields and every KPI referenced by any saved workspace Report Template. A versioned template signature backfills existing tables in the background and invalidates only affected Dashboard projections, avoiding KPI-column repair during Dashboard preparation.
@@ -57,7 +57,7 @@
 - Fixed Dataset Preview badge alignment so hidden columns no longer leave stacked badges, while preserving semantic colours inside themed modules.
 - Startup warming now processes only the open Workspace sequentially; other Workspaces wait for 30 minutes of inactivity.
 - Excluded timestamp fields from analysis metrics; expired sessions stop passive polling without redirecting the current page or repeatedly returning unauthorized responses.
-- Task polling uses short-lived SQLite reads, registry handles close deterministically, size scans are cached and login skips repeated Workspace migrations. Workspace databases now enable WAL once during initialization, ordinary requests no longer change connection safety settings, and large CDR validation scans release the writer reservation, keeping pages responsive during Dashboard preparation.
+- Task polling uses short-lived SQLite reads, registry handles close deterministically, size scans are cached and login skips repeated Workspace migrations. Workspace databases now enable WAL once during initialization, ordinary requests no longer change connection safety settings, and large CDR validation scans release the writer reservation, keeping pages responsive during Dashboard preparation. Dataset ingestion, Vendor mapping/clearing, Auto-calculated Field materialization and combined-CDR recreation now share the same per-workspace writer queue, preventing `database is locked` from leaving previously processed CDRs unusable; legacy affected rows recover automatically and failed mappings leave their source CDR ready for use and remapping.
 - Background task interruption remains successful when its non-critical audit entry encounters a temporary SQLite write lock.
 - Fixed dataset-dialog loading, Escape dismissal, E2E filter layering and duplicate Reporting frame loads.
 
