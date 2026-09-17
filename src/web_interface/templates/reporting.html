@@ -1837,6 +1837,7 @@
       reportChartZoomSelection.hidden = false;
     };
     reportChartViewerCanvas?.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'touch') return;
       if (!reportChartDrawRect || !reportChartViewport) return;
       const point = pointInReportChart(event);
       if (!point || point.x < reportChartDrawRect.x || point.x > reportChartDrawRect.x + reportChartDrawRect.width || point.y < reportChartDrawRect.y || point.y > reportChartDrawRect.y + reportChartDrawRect.height) return;
@@ -1952,6 +1953,29 @@
       const target = {first: 0, previous: reportChartIndex - 1, next: reportChartIndex + 1, last: reportCharts.length - 1}[navigation];
       openReportChartViewer(target);
     });
+    let reportChartSwipe = null;
+    reportChartViewer?.addEventListener('pointerdown', (event) => {
+      if (event.pointerType !== 'touch' || !event.isPrimary || reportChartViewer.hidden) return;
+      if (event.target.closest('button,a,input,select,textarea,summary,[contenteditable="true"],.report-chart-viewer-sandbox')) return;
+      const chartIsZoomed = reportChartImage && reportChartViewport && (
+        reportChartViewport.width < reportChartImage.naturalWidth - 1
+        || reportChartViewport.height < reportChartImage.naturalHeight - 1
+      );
+      if (event.target.closest('canvas') && chartIsZoomed) return;
+      reportChartSwipe = {pointerId: event.pointerId, x: event.clientX, y: event.clientY, time: performance.now()};
+    });
+    reportChartViewer?.addEventListener('pointerup', (event) => {
+      if (!reportChartSwipe || event.pointerId !== reportChartSwipe.pointerId) return;
+      const gesture = reportChartSwipe;
+      reportChartSwipe = null;
+      const horizontal = event.clientX - gesture.x;
+      const vertical = event.clientY - gesture.y;
+      if (performance.now() - gesture.time > 900 || Math.abs(horizontal) < 56 || Math.abs(horizontal) < Math.abs(vertical) * 1.35) return;
+      event.preventDefault();
+      const target = reportChartIndex + (horizontal < 0 ? 1 : -1);
+      if (target >= 0 && target < reportCharts.length) openReportChartViewer(target);
+    });
+    reportChartViewer?.addEventListener('pointercancel', () => { reportChartSwipe = null; });
     document.addEventListener('keydown', (event) => {
       if (reportChartViewer?.hidden) return;
       if (event.key === 'Escape') {

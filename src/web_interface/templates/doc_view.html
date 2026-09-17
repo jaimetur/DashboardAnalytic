@@ -12,25 +12,55 @@
     <p id="doc-path" class="doc-meta">Loading document...</p>
     {% if help_navigation %}
     <div class="doc-layout">
-      <aside class="doc-sidebar" aria-label="Help navigation">
+      <aside class="doc-sidebar help-navigator-inline" aria-label="Help navigation">
         <h3>Help Navigation</h3>
         <p>Browse the available documentation.</p>
-        <nav><ul id="help-nav-list" class="help-nav-list"></ul></nav>
+        <nav><ul id="help-nav-list" class="help-nav-list" data-help-nav-list></ul></nav>
       </aside>
       <article id="doc-content" class="doc-markdown markdown-viewer"></article>
     </div>
     {% elif changelog_navigation %}
     <div class="doc-layout">
-      <aside class="doc-sidebar" aria-label="Release navigation">
-        <h3>Releases</h3>
+      <div class="doc-sidebar-stack">
+        <aside class="doc-sidebar help-navigator-inline" aria-label="Documentation navigation">
+          <h3>Help Navigation</h3>
+          <p>Browse the available documentation.</p>
+          <nav><ul class="help-nav-list" data-help-nav-list></ul></nav>
+        </aside>
+        <aside class="doc-sidebar release-navigator-inline" aria-label="Release navigation">
+          <h3>Releases</h3>
+          <p>Jump to a release.</p>
+          <nav><ul id="changelog-nav-list" class="help-nav-list" data-changelog-nav-list></ul></nav>
+        </aside>
+      </div>
+      <article id="doc-content" class="doc-markdown markdown-viewer"></article>
+    </div>
+    <aside class="release-navigator" aria-label="Fixed release navigation" data-release-navigator>
+      <div class="release-navigator-drawer" id="release-navigator-drawer">
+        <header><h3>Releases</h3><button type="button" class="release-navigator-close" data-release-navigator-close aria-label="Close release navigation">&times;</button></header>
         <p>Jump to a release.</p>
-        <nav><ul id="changelog-nav-list" class="help-nav-list"></ul></nav>
+        <nav><ul id="changelog-fixed-nav-list" class="help-nav-list" data-changelog-nav-list></ul></nav>
+      </div>
+      <button type="button" class="release-navigator-tab" data-release-navigator-toggle aria-expanded="false" aria-controls="release-navigator-drawer" title="Navigate releases"><span>Releases</span></button>
+    </aside>
+    {% else %}
+    <div class="doc-layout">
+      <aside class="doc-sidebar help-navigator-inline" aria-label="Documentation navigation">
+        <h3>Help Navigation</h3>
+        <p>Browse the available documentation.</p>
+        <nav><ul class="help-nav-list" data-help-nav-list></ul></nav>
       </aside>
       <article id="doc-content" class="doc-markdown markdown-viewer"></article>
     </div>
-    {% else %}
-    <article id="doc-content" class="doc-markdown markdown-viewer"></article>
     {% endif %}
+    <aside class="help-navigator" aria-label="Fixed documentation navigation" data-help-navigator>
+      <div class="help-navigator-drawer" id="help-navigator-drawer">
+        <header><h3>Help Navigation</h3><button type="button" class="help-navigator-close" data-help-navigator-close aria-label="Close Help navigation">&times;</button></header>
+        <p>Browse the available documentation.</p>
+        <nav><ul id="help-fixed-nav-list" class="help-nav-list" data-help-nav-list></ul></nav>
+      </div>
+      <button type="button" class="help-navigator-tab" data-help-navigator-toggle aria-expanded="false" aria-controls="help-navigator-drawer" title="Navigate documentation"><span>Navigation</span></button>
+    </aside>
   </article>
 </section>
 {% endblock %}
@@ -40,10 +70,65 @@
 (function () {
   const pathEl = document.getElementById('doc-path');
   const contentEl = document.getElementById('doc-content');
-  const helpNavEl = document.getElementById('help-nav-list');
+  const helpNavLists = [...document.querySelectorAll('[data-help-nav-list]')];
   const changelogNavEl = document.getElementById('changelog-nav-list');
+  const changelogNavLists = [...document.querySelectorAll('[data-changelog-nav-list]')];
   let currentDocumentPath = '';
   if (!pathEl || !contentEl || !window.MarkdownRenderer) return;
+
+  const helpNavigator = document.querySelector('[data-help-navigator]');
+  const helpNavigatorToggle = helpNavigator?.querySelector('[data-help-navigator-toggle]');
+  const helpNavigatorClose = helpNavigator?.querySelector('[data-help-navigator-close]');
+  if (helpNavigator && helpNavigator.parentElement !== document.body) document.body.append(helpNavigator);
+  const setHelpNavigatorOpen = (open) => {
+    if (!helpNavigator || !helpNavigatorToggle) return;
+    helpNavigator.classList.toggle('is-open', open);
+    helpNavigatorToggle.setAttribute('aria-expanded', String(open));
+  };
+  helpNavigatorToggle?.addEventListener('click', () => {
+    const opening = !helpNavigator.classList.contains('is-open');
+    if (opening) setReleaseNavigatorOpen(false);
+    setHelpNavigatorOpen(opening);
+  });
+  helpNavigatorClose?.addEventListener('click', () => setHelpNavigatorOpen(false));
+  helpNavigator?.addEventListener('click', (event) => {
+    if (event.target.closest('.help-nav-list a')) setHelpNavigatorOpen(false);
+  });
+  document.addEventListener('pointerdown', (event) => {
+    if (helpNavigator?.classList.contains('is-open') && !helpNavigator.contains(event.target)) setHelpNavigatorOpen(false);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !helpNavigator?.classList.contains('is-open')) return;
+    setHelpNavigatorOpen(false);
+    helpNavigatorToggle?.focus();
+  });
+
+  const releaseNavigator = document.querySelector('[data-release-navigator]');
+  const releaseNavigatorToggle = releaseNavigator?.querySelector('[data-release-navigator-toggle]');
+  const releaseNavigatorClose = releaseNavigator?.querySelector('[data-release-navigator-close]');
+  if (releaseNavigator && releaseNavigator.parentElement !== document.body) document.body.append(releaseNavigator);
+  const setReleaseNavigatorOpen = (open) => {
+    if (!releaseNavigator || !releaseNavigatorToggle) return;
+    releaseNavigator.classList.toggle('is-open', open);
+    releaseNavigatorToggle.setAttribute('aria-expanded', String(open));
+  };
+  releaseNavigatorToggle?.addEventListener('click', () => {
+    const opening = !releaseNavigator.classList.contains('is-open');
+    if (opening) setHelpNavigatorOpen(false);
+    setReleaseNavigatorOpen(opening);
+  });
+  releaseNavigatorClose?.addEventListener('click', () => setReleaseNavigatorOpen(false));
+  releaseNavigator?.addEventListener('click', (event) => {
+    if (event.target.closest('.help-nav-list a')) setReleaseNavigatorOpen(false);
+  });
+  document.addEventListener('pointerdown', (event) => {
+    if (releaseNavigator?.classList.contains('is-open') && !releaseNavigator.contains(event.target)) setReleaseNavigatorOpen(false);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !releaseNavigator?.classList.contains('is-open')) return;
+    setReleaseNavigatorOpen(false);
+    releaseNavigatorToggle?.focus();
+  });
 
   function resolveDocUrl(rawUrl, isImage) {
     const raw = String(rawUrl || '').trim();
@@ -164,34 +249,48 @@
     return fileName.replace(/\.md$/i, '').replace(/[-_]+/g, ' ').replace(/^\d+\s*/, '').replace(/\b\w/g, (letter) => letter.toUpperCase());
   }
 
-  if (helpNavEl) {
+  if (helpNavLists.length) {
     fetch('/api/documents/help-index')
       .then(async (response) => ({response, data: await response.json()}))
       .then(({response, data}) => {
         if (!response.ok || !Array.isArray(data.documents)) throw new Error('Unable to load help navigation.');
-        data.documents.forEach((helpDocument) => {
+        const relatedDocuments = [
+          {label: 'Readme', url: '/documents/view/readme'},
+          {label: 'Changelog', url: '/documents/view/changelog'},
+        ];
+        helpNavLists.forEach((navList) => relatedDocuments.forEach((documentLink) => {
           const item = document.createElement('li');
+          item.className = 'help-nav-related-item';
+          const link = document.createElement('a');
+          link.href = documentLink.url;
+          link.textContent = documentLink.label;
+          if (link.pathname === window.location.pathname) link.classList.add('active');
+          item.appendChild(link);
+          navList.appendChild(item);
+        }));
+        helpNavLists.forEach((navList) => data.documents.forEach((helpDocument, position) => {
+          const item = document.createElement('li');
+          if (position === 0) item.className = 'help-nav-help-start';
           const link = document.createElement('a');
           link.href = helpDocument.url;
-          const position = data.documents.indexOf(helpDocument);
           const number = helpDocument.number || String(position).padStart(2, '0');
           const label = position === 0 ? 'Help Home' : (helpDocument.label || formatHelpLabel(helpDocument.relative_path));
           link.textContent = position === 0 ? `${number}. ${label} 🏠` : `${number}. ${label}`;
           if (link.pathname === window.location.pathname) link.classList.add('active');
           item.appendChild(link);
-          helpNavEl.appendChild(item);
-        });
+          navList.appendChild(item);
+        }));
       })
       .catch(() => {
-        helpNavEl.innerHTML = '<li>Unable to load help navigation.</li>';
+        helpNavLists.forEach((navList) => { navList.innerHTML = '<li>Unable to load help navigation.</li>'; });
       });
   }
-  if (changelogNavEl) {
+  if (changelogNavLists.length) {
     fetch('/api/documents/changelog-index')
       .then(async (response) => ({response, data: await response.json()}))
       .then(({response, data}) => {
         if (!response.ok || !Array.isArray(data.releases)) throw new Error('Unable to load release navigation.');
-        data.releases.forEach((release) => {
+        changelogNavLists.forEach((navList) => data.releases.forEach((release) => {
           const item = document.createElement('li');
           const link = document.createElement('a');
           link.href = `#${release.id}`;
@@ -200,10 +299,10 @@
             requestAnimationFrame(() => openChangelogRelease(release.id, true, true));
           });
           item.appendChild(link);
-          changelogNavEl.appendChild(item);
-        });
+          navList.appendChild(item);
+        }));
       })
-      .catch(() => { changelogNavEl.innerHTML = '<li>Unable to load releases.</li>'; });
+      .catch(() => { changelogNavLists.forEach((navList) => { navList.innerHTML = '<li>Unable to load releases.</li>'; }); });
   }
 })();
 </script>

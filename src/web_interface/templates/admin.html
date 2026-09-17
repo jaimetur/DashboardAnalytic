@@ -227,13 +227,13 @@
           <tbody>
             {% for mapping in operator_mapping_groups %}
             <tr>
-              <td>
+              <td data-label="Canonical label">
                 <form id="operator-mapping-{{ loop.index }}" action="/admin/operator-mappings/save" method="post"></form>
                 <input type="hidden" name="original_canonical" value="{{ mapping.canonical }}" form="operator-mapping-{{ loop.index }}">
                 <input class="table-input operator-mapping-canonical" type="text" name="canonical_value" value="{{ mapping.canonical }}" form="operator-mapping-{{ loop.index }}" required>
               </td>
-              <td><textarea class="operator-mapping-aliases" name="aliases" form="operator-mapping-{{ loop.index }}" rows="3" placeholder="One source label per line">{{ mapping.aliases | join('\n') }}</textarea></td>
-              <td><div class="table-actions"><button type="submit" form="operator-mapping-{{ loop.index }}" class="icon-action" aria-label="Save {{ mapping.canonical }} mapping" title="Save mapping">✓</button><form action="/admin/operator-mappings/delete" method="post" data-confirm="Delete the complete {{ mapping.canonical }} Operator Mapping group?"><input type="hidden" name="canonical_value" value="{{ mapping.canonical }}"><button type="submit" class="danger-button icon-action" aria-label="Delete {{ mapping.canonical }} mapping" title="Delete mapping">×</button></form></div></td>
+              <td data-label="Mapped source labels"><textarea class="operator-mapping-aliases" name="aliases" form="operator-mapping-{{ loop.index }}" rows="3" placeholder="One source label per line">{{ mapping.aliases | join('\n') }}</textarea></td>
+              <td data-label="Actions"><div class="table-actions"><button type="submit" form="operator-mapping-{{ loop.index }}" class="icon-action" aria-label="Save {{ mapping.canonical }} mapping" title="Save mapping">✓</button><form action="/admin/operator-mappings/delete" method="post" data-confirm="Delete the complete {{ mapping.canonical }} Operator Mapping group?"><input type="hidden" name="canonical_value" value="{{ mapping.canonical }}"><button type="submit" class="danger-button icon-action" aria-label="Delete {{ mapping.canonical }} mapping" title="Delete mapping">×</button></form></div></td>
             </tr>
             {% endfor %}
             {% if not operator_mapping_groups %}<tr><td colspan="3">No Operator Mappings are configured.</td></tr>{% endif %}

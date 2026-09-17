@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="src/web_interface/static/img/brand-mark.png" alt="Dashboard Analytic logo" width="320">
+</p>
+
 # Dashboard Analytic Help
 
 Use this Help centre for detailed workflows, examples and technical rules. For a shorter introduction and deployment quick start, open the **Readme** tab.

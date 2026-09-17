@@ -461,9 +461,10 @@ function limitSeriesCollectionByX(seriesCollection, xMaxOverride) {
     'table.queue-table', 'table.users-table', 'table.catalogue-workspace-table',
     'table.report-jobs-table', 'table.workspace-library-table', 'table.recovered-transfer-table',
     'table.app-logs-table', 'table.admin-datasets-table', 'table.database-editor-table',
+    'table.operator-mappings-table', 'table.ds-dashboards-table',
     '.report-charts-grid', '.workspace-calculated-dimensions-list',
   ].join(', ');
-  const compactViewport = window.matchMedia('(max-width: 480px)');
+  const compactViewport = window.matchMedia('(max-width: 640px)');
   const pageSize = 1;
   const states = new WeakMap();
   let scheduled = false;

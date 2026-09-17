@@ -551,7 +551,7 @@
     if (!rows.length) { const row = node('tr'), cell = node('td', 'No Dashboards have been created yet.', 'form-note'); cell.colSpan = 5; row.append(cell); body.append(row); return; }
     for (const [id, item] of rows) {
       const row = node('tr'); if (id === activeId) row.classList.add('ds-dashboard-active');
-      const nameCell = node('td');
+      const nameCell = node('td'); nameCell.dataset.label = 'Dashboard';
       const nameEditor = node('div', undefined, 'ds-dashboard-name-editor');
       const nameInput = document.createElement('input'); nameInput.type = 'text'; nameInput.value = item.name; nameInput.maxLength = 120; nameInput.setAttribute('aria-label', `Dashboard name: ${item.name}`);
       const nameSave = node('button', '✓', 'ds-dashboard-name-save'); nameSave.type = 'button'; nameSave.title = 'Save Dashboard name'; nameSave.setAttribute('aria-label', 'Save Dashboard name'); nameSave.hidden = true;
@@ -572,8 +572,10 @@
         library(); status(`Renamed Dashboard to “${result.name}”.`);
       });
       nameEditor.append(nameInput, nameSave); nameCell.append(nameEditor);
-      row.append(nameCell, node('td', (item.technology || item.template_technology || 'nsa').toUpperCase()), node('td', item.template));
-      const statusCell = node('td');
+      const technologyCell = node('td', (item.technology || item.template_technology || 'nsa').toUpperCase()); technologyCell.dataset.label = 'NR Mode';
+      const templateCell = node('td', item.template); templateCell.dataset.label = 'Template';
+      row.append(nameCell, technologyCell, templateCell);
+      const statusCell = node('td'); statusCell.dataset.label = 'Status';
       const dashboardStatus = dashboardStatuses.get(id) || {state: 'checking', label: 'Checking'};
       const statusBadge = node('span', dashboardStatus.label, `ds-dashboard-status ds-dashboard-status-${dashboardStatus.state}`);
       statusBadge.dataset.dashboardStatusId = id;
@@ -605,7 +607,7 @@
       ppt.dataset.dashboardPptId = id;
       ppt.disabled = dashboardStatus.state !== 'ready';
       action('Delete Dashboard', '×', async () => { await deleteDashboard(id); }, 'danger-button');
-      const cell = node('td'); cell.append(actions); row.append(cell); body.append(row);
+      const cell = node('td'); cell.dataset.label = 'Actions'; cell.append(actions); row.append(cell); body.append(row);
     }
   }
   const renderDashboardStatuses = () => {
@@ -1779,6 +1781,7 @@
     up: expandedPanUp, down: expandedPanDown,
   });
   let expandedControlsTimer;
+  let expandedTouchControlsTimer;
   let expandedFiltersCloseTimer;
   const showExpandedCanvasControls = () => {
     clearTimeout(expandedControlsTimer);
@@ -1796,6 +1799,15 @@
   expandedCanvasShell.onpointerleave = hideExpandedCanvasControls;
   expandedCanvasShell.onfocusin = showExpandedCanvasControls;
   expandedCanvasShell.onfocusout = () => { if (!expandedCanvasShell.contains(document.activeElement)) hideExpandedCanvasControls(); };
+  expandedCanvasShell.addEventListener('pointerdown', event => {
+    if (event.pointerType !== 'touch' || event.target.closest('.ds-chart-filter-panel')) return;
+    clearTimeout(expandedTouchControlsTimer);
+    expandedCanvasShell.classList.add('ds-touch-controls-visible');
+    expandedTouchControlsTimer = setTimeout(() => {
+      expandedCanvasShell.classList.remove('ds-touch-controls-visible');
+      expandedTouchControlsTimer = null;
+    }, 3000);
+  });
   let expandedChart = null;
   let expandedChartMode = 'dashboard';
   let expandedChartFilterControls = null;
@@ -2222,6 +2234,7 @@
   }
   function syncPresentationControls() {
     const button = $('ds-presentation');
+    $('ds-viewer').classList.toggle('ds-presentation-active', presentation.running);
     button.classList.toggle('is-running', presentation.running);
     button.title = presentation.running ? 'Stop presentation' : 'Presentation';
     button.setAttribute('aria-label', presentation.running ? 'Stop presentation' : 'Presentation');
@@ -2280,7 +2293,14 @@
     for (const chart of slide.charts) {
       const card = node('article',undefined,'ds-chart'); card.setAttribute('aria-label',chart.title); card.tabIndex = 0;
       let renderedPayload = null;
-      if (chart.position) { const [left,top,width,height] = chart.position; Object.assign(card.style,{left:`${left}%`,top:`${top}%`,width:`${width}%`,height:`${height}%`}); }
+      if (chart.position) {
+        const [left,top,width,height] = chart.position;
+        Object.assign(card.style,{left:`${left}%`,top:`${top}%`,width:`${width}%`,height:`${height}%`});
+        card.style.setProperty('--ds-chart-left', `${left}%`);
+        card.style.setProperty('--ds-chart-top', `${top}%`);
+        card.style.setProperty('--ds-chart-width', `${width}%`);
+        card.style.setProperty('--ds-chart-height', `${height}%`);
+      }
       const message = node('div',`Rendering ${chart.title || 'chart'}…`,'ds-chart-message'); card.append(message);
       const canvas = document.createElement('canvas'); canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', chart.title); canvas.hidden = true; card.append(canvas);
       const zoom = chartZoomControls(canvas); card.append(zoom);
@@ -2315,12 +2335,22 @@
       });
       const controls = node('div', undefined, 'ds-chart-controls'); controls.append(data, expand, zoom); card.append(controls);
       let hideTimer;
+      let touchControlsTimer;
       const showControls = () => { clearTimeout(hideTimer); hideTimer = null; card.classList.add('ds-hover'); };
       const hideControls = () => { if (!hideTimer) hideTimer = setTimeout(() => { card.classList.remove('ds-hover'); hideTimer = null; }, 500); };
       card.onpointerenter = showControls;
       card.onpointerleave = hideControls;
       card.onfocusin = showControls;
       card.onfocusout = () => { if (!card.contains(document.activeElement)) hideControls(); };
+      card.addEventListener('pointerdown', event => {
+        if (event.pointerType !== 'touch') return;
+        clearTimeout(touchControlsTimer);
+        card.classList.add('ds-touch-controls-visible');
+        touchControlsTimer = setTimeout(() => {
+          card.classList.remove('ds-touch-controls-visible');
+          touchControlsTimer = null;
+        }, 3000);
+      });
       stage.append(card);
     }
     if (presentation.running) { stage.dataset.presentationEffect = presentation.effect; void stage.offsetWidth; stage.classList.add('ds-slide-transition'); }
@@ -2331,6 +2361,45 @@
   bind('ds-prev',()=>{ stopPresentation(); slideIndex--; renderSlide(); });
   bind('ds-next',()=>{ stopPresentation(); slideIndex++; renderSlide(); });
   bind('ds-last',()=>{ stopPresentation(); slideIndex = Math.max(0, (prepared?.slides.length || 1) - 1); renderSlide(); });
+  const bindHorizontalSwipe = (host, {previous, next, blocked = () => false}) => {
+    let gesture = null;
+    const reset = () => { gesture = null; };
+    host.addEventListener('pointerdown', event => {
+      if (event.pointerType !== 'touch' || !event.isPrimary || blocked()) return;
+      if (event.target.closest('button,a,input,select,textarea,summary,[contenteditable="true"],.multiselect-menu,.ds-chart-filter-panel')) return;
+      const canvas = event.target.closest('canvas');
+      if (canvas && Number(globalThis.getDashboardChartZoom?.(canvas) || 1) > 1) return;
+      gesture = {pointerId: event.pointerId, x: event.clientX, y: event.clientY, time: performance.now()};
+    });
+    host.addEventListener('pointerup', event => {
+      if (!gesture || event.pointerId !== gesture.pointerId) return;
+      const current = gesture;
+      reset();
+      const horizontal = event.clientX - current.x;
+      const vertical = event.clientY - current.y;
+      if (performance.now() - current.time > 900 || Math.abs(horizontal) < 56 || Math.abs(horizontal) < Math.abs(vertical) * 1.35) return;
+      event.preventDefault();
+      if (horizontal < 0) next();
+      else previous();
+    });
+    host.addEventListener('pointercancel', reset);
+  };
+  bindHorizontalSwipe($('ds-viewer'), {
+    blocked: () => $('ds-viewer').hidden || !prepared?.slides?.length,
+    previous: () => {
+      if (slideIndex <= 0) return;
+      stopPresentation(); slideIndex -= 1; renderSlide();
+    },
+    next: () => {
+      if (slideIndex >= (prepared?.slides.length || 1) - 1) return;
+      stopPresentation(); slideIndex += 1; renderSlide();
+    },
+  });
+  bindHorizontalSwipe($('ds-chart-expanded-overlay'), {
+    blocked: () => $('ds-chart-expanded-overlay').hidden || !expandedChart,
+    previous: () => void safe(() => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) - 1))(),
+    next: () => void safe(() => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) + 1))(),
+  });
   $('ds-slide').onchange = () => { stopPresentation(); slideIndex = Number($('ds-slide').value); renderSlide(); };
   bind('ds-comment-add', async () => { const input = $('ds-comment-input'), comment = input.value.trim(); if (!comment || !definition) return; const key = currentSlideCommentKey(); definition.slide_comments ||= {}; const comments = definition.slide_comments[key] ||= []; if (comments.length >= 50) throw new Error('A slide can have at most 50 comments.'); comments.push(comment); input.value = ''; await persistComments(); renderComments(); });
   $('ds-comment-input').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); $('ds-comment-add').click(); } });
@@ -2404,7 +2473,11 @@
     }
     if (visible === 'ds-viewer' && !editing && event.key === 'ArrowLeft' && slideIndex > 0) { event.preventDefault(); stopPresentation(); slideIndex -= 1; renderSlide(); return; }
     if (visible === 'ds-viewer' && !editing && event.key === 'ArrowRight' && slideIndex < (prepared?.slides.length || 1) - 1) { event.preventDefault(); stopPresentation(); slideIndex += 1; renderSlide(); return; }
-    if (event.key === 'Escape') { event.preventDefault(); $({'ds-chart-expanded-overlay':'ds-chart-expanded-close','ds-editor-overlay':'ds-editor-close','ds-data-overlay':'ds-data-close','ds-filter-overlay':'ds-filter-close','ds-ppt-filter-overlay':'ds-ppt-filter-dialog-close','ds-presentation-overlay':'ds-presentation-close','ds-viewer':'ds-viewer-close'}[visible]).click(); }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      if (visible === 'ds-viewer' && presentation.running) { stopPresentation(); return; }
+      $({'ds-chart-expanded-overlay':'ds-chart-expanded-close','ds-editor-overlay':'ds-editor-close','ds-data-overlay':'ds-data-close','ds-filter-overlay':'ds-filter-close','ds-ppt-filter-overlay':'ds-ppt-filter-dialog-close','ds-presentation-overlay':'ds-presentation-close','ds-viewer':'ds-viewer-close'}[visible]).click();
+    }
     if (event.key === 'Tab') { const controls = [...$(visible).querySelectorAll('button:not(:disabled),a[href],input,select,summary,[tabindex="0"]')].filter(el=>el.getClientRects().length); if (!controls.length) return; const first = controls[0], last = controls.at(-1); if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
   });
   window.addEventListener('message', event => {
