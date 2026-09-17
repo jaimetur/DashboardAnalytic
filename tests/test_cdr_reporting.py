@@ -2544,6 +2544,45 @@ def test_netcheck_reporting_generates_template_backed_pptx(client) -> None:
     assert client.get(job['download_url']).status_code == 404
 
 
+def test_reporting_chart_dataset_reuses_one_source_frame_and_projects_chart_columns(monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    first = CatalogEntry(
+        slide=1, slide_title='Slide', slide_subtitle='', layout='', chart_title='First',
+        cdr_source='CDR-Data', kpi='Metric_A', chart_type='Table', legend='', filters='',
+        grouping_rows='Operator', grouping_columns='Campaign',
+    )
+    second = replace(first, chart_title='Second', kpi='Metric_B')
+    loads: list[list[str]] = []
+    monkeypatch.setattr(app_module, '_reporting_datasets', lambda *_args: [{
+        'id': 7, 'dataset_kind': 'data', 'updated_at': '1', 'processed_at': '1',
+        'normalization_version': '1',
+    }])
+
+    def load_shared(_datasets, _technology, entries, _multivendor):
+        loads.append([entry.kpi for entry in entries])
+        return pd.DataFrame({
+            'Operator': ['VF'], 'Campaign': ['2026-Q3'], 'Metric_A': [1], 'Metric_B': [2],
+        })
+
+    monkeypatch.setattr(app_module, '_combined_reporting_frame', load_shared)
+    app_module._clear_chart_preview_caches()
+
+    first_key, first_frame = app_module._shared_reporting_preview_frame(
+        [7], first, [first, second], 'nsa', False,
+    )
+    second_key, second_frame = app_module._shared_reporting_preview_frame(
+        [7], second, [first, second], 'nsa', False,
+    )
+
+    assert first_key == second_key
+    assert len(loads) == 1
+    assert {'Operator', 'Campaign', 'Metric_A'} <= set(first_frame.columns)
+    assert 'Metric_B' not in first_frame.columns
+    assert {'Operator', 'Campaign', 'Metric_B'} <= set(second_frame.columns)
+    assert 'Metric_A' not in second_frame.columns
+
+
 def test_reporting_generates_template_chart_previews(client, monkeypatch) -> None:
     import src.DashboardAnalytic as app_module
 

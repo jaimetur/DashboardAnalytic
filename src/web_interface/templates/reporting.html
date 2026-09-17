@@ -1737,6 +1737,11 @@
     const loadReportChartViewerDataset = async () => {
       if (!reportChartViewerDataPanel) return false;
       reportChartViewerData.disabled = true;
+      const loading = document.createElement('p');
+      loading.className = 'form-note report-chart-viewer-data-loading';
+      loading.textContent = 'Loading filtered dataset…';
+      reportChartViewerDataPanel.replaceChildren(loading);
+      reportChartViewerDataPanel.setAttribute('aria-busy', 'true');
       showLoadingOverlay('Loading Filtered Dataset', 'Please wait while the filtered dataset is prepared.');
       try {
         const payload = await requestReportChartViewerDataset();
@@ -1753,14 +1758,14 @@
         return false;
       } finally {
         hideLoadingOverlay();
+        reportChartViewerDataPanel.removeAttribute('aria-busy');
         reportChartViewerData.disabled = false;
       }
     };
     reportChartViewerData?.addEventListener('click', async () => {
-      if (await loadReportChartViewerDataset()) {
-        reportChartViewerDataOverlay.hidden = false;
-        reportChartViewerDataOverlay.querySelector('[data-report-chart-viewer-data-close]')?.focus();
-      }
+      reportChartViewerDataOverlay.hidden = false;
+      reportChartViewerDataOverlay.querySelector('[data-report-chart-viewer-data-close]')?.focus();
+      if (!await loadReportChartViewerDataset()) closeReportChartViewerData(true);
     });
     reportChartViewerInteractive?.addEventListener('click', () => {
       if (!reportChartViewerSandbox) return;

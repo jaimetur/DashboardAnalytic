@@ -1006,7 +1006,7 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .report-chart-viewer-interactive-button svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .report-chart-viewer-data-overlay { position: absolute; z-index: 2; inset: 0; display: grid; place-items: stretch; padding: 0; border-radius: inherit; background: rgba(31, 19, 52, 0.50); }
 .report-chart-viewer-data-overlay[hidden] { display: none !important; }
-.report-chart-viewer-data-dialog { position: absolute; inset: 5%; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 1rem; min-width: 0; min-height: 0; padding: 1.25rem 1.4rem; border-radius: 18px; background: linear-gradient(180deg, rgba(255, 251, 255, 0.99), rgba(247, 242, 253, 0.99)); }
+.report-chart-viewer-data-dialog { position: absolute; inset: 2%; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 1rem; min-width: 0; min-height: 0; padding: 1.25rem 1.4rem; border-radius: 18px; background: linear-gradient(180deg, rgba(255, 251, 255, 0.99), rgba(247, 242, 253, 0.99)); }
 .report-chart-viewer-data-header { display: flex; justify-content: space-between; align-items: start; gap: 1rem; }
 .report-chart-viewer-data-header h3, .report-chart-viewer-data-header p { margin: 0; }
 .report-chart-viewer-data { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; overflow: hidden; border: 1px solid #d9c9ee; border-radius: 8px; background: #fff; }
@@ -1018,6 +1018,7 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .report-chart-viewer-data-header .report-chart-viewer-close:hover:not(:disabled),
 #ds-data-close:hover:not(:disabled) { border-color: #7d1722; background: linear-gradient(145deg, #96222e, #c53a46); color: #fff; }
 .report-chart-viewer-data > .form-note { margin: 0; padding: 0.55rem 0.65rem; border-bottom: 1px solid #eee7f7; background: #fbf8ff; }
+.report-chart-viewer-data-loading { display: grid; place-items: center; height: 100%; box-sizing: border-box; border: 0 !important; color: #5c4778; font-weight: 750; }
 .report-chart-viewer-data-scroll { min-height: 0; overflow: auto; }
 .report-chart-viewer-data-scroll .gcid-column { background: #fff6bf; color: #554000; font-weight: 700; }
 .report-chart-viewer-data-scroll .vendor-column { background: #ddf6e7; color: #225b35; font-weight: 700; }

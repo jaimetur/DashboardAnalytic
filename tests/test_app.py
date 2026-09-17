@@ -4851,6 +4851,10 @@ def test_reporting_chart_viewer_uses_hover_canvas_dataset_and_zoom_controls(clie
     assert controls.count('data-report-chart-zoom=') == 2
     assert 'data-report-chart-zoom-reset' in controls
     assert '<span>View filtered dataset</span>' not in reporting.text
+    assert "reportChartViewerDataOverlay.hidden = false;" in reporting.text
+    assert "reportChartViewerDataPanel.setAttribute('aria-busy', 'true');" in reporting.text
+    assert "showLoadingOverlay('Loading Filtered Dataset', 'Please wait while the filtered dataset is prepared.');" in reporting.text
+    assert "hideLoadingOverlay();" in reporting.text
     navigation = reporting.text.split('class="report-chart-viewer-navigation"', 1)[1].split('</div>', 1)[0]
     assert 'data-report-chart-zoom' not in navigation
     assert "addEventListener('pointerenter', showReportChartViewerControls)" in reporting.text
@@ -4863,6 +4867,8 @@ def test_reporting_chart_viewer_uses_hover_canvas_dataset_and_zoom_controls(clie
     assert '.report-chart-viewer-image.is-controls-visible .report-chart-viewer-canvas-controls' in css
     assert '.report-chart-viewer-canvas-data-button { width: 2.5rem;' in css
     assert '.report-chart-viewer-canvas-data-button svg { width: 1.4rem;' in css
+    assert '.report-chart-viewer-data-loading { display: grid;' in css
+    assert '.report-chart-viewer-data-dialog { position: absolute; inset: 2%;' in css
 
 
 def test_admin_catalogue_rename_supports_background_json_save(client) -> None:

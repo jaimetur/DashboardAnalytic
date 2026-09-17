@@ -64,7 +64,7 @@ Actions depend on job state: open, download, stop, retry, relaunch or delete. If
 Charts Panel browses report-rendered and standalone Chart Sets. Filter by NR Mode, Type, Template and Scope, then select a generated set.
 
 - Open thumbnails in the shared expanded Interactive Preview.
-- Hover over the chart canvas to reveal its top-right controls: the filtered-dataset icon followed by zoom controls. They remain visible while interacting and hide three seconds after the pointer leaves the canvas. The dataset viewer provides server-side pagination and column filters.
+- Hover over the chart canvas to reveal its top-right controls: the filtered-dataset icon followed by zoom controls. They remain visible while interacting and hide three seconds after the pointer leaves the canvas. The dataset panel opens immediately while the floating **Loading Filtered Dataset** dialog reports its preparation, fills its parent viewer with a 2% inset on every side, provides server-side pagination and column filters, and reuses the selected Chart Set's cached CDR source when moving between charts of the same type.
 - Download or delete a Chart Set.
 - Administrators can open the exact source template and row.
 - Temporary preview changes do not modify the stored template until Update Template and Save are used in the editor.

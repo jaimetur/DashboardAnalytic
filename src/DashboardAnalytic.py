@@ -8636,7 +8636,9 @@ def _report_job_charts_payload(row: Any) -> dict[str, Any] | None:
     }
 
 
-def _temporary_chart_preview_context(source: str, identifier: str, chart_index: int) -> tuple[Any, dict[str, list[int]], str, bool, int]:
+def _temporary_chart_preview_context(
+    source: str, identifier: str, chart_index: int,
+) -> tuple[Any, dict[str, list[int]], str, bool, int, list[Any]]:
     """Resolve one persisted chart back to its immutable template definition."""
     if source == 'report':
         row = repository.get_report_run(int(identifier))
@@ -8676,7 +8678,47 @@ def _temporary_chart_preview_context(source: str, identifier: str, chart_index: 
         editor_index for editor_index, (source_index, _entry) in enumerate(editor_entries)
         if source_index == original_row_index
     )
-    return entry, selected_ids, technology, scope == 'multivendor', template_row_index
+    return entry, selected_ids, technology, scope == 'multivendor', template_row_index, [
+        candidate for _source_index, candidate in chart_entries
+    ]
+
+
+def _shared_reporting_preview_frame(
+    preview_dataset_ids: list[int],
+    entry: CatalogEntry,
+    template_entries: list[Any],
+    technology: str,
+    multivendor: bool,
+) -> tuple[str, pd.DataFrame]:
+    """Reuse one source frame across every chart in the selected Chart Set."""
+    selected = _reporting_datasets(preview_dataset_ids, entry.source_kind)
+    source_entries = [candidate for candidate in template_entries if candidate.source_kind == entry.source_kind]
+    query_entries = [*source_entries, entry]
+    shared_columns = reporting_query_columns(entry.source_kind, query_entries, multivendor)
+    frame_key = _chart_preview_cache_key('reporting-source-frame', {
+        'dataset_ids': preview_dataset_ids,
+        'dataset_versions': [
+            (item['id'], item.get('updated_at'), item.get('processed_at'), item.get('normalization_version'))
+            for item in selected
+        ],
+        'technology': technology,
+        'multivendor': multivendor,
+        'columns': shared_columns,
+    })
+
+    def load_frame() -> pd.DataFrame:
+        combined = _combined_reporting_frame(selected, technology, query_entries, multivendor)
+        return ensure_vendor_group(combined) if multivendor else combined
+
+    shared = _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4)
+    chart_columns = reporting_query_columns(entry.source_kind, [entry], multivendor)
+    projected_columns = list(dict.fromkeys(
+        resolved for column in chart_columns
+        if (resolved := resolve_column_name(shared.columns, column)) is not None
+    ))
+    projected = shared.loc[:, projected_columns].copy(deep=False) if projected_columns else shared
+    projected.attrs = shared.attrs.copy()
+    return frame_key, projected
 
 
 def _temporary_chart_definition_changes(editable: dict[str, Any]) -> dict[str, str]:
@@ -8713,7 +8755,7 @@ def _temporary_preview_dataset_ids(editable: dict[str, Any], selected_ids: dict[
 @app.get('/api/e2e-reporting/chart-preview/context')
 def temporary_chart_preview_context(source: str, identifier: str, chart_index: int, user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Return an immutable chart definition for the interactive viewer sandbox."""
-    entry, selected_ids, _technology, _multivendor, template_row_index = _temporary_chart_preview_context(source, identifier, chart_index)
+    entry, selected_ids, _technology, _multivendor, template_row_index, _template_entries = _temporary_chart_preview_context(source, identifier, chart_index)
     dataset_rows = repository.list_datasets()
     selected_dataset_ids = {value for values in selected_ids.values() for value in values}
     # The controls only need the schemas backing this Chart Set. Inspecting
@@ -8748,7 +8790,7 @@ async def temporary_chart_preview(request: Request, user: SessionUser = Depends(
         source = str(payload.get('source') or '')
         identifier = str(payload.get('identifier') or '')
         chart_index = int(payload.get('chart_index'))
-        entry, selected_ids, technology, multivendor, _template_row_index = _temporary_chart_preview_context(source, identifier, chart_index)
+        entry, selected_ids, technology, multivendor, _template_row_index, template_entries = _temporary_chart_preview_context(source, identifier, chart_index)
         editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
         if not selected_ids.get(entry.source_kind or ''):
             return Response(content=render_unavailable_source_chart(entry), media_type='image/png', headers={'Cache-Control': 'no-store'})
@@ -8758,18 +8800,9 @@ async def temporary_chart_preview(request: Request, user: SessionUser = Depends(
     if not entry.source_kind:
         raise HTTPException(status_code=400, detail='Choose a valid CDR Source.')
     preview_dataset_ids = _temporary_preview_dataset_ids(editable, selected_ids, entry.source_kind)
-    selected = _reporting_datasets(preview_dataset_ids, entry.source_kind)
-    frame_key = _chart_preview_cache_key('reporting-source-frame', {
-        'dataset_ids': preview_dataset_ids,
-        'dataset_versions': [(item['id'], item.get('updated_at'), item.get('processed_at'), item.get('normalization_version')) for item in selected],
-        'technology': technology,
-        'multivendor': multivendor,
-        'columns': reporting_query_columns(entry.source_kind, [entry], multivendor),
-    })
-    def load_frame() -> pd.DataFrame:
-        combined = _combined_reporting_frame(selected, technology, [entry], multivendor)
-        return ensure_vendor_group(combined) if multivendor else combined
-    frame = _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4)
+    frame_key, frame = _shared_reporting_preview_frame(
+        preview_dataset_ids, entry, template_entries, technology, multivendor,
+    )
     filtered = _cached_filtered_chart_frame(frame_key, frame, entry, multivendor)
     try:
         image = render_catalog_chart_preview(filtered, entry, multivendor=multivendor, prefiltered=True)
@@ -8784,7 +8817,7 @@ def _temporary_chart_preview_hover_targets(payload: dict[str, Any]) -> list[dict
         source = str(payload.get('source') or '')
         identifier = str(payload.get('identifier') or '')
         chart_index = int(payload.get('chart_index'))
-        entry, selected_ids, technology, multivendor, _template_row_index = _temporary_chart_preview_context(source, identifier, chart_index)
+        entry, selected_ids, technology, multivendor, _template_row_index, template_entries = _temporary_chart_preview_context(source, identifier, chart_index)
         editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
         if source == 'standalone' and not editable:
             if not _chart_set_tooltips_enabled(identifier):
@@ -8804,17 +8837,9 @@ def _temporary_chart_preview_hover_targets(payload: dict[str, Any]) -> list[dict
         raise HTTPException(status_code=400, detail=f'Invalid chart hover request: {exc}') from exc
     if not entry.source_kind:
         raise HTTPException(status_code=400, detail='Choose a valid CDR Source.')
-    selected = _reporting_datasets(preview_dataset_ids, entry.source_kind)
-    frame_key = _chart_preview_cache_key('reporting-source-frame', {
-        'dataset_ids': preview_dataset_ids,
-        'dataset_versions': [(item['id'], item.get('updated_at'), item.get('processed_at'), item.get('normalization_version')) for item in selected],
-        'technology': technology, 'multivendor': multivendor,
-        'columns': reporting_query_columns(entry.source_kind, [entry], multivendor),
-    })
-    def load_frame() -> pd.DataFrame:
-        combined = _combined_reporting_frame(selected, technology, [entry], multivendor)
-        return ensure_vendor_group(combined) if multivendor else combined
-    frame = _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4)
+    frame_key, frame = _shared_reporting_preview_frame(
+        preview_dataset_ids, entry, template_entries, technology, multivendor,
+    )
     filtered = _cached_filtered_chart_frame(frame_key, frame, entry, multivendor)
     targets = catalog_chart_hover_targets(filtered, entry, multivendor=multivendor, prefiltered=True)
     if source == 'standalone' and not editable:
@@ -8952,7 +8977,7 @@ async def temporary_chart_preview_data(request: Request, user: SessionUser = Dep
         source = str(payload.get('source') or '')
         identifier = str(payload.get('identifier') or '')
         chart_index = int(payload.get('chart_index'))
-        entry, selected_ids, technology, multivendor, _template_row_index = _temporary_chart_preview_context(
+        entry, selected_ids, technology, multivendor, _template_row_index, template_entries = _temporary_chart_preview_context(
             source, identifier, chart_index,
         )
         editable = payload.get('definition') if isinstance(payload.get('definition'), dict) else {}
@@ -8984,20 +9009,9 @@ async def temporary_chart_preview_data(request: Request, user: SessionUser = Dep
         cache_key = hashlib.sha256(cache_material.encode('utf-8')).hexdigest()
         cached = CHART_PREVIEW_DATA_CACHE.get(cache_key)
         if cached is None:
-            selected = _reporting_datasets(preview_dataset_ids, entry.source_kind)
-            frame_key = _chart_preview_cache_key('reporting-source-frame', {
-                'dataset_ids': preview_dataset_ids,
-                'dataset_versions': [
-                    (item['id'], item.get('updated_at'), item.get('processed_at'), item.get('normalization_version'))
-                    for item in selected
-                ],
-                'technology': technology, 'multivendor': multivendor,
-                'columns': reporting_query_columns(entry.source_kind, [entry], multivendor),
-            })
-            def load_frame() -> pd.DataFrame:
-                combined = _combined_reporting_frame(selected, technology, [entry], multivendor)
-                return ensure_vendor_group(combined) if multivendor else combined
-            frame = _bounded_preview_frame(CHART_PREVIEW_FRAME_CACHE, frame_key, load_frame, 4)
+            _frame_key, frame = _shared_reporting_preview_frame(
+                preview_dataset_ids, entry, template_entries, technology, multivendor,
+            )
             full_preview, base_summary = preview_catalog_chart_data(
                 frame, entry, limit=100_000, include_filter_values=False,
             )

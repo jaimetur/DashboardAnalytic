@@ -183,6 +183,8 @@ Dashboard warming uses a FIFO queue with one Dashboard preparation active at a t
 
 The filtered-data overlay uses the complete chart-filtered dataset, not a fixed first-200-row sample.
 
+Charts in the same Reporting Chart Set and CDR type share one cached source frame. Each chart then projects and filters only its own required columns, avoiding repeated reads of nearly identical source data while preserving chart-specific KPI and filter fields.
+
 - Pages contain 100 rows.
 - Page navigation is server-side and remains fixed outside table scrolling.
 - Vertical and horizontal scrolling affect only the table viewport.
