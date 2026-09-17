@@ -3351,6 +3351,46 @@ def test_operator_storage_migration_recovers_raw_values_from_the_source(client) 
     assert combined['Operator'].tolist() == ['Vodafone UK']
 
 
+def test_combined_recreation_migrates_individual_operator_storage_before_rebuilding(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    app_module.repository.replace_operator_mapping_group(
+        'Vodafone UK', 'VF', ['Vodafone UK', 'Vodafone', 'VFUK'],
+    )
+    client.post(
+        '/datasets-analysis/upload',
+        data={'dataset_kinds': 'data'},
+        files={'dataset_files': (
+            'cdr_data.csv', BytesIO(b'Operator,Mean_Data_Rate\nVodafone UK,91\n'), 'text/csv',
+        )},
+        follow_redirects=False,
+    )
+    legacy = app_module.repository.load_dataset_rows(
+        1, app_module.repository.list_dataset_row_columns(1), {},
+    )
+    legacy['Operator'] = 'VF'
+    app_module.repository.replace_dataset_rows(1, legacy)
+    app_module.repository.replace_reporting_rows(1, 'data', legacy)
+    app_module.repository.update_dataset_profile(1, normalization_version=11)
+    progress: list[tuple[int, int, str]] = []
+
+    app_module.recreate_combined_cdr_table(
+        app_module.active_workspace,
+        'data',
+        lambda completed, total, message: progress.append((completed, total, message)),
+    )
+
+    materialized = app_module.repository.load_dataset_rows(1, ['Operator'], {})
+    combined = app_module.repository.load_reporting_rows('data', [1], ['Operator'])
+    refreshed = app_module.repository.get_dataset(1)
+    assert materialized['Operator'].tolist() == ['Vodafone UK']
+    assert combined['Operator'].tolist() == ['Vodafone UK']
+    assert int(refreshed['normalization_version']) == app_module.DATASET_NORMALIZATION_VERSION
+    assert any('Migrating individual CDR-DATA table 1 of 1' in message for _, _, message in progress)
+    assert progress[-1][0] == progress[-1][1]
+
+
 def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(client) -> None:
     login(client)
     import src.DashboardAnalytic as app_module
@@ -3446,6 +3486,7 @@ def test_combined_recreation_returns_materialization_job_for_progress(client, mo
     assert response.status_code == 200
     assert response.json()['materialization_job'] == 'combined-job'
     assert response.json()['materialization_status_url'].endswith('/combined-job')
+    assert 'individual CDR-VOICE tables' in response.json()['notice']
 
 
 def test_queued_dataset_actions_remain_compact_icons_during_live_updates(client) -> None:

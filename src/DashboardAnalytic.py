@@ -1094,7 +1094,8 @@ def _run_combined_cdr_recreation_job(job_id: str, workspace: Workspace, kind: st
 
     with AUTO_CALCULATED_FIELD_JOBS_LOCK:
         AUTO_CALCULATED_FIELD_JOBS[job_id].update(
-            status='processing', message=f'Preparing combined CDR-{kind.upper()} table',
+            status='processing',
+            message=f'Checking all individual CDR-{kind.upper()} tables before recreating the combined table',
             started_at=datetime.now(timezone.utc).timestamp(),
         )
     try:
@@ -1140,7 +1141,7 @@ def start_combined_cdr_recreation_job(
         'id': job_id, 'workspace_id': workspace.id, 'workspace_name': workspace.name,
         'operation': 'combined_recreation', 'combined_kind': kind,
         'status': 'queued', 'completed': 0, 'total': 0,
-        'message': f'Waiting to recreate combined CDR-{kind.upper()} table',
+        'message': f'Waiting to migrate individual CDR-{kind.upper()} tables and recreate the combined table',
         'previous_definitions': [], 'affected_sources': [], 'renames': {}, 'username': username,
         'created_at': datetime.now(timezone.utc).timestamp(),
     }
@@ -3306,7 +3307,7 @@ def recreate_combined_cdr_table(
     kind: str,
     progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> dict[str, int]:
-    """Rebuild one combined CDR table and recover missing individual row stores."""
+    """Upgrade every individual CDR of one kind, then rebuild its combined table."""
     task_repository = Repository(
         workspace.database_path,
         global_db_path=repository.global_db_path,
@@ -3331,36 +3332,78 @@ def recreate_combined_cdr_table(
         for mapping_kind in ('mapping_vodafone', 'mapping_three')
     }
     total = max(len(datasets) * 100 + 1, 1)
-    task_repository.drop_reporting_table(kind)
+    materialized_rows_by_dataset: dict[int, int] = {}
     for index, dataset in enumerate(datasets):
         dataset_id = int(dataset['id'])
         expected_rows = int(dataset['row_count'] or 0)
         materialized_rows = task_repository.dataset_row_count(dataset_id)
-        if materialized_rows == 0 or (expected_rows and materialized_rows != expected_rows):
+        previous_version = int(dataset['normalization_version'] or 1)
+        needs_migration = previous_version < DATASET_NORMALIZATION_VERSION
+        needs_row_recovery = materialized_rows == 0 or (expected_rows and materialized_rows != expected_rows)
+        if needs_migration or needs_row_recovery:
             dataset_path = Path(str(dataset['stored_path'] or ''))
             if not dataset_path.is_file():
+                operation = 'migration' if needs_migration else 'row recovery'
                 raise FileNotFoundError(
-                    f"{dataset['file_name']} has {materialized_rows} materialized rows instead of "
-                    f'{expected_rows}, and its source file is unavailable.'
+                    f"{dataset['file_name']} requires {operation}, but its original source file is unavailable."
                 )
+            action = 'Migrating' if needs_migration else 'Recovering'
+            action_message = (
+                f'{action} individual CDR-{kind.upper()} table {index + 1} of {len(datasets)}: '
+                f"{dataset['file_name']}"
+            )
             if progress_callback:
-                progress_callback(index * 100, total, f"Recovering rows for {dataset['file_name']}")
+                progress_callback(index * 80, total, action_message)
 
-            def rebuild_progress(value: int, *, offset: int = index * 100, name: str = str(dataset['file_name'])) -> None:
+            def rebuild_progress(value: int, *, offset: int = index * 80, message: str = action_message) -> None:
                 if progress_callback:
-                    progress_callback(offset + min(max(int(value), 0), 95), total, f'Recovering rows for {name}')
+                    scaled = round(min(max(int(value), 0), 100) * 0.8)
+                    progress_callback(offset + scaled, total, message)
 
+            try:
+                options = json.loads(str(dataset['processing_options_json'] or '{}'))
+            except (TypeError, json.JSONDecodeError):
+                options = {}
             use_mappings = bool(dataset['vendor_mapping_applied'])
             rebuild_dataset_artifacts(
                 dataset_id,
                 dataset_path,
                 progress_callback=rebuild_progress,
                 forced_dataset_kind=kind,
-                vodafone_mapping_dataset_id=ready_mappings['mapping_vodafone'] if use_mappings else None,
-                three_mapping_dataset_id=ready_mappings['mapping_three'] if use_mappings else None,
+                vodafone_mapping_dataset_id=(
+                    options.get('vodafone_mapping_dataset_id')
+                    or (ready_mappings['mapping_vodafone'] if use_mappings else None)
+                ),
+                three_mapping_dataset_id=(
+                    options.get('three_mapping_dataset_id')
+                    or (ready_mappings['mapping_three'] if use_mappings else None)
+                ),
                 task_repository=task_repository,
+                update_combined_reporting=False,
             )
             materialized_rows = task_repository.dataset_row_count(dataset_id)
+        materialized_rows_by_dataset[dataset_id] = materialized_rows
+        if progress_callback:
+            progress_callback(
+                (index + 1) * 80,
+                total,
+                f'Checked individual CDR-{kind.upper()} table {index + 1} of {len(datasets)}: '
+                f'{dataset["file_name"]}',
+            )
+
+    # Do not discard the last valid combined table until every individual CDR
+    # has passed migration/recovery successfully.
+    task_repository.drop_reporting_table(kind)
+    for index, dataset in enumerate(datasets):
+        dataset_id = int(dataset['id'])
+        materialized_rows = materialized_rows_by_dataset[dataset_id]
+        if progress_callback:
+            progress_callback(
+                len(datasets) * 80 + index * 20,
+                total,
+                f'Rebuilding combined CDR-{kind.upper()} table from individual table '
+                f'{index + 1} of {len(datasets)}: {dataset["file_name"]}',
+            )
         task_repository.copy_dataset_rows_to_reporting(dataset_id, kind, required_columns)
         combined_rows = task_repository.reporting_row_count(kind, dataset_id)
         if combined_rows != materialized_rows:
@@ -3368,7 +3411,11 @@ def recreate_combined_cdr_table(
                 f"{dataset['file_name']} contributed {combined_rows} of {materialized_rows} rows to the combined table."
             )
         if progress_callback:
-            progress_callback((index + 1) * 100, total, f"Added {dataset['file_name']}")
+            progress_callback(
+                len(datasets) * 80 + (index + 1) * 20,
+                total,
+                f'Added {dataset["file_name"]} to combined CDR-{kind.upper()}',
+            )
     total_rows = task_repository.reporting_row_count(kind)
     expected_total = sum(task_repository.dataset_row_count(int(dataset['id'])) for dataset in datasets)
     if total_rows != expected_total:
@@ -6635,7 +6682,10 @@ def recreate_combined_cdr(
     return JSONResponse({
         'materialization_job': job['id'],
         'materialization_status_url': f'/api/workspace/auto-calculated-fields/materialization/{job["id"]}',
-        'notice': f'The combined CDR-{normalized_kind.upper()} table is being recreated in the background.',
+        'notice': (
+            f'All individual CDR-{normalized_kind.upper()} tables are being checked and migrated when needed; '
+            'the combined table will then be recreated in the background.'
+        ),
     })
 
 

@@ -114,7 +114,7 @@ window.addEventListener('load', () => {
 document.querySelectorAll('[data-combined-dataset-recreate]').forEach((button) => {
   button.addEventListener('click', async () => {
     const accepted = await showConfirmDialog(
-      `Recreate ${button.dataset.combinedName || 'this combined CDR table'} from the current individual datasets?`,
+      `Check and migrate every individual CDR table of this type, then recreate ${button.dataset.combinedName || 'the combined CDR table'}? This runs in the background and can take several minutes.`,
       {title: 'Recreate combined table', confirmLabel: 'Recreate table', tone: 'warning'},
     );
     if (!accepted) return;
@@ -3219,7 +3219,19 @@ function datasetPreviewUrl(url, embedded = false) {
   return target.toString();
 }
 
-function openDatasetPreviewInNewTab(url) {
+function datasetPreviewLoadingDetails(trigger) {
+  if (!trigger?.matches?.('[data-combined-dataset-preview]')) {
+    return {title: 'Loading Dataset', copy: 'Please wait while the Dataset preview is loaded.'};
+  }
+  const labels = {data: 'Data', voice: 'Voice', speech: 'Speech'};
+  const kind = labels[String(trigger.dataset.datasetKind || '').toLowerCase()] || 'selected';
+  return {
+    title: 'Loading Dataset',
+    copy: `Checking and, when required, migrating all individual CDR-${kind} tables before loading their combined preview. This can take several minutes.`,
+  };
+}
+
+function openDatasetPreviewInNewTab(url, trigger) {
   const previewWindow = window.open('', '_blank');
   if (!previewWindow) {
     showInfoDialog('The browser blocked the new Dataset preview tab. Allow pop-ups for this site and try again.', {
@@ -3227,14 +3239,20 @@ function openDatasetPreviewInNewTab(url) {
     });
     return;
   }
+  const loading = datasetPreviewLoadingDetails(trigger);
   previewWindow.opener = null;
-  previewWindow.document.write(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Loading Dataset</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;background:#eef4f6;color:#17384b;font-family:Segoe UI,sans-serif}.panel{width:min(84vw,460px);box-sizing:border-box;padding:28px;border-radius:24px;background:#fff;box-shadow:0 30px 70px rgba(15,40,55,.22)}.spinner{width:42px;height:42px;border:4px solid rgba(11,122,117,.18);border-top-color:#0b7a75;border-radius:50%;animation:spin .95s linear infinite}h1{margin:16px 0 8px;font-size:24px}p{margin:0;color:#607681}.bar{height:10px;margin-top:18px;overflow:hidden;border-radius:999px;background:#e5edf0}.bar:after{content:"";display:block;width:45%;height:100%;border-radius:inherit;background:linear-gradient(90deg,#0b7a75,#53d7c8);animation:slide 1.4s ease-in-out infinite}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slide{0%{transform:translateX(-120%)}50%{transform:translateX(125%)}100%{transform:translateX(250%)}}</style></head><body><main class="panel" role="status" aria-live="assertive"><div class="spinner" aria-hidden="true"></div><h1>Loading Dataset</h1><p>Please wait while the Dataset preview is loaded.</p><div class="bar" aria-hidden="true"></div></main></body></html>`);
+  previewWindow.document.write(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Loading Dataset</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;background:#eef4f6;color:#17384b;font-family:Segoe UI,sans-serif}.panel{width:min(84vw,460px);box-sizing:border-box;padding:28px;border-radius:24px;background:#fff;box-shadow:0 30px 70px rgba(15,40,55,.22)}.spinner{width:42px;height:42px;border:4px solid rgba(11,122,117,.18);border-top-color:#0b7a75;border-radius:50%;animation:spin .95s linear infinite}h1{margin:16px 0 8px;font-size:24px}p{margin:0;color:#607681}.bar{height:10px;margin-top:18px;overflow:hidden;border-radius:999px;background:#e5edf0}.bar:after{content:"";display:block;width:45%;height:100%;border-radius:inherit;background:linear-gradient(90deg,#0b7a75,#53d7c8);animation:slide 1.4s ease-in-out infinite}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slide{0%{transform:translateX(-120%)}50%{transform:translateX(125%)}100%{transform:translateX(250%)}}</style></head><body><main class="panel" role="status" aria-live="assertive"><div class="spinner" aria-hidden="true"></div><h1>${loading.title}</h1><p>${loading.copy}</p><div class="bar" aria-hidden="true"></div></main></body></html>`);
   previewWindow.document.close();
   previewWindow.location.replace(datasetPreviewUrl(url));
 }
 
 function openDatasetPreviewInDialog(url, trigger) {
   if (!datasetPreviewOverlay || !datasetPreviewFrame || !datasetPreviewLoading) return;
+  const loading = datasetPreviewLoadingDetails(trigger);
+  const title = document.getElementById('dataset-preview-loading-title');
+  const copy = document.getElementById('dataset-preview-loading-copy');
+  if (title instanceof HTMLElement) title.textContent = loading.title;
+  if (copy instanceof HTMLElement) copy.textContent = loading.copy;
   datasetPreviewReturnFocus = trigger || document.activeElement;
   datasetPreviewLoading.hidden = false;
   datasetPreviewOverlay.hidden = false;
@@ -3251,7 +3269,7 @@ async function chooseDatasetPreviewDestination(url, trigger) {
       secondaryLabel: 'Current tab', cancelLabel: 'Cancel', wideActions: true,
     },
   );
-  if (destination === 'confirm') openDatasetPreviewInNewTab(url);
+  if (destination === 'confirm') openDatasetPreviewInNewTab(url, trigger);
   if (destination === 'secondary') openDatasetPreviewInDialog(url, trigger);
 }
 

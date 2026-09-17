@@ -60,6 +60,10 @@ The global floating task cards remain visible while workspace work continues. Th
 - Source headers are preserved. Field resolution ignores letter case and separators such as spaces, underscores and hyphens; `Subscriber` and legacy `Suscriber` identify the same field.
 - A genuinely repeated header within one source worksheet receives `_Duplicate_2`, `_Duplicate_3`, and so on. Empty source headers receive a positional `Unnamed_N` name. Technical SQLite collision suffixes such as `__2` are not retained.
 
+### Combined Table Recreation
+
+The circular **Recreate combined table** action checks every ready individual CDR of that type in the background before rebuilding the combined table. If an individual table uses an older normalization version, the job migrates it from its original source file first; one recreation each for Data, Voice and Speech therefore upgrades both their individual and combined tables. Its live task detail identifies the individual table being migrated. Opening a combined preview performs the same compatibility check, and its Loading Dataset panel explains when all individual tables of that CDR type may need migration.
+
 ### Fixed CDR Fields
 
 The processor materialises every fixed field even when all its values are empty. Dataset Preview places them after `Source_File`, `Source_Sheet` and `Dataset_Kind` in the order shown below. Each field follows its own rule:
