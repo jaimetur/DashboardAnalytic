@@ -109,13 +109,13 @@ ADAPTATIVE_FILTER_FIELDS = (
     'Market', 'Operator', 'Vendor', 'Region', 'City', 'Campaign', 'RAT', 'Session Type', 'Call Status',
 )
 DASHBOARD_RENDER_CACHE_VERSION = 1
-DASHBOARD_SELECTION_CACHE_VERSION = 9
+DASHBOARD_SELECTION_CACHE_VERSION = 10
 DASHBOARD_SELECTION_CACHE_LIMIT = 128
 DASHBOARD_PROFILE_SELECTION_THRESHOLD = 100_000
-DASHBOARD_CHART_MODEL_CACHE_VERSION = 9
+DASHBOARD_CHART_MODEL_CACHE_VERSION = 10
 DASHBOARD_CHART_MODEL_DISK_LIMIT = 500
 DASHBOARD_CHART_RENDER_WORKERS = 3
-DASHBOARD_PREVIEW_MANIFEST_VERSION = 7
+DASHBOARD_PREVIEW_MANIFEST_VERSION = 8
 DASHBOARD_DATE_BOUNDS_CACHE_VERSION = 1
 
 
@@ -1361,27 +1361,38 @@ def install_dashboard_routes(core):
             return f"COALESCE({candidates}, '')"
         return f"COALESCE(CAST({quote(resolved[0])} AS TEXT), '')"
 
-    def nr_mode_sql(columns, technology):
-        rat = resolve_sql_column(columns, 'RAT')
-        call_modes = [resolve_sql_column(columns, name) for name in ('L1_Call_Mode_A', 'L2_Call_Mode_A')]
-        call_modes = list(dict.fromkeys(column for column in call_modes if column))
-        if not rat and not call_modes:
-            raise ValueError('The selected CDR does not contain RAT or Call Mode fields required to separate NSA and SA sessions.')
-        quote = lambda column: '"' + str(column).replace('"', '""') + '"'
-        rat_text = f"UPPER(COALESCE(CAST({quote(rat)} AS TEXT), ''))" if rat else "''"
-        mode_text = " || ' ' || ".join(f"UPPER(COALESCE(CAST({quote(column)} AS TEXT), ''))" for column in call_modes) or "''"
-        session = resolve_sql_column(columns, 'Session Type')
-        session_text = f"UPPER(COALESCE(CAST({quote(session)} AS TEXT), ''))" if session else "''"
-        whatsapp = f"({session_text} LIKE '%WHATSAPP%')"
-        recognised = f"({mode_text} LIKE '%VOLTE%' OR {mode_text} LIKE '%EPSFB%' OR {mode_text} LIKE '%VONR%')"
-        rat_nsa = f"(REPLACE(REPLACE({rat_text}, '-', ''), ' ', '') LIKE '%ENDC%')"
-        rat_sa = f"({rat_text} LIKE '%NR%' AND NOT {rat_nsa})"
-        mode_nsa = f"(({mode_text} LIKE '%VOLTE%' OR {mode_text} LIKE '%EPSFB%') AND NOT {mode_text} LIKE '%VONR%')"
-        mode_sa = f"({mode_text} LIKE '%VONR%' AND NOT ({mode_text} LIKE '%VOLTE%' OR {mode_text} LIKE '%EPSFB%'))"
-        lte_fallback = f"({session_text} LIKE '%MULTIRAB%' AND ('/' || REPLACE({rat_text}, ' ', '') || '/') LIKE '%/LTE/%')"
-        if technology == 'nsa':
-            return f"(({whatsapp} AND {rat_nsa}) OR (NOT {whatsapp} AND ({mode_nsa} OR (NOT {recognised} AND ({rat_nsa} OR {lte_fallback})))))"
-        return f"(({whatsapp} AND {rat_sa}) OR (NOT {whatsapp} AND ({mode_sa} OR (NOT {recognised} AND {rat_sa}))))"
+    def filter_sql_normalized_expression(task_repository, columns, field):
+        """Return an indexed normalized expression when one physical column owns the filter."""
+        lookup = {identity(column): column for column in columns}
+        aliases = next((values for label, values in FILTER_COLUMNS.items() if identity(label) == identity(field)), (field,))
+        resolved = list(dict.fromkeys(
+            lookup[identity(alias)] for alias in aliases if identity(alias) in lookup
+        ))
+        if not resolved:
+            return None
+        quote = task_repository._quote_identifier
+        if len(resolved) == 1:
+            return f"LOWER(TRIM(CAST({quote(resolved[0])} AS TEXT)))"
+        value_expression = filter_sql_value_expression(task_repository, columns, field)
+        return f"LOWER(TRIM({value_expression}))" if value_expression is not None else None
+
+    def selection_filter_where(task_repository, columns, definition, exclude=None):
+        """Build only the user-selected Dashboard filter predicates."""
+        clauses, params = [], []
+        excluded = identity(exclude) if exclude else ''
+        for field_name, values in definition.filters.items():
+            if identity(field_name) == excluded:
+                continue
+            normalized_expression = filter_sql_normalized_expression(
+                task_repository, columns, field_name,
+            )
+            if normalized_expression is None or not values:
+                clauses.append('0')
+                continue
+            value_placeholders = ', '.join('?' for _ in values)
+            clauses.append(f"{normalized_expression} IN ({value_placeholders})")
+            params.extend(str(value).strip().lower() for value in values)
+        return ' AND '.join(f'({clause})' for clause in clauses) or '1', params
 
     def selection_where(
         task_repository, kind, dataset_ids, definition, exclude=None, *, columns=None, include_dataset_scope=True,
@@ -1394,17 +1405,12 @@ def install_dashboard_routes(core):
             placeholders = ', '.join('?' for _ in dataset_ids)
             clauses.append(f"dataset_id IN ({placeholders})")
             params.extend(int(dataset_id) for dataset_id in dataset_ids)
-        excluded = identity(exclude) if exclude else ''
-        for field_name, values in definition.filters.items():
-            if identity(field_name) == excluded:
-                continue
-            value_expression = filter_sql_value_expression(task_repository, columns, field_name)
-            if value_expression is None or not values:
-                clauses.append('0')
-                continue
-            value_placeholders = ', '.join('?' for _ in values)
-            clauses.append(f"LOWER(TRIM({value_expression})) IN ({value_placeholders})")
-            params.extend(str(value).strip().lower() for value in values)
+        filter_where, filter_params = selection_filter_where(
+            task_repository, columns, definition, exclude=exclude,
+        )
+        if filter_where != '1':
+            clauses.append(filter_where)
+            params.extend(filter_params)
         concrete_from = definition.date_from if isinstance(definition.date_from, date) and not ignore_event_time_filtering() else None
         concrete_to = definition.date_to if isinstance(definition.date_to, date) and not ignore_event_time_filtering() else None
         if concrete_from or concrete_to:
@@ -1413,18 +1419,16 @@ def install_dashboard_routes(core):
                 clauses.append('0')
             else:
                 if concrete_from:
-                    clauses.append(f"datetime({quote(date_column)}) >= datetime(?)")
+                    clauses.append(f"date(CAST({quote(date_column)} AS TEXT)) >= date(?)")
                     params.append(concrete_from.isoformat())
                 if concrete_to:
-                    clauses.append(f"datetime({quote(date_column)}) < datetime(?, '+1 day')")
+                    clauses.append(f"date(CAST({quote(date_column)} AS TEXT)) <= date(?)")
                     params.append(concrete_to.isoformat())
         source_sheet = resolve_sql_column(columns, 'source_sheet')
         if source_sheet and core.CDR_IGNORED_SHEET_KEYS:
             ignored = sorted(core.CDR_IGNORED_SHEET_KEYS)
             clauses.append(f"({quote(source_sheet)} IS NULL OR LOWER(TRIM(CAST({quote(source_sheet)} AS TEXT))) NOT IN ({', '.join('?' for _ in ignored)}))")
             params.extend(ignored)
-        if kind != 'data':
-            clauses.append(nr_mode_sql(columns, definition.technology))
         return ' AND '.join(f'({clause})' for clause in clauses) or '1', params
 
     def dashboard_combined_requested_columns(definition, dimensions, kind):
@@ -1617,6 +1621,69 @@ def install_dashboard_routes(core):
         definition.date_from = lower if definition.date_from == 'Oldest' or definition.date_from is None or not lower <= definition.date_from <= upper else definition.date_from
         definition.date_to = upper if definition.date_to == 'Newest' or definition.date_to is None or not lower <= definition.date_to <= upper else definition.date_to
 
+    def combined_filter_options(
+        definition, selected_by_kind, fields, task_repository, connection,
+    ):
+        """Calculate every adaptive facet with one combined-table scan per CDR kind."""
+        options = {field_name: set() for field_name in fields}
+        active_filter_keys = {identity(field_name) for field_name in definition.filters}
+        facet_groups: dict[str | None, list[str]] = {None: []}
+        for field_name in fields:
+            excluded = field_name if identity(field_name) in active_filter_keys else None
+            facet_groups.setdefault(excluded, []).append(field_name)
+        for kind, selected in selected_by_kind.items():
+            columns = task_repository.list_reporting_row_columns(kind)
+            available = {
+                field_name: filter_sql_value_expression(task_repository, columns, field_name)
+                for field_name in fields
+            }
+            available = {
+                field_name: expression for field_name, expression in available.items()
+                if expression is not None
+            }
+            if not available:
+                continue
+            table = task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))
+            base_definition = definition.model_copy(deep=True)
+            base_definition.filters = {}
+            base_where, base_params = selection_where(
+                task_repository, kind, [int(row['id']) for row in selected],
+                base_definition, columns=columns,
+            )
+            match_columns, match_parameters, group_aliases = [], [], {}
+            for group_index, (excluded, _group_fields) in enumerate(facet_groups.items()):
+                alias = f'facet_match_{group_index}'
+                predicate, predicate_params = selection_filter_where(
+                    task_repository, columns, definition, exclude=excluded,
+                )
+                match_columns.append(f'({predicate}) AS {alias}')
+                match_parameters.extend(predicate_params)
+                group_aliases[excluded] = alias
+            aggregates = []
+            field_order = []
+            for field_name in fields:
+                expression = available.get(field_name)
+                if expression is None:
+                    continue
+                excluded = field_name if identity(field_name) in active_filter_keys else None
+                aggregates.append(
+                    f'json_group_array(DISTINCT {expression}) '
+                    f'FILTER (WHERE {group_aliases[excluded]}) AS facet_{len(field_order)}'
+                )
+                field_order.append(field_name)
+            query = (
+                f'WITH scoped AS (SELECT * FROM {table} WHERE {base_where}), '
+                f'matched AS (SELECT *, {", ".join(match_columns)} FROM scoped) '
+                f'SELECT {", ".join(aggregates)} FROM matched'
+            )
+            row = connection.execute(query, [*base_params, *match_parameters]).fetchone()
+            for index, field_name in enumerate(field_order):
+                encoded_values = row[f'facet_{index}'] if row else '[]'
+                options[field_name].update(
+                    str(value) for value in json.loads(encoded_values or '[]') if value is not None
+                )
+        return {field_name: sorted(values, key=str.casefold) for field_name, values in options.items()}
+
     def profile_filter_options(definition, dimensions, selected_by_kind, fields, task_repository):
         """Load large-dashboard facet values from selected CDR profiles."""
         options = {field_name: set() for field_name in fields}
@@ -1664,34 +1731,11 @@ def install_dashboard_routes(core):
             # adaptive facet must ignore its own current restriction so users
             # can see and select values outside the saved selection.
             with task_repository.connection() as connection:
-                for kind, selected in selected_by_kind.items():
-                    columns = task_repository.list_reporting_row_columns(kind)
-                    table = task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))
-                    active_filter_keys = {identity(field_name) for field_name in definition.filters}
-                    facet_groups: dict[str | None, list[str]] = {None: []}
-                    for field_name in missing_fields:
-                        excluded = field_name if identity(field_name) in active_filter_keys else None
-                        facet_groups.setdefault(excluded, []).append(field_name)
-                    for excluded, group_fields in facet_groups.items():
-                        available = [
-                            (field_name, filter_sql_value_expression(task_repository, columns, field_name))
-                            for field_name in group_fields
-                        ]
-                        available = [(field_name, expression) for field_name, expression in available if expression is not None]
-                        if not available:
-                            continue
-                        where, params = selection_where(
-                            task_repository, kind, [int(row['id']) for row in selected], definition,
-                            exclude=excluded, columns=columns,
-                        )
-                        select_clause = ', '.join(
-                            f'json_group_array(DISTINCT {expression}) AS facet_{index}'
-                            for index, (_field_name, expression) in enumerate(available)
-                        )
-                        row = connection.execute(f'SELECT {select_clause} FROM {table} WHERE {where}', params).fetchone()
-                        for index, (field_name, _column) in enumerate(available):
-                            encoded_values = row[f'facet_{index}'] if row else '[]'
-                            options[field_name].update(str(value) for value in json.loads(encoded_values or '[]'))
+                queried = combined_filter_options(
+                    definition, selected_by_kind, missing_fields, task_repository, connection,
+                )
+            for field_name, values in queried.items():
+                options[field_name].update(values)
         return {field_name: sorted(values, key=str.casefold) for field_name, values in options.items()}
 
     def materialize_selection(
@@ -1721,14 +1765,14 @@ def install_dashboard_routes(core):
                     json.loads(cached['options_json']), json.loads(cached['row_counts_json']), True,
                 )
             if callable(progress):
-                progress(62, 'Counting filtered rows in the combined CDR tables')
+                progress(62, 'Counting Filtered Universe rows in the combined CDR tables')
             row_counts = {}
             selected_groups = list(selected_by_kind.items())
             for group_index, (kind, selected) in enumerate(selected_groups):
                 if callable(progress):
                     progress(
                         62 + round(group_index * 6 / max(len(selected_groups), 1)),
-                        f'Counting filtered CDR-{kind.title()} rows in the combined table',
+                        f'Counting Filtered Universe CDR-{kind.title()} rows in the combined table',
                     )
                 dataset_ids = [int(row['id']) for row in selected]
                 where, params = selection_where(task_repository, kind, dataset_ids, definition)
@@ -1747,39 +1791,10 @@ def install_dashboard_routes(core):
                 )
             else:
                 if callable(progress):
-                    progress(70, 'Calculating dependent filter options in the combined CDR tables')
-                # Active filters need facet values that exclude each field's
-                # own restriction. Aggregate fields sharing a predicate in one
-                # pass, keeping individual passes only where necessary.
-                options = {field_name: set() for field_name in fields}
-                active_filter_keys = {identity(field_name) for field_name in definition.filters}
-                facet_groups: dict[str | None, list[str]] = {None: []}
-                for field_name in fields:
-                    excluded = field_name if identity(field_name) in active_filter_keys else None
-                    facet_groups.setdefault(excluded, []).append(field_name)
-                for kind, selected in selected_by_kind.items():
-                    columns = task_repository.list_reporting_row_columns(kind)
-                    table = task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))
-                    for excluded, group_fields in facet_groups.items():
-                        available = [
-                            (field_name, filter_sql_value_expression(task_repository, columns, field_name))
-                            for field_name in group_fields
-                        ]
-                        available = [(field_name, expression) for field_name, expression in available if expression is not None]
-                        if not available:
-                            continue
-                        where, params = selection_where(
-                            task_repository, kind, [int(row['id']) for row in selected], definition, exclude=excluded,
-                        )
-                        select_clause = ', '.join(
-                            f'json_group_array(DISTINCT {expression}) AS facet_{index}'
-                            for index, (_field_name, expression) in enumerate(available)
-                        )
-                        row = connection.execute(f'SELECT {select_clause} FROM {table} WHERE {where}', params).fetchone()
-                        for index, (field_name, _column) in enumerate(available):
-                            encoded_values = row[f'facet_{index}'] if row else '[]'
-                            options[field_name].update(str(value) for value in json.loads(encoded_values or '[]'))
-                options = {field_name: sorted(values, key=str.casefold) for field_name, values in options.items()}
+                    progress(70, 'Calculating adaptive filter options in one pass per CDR table')
+                options = combined_filter_options(
+                    definition, selected_by_kind, fields, task_repository, connection,
+                )
             # Expensive counts and facet scans above are read-only. Start the
             # coordinated Workspace write transaction only once their final
             # cache payload is ready.

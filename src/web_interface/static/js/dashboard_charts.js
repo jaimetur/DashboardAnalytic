@@ -156,8 +156,12 @@
   }
 
   function drawTitle(context, title) {
+    const view = views.get(context.canvas) || {scaleX: 1, scaleY: 1, zoom: 1, originX: 0, originY: 0};
+    const zoom = Number(view.zoom) || 1;
+    const x = 32 / (Math.max(view.scaleX, .0001) * zoom) - Number(view.originX || 0);
+    const y = 20 / (Math.max(view.scaleY, .0001) * zoom) - Number(view.originY || 0);
     context.fillStyle = '#1D3345'; context.textAlign = 'left'; context.textBaseline = 'top'; font(context, 40, true);
-    context.fillText(String(title || ''), 32, 20);
+    context.fillText(String(title || ''), x, y);
   }
 
   function fittedText(context, value, width) {
@@ -755,6 +759,9 @@
     const context = prepareCanvas(canvas), state = {canvas, hits: []};
     context.fillStyle = '#FFFFFF'; context.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
     drawPayload(context, payload, state, {x: 0, y: 0, scale: 1}); renderStates.set(canvas, state);
+    const view = views.get(canvas);
+    const titleHeight = 40 * Math.min(view?.scaleX || 1, view?.scaleY || 1) * (view?.zoom || 1);
+    canvas.dispatchEvent(new CustomEvent('dashboardchartlayout', {detail: {titleTop: 20, titleHeight}}));
   }
 
   function closestHit(hits, x, y) {

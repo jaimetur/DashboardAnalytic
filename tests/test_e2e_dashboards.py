@@ -643,7 +643,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "'Waiting to prepare Dashboard dataset'" in dashboard_module
     assert "'progress': task.get('progress', 0)," in dashboard_module
     assert "@app.get('/api/e2e-dashboards/preparation-progress/{preparation_id}')" in dashboard_module
-    assert "progress(62, 'Counting filtered rows in the combined CDR tables')" in dashboard_module
+    assert "progress(62, 'Counting Filtered Universe rows in the combined CDR tables')" in dashboard_module
     assert "progress(78, 'Restoring cached row counts and filter options')" in dashboard_module
     assert "update_preparation_progress(94, 'Saving the reusable Dashboard preparation cache')" in dashboard_module
     assert 'with lock, task_repository.connection() as connection:' not in dashboard_module
@@ -695,7 +695,7 @@ def test_dashboards_lifecycle_and_layout(client):
     selection_key_source = dashboard_module[dashboard_module.index('def persistent_selection_key'):dashboard_module.index('def selected_date_bounds')]
     assert "'scope': definition.scope," not in selection_key_source
     assert "'schema': DASHBOARD_SELECTION_CACHE_VERSION," in selection_key_source
-    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 9' in dashboard_module
+    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 10' in dashboard_module
     assert "kind: sorted([" in selection_key_source
     assert "kind: sorted(set(dataset_ids))" in selection_key_source
     assert "field: sorted(set(values))" in selection_key_source
@@ -705,7 +705,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'use_profile_options=False, progress=None,' in dashboard_module
     assert 'use_profile_options=use_profile_options,' in dashboard_module
     assert 'DASHBOARD_CHART_RENDER_WORKERS = 3' in dashboard_module
-    assert 'DASHBOARD_PREVIEW_MANIFEST_VERSION = 7' in dashboard_module
+    assert 'DASHBOARD_PREVIEW_MANIFEST_VERSION = 8' in dashboard_module
     assert "thread_name_prefix='e2e-dashboard-chart'," not in dashboard_module
     assert 'def schedule_next_prefetch() -> None:' not in dashboard_module
     assert 'def enqueue_prefetch(' not in dashboard_module
@@ -821,6 +821,71 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '#ds-save::before' in dashboard_css
     assert '#ds-clear-filters::before' in dashboard_css
     assert '#ds-last-saved-filters::before' in dashboard_css
+    assert '.ds-slide-content.ds-comments-right .ds-viewer-navigation-footer {' in dashboard_css
+    assert 'grid-column:1 / -1;' in dashboard_css
+    assert '.ds-slide-content.ds-comments-right>.ds-slide-comments:not([open]) #ds-comments-title {' in dashboard_css
+    assert 'transform:translate(-50%,-50%) rotate(90deg);' in dashboard_css
+    assert 'clip-path:polygon(100% 0,32% 50%,100% 100%,76% 100%,8% 50%,76% 0);' in dashboard_css
+    assert '.ds-slide-comments,\n.ds-slide-comments>summary,\n.ds-slide-comments-body {\n  background:#c4b0dc;' in dashboard_css
+    assert "panel?.classList.toggle('ds-has-comments', comments.length > 0);" in dashboard_script
+    assert 'if (panel && presentation.active) panel.open = presentation.showComments && comments.length > 0;' in dashboard_script
+    assert 'commentsPanel.open = presentationCommentsWasOpen;' in dashboard_script
+    assert '#ds-viewer.ds-presentation-active.ds-presentation-comments-enabled .ds-slide-comments.ds-has-comments {' in dashboard_css
+    assert '#ds-viewer.ds-presentation-active .ds-slide-comments { display:none!important; }' in dashboard_css
+    assert 'id="ds-presentation-comments"' in page.text
+    assert 'id="ds-presentation-delay" type="number" min="1" max="300"' in page.text
+    assert 'id="ds-presentation-transition-duration" type="number" min="0.1" max="10" step="0.1" value="1"' in page.text
+    assert '<option value="slide-left">Slide from left</option>' in page.text
+    assert '<option value="zoom">Zoom</option>' in page.text
+    assert '<option value="rise">Rise</option>' in page.text
+    assert '<option value="blur">Blur</option>' in page.text
+    assert '<option value="rotate">Soft rotate</option>' in page.text
+    assert '<option value="flip" selected>Flip</option>' in page.text
+    assert '<option value="bounce">Bounce</option>' in page.text
+    assert '<option value="wipe">Wipe</option>' in page.text
+    assert '<option value="mosaic">Mosaic</option>' in page.text
+    assert '<option value="curtain">Curtain</option>' in page.text
+    assert '<option value="blinds">Blinds</option>' in page.text
+    assert '<option value="random">Random</option>' in page.text
+    assert '<option value="none">None</option><option value="random">Random</option><optgroup label="Effects">' in page.text
+    assert '<option value="flip" selected>Flip</option>' in page.text
+    assert 'id="ds-presentation-stop-viewer"' in page.text
+    assert "presentation.showComments = $('ds-presentation-comments').value === 'yes';" in dashboard_script
+    assert "$('ds-viewer').style.setProperty('--ds-presentation-transition-duration', `${presentation.transitionDuration}s`);" in dashboard_script
+    assert 'animation:ds-slide-fade var(--ds-presentation-transition-duration,1s) ease both' in dashboard_css
+    assert "const randomPresentationEffects = ['fade', 'slide', 'slide-left', 'zoom', 'rise', 'blur', 'rotate', 'flip', 'bounce', 'wipe', 'mosaic', 'curtain', 'blinds'];" in dashboard_script
+    assert "if (presentation.effect !== 'random') return presentation.effect;" in dashboard_script
+    assert "lastRandomPresentationEffect = choices[Math.floor(Math.random() * choices.length)] || 'fade';" in dashboard_script
+    assert "localStorage.getItem(presentationEffectStorageKey)" in dashboard_script
+    assert "localStorage.setItem(presentationEffectStorageKey, event.target.value)" in dashboard_script
+    assert "lastRandomPresentationEffect = '';\n    slideIndex = 0;" in dashboard_script
+    assert "bind('ds-presentation-stop-viewer', stopPresentation);" in dashboard_script
+    assert "if (presentation.running) pausePresentation(); else resumePresentation();" in dashboard_script
+    assert "event.code === 'Space' || event.key === ' '" in dashboard_script
+    assert "if (visible === 'ds-viewer' && !editing && event.key === 'F8')" in dashboard_script
+    assert 'if (!presentation.active) startPresentation();' in dashboard_script
+    assert "presentation.active && event.key === 'F7'" in dashboard_script
+    assert "presentation.active && event.key === 'F9'" in dashboard_script
+    assert 'if (presentation.active) navigatePresentationSlide(-1);' in dashboard_script
+    assert 'if (presentation.active) navigatePresentationSlide(1);' in dashboard_script
+    assert '[data-presentation-effect="slide-left"]' in dashboard_css
+    assert '[data-presentation-effect="zoom"]' in dashboard_css
+    assert '[data-presentation-effect="rise"]' in dashboard_css
+    assert '[data-presentation-effect="blur"]' in dashboard_css
+    assert ':is(#ds-presentation,#ds-presentation-stop-viewer)' in dashboard_css
+    assert '.ds-presentation-stop-action::after' in dashboard_css
+    assert '#ds-presentation-stop-viewer[hidden] {' in dashboard_css
+    assert "function dashboardViewerBrand(className = 'ds-structural-brand')" in dashboard_script
+    assert "const brand = dashboardViewerBrand('ds-chart-brand'); card.append(brand);" in dashboard_script
+    assert '.ds-chart-brand{' in dashboard_css
+    assert 'position:absolute;z-index:2;top:2.5rem;right:12px;' in dashboard_css
+    assert '.ds-chart>img,.ds-chart>canvas{z-index:1}' in dashboard_css
+    assert '.ds-chart>.ds-chart-controls{top:calc(2.9rem + 9px)}' in dashboard_css
+    assert '.ds-chart>.ds-chart-brand>img{' in dashboard_css
+    assert 'position:static!important;inset:auto!important;width:2.65rem!important;height:2.65rem!important;object-fit:contain!important' in dashboard_css
+    assert "canvas.addEventListener('dashboardchartlayout', event => {" in dashboard_script
+    assert "brand.style.top = `${top + height / 2}px`;" in dashboard_script
+    assert 'filter:none' in dashboard_css
     assert 'id="ds-filter-close-action"' in page.text
     assert '#ds-filter-close-action[hidden]{display:none!important}' in dashboard_css
     assert "bind('ds-filter-close-action', closeFilters);" in dashboard_script
@@ -1545,7 +1610,7 @@ def test_dashboard_validates_template_dates_and_sources(client):
     assert client.get('/api/e2e-dashboards/data/missing/0').status_code == 410
 
 
-def test_dashboard_sql_selection_preserves_voice_nr_mode_semantics(client):
+def test_dashboard_sql_selection_leaves_nr_mode_to_explicit_user_filters(client):
     client.post('/login', data={'username': 'super', 'password': 'super123'})
     response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'voice'}, files={
         'dataset_files': ('voice.csv', BytesIO(
@@ -1565,12 +1630,14 @@ def test_dashboard_sql_selection_preserves_voice_nr_mode_semantics(client):
         name='Voice', template='Voice Dashboard', datasets={'voice': [1]}, technology='nsa',
     ).model_dump(mode='json')
     nsa = client.post('/api/e2e-dashboards/prepare', json=payload).json()
-    assert nsa['rows']['voice'] == 2
-    assert nsa['universe_rows']['voice'] == 2
+    assert nsa['rows']['voice'] == 4
+    assert nsa['universe_rows']['voice'] == 4
     payload['technology'] = 'sa'
     sa = client.post('/api/e2e-dashboards/prepare', json=payload).json()
-    assert sa['rows']['voice'] == 2
-    assert sa['universe_rows']['voice'] == 2
+    assert sa['rows']['voice'] == 4
+    assert sa['universe_rows']['voice'] == 4
+    dashboard_module = (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
+    assert 'def nr_mode_sql(' not in dashboard_module
 
 
 def test_dashboard_snapshot_access_and_legacy_redirect(client):

@@ -419,15 +419,6 @@ class Repository:
         if 'materialized' in columns:
             conn.execute('ALTER TABLE dashboard_filter_selections DROP COLUMN materialized')
 
-    def _ensure_existing_reporting_indexes(self, conn: sqlite3.Connection) -> None:
-        for kind in ('data', 'voice', 'speech'):
-            table_name = self.reporting_rows_table_name(kind)
-            exists = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,),
-            ).fetchone()
-            if exists:
-                self._create_reporting_row_indexes(conn, table_name, self._table_columns(conn, table_name))
-
     def initialize(self) -> None:
         self.remove_legacy_global_tables()
         with self.connection() as conn:
@@ -453,7 +444,10 @@ class Repository:
                 )
             self._ensure_dashboard_filter_selection_columns(conn)
             self._remove_legacy_dashboard_selection_rows(conn)
-            self._ensure_existing_reporting_indexes(conn)
+            # Functional indexes are created when reporting rows are imported
+            # or refreshed. Building every newly introduced index over all
+            # legacy CDR tables here can block application startup for minutes
+            # on large workspaces.
             self._ensure_report_template_columns(conn)
             self._ensure_dataset_profile_columns(conn)
             self._ensure_generated_job_columns(conn)
@@ -2181,7 +2175,9 @@ class Repository:
     def _create_dataset_row_indexes(self, conn: sqlite3.Connection, table_name: str, columns: list[str]) -> None:
         indexed_dimensions = [
             'market', 'period', 'operator', 'vendor', 'test_name', 'region', 'city',
-            'session_type', 'direction', 'technology_primary', 'source_sheet', 'status',
+            'g_level_2', 'g_level_4', 'campaign', 'rat', 'rat_a', 'sample_rat_a',
+            'session_type', 'direction', 'technology_primary', 'source_sheet',
+            'call_status', 'status',
         ]
         for requested_name in indexed_dimensions:
             actual_name = self._resolve_dataset_row_column_name(set(columns), requested_name)

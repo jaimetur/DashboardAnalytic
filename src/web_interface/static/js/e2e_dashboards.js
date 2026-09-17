@@ -9,7 +9,10 @@
   let dashboards = {}, activeId = '', definition = null, savedDefinition = '', appliedFilterState = '', appliedSelectionState = '', appliedDashboardDefinition = null, prepared = null, slideIndex = 0;
   let sequence = 0, cacheLookupSequence = 0, timer, controller, preparing = null, preparingFilterState = '', preparationProgressTimer = 0, dirty = false, filterActionBusy = false, dataToken = '', dataEndpoint = '';
   let presentationTimer = 0;
-  const presentation = {running: false, delay: 5000, effect: 'fade'};
+  const presentation = {active: false, running: false, delay: 5000, transitionDuration: 1, effect: 'flip', showComments: true};
+  let presentationCommentsWasOpen = false;
+  const randomPresentationEffects = ['fade', 'slide', 'slide-left', 'zoom', 'rise', 'blur', 'rotate', 'flip', 'bounce', 'wipe', 'mosaic', 'curtain', 'blinds'];
+  let lastRandomPresentationEffect = '';
   let facetOptions = {}, availableFields = [], facetFields = config.filter_fields || [], facetsLoading = false, facetsRefreshTimer = 0;
   const facetOptionRequests = new Map();
   let facetOptionRequestSequence = 0;
@@ -33,6 +36,12 @@
   const scrollStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:scroll`;
   const preparedStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:prepared`;
   const universeStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:universes`;
+  const presentationEffectStorageKey = 'dashboard-analytic:e2e-dashboards:presentation-effect';
+  try {
+    const storedPresentationEffect = localStorage.getItem(presentationEffectStorageKey);
+    const effectSelect = $('ds-presentation-effect');
+    if (storedPresentationEffect && [...effectSelect.options].some(option => option.value === storedPresentationEffect)) effectSelect.value = storedPresentationEffect;
+  } catch (_) { /* Local storage is optional. */ }
   const navigationEntry = performance.getEntriesByType?.('navigation')?.[0];
   const restorePageState = navigationEntry?.type === 'reload';
   const dashboardId = () => {
@@ -1772,13 +1781,17 @@
       }
     })();
   }
+  function dashboardViewerBrand(className = 'ds-structural-brand') {
+    const brand = node('div', undefined, className);
+    const mark = document.createElement('img'); mark.src = config.brand_mark; mark.alt = `${config.app_name || 'Dashboard Analytic'} logo`; mark.width = 72; mark.height = 72;
+    brand.append(node('strong', config.app_name || 'Dashboard Analytic'), mark);
+    return brand;
+  }
   function structuralDashboard(stage, slide) {
     const kind = String(slide.structural_type || '').toLowerCase().includes('transition') ? 'transition' : 'title';
     const cover = node('section', undefined, `ds-structural-slide ds-structural-${kind}`);
     cover.setAttribute('aria-label', `${kind === 'transition' ? 'Transition' : 'Title'} dashboard: ${slide.title || 'Untitled'}`);
-    const brand = node('div', undefined, 'ds-structural-brand');
-    const mark = document.createElement('img'); mark.src = config.brand_mark; mark.alt = `${config.app_name || 'Dashboard Analytic'} logo`; mark.width = 72; mark.height = 72;
-    brand.append(node('strong', config.app_name || 'Dashboard Analytic'), mark);
+    const brand = dashboardViewerBrand();
     const content = node('div', undefined, 'ds-structural-content');
     content.append(node('h3', slide.title || 'Dashboard', 'ds-structural-title'));
     if (slide.subtitle) content.append(node('p', slide.subtitle, 'ds-structural-subtitle'));
@@ -2277,6 +2290,9 @@
     if (!list || !definition) return;
     definition.slide_comments ||= {};
     const comments = definition.slide_comments[currentSlideCommentKey()] || [];
+    const panel = list.closest('.ds-slide-comments');
+    panel?.classList.toggle('ds-has-comments', comments.length > 0);
+    if (panel && presentation.active) panel.open = presentation.showComments && comments.length > 0;
     list.replaceChildren();
     if (!comments.length) { list.append(node('li', 'No comments for this slide.', 'ds-comments-empty')); return; }
     comments.forEach((comment, index) => {
@@ -2311,17 +2327,32 @@
   }
   function syncPresentationControls() {
     const button = $('ds-presentation');
-    $('ds-viewer').classList.toggle('ds-presentation-active', presentation.running);
+    $('ds-viewer').classList.toggle('ds-presentation-active', presentation.active);
+    $('ds-viewer').classList.toggle('ds-presentation-comments-enabled', presentation.active && presentation.showComments);
     button.classList.toggle('is-running', presentation.running);
-    button.title = presentation.running ? 'Stop presentation' : 'Presentation';
-    button.setAttribute('aria-label', presentation.running ? 'Stop presentation' : 'Presentation');
-    $('ds-presentation-start').disabled = presentation.running;
-    $('ds-presentation-stop').disabled = !presentation.running;
+    const action = presentation.active ? (presentation.running ? 'Pause presentation' : 'Resume presentation') : 'Presentation';
+    button.title = action;
+    button.setAttribute('aria-label', action);
+    $('ds-presentation-start').disabled = presentation.active;
+    $('ds-presentation-stop').disabled = !presentation.active;
+    $('ds-presentation-stop-viewer').hidden = !presentation.active;
   }
   function stopPresentation() {
     clearTimeout(presentationTimer); presentationTimer = 0;
-    if (!presentation.running) return;
-    presentation.running = false; syncPresentationControls(); status('Presentation stopped.');
+    if (!presentation.active) return;
+    presentation.active = false; presentation.running = false; syncPresentationControls();
+    const commentsPanel = $('ds-comments-list')?.closest('.ds-slide-comments');
+    if (commentsPanel) commentsPanel.open = presentationCommentsWasOpen;
+    status('Presentation stopped.');
+  }
+  function pausePresentation() {
+    if (!presentation.active || !presentation.running) return;
+    clearTimeout(presentationTimer); presentationTimer = 0;
+    presentation.running = false; syncPresentationControls(); status('Presentation paused.');
+  }
+  function resumePresentation() {
+    if (!presentation.active || presentation.running) return;
+    presentation.running = true; syncPresentationControls(); schedulePresentationAdvance(); status('Presentation resumed.');
   }
   function schedulePresentationAdvance() {
     clearTimeout(presentationTimer);
@@ -2333,9 +2364,34 @@
   }
   function startPresentation() {
     if (!prepared?.slides.length) return;
-    presentation.delay = Number($('ds-presentation-delay').value) * 1000;
+    const requestedDelay = Number($('ds-presentation-delay').value);
+    const delaySeconds = Math.max(1, Math.min(300, Number.isFinite(requestedDelay) ? requestedDelay : 5));
+    $('ds-presentation-delay').value = String(delaySeconds);
+    presentation.delay = delaySeconds * 1000;
+    const requestedTransitionDuration = Number($('ds-presentation-transition-duration').value);
+    presentation.transitionDuration = Math.max(0.1, Math.min(10, Number.isFinite(requestedTransitionDuration) ? requestedTransitionDuration : 1));
+    $('ds-presentation-transition-duration').value = String(presentation.transitionDuration);
+    $('ds-viewer').style.setProperty('--ds-presentation-transition-duration', `${presentation.transitionDuration}s`);
     presentation.effect = $('ds-presentation-effect').value;
-    presentation.running = true; syncPresentationControls(); overlay('ds-presentation-overlay', false); renderSlide(); schedulePresentationAdvance(); status(`Presentation started: ${presentation.delay / 1000} seconds per slide.`);
+    presentation.showComments = $('ds-presentation-comments').value === 'yes';
+    presentationCommentsWasOpen = Boolean($('ds-comments-list')?.closest('.ds-slide-comments')?.open);
+    lastRandomPresentationEffect = '';
+    slideIndex = 0;
+    presentation.active = true; presentation.running = true; syncPresentationControls(); overlay('ds-presentation-overlay', false); renderSlide();
+    $('ds-viewer').querySelector('.ds-viewer-panel')?.focus({preventScroll:true});
+    schedulePresentationAdvance(); status(`Presentation started: ${presentation.delay / 1000} seconds per slide, ${presentation.transitionDuration} second transition.`);
+  }
+  function navigatePresentationSlide(offset) {
+    const nextIndex = Math.max(0, Math.min(slideIndex + offset, (prepared?.slides.length || 1) - 1));
+    if (nextIndex === slideIndex) return;
+    slideIndex = nextIndex; renderSlide();
+    if (presentation.running) schedulePresentationAdvance();
+  }
+  function presentationTransitionEffect() {
+    if (presentation.effect !== 'random') return presentation.effect;
+    const choices = randomPresentationEffects.filter(effect => effect !== lastRandomPresentationEffect);
+    lastRandomPresentationEffect = choices[Math.floor(Math.random() * choices.length)] || 'fade';
+    return lastRandomPresentationEffect;
   }
   function resetViewerForDashboard() {
     // A new Dashboard can be opened while its server snapshot is still being
@@ -2369,6 +2425,7 @@
     if (!slide.charts.length) structuralDashboard(stage, slide);
     for (const chart of slide.charts) {
       const card = node('article',undefined,'ds-chart'); card.setAttribute('aria-label',chart.title); card.tabIndex = 0;
+      const brand = dashboardViewerBrand('ds-chart-brand'); card.append(brand);
       let renderedPayload = null;
       if (chart.position) {
         const [left,top,width,height] = chart.position;
@@ -2380,6 +2437,11 @@
       }
       const message = node('div',`Rendering ${chart.title || 'chart'}…`,'ds-chart-message'); card.append(message);
       const canvas = document.createElement('canvas'); canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', chart.title); canvas.hidden = true; card.append(canvas);
+      canvas.addEventListener('dashboardchartlayout', event => {
+        const top = Number(event.detail?.titleTop);
+        const height = Number(event.detail?.titleHeight);
+        if (Number.isFinite(top) && Number.isFinite(height)) brand.style.top = `${top + height / 2}px`;
+      });
       const zoom = chartZoomControls(canvas); card.append(zoom);
       const panButtons = Object.fromEntries(chartPanDirections.map(direction => [
         direction, createChartPanButton(direction, `ds-chart-pan-button ds-chart-pan-${direction}`),
@@ -2430,7 +2492,7 @@
       });
       stage.append(card);
     }
-    if (presentation.running) { stage.dataset.presentationEffect = presentation.effect; void stage.offsetWidth; stage.classList.add('ds-slide-transition'); }
+    if (presentation.active) { stage.dataset.presentationEffect = presentationTransitionEffect(); void stage.offsetWidth; stage.classList.add('ds-slide-transition'); }
     renderComments();
     scheduleNearbySlidePreload(preloadToken, preloadOrigin, visibleLoads);
   }
@@ -2465,11 +2527,13 @@
     blocked: () => $('ds-viewer').hidden || !prepared?.slides?.length,
     previous: () => {
       if (slideIndex <= 0) return;
-      stopPresentation(); slideIndex -= 1; renderSlide();
+      if (presentation.active) navigatePresentationSlide(-1);
+      else { slideIndex -= 1; renderSlide(); }
     },
     next: () => {
       if (slideIndex >= (prepared?.slides.length || 1) - 1) return;
-      stopPresentation(); slideIndex += 1; renderSlide();
+      if (presentation.active) navigatePresentationSlide(1);
+      else { slideIndex += 1; renderSlide(); }
     },
   });
   bindHorizontalSwipe($('ds-chart-expanded-overlay'), {
@@ -2480,10 +2544,18 @@
   $('ds-slide').onchange = () => { stopPresentation(); slideIndex = Number($('ds-slide').value); renderSlide(); };
   bind('ds-comment-add', async () => { const input = $('ds-comment-input'), comment = input.value.trim(); if (!comment || !definition) return; const key = currentSlideCommentKey(); definition.slide_comments ||= {}; const comments = definition.slide_comments[key] ||= []; if (comments.length >= 50) throw new Error('A slide can have at most 50 comments.'); comments.push(comment); input.value = ''; await persistComments(); renderComments(); });
   $('ds-comment-input').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); $('ds-comment-add').click(); } });
-  bind('ds-presentation', () => { if (presentation.running) stopPresentation(); else overlay('ds-presentation-overlay', true); });
+  bind('ds-presentation', () => {
+    if (!presentation.active) overlay('ds-presentation-overlay', true);
+    else if (presentation.running) pausePresentation();
+    else resumePresentation();
+  });
   bind('ds-presentation-close', () => overlay('ds-presentation-overlay', false));
+  $('ds-presentation-effect').addEventListener('change', event => {
+    try { localStorage.setItem(presentationEffectStorageKey, event.target.value); } catch (_) { /* Local storage is optional. */ }
+  });
   bind('ds-presentation-start', startPresentation);
   bind('ds-presentation-stop', stopPresentation);
+  bind('ds-presentation-stop-viewer', stopPresentation);
   bind('ds-floating-filters', openFloatingFilters);
   bind('ds-filter-close', closeFilters);
   bind('ds-filter-close-action', closeFilters);
@@ -2548,11 +2620,33 @@
       void safe(() => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) + 1))();
       return;
     }
-    if (visible === 'ds-viewer' && !editing && event.key === 'ArrowLeft' && slideIndex > 0) { event.preventDefault(); stopPresentation(); slideIndex -= 1; renderSlide(); return; }
-    if (visible === 'ds-viewer' && !editing && event.key === 'ArrowRight' && slideIndex < (prepared?.slides.length || 1) - 1) { event.preventDefault(); stopPresentation(); slideIndex += 1; renderSlide(); return; }
+    if (visible === 'ds-viewer' && !editing && event.key === 'F8') {
+      event.preventDefault();
+      if (!presentation.active) startPresentation();
+      else if (presentation.running) pausePresentation();
+      else resumePresentation();
+      return;
+    }
+    if (visible === 'ds-viewer' && !editing && presentation.active && event.key === 'F7') {
+      event.preventDefault();
+      navigatePresentationSlide(-1);
+      return;
+    }
+    if (visible === 'ds-viewer' && !editing && presentation.active && event.key === 'F9') {
+      event.preventDefault();
+      navigatePresentationSlide(1);
+      return;
+    }
+    if (visible === 'ds-viewer' && !editing && event.key === 'ArrowLeft' && slideIndex > 0) { event.preventDefault(); if (presentation.active) navigatePresentationSlide(-1); else { slideIndex -= 1; renderSlide(); } return; }
+    if (visible === 'ds-viewer' && !editing && event.key === 'ArrowRight' && slideIndex < (prepared?.slides.length || 1) - 1) { event.preventDefault(); if (presentation.active) navigatePresentationSlide(1); else { slideIndex += 1; renderSlide(); } return; }
+    if (visible === 'ds-viewer' && !editing && presentation.active && (event.code === 'Space' || event.key === ' ')) {
+      event.preventDefault();
+      if (presentation.running) pausePresentation(); else resumePresentation();
+      return;
+    }
     if (event.key === 'Escape') {
       event.preventDefault();
-      if (visible === 'ds-viewer' && presentation.running) { stopPresentation(); return; }
+      if (visible === 'ds-viewer' && presentation.active) { stopPresentation(); return; }
       $({'ds-chart-expanded-overlay':'ds-chart-expanded-close','ds-editor-overlay':'ds-editor-close','ds-data-overlay':'ds-data-close','ds-filter-overlay':'ds-filter-close','ds-ppt-filter-overlay':'ds-ppt-filter-dialog-close','ds-presentation-overlay':'ds-presentation-close','ds-viewer':'ds-viewer-close'}[visible]).click();
     }
     if (event.key === 'Tab') { const controls = [...$(visible).querySelectorAll('button:not(:disabled),a[href],input,select,summary,[tabindex="0"]')].filter(el=>el.getClientRects().length); if (!controls.length) return; const first = controls[0], last = controls.at(-1); if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
