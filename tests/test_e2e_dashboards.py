@@ -101,20 +101,23 @@ def test_dashboard_export_uses_the_admin_import_archive_format(client):
         assert manifest['workspace_components'] == ['dashboards']
         document = json.loads(archive.read(manifest['archive_path']))
     assert document['format'] == 'dashboard-analytic-dashboards'
-    persisted = {key: value for key, value in payload.items() if key not in {'scope', 'datasets', 'date_from', 'date_to'}}
-    assert document['dashboards'] == {dashboard_id: persisted}
+    assert document['dashboards'] == {dashboard_id: payload}
 
 
-def test_dashboard_keeps_dataset_universe_out_of_persisted_filters(client):
+def test_dashboard_persists_dataset_universe_separately_from_filters(client):
     payload = setup_dashboard(client)
     payload['date_from'], payload['date_to'] = 'Oldest', 'Newest'
 
     saved = client.put('/api/e2e-dashboards/symbolic-dates', json=payload)
 
     assert saved.status_code == 200, saved.text
-    assert not {'scope', 'datasets', 'date_from', 'date_to'} & saved.json()['definition'].keys()
+    assert {key: saved.json()['definition'][key] for key in ('scope', 'datasets', 'date_from', 'date_to')} == {
+        key: payload[key] for key in ('scope', 'datasets', 'date_from', 'date_to')
+    }
     stored = client.get('/api/e2e-dashboards').json()['symbolic-dates']
-    assert not {'scope', 'datasets', 'date_from', 'date_to'} & stored.keys()
+    assert {key: stored[key] for key in ('scope', 'datasets', 'date_from', 'date_to')} == {
+        key: payload[key] for key in ('scope', 'datasets', 'date_from', 'date_to')
+    }
     prepared = client.post('/api/e2e-dashboards/prepare', json=payload)
     assert prepared.status_code == 200, prepared.text
     assert prepared.json()['date_bounds'] == {'min': '2026-09-01', 'max': '2026-09-03'}
@@ -248,6 +251,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '"filter_aliases"' in page.text
     assert '"Region": ["Region", "G_Level_2", "G Level 2"]' in page.text
     assert '>Apply Filters<' in page.text
+    assert '>Apply Universe</span>' in page.text
+    assert '>Save Universe</span>' in page.text
+    assert page.text.index('id="ds-apply-universe"') < page.text.index('id="ds-apply-filters"')
     assert page.text.index('>Apply Filters<') < page.text.index('>Save Filters<')
     assert 'id="ds-apply-filters" title="Apply the current Dashboard filters without saving them" disabled' in page.text
     assert 'id="ds-refresh"' not in page.text
@@ -337,7 +343,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'ds-viewer-refresh-action' in page.text
     dashboard_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
     assert "controls.append(data, expand, zoom)" in dashboard_script
-    assert "savedDefinition = definitionFingerprint(dashboards[id]); dirty = false;" in dashboard_script
+    assert "savedDefinition = definitionFingerprint(savedRuntimeDashboardDefinition(dashboards[id])); dirty = false;" in dashboard_script
     assert "await warmDashboardModels();" not in dashboard_script
     assert "Rendering Dashboard Charts" in dashboard_script
     assert "overlay('ds-viewer', true);\n    if (needsPreparation) await prepare();" in dashboard_script
@@ -378,6 +384,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="report-charts-panel"' in reporting_template
     assert "document.dispatchEvent(new CustomEvent('page-panel-navigation:update'));" in reporting_template
     dashboard_template = (Path(__file__).parents[1] / 'src/web_interface/templates/e2e_dashboards.html').read_text(encoding='utf-8')
+    assert dashboard_template.index('id="ds-apply-filters"') < dashboard_template.index('id="ds-generate-ppt"')
     assert 'id="ds-ppt-charts-panel" open data-panel-state-key="e2e-dashboards:ppt-charts" hidden' in dashboard_template
     assert "$('ds-ppt-charts-panel').hidden = false;" in dashboard_script
     assert "$('ds-ppt-charts-panel').hidden = true;" in dashboard_script
@@ -440,7 +447,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '.ds-chart-expanded-overlay .ds-chart-expanded-dialog { position: relative;' in dashboard_styles
     assert '.ds-chart-expanded-overlay .ds-chart-expanded-canvas { border:' in dashboard_styles
     assert '#ds-chart-expanded-close.report-chart-viewer-close, .e2e-dashboards .ds-viewer-header #ds-viewer-close.report-chart-viewer-close {' in dashboard_styles
-    assert '#ds-subtitle{min-height:1.4em}.ds-viewer-panel>.ds-actions{margin-top:.5rem}' in dashboard_styles
+    assert '#ds-subtitle{min-height:1.4em}.ds-viewer-panel>.ds-actions{display:grid;' in dashboard_styles
     assert '#ds-subtitle:empty{display:none}' not in dashboard_styles
     assert 'text-transform: uppercase;' in dashboard_styles
     assert 'height: 14rem;' in dashboard_styles
@@ -501,6 +508,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "closeOnOutsidePointer('ds-editor-overlay', closeTemplateEditor);" in dashboard_script
     assert "$('ds-unapplied-filters-badge').hidden = !hasUnappliedFilterChanges();" in dashboard_script
     assert "$('ds-unsaved-filters-badge').hidden = !hasUnsavedFilterChanges();" in dashboard_script
+    assert "$('ds-unapplied-universe-badge').hidden = !hasUnappliedUniverseChanges();" in dashboard_script
+    assert "$('ds-unsaved-universe-badge').hidden = !hasUnsavedUniverseChanges();" in dashboard_script
     assert "if (!$('ds-filter-overlay').hidden) await closeFilters();" in dashboard_script
     assert "This Dashboard has unsaved changes. Close Adaptative Filters without saving them?" not in dashboard_script
     assert "This Report Template has unsaved changes. Close the editor without saving them?" in dashboard_script
@@ -553,10 +562,13 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "const filterControlState = (current, applied, saved, equal = sameFilterValues) =>" in dashboard_script
     assert "if (!equal(current, applied)) return 'unapplied';" in dashboard_script
     assert "return equal(applied, saved) ? '' : 'applied-unsaved';" in dashboard_script
-    assert "const sourceState = _kind => '';" in dashboard_script
-    assert "const scopeState = () => '';" in dashboard_script
-    assert "const dateState = _key => '';" in dashboard_script
+    assert "const sourceState = kind => filterControlState(" in dashboard_script
+    assert "const scopeState = () => filterControlState(" in dashboard_script
+    assert "const dateState = key => filterControlState(" in dashboard_script
     assert "const hasUnappliedFilterChanges = () =>" in dashboard_script
+    assert "filterStateFingerprint(definition) !== filterStateFingerprint(appliedDefinition())" in dashboard_script
+    assert "const hasUnappliedUniverseChanges = () =>" in dashboard_script
+    assert "universeStateFingerprint(definition) !== universeStateFingerprint(appliedDefinition())" in dashboard_script
     assert 'const resolveUnappliedFilterChanges = async () =>' in dashboard_script
     assert "title: 'Unapplied Dashboard filters'" in dashboard_script
     assert "confirmLabel: 'Apply Filters and Continue'" in dashboard_script
@@ -578,12 +590,12 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "const host = node('label', label, 'ds-source-filter')" in dashboard_script
     assert "updateFilterControlState(facet, filterState(field));" in dashboard_script
     assert "updateFilterControlState(wrapper, dateState(key), true);" in dashboard_script
-    assert 'savedDefinition = definitionFingerprint(result.definition); updateDirtyState(); sources(); facets(); library();' in dashboard_script
+    assert 'savedDefinition = definitionFingerprint(result.definition); rememberUniverse(); updateDirtyState(); sources(); facets(); library();' in dashboard_script
     assert 'await prepare();' in dashboard_script
     assert 'if (next.length === current.length && next.every(value => current.includes(value))) return;' in dashboard_script
     assert 'function filterChanged() {' in dashboard_script
     assert "? 'Filter changes are ready to apply.'" in dashboard_script
-    assert ": 'Dataset Universe changes will be prepared when View Dashboard or Generate PPT is selected.'" in dashboard_script
+    assert ": 'All Dashboard filters and Dataset Universe controls are applied.'" in dashboard_script
     assert 'if (preparing && cached && currentFilterState !== preparingFilterState)' not in dashboard_script
     assert "status('Restored the previously prepared filters.');" in dashboard_script
     assert "const payload = await api('/filter-options', 'POST', {definition, field});" in dashboard_script
@@ -607,9 +619,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "if (value === 'Oldest') return dateBounds?.min ? `Oldest (${dateBounds.min})` : 'Oldest';" in dashboard_script
     assert "if (value === 'Newest') return dateBounds?.max ? `Newest (${dateBounds.max})` : 'Newest';" in dashboard_script
     assert "input.value = dateInputDisplayValue(key, definition[key]);" in dashboard_script
-    assert 'const persistedDashboardDefinition = value =>' in dashboard_script
-    assert "delete persisted.scope;" in dashboard_script
-    assert "delete persisted.datasets;" in dashboard_script
+    assert 'const persistedDashboardDefinition = value => canonicalDashboardDefinition(value);' in dashboard_script
+    assert "delete persisted.scope;" not in dashboard_script
+    assert "delete persisted.datasets;" not in dashboard_script
     assert 'delete preparedDefinition.name;' in dashboard_script
     assert 'delete preparedDefinition.slide_comments;' in dashboard_script
     assert 'entries.push({fingerprint, token: payload.token});' in dashboard_script
@@ -628,10 +640,13 @@ def test_dashboards_lifecycle_and_layout(client):
     dashboard_module = (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     assert 'for saved_id, saved_definition in read_dashboards(task_repository).items()' not in dashboard_module
     assert "'dashboard_name': task['name']," in dashboard_module
-    assert "'label': 'Rendering Dashboard Charts' if task.get('rendering_only') else 'Preparing Dashboard dataset'," in dashboard_module
+    assert "'Waiting to prepare Dashboard dataset'" in dashboard_module
     assert "'progress': task.get('progress', 0)," in dashboard_module
     assert "@app.get('/api/e2e-dashboards/preparation-progress/{preparation_id}')" in dashboard_module
-    assert "report(60, 'Building filtered Dashboard selection')" in dashboard_module
+    assert "progress(62, 'Counting filtered rows in the combined CDR tables')" in dashboard_module
+    assert "progress(78, 'Restoring cached row counts and filter options')" in dashboard_module
+    assert "update_preparation_progress(94, 'Saving the reusable Dashboard preparation cache')" in dashboard_module
+    assert 'with lock, task_repository.connection() as connection:' not in dashboard_module
     assert "job['progress'] = round(82 + job['completed'] * 18 / max(job['total'], 1))" not in dashboard_module
     assert 'direct_preparation_tasks: dict[str, dict] = {}' in dashboard_module
     assert "preparation_id: str | None = None," in dashboard_module
@@ -641,13 +656,23 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "if (backgroundPreparationToken === preparationToken) dismissPreparationStatus();" in dashboard_script
     assert "bind('ds-apply-filters', async () => {" in dashboard_script
     assert "if (!hasUnappliedFilterChanges()) return;" in dashboard_script
-    assert "api(`/prepare${params.size ? `?${params}` : ''}`,'POST',definition,controller.signal)" in dashboard_script
+    assert "bind('ds-apply-universe', async () => {" in dashboard_script
+    assert "if (!hasUnappliedUniverseChanges()) return;" in dashboard_script
+    assert "bind('ds-reload-universe', () => {" in dashboard_script
+    assert "copyDefinitionFields(definition, savedDashboardDefinition(), universeDefinitionFields);" in dashboard_script
+    assert "`/prepare${params.size ? `?${params}` : ''}`,'POST',definition,controller.signal," in dashboard_script
     assert "window.dispatchEvent(new Event('dashboard-analytic:refresh-background-tasks'));" in dashboard_script
     assert "title: 'Unsaved Dashboard filters'" in dashboard_script
     assert "confirmLabel: 'Save Filters'" in dashboard_script
+    assert "title: 'Unsaved Dataset Universe'" in dashboard_script
+    assert "confirmLabel: 'Save Universe'" in dashboard_script
+    assert "if (link.classList.contains('topnav-link-logout'))" in dashboard_script
+    assert 'for (const key of [openStorageKey, scrollStorageKey, preparedStorageKey, universeStorageKey])' in dashboard_script
     assert "secondaryLabel: 'Discard'" in dashboard_script
     assert "window.location.assign(target.href);" in dashboard_script
     assert "$('ds-apply-filters').disabled = !hasUnappliedFilterChanges() || filterActionBusy;" in dashboard_script
+    assert "$('ds-apply-universe').disabled = !hasUnappliedUniverseChanges() || filterActionBusy;" in dashboard_script
+    assert "$('ds-reload-universe').disabled = !hasUnsavedUniverseChanges() || filterActionBusy;" in dashboard_script
     assert "const dashboardStatuses = new Map();" in dashboard_script
     assert 'const dashboardPreparationTokens = new Map();' in dashboard_script
     assert "if (!dashboardPreparationTokens.has(id)) dashboardStatuses.set(id, value);" in dashboard_script
@@ -676,7 +701,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "field: sorted(set(values))" in selection_key_source
     assert '{entry_key}:{operator_mapping_key}' in dashboard_module
     assert "'rendering_only': rendering_only," in dashboard_module
-    assert 'def materialize_selection(definition, task_repository, dimensions, selected_by_kind, fields, *, use_profile_options=False):' in dashboard_module
+    assert 'def materialize_selection(' in dashboard_module
+    assert 'use_profile_options=False, progress=None,' in dashboard_module
     assert 'use_profile_options=use_profile_options,' in dashboard_module
     assert 'DASHBOARD_CHART_RENDER_WORKERS = 3' in dashboard_module
     assert 'DASHBOARD_PREVIEW_MANIFEST_VERSION = 7' in dashboard_module
@@ -699,13 +725,13 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'aggregation_columns = chart_aggregation_columns(' in dashboard_module
     assert "thread_name_prefix='e2e-dashboard-data'," not in dashboard_module
     dashboard_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
-    assert '.e2e-dashboards .ds-unsaved-filters-badge' in dashboard_css
-    assert '.e2e-dashboards .ds-unapplied-filters-badge' in dashboard_css
+    assert '.e2e-dashboards :is(.ds-unsaved-filters-badge,.ds-unsaved-universe-badge)' in dashboard_css
+    assert '.e2e-dashboards :is(.ds-unapplied-filters-badge,.ds-unapplied-universe-badge)' in dashboard_css
     assert '.ds-scope-control.ds-filter-applied-unsaved select' in dashboard_css
     assert '.ds-date-picker.ds-date-picker-applied-unsaved .ds-date-picker-control>input' in dashboard_css
     assert '.e2e-dashboards .ds-dashboard-close::after' in dashboard_css
     assert '.e2e-dashboards .ds-active-dashboard-name{color:#12664f;font-family:inherit;font-size:1.12em;font-weight:900}' in dashboard_css
-    assert '.e2e-dashboards .ds-dashboard-close{background:linear-gradient(135deg,#e5989b,#f2b8b9)' in dashboard_css
+    assert '.e2e-dashboards .ds-dashboard-close{background:linear-gradient(135deg,#a9273a,#dc5361)' in dashboard_css
     assert '.e2e-dashboards .ds-dashboard-open{background:linear-gradient(145deg,#e87912,#ffad2f)' in dashboard_css
     assert '.e2e-dashboards .ds-dashboard-view{background:linear-gradient(145deg,#167957,#29ae7d)' in dashboard_css
     assert '.ds-dashboard-status-loading-data{border-color:#d3aa45;background:#fff1c9;color:#77570a}' in dashboard_css
@@ -742,16 +768,21 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'const dashboardNeedsRefresh = () => Boolean(' in dashboard_script
     assert "$('ds-preparing-out-of-sync').hidden = !stale;" in dashboard_script
     assert "bind('ds-preparing-refresh', async () => {" in dashboard_script
-    assert 'label.textContent = `${detail} · ${percent}%`;' in dashboard_script
+    assert 'label.textContent = known ? `${detail} · ${percent}%` : detail;' in dashboard_script
+    assert "const known = progress !== null && progress !== undefined && progress !== '' && Number.isFinite(numeric);" in dashboard_script
+    assert "$('ds-preparing-detail').textContent = detail;" in dashboard_script
+    assert "emitPreparationStatus(payload.status || 'processing', payload.detail, token, queued ? null : payload.progress);" in dashboard_script
     assert 'api(`/preparation-progress/${encodeURIComponent(token)}`)' in dashboard_script
     assert 'monitorPreparationProgress(preparationToken);' in dashboard_script
+    assert dashboard_script.index('const preparationRequest = api(') < dashboard_script.index('monitorPreparationProgress(preparationToken);')
+    assert "dashboard_work_gate.acquire(timeout=0.2)" in dashboard_module
     assert "status(''); await prepare();" in dashboard_script
     assert "setPreparationState('preparing', needsDataPreparation ? 'data' : 'rendering');" in dashboard_script
     assert 'void refreshDashboardStatuses();' in dashboard_script
     assert 'void refreshDashboardPptJobs();' in dashboard_script
     assert 'await Promise.all([refreshDashboardStatuses(), refreshDashboardPptJobs()]);' not in dashboard_script
-    assert 'savedDefinition = definitionFingerprint(definition); updateDirtyState();\n    // Date defaults may be derived' in dashboard_script
-    assert 'with the disabled Apply and Save buttons.\n    sources(); facets();' in dashboard_script
+    assert 'savedDefinition = definitionFingerprint(definition); updateDirtyState();' not in dashboard_script
+    assert 'the controls so their state agrees with the Apply and Save buttons.\n    sources(); facets();' in dashboard_script
     assert "setPreparationState('preparing');" in dashboard_script
     assert "bind('ds-refresh',prepare);" not in dashboard_script
     assert 'const setPreparationRows = payload =>' in dashboard_script
@@ -767,6 +798,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "const reset = node('button', undefined, 'ds-chart-zoom-button ds-chart-zoom-reset');" in dashboard_script
     assert "bind('ds-clear-filters', () => { definition.filters = {}; facets(); filterChanged(); });" in dashboard_script
     assert "bind('ds-last-saved-filters', () => {" in dashboard_script
+    assert 'id="ds-reload-universe"' in page.text
     assert "definition.datasets = structuredClone(saved.datasets || {});" not in dashboard_script
     assert "definition.scope = saved.scope || 'single';" not in dashboard_script
     assert "definition.filters = structuredClone(saved.filters || {});" in dashboard_script
@@ -1364,7 +1396,9 @@ def test_dashboard_migrates_all_saved_definitions_to_current_default_filters(cli
     assert migrated['filters'] == {'Operator': ['A'], 'Region': ['North']}
     assert migrated['custom_fields'] == ['Mean_Data_Rate']
     assert migrated['hidden_filters'] == ['Former custom filter']
-    assert not {'scope', 'datasets', 'date_from', 'date_to'} & migrated.keys()
+    assert {key: migrated[key] for key in ('scope', 'datasets', 'date_from', 'date_to')} == {
+        key: payload[key] for key in ('scope', 'datasets', 'date_from', 'date_to')
+    }
     assert core.repository.get_workspace_state('e2e_dashboard_default_filters_v6') == '1'
     assert json.loads(core.repository.get_workspace_state('e2e_dashboards_v2'))['legacy'] == migrated
 
@@ -1395,6 +1429,40 @@ def test_dashboard_custom_fields_and_snapshot_filters(client):
     payload['hidden_filters'] = ['Market']
     preview = client.post('/api/e2e-dashboards/prepare', json=payload).json()
     assert 'Market' not in preview['options']
+
+
+def test_dashboard_source_specific_custom_fields_do_not_repeat_combined_preparation(client, monkeypatch):
+    payload = setup_dashboard(client)
+    response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'voice'}, files={
+        'dataset_files': ('voice.csv', BytesIO(
+            b'Operator,City,Mean_Call_Setup_Time,Session_Type\nA,London,1.2,VoLTE\n'
+        ), 'text/csv'),
+    })
+    assert response.status_code == 200
+    core.write_workspace_calculated_dimensions([
+        {
+            'name': 'Test Family', 'sources': ['cdr-data'],
+            'rules': [{'when': 'Test_Name CONTAINS HTTP', 'value': 'HTTP'}], 'default': '',
+        },
+        {
+            'name': 'Call Family', 'sources': ['cdr-voice'],
+            'rules': [{'when': 'Session_Type CONTAINS VoLTE', 'value': 'VoLTE'}], 'default': 'Call',
+        },
+    ])
+    payload['datasets']['voice'] = [2]
+    payload['custom_fields'] = ['Test Family', 'Call Family']
+    first = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert first.status_code == 200, first.text
+
+    from src.modules.repository import Repository
+
+    def unexpected_combined_rebuild(*_args, **_kwargs):
+        raise AssertionError('Fields from another CDR type must not prepare source columns.')
+
+    monkeypatch.setattr(Repository, 'copy_dataset_rows_to_reporting', unexpected_combined_rebuild)
+    payload['filters'] = {'City': ['London']}
+    repeated = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert repeated.status_code == 200, repeated.text
 
 
 def test_dashboard_loads_new_filter_values_without_preparing_a_snapshot(client):
@@ -1520,7 +1588,7 @@ def test_dashboard_snapshot_access_and_legacy_redirect(client):
     assert client.get(f"/api/e2e-dashboards/prepared/{preview['token']}").status_code == 410
 
 
-def test_dashboard_reuses_persistent_sql_selection_and_invalidates_dataset_versions(client):
+def test_dashboard_reuses_persistent_sql_selection_and_invalidates_dataset_versions(client, monkeypatch):
     payload = setup_dashboard(client)
     first = client.post('/api/e2e-dashboards/prepare', json=payload)
     assert first.status_code == 200
@@ -1535,18 +1603,33 @@ def test_dashboard_reuses_persistent_sql_selection_and_invalidates_dataset_versi
     assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 200
     with core.repository.connection() as connection:
         assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 1
+
+    from src.modules.repository import Repository
+
+    def unexpected_combined_rebuild(*_args, **_kwargs):
+        raise AssertionError('Default Filter value changes must not prepare source columns.')
+
+    monkeypatch.setattr(Repository, 'copy_dataset_rows_to_reporting', unexpected_combined_rebuild)
     payload['filters'] = {'City': ['London']}
     assert client.post('/api/e2e-dashboards/prepare', json=payload).json()['rows']['data'] == 2
     with core.repository.connection() as connection:
         assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 2
+    payload['filters'] = {'City': ['Leeds']}
+    assert client.post('/api/e2e-dashboards/prepare', json=payload).json()['rows']['data'] == 1
+    with core.repository.connection() as connection:
+        assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 3
+    payload['filters'] = {'City': ['London']}
+    assert client.post('/api/e2e-dashboards/prepare', json=payload).json()['rows']['data'] == 2
+    with core.repository.connection() as connection:
+        assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 3
     core.repository.set_workspace_state('dashboard_cache_test', 'updated')
     assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 200
     with core.repository.connection() as connection:
-        assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 2
+        assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 3
     core.repository.update_dataset_profile(1, progress=100)
     assert client.post('/api/e2e-dashboards/prepare', json=payload).status_code == 200
     with core.repository.connection() as connection:
-        assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 3
+        assert connection.execute('SELECT COUNT(*) AS count FROM dashboard_filter_selections').fetchone()['count'] == 4
 
 
 def test_dashboard_selection_cache_ignores_filter_value_order(client):

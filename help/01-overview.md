@@ -106,7 +106,7 @@ Datasets Analysis analyses one processed CDR at a time.
 
 ## E2E Dashboards
 
-E2E Dashboards is the main analysis module and the complete template-driven workflow behind Dashboard Analytic. A saved Dashboard binds a name and NR Mode to a workspace Report Template, filters, hidden fields and slide comments. Scope, selected Data/Voice/Speech CDRs and dates define the current Dataset Universe and remain session state rather than persisted filters. The definition can be opened repeatedly, duplicated, exported or moved with its workspace without copying source rows into it.
+E2E Dashboards is the main analysis module and the complete template-driven workflow behind Dashboard Analytic. A saved Dashboard binds a name and NR Mode to a workspace Report Template, filters, hidden fields, slide comments and an optional saved Dataset Universe. Scope, selected Data/Voice/Speech CDRs and dates can be applied temporarily or saved independently from filters. The definition can be opened repeatedly, duplicated, exported or moved with its workspace without copying source rows into it.
 
 ### Manage Dashboards
 
@@ -121,7 +121,7 @@ E2E Dashboards is the main analysis module and the complete template-driven work
 - Use automatic date bounds and synchronized default filters for Market, Operator, Vendor, Region, City, Campaign, RAT, Session Type and Call Status.
 - Resolve Region, City, RAT and other known fields through ordered source-column aliases, with the supported priority visible in a tooltip.
 - Add any selected-CDR column or applicable Auto-calculated Field as an extra filter.
-- Apply changed filters, save them as the Dashboard default, reload the saved filters or clear them. Scope, CDRs and dates prepare automatically when viewing or exporting; pending filter changes offer Apply, Discard, Save or Cancel.
+- Apply or save Scope, CDR and date changes with the Dataset Universe actions. Apply, save, reload or clear filter changes independently with the controls below the filter panels.
 
 ### Preparation and reuse
 

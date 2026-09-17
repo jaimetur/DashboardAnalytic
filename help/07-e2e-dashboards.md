@@ -2,7 +2,7 @@
 
 E2E Dashboards is the main template-driven analysis workspace. It combines processed Data, Voice and Speech CDRs, applies one synchronized selection to a complete Dashboard and renders every template slide interactively before producing a PowerPoint.
 
-Each Dashboard stores its name, NR mode, Report Template, adaptive and additional filters, hidden filters and slide comments in the active workspace. Scope, selected CDRs and dates form the temporary Dataset Universe and are rebuilt when the Dashboard opens; they are not persisted in the Dashboard definition. A Dashboard does not copy source datasets or generated cache files.
+Each Dashboard stores its name, NR mode, Report Template, adaptive and additional filters, hidden filters, slide comments and, when requested, its Dataset Universe in the active workspace. Scope, selected CDRs and dates can be applied temporarily or saved independently from filters. A Dashboard does not copy source datasets or generated cache files.
 
 ## Before creating a Dashboard
 
@@ -22,13 +22,13 @@ Dashboard uses the same Report Template schema and renderer as Reporting. This g
 5. Duplicate creates an independent definition. Close leaves the active definition without deleting it.
 6. Delete removes the definition after confirmation; it does not remove CDRs, templates or generated PPT jobs.
 
-**Export Dashboard** creates the versioned ZIP accepted by Admin Import. **Import Dashboard** also accepts the legacy standalone JSON definition. Imported definitions need a compatible template; their temporary Dataset Universe is rebuilt from ready CDRs in the destination workspace when they are opened.
+**Export Dashboard** creates the versioned ZIP accepted by Admin Import. **Import Dashboard** also accepts the legacy standalone JSON definition. Imported definitions need a compatible template; saved universes retain their dataset identifiers, while legacy definitions without one start from the newest ready CDRs in the destination workspace.
 
-The last open Dashboard and page scroll position are remembered in the browser session. Real unsaved filter changes require Save, Discard or Cancel before navigation. Management-only name, NR Mode and Template inputs do not create false unsaved-filter warnings.
+The last open Dashboard and page scroll position are remembered in the browser session. Real unsaved filter or Dataset Universe changes require Save, Discard or Cancel before navigation. Logging out clears the temporary open-Dashboard, scroll, preview and universe state. Management-only name, NR Mode and Template inputs do not create false unsaved-filter warnings.
 
 ## Dashboard Datasets & Filters
 
-The panel separates the comparison scope and selected universe under **Select Dataset Universe** from the default and additional filters under **Select Dataset Filters**. **Unapplied filters** and **Unsaved filters** apply only to the filters on the right; changing Scope, CDRs or dates can require preparation but never produces those badges or enables Apply Filters/Save Filters.
+The panel separates the comparison scope and selected universe under **Select Dataset Universe** from the default and additional filters under **Select Dataset Filters**. Each column has its own Apply and Save actions and its own unapplied/unsaved badges. PPT and View actions appear on the following row.
 
 ### Dashboard Scope
 
@@ -72,14 +72,17 @@ The circular `×` removes an additional filter or hides a default filter after c
 
 ### Apply, Save, Clear and Reload
 
-- **Apply Filters** applies changed filters without changing the Dashboard defaults. It remains disabled for changes limited to Scope, CDRs or dates.
+- **Apply Universe** applies changed Scope, CDRs and dates without changing the saved Dashboard universe.
+- **Save Universe** stores and applies the current Scope, CDR and date selection.
+- **Reload** restores the saved Scope, CDR and dates without altering filters.
+- **Apply Filters** applies changed filters without changing the Dashboard defaults.
 - **Save Filters** applies and persists adaptive filters, additional fields and hidden filters.
 - **Clear Filters** removes adaptive-filter restrictions without changing the Dataset Universe.
 - **Reload Saved Filters** restores only the persisted filters and keeps the current Scope, CDRs and dates.
 
 Returning to an already prepared combination restores its snapshot and charts without recalculation. Filter-value and dataset order do not create different cache entries for equivalent selections.
 
-If View Dashboard or Generate PPT is requested with unapplied adaptive-filter changes, the dialog provides these actions. Pending changes limited to Scope, CDRs or dates prepare the temporary Dataset Universe automatically before continuing.
+If View Dashboard or Generate PPT is requested with unapplied adaptive-filter changes, the dialog provides Apply, Discard, Save or Cancel. Pending universe changes are prepared before continuing and can be persisted beforehand with **Save Universe**.
 
 - **Apply Filters and Continue** applies, waits for preparation and continues.
 - **Discard and Continue** restores the last applied selection and continues.

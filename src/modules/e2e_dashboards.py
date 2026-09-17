@@ -637,11 +637,8 @@ def install_dashboard_routes(core):
         if not isinstance(definition, dict):
             return definition
         normalized = dict(definition)
-        # Scope, source CDRs and dates define the temporary dataset universe.
-        # They are rebuilt when a Dashboard opens and are never saved as
-        # persistent Dashboard filters.
-        for field in ('scope', 'datasets', 'date_from', 'date_to'):
-            normalized.pop(field, None)
+        # Scope, source CDRs and dates are stored independently from filters so
+        # a Dashboard can restore an explicitly saved Dataset Universe.
         filters = normalized.get('filters')
         retired_filter_keys = {identity('Technology'), identity('Zone')}
         migrated_filters = {}
@@ -1430,37 +1427,64 @@ def install_dashboard_routes(core):
             clauses.append(nr_mode_sql(columns, definition.technology))
         return ' AND '.join(f'({clause})' for clause in clauses) or '1', params
 
-    def ensure_combined_filter_columns(definition, task_repository, dimensions, selected_by_kind, entries):
+    def dashboard_combined_requested_columns(definition, dimensions, kind):
+        default_filter_keys = {identity(field) for field in ADAPTATIVE_FILTER_FIELDS}
+        # The combined-table contract owns fixed preview columns, Default
+        # Filter aliases and saved-template KPI fields. Some of those aliases
+        # are alternatives, so comparing the whole contract with one physical
+        # CDR schema would report false missing columns forever. Dashboard
+        # preparation only owns genuinely Dashboard-specific extensions.
+        candidates = {
+            field for field in definition.custom_fields
+            if identity(field) not in default_filter_keys
+        }
+        candidates.update(
+            field for field in definition.filters
+            if identity(field) not in default_filter_keys
+        )
+        dimensions_by_name = {identity(dimension.name): dimension for dimension in dimensions}
+        return {
+            field for field in candidates
+            if (
+                identity(field) not in dimensions_by_name
+                or f'cdr-{kind}' in dimensions_by_name[identity(field)].sources
+            )
+        }
+
+    def dashboard_combined_columns_missing(definition, task_repository, dimensions, selected_by_kind):
+        """Whether opening this Dashboard must add a genuinely new source column."""
+        for kind in selected_by_kind:
+            requested = dashboard_combined_requested_columns(definition, dimensions, kind)
+            current = {identity(column) for column in task_repository.list_reporting_row_columns(kind)}
+            if not {identity(column) for column in requested}.issubset(current):
+                return True
+        return False
+
+    def ensure_combined_filter_columns(
+        definition, task_repository, dimensions, selected_by_kind, chart_entries=None,
+    ):
         selected_dimension_keys = {identity(name) for name in definition.custom_fields}
-        active_dimensions = tuple(dimension for dimension in dimensions if identity(dimension.name) in selected_dimension_keys)
-        for kind, selected in selected_by_kind.items():
-            requested = set(core.combined_reporting_required_columns(active_dimensions, kind, task_repository))
-            requested.update(core.reporting_query_columns(kind, entries, definition.scope == 'multivendor'))
-            requested.update(definition.custom_fields)
-            requested.update(definition.filters)
-            requested.update(alias for aliases in FILTER_COLUMNS.values() for alias in aliases)
-            requested.update(('event_start_time', 'Test_Start_Time', 'Timestamp', 'Date'))
-            # Remember a successful combined-table validation for this exact
-            # source revision and requested-column set so unchanged Dashboard
-            # requests do not repeat the completeness checks.
-            signature_payload = {
-                'schema': 1,
-                'datasets': [
-                    (row['id'], row.get('updated_at'), row.get('processed_at'), row.get('normalization_version'), row.get('row_count'))
-                    for row in selected
-                ],
-                'requested': sorted(identity(column) for column in requested),
-            }
-            signature = sha256(json.dumps(signature_payload, sort_keys=True, default=str).encode()).hexdigest()
-            signature_key = f'dashboard_combined_columns_v2_{kind}'
-            if task_repository.get_workspace_state(signature_key) == signature:
+        active_dimensions = tuple(
+            dimension for dimension in dimensions if identity(dimension.name) in selected_dimension_keys
+        )
+        for kind in selected_by_kind:
+            requested = dashboard_combined_requested_columns(definition, dimensions, kind)
+            if chart_entries:
+                requested.update(core.reporting_query_columns(
+                    kind, chart_entries, definition.scope == 'multivendor',
+                ))
+            current = {identity(column) for column in task_repository.list_reporting_row_columns(kind)}
+            if {identity(column) for column in requested}.issubset(current):
                 continue
             changed = False
-            for row in selected:
-                # Existing rows can still have NULL values for fields added by
-                # another dataset or by a later normalization pass. The copy
-                # helper has a fast no-change path and repairs only incomplete
-                # requested columns for this selected dataset.
+            all_ready_sources = [
+                row for row in task_repository.list_datasets()
+                if row['status'] == 'ready' and str(row['dataset_kind'] or '').casefold() == kind
+            ]
+            for row in all_ready_sources:
+                # A newly requested Dashboard-specific column belongs to the
+                # shared source, not merely the currently selected universe.
+                # Future dataset selections can therefore stay SQL-only.
                 if task_repository.copy_dataset_rows_to_reporting(
                     row['id'], kind, sorted(requested, key=str.casefold),
                 ):
@@ -1478,7 +1502,6 @@ def install_dashboard_routes(core):
                 changed = True
             if changed:
                 task_repository.set_workspace_state(f'combined_reporting_updated_{kind}', core.now_iso())
-            task_repository.set_workspace_state(signature_key, signature)
 
     def persistent_selection_key(definition, task_repository, dimensions, selected_by_kind):
         versions = {
@@ -1515,8 +1538,10 @@ def install_dashboard_routes(core):
         }
         return sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
-    def selected_date_bounds(task_repository, selected_by_kind):
+    def selected_date_bounds(task_repository, selected_by_kind, progress=None):
         """Return the inclusive calendar bounds across the selected source datasets."""
+        if callable(progress):
+            progress(45, 'Checking cached Dataset Universe date limits')
         sources = {}
         for kind, selected in selected_by_kind.items():
             columns = task_repository.list_reporting_row_columns(kind)
@@ -1542,10 +1567,14 @@ def install_dashboard_routes(core):
             if not isinstance(cached_bounds, dict):
                 cached_bounds = {}
             if cache_signature in cached_bounds:
+                if callable(progress):
+                    progress(52, 'Restoring cached Dataset Universe date limits')
                 return cached_bounds[cache_signature]
         except (TypeError, ValueError, json.JSONDecodeError):
             cached_bounds = {}
         lower = upper = None
+        if callable(progress):
+            progress(48, 'Reading Dataset Universe date limits from the combined CDR tables')
         with task_repository.connection() as connection:
             for kind, selected in selected_by_kind.items():
                 date_column = sources[kind]['date_column']
@@ -1577,6 +1606,8 @@ def install_dashboard_routes(core):
         if len(cached_bounds) > 128:
             cached_bounds = dict(list(cached_bounds.items())[-128:])
         task_repository.set_workspace_state(cache_state_key, json.dumps(cached_bounds, separators=(',', ':')))
+        if callable(progress):
+            progress(52, 'Caching Dataset Universe date limits')
         return bounds
 
     def apply_selected_date_bounds(definition, bounds):
@@ -1663,23 +1694,42 @@ def install_dashboard_routes(core):
                             options[field_name].update(str(value) for value in json.loads(encoded_values or '[]'))
         return {field_name: sorted(values, key=str.casefold) for field_name, values in options.items()}
 
-    def materialize_selection(definition, task_repository, dimensions, selected_by_kind, fields, *, use_profile_options=False):
+    def materialize_selection(
+        definition, task_repository, dimensions, selected_by_kind, fields, *,
+        use_profile_options=False, progress=None,
+    ):
         cache_key = persistent_selection_key(definition, task_repository, dimensions, selected_by_kind)
         estimated_rows = sum(sum(int(row.get('row_count') or 0) for row in selected) for selected in selected_by_kind.values())
         use_profile_options = use_profile_options or estimated_rows > DASHBOARD_PROFILE_SELECTION_THRESHOLD
-        with lock, task_repository.connection() as connection:
+        if callable(progress):
+            progress(55, 'Checking the filtered Dashboard selection cache')
+        # Dashboard preparation is already serialized by dashboard_work_gate.
+        # Do not retain the shared task-registry lock while SQLite counts or
+        # facet queries run: progress polling needs that lock to report the
+        # exact live phase during a potentially long combined-table scan.
+        with task_repository.connection() as connection:
             cached = connection.execute(
                 'SELECT id, options_json, row_counts_json FROM dashboard_filter_selections WHERE cache_key = ?',
                 (cache_key,),
             ).fetchone()
             if cached:
+                if callable(progress):
+                    progress(78, 'Restoring cached row counts and filter options')
                 connection.execute('UPDATE dashboard_filter_selections SET last_accessed_at = CURRENT_TIMESTAMP WHERE id = ?', (cached['id'],))
                 return (
                     int(cached['id']), cache_key,
                     json.loads(cached['options_json']), json.loads(cached['row_counts_json']), True,
                 )
+            if callable(progress):
+                progress(62, 'Counting filtered rows in the combined CDR tables')
             row_counts = {}
-            for kind, selected in selected_by_kind.items():
+            selected_groups = list(selected_by_kind.items())
+            for group_index, (kind, selected) in enumerate(selected_groups):
+                if callable(progress):
+                    progress(
+                        62 + round(group_index * 6 / max(len(selected_groups), 1)),
+                        f'Counting filtered CDR-{kind.title()} rows in the combined table',
+                    )
                 dataset_ids = [int(row['id']) for row in selected]
                 where, params = selection_where(task_repository, kind, dataset_ids, definition)
                 table = task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))
@@ -1690,10 +1740,14 @@ def install_dashboard_routes(core):
             # catalogue. This avoids wide DISTINCT scans while row counts and
             # chart previews remain exact from the combined reporting tables.
             if use_profile_options:
+                if callable(progress):
+                    progress(70, 'Loading filter options from Dataset profiles')
                 options = profile_filter_options(
                     definition, dimensions, selected_by_kind, fields, task_repository,
                 )
             else:
+                if callable(progress):
+                    progress(70, 'Calculating dependent filter options in the combined CDR tables')
                 # Active filters need facet values that exclude each field's
                 # own restriction. Aggregate fields sharing a predicate in one
                 # pass, keeping individual passes only where necessary.
@@ -1729,6 +1783,8 @@ def install_dashboard_routes(core):
             # Expensive counts and facet scans above are read-only. Start the
             # coordinated Workspace write transaction only once their final
             # cache payload is ready.
+            if callable(progress):
+                progress(78, 'Caching filtered row counts and filter options')
             cursor = connection.execute(
                 'INSERT INTO dashboard_filter_selections '
                 '(cache_key, options_json, row_counts_json) VALUES (?, ?, ?)',
@@ -1753,7 +1809,7 @@ def install_dashboard_routes(core):
         known_default = any(identity(field_name) == identity(field) for field in ADAPTATIVE_FILTER_FIELDS)
         if not known_default and not any(identity(field_name) == identity(field) for field in requested_definition.custom_fields):
             requested_definition.custom_fields.append(field_name)
-        ensure_combined_filter_columns(requested_definition, task_repository, dimensions, selected_by_kind, entries)
+        ensure_combined_filter_columns(requested_definition, task_repository, dimensions, selected_by_kind)
         apply_selected_date_bounds(requested_definition, selected_date_bounds(task_repository, selected_by_kind))
         values = set()
         resolved = False
@@ -1788,7 +1844,7 @@ def install_dashboard_routes(core):
                 progress(percent, detail)
 
         workspace = workspace or workspace_key()
-        report(5, 'Validating Dashboard sources')
+        report(5, 'Validating the Dashboard template and selected CDR sources')
         ensure_not_cancelled()
         task_repository = Repository(Path(workspace), core.repository.global_db_path)
         entries = validate(definition, task_repository)
@@ -1798,11 +1854,11 @@ def install_dashboard_routes(core):
             kind: sum(int(dataset.get('row_count') or 0) for dataset in selected)
             for kind, selected in selected_by_kind.items()
         }
-        report(20, 'Preparing Dashboard source columns')
-        ensure_combined_filter_columns(definition, task_repository, dimensions, selected_by_kind, entries)
+        if dashboard_combined_columns_missing(definition, task_repository, dimensions, selected_by_kind):
+            report(20, 'Adding new Dashboard-specific fields to the combined CDR tables')
+            ensure_combined_filter_columns(definition, task_repository, dimensions, selected_by_kind)
         ensure_not_cancelled()
-        report(45, 'Resolving Dataset Universe dates')
-        date_bounds = selected_date_bounds(task_repository, selected_by_kind)
+        date_bounds = selected_date_bounds(task_repository, selected_by_kind, progress=report)
         apply_selected_date_bounds(definition, date_bounds)
         selected_dataset_ids = {dataset_id for ids in definition.datasets.values() for dataset_id in ids}
         available_fields = {column for dataset_id in selected_dataset_ids for column in task_repository.list_dataset_row_columns(dataset_id)}
@@ -1817,11 +1873,11 @@ def install_dashboard_routes(core):
             and str(definition.date_from) == date_bounds['min']
             and str(definition.date_to) == date_bounds['max']
         )
-        report(60, 'Building filtered Dashboard selection')
         selection_id, selection_key, options, row_counts, rows_exact = materialize_selection(
-            definition, task_repository, dimensions, selected_by_kind, fields, use_profile_options=use_profile_options,
+            definition, task_repository, dimensions, selected_by_kind, fields,
+            use_profile_options=use_profile_options, progress=report,
         )
-        report(82, 'Preparing Dashboard slides')
+        report(82, 'Preparing the Dashboard slide structure and chart positions')
         full_date_range = bool(
             date_bounds
             and str(definition.date_from) == date_bounds['min']
@@ -1879,7 +1935,7 @@ def install_dashboard_routes(core):
                 snapshots.popitem(last=False)
             snapshot = snapshots[token]
         ensure_not_cancelled()
-        report(82, 'Dashboard dataset is ready')
+        report(90, 'Dashboard selection and slide structure are ready')
         return {**payload, 'token': token}
 
     def preview_manifest_path(workspace: str, dashboard_id: str, fingerprint: str) -> Path:
@@ -2045,7 +2101,7 @@ def install_dashboard_routes(core):
                 'rendering_only': rendering_only, 'cancellation': cancellation,
                 'status': 'queued', 'queued_at': datetime.now(timezone.utc).timestamp(),
                 'started_at': None,
-                'progress': 0, 'detail': 'Starting Dashboard preparation',
+                'progress': 0, 'detail': 'Waiting for an available Dashboard preparation slot',
             }
         try:
             def preparation_cancelled():
@@ -2057,7 +2113,12 @@ def install_dashboard_routes(core):
                     if task is not None:
                         task.update(progress=percent, detail=detail)
 
-            with dashboard_work_gate:
+            gate_acquired = False
+            while not gate_acquired:
+                if cancellation['requested']:
+                    raise RuntimeError('Dashboard preparation cancelled.')
+                gate_acquired = dashboard_work_gate.acquire(timeout=0.2)
+            try:
                 with lock:
                     task = direct_preparation_tasks.get(preparation_id)
                     if task is not None:
@@ -2066,12 +2127,17 @@ def install_dashboard_routes(core):
                         task.update(
                             status='processing',
                             started_at=datetime.now(timezone.utc).timestamp(),
+                            progress=1,
+                            detail='Starting the Dashboard preparation worker',
                         )
                 preview = build_preview(
                     definition, user, workspace=workspace, cancelled=preparation_cancelled,
                     progress=update_preparation_progress,
                 )
+            finally:
+                dashboard_work_gate.release()
             if dashboard_id:
+                update_preparation_progress(94, 'Saving the reusable Dashboard preparation cache')
                 with lock:
                     prepared_snapshot = snapshots.get(preview['token'])
                 if prepared_snapshot is None:
@@ -2084,6 +2150,7 @@ def install_dashboard_routes(core):
                     ),
                     preview['token'],
                 )
+            update_preparation_progress(100, 'Dashboard dataset and filters are ready')
             return preview
         except (ValueError, KeyError) as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -2122,6 +2189,7 @@ def install_dashboard_routes(core):
             return {
                 'progress': task.get('progress', 0),
                 'detail': task.get('detail') or 'Preparing Dashboard dataset',
+                'status': task.get('status', 'processing'),
             }
 
     def prefetched_dashboard_response(dashboard_id: str, definition: DashboardDefinition, user):
@@ -2961,6 +3029,13 @@ def install_dashboard_routes(core):
                     persisted_current = normalize_dashboard_filters(
                         default_definition.model_dump(mode='json'),
                     )
+                    # The session definition may intentionally carry an
+                    # applied, unsaved universe. Compare only the persisted
+                    # non-universe Dashboard fields before using it for the
+                    # status lookup.
+                    for field in ('scope', 'datasets', 'date_from', 'date_to'):
+                        persisted_requested.pop(field, None)
+                        persisted_current.pop(field, None)
                     if persisted_requested == persisted_current:
                         definition = requested_definition
                 prepared = restore_matching_preview_manifest(
@@ -3010,7 +3085,11 @@ def install_dashboard_routes(core):
             return [{
                 'id': task['id'],
                 'dashboard_name': task['name'],
-                'label': 'Rendering Dashboard Charts' if task.get('rendering_only') else 'Preparing Dashboard dataset',
+                'label': (
+                    'Waiting to render Dashboard Charts' if task.get('rendering_only') else 'Waiting to prepare Dashboard dataset'
+                ) if task.get('status') == 'queued' else (
+                    'Rendering Dashboard Charts' if task.get('rendering_only') else 'Preparing Dashboard dataset'
+                ),
                 'detail': (
                     'Rendering charts with the current Dashboard scope'
                     if task.get('rendering_only')

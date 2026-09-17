@@ -6671,6 +6671,22 @@ if (queueNode) {
   };
   const taskIsQueued = (task) => String(task?.status || '').toLowerCase() === 'queued'
     || String(task?.detail || '').toLowerCase() === 'queued';
+  const taskCanStop = (task) => {
+    const status = String(task?.status || '').toLowerCase();
+    return Boolean(task?.stop_url && task?.stop_task_id)
+      && !['complete', 'completed', 'cancelled', 'stopped', 'ready'].includes(status);
+  };
+  const requestTaskStop = async (task) => {
+    const body = new URLSearchParams({task_id: String(task.stop_task_id)});
+    const response = await fetch(String(task.stop_url), {
+      method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json'}, body,
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(String(payload.detail || 'The background job could not be stopped.'));
+    }
+  };
   const formatQueuedAge = (queuedAt) => {
     const timestamp = Number(queuedAt);
     if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
@@ -6899,6 +6915,8 @@ if (queueNode) {
     panel.addEventListener('pointerup', stopDragging);
     panel.addEventListener('pointercancel', stopDragging);
 
+    const panelHeader = document.createElement('header');
+    panelHeader.className = 'background-task-panel-header';
     const heading = document.createElement('h3');
     heading.className = 'background-task-workspace';
     heading.textContent = group.workspace_id === '__server__'
@@ -6906,7 +6924,38 @@ if (queueNode) {
       : group.is_active
       ? `Active workspace · ${group.workspace_name}`
       : String(group.workspace_name || 'Workspace');
-    panel.append(heading);
+    panelHeader.append(heading);
+
+    const stoppableTasks = (Array.isArray(group.tasks) ? group.tasks : []).filter(taskCanStop);
+    if (stoppableTasks.length) {
+      const stopAll = document.createElement('button');
+      stopAll.type = 'button';
+      stopAll.className = 'background-task-stop-all-button';
+      stopAll.textContent = 'Stop all';
+      stopAll.title = `Stop all ${stoppableTasks.length} interruptible background task${stoppableTasks.length === 1 ? '' : 's'}`;
+      stopAll.setAttribute('aria-label', stopAll.title);
+      stopAll.addEventListener('click', async () => {
+        const accepted = await showConfirmDialog(
+          `Stop all ${stoppableTasks.length} interruptible background task${stoppableTasks.length === 1 ? '' : 's'} in “${String(group.workspace_name || 'System tasks')}”?`,
+          {title: 'Interrupt all background tasks', confirmLabel: 'Stop all'},
+        );
+        if (!accepted) return;
+        stopAll.disabled = true;
+        const outcomes = await Promise.allSettled(stoppableTasks.map(requestTaskStop));
+        await poll();
+        const failures = outcomes.filter((outcome) => outcome.status === 'rejected');
+        if (failures.length) {
+          const stoppedCount = outcomes.length - failures.length;
+          showInfoDialog(
+            `${stoppedCount} task${stoppedCount === 1 ? '' : 's'} stopped; ${failures.length} could not be stopped.`,
+            {title: 'Some tasks are still running', tone: 'error'},
+          );
+          stopAll.disabled = false;
+        }
+      });
+      panelHeader.append(stopAll);
+    }
+    panel.append(panelHeader);
 
     const list = document.createElement('div');
     list.className = 'background-task-list';
@@ -6935,7 +6984,7 @@ if (queueNode) {
       label.className = 'background-task-label';
       label.textContent = String(task.label || 'Background task');
       taskHead.append(label);
-      if (task.stop_url && task.stop_task_id) {
+      if (taskCanStop(task)) {
         const stop = document.createElement('button');
         stop.type = 'button';
         stop.className = 'background-task-stop-button';
@@ -6950,15 +6999,7 @@ if (queueNode) {
           if (!accepted) return;
           stop.disabled = true;
           try {
-            const body = new URLSearchParams({task_id: String(task.stop_task_id)});
-            const response = await fetch(String(task.stop_url), {
-              method: 'POST', credentials: 'same-origin',
-              headers: {'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json'}, body,
-            });
-            if (!response.ok) {
-              const payload = await response.json().catch(() => ({}));
-              throw new Error(String(payload.detail || 'The background job could not be stopped.'));
-            }
+            await requestTaskStop(task);
             await poll();
           } catch (error) {
             stop.disabled = false;

@@ -256,7 +256,7 @@ LEGACY_VENDOR_MAPPING_FAILURE_MARKERS = (
     'database is locked',
 )
 DATASET_NORMALIZATION_VERSION = 13
-COMBINED_REPORTING_TEMPLATE_COLUMNS_VERSION = 1
+COMBINED_REPORTING_TEMPLATE_COLUMNS_VERSION = 2
 
 
 def format_preview_gcid(value: object) -> object:
@@ -818,6 +818,16 @@ def combined_reporting_required_columns(
         *Repository.REPORTING_CORE_COLUMNS,
         *PREVIEW_METADATA_FIELDS,
         *MAIN_CDR_FIELDS,
+        # E2E Dashboard Default Filters are a fixed part of every combined
+        # source. Keep every physical fallback alias so opening a Dashboard
+        # never has to repair selected CDR rows just to populate its facets.
+        'market', 'operator', 'vendor',
+        'Region', 'G_Level_2', 'G Level 2',
+        'City', 'G_Level_4', 'G Level 4',
+        'Campaign', 'campaign',
+        'session_type',
+        'RAT_A', 'RAT', 'Sample_RAT_A',
+        'Call_Status', 'call_status', 'status',
         'attempt_count',
         *workspace_template_kpi_columns(task_repository, kind),
     ]
