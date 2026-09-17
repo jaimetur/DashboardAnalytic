@@ -945,6 +945,23 @@
   }
 }
 
+/* On wide viewers the close action belongs at the dialog's outer edge. The
+   compact layout keeps it in the title row through the rules above. */
+@media (min-width:761px) and (min-height:601px) {
+  .ds-chart-expanded-overlay .ds-chart-expanded-header {
+    position:relative;
+    padding-right:3rem;
+  }
+  .ds-chart-expanded-titlebar #ds-chart-expanded-close {
+    position:absolute;
+    z-index:2;
+    top:50%;
+    right:0;
+    margin:0;
+    transform:translateY(-50%);
+  }
+}
+
 /* Touch chart actions appear only after tapping the chart. Focus on Dataset or
    Refresh must not independently reveal the actions or Chart Definition. */
 @media (hover:none), (pointer:coarse) {

@@ -3951,8 +3951,8 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     live_status = client.get('/api/datasets/status').json()['datasets']
     assert next(dataset for dataset in live_status if dataset['id'] == 1)['can_map_vendors'] is True
 
-    # Vendor enrichment must not certify an older source normalization that it
-    # did not rebuild from the uploaded file.
+    # Vendor Mapping rebuilds from the uploaded source so it can restore the
+    # original Operator values before adding the calculated Vendor fields.
     app_module.repository.update_dataset_profile(1, normalization_version=12)
     response = client.post(
         '/workspace/map-vendors',
@@ -3960,7 +3960,7 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
         follow_redirects=False,
     )
     assert response.status_code == 303
-    assert int(app_module.repository.get_dataset(1)['normalization_version']) == 12
+    assert int(app_module.repository.get_dataset(1)['normalization_version']) == 13
 
     preview = client.get('/workspace/preview/1')
     assert preview.status_code == 200

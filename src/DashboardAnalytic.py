@@ -2781,6 +2781,32 @@ def process_vendor_mapping(
                 )
                 task_repository.update_dataset_profile(dataset_id, progress=35)
                 ensure_not_stopped(dataset_id, task_repository)
+                dataset_path = Path(str(dataset.get('stored_path') or ''))
+                needs_source_operator_recovery = (
+                    int(dataset.get('normalization_version') or 1) < DATASET_NORMALIZATION_VERSION
+                )
+                if needs_source_operator_recovery and dataset_path.is_file():
+                    # Start from the original CDR, rather than the existing
+                    # materialized rows only for a legacy build that may have
+                    # written canonical Operator labels into the CDR.
+                    rebuild_result = rebuild_dataset_artifacts(
+                        dataset_id,
+                        dataset_path,
+                        forced_dataset_kind=str(dataset.get('dataset_kind') or ''),
+                        vodafone_mapping_dataset_id=vodafone_mapping_dataset_id,
+                        three_mapping_dataset_id=three_mapping_dataset_id,
+                        task_repository=task_repository,
+                    )
+                    if rebuild_result.get('vendor_mapping_error'):
+                        raise ValueError(str(rebuild_result['vendor_mapping_error']))
+                    clear_dataset_analysis_cache(dataset_path)
+                    task_repository.add_log(username, 'map_dataset_vendors', json.dumps({
+                        'dataset_id': dataset_id,
+                        'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
+                        'three_mapping_dataset_id': three_mapping_dataset_id,
+                        'status': 'ready',
+                    }))
+                    return
                 mapped_frame = assign_cdr_vendors(
                     _reporting_frame(dataset_id, task_repository),
                     _reporting_frame(vodafone_mapping['id'], task_repository) if vodafone_mapping else None,

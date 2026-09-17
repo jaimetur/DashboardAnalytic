@@ -2401,6 +2401,16 @@ def install_dashboard_routes(core):
         spec = _catalog_spec(entry)
         if spec.get('operators'):
             return None
+        # This SQL-only pagination path reads physical CDR values. Chart frames
+        # intentionally replace Operator aliases (and their derived Subscriber
+        # and Vendor presentation labels) in memory, so using the SQL values
+        # for the dropdown would make a visible canonical value impossible to
+        # select. Use the shared mapped frame whenever such a column is shown.
+        if any(
+            identity(column) in {'operator', 'subscriber', 'vendor', 'vendoronly'}
+            for column in chart_query_columns(entry, snapshot.multivendor)
+        ):
+            return None
         task_repository = Repository(Path(snapshot.workspace), core.repository.global_db_path)
         selected = core._optional_reporting_datasets(
             snapshot.definition.datasets.get(entry.source_kind, []), entry.source_kind, task_repository,
