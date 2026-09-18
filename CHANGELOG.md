@@ -12,12 +12,13 @@
 #### 🚀 Enhancements:
 - Expanded App Logs with meaningful workspace lifecycle and configuration changes plus start, completion, cancellation and failure events for scheduled/manual backups, automatic workspace reconciliation, Auto-calculated Field materialization, combined-CDR recreation, workspace duplication and Dashboard-cache cleanup. System-executed background work preserves the requesting user when available and identifies `system` as its executor.
 - Chart Builder now uses the E2E Dashboard individual Canvas chart viewer directly inside the Interactive Preview panel, including its responsive renderer, semantic hover support, zoom, panning and refresh controls, instead of the embedded E2E Reporting PNG preview.
-- Reprocess All now queues selected Vendor Mapping datasets before CDR datasets and makes each dependent CDR wait for its newly reprocessed mapping, so Vendor assignment uses the refreshed mapping in the same batch.
+- Reprocess All and multi-file uploads now run as two explicit phases: selected Vendor Mapping datasets may process in parallel, but every CDR in the batch waits until all those mappings finish, ensuring Vendor assignment never uses a partially refreshed mapping set.
 - Operator labels are no longer seeded or normalised through built-in UK aliases. Admin Operator Mappings is the sole source for reporting and dashboard label transformations; with no configured mappings, the original CDR labels remain unchanged, including in the combined table.
 - Floating background-task cards now keep their workspace title, total task count, top controls and separator fixed while a vertically scrollable task list accommodates processes that exceed the available viewport height, including touch scrolling on compact screens. Tasks retain their immutable queue order oldest-first, new cards start at the top, and two-second status refreshes preserve the same scroll container and the user's current position without treating temporary layout resets as user scrolling or making the scrollbar flicker. Reprocessed datasets calculate queued age from the current queue transition instead of their original upload time.
 
 #### 🐛 Bug fixes:
 - App Logs now renders timestamps and derives date filters with the timezone selected in Application Runtime instead of relying on the host process timezone, preventing UTC offsets and midnight events from appearing under the wrong local date.
+- CDR processing with explicitly selected Vendor Mappings now fails visibly when mapping raises an error or leaves any Vendor value empty, instead of publishing an apparently successful Ready dataset without complete mapped Vendors.
 
 #### 📚 Documentation:
 

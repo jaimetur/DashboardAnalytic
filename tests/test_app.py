@@ -1783,6 +1783,12 @@ def test_workspace_bulk_dataset_actions_reprocess_in_dependency_order(client, mo
     )
     client.post(
         "/datasets-analysis/upload",
+        data={"dataset_kinds": "mapping_vodafone"},
+        files={"dataset_files": ("vf-mapping.csv", BytesIO(b"Cell_ID_A,Vendor\n100,Ericsson\n"), "text/csv")},
+        follow_redirects=False,
+    )
+    client.post(
+        "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("cdr.csv", BytesIO(b"operator,Cell_ID_A,score\n3,200 -> 200,91\n"), "text/csv")},
         follow_redirects=False,
@@ -1790,7 +1796,7 @@ def test_workspace_bulk_dataset_actions_reprocess_in_dependency_order(client, mo
     import src.DashboardAnalytic as app_module
 
     app_module.repository.update_dataset_profile(
-        2,
+        3,
         processing_options_json=json.dumps({"three_mapping_dataset_id": 1}),
     )
     page = client.get('/workspace')
@@ -1800,6 +1806,7 @@ def test_workspace_bulk_dataset_actions_reprocess_in_dependency_order(client, mo
     assert 'data-dataset-reprocess-dialog' in page.text
     assert 'name="dataset_ids" value="1" data-reprocess-dataset-choice checked' in page.text
     assert 'name="dataset_ids" value="2" data-reprocess-dataset-choice checked' in page.text
+    assert 'name="dataset_ids" value="3" data-reprocess-dataset-choice checked' in page.text
 
     calls = []
 
@@ -1822,14 +1829,14 @@ def test_workspace_bulk_dataset_actions_reprocess_in_dependency_order(client, mo
     monkeypatch.setattr(app_module, 'enqueue_dataset_processing', capture_enqueue)
     response = client.post(
         '/workspace/reprocess-datasets',
-        data={'dataset_ids': ['2', '1']},
+        data={'dataset_ids': ['3', '1', '2']},
         follow_redirects=False,
     )
 
     assert response.status_code == 303
-    assert [call['dataset_id'] for call in calls] == [1, 2]
-    assert calls[1]['three_mapping_dataset_id'] == 1
-    assert calls[1]['dependencies'] == [calls[0]['token']]
+    assert [call['dataset_id'] for call in calls] == [1, 2, 3]
+    assert calls[2]['three_mapping_dataset_id'] == 1
+    assert calls[2]['dependencies'] == [calls[0]['token'], calls[1]['token']]
 
 
 def test_admin_dataset_table_includes_ordered_global_icon_actions(client, monkeypatch) -> None:
@@ -2164,6 +2171,9 @@ def test_reupload_preserves_original_upload_date_for_dataset_ordering(client) ->
     assert 'data-queue-sort-key="uploaded"' in workspace.text
     assert 'data-queue-sort-key="updated"' in workspace.text
     assert workspace.text.index('data-queue-sort-key="uploaded"') < workspace.text.index('data-queue-sort-key="updated"')
+    styles = client.get('/static/css/app.css').text
+    assert '.queue-table th:nth-child(2), .queue-table td:nth-child(2) { width: 360px; min-width: 360px; max-width: 360px; overflow-wrap: anywhere; }' in styles
+    assert '.queue-table [data-queue-updated] { white-space: pre; }' in styles
     assert 'Default (' in workspace.text
 
 
@@ -4694,6 +4704,34 @@ def test_workspace_batch_upload_processes_uploaded_mapping_before_its_cdr(client
     import src.DashboardAnalytic as app_module
     cdr = app_module.serialize_dataset_row(app_module.repository.get_dataset(2))
     assert cdr['vendor_mapping_applied'] is True
+
+
+def test_dataset_processing_fails_when_selected_vendor_mapping_cannot_be_applied(client) -> None:
+    login(client)
+
+    response = client.post(
+        '/datasets-analysis/upload',
+        data={
+            'dataset_kinds': ['mapping_three', 'data'],
+            'vodafone_mapping_dataset_ids': ['', ''],
+            'three_mapping_dataset_ids': ['', 'upload:0'],
+        },
+        files=[
+            ('dataset_files', ('Multivendor_Mapping_3UK.csv', BytesIO(b'Cid__ECI,Vendor\n200,Nokia\n'), 'text/csv')),
+            ('dataset_files', ('cdr_without_cell_id.csv', BytesIO(b'Operator,score\n3,91\n'), 'text/csv')),
+        ],
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    import src.DashboardAnalytic as app_module
+
+    cdr = app_module.serialize_dataset_row(app_module.repository.get_dataset(2))
+    assert cdr['status'] == 'failed'
+    assert cdr['vendor_mapping_applied'] is False
+    assert 'Vendor mapping failed' in str(cdr['last_error'])
+    assert 'Cell ID field' in str(cdr['last_error'])
+    assert client.get('/workspace/preview/2').status_code == 400
 
 
 def test_vfuk_preview_limits_mapping_sheets_and_displays_materialised_gcid(client) -> None:

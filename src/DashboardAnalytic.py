@@ -2420,6 +2420,12 @@ def _process_dataset(
                 task_repository=task_repository,
                 update_combined_reporting=False,
             )
+            if vodafone_mapping_dataset_id or three_mapping_dataset_id:
+                mapping_error = str(rebuild_result.get('vendor_mapping_error') or '').strip()
+                if mapping_error:
+                    raise ValueError(f'Vendor mapping failed: {mapping_error}')
+                if not rebuild_result.get('vendor_values_complete'):
+                    raise ValueError('Vendor mapping produced one or more empty Vendor values.')
             task_repository.add_log(username, 'process_dataset', json.dumps({
                 'dataset_id': dataset_id,
                 'file': dataset_path.name,
@@ -2427,11 +2433,6 @@ def _process_dataset(
                 'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
                 'three_mapping_dataset_id': three_mapping_dataset_id,
             }))
-            if rebuild_result.get('vendor_mapping_error'):
-                task_repository.add_log(username, 'vendor_mapping_skipped', json.dumps({
-                    'dataset_id': dataset_id,
-                    'error': rebuild_result['vendor_mapping_error'],
-                }))
             dataset_kind = str(rebuild_result.get('dataset_kind') or '').casefold()
             if workspace and dataset_kind in CDR_DATASET_KINDS:
                 # The dataset has already reached Ready/100% at this point.
@@ -2733,6 +2734,7 @@ def rebuild_dataset_artifacts(
         'analysis': analysis,
         'filter_options': filter_options,
         'vendor_mapping_error': auto_vendor_mapping_error,
+        'vendor_values_complete': vendor_values_complete,
         'dataset_kind': dataset_kind,
     }
 
@@ -11032,9 +11034,9 @@ async def upload_dataset(
         return mapping_id
 
     # Process mappings before CDRs uploaded in the same request. Background
-    # workers remain parallel, while an explicit Future dependency guarantees
-    # that a CDR selected from this batch waits only for its own mapping files.
-    batch_processing_futures: dict[int, Future[Any]] = {}
+    # workers remain parallel within each phase, while every CDR waits for all
+    # mapping files in the batch so none can use a partially refreshed mapping set.
+    batch_mapping_futures: list[Future[Any]] = []
     for uploaded in sorted(
         uploaded_datasets,
         key=lambda item: 0 if item['dataset_kind'] in {'mapping_vodafone', 'mapping_three'} else 1,
@@ -11055,11 +11057,7 @@ async def upload_dataset(
             'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
             'three_mapping_dataset_id': three_mapping_dataset_id,
         }))
-        dependencies = [
-            batch_processing_futures[mapping_id]
-            for mapping_id in (vodafone_mapping_dataset_id, three_mapping_dataset_id)
-            if mapping_id in batch_processing_futures
-        ]
+        dependencies = list(batch_mapping_futures) if dataset_kind in CDR_DATASET_KINDS else []
         future = enqueue_dataset_processing(
             background_tasks,
             int(uploaded['dataset_id']),
@@ -11070,7 +11068,8 @@ async def upload_dataset(
             dependencies=dependencies,
         )
         if future is not None:
-            batch_processing_futures[int(uploaded['dataset_id'])] = future
+            if dataset_kind in {'mapping_vodafone', 'mapping_three'}:
+                batch_mapping_futures.append(future)
 
     if not queued_dataset_ids:
         return RedirectResponse('/workspace', status_code=status.HTTP_303_SEE_OTHER)
@@ -11274,7 +11273,7 @@ def reprocess_workspace_datasets(
             detail=f"These datasets cannot be reprocessed from an original source file: {', '.join(unavailable)}",
         )
 
-    processing_futures: dict[int, Future[Any]] = {}
+    mapping_futures: list[Future[Any]] = []
     queued_ids: list[int] = []
     for dataset in sorted(
         selected_datasets,
@@ -11286,11 +11285,7 @@ def reprocess_workspace_datasets(
             processing_options = {}
         vodafone_mapping_dataset_id = processing_options.get('vodafone_mapping_dataset_id')
         three_mapping_dataset_id = processing_options.get('three_mapping_dataset_id')
-        dependencies = [
-            processing_futures[mapping_id]
-            for mapping_id in (vodafone_mapping_dataset_id, three_mapping_dataset_id)
-            if mapping_id in processing_futures
-        ]
+        dependencies = list(mapping_futures) if dataset.get('dataset_kind') in CDR_DATASET_KINDS else []
         future = enqueue_dataset_processing(
             background_tasks,
             int(dataset['id']),
@@ -11303,7 +11298,8 @@ def reprocess_workspace_datasets(
         if future is None:
             continue
         dataset_id = int(dataset['id'])
-        processing_futures[dataset_id] = future
+        if dataset.get('dataset_kind') in {'mapping_vodafone', 'mapping_three'}:
+            mapping_futures.append(future)
         queued_ids.append(dataset_id)
         repository.add_log(user.username, 'reprocess_dataset', json.dumps({
             'dataset_id': dataset_id,
