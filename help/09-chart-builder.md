@@ -1,6 +1,6 @@
 # Chart Builder
 
-Chart Builder is the ad-hoc chart editor. It reuses the Interactive Preview from E2E Reporting and Report Template editing, but its definition is temporary: it never changes a stored template or creates a PowerPoint report.
+Chart Builder is the ad-hoc chart editor. It uses the E2E Dashboard individual Canvas chart viewer embedded directly in the page, while its definition remains temporary: it never changes a stored template or creates a PowerPoint report.
 
 ## Workflow
 
@@ -29,6 +29,8 @@ The CDR Source selector is filtered by CDR Type and shows only processed dataset
 | Legend Position | Top, Bottom, Left or Right. |
 
 Rows and Columns preserve checkbox order. Selecting `Operator` then `Campaign` produces `Operator × Campaign`.
+
+The embedded viewer provides the same Canvas rendering, semantic hover details, zoom, panning and refresh behaviour as an individual E2E Dashboard chart.
 
 ## Example
 

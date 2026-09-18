@@ -204,7 +204,7 @@ Legend: Campaign
 
 ## App Logs
 
-App Logs presents meaningful user and system events rather than every UI click.
+App Logs presents meaningful user and system events rather than every UI click. Background and automatic work records its lifecycle—including scheduled and manual backups, automatic workspace reconciliation, materialization, combined-table recreation, workspace duplication and cache cleanup—and distinguishes the requesting user from the `system` executor.
 
 - Filter by **User**, **Executed by**, date, type and action.
 - User names are matched case-insensitively and displayed in lowercase.

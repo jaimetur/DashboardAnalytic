@@ -10,6 +10,9 @@
 #### 🌟 New Features:
 
 #### 🚀 Enhancements:
+- Expanded App Logs with meaningful workspace lifecycle and configuration changes plus start, completion, cancellation and failure events for scheduled/manual backups, automatic workspace reconciliation, Auto-calculated Field materialization, combined-CDR recreation, workspace duplication and Dashboard-cache cleanup. System-executed background work preserves the requesting user when available and identifies `system` as its executor.
+- Chart Builder now uses the E2E Dashboard individual Canvas chart viewer directly inside the Interactive Preview panel, including its responsive renderer, semantic hover support, zoom, panning and refresh controls, instead of the embedded E2E Reporting PNG preview.
+- Reprocess All now queues selected Vendor Mapping datasets before CDR datasets and makes each dependent CDR wait for its newly reprocessed mapping, so Vendor assignment uses the refreshed mapping in the same batch.
 
 #### 🐛 Bug fixes:
 

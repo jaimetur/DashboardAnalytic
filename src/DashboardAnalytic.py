@@ -52,7 +52,7 @@ from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
 from src.modules.auth import SessionUser, verify_password
 from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE, workspace_write_lock
@@ -1036,6 +1036,10 @@ def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
                 message=f"Updated {' and '.join(updated_parts)}",
                 finished_at=datetime.now(timezone.utc).timestamp(),
             )
+        task_repository.try_add_log(str(job.get('username') or 'system'), 'materialize_auto_calculated_fields_completed', json.dumps({
+            'job_id': job_id, 'workspace': workspace.id, 'datasets': dataset_count,
+            'combined_tables': combined_count, 'executed_by': 'system',
+        }))
     except ProcessingStopped as exc:
         task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'stopped')
         with AUTO_CALCULATED_FIELD_JOBS_LOCK:
@@ -1043,6 +1047,9 @@ def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
                 status='stopped', error=str(exc), message='Materialization stopped by user.',
                 finished_at=datetime.now(timezone.utc).timestamp(),
             )
+        task_repository.try_add_log(str(job.get('username') or 'system'), 'materialize_auto_calculated_fields_stopped', json.dumps({
+            'job_id': job_id, 'workspace': workspace.id, 'error': str(exc), 'executed_by': 'system',
+        }))
     except Exception as exc:
         task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
         with AUTO_CALCULATED_FIELD_JOBS_LOCK:
@@ -1050,6 +1057,9 @@ def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
                 status='failed', error=str(exc), message='Materialization failed',
                 finished_at=datetime.now(timezone.utc).timestamp(),
             )
+        task_repository.try_add_log(str(job.get('username') or 'system'), 'materialize_auto_calculated_fields_failed', json.dumps({
+            'job_id': job_id, 'workspace': workspace.id, 'error': str(exc), 'executed_by': 'system',
+        }))
 
 
 def start_auto_calculated_field_job(
@@ -1144,6 +1154,10 @@ def _run_combined_cdr_recreation_job(job_id: str, workspace: Workspace, kind: st
                 refresh_workspace=True,
                 finished_at=datetime.now(timezone.utc).timestamp(),
             )
+        task_repository.try_add_log(str(AUTO_CALCULATED_FIELD_JOBS[job_id].get('username') or 'system'), 'recreate_combined_cdr_table_completed', json.dumps({
+            'job_id': job_id, 'workspace': workspace.id, 'kind': kind,
+            'rows': stats['rows'], 'executed_by': 'system',
+        }))
     except ProcessingStopped as exc:
         task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'stopped')
         with AUTO_CALCULATED_FIELD_JOBS_LOCK:
@@ -1151,6 +1165,10 @@ def _run_combined_cdr_recreation_job(job_id: str, workspace: Workspace, kind: st
                 status='stopped', error=str(exc), message=f'Combined CDR-{kind.upper()} recreation stopped by user.',
                 finished_at=datetime.now(timezone.utc).timestamp(),
             )
+        task_repository.try_add_log(str(AUTO_CALCULATED_FIELD_JOBS[job_id].get('username') or 'system'), 'recreate_combined_cdr_table_stopped', json.dumps({
+            'job_id': job_id, 'workspace': workspace.id, 'kind': kind,
+            'error': str(exc), 'executed_by': 'system',
+        }))
     except Exception as exc:
         task_repository.set_workspace_state('calculated_dimensions_need_materialization', '0')
         task_repository.set_workspace_state(f'combined_reporting_error_{kind}', str(exc))
@@ -1159,6 +1177,10 @@ def _run_combined_cdr_recreation_job(job_id: str, workspace: Workspace, kind: st
                 status='failed', error=str(exc), message=f'Combined CDR-{kind.upper()} recreation failed',
                 finished_at=datetime.now(timezone.utc).timestamp(),
             )
+        task_repository.try_add_log(str(AUTO_CALCULATED_FIELD_JOBS[job_id].get('username') or 'system'), 'recreate_combined_cdr_table_failed', json.dumps({
+            'job_id': job_id, 'workspace': workspace.id, 'kind': kind,
+            'error': str(exc), 'executed_by': 'system',
+        }))
 
 
 def start_combined_cdr_recreation_job(
@@ -1244,6 +1266,12 @@ def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
     )
 
     def run() -> None:
+        task_repository.try_add_log('system', 'automatic_workspace_materialization_started', json.dumps({
+            'workspace': workspace.id,
+            'dimensions_pending': dimensions_pending,
+            'template_columns_pending': templates_pending,
+            'executed_by': 'system',
+        }))
         try:
             with _dataset_processing_lock(task_repository):
                 dimensions = parse_calculated_dimensions(task_repository.list_calculated_dimensions())
@@ -1268,7 +1296,13 @@ def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
                     task_repository.set_workspace_state(
                         'combined_reporting_template_columns_signature', processed_signature,
                     )
-        except Exception:
+            task_repository.try_add_log('system', 'automatic_workspace_materialization_completed', json.dumps({
+                'workspace': workspace.id,
+                'dimensions_pending': dimensions_pending,
+                'template_columns_pending': templates_pending,
+                'executed_by': 'system',
+            }))
+        except Exception as exc:
             if dimensions_pending:
                 try:
                     task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
@@ -1276,6 +1310,9 @@ def queue_workspace_dimension_materialization(workspace: Workspace) -> None:
                     # The workspace may have been deleted while its background
                     # reconciliation was shutting down.
                     pass
+            task_repository.try_add_log('system', 'automatic_workspace_materialization_failed', json.dumps({
+                'workspace': workspace.id, 'error': str(exc), 'executed_by': 'system',
+            }))
         finally:
             with WORKSPACE_DIMENSION_MATERIALIZATION_THREADS_LOCK:
                 WORKSPACE_DIMENSION_MATERIALIZATION_THREADS.discard(workspace.id)
@@ -4036,6 +4073,19 @@ def run_recurring_backup_scheduler() -> None:
     }
     with SCHEDULED_BACKUP_JOBS_LOCK:
         SCHEDULED_BACKUP_JOBS[job_id] = job
+    audit_repository = (
+        Repository(
+            active_workspace.database_path,
+            global_db_path=repository.global_db_path,
+            workspace_registry_db_path=workspace_registry.registry_path,
+        )
+        if active_workspace else None
+    )
+    if audit_repository:
+        audit_repository.try_add_log('system', 'scheduled_database_backup_started', json.dumps({
+            'job_id': job_id, 'period': period, 'components': config.get('components', []),
+            'workspace_ids': config.get('workspace_ids', []), 'executed_by': 'system',
+        }))
     def run() -> None:
         global RECURRING_BACKUP_RUNNING
         try:
@@ -4055,13 +4105,26 @@ def run_recurring_backup_scheduler() -> None:
                     destination.unlink(missing_ok=True)
                     job.update(status='cancelled', message='Scheduled backup stopped and incomplete ZIP removed', progress=100,
                                finished_at=datetime.now(timezone.utc).timestamp())
+                    if audit_repository:
+                        audit_repository.try_add_log('system', 'scheduled_database_backup_stopped', json.dumps({
+                            'job_id': job_id, 'period': period, 'executed_by': 'system',
+                        }))
                     return
                 job.update(status='ready', message=f'Backup created: {destination.name}', progress=100,
                            finished_at=datetime.now(timezone.utc).timestamp())
+            if audit_repository:
+                audit_repository.try_add_log('system', 'scheduled_database_backup_completed', json.dumps({
+                    'job_id': job_id, 'period': period, 'file': destination.name,
+                    'executed_by': 'system',
+                }))
         except Exception as exc:
             with SCHEDULED_BACKUP_JOBS_LOCK:
                 job.update(status='failed', message=f'Backup failed: {exc}', progress=100,
                            finished_at=datetime.now(timezone.utc).timestamp())
+            if audit_repository:
+                audit_repository.try_add_log('system', 'scheduled_database_backup_failed', json.dumps({
+                    'job_id': job_id, 'period': period, 'error': str(exc), 'executed_by': 'system',
+                }))
         finally:
             with RECURRING_BACKUP_LOCK:
                 RECURRING_BACKUP_RUNNING = False
@@ -4081,6 +4144,14 @@ def start_manual_database_backup(config: dict[str, Any], username: str) -> dict[
     }
     with MANUAL_BACKUP_JOBS_LOCK:
         MANUAL_BACKUP_JOBS[job_id] = job
+    audit_repository = (
+        Repository(
+            active_workspace.database_path,
+            global_db_path=repository.global_db_path,
+            workspace_registry_db_path=workspace_registry.registry_path,
+        )
+        if active_workspace else None
+    )
 
     def run() -> None:
         global RECURRING_BACKUP_RUNNING
@@ -4099,6 +4170,10 @@ def start_manual_database_backup(config: dict[str, Any], username: str) -> dict[
                 if job.get('cancel_requested'):
                     job.update(status='cancelled', message='Backup stopped before ZIP creation', progress=100,
                                finished_at=datetime.now(timezone.utc).timestamp())
+                    if audit_repository:
+                        audit_repository.try_add_log(username, 'manual_database_backup_stopped', json.dumps({
+                            'job_id': job_id, 'executed_by': 'system',
+                        }))
                     return
             def update_progress(message: str, progress: float) -> None:
                 with MANUAL_BACKUP_JOBS_LOCK:
@@ -4117,17 +4192,29 @@ def start_manual_database_backup(config: dict[str, Any], username: str) -> dict[
                         status='cancelled', message='Backup stopped and incomplete ZIP removed', progress=100,
                         finished_at=datetime.now(timezone.utc).timestamp(),
                     )
+                    if audit_repository:
+                        audit_repository.try_add_log(username, 'manual_database_backup_stopped', json.dumps({
+                            'job_id': job_id, 'executed_by': 'system',
+                        }))
                     return
                 job.update(
                     status='ready', message=f'Backup created: {destination.name}', progress=100,
                     finished_at=datetime.now(timezone.utc).timestamp(),
                 )
+            if audit_repository:
+                audit_repository.try_add_log(username, 'manual_database_backup_completed', json.dumps({
+                    'job_id': job_id, 'file': destination.name, 'executed_by': 'system',
+                }))
         except Exception as exc:
             with MANUAL_BACKUP_JOBS_LOCK:
                 job.update(
                     status='failed', message='Manual backup failed', error=str(exc), progress=100,
                     finished_at=datetime.now(timezone.utc).timestamp(),
                 )
+            if audit_repository:
+                audit_repository.try_add_log(username, 'manual_database_backup_failed', json.dumps({
+                    'job_id': job_id, 'error': str(exc), 'executed_by': 'system',
+                }))
         finally:
             if acquired_backup_slot:
                 with RECURRING_BACKUP_LOCK:
@@ -7478,6 +7565,22 @@ def require_workspace_access(user: SessionUser, workspace_id: str) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='You do not have access to that workspace.')
 
 
+def add_workspace_audit_log(
+    workspace: Workspace, username: str, action: str, details: dict[str, Any] | str,
+) -> bool:
+    """Write an operational event to the workspace it belongs to."""
+    task_repository = Repository(
+        workspace.database_path,
+        global_db_path=repository.global_db_path,
+        workspace_registry_db_path=workspace_registry.registry_path,
+    )
+    payload = json.dumps(details) if isinstance(details, dict) else details
+    try:
+        return task_repository.try_add_log(username, action, payload)
+    except (OSError, sqlite3.Error):
+        return False
+
+
 @app.post('/workspace/select')
 def select_workspace(
     workspace_id: str = Form(...),
@@ -7493,12 +7596,15 @@ def select_workspace(
     if user.role != 'super-admin' and not repository.user_has_workspace_access(user.username, workspace_id):
         return RedirectResponse(f'{target}?workspace_error=You+do+not+have+access+to+that+workspace.', status_code=status.HTTP_303_SEE_OTHER)
     try:
-        activate_workspace(workspace_id)
+        workspace = activate_workspace(workspace_id)
     except Exception as exc:
         return RedirectResponse(
             f'{target}?{urlencode({"workspace_error": f"Unable to open the selected workspace: {exc}"})}',
             status_code=status.HTTP_303_SEE_OTHER,
         )
+    repository.try_add_log(user.username, 'open_workspace', json.dumps({
+        'workspace': workspace.id, 'name': workspace.name,
+    }))
     return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -7506,6 +7612,9 @@ def select_workspace(
 def close_workspace(workspace_id: str = Form(...), user: SessionUser = Depends(current_user)) -> Response:
     if not active_workspace or active_workspace.id != workspace_id:
         return RedirectResponse('/workspace?workspace_warning=Only+the+open+workspace+can+be+closed.', status_code=status.HTTP_303_SEE_OTHER)
+    repository.try_add_log(user.username, 'close_workspace', json.dumps({
+        'workspace': active_workspace.id, 'name': active_workspace.name,
+    }))
     close_active_workspace()
     return RedirectResponse('/workspace?workspace_notice=Workspace+closed.', status_code=status.HTTP_303_SEE_OTHER)
 
@@ -7527,6 +7636,9 @@ def create_workspace(name: str = Form(...), usernames: list[str] = Form(default=
         activate_workspace(workspace.id)
     except ValueError as exc:
         return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
+    repository.try_add_log(user.username, 'create_workspace', json.dumps({
+        'workspace': workspace.id, 'name': workspace.name,
+    }))
     return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": f"Created and opened {workspace.name}."})}', status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -7540,6 +7652,9 @@ def rename_workspace(workspace_id: str = Form(...), name: str = Form(...), user:
             activate_workspace(workspace.id)
     except ValueError as exc:
         return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
+    add_workspace_audit_log(workspace, user.username, 'rename_workspace', {
+        'workspace': workspace.id, 'name': workspace.name,
+    })
     return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": f"Renamed workspace to {workspace.name}."})}', status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -7569,6 +7684,10 @@ def save_workspace(
             return JSONResponse({'detail': str(exc)}, status_code=400)
         return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}', status_code=status.HTTP_303_SEE_OTHER)
     notice = 'Workspace name and access updated.' if user.role == 'super-admin' else 'Workspace name updated.'
+    add_workspace_audit_log(workspace, user.username, 'save_workspace', {
+        'workspace': workspace.id, 'name': workspace.name,
+        'access_updated': user.role == 'super-admin',
+    })
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JSONResponse({'ok': True, 'notice': notice, 'workspace': {'id': workspace.id, 'name': workspace.name}})
     return RedirectResponse(f'/workspace?{urlencode({"workspace_notice": notice})}', status_code=status.HTTP_303_SEE_OTHER)
@@ -7590,6 +7709,10 @@ def duplicate_workspace(
         for account in repository.list_users()
         if workspace_id in repository.list_user_workspace_ids(int(account['id']))
     ]
+    add_workspace_audit_log(source, user.username, 'duplicate_workspace_started', {
+        'workspace': source.id, 'name': source.name,
+        'include_generated_outputs': include_generated_outputs,
+    })
 
     def run_duplication() -> None:
       workspace: Workspace | None = None
@@ -7612,7 +7735,12 @@ def duplicate_workspace(
             should_stop=duplication_stopped,
         )
         invalidate_workspace_size_cache(workspace.database_path.parent)
-      except Exception:
+        add_workspace_audit_log(source, user.username, 'duplicate_workspace_completed', {
+            'workspace': source.id, 'name': source.name,
+            'duplicate_workspace': workspace.id, 'duplicate_name': workspace.name,
+            'executed_by': 'system',
+        })
+      except Exception as exc:
         # Do not leave a registered but inaccessible/partially configured
         # workspace behind when the filesystem copy or permission copy fails.
         failed_workspace = workspace or created_workspace
@@ -7628,6 +7756,10 @@ def duplicate_workspace(
                     'workspace_name': failed_workspace.name, 'owner': user.username,
                     'status': 'ready', 'finished_at': datetime.now(timezone.utc).timestamp(),
                 }
+        add_workspace_audit_log(source, user.username, 'duplicate_workspace_failed', {
+            'workspace': source.id, 'name': source.name, 'error': str(exc),
+            'executed_by': 'system',
+        })
       finally:
         if created_workspace is not None:
             with WORKSPACE_DUPLICATION_STOP_REQUESTS_LOCK:
@@ -7733,6 +7865,9 @@ def delete_workspace_cache(
     if workspace is None:
         return RedirectResponse('/workspace?workspace_error=Workspace+not+found.', status_code=status.HTTP_303_SEE_OTHER)
     require_workspace_access(user, workspace_id)
+    add_workspace_audit_log(workspace, user.username, 'clear_workspace_cache_started', {
+        'workspace': workspace.id, 'name': workspace.name,
+    })
     cancel_dashboard_tasks = getattr(sys.modules[__name__], 'e2e_dashboard_cancel_workspace_tasks', None)
     if callable(cancel_dashboard_tasks):
         cancel_dashboard_tasks(workspace.database_path)
@@ -7784,6 +7919,9 @@ def delete_workspace_cache(
                         status='ready', progress=100, message='Cache cleared',
                         finished_at=datetime.now(timezone.utc).timestamp(),
                     )
+            add_workspace_audit_log(workspace, user.username, 'clear_workspace_cache_completed', {
+                'workspace': workspace.id, 'name': workspace.name, 'executed_by': 'system',
+            })
         except Exception as exc:
             with WORKSPACE_LIFECYCLE_JOBS_LOCK:
                 job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
@@ -7792,6 +7930,10 @@ def delete_workspace_cache(
                         status='failed', error=str(exc), message=str(exc),
                         finished_at=datetime.now(timezone.utc).timestamp(),
                     )
+            add_workspace_audit_log(workspace, user.username, 'clear_workspace_cache_failed', {
+                'workspace': workspace.id, 'name': workspace.name, 'error': str(exc),
+                'executed_by': 'system',
+            })
 
     Thread(target=run_cache_clear, name=f'workspace-cache-clear-{workspace_id}', daemon=True).start()
     notice = 'Workspace cache clearing started. Dashboard data and chart models will be rebuilt when needed.'
@@ -7816,11 +7958,16 @@ def update_workspace_access(
     user: SessionUser = Depends(admin_user),
 ) -> Response:
     require_super_admin(user)
-    if not workspace_registry.get(workspace_id):
+    workspace = workspace_registry.get(workspace_id)
+    if not workspace:
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return JSONResponse({'detail': 'Workspace not found.'}, status_code=404)
         return RedirectResponse('/workspace?workspace_error=Workspace+not+found.', status_code=status.HTTP_303_SEE_OTHER)
     repository.set_workspace_user_access(workspace_id, usernames)
+    add_workspace_audit_log(workspace, user.username, 'update_workspace_access', {
+        'workspace': workspace.id, 'name': workspace.name,
+        'usernames': sorted({value.strip().casefold() for value in usernames if value.strip()}),
+    })
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JSONResponse({'ok': True, 'notice': 'Workspace access updated.'})
     return RedirectResponse('/workspace?workspace_notice=Workspace+access+updated.', status_code=status.HTTP_303_SEE_OTHER)
@@ -9713,7 +9860,10 @@ async def chart_builder_preview(request: Request, user: SessionUser = Depends(cu
     try:
         source_key = _chart_preview_cache_key('chart-builder-selection', {'dataset_ids': payload.get('dataset_ids', [])})
         filtered = _cached_filtered_chart_frame(source_key, frame, entry, False)
-        return Response(content=render_catalog_chart_preview(filtered, entry, prefiltered=True), media_type='image/png', headers={'Cache-Control': 'no-store'})
+        return JSONResponse(
+            catalog_chart_payload(filtered, entry, prefiltered=True),
+            headers={'Cache-Control': 'no-store'},
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -11591,6 +11741,12 @@ def save_configuration(
     repository.set_application_state(RUNTIME_CONFIGURATION_STATE_KEY, json.dumps(values, sort_keys=True))
     apply_runtime_configuration(values)
     reset_dashboard_canvas_renderer()
+    repository.try_add_log(user.username, 'save_application_configuration', json.dumps({
+        'timezone': timezone_name,
+        'report_chart_renderer': renderer,
+        'chromium_configured': bool(chromium_path),
+        'ignore_event_time_filtering': bool(ignore_event_time_filtering_value),
+    }))
     return RedirectResponse('/config?notice=Configuration+saved.', status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -11643,6 +11799,12 @@ def save_recurring_backup_settings(
         'backup_path': str(storage_path), 'last_run_period': '',
     }
     repository.set_application_state(RECURRING_BACKUP_STATE_KEY, json.dumps(config))
+    repository.try_add_log(user.username, 'save_scheduled_backup_settings', json.dumps({
+        'enabled': enabled, 'components': selected_components,
+        'workspace_ids': selected_workspace_ids, 'recurrence': recurrence,
+        'execution_time': execution_time, 'weekly_day': weekly_day,
+        'monthly_day': monthly_day, 'max_backups': max_backups,
+    }))
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JSONResponse({'message': 'Scheduler settings saved.'})
     return RedirectResponse('/admin?backup_notice=Scheduler+settings+saved.', status_code=status.HTTP_303_SEE_OTHER)

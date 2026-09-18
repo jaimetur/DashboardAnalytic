@@ -5,6 +5,7 @@ import shutil
 import sqlite3
 import time
 from dataclasses import replace
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote
@@ -1729,6 +1730,44 @@ def test_ready_dataset_can_be_reprocessed_and_return_to_admin(client) -> None:
     assert response.headers["location"] == "/admin"
 
 
+def test_chart_builder_uses_dashboard_canvas_model(client) -> None:
+    login(client)
+    client.post(
+        "/datasets-analysis/upload",
+        data={"dataset_kinds": "data"},
+        files={"dataset_files": ("chart.csv", BytesIO(
+            b"operator,score\nO2,91\nEE,87\n"
+        ), "text/csv")},
+        follow_redirects=False,
+    )
+
+    page = client.get('/chart-builder')
+    assert page.status_code == 200
+    assert 'data-chart-builder-chart' in page.text
+    assert 'js/dashboard_charts.js' in page.text
+
+    response = client.post('/api/chart-builder/preview', json={
+        'dataset_ids': [1],
+        'definition': {
+            'chart_title': 'Operator score',
+            'chart_type': 'Average Vertical Bars',
+            'cdr_source': 'CDR-Data',
+            'kpi': 'score',
+            'grouping_rows': 'operator',
+            'grouping_columns': '',
+            'legend': '',
+            'legend_position': 'Top',
+        },
+    })
+
+    assert response.status_code == 200
+    assert response.headers['content-type'].startswith('application/json')
+    payload = response.json()
+    assert payload['width'] == 1600
+    assert payload['height'] == 900
+    assert payload['title'] == 'Operator score'
+
+
 def test_workspace_bulk_dataset_actions_reprocess_in_dependency_order(client, monkeypatch) -> None:
     login(client)
     client.post(
@@ -2115,11 +2154,11 @@ def test_reupload_preserves_original_upload_date_for_dataset_ordering(client) ->
     assert dataset['uploaded_at'] == original_upload
 
     workspace = client.get('/workspace')
-    assert workspace.text.index('<th>ID</th>') < workspace.text.index('<th>Dataset</th>')
-    assert 'data-queue-id>1</td>' in workspace.text
-    assert '<th>Uploaded</th>' in workspace.text
-    assert '<th>Updated</th>' in workspace.text
-    assert workspace.text.index('<th>Uploaded</th>') < workspace.text.index('<th>Updated</th>')
+    assert workspace.text.index('data-queue-sort-key="id"') < workspace.text.index('data-queue-sort-key="dataset"')
+    assert 'data-queue-id data-queue-sort-value="1"' in workspace.text
+    assert 'data-queue-sort-key="uploaded"' in workspace.text
+    assert 'data-queue-sort-key="updated"' in workspace.text
+    assert workspace.text.index('data-queue-sort-key="uploaded"') < workspace.text.index('data-queue-sort-key="updated"')
     assert 'Default (' in workspace.text
 
 
@@ -3239,6 +3278,10 @@ def test_admin_recurring_backup_settings_are_persisted(client) -> None:
     assert config['monthly_day'] == 14
     assert config['max_backups'] == 12
     assert config['backup_path'].endswith('scheduled-backups')
+    assert any(
+        row['action'] == 'save_scheduled_backup_settings'
+        for row in app_module.repository.list_logs()
+    )
     page = client.get('/admin')
     assert 'Backup Protection' in page.text
     assert 'database-view-subpanel' in page.text
@@ -3253,6 +3296,39 @@ def test_admin_recurring_backup_settings_are_persisted(client) -> None:
     })
     assert created_directory.status_code == 200
     assert created_directory.json()['path'].endswith('created-from-picker')
+
+
+def test_scheduled_backup_records_automatic_lifecycle_in_app_logs(client, monkeypatch, tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    now = datetime.now().astimezone()
+    config = app_module.recurring_backup_settings() | {
+        'enabled': True,
+        'components': ['app_database'],
+        'recurrence': 'hourly',
+        'execution_time': now.strftime('%H:%M'),
+        'last_run_period': '',
+    }
+    destination = tmp_path / 'scheduled.zip'
+
+    class ImmediateThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(app_module, 'recurring_backup_settings', lambda: dict(config))
+    monkeypatch.setattr(app_module, 'create_recurring_database_backup', lambda _config, _progress: destination)
+    monkeypatch.setattr(app_module, 'Thread', ImmediateThread)
+    app_module.RECURRING_BACKUP_RUNNING = False
+
+    app_module.run_recurring_backup_scheduler()
+
+    actions = [row['action'] for row in app_module.repository.list_logs()]
+    assert 'scheduled_database_backup_started' in actions
+    assert 'scheduled_database_backup_completed' in actions
 
 
 def test_manual_database_backup_uses_current_form_selection_without_enabling_schedule(client, monkeypatch) -> None:
@@ -3790,10 +3866,11 @@ def test_workspace_lists_combined_cdr_with_preview_and_kind_filter_metadata(clie
     assert 'CDR-Data (combined)' in workspace_response.text
     assert 'data-dataset-row data-dataset-kind="data"' in workspace_response.text
     assert workspace_response.text.count('<th') >= 22
-    assert workspace_response.text.count('>Columns</th>') == 2
+    assert workspace_response.text.count('data-queue-sort-key="columns"') == 1
+    assert workspace_response.text.count('>Columns</th>') == 1
     assert 'data-combined-dataset-structure-row' in workspace_response.text
     dataset_columns = int(app_module.repository.get_dataset(1)['column_count'])
-    assert f'data-queue-columns>{dataset_columns:,}</td>' in workspace_response.text
+    assert f'data-queue-sort-cell="columns">{dataset_columns:,}</td>' in workspace_response.text
     assert 'href="/workspace/combined/data/preview"' in workspace_response.text
     assert 'Combined CDR tables' in workspace_response.text
     assert 'they cannot be uploaded or imported as separate datasets' in workspace_response.text
@@ -4286,7 +4363,7 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     assert preview.status_code == 200
     assert '>3_Nokia<' in preview.text
 
-    workspace_after_mapping = client.get('/workspace').text.split('<table class="queue-table">', 1)[1].split('</tbody>', 1)[0]
+    workspace_after_mapping = client.get('/workspace').text.split('<table class="queue-table" data-queue-sortable-table>', 1)[1].split('</tbody>', 1)[0]
     assert 'data-dataset-id="1"' in workspace_after_mapping
     assert 'data-vendor-map-open' not in workspace_after_mapping
     assert 'data-vendor-clear-open' in workspace_after_mapping
@@ -4296,7 +4373,7 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
 
     clear_response = client.post('/workspace/clear-vendors/1', follow_redirects=False)
     assert clear_response.status_code == 303
-    workspace_after_clear = client.get('/workspace').text.split('<table class="queue-table">', 1)[1].split('</tbody>', 1)[0]
+    workspace_after_clear = client.get('/workspace').text.split('<table class="queue-table" data-queue-sortable-table>', 1)[1].split('</tbody>', 1)[0]
     assert 'data-vendor-map-open' in workspace_after_clear
     assert 'data-vendor-clear-open' not in workspace_after_clear
 

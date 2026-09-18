@@ -19,7 +19,21 @@
       <select data-chart-builder-sources multiple size="6">{% for dataset in datasets %}<option value="{{ dataset.id }}" data-kind="{{ dataset.kind }}" data-columns='{{ dataset.columns | tojson }}'>{{ dataset.name }}</option>{% endfor %}</select>
     </label>
     <div class="chart-builder-layout">
-      <div class="chart-builder-canvas" data-chart-builder-canvas><p>Select CDR Sources and configure the Interactive Preview.</p></div>
+      <section class="chart-builder-viewer e2e-dashboards" data-chart-builder-viewer aria-label="Individual chart viewer">
+        <header class="chart-builder-viewer-header">
+          <div><p class="eyebrow">Individual chart</p><h3 data-chart-builder-title>Ad-hoc chart</h3></div>
+          <button type="button" class="ds-viewer-icon-action ds-viewer-refresh-action" data-chart-builder-refresh title="Refresh chart" aria-label="Refresh chart"></button>
+        </header>
+        <div class="chart-builder-canvas ds-chart-expanded-canvas" data-chart-builder-canvas>
+          <div class="ds-chart-message" data-chart-builder-message>Select CDR Sources and configure the Interactive Preview.</div>
+          <canvas data-chart-builder-chart role="img" aria-label="Ad-hoc chart" hidden></canvas>
+          <button type="button" class="ds-chart-expanded-pan ds-chart-expanded-pan-left" data-chart-builder-pan="left" title="Move view left" aria-label="Move view left" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5 8 12l7 7"/></svg></button>
+          <button type="button" class="ds-chart-expanded-pan ds-chart-expanded-pan-right" data-chart-builder-pan="right" title="Move view right" aria-label="Move view right" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
+          <button type="button" class="ds-chart-expanded-pan ds-chart-expanded-pan-up" data-chart-builder-pan="up" title="Move view up" aria-label="Move view up" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 15 12 8l7 7"/></svg></button>
+          <button type="button" class="ds-chart-expanded-pan ds-chart-expanded-pan-down" data-chart-builder-pan="down" title="Move view down" aria-label="Move view down" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 9 7 7 7-7"/></svg></button>
+          <div class="ds-chart-controls"><div class="ds-chart-zoom" data-chart-builder-zoom role="group" aria-label="Chart zoom" hidden><button type="button" data-chart-builder-zoom-out title="Zoom out" aria-label="Zoom out">−</button><output data-chart-builder-zoom-level>100%</output><button type="button" data-chart-builder-zoom-in title="Zoom in" aria-label="Zoom in">+</button><button type="button" class="ds-chart-zoom-reset" data-chart-builder-zoom-reset title="Reset zoom" aria-label="Reset zoom">↺</button></div></div>
+        </div>
+      </section>
       <section class="report-chart-viewer-sandbox" data-chart-builder-sandbox>
         <p class="eyebrow">Chart Definition</p><p class="form-note">Changes regenerate only this temporary preview.</p>
         <div class="report-chart-viewer-fields" data-chart-builder-fields></div>
@@ -34,8 +48,12 @@
   const type = document.querySelector('[data-chart-builder-type]');
   const sources = document.querySelector('[data-chart-builder-sources]');
   const fields = document.querySelector('[data-chart-builder-fields]');
-  const canvas = document.querySelector('[data-chart-builder-canvas]');
-  if (!type || !sources || !fields || !canvas) return;
+  const canvasShell = document.querySelector('[data-chart-builder-canvas]');
+  const canvas = document.querySelector('[data-chart-builder-chart]');
+  const message = document.querySelector('[data-chart-builder-message]');
+  const title = document.querySelector('[data-chart-builder-title]');
+  const zoom = document.querySelector('[data-chart-builder-zoom]');
+  if (!type || !sources || !fields || !canvasShell || !canvas || !message || !zoom) return;
   let timer = null;
   let previewRequest = 0;
   let previewController = null;
@@ -69,10 +87,47 @@
     const requestId = ++previewRequest;
     previewController?.abort();
     previewController = new AbortController();
-    try { const response = await fetch('/api/chart-builder/preview', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, signal:previewController.signal, body:JSON.stringify({dataset_ids:selected(), definition:definition()})}); const body = await response.blob(); if (!response.ok) throw new Error(await body.text()); if (requestId !== previewRequest) return; const image = document.createElement('img'); image.src = URL.createObjectURL(body); image.alt = 'Temporary chart preview'; canvas.replaceChildren(image); } catch (error) { if (error.name !== 'AbortError' && requestId === previewRequest) canvas.replaceChildren(Object.assign(document.createElement('p'), {textContent:'Choose a valid KPI and aggregation to generate the chart.'})); }
+    message.hidden = false; message.textContent = 'Rendering chart…'; canvas.hidden = true;
+    try {
+      const response = await fetch('/api/chart-builder/preview', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, signal:previewController.signal, body:JSON.stringify({dataset_ids:selected(), definition:definition()})});
+      const body = await response.json();
+      if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : 'Unable to render the chart.');
+      if (requestId !== previewRequest) return;
+      title.textContent = body.title || definition().chart_title || 'Ad-hoc chart';
+      canvas.setAttribute('aria-label', title.textContent); canvas.hidden = false;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      if (requestId !== previewRequest) return;
+      globalThis.renderDashboardChart(canvas, body); resetZoom(); zoom.hidden = false; message.hidden = true;
+    } catch (error) {
+      if (error.name !== 'AbortError' && requestId === previewRequest) {
+        canvas.hidden = true; zoom.hidden = true; message.hidden = false;
+        message.textContent = error.message || 'Choose a valid KPI and aggregation to generate the chart.';
+      }
+    }
   };
   function queue() { window.clearTimeout(timer); previewController?.abort(); timer = window.setTimeout(preview, 350); }
-  type.addEventListener('change', () => { filterSources(); render(); canvas.replaceChildren(Object.assign(document.createElement('p'), {textContent:'Select one or more processed CDR Sources.'})); });
+  const syncNavigation = () => {
+    const state = globalThis.getDashboardChartPanState?.(canvas) || {zoom: 1};
+    document.querySelectorAll('[data-chart-builder-pan]').forEach((button) => {
+      const direction = button.dataset.chartBuilderPan;
+      button.hidden = Number(state.zoom) <= 1;
+      button.disabled = !state[`canPan${direction[0].toUpperCase()}${direction.slice(1)}`];
+    });
+    const level = Math.max(1, Math.min(4, Number(state.zoom) || 1));
+    document.querySelector('[data-chart-builder-zoom-level]').textContent = `${Math.round(level * 100)}%`;
+    document.querySelector('[data-chart-builder-zoom-out]').disabled = level <= 1;
+    document.querySelector('[data-chart-builder-zoom-reset]').disabled = level <= 1;
+    document.querySelector('[data-chart-builder-zoom-in]').disabled = level >= 4;
+  };
+  const setZoom = (value) => { globalThis.setDashboardChartZoom?.(canvas, value); syncNavigation(); };
+  const resetZoom = () => setZoom(1);
+  document.querySelector('[data-chart-builder-zoom-out]').addEventListener('click', () => setZoom((globalThis.getDashboardChartZoom?.(canvas) || 1) - .25));
+  document.querySelector('[data-chart-builder-zoom-in]').addEventListener('click', () => setZoom((globalThis.getDashboardChartZoom?.(canvas) || 1) + .25));
+  document.querySelector('[data-chart-builder-zoom-reset]').addEventListener('click', resetZoom);
+  document.querySelectorAll('[data-chart-builder-pan]').forEach((button) => button.addEventListener('click', () => { globalThis.panDashboardChart?.(canvas, button.dataset.chartBuilderPan); syncNavigation(); }));
+  canvas.addEventListener('dashboardchartzoom', syncNavigation); canvas.addEventListener('dashboardchartpan', syncNavigation);
+  document.querySelector('[data-chart-builder-refresh]').addEventListener('click', preview);
+  type.addEventListener('change', () => { filterSources(); render(); canvas.hidden = true; zoom.hidden = true; message.hidden = false; message.textContent = 'Select one or more processed CDR Sources.'; });
   sources.addEventListener('change', () => { render(); queue(); });
   // The shared controls include native selects hidden behind searchable menus.
   // Delegate both events so every visible editor change reaches this preview.
@@ -82,4 +137,5 @@
   render();
 })();
 </script>
+<script defer src="{{ static_path('js/dashboard_charts.js') }}?v={{ asset_version('js/dashboard_charts.js') }}"></script>
 {% endblock %}
