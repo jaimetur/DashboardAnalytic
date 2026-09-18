@@ -6803,7 +6803,6 @@ if (queueNode) {
   const locallyStoppedTaskIds = new Set();
   const transientTasks = new Map();
   const minimizedPanels = new Map();
-  const panelTaskIds = new Map();
   const panelScrollPositions = new Map();
   const completedTaskRetentionMs = 5000;
   let completedTaskExpiryTimer = null;
@@ -7079,7 +7078,16 @@ if (queueNode) {
       ? `Active workspace · ${group.workspace_name}`
       : String(group.workspace_name || 'Workspace');
     panelHeader.append(heading);
-    const tasks = Array.isArray(group.tasks) ? group.tasks : [];
+    const tasks = (Array.isArray(group.tasks) ? group.tasks : [])
+      .map((task, index) => ({task, index}))
+      .sort((left, right) => {
+        const leftTime = Number(left.task.queued_at ?? left.task.started_at ?? left.task.completed_at);
+        const rightTime = Number(right.task.queued_at ?? right.task.started_at ?? right.task.completed_at);
+        if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) return leftTime - rightTime;
+        if (Number.isFinite(leftTime) !== Number.isFinite(rightTime)) return Number.isFinite(leftTime) ? -1 : 1;
+        return left.index - right.index;
+      })
+      .map(({task}) => task);
     const taskCount = document.createElement('span');
     taskCount.className = 'background-task-count';
     taskCount.textContent = `${tasks.length} task${tasks.length === 1 ? '' : 's'}`;
@@ -7141,13 +7149,7 @@ if (queueNode) {
     const list = document.createElement('div');
     list.className = 'background-task-list';
     let previousDashboardName = '';
-    const taskSections = new Map();
     tasks.forEach((task) => {
-      const section = String(task.dashboard_name || `task:${task.id || taskSections.size}`);
-      if (!taskSections.has(section)) taskSections.set(section, []);
-      taskSections.get(section).push(task);
-    });
-    [...taskSections.values()].flat().forEach((task) => {
       const dashboardName = String(task.dashboard_name || '');
       if (dashboardName && dashboardName !== previousDashboardName) {
         const dashboard = document.createElement('span');
@@ -7226,12 +7228,7 @@ if (queueNode) {
       list.append(item);
     });
     panel.append(list);
-    const nextTaskIds = new Set(tasks.map(task => String(task.id || '')));
-    const previousTaskIds = panelTaskIds.get(panelStateKey);
-    const hasNewTasks = !previousTaskIds || [...nextTaskIds].some(taskId => !previousTaskIds.has(taskId));
-    panelTaskIds.set(panelStateKey, nextTaskIds);
-    list.scrollTop = panelScrollPositions.get(panelStateKey) || 0;
-    if (hasNewTasks) list.dataset.scrollNewTasksIntoView = 'end';
+    list.dataset.restoreScrollTop = String(panelScrollPositions.get(panelStateKey) || 0);
     list.addEventListener('scroll', () => panelScrollPositions.set(panelStateKey, list.scrollTop), {passive: true});
     return panel;
   };
@@ -7242,7 +7239,6 @@ if (queueNode) {
     minimizedPanels.forEach((_value, key) => {
       if (!visiblePanelKeys.has(key)) minimizedPanels.delete(key);
     });
-    panelTaskIds.forEach((_value, key) => { if (!visiblePanelKeys.has(key)) panelTaskIds.delete(key); });
     panelScrollPositions.forEach((_value, key) => { if (!visiblePanelKeys.has(key)) panelScrollPositions.delete(key); });
     const queuedAgeSignature = normalized.flatMap(group => group.tasks || []).filter(taskIsQueued).map((task) => {
       const queuedAt = Number(task.queued_at);
@@ -7251,17 +7247,22 @@ if (queueNode) {
     const signature = JSON.stringify([normalized, queuedAgeSignature]);
     if (signature === renderedSignature) return;
     renderedSignature = signature;
+    root.querySelectorAll('[data-background-task-panel-key]').forEach((panel) => {
+      const panelKey = panel.dataset.backgroundTaskPanelKey;
+      const list = panel.querySelector('.background-task-list');
+      if (panelKey && list) panelScrollPositions.set(panelKey, list.scrollTop);
+    });
     const activeGroups = normalized.filter((group) => String(group.workspace_id) !== '__server__' && (Boolean(group.is_active) || group.dock === 'right'));
     const systemGroups = normalized.filter((group) => String(group.workspace_id) === '__server__');
     const otherGroups = normalized.filter((group) => !group.is_active && group.dock !== 'right' && String(group.workspace_id) !== '__server__');
     activeDock.replaceChildren(...activeGroups.map(createTaskPanel));
     otherDock.replaceChildren(...otherGroups.map(createTaskPanel));
     systemDock.replaceChildren(...systemGroups.map(createTaskPanel));
-    root.querySelectorAll('[data-scroll-new-tasks-into-view="end"]').forEach((list) => {
-      list.scrollTop = list.scrollHeight;
+    root.querySelectorAll('[data-restore-scroll-top]').forEach((list) => {
+      list.scrollTop = Number(list.dataset.restoreScrollTop) || 0;
       const panelKey = list.closest('[data-background-task-panel-key]')?.dataset.backgroundTaskPanelKey;
       if (panelKey) panelScrollPositions.set(panelKey, list.scrollTop);
-      delete list.dataset.scrollNewTasksIntoView;
+      delete list.dataset.restoreScrollTop;
     });
     root.classList.toggle('has-both-sides', activeGroups.length > 0 && otherGroups.length > 0);
     root.classList.toggle('has-three-docks', activeGroups.length > 0 && otherGroups.length > 0 && systemGroups.length > 0);

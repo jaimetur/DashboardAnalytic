@@ -2160,7 +2160,7 @@ def now_iso() -> str:
 
 
 def format_local_timestamp(value: Any) -> str:
-    """Render an ISO timestamp in the server's local timezone."""
+    """Render an ISO timestamp in the timezone selected in Application Runtime."""
     raw = str(value or '').strip()
     if not raw:
         return ''
@@ -2168,8 +2168,9 @@ def format_local_timestamp(value: Any) -> str:
         parsed = datetime.fromisoformat(raw.replace('Z', '+00:00'))
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone().strftime('%Y-%m-%d %H:%M:%S')
-    except ValueError:
+        configured_timezone = ZoneInfo(str(os.environ.get('TZ') or DEPLOYMENT_RUNTIME_DEFAULTS['timezone'] or 'UTC'))
+        return parsed.astimezone(configured_timezone).strftime('%Y-%m-%d %H:%M:%S')
+    except (KeyError, ValueError):
         return raw
 
 
@@ -6415,6 +6416,7 @@ def build_app_logs() -> list[dict[str, Any]]:
         display_username = legacy_requested_by if stored_username == 'system' and legacy_requested_by and not executed_by else stored_username
         if stored_username == 'system' and legacy_requested_by and not executed_by:
             executed_by = 'system'
+        created_at = format_local_timestamp(row['created_at'])
         log = {
             'id': row['id'],
             'username': display_username,
@@ -6422,8 +6424,8 @@ def build_app_logs() -> list[dict[str, Any]]:
             'action': action,
             'details': details,
             'details_text': details_text,
-            'created_at': format_local_timestamp(row['created_at']),
-            'date': str(row['created_at'] or '')[:10],
+            'created_at': created_at,
+            'date': created_at[:10],
         }
         log['summary'] = describe_workspace_log_entry(log)
         log['log_type'] = classify_workspace_log_entry(log)
@@ -7043,20 +7045,24 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
             if {'datasets', 'dataset_profiles'} <= tables:
                 completed_cutoff = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
                 rows = connection.execute(
-                    """SELECT d.id, d.file_name, d.uploaded_at, p.status, p.progress,
-                              p.processing_started_at, p.processed_at
+                    """SELECT d.id, d.file_name, p.status, p.progress,
+                              p.processing_started_at, p.processed_at,
+                              CASE
+                                  WHEN p.status = 'queued' THEN p.updated_at
+                                  ELSE COALESCE(p.processing_started_at, p.updated_at)
+                              END AS queued_at
                        FROM datasets d
                        JOIN dataset_profiles p ON p.dataset_id = d.id
                        WHERE p.status IN ('queued', 'processing')
                           OR (p.status = 'ready' AND p.processed_at IS NOT NULL
                               AND datetime(p.processed_at) >= datetime(?))
-                       ORDER BY d.uploaded_at, d.id"""
+                       ORDER BY queued_at, d.id"""
                     , (completed_cutoff,)
                 ).fetchall()
                 for row in rows:
                     raw_status = str(row['status'] or 'queued').casefold()
                     ready = raw_status == 'ready'
-                    queued_at = parse_dataset_timestamp(row['uploaded_at'])
+                    queued_at = parse_dataset_timestamp(row['queued_at'])
                     started_at = parse_dataset_timestamp(row['processing_started_at'])
                     completed_at = parse_dataset_timestamp(row['processed_at']) if ready else None
                     duration_seconds = None

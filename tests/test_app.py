@@ -2771,9 +2771,10 @@ def test_global_background_tasks_groups_active_and_other_workspaces(client) -> N
     assert 'overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; touch-action: pan-y;' in app_css
     assert "!event.target.closest('.background-task-panel-header')" in app_script
     assert "taskCount.textContent = `${tasks.length} task${tasks.length === 1 ? '' : 's'}`;" in app_script
-    assert 'const hasNewTasks = !previousTaskIds || [...nextTaskIds].some' in app_script
-    assert "if (hasNewTasks) list.dataset.scrollNewTasksIntoView = 'end';" in app_script
-    assert 'list.scrollTop = list.scrollHeight;' in app_script
+    assert 'return leftTime - rightTime;' in app_script
+    assert "if (panelKey && list) panelScrollPositions.set(panelKey, list.scrollTop);" in app_script
+    assert "list.dataset.restoreScrollTop = String(panelScrollPositions.get(panelStateKey) || 0);" in app_script
+    assert "list.scrollTop = Number(list.dataset.restoreScrollTop) || 0;" in app_script
 
     with app_module.repository.connection() as connection:
         connection.execute("UPDATE generated_jobs SET status = 'ready', progress = 100")
@@ -2929,6 +2930,32 @@ def test_queued_background_task_reports_queue_age_without_execution_duration(cli
     assert task['queued_at'] == queued_at
     assert task['started_at'] is None
     assert task['duration_seconds'] is None
+
+
+def test_reprocessed_dataset_queue_age_uses_current_queue_transition(client) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    source_path = app_module.settings.input_dir / 'requeued-background-dataset.csv'
+    source_path.write_bytes(b'market,score\nES,91\n')
+    dataset_id, _ = app_module.repository.add_dataset(source_path.name, str(source_path), 'admin')
+    old_upload = (app_module.datetime.now().astimezone() - app_module.timedelta(days=3)).isoformat()
+    with app_module.repository.connection() as connection:
+        connection.execute('UPDATE datasets SET uploaded_at = ? WHERE id = ?', (old_upload, dataset_id))
+    queued_after = time.time() - 2
+    app_module.repository.update_dataset_profile(
+        dataset_id, status='queued', progress=0, processing_started_at=None, processed_at=None,
+    )
+
+    task = next(
+        item for item in app_module._workspace_background_tasks(workspace)
+        if item['id'] == f'dataset:{workspace.id}:{dataset_id}'
+    )
+
+    assert task['queued_at'] >= queued_after
+    assert task['queued_at'] > app_module.parse_dataset_timestamp(old_upload).timestamp()
 
 
 def test_workspace_dataset_upload_uses_non_blocking_progress_card(client) -> None:
@@ -6525,6 +6552,28 @@ def test_app_logs_combines_operational_and_audit_activity(client) -> None:
 
     payload = client.get('/api/app-logs').json()
     assert any(log['action'] == 'process_dataset_failed' for log in payload['logs'])
+
+
+def test_app_logs_use_the_configured_timezone_for_display_and_date_filter(client, monkeypatch) -> None:
+    login(client)
+
+    import src.DashboardAnalytic as app_module
+
+    monkeypatch.setenv('TZ', 'Europe/Madrid')
+    app_module.repository.add_log('admin', 'timezone_display_test', '{}')
+    with app_module.repository.connection() as connection:
+        connection.execute(
+            "UPDATE audit_logs SET created_at = ? WHERE action = ?",
+            ('2026-09-18T22:30:00+00:00', 'timezone_display_test'),
+        )
+
+    log = next(
+        item for item in client.get('/api/app-logs').json()['logs']
+        if item['action'] == 'timezone_display_test'
+    )
+
+    assert log['created_at'] == '2026-09-19 00:30:00'
+    assert log['date'] == '2026-09-19'
 
 
 def test_app_logs_normalises_user_case_and_records_login_outcomes(client) -> None:
