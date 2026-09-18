@@ -58,7 +58,7 @@ def test_vendor_formula_keeps_vodafone_ericsson_null_exception_as_mixed() -> Non
     assert vendor_from_cells('O2', 'first -> unknown', lookup) == 'O2'
 
 
-def test_report_operator_aliases_share_filters_and_grouping_across_campaigns() -> None:
+def test_report_operator_aliases_use_only_workspace_configuration() -> None:
     frame = pd.DataFrame({
         "Operator": ["Vodafone", "Vodafone UK", "o2 - de", "O2(UK)", "Telefónica", "Three", "Three UK", "3 UK", "EE UK", "Everything Everywhere"],
         "Campaign": ["UK_Q4_2025", "UK_Q2_2026", "UK_Q4_2025", "UK_Q2_2026", "UK_Q2_2026", "UK_Q4_2025", "UK_Q2_2026", "UK_Q4_2025", "UK_Q2_2026", "UK_Q4_2025"],
@@ -66,10 +66,14 @@ def test_report_operator_aliases_share_filters_and_grouping_across_campaigns() -
     })
     entry = CatalogEntry(
         1, "", "", "", "", "CDR-Voice", "Call_Status", "100% Stacked Vertical Bars", "",
-        "Operator IN (Vodafone, O2, 3, EE)", "Operator", "Campaign",
+        "Operator IN (VF, O2, 3, EE)", "Operator", "Campaign",
     )
 
-    normalised = normalise_operator_aliases(frame)
+    normalised = normalise_operator_aliases(frame, {
+        'vodafone': 'VF', 'vodafone uk': 'VF', 'o2(uk)': 'O2',
+        'o2 - de': 'O2', 'telefónica': 'O2', 'three': '3', 'three uk': '3', '3 uk': '3',
+        'ee uk': 'EE', 'everything everywhere': 'EE',
+    })
     filtered = _apply_catalog_filters(normalised, entry, False, "Call_Status")
     grouped, primary, series = _apply_catalog_grouping(filtered, entry, False, "Call_Status")
 
@@ -116,13 +120,16 @@ def test_catalog_timestamp_conditions_remain_active_when_date_range_filtering_is
 def test_h3g_is_not_normalised_as_operator_three() -> None:
     frame = pd.DataFrame({"Operator": ["H3G", "H3G UK", "Three UK"]})
 
-    assert normalise_operator_aliases(frame)["Operator"].tolist() == ["H3G", "H3G UK", "3"]
+    assert normalise_operator_aliases(frame)["Operator"].tolist() == ["H3G", "H3G UK", "Three UK"]
 
 
-def test_vendor_aliases_normalise_only_the_operator_prefix() -> None:
+def test_vendor_aliases_normalise_only_with_workspace_configuration() -> None:
     frame = pd.DataFrame({"vendor": ["Vodafone_Ericsson", "Three UK_Nokia", "O2 (UK)_Huawei", "EE_Ericsson", "H3G_Huawei"]})
 
-    assert normalise_operator_aliases(frame)["vendor"].tolist() == [
+    assert normalise_operator_aliases(frame)["vendor"].tolist() == frame["vendor"].tolist()
+    assert normalise_operator_aliases(frame, {
+        'vodafone': 'VF', 'three uk': '3', 'o2 (uk)': 'O2', 'ee': 'EE',
+    })["vendor"].tolist() == [
         "VF_Ericsson", "3_Nokia", "O2_Huawei", "EE_Ericsson", "H3G_Huawei",
     ]
 
@@ -1054,6 +1061,7 @@ def test_multivendor_rendering_rewrites_display_and_grouping_and_excludes_unreso
         'Campaign': ['UK_Q2_SA_2026', 'UK_Q2_SA_2026', 'UK_Q2_SA_2026'],
         'LQ': [3.8, 3.6, 3.5],
     })
+    frame = normalise_operator_aliases(frame, {'vodafone uk': 'VF', 'vodafone': 'VF'})
     filtered = _apply_catalog_filters(frame, rendered, True, 'LQ')
     grouped, primary, series = _apply_catalog_grouping(filtered, rendered, True, 'LQ')
     assert grouped[primary].tolist() == ['VF · Ericsson']
@@ -1101,10 +1109,11 @@ def test_multivendor_operator_filters_match_vendor_prefixes_and_keep_full_groupi
         'LQ': [3.8, 3.7, 3.6, 3.5, 3.4],
     })
 
+    frame = normalise_operator_aliases(frame, {'vodafone uk': 'VF', 'vodafone': 'VF'})
     filtered = _apply_catalog_filters(frame, rendered, True, 'LQ')
     grouped, primary, series = _apply_catalog_grouping(filtered, rendered, True, 'LQ')
 
-    assert filtered['vendor'].tolist() == ['Vodafone_Ericsson', 'Vodafone_Huawei', '3_Nokia', 'O2_Ericsson']
+    assert filtered['vendor'].tolist() == ['VF_Ericsson', 'VF_Huawei', '3_Nokia', 'O2_Ericsson']
     assert grouped[primary].tolist() == ['VF · Ericsson', 'VF · Huawei', '3 · Nokia', 'O2 · Ericsson']
     assert grouped[series].tolist() == [
         'VF · Ericsson · 2025-Q4', 'VF · Huawei · 2026-Q1',

@@ -425,23 +425,6 @@ class Repository:
             self._configure_database_journal(conn)
             self._migrate_calculated_dimensions_table(conn)
             conn.executescript(SCHEMA)
-            mappings_seeded = conn.execute(
-                "SELECT 1 FROM workspace_state WHERE key = 'operator_mappings_seeded'"
-            ).fetchone()
-            if not mappings_seeded:
-                conn.executemany(
-                    'INSERT OR IGNORE INTO operator_mappings (source_value, canonical_value) VALUES (?, ?)',
-                    (
-                        ('Vodafone', 'Vodafone UK'), ('Vodafone UK', 'Vodafone UK'),
-                        ('VF', 'Vodafone UK'), ('VFUK', 'Vodafone UK'),
-                        ('Three', '3'), ('Three UK', '3'), ('3 UK', '3'), ('3UK', '3'),
-                        ('O2 UK', 'O2'), ('Telefonica', 'O2'), ('Telefónica', 'O2'),
-                        ('EE UK', 'EE'),
-                    ),
-                )
-                conn.execute(
-                    "INSERT INTO workspace_state (key, value) VALUES ('operator_mappings_seeded', '1')"
-                )
             self._ensure_dashboard_filter_selection_columns(conn)
             self._remove_legacy_dashboard_selection_rows(conn)
             # Functional indexes are created when reporting rows are imported

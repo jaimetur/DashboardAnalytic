@@ -1731,12 +1731,15 @@ def test_ready_dataset_can_be_reprocessed_and_return_to_admin(client) -> None:
 
 
 def test_chart_builder_uses_dashboard_canvas_model(client) -> None:
+    import src.DashboardAnalytic as app_module
+
     login(client)
+    app_module.repository.replace_operator_mapping_group(None, 'VF', ['Vodafone'])
     client.post(
         "/datasets-analysis/upload",
         data={"dataset_kinds": "data"},
         files={"dataset_files": ("chart.csv", BytesIO(
-            b"operator,score\nO2,91\nEE,87\n"
+            b"operator,Vendor,score\nVodafone,Vodafone_Ericsson,91\nEE,EE_Huawei,87\n"
         ), "text/csv")},
         follow_redirects=False,
     )
@@ -1753,7 +1756,7 @@ def test_chart_builder_uses_dashboard_canvas_model(client) -> None:
             'chart_type': 'Average Vertical Bars',
             'cdr_source': 'CDR-Data',
             'kpi': 'score',
-            'grouping_rows': 'operator',
+            'grouping_rows': 'Vendor',
             'grouping_columns': '',
             'legend': '',
             'legend_position': 'Top',
@@ -1766,6 +1769,8 @@ def test_chart_builder_uses_dashboard_canvas_model(client) -> None:
     assert payload['width'] == 1600
     assert payload['height'] == 900
     assert payload['title'] == 'Operator score'
+    assert 'VF_Ericsson' in json.dumps(payload)
+    assert 'Vodafone_Ericsson' not in json.dumps(payload)
 
 
 def test_workspace_bulk_dataset_actions_reprocess_in_dependency_order(client, monkeypatch) -> None:
@@ -3199,6 +3204,7 @@ def test_admin_operator_mapping_panel_groups_and_edits_aliases(client) -> None:
     import src.DashboardAnalytic as app_module
 
     login(client)
+    assert app_module.repository.list_operator_mappings() == {}
     app_module.repository.replace_operator_mapping_group(
         None, 'Legacy Carrier', ['Legacy A', 'Legacy B'],
     )
@@ -3207,8 +3213,7 @@ def test_admin_operator_mapping_panel_groups_and_edits_aliases(client) -> None:
     assert 'data-panel-state-key="admin:operator-mappings"' in page.text
     assert '<h2>Operator Mappings</h2>' in page.text
     assert page.text.index('<h2>Report Templates Management</h2>') < page.text.index('<h2>Operator Mappings</h2>')
-    assert 'value="Vodafone UK"' in page.text
-    assert 'VF\nVFUK\nVodafone' in page.text
+    assert 'value="Vodafone UK"' not in page.text
     assert 'value="Legacy Carrier"' in page.text
     assert 'Legacy A\nLegacy B' in page.text
     assert 'Add operator mapping' not in page.text
@@ -3747,26 +3752,36 @@ def test_operator_mapping_is_applied_to_charts_but_not_materialized_tables(clien
 
     login(client)
     app_module.repository.replace_operator_mapping_group(
-        'Vodafone UK', 'VF', ['Vodafone UK', 'Vodafone', 'VFUK'],
+        None, 'VF', ['Vodafone UK', 'Vodafone', 'VFUK'],
     )
     response = client.post(
         '/datasets-analysis/upload',
         data={'dataset_kinds': 'data'},
         files={'dataset_files': (
-            'cdr_data.csv', BytesIO(b'Operator,Mean_Data_Rate\nVodafone UK,91\nO2,87\n'), 'text/csv',
+            'cdr_data.csv', BytesIO(
+                b'Operator,Subscriber,Vendor,Mean_Data_Rate\n'
+                b'Vodafone UK,Vodafone UK,Vodafone UK_Ericsson,91\n'
+                b'O2,O2,O2_Huawei,87\n'
+            ), 'text/csv',
         )},
         follow_redirects=False,
     )
     assert response.status_code == 303
 
     dataset = app_module.serialize_dataset_row(app_module.repository.get_dataset(1))
-    materialized = app_module.repository.load_dataset_rows(1, ['Operator'], {})
-    combined = app_module.repository.load_reporting_rows('data', [1], ['Operator'])
+    materialized = app_module.repository.load_dataset_rows(1, ['Operator', 'Subscriber', 'Vendor'], {})
+    combined = app_module.repository.load_reporting_rows('data', [1], ['Operator', 'Subscriber', 'Vendor'])
     chart_frame = app_module._combined_reporting_frame([dataset], 'nsa', [], False)
 
     assert materialized['Operator'].tolist() == ['Vodafone UK', 'O2']
     assert combined['Operator'].tolist() == ['Vodafone UK', 'O2']
     assert chart_frame['Operator'].tolist() == ['VF', 'O2']
+    assert materialized['Subscriber'].tolist() == ['Vodafone UK', 'O2']
+    assert combined['Subscriber'].tolist() == ['Vodafone UK', 'O2']
+    assert chart_frame['Subscriber'].tolist() == ['VF', 'O2']
+    assert materialized['Vendor'].tolist() == ['Vodafone UK_Ericsson', 'O2_Huawei']
+    assert combined['Vendor'].tolist() == ['Vodafone UK_Ericsson', 'O2_Huawei']
+    assert chart_frame['Vendor'].tolist() == ['VF_Ericsson', 'O2_Huawei']
     operator_options = next(
         values for field, values in dataset['filter_options'].items()
         if app_module.column_identity(field) == 'operator'
@@ -3779,7 +3794,7 @@ def test_operator_storage_migration_recovers_raw_values_from_the_source(client) 
 
     login(client)
     app_module.repository.replace_operator_mapping_group(
-        'Vodafone UK', 'VF', ['Vodafone UK', 'Vodafone', 'VFUK'],
+        None, 'VF', ['Vodafone UK', 'Vodafone', 'VFUK'],
     )
     client.post(
         '/datasets-analysis/upload',
@@ -3813,7 +3828,7 @@ def test_combined_recreation_migrates_individual_operator_storage_before_rebuild
 
     login(client)
     app_module.repository.replace_operator_mapping_group(
-        'Vodafone UK', 'VF', ['Vodafone UK', 'Vodafone', 'VFUK'],
+        None, 'VF', ['Vodafone UK', 'Vodafone', 'VFUK'],
     )
     client.post(
         '/datasets-analysis/upload',

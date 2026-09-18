@@ -799,8 +799,15 @@ def _normalise_operator(value: object) -> str:
     return text
 
 
-def _normalise_operator_label(value: object) -> str:
-    """Return the canonical report label for known historical UK aliases."""
+def _normalise_operator_label(value: object, mappings: dict[str, str] | None = None) -> str:
+    """Return an Admin-configured label, or preserve the supplied label."""
+    text = str(value or "").strip()
+    configured = mappings or {}
+    return configured.get(text.casefold(), text)
+
+
+def _operator_sort_label(value: object) -> str:
+    """Return a stable visual sort identity without changing displayed data."""
     text = _normalise_operator(value)
     key = re.sub(
         r"[^a-z0-9]+",
@@ -816,36 +823,50 @@ def _normalise_operator_label(value: object) -> str:
     return text
 
 
-def _vendor_operator(value: object) -> str:
+def _vendor_operator(value: object, mappings: dict[str, str] | None = None) -> str:
     """Return the operator prefix from an ``Operator_Vendor`` value."""
     text = str(value or "").strip()
     operator, _separator, _vendor = text.partition("_")
-    return _normalise_operator_label(operator or text)
+    return _normalise_operator_label(operator or text, mappings)
 
 
-def _normalise_vendor(value: object) -> str:
-    """Canonicalise only the operator prefix of a materialised Vendor label."""
+def _normalise_vendor(value: object, mappings: dict[str, str] | None = None) -> str:
+    """Normalise only an ``Operator_Vendor`` label's operator prefix.
+
+    The suffix is a vendor value and is never transformed. With no Admin
+    mapping, this deliberately returns the original label unchanged.
+    """
     text = str(value or "").strip()
     operator, separator, vendor = text.partition("_")
-    normalized_operator = _normalise_operator_label(operator or text)
+    normalized_operator = _normalise_operator_label(operator or text, mappings)
     return f"{normalized_operator}_{vendor}" if separator else normalized_operator
 
 
-def normalise_operator_aliases(frame: pd.DataFrame) -> pd.DataFrame:
-    """Canonicalise reporting operator labels without mutating stored CDRs.
+def normalise_operator_aliases(frame: pd.DataFrame, mappings: dict[str, str] | None = None) -> pd.DataFrame:
+    """Apply only the operator aliases explicitly configured in Admin.
 
-    The normalisation applies to the physical ``Operator`` field used by
-    template filters and to the operator prefix of materialised
-    ``Vendor`` labels. Vendor suffixes remain intact, so for example
-    ``Vodafone_Ericsson`` becomes ``VF_Ericsson``.
+    No default aliases exist. Without workspace mappings, both ``Operator``
+    and the operator prefix of ``Vendor`` retain the exact CDR label.
     """
     result = frame.copy()
+    source_mappings = mappings if mappings is not None else frame.attrs.get('operator_mappings', {})
+    configured = {str(key).strip().casefold(): str(value).strip() for key, value in source_mappings.items()}
+    def mapped(value: object) -> object:
+        if pd.isna(value) or not str(value).strip():
+            return value
+        return _normalise_operator_label(value, configured)
     for column in result.columns:
         if _normalise_catalog_name(str(column)) == "operator":
-            result[column] = result[column].map(_normalise_operator_label)
+            result[column] = result[column].map(mapped)
     vendor_column = _first_existing(result, ["Vendor", "vendor"])
     if vendor_column:
-        result[vendor_column] = result[vendor_column].map(_normalise_vendor)
+        def mapped_vendor(value: object) -> object:
+            if pd.isna(value) or not str(value).strip():
+                return value
+            return _normalise_vendor(value, configured)
+        result[vendor_column] = result[vendor_column].map(mapped_vendor)
+    result.attrs['operator_aliases_normalized'] = True
+    result.attrs['operator_mappings'] = configured
     return result
 
 
@@ -1475,6 +1496,11 @@ def _campaign_display_value(value: object) -> str:
 
 def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor: bool, metric: str | None) -> pd.DataFrame:
     result = frame.copy()
+    operator_mappings = result.attrs.get('operator_mappings', {})
+    def mapped_operator(value: object) -> str:
+        return _normalise_operator_label(value, operator_mappings)
+    def mapped_vendor(value: object) -> str:
+        return _normalise_vendor(value, operator_mappings)
     result.attrs["catalogue_calculated_dimensions"] = entry.calculated_dimensions
     result.attrs["catalogue_cdr_source"] = entry.cdr_source
     for condition in parse_catalog_filters(entry.filters):
@@ -1494,8 +1520,8 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
         if not column:
             raise ValueError(f"Slide {entry.slide}: filter column '{condition.column}' does not exist in {entry.cdr_source}.")
         series = result[column]
-        comparison_series = series.map(_vendor_operator) if multivendor and is_operator_filter else (
-            series.map(_normalise_operator_label) if is_operator_filter else series
+        comparison_series = series.map(lambda value: _vendor_operator(value, operator_mappings)) if multivendor and is_operator_filter else (
+            series if is_operator_filter else series
         )
         is_campaign_filter = normalized_condition == 'campaign'
         if is_campaign_filter:
@@ -1506,8 +1532,8 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
             # An underscore explicitly selects one materialised operator/vendor
             # value. A bare name selects that vendor beneath every operator.
             full_value = "_" in text
-            candidates = series.map(_normalise_vendor).astype(str) if full_value else series.map(_vendor_label).astype(str)
-            expected = _normalise_vendor(text) if full_value else text
+            candidates = series.map(lambda value: _normalise_vendor(value, operator_mappings)).astype(str) if full_value else series.map(_vendor_label).astype(str)
+            expected = mapped_vendor(text) if full_value else text
             if contains:
                 return candidates.str.contains(expected, case=False, na=False, regex=False)
             return candidates.str.casefold().eq(expected.casefold())
@@ -1525,7 +1551,7 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
                 result = result.loc[comparison].copy()
                 continue
             if is_operator_filter:
-                target = _normalise_operator_label(target)
+                target = mapped_operator(target)
             elif is_campaign_filter:
                 target = compact_campaign_value(target)
             numeric = pd.to_numeric(series, errors="coerce")
@@ -1543,7 +1569,7 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
                     raise ValueError(f"Slide {entry.slide}: '{condition.operator}' requires a numeric value for '{condition.column}'.")
         elif condition.operator in {"CONTAINS", "NOT CONTAINS"}:
             targets = tuple(
-                _normalise_operator_label(item) if is_operator_filter else
+                mapped_operator(item) if is_operator_filter else
                 compact_campaign_value(item) if is_campaign_filter else item
                 for item in condition.values
             )
@@ -1559,7 +1585,7 @@ def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor
                     comparison |= vendor_match(target)
             else:
                 accepted = {
-                    (_normalise_operator_label(item) if is_operator_filter else
+                    (mapped_operator(item) if is_operator_filter else
                      compact_campaign_value(item) if is_campaign_filter else item).casefold()
                     for item in condition.values
                 }
@@ -1606,7 +1632,10 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
     if multivendor:
         vendor = _group_column(frame, True)
         if vendor:
-            frame["__catalog_multivendor_operator"] = frame[vendor].map(_vendor_operator)
+            mappings = frame.attrs.get('operator_mappings', {})
+            frame["__catalog_multivendor_operator"] = frame[vendor].map(
+                lambda value: _vendor_operator(value, mappings)
+            )
             frame["__catalog_multivendor_vendor"] = frame[vendor].map(_vendor_label)
 
     def resolve_dimensions(dimensions: tuple[str, ...], axis: str) -> list[str]:
@@ -1632,6 +1661,7 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         if condition.operator == "IN"
     }
     configured_dimension_values: dict[str, list[str]] = {}
+    operator_mappings = frame.attrs.get('operator_mappings', {})
     # Preserve every resolved hierarchy level for renderers that need pane-like
     # rows and nested column headers. The flattened primary/series fields remain
     # available for chart grammars that intentionally use compact labels.
@@ -1650,7 +1680,7 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
                     key=_campaign_sort_key,
                 )
             elif normalized_dimension == "operator":
-                requested = [_normalise_operator_label(value) for value in requested]
+                requested = [operator_mappings.get(str(value).strip().casefold(), str(value).strip()) for value in requested]
             configured_dimension_values[target] = list(dict.fromkeys(requested))
 
     row_display_columns: list[str] = []
@@ -2301,7 +2331,7 @@ def _vendor_colour_family(vendor: str) -> str | None:
 
 def _operator_display_sort_key(value: object) -> tuple[int, str]:
     """Order recognised operators before all other operators by display label."""
-    normalized = _normalise_operator_label(value)
+    normalized = _operator_sort_label(value)
     rank = next(
         (index for index, operator in enumerate(OPERATOR_DISPLAY_ORDER) if normalized.casefold() == operator.casefold()),
         len(OPERATOR_DISPLAY_ORDER),
@@ -2313,7 +2343,7 @@ def _vendor_display_sort_key(value: object) -> tuple[int, str, int, str]:
     """Order ``Operator_Vendor`` values by operator then canonical vendor rank."""
     text = str(value).strip()
     operator, _separator, vendor = text.partition("_")
-    normalized_operator = _normalise_operator_label(operator or text)
+    normalized_operator = _operator_sort_label(operator or text)
     normalized_vendor = _vendor_label(vendor or text).casefold()
     vendor_rank = next(
         (index for index, name in enumerate(VENDOR_DISPLAY_ORDER) if name in normalized_vendor),

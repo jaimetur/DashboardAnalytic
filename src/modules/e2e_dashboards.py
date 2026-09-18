@@ -2295,22 +2295,6 @@ def install_dashboard_routes(core):
             values = [str(value) for value in condition.values]
             if normalized == 'operator':
                 workspace_mappings = task_repository.list_operator_mappings()
-                operator_aliases = {
-                    'vf': ('VF', 'Vodafone', 'Vodafone UK'),
-                    'vodafone': ('VF', 'Vodafone', 'Vodafone UK'),
-                    'vodafoneuk': ('VF', 'Vodafone', 'Vodafone UK'),
-                    '3': ('3', 'Three', '3 UK'),
-                    'three': ('3', 'Three', '3 UK'),
-                    '3uk': ('3', 'Three', '3 UK'),
-                    'ee': ('EE',),
-                    'o2': ('O2', 'Telefonica', 'Telefónica'),
-                    'telefonica': ('O2', 'Telefonica', 'Telefónica'),
-                }
-                values = list(dict.fromkeys(
-                    alias
-                    for value in values
-                    for alias in operator_aliases.get(identity(value), (value,))
-                ))
                 canonical_values = {
                     workspace_mappings.get(value.strip().casefold(), value.strip()).casefold()
                     for value in values
@@ -2632,9 +2616,10 @@ def install_dashboard_routes(core):
             connection.close()
         if snapshot.multivendor:
             visible = ensure_vendor_group(visible)
-        visible = normalise_operator_aliases(
-            apply_operator_mappings(visible, task_repository.list_operator_mappings())
-        )
+        operator_mappings = task_repository.list_operator_mappings()
+        visible = apply_operator_mappings(visible, operator_mappings)
+        visible.attrs['operator_mappings'] = operator_mappings
+        visible = normalise_operator_aliases(visible)
         return visible, total, chart_total, filter_values
 
     def unique_chart_dataset_rows(snapshot, entry, frame):
@@ -2700,9 +2685,10 @@ def install_dashboard_routes(core):
                         )
                         if snapshot.multivendor:
                             raw_frame = ensure_vendor_group(raw_frame)
-                        raw_frame = normalise_operator_aliases(
-                            apply_operator_mappings(raw_frame, task_repository.list_operator_mappings())
-                        )
+                        operator_mappings = task_repository.list_operator_mappings()
+                        raw_frame = apply_operator_mappings(raw_frame, operator_mappings)
+                        raw_frame.attrs['operator_mappings'] = operator_mappings
+                        raw_frame = normalise_operator_aliases(raw_frame)
                         raw_frame.attrs['operator_aliases_normalized'] = True
                         with lock:
                             snapshot.frames[raw_key] = raw_frame
@@ -2952,9 +2938,10 @@ def install_dashboard_routes(core):
         )
         if snapshot.multivendor:
             raw_frame = ensure_vendor_group(raw_frame)
-        raw_frame = normalise_operator_aliases(
-            apply_operator_mappings(raw_frame, task_repository.list_operator_mappings())
-        )
+        operator_mappings = task_repository.list_operator_mappings()
+        raw_frame = apply_operator_mappings(raw_frame, operator_mappings)
+        raw_frame.attrs['operator_mappings'] = operator_mappings
+        raw_frame = normalise_operator_aliases(raw_frame)
         raw_frame.attrs['operator_aliases_normalized'] = True
         try:
             frame, _ = prepare_catalog_chart_preview_frame(
