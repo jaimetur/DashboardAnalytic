@@ -2497,6 +2497,213 @@ class Repository:
                 ).fetchall()
             )
 
+    @staticmethod
+    def _remap_dataset_ids_in_json(value: Any, id_mapping: dict[int, int], *, dataset_scope: bool = False) -> Any:
+        """Rewrite dataset identifiers in persisted JSON without touching unrelated numbers."""
+        if isinstance(value, dict):
+            remapped: dict[str, Any] = {}
+            for key, child in value.items():
+                normalized_key = str(key).casefold()
+                child_scope = dataset_scope or normalized_key in {
+                    'dataset_id', 'dataset_ids', 'dataset_ids_by_source', 'datasets',
+                    'data_dataset_id', 'voice_dataset_id', 'speech_dataset_id',
+                    'mapping_dataset_id', 'vodafone_mapping_dataset_id', 'three_mapping_dataset_id',
+                } or normalized_key.endswith('_dataset_id')
+                remapped[key] = Repository._remap_dataset_ids_in_json(
+                    child, id_mapping, dataset_scope=child_scope,
+                )
+            return remapped
+        if isinstance(value, list):
+            return [
+                Repository._remap_dataset_ids_in_json(item, id_mapping, dataset_scope=dataset_scope)
+                for item in value
+            ]
+        if not dataset_scope or isinstance(value, bool):
+            return value
+        if isinstance(value, int):
+            return id_mapping.get(value, value)
+        if isinstance(value, str) and value.strip().isdigit():
+            mapped = id_mapping.get(int(value.strip()))
+            return str(mapped) if mapped is not None else value
+        return value
+
+    def reorder_dataset_ids(self, ordered_dataset_ids: list[int]) -> dict[int, int]:
+        """Renumber datasets to match the requested order and propagate every persisted reference."""
+        requested_ids = [int(value) for value in ordered_dataset_ids]
+        if len(requested_ids) != len(set(requested_ids)):
+            raise ValueError('Dataset order contains duplicate IDs.')
+
+        with self.connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            current_rows = conn.execute('SELECT id FROM datasets ORDER BY id').fetchall()
+            current_ids = [int(row['id']) for row in current_rows]
+            if set(requested_ids) != set(current_ids) or len(requested_ids) != len(current_ids):
+                raise ValueError('Dataset order must contain every current dataset exactly once.')
+            if not current_ids:
+                return {}
+            busy = conn.execute(
+                "SELECT 1 FROM dataset_profiles WHERE status IN ('queued', 'processing') LIMIT 1"
+            ).fetchone()
+            if busy:
+                raise ValueError('Stop or wait for every queued or processing dataset before reordering IDs.')
+
+            id_mapping = {old_id: position for position, old_id in enumerate(requested_ids, start=1)}
+            changed_mapping = {
+                old_id: new_id for old_id, new_id in id_mapping.items() if old_id != new_id
+            }
+            if not changed_mapping:
+                return id_mapping
+
+            max_id = max(current_ids)
+            temporary_ids = {
+                old_id: -(max_id + position)
+                for position, old_id in enumerate(changed_mapping, start=1)
+            }
+            conn.execute('PRAGMA defer_foreign_keys = ON')
+
+            table_names = [
+                str(row['name']) for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+                ).fetchall()
+            ]
+            dataset_row_tables = {
+                int(table_name.removeprefix('dataset_rows_')): table_name
+                for table_name in table_names
+                if table_name.removeprefix('dataset_rows_').isdigit()
+                and int(table_name.removeprefix('dataset_rows_')) in changed_mapping
+            }
+            temporary_table_names: dict[int, str] = {}
+            for old_id, table_name in dataset_row_tables.items():
+                temporary_name = f'__dataset_rows_reorder_{old_id}'
+                conn.execute(f'DROP TABLE IF EXISTS {self._quote_identifier(temporary_name)}')
+                conn.execute(
+                    f'ALTER TABLE {self._quote_identifier(table_name)} '
+                    f'RENAME TO {self._quote_identifier(temporary_name)}'
+                )
+                temporary_table_names[old_id] = temporary_name
+
+            reference_columns: list[tuple[str, str, bool]] = []
+            for table_name in table_names:
+                if table_name == 'datasets' or table_name in dataset_row_tables.values():
+                    continue
+                metadata = conn.execute(
+                    f'PRAGMA table_info({self._quote_identifier(table_name)})'
+                ).fetchall()
+                unique_columns: set[str] = {
+                    str(column['name']) for column in metadata if int(column['pk']) > 0
+                }
+                for index in conn.execute(
+                    f'PRAGMA index_list({self._quote_identifier(table_name)})'
+                ).fetchall():
+                    if not int(index['unique']):
+                        continue
+                    unique_columns.update(
+                        str(column['name']) for column in conn.execute(
+                            f'PRAGMA index_info({self._quote_identifier(str(index["name"]))})'
+                        ).fetchall()
+                        if column['name'] is not None
+                    )
+                for column in metadata:
+                    column_name = str(column['name'])
+                    normalized = column_name.casefold()
+                    if normalized == 'dataset_id' or normalized.endswith('_dataset_id'):
+                        reference_columns.append((table_name, column_name, column_name in unique_columns))
+
+            for table_name, column_name, requires_temporary_id in reference_columns:
+                if not requires_temporary_id:
+                    continue
+                quoted_table = self._quote_identifier(table_name)
+                quoted_column = self._quote_identifier(column_name)
+                for old_id, temporary_id in temporary_ids.items():
+                    conn.execute(
+                        f'UPDATE {quoted_table} SET {quoted_column} = ? WHERE {quoted_column} = ?',
+                        (temporary_id, old_id),
+                    )
+            for table_name, column_name, requires_temporary_id in reference_columns:
+                if requires_temporary_id:
+                    continue
+                quoted_table = self._quote_identifier(table_name)
+                quoted_column = self._quote_identifier(column_name)
+                cases = ' '.join('WHEN ? THEN ?' for _ in changed_mapping)
+                placeholders = ', '.join('?' for _ in changed_mapping)
+                case_parameters = [
+                    value
+                    for old_id, new_id in changed_mapping.items()
+                    for value in (old_id, new_id)
+                ]
+                conn.execute(
+                    f'UPDATE {quoted_table} SET {quoted_column} = '
+                    f'CASE {quoted_column} {cases} ELSE {quoted_column} END '
+                    f'WHERE {quoted_column} IN ({placeholders})',
+                    (*case_parameters, *changed_mapping.keys()),
+                )
+            for old_id, temporary_id in temporary_ids.items():
+                conn.execute('UPDATE datasets SET id = ? WHERE id = ?', (temporary_id, old_id))
+            for old_id, new_id in changed_mapping.items():
+                conn.execute('UPDATE datasets SET id = ? WHERE id = ?', (new_id, temporary_ids[old_id]))
+            for table_name, column_name, requires_temporary_id in reference_columns:
+                if not requires_temporary_id:
+                    continue
+                quoted_table = self._quote_identifier(table_name)
+                quoted_column = self._quote_identifier(column_name)
+                for old_id, new_id in changed_mapping.items():
+                    conn.execute(
+                        f'UPDATE {quoted_table} SET {quoted_column} = ? WHERE {quoted_column} = ?',
+                        (new_id, temporary_ids[old_id]),
+                    )
+
+            for old_id, temporary_name in temporary_table_names.items():
+                new_name = self.dataset_rows_table_name(id_mapping[old_id])
+                conn.execute(
+                    f'ALTER TABLE {self._quote_identifier(temporary_name)} '
+                    f'RENAME TO {self._quote_identifier(new_name)}'
+                )
+
+            json_columns = {
+                'dataset_profiles': [('processing_options_json', False)],
+                'generated_jobs': [('dataset_ids_json', True)],
+                'audit_logs': [('details', False)],
+                'workspace_state': [('value', False)],
+            }
+            for table_name, columns in json_columns.items():
+                if table_name not in table_names:
+                    continue
+                available_columns = {
+                    str(column['name']) for column in conn.execute(
+                        f'PRAGMA table_info({self._quote_identifier(table_name)})'
+                    ).fetchall()
+                }
+                for column_name, dataset_scope in columns:
+                    if column_name not in available_columns:
+                        continue
+                    rows = conn.execute(
+                        f'SELECT rowid AS __rowid__, {self._quote_identifier(column_name)} AS payload '
+                        f'FROM {self._quote_identifier(table_name)}'
+                    ).fetchall()
+                    for row in rows:
+                        try:
+                            payload = json.loads(str(row['payload'] or ''))
+                        except (TypeError, ValueError):
+                            continue
+                        remapped = self._remap_dataset_ids_in_json(
+                            payload, changed_mapping, dataset_scope=dataset_scope,
+                        )
+                        if remapped != payload:
+                            conn.execute(
+                                f'UPDATE {self._quote_identifier(table_name)} '
+                                f'SET {self._quote_identifier(column_name)} = ? WHERE rowid = ?',
+                                (json.dumps(remapped, ensure_ascii=False), int(row['__rowid__'])),
+                            )
+
+            if 'dashboard_filter_selections' in table_names:
+                conn.execute('DELETE FROM dashboard_filter_selections')
+            conn.execute("DELETE FROM sqlite_sequence WHERE name = 'datasets'")
+            conn.execute("INSERT INTO sqlite_sequence(name, seq) VALUES ('datasets', ?)", (len(current_ids),))
+            foreign_key_errors = conn.execute('PRAGMA foreign_key_check').fetchall()
+            if foreign_key_errors:
+                raise ValueError('Dataset IDs could not be reordered without breaking database references.')
+            return id_mapping
+
     def delete_dataset(self, dataset_id: int) -> sqlite3.Row | None:
         with self.connection() as conn:
             dataset = conn.execute(

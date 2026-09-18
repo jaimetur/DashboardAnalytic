@@ -3304,7 +3304,11 @@ def build_datasets_analysis_table_rows(df: pd.DataFrame, selected_metrics: list[
 def build_dataset_view_state(
     dataset_id: int | None, input_kind: str | None, allowed_kinds: frozenset[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], dict[str, Any] | None]:
-    datasets = [serialize_dataset_row(row) for row in repository.list_datasets()]
+    datasets = sorted(
+        [serialize_dataset_row(row) for row in repository.list_datasets()],
+        key=lambda dataset: int(dataset['id']),
+        reverse=True,
+    )
     ready_datasets = [
         dataset for dataset in datasets
         if dataset['is_ready'] and (allowed_kinds is None or dataset.get('dataset_kind') in allowed_kinds)
@@ -6092,15 +6096,19 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         technology: [str(catalogue['name']) for catalogue in payload['catalogues']]
         for technology, payload in report_catalogs.items()
     }
-    admin_datasets = [serialize_dataset_row(dataset) for dataset in repository.list_datasets()] if active_workspace else []
+    admin_datasets = sorted(
+        [serialize_dataset_row(dataset) for dataset in repository.list_datasets()],
+        key=lambda dataset: int(dataset['id']),
+        reverse=True,
+    ) if active_workspace else []
     add_workspace_vendor_capabilities(admin_datasets)
     ready_admin_datasets = [dataset for dataset in admin_datasets if dataset['is_ready']]
     dataset_names = {
         int(dataset['id']): str(dataset['file_name'])
         for dataset in admin_datasets
     }
-    database_table_groups: dict[str, list[dict[str, str]]] = {
-        'Config Tables': [], 'Workspace Tables': [], 'Individual dataset rows': [], 'Combined CDR rows': [],
+    database_table_groups: dict[str, list[dict[str, Any]]] = {
+        'Config Tables': [], 'Workspace Tables': [], 'Individual Datasets': [], 'Combined CDR rows': [],
     }
     friendly_tables = {
         WORKSPACE_REGISTRY_TABLE: 'Workspace registry',
@@ -6126,7 +6134,11 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
         if dataset_match:
             dataset_id = int(dataset_match.group(1))
             if dataset_name := dataset_names.get(dataset_id):
-                database_table_groups['Individual dataset rows'].append({'name': table_name, 'label': dataset_name})
+                database_table_groups['Individual Datasets'].append({
+                    'name': table_name,
+                    'label': dataset_name,
+                    'dataset_id': dataset_id,
+                })
         elif reporting_match:
             database_table_groups['Combined CDR rows'].append({
                 'name': table_name,
@@ -6139,6 +6151,10 @@ def render_admin_template(request: Request, user: SessionUser, error: str | None
                 'name': table_name,
                 'label': friendly_tables.get(table_name, table_name),
             })
+    database_table_groups['Individual Datasets'].sort(
+        key=lambda table: table['dataset_id'],
+        reverse=True,
+    )
     export_options = [
         {'value': 'config', 'label': 'App Config'},
         {'value': 'dashboards', 'label': 'Dashboards (from active workspace)', 'disabled': not active_workspace},
@@ -10924,6 +10940,12 @@ def rename_dataset_file(
     if new_path != old_path and new_path.exists():
         raise HTTPException(status_code=400, detail='A file with that name already exists in this workspace.')
     if new_path == old_path:
+        if 'application/json' in request.headers.get('accept', '').casefold():
+            return JSONResponse({
+                'dataset_id': dataset_id,
+                'file_name': new_name,
+                'stored_path': str(new_path),
+            })
         return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 
     try:
@@ -10953,6 +10975,60 @@ def rename_dataset_file(
             'dataset_id': dataset_id,
             'file_name': new_name,
             'stored_path': str(new_path),
+        })
+    return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/admin/datasets/{dataset_id}/move')
+def move_admin_dataset(
+    dataset_id: int,
+    request: Request,
+    direction: str = Form(...),
+    user: SessionUser = Depends(admin_user),
+) -> Response:
+    wants_json = (
+        'application/json' in request.headers.get('accept', '').casefold()
+        or request.headers.get('x-requested-with', '').casefold() == 'xmlhttprequest'
+    )
+    normalized_direction = direction.strip().casefold()
+    if normalized_direction not in {'up', 'down'}:
+        raise HTTPException(status_code=400, detail='Dataset direction must be up or down.')
+    datasets = sorted(repository.list_datasets(), key=lambda row: int(row['id']), reverse=True)
+    ordered_ids = [int(row['id']) for row in datasets]
+    if dataset_id not in ordered_ids:
+        raise HTTPException(status_code=404, detail='Dataset not found.')
+    current_index = ordered_ids.index(dataset_id)
+    target_index = current_index - 1 if normalized_direction == 'up' else current_index + 1
+    if target_index < 0 or target_index >= len(ordered_ids):
+        if wants_json:
+            return JSONResponse({'ok': True, 'id_mapping': {}})
+        return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+    ordered_ids[current_index], ordered_ids[target_index] = ordered_ids[target_index], ordered_ids[current_index]
+    moved_name = str(datasets[current_index]['file_name'])
+    try:
+        # The table displays the highest ID first. Reverse the requested visual
+        # order before assigning IDs from 1 upwards so it remains stable after
+        # the page reloads.
+        id_mapping = repository.reorder_dataset_ids(list(reversed(ordered_ids)))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    workspace_key = str(repository.db_path.resolve())
+    with STOP_REQUESTS_LOCK:
+        STOP_REQUESTS.difference_update(key for key in STOP_REQUESTS if key[0] == workspace_key)
+    ANALYSIS_CACHE.clear()
+    DATAFRAME_CACHE.clear()
+    _clear_chart_preview_caches()
+    invalidate_workspace_size_cache()
+    repository.add_log(user.username, 'reorder_datasets', json.dumps({
+        'dataset': moved_name,
+        'direction': normalized_direction,
+        'id_mapping': {str(old_id): new_id for old_id, new_id in id_mapping.items()},
+    }))
+    if wants_json:
+        return JSONResponse({
+            'ok': True,
+            'id_mapping': {str(old_id): new_id for old_id, new_id in id_mapping.items()},
         })
     return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
 

@@ -5993,8 +5993,8 @@ function bindAdminDatasetRenameForm(form) {
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     showLoadingOverlay(
-      'Renaming dataset',
-      'Please wait while the dataset file, path and materialised references are updated.',
+      form.dataset.loadingLabel || 'Renaming dataset',
+      form.dataset.loadingCopy || 'Please wait while the dataset file, path and materialised references are updated.',
     );
     try {
       const response = await fetch(form.action, {
@@ -6030,6 +6030,95 @@ function bindAdminDatasetRenameForm(form) {
 }
 
 document.querySelectorAll('[data-admin-dataset-rename-form]').forEach(bindAdminDatasetRenameForm);
+
+function remapAdminDatasetControls(idMapping) {
+  if (!idMapping || typeof idMapping !== 'object') return;
+  const controls = document.querySelectorAll([
+    '[data-admin-vendor-mapping-choice]',
+    '[data-admin-vendor-clearing-choice]',
+    '[data-admin-reprocess-dataset-choice]',
+    '[data-admin-vendor-mapping-dialog] option[value]',
+  ].join(', '));
+  controls.forEach((control) => {
+    const replacement = idMapping[String(control.value)];
+    if (replacement !== undefined) control.value = String(replacement);
+  });
+}
+
+function refreshAdminIndividualDatasetOptions(freshDocument) {
+  const currentSelect = document.querySelector('[data-database-table-select]');
+  const freshSelect = freshDocument.querySelector('[data-database-table-select]');
+  if (!(currentSelect instanceof HTMLSelectElement) || !(freshSelect instanceof HTMLSelectElement)) return;
+  const currentGroup = Array.from(currentSelect.querySelectorAll('optgroup'))
+    .find((group) => group.label === 'Individual Datasets');
+  const freshGroup = Array.from(freshSelect.querySelectorAll('optgroup'))
+    .find((group) => group.label === 'Individual Datasets');
+  if (!currentGroup || !freshGroup) return;
+  const selectedValue = currentSelect.value;
+  currentGroup.replaceWith(freshGroup);
+  if (Array.from(currentSelect.options).some((option) => option.value === selectedValue)) {
+    currentSelect.value = selectedValue;
+  }
+}
+
+document.addEventListener('submit', async (event) => {
+  const form = event.target instanceof HTMLFormElement
+    ? event.target.closest('[data-admin-dataset-move-form]')
+    : null;
+  if (!(form instanceof HTMLFormElement)) return;
+  event.preventDefault();
+  if (form.dataset.moveSubmitting === '1') return;
+  form.dataset.moveSubmitting = '1';
+  const scrollTop = window.scrollY;
+  const scrollLeft = window.scrollX;
+  showLoadingOverlay(form.dataset.loadingLabel, form.dataset.loadingCopy);
+  try {
+    const response = await fetch(form.action, {
+      method: 'POST',
+      body: new FormData(form),
+      credentials: 'same-origin',
+      headers: {Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+    });
+    const content = await response.text();
+    let payload = {};
+    try { payload = content ? JSON.parse(content) : {}; } catch (_error) { /* Use the request fallback below. */ }
+    if (!response.ok) {
+      throw new Error(payload.detail || `The dataset order could not be updated (status ${response.status}).`);
+    }
+
+    const pageResponse = await fetch('/admin', {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: {'X-Requested-With': 'XMLHttpRequest'},
+    });
+    if (!pageResponse.ok) throw new Error('The updated Dataset Management table could not be loaded.');
+    const freshDocument = new DOMParser().parseFromString(await pageResponse.text(), 'text/html');
+    const currentTable = document.querySelector('.admin-datasets-table');
+    const freshTable = freshDocument.querySelector('.admin-datasets-table');
+    if (!(currentTable instanceof HTMLTableElement) || !(freshTable instanceof HTMLTableElement)) {
+      throw new Error('The updated Dataset Management table could not be found.');
+    }
+
+    const existingPager = currentTable.closest('.table-wrap')?.nextElementSibling;
+    if (existingPager?.classList.contains('mobile-card-pagination')) existingPager.remove();
+    currentTable.replaceWith(freshTable);
+    remapAdminDatasetControls(payload.id_mapping);
+    refreshAdminIndividualDatasetOptions(freshDocument);
+    freshTable.querySelectorAll('[data-admin-dataset-rename-form]').forEach(bindAdminDatasetRenameForm);
+    freshTable.querySelectorAll('form[data-confirm]').forEach(bindConfirmForm);
+    window.requestAnimationFrame(() => {
+      sizeAdminDatasetNameColumn(freshTable.closest('[data-panel-state-key="admin:datasets"]'));
+      window.scrollTo({top: scrollTop, left: scrollLeft, behavior: 'auto'});
+    });
+  } catch (error) {
+    showInfoDialog(error instanceof Error ? error.message : 'The dataset order could not be updated.', {
+      title: 'Dataset Reordering Failed', tone: 'error',
+    });
+  } finally {
+    form.dataset.moveSubmitting = '0';
+    hideLoadingOverlay();
+  }
+});
 
 document.querySelectorAll('[data-file-picker-input]').forEach((filePickerInput) => {
   const filePickerText = filePickerInput.closest('.file-picker-shell')?.querySelector('[data-file-picker-text]');
@@ -6409,7 +6498,47 @@ if (queueNode) {
   const selectedDatasetField = document.querySelector('input[name="dataset_id"], select[name="dataset_id"]');
   const waitingPanel = document.querySelector('.queue-waiting-copy');
   const queueTypeFilter = document.querySelector('[data-queue-type-filter]');
+  const sortableQueueTable = queueNode.querySelector('[data-queue-sortable-table]');
+  const queueSortButtons = Array.from(sortableQueueTable?.querySelectorAll('[data-queue-sort-key]') || []);
+  const queueSortState = {key: 'id', direction: 'desc'};
   const formatQueueCount = (value) => Math.max(0, Number(value) || 0).toLocaleString('en-US', {maximumFractionDigits: 0});
+  const applyQueueSort = () => {
+    const body = sortableQueueTable?.tBodies?.[0];
+    if (!body) return;
+    const button = queueSortButtons.find((candidate) => candidate.dataset.queueSortKey === queueSortState.key);
+    const type = button?.dataset.queueSortType || 'text';
+    const direction = queueSortState.direction === 'desc' ? -1 : 1;
+    const rows = Array.from(body.querySelectorAll('tr[data-dataset-id]'));
+    rows.sort((left, right) => {
+      const leftValue = left.querySelector(`[data-queue-sort-cell="${queueSortState.key}"]`)?.dataset.queueSortValue || '';
+      const rightValue = right.querySelector(`[data-queue-sort-cell="${queueSortState.key}"]`)?.dataset.queueSortValue || '';
+      let compared;
+      if (type === 'number') {
+        compared = (Number(leftValue) || 0) - (Number(rightValue) || 0);
+      } else {
+        compared = leftValue.localeCompare(rightValue, undefined, {numeric: true, sensitivity: 'base'});
+      }
+      if (compared === 0) compared = Number(left.dataset.datasetId || 0) - Number(right.dataset.datasetId || 0);
+      return compared * direction;
+    });
+    const combinedBoundary = body.querySelector('[data-combined-dataset-structure-row], [data-combined-dataset-row]');
+    rows.forEach((row) => body.insertBefore(row, combinedBoundary));
+    queueSortButtons.forEach((candidate) => {
+      const active = candidate.dataset.queueSortKey === queueSortState.key;
+      const heading = candidate.closest('th');
+      if (heading) heading.setAttribute('aria-sort', active ? (queueSortState.direction === 'desc' ? 'descending' : 'ascending') : 'none');
+      const indicator = candidate.querySelector('[data-queue-sort-indicator]');
+      if (indicator) indicator.textContent = active ? (queueSortState.direction === 'desc' ? '↓' : '↑') : '↕';
+    });
+    sortableQueueTable.dispatchEvent(new CustomEvent('mobile-card-pagination:refresh', {bubbles: true}));
+  };
+  queueSortButtons.forEach((button) => button.addEventListener('click', () => {
+    const key = button.dataset.queueSortKey || 'id';
+    queueSortState.direction = queueSortState.key === key && queueSortState.direction === 'asc' ? 'desc' : 'asc';
+    queueSortState.key = key;
+    applyQueueSort();
+  }));
+  applyQueueSort();
   const applyQueueTypeFilter = () => {
     const selectedKind = queueTypeFilter?.value || '';
     const combinedRows = Array.from(document.querySelectorAll('[data-combined-dataset-row]'));
@@ -6456,14 +6585,19 @@ if (queueNode) {
       || (statusPill?.classList.contains('queue-status-ready') ? 'ready' : '');
 
     if (kind) kind.textContent = dataset.input_kind_label || 'Other';
-    if (rows) rows.textContent = formatQueueCount(dataset.row_count);
-    if (columns) columns.textContent = formatQueueCount(dataset.column_count);
-    if (size) size.textContent = dataset.size_mb_label || '0.00 MB';
+    if (kind) kind.dataset.queueSortValue = dataset.input_kind_label || 'Other';
+    if (rows) { rows.textContent = formatQueueCount(dataset.row_count); rows.dataset.queueSortValue = String(dataset.row_count || 0); }
+    if (columns) { columns.textContent = formatQueueCount(dataset.column_count); columns.dataset.queueSortValue = String(dataset.column_count || 0); }
+    if (size) { size.textContent = dataset.size_mb_label || '0.00 MB'; size.dataset.queueSortValue = String(dataset.size_bytes || 0); }
     if (statusPill) {
       statusPill.textContent = dataset.status_label || dataset.status || 'Queued';
       statusPill.className = `queue-status-pill queue-status-${dataset.status}`;
     }
     row.dataset.queueStatus = dataset.status || '';
+    const statusCell = row.querySelector('[data-queue-sort-cell="status"]');
+    const progressCell = row.querySelector('[data-queue-sort-cell="progress"]');
+    if (statusCell) statusCell.dataset.queueSortValue = dataset.status_label || dataset.status || 'Queued';
+    if (progressCell) progressCell.dataset.queueSortValue = String(dataset.progress || 0);
     if (previousStatus && previousStatus !== 'ready' && dataset.status === 'ready') {
       refreshWorkspaceAfterCompletion = true;
     }
@@ -6479,8 +6613,14 @@ if (queueNode) {
       elapsed.hidden = !elapsed.textContent;
       if (progressSeparator) progressSeparator.hidden = elapsed.hidden;
     }
-    if (uploaded) uploaded.textContent = formatQueueTimestamp(dataset.uploaded_at_local || dataset.uploaded_at);
-    if (updated) updated.textContent = formatQueueTimestamp(dataset.updated_at_local || dataset.updated_at || dataset.uploaded_at_local || dataset.uploaded_at);
+    if (uploaded) {
+      uploaded.textContent = formatQueueTimestamp(dataset.uploaded_at_local || dataset.uploaded_at);
+      uploaded.dataset.queueSortValue = dataset.uploaded_at || '';
+    }
+    if (updated) {
+      updated.textContent = formatQueueTimestamp(dataset.updated_at_local || dataset.updated_at || dataset.uploaded_at_local || dataset.uploaded_at);
+      updated.dataset.queueSortValue = dataset.updated_at || dataset.uploaded_at || '';
+    }
     // A profile can be in the small persistence window between status updates.
     // Keep the known row kind until the API supplies a replacement so ready CDR
     // actions do not disappear while another upload is being processed.
@@ -6605,6 +6745,7 @@ if (queueNode) {
       document.dispatchEvent(new CustomEvent('workspace-dataset-status-updated', {detail: {datasets}}));
       const combinedTables = Array.isArray(payload.combined_tables) ? payload.combined_tables : [];
       combinedTables.forEach(updateCombinedQueueRow);
+      applyQueueSort();
       applyQueueTypeFilter();
       if (refreshWorkspaceAfterCompletion) {
         if (suppressReload) {

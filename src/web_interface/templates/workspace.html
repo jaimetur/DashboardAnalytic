@@ -201,38 +201,38 @@
       </div>
     </div>
     <div class="table-wrap queue-table-wrap">
-      <table class="queue-table">
+      <table class="queue-table" data-queue-sortable-table>
         <thead>
           <tr>
-            <th>ID</th>
-            <th>Dataset</th>
-            <th>Input Type</th>
-            <th>Rows</th>
-            <th>Columns</th>
-            <th>Size</th>
-            <th>Status</th>
-            <th>Progress</th>
-            <th>Uploaded</th>
-            <th>Updated</th>
+            <th aria-sort="descending"><button type="button" class="queue-sort-button" data-queue-sort-key="id" data-queue-sort-type="number">ID<span aria-hidden="true" data-queue-sort-indicator>↓</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="dataset" data-queue-sort-type="text">Dataset<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="kind" data-queue-sort-type="text">Input Type<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="rows" data-queue-sort-type="number">Rows<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="columns" data-queue-sort-type="number">Columns<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="size" data-queue-sort-type="number">Size<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="status" data-queue-sort-type="text">Status<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="progress" data-queue-sort-type="number">Progress<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="uploaded" data-queue-sort-type="text">Uploaded<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
+            <th><button type="button" class="queue-sort-button" data-queue-sort-key="updated" data-queue-sort-type="text">Updated<span aria-hidden="true" data-queue-sort-indicator>↕</span></button></th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {% for dataset in datasets %}
           <tr class="{% if selected_dataset and selected_dataset.id == dataset.id %}active-row{% endif %}" data-dataset-row data-dataset-id="{{ dataset.id }}" data-dataset-kind="{{ dataset.dataset_kind or 'generic' }}" data-queue-status="{{ dataset.status }}">
-            <td data-label="ID" data-queue-id>{{ dataset.id }}</td>
-            <td data-label="Dataset">
+            <td data-label="ID" data-queue-id data-queue-sort-value="{{ dataset.id }}" data-queue-sort-cell="id">{{ dataset.id }}</td>
+            <td data-label="Dataset" data-queue-sort-value="{{ dataset.file_name }}" data-queue-sort-cell="dataset">
               <div class="queue-dataset-name" data-queue-file-name>{{ dataset.file_name }}</div>
               <div class="queue-dataset-path" data-queue-file-path>{{ dataset.stored_path }}</div>
             </td>
-            <td data-label="Input Type" data-queue-kind>{{ dataset.input_kind_label }}</td>
-            <td data-label="Rows" data-queue-rows>{{ '{:,}'.format(dataset.row_count or 0) }}</td>
-            <td data-label="Columns" data-queue-columns>{{ '{:,}'.format(dataset.column_count or 0) }}</td>
-            <td data-label="Size" data-queue-size>{{ dataset.size_mb_label }}</td>
-            <td data-label="Status">
+            <td data-label="Input Type" data-queue-kind data-queue-sort-value="{{ dataset.input_kind_label }}" data-queue-sort-cell="kind">{{ dataset.input_kind_label }}</td>
+            <td data-label="Rows" data-queue-rows data-queue-sort-value="{{ dataset.row_count or 0 }}" data-queue-sort-cell="rows">{{ '{:,}'.format(dataset.row_count or 0) }}</td>
+            <td data-label="Columns" data-queue-columns data-queue-sort-value="{{ dataset.column_count or 0 }}" data-queue-sort-cell="columns">{{ '{:,}'.format(dataset.column_count or 0) }}</td>
+            <td data-label="Size" data-queue-size data-queue-sort-value="{{ dataset.size_bytes }}" data-queue-sort-cell="size">{{ dataset.size_mb_label }}</td>
+            <td data-label="Status" data-queue-sort-value="{{ dataset.status_label }}" data-queue-sort-cell="status">
               <span class="queue-status-pill queue-status-{{ dataset.status }}" data-queue-status-pill>{{ dataset.status_label }}</span>
             </td>
-            <td data-label="Progress">
+            <td data-label="Progress" data-queue-sort-value="{{ dataset.progress }}" data-queue-sort-cell="progress">
               <div class="queue-progress-cell">
                 <div class="progress-shell visual-progress-shell">
                   <div class="progress-bar status-{{ dataset.status }}" data-queue-progress-bar style="width: {{ dataset.progress }}%"></div>
@@ -247,8 +247,8 @@
                 {% endif %}
               </div>
             </td>
-            <td data-label="Uploaded" data-queue-uploaded>{{ (dataset.uploaded_at_local or '').replace('T', ' ').replace(' ', '\n') }}</td>
-            <td data-label="Updated" data-queue-updated>{{ (dataset.updated_at_local or dataset.uploaded_at_local or '').replace('T', ' ').replace(' ', '\n') }}</td>
+            <td data-label="Uploaded" data-queue-uploaded data-queue-sort-value="{{ dataset.uploaded_at or '' }}" data-queue-sort-cell="uploaded">{{ (dataset.uploaded_at_local or '').replace('T', ' ').replace(' ', '\n') }}</td>
+            <td data-label="Updated" data-queue-updated data-queue-sort-value="{{ dataset.updated_at or dataset.uploaded_at or '' }}" data-queue-sort-cell="updated">{{ (dataset.updated_at_local or dataset.uploaded_at_local or '').replace('T', ' ').replace(' ', '\n') }}</td>
             <td data-label="Actions">
               <div class="queue-actions">
                 {% if dataset.status == 'ready' %}

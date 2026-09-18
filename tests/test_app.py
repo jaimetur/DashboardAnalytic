@@ -1810,6 +1810,8 @@ def test_admin_dataset_table_includes_ordered_global_icon_actions(client, monkey
     assert 'data-admin-vendor-mapping-dialog' in page.text
     assert 'data-admin-vendor-clearing-dialog' in page.text
     assert 'data-admin-dataset-reprocess-dialog' in page.text
+    assert 'class="admin-dataset-move admin-dataset-move-up icon-action"' in page.text
+    assert 'class="admin-dataset-move admin-dataset-move-down icon-action"' in page.text
     assert page.text.count('name="return_to" value="admin"') >= 5
     styles = client.get('/static/css/app.css')
     assert styles.status_code == 200
@@ -1828,6 +1830,126 @@ def test_admin_dataset_table_includes_ordered_global_icon_actions(client, monkey
     )
     assert response.status_code == 303
     assert response.headers['location'] == '/admin'
+
+
+def test_admin_dataset_rows_can_be_reordered_in_descending_order_and_all_ids_are_propagated(client, monkeypatch) -> None:
+    login(client)
+    for name, score in (('first.csv', 91), ('second.csv', 92), ('third.csv', 93)):
+        client.post(
+            '/datasets-analysis/upload',
+            data={'dataset_kinds': 'data'},
+            files={'dataset_files': (name, BytesIO(f'market,period,score\nES,2026-Q1,{score}\n'.encode()), 'text/csv')},
+            follow_redirects=False,
+        )
+
+    import src.DashboardAnalytic as app_module
+
+    app_module.repository.update_dataset_profile(
+        3,
+        processing_options_json=json.dumps({'vodafone_mapping_dataset_id': 1}),
+    )
+    app_module.repository.set_workspace_state(
+        'e2e_dashboards_v2',
+        json.dumps({'dashboard': {'datasets': {'data': [3, 1]}}}),
+    )
+    with app_module.repository.connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO generated_jobs (
+                job_type, report_type, technology, scope, data_dataset_id,
+                template_name, created_by, dataset_ids_json
+            ) VALUES ('report', 'summary', 'nsa', 'single', 3, 'Template', 'admin', ?)
+            """,
+            (json.dumps({'data': [3, 1]}),),
+        )
+
+    first_move = client.post(
+        '/admin/datasets/1/move',
+        data={'direction': 'up'},
+        headers={'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+        follow_redirects=False,
+    )
+    second_move = client.post(
+        '/admin/datasets/2/move', data={'direction': 'up'}, follow_redirects=False,
+    )
+
+    assert first_move.status_code == 200
+    assert first_move.json() == {'ok': True, 'id_mapping': {'1': 2, '2': 1, '3': 3}}
+    assert second_move.status_code == 303
+    datasets = sorted(app_module.repository.list_datasets(), key=lambda row: int(row['id']))
+    assert [(int(row['id']), row['file_name']) for row in datasets] == [
+        (1, 'second.csv'), (2, 'third.csv'), (3, 'first.csv'),
+    ]
+    assert app_module.repository.dataset_rows_table_exists(1)
+    assert app_module.repository.dataset_rows_table_exists(2)
+    assert app_module.repository.dataset_rows_table_exists(3)
+    assert json.loads(app_module.repository.get_dataset(2)['processing_options_json']) == {
+        'vodafone_mapping_dataset_id': 3,
+    }
+    reprocessing_calls = []
+    monkeypatch.setattr(
+        app_module,
+        'enqueue_dataset_processing',
+        lambda _tasks, dataset_id, _path, _username, vodafone_mapping_dataset_id, three_mapping_dataset_id: reprocessing_calls.append({
+            'dataset_id': dataset_id,
+            'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
+            'three_mapping_dataset_id': three_mapping_dataset_id,
+        }),
+    )
+    reprocess = client.post(
+        '/datasets-analysis/retry/2', data={'return_to': 'admin'}, follow_redirects=False,
+    )
+    assert reprocess.status_code == 303
+    assert reprocessing_calls == [{
+        'dataset_id': 2,
+        'vodafone_mapping_dataset_id': 3,
+        'three_mapping_dataset_id': None,
+    }]
+    dashboard_state = json.loads(app_module.repository.get_workspace_state('e2e_dashboards_v2'))
+    assert dashboard_state['dashboard']['datasets']['data'] == [2, 3]
+    with app_module.repository.connection() as connection:
+        job = connection.execute(
+            'SELECT data_dataset_id, dataset_ids_json FROM generated_jobs ORDER BY id DESC LIMIT 1'
+        ).fetchone()
+        sequence = connection.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name = 'datasets'"
+        ).fetchone()
+    assert int(job['data_dataset_id']) == 2
+    assert json.loads(job['dataset_ids_json']) == {'data': [2, 3]}
+    assert int(sequence['seq']) == 3
+    admin_page = client.get('/admin')
+    dataset_table = admin_page.text.split('<table class="admin-datasets-table">', 1)[1].split('</table>', 1)[0]
+    assert dataset_table.index('data-label="ID">3<') < dataset_table.index('data-label="ID">2<') < dataset_table.index('data-label="ID">1<')
+    assert dataset_table.count('data-loading-label="Reordering datasets"') == 6
+    assert dataset_table.count('data-admin-dataset-move-form') == 6
+    assert 'data-loading-copy="Please wait while dataset IDs and all stored references are updated."' in dataset_table
+    individual_tables = admin_page.text.split('<optgroup label="Individual Datasets">', 1)[1].split('</optgroup>', 1)[0]
+    assert individual_tables.index('value="dataset_rows_3"') < individual_tables.index('value="dataset_rows_2"') < individual_tables.index('value="dataset_rows_1"')
+    assert 'Individual dataset rows' not in admin_page.text
+    app_script = client.get('/static/js/app.js').text
+    assert "currentTable.replaceWith(freshTable)" in app_script
+    assert "window.scrollTo({top: scrollTop, left: scrollLeft, behavior: 'auto'})" in app_script
+
+
+def test_database_management_orders_individual_dataset_tables_by_numeric_id_descending(client) -> None:
+    login(client)
+    import src.DashboardAnalytic as app_module
+
+    for dataset_number in range(1, 13):
+        dataset_id, _ = app_module.repository.add_dataset(
+            f'dataset-{dataset_number}.csv',
+            str(app_module.settings.input_dir / f'dataset-{dataset_number}.csv'),
+            'admin',
+        )
+        app_module.repository.replace_dataset_rows(dataset_id, pd.DataFrame({'value': [dataset_number]}))
+
+    page = client.get('/admin')
+    individual_tables = page.text.split('<optgroup label="Individual Datasets">', 1)[1].split('</optgroup>', 1)[0]
+    positions = [individual_tables.index(f'value="dataset_rows_{dataset_id}"') for dataset_id in range(12, 0, -1)]
+
+    assert positions == sorted(positions)
+    assert individual_tables.index('value="dataset_rows_12"') < individual_tables.index('value="dataset_rows_9"')
+    assert individual_tables.index('value="dataset_rows_10"') < individual_tables.index('value="dataset_rows_2"')
 
 
 def test_workspace_stop_all_stops_only_processing_datasets(client) -> None:
@@ -3402,6 +3524,8 @@ def test_admin_dataset_management_renames_dataset_file_and_materialised_source_l
     assert admin.text.index('<th>Uploaded</th>') < admin.text.index('<th>Updated</th>')
     assert 'dataset-rename-1' in admin.text
     assert 'data-admin-dataset-rename-save' in admin.text
+    assert 'data-loading-label="Renaming dataset"' in admin.text
+    assert 'data-loading-copy="Please wait while the dataset file, path and materialised references are updated."' in admin.text
     assert 'Save name' not in admin.text
     assert 'Show Analysis' in admin.text
     assert 'Preview' in admin.text
@@ -6227,6 +6351,29 @@ def test_workspace_queue_shows_dataset_size_column(client) -> None:
     assert response.status_code == 200
     assert "<th>Size</th>" in response.text
     assert "MB" in response.text
+
+
+def test_workspace_dataset_table_defaults_to_descending_ids_and_has_sortable_columns(client) -> None:
+    login(client)
+    for name in ('first.csv', 'second.csv'):
+        response = client.post(
+            '/datasets-analysis/upload',
+            data={'dataset_kinds': 'data'},
+            files={'dataset_files': (name, BytesIO(b'market,period,score\nES,2026-Q1,91\n'), 'text/csv')},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    page = client.get('/workspace')
+    table = page.text.split('<table class="queue-table" data-queue-sortable-table>', 1)[1].split('</table>', 1)[0]
+
+    assert table.index('data-dataset-id="2"') < table.index('data-dataset-id="1"')
+    assert '<th aria-sort="descending"><button type="button" class="queue-sort-button" data-queue-sort-key="id" data-queue-sort-type="number">' in table
+    for key in ('dataset', 'kind', 'rows', 'columns', 'size', 'status', 'progress', 'uploaded', 'updated'):
+        assert f'data-queue-sort-key="{key}"' in table
+    script = client.get('/static/js/app.js').text
+    assert "const queueSortState = {key: 'id', direction: 'desc'};" in script
+    assert 'combinedBoundary' in script
 
 
 def test_app_logs_combines_operational_and_audit_activity(client) -> None:

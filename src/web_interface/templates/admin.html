@@ -635,6 +635,7 @@
     {% set mappable_admin_datasets = datasets | selectattr('can_map_vendors') | list %}
     {% set clearable_admin_datasets = datasets | selectattr('can_clear_vendors') | list %}
     {% set reprocessable_admin_datasets = datasets | selectattr('can_reprocess') | list %}
+    {% set dataset_reordering_blocked = (datasets | selectattr('status', 'equalto', 'queued') | list) or (datasets | selectattr('status', 'equalto', 'processing') | list) %}
     <div class="queue-bulk-actions admin-dataset-bulk-actions" role="group" aria-label="Bulk dataset actions">
       <button type="button" class="queue-map-all" data-admin-vendor-map-all-open title="Assign Vendor Mapping to all eligible CDR datasets" aria-label="Assign Vendor Mapping to all eligible CDR datasets"{% if not mappable_admin_datasets %} disabled{% endif %}>Map All</button>
       <button type="button" class="queue-clear-all" data-admin-vendor-clear-all-open title="Clear Vendor Mapping from all mapped CDR datasets" aria-label="Clear Vendor Mapping from all mapped CDR datasets"{% if not clearable_admin_datasets %} disabled{% endif %}>Clear All</button>
@@ -651,15 +652,27 @@
     <div class="table-wrap">
       <table class="admin-datasets-table">
         <colgroup>
-          <col><col data-admin-dataset-name-column><col data-admin-dataset-path-column><col><col><col><col>
+          <col data-admin-dataset-order-column><col><col data-admin-dataset-name-column><col data-admin-dataset-path-column><col><col><col><col>
         </colgroup>
-        <thead><tr><th>ID</th><th>Name</th><th>Path</th><th>User</th><th>Uploaded</th><th>Updated</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Order</th><th>ID</th><th>Name</th><th>Path</th><th>User</th><th>Uploaded</th><th>Updated</th><th>Actions</th></tr></thead>
         <tbody>
           {% for row in datasets %}
           <tr>
+            <td data-label="Order">
+              <div class="admin-dataset-order-actions">
+                <form method="post" action="/admin/datasets/{{ row.id }}/move" data-admin-dataset-move-form data-loading-label="Reordering datasets" data-loading-copy="Please wait while dataset IDs and all stored references are updated.">
+                  <input type="hidden" name="direction" value="up">
+                  <button type="submit" class="admin-dataset-move admin-dataset-move-up icon-action" aria-label="Move dataset up" title="Move dataset up and renumber dataset IDs"{% if loop.first or dataset_reordering_blocked %} disabled{% endif %}>Move Up</button>
+                </form>
+                <form method="post" action="/admin/datasets/{{ row.id }}/move" data-admin-dataset-move-form data-loading-label="Reordering datasets" data-loading-copy="Please wait while dataset IDs and all stored references are updated.">
+                  <input type="hidden" name="direction" value="down">
+                  <button type="submit" class="admin-dataset-move admin-dataset-move-down icon-action" aria-label="Move dataset down" title="Move dataset down and renumber dataset IDs"{% if loop.last or dataset_reordering_blocked %} disabled{% endif %}>Move Down</button>
+                </form>
+              </div>
+            </td>
             <td data-label="ID">{{ row.id }}</td>
             <td data-label="Name">
-              <form id="dataset-rename-{{ row.id }}" action="/admin/datasets/{{ row.id }}/rename" method="post" class="admin-dataset-rename-form" data-admin-dataset-rename-form>
+              <form id="dataset-rename-{{ row.id }}" action="/admin/datasets/{{ row.id }}/rename" method="post" class="admin-dataset-rename-form" data-admin-dataset-rename-form data-loading-label="Renaming dataset" data-loading-copy="Please wait while the dataset file, path and materialised references are updated.">
                 <input class="table-input" type="text" name="file_name" value="{{ row.file_name }}" size="{{ row.file_name | length }}" required data-admin-dataset-name-input {% if row.status in ['queued', 'processing'] %}disabled title="A dataset cannot be renamed while it is queued or processing."{% endif %}>
                 <button type="submit" class="admin-dataset-rename-save" data-admin-dataset-rename-save aria-label="Save dataset name" title="Save dataset name" hidden>✓</button>
               </form>
@@ -713,7 +726,7 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="6">No datasets available in the active workspace.</td></tr>
+          <tr><td colspan="8" class="admin-dataset-empty">No datasets available in the active workspace.</td></tr>
           {% endfor %}
         </tbody>
       </table>
