@@ -6803,6 +6803,8 @@ if (queueNode) {
   const locallyStoppedTaskIds = new Set();
   const transientTasks = new Map();
   const minimizedPanels = new Map();
+  const panelTaskIds = new Map();
+  const panelScrollPositions = new Map();
   const completedTaskRetentionMs = 5000;
   let completedTaskExpiryTimer = null;
   const formatTaskDuration = (seconds) => {
@@ -6994,6 +6996,7 @@ if (queueNode) {
     panel.setAttribute('aria-label', `Background tasks for ${group.workspace_name || 'workspace'}`);
 
     const panelStateKey = String(group.workspace_id);
+    panel.dataset.backgroundTaskPanelKey = panelStateKey;
     const minimize = document.createElement('button');
     minimize.type = 'button';
     minimize.className = 'background-task-minimize-button';
@@ -7045,7 +7048,11 @@ if (queueNode) {
       dragging = null;
     };
     panel.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0 || event.target.closest('button, a, input, select, textarea, label')) return;
+      if (
+        event.button !== 0
+        || !event.target.closest('.background-task-panel-header')
+        || event.target.closest('button, a, input, select, textarea, label')
+      ) return;
       const bounds = panel.getBoundingClientRect();
       dragging = {offsetX: event.clientX - bounds.left, offsetY: event.clientY - bounds.top};
       panel.classList.add('is-dragging');
@@ -7072,8 +7079,14 @@ if (queueNode) {
       ? `Active workspace · ${group.workspace_name}`
       : String(group.workspace_name || 'Workspace');
     panelHeader.append(heading);
+    const tasks = Array.isArray(group.tasks) ? group.tasks : [];
+    const taskCount = document.createElement('span');
+    taskCount.className = 'background-task-count';
+    taskCount.textContent = `${tasks.length} task${tasks.length === 1 ? '' : 's'}`;
+    taskCount.setAttribute('aria-label', `${tasks.length} total background task${tasks.length === 1 ? '' : 's'}`);
+    panelHeader.append(taskCount);
 
-    const stoppableTasks = (Array.isArray(group.tasks) ? group.tasks : [])
+    const stoppableTasks = tasks
       .filter(taskCanStop)
       .sort((left, right) => Number(taskIsQueued(right)) - Number(taskIsQueued(left)));
     if (stoppableTasks.length) {
@@ -7129,7 +7142,7 @@ if (queueNode) {
     list.className = 'background-task-list';
     let previousDashboardName = '';
     const taskSections = new Map();
-    (Array.isArray(group.tasks) ? group.tasks : []).forEach((task) => {
+    tasks.forEach((task) => {
       const section = String(task.dashboard_name || `task:${task.id || taskSections.size}`);
       if (!taskSections.has(section)) taskSections.set(section, []);
       taskSections.get(section).push(task);
@@ -7213,6 +7226,13 @@ if (queueNode) {
       list.append(item);
     });
     panel.append(list);
+    const nextTaskIds = new Set(tasks.map(task => String(task.id || '')));
+    const previousTaskIds = panelTaskIds.get(panelStateKey);
+    const hasNewTasks = !previousTaskIds || [...nextTaskIds].some(taskId => !previousTaskIds.has(taskId));
+    panelTaskIds.set(panelStateKey, nextTaskIds);
+    list.scrollTop = panelScrollPositions.get(panelStateKey) || 0;
+    if (hasNewTasks) list.dataset.scrollNewTasksIntoView = 'end';
+    list.addEventListener('scroll', () => panelScrollPositions.set(panelStateKey, list.scrollTop), {passive: true});
     return panel;
   };
 
@@ -7222,6 +7242,8 @@ if (queueNode) {
     minimizedPanels.forEach((_value, key) => {
       if (!visiblePanelKeys.has(key)) minimizedPanels.delete(key);
     });
+    panelTaskIds.forEach((_value, key) => { if (!visiblePanelKeys.has(key)) panelTaskIds.delete(key); });
+    panelScrollPositions.forEach((_value, key) => { if (!visiblePanelKeys.has(key)) panelScrollPositions.delete(key); });
     const queuedAgeSignature = normalized.flatMap(group => group.tasks || []).filter(taskIsQueued).map((task) => {
       const queuedAt = Number(task.queued_at);
       return `${task.id}:${Number.isFinite(queuedAt) ? Math.max(0, Math.floor((Date.now() / 1000 - queuedAt) / 60)) : ''}`;
@@ -7235,6 +7257,12 @@ if (queueNode) {
     activeDock.replaceChildren(...activeGroups.map(createTaskPanel));
     otherDock.replaceChildren(...otherGroups.map(createTaskPanel));
     systemDock.replaceChildren(...systemGroups.map(createTaskPanel));
+    root.querySelectorAll('[data-scroll-new-tasks-into-view="end"]').forEach((list) => {
+      list.scrollTop = list.scrollHeight;
+      const panelKey = list.closest('[data-background-task-panel-key]')?.dataset.backgroundTaskPanelKey;
+      if (panelKey) panelScrollPositions.set(panelKey, list.scrollTop);
+      delete list.dataset.scrollNewTasksIntoView;
+    });
     root.classList.toggle('has-both-sides', activeGroups.length > 0 && otherGroups.length > 0);
     root.classList.toggle('has-three-docks', activeGroups.length > 0 && otherGroups.length > 0 && systemGroups.length > 0);
     root.hidden = normalized.length === 0;

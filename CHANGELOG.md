@@ -14,6 +14,7 @@
 - Chart Builder now uses the E2E Dashboard individual Canvas chart viewer directly inside the Interactive Preview panel, including its responsive renderer, semantic hover support, zoom, panning and refresh controls, instead of the embedded E2E Reporting PNG preview.
 - Reprocess All now queues selected Vendor Mapping datasets before CDR datasets and makes each dependent CDR wait for its newly reprocessed mapping, so Vendor assignment uses the refreshed mapping in the same batch.
 - Operator labels are no longer seeded or normalised through built-in UK aliases. Admin Operator Mappings is the sole source for reporting and dashboard label transformations; with no configured mappings, the original CDR labels remain unchanged, including in the combined table.
+- Floating background-task cards now keep their workspace title, total task count, top controls and separator fixed while a vertically scrollable task list accommodates processes that exceed the available viewport height, including touch scrolling on compact screens. Normal refreshes preserve the current list position, while newly created tasks move the oldest-first list to the bottom where the new work appears.
 
 #### 🐛 Bug fixes:
 

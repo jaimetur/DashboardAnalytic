@@ -2762,6 +2762,18 @@ def test_global_background_tasks_groups_active_and_other_workspaces(client) -> N
     assert 'id="background-task-panels"' in page.text
     assert 'data-background-task-dock="active"' in page.text
     assert 'data-background-task-dock="other"' in page.text
+    app_css = (Path(__file__).parents[1] / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')
+    app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+    assert '.background-task-panel { position: relative; pointer-events: auto; flex: 0 0 auto; display: flex; flex-direction: column;' in app_css
+    assert '.background-task-panel-header { flex: 0 0 auto;' in app_css
+    assert '.background-task-count { flex: 0 0 auto;' in app_css
+    assert '.background-task-list { min-height: 0; display: grid;' in app_css
+    assert 'overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; touch-action: pan-y;' in app_css
+    assert "!event.target.closest('.background-task-panel-header')" in app_script
+    assert "taskCount.textContent = `${tasks.length} task${tasks.length === 1 ? '' : 's'}`;" in app_script
+    assert 'const hasNewTasks = !previousTaskIds || [...nextTaskIds].some' in app_script
+    assert "if (hasNewTasks) list.dataset.scrollNewTasksIntoView = 'end';" in app_script
+    assert 'list.scrollTop = list.scrollHeight;' in app_script
 
     with app_module.repository.connection() as connection:
         connection.execute("UPDATE generated_jobs SET status = 'ready', progress = 100")
