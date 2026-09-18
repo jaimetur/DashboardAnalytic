@@ -162,6 +162,7 @@ CREATE TABLE IF NOT EXISTS dataset_profiles (
     summary_json TEXT NOT NULL DEFAULT '{}',
     kpis_json TEXT NOT NULL DEFAULT '{}',
     last_error TEXT,
+    processing_queued_at TEXT,
     processing_started_at TEXT,
     processed_at TEXT,
     processing_options_json TEXT NOT NULL DEFAULT '{}',
@@ -616,6 +617,8 @@ class Repository:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN vendor_values_complete INTEGER NOT NULL DEFAULT 0")
         if 'processing_started_at' not in existing_columns:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN processing_started_at TEXT")
+        if 'processing_queued_at' not in existing_columns:
+            conn.execute("ALTER TABLE dataset_profiles ADD COLUMN processing_queued_at TEXT")
         if 'processing_options_json' not in existing_columns:
             conn.execute("ALTER TABLE dataset_profiles ADD COLUMN processing_options_json TEXT NOT NULL DEFAULT '{}'")
 

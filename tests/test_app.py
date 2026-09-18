@@ -2774,7 +2774,11 @@ def test_global_background_tasks_groups_active_and_other_workspaces(client) -> N
     assert 'return leftTime - rightTime;' in app_script
     assert "if (panelKey && list) panelScrollPositions.set(panelKey, list.scrollTop);" in app_script
     assert "list.dataset.restoreScrollTop = String(panelScrollPositions.get(panelStateKey) || 0);" in app_script
-    assert "list.scrollTop = Number(list.dataset.restoreScrollTop) || 0;" in app_script
+    assert 'const restoredScrollTop = Number(list.dataset.restoreScrollTop) || 0;' in app_script
+    assert 'list.replaceChildren(...replacementList.childNodes);' in app_script
+    assert "if (list.dataset.restoringScroll === 'true') return;" in app_script
+    assert 'const preservedScrollTop = panelScrollPositions.get(panelKey) ?? list.scrollTop;' in app_script
+    assert 'window.requestAnimationFrame(() => {' in app_script
 
     with app_module.repository.connection() as connection:
         connection.execute("UPDATE generated_jobs SET status = 'ready', progress = 100")
@@ -2945,8 +2949,14 @@ def test_reprocessed_dataset_queue_age_uses_current_queue_transition(client) -> 
     with app_module.repository.connection() as connection:
         connection.execute('UPDATE datasets SET uploaded_at = ? WHERE id = ?', (old_upload, dataset_id))
     queued_after = time.time() - 2
+    queued_at = app_module.datetime.now().astimezone().isoformat()
     app_module.repository.update_dataset_profile(
-        dataset_id, status='queued', progress=0, processing_started_at=None, processed_at=None,
+        dataset_id, status='queued', progress=0, processing_queued_at=queued_at,
+        processing_started_at=None, processed_at=None,
+    )
+    app_module.repository.update_dataset_profile(
+        dataset_id, status='processing', progress=42,
+        processing_started_at=app_module.datetime.now().astimezone().isoformat(),
     )
 
     task = next(
@@ -2956,6 +2966,7 @@ def test_reprocessed_dataset_queue_age_uses_current_queue_transition(client) -> 
 
     assert task['queued_at'] >= queued_after
     assert task['queued_at'] > app_module.parse_dataset_timestamp(old_upload).timestamp()
+    assert task['queued_at'] == app_module.parse_dataset_timestamp(queued_at).timestamp()
 
 
 def test_workspace_dataset_upload_uses_non_blocking_progress_card(client) -> None:

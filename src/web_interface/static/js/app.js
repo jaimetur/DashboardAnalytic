@@ -7229,7 +7229,10 @@ if (queueNode) {
     });
     panel.append(list);
     list.dataset.restoreScrollTop = String(panelScrollPositions.get(panelStateKey) || 0);
-    list.addEventListener('scroll', () => panelScrollPositions.set(panelStateKey, list.scrollTop), {passive: true});
+    list.addEventListener('scroll', () => {
+      if (list.dataset.restoringScroll === 'true') return;
+      panelScrollPositions.set(panelStateKey, list.scrollTop);
+    }, {passive: true});
     return panel;
   };
 
@@ -7247,22 +7250,54 @@ if (queueNode) {
     const signature = JSON.stringify([normalized, queuedAgeSignature]);
     if (signature === renderedSignature) return;
     renderedSignature = signature;
+    const existingPanels = new Map();
     root.querySelectorAll('[data-background-task-panel-key]').forEach((panel) => {
       const panelKey = panel.dataset.backgroundTaskPanelKey;
       const list = panel.querySelector('.background-task-list');
       if (panelKey && list) panelScrollPositions.set(panelKey, list.scrollTop);
+      if (panelKey) existingPanels.set(panelKey, panel);
     });
     const activeGroups = normalized.filter((group) => String(group.workspace_id) !== '__server__' && (Boolean(group.is_active) || group.dock === 'right'));
     const systemGroups = normalized.filter((group) => String(group.workspace_id) === '__server__');
     const otherGroups = normalized.filter((group) => !group.is_active && group.dock !== 'right' && String(group.workspace_id) !== '__server__');
-    activeDock.replaceChildren(...activeGroups.map(createTaskPanel));
-    otherDock.replaceChildren(...otherGroups.map(createTaskPanel));
-    systemDock.replaceChildren(...systemGroups.map(createTaskPanel));
+    const refreshPanel = (group) => {
+      const panelKey = String(group.workspace_id);
+      const replacement = createTaskPanel(group);
+      const panel = existingPanels.get(panelKey);
+      if (!(panel instanceof HTMLElement)) return replacement;
+      const list = panel.querySelector('.background-task-list');
+      const replacementList = replacement.querySelector('.background-task-list');
+      const header = panel.querySelector('.background-task-panel-header');
+      const replacementHeader = replacement.querySelector('.background-task-panel-header');
+      if (list instanceof HTMLElement && replacementList instanceof HTMLElement) {
+        const preservedScrollTop = panelScrollPositions.get(panelKey) ?? list.scrollTop;
+        list.dataset.restoreScrollTop = String(preservedScrollTop);
+        list.dataset.restoringScroll = 'true';
+        list.replaceChildren(...replacementList.childNodes);
+      }
+      if (header instanceof HTMLElement && replacementHeader instanceof HTMLElement) {
+        header.replaceWith(replacementHeader);
+      }
+      const preservedClasses = ['is-minimized', 'is-detached', 'is-dragging']
+        .filter((className) => panel.classList.contains(className));
+      panel.className = [replacement.className, ...preservedClasses].join(' ');
+      panel.setAttribute('aria-label', replacement.getAttribute('aria-label') || 'Background tasks');
+      return panel;
+    };
+    activeDock.replaceChildren(...activeGroups.map(refreshPanel));
+    otherDock.replaceChildren(...otherGroups.map(refreshPanel));
+    systemDock.replaceChildren(...systemGroups.map(refreshPanel));
     root.querySelectorAll('[data-restore-scroll-top]').forEach((list) => {
-      list.scrollTop = Number(list.dataset.restoreScrollTop) || 0;
+      const restoredScrollTop = Number(list.dataset.restoreScrollTop) || 0;
+      list.dataset.restoringScroll = 'true';
+      list.scrollTop = restoredScrollTop;
       const panelKey = list.closest('[data-background-task-panel-key]')?.dataset.backgroundTaskPanelKey;
-      if (panelKey) panelScrollPositions.set(panelKey, list.scrollTop);
       delete list.dataset.restoreScrollTop;
+      window.requestAnimationFrame(() => {
+        list.scrollTop = restoredScrollTop;
+        if (panelKey) panelScrollPositions.set(panelKey, list.scrollTop);
+        delete list.dataset.restoringScroll;
+      });
     });
     root.classList.toggle('has-both-sides', activeGroups.length > 0 && otherGroups.length > 0);
     root.classList.toggle('has-three-docks', activeGroups.length > 0 && otherGroups.length > 0 && systemGroups.length > 0);

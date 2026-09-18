@@ -2521,7 +2521,7 @@ def enqueue_dataset_processing(
         if persist_queued_state:
             repository.update_dataset_profile(
                 dataset_id, status='queued', progress=0, last_error=None,
-                processing_started_at=None, processed_at=None,
+                processing_queued_at=now_iso(), processing_started_at=None, processed_at=None,
                 processing_options_json=json.dumps({
                     'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
                     'three_mapping_dataset_id': three_mapping_dataset_id,
@@ -2602,7 +2602,8 @@ def resume_interrupted_dataset_processing(workspace: Workspace) -> list[int]:
         except (json.JSONDecodeError, TypeError):
             options = {}
         task_repository.update_dataset_profile(
-            dataset_id, status='queued', last_error=None, processed_at=None,
+            dataset_id, status='queued', last_error=None, processing_queued_at=now_iso(),
+            processing_started_at=None, processed_at=None,
         )
         _dataset_processing_executor(task_repository).submit(
             process_dataset,
@@ -2915,7 +2916,8 @@ def enqueue_vendor_mapping(
     task_repository = Repository(Path(repository.db_path))
     clear_stop_request(dataset_id, task_repository)
     task_repository.update_dataset_profile(
-        dataset_id, status='queued', progress=0, last_error=None, processing_started_at=None, processed_at=None,
+        dataset_id, status='queued', progress=0, last_error=None, processing_queued_at=now_iso(),
+        processing_started_at=None, processed_at=None,
         processing_options_json=json.dumps({
             'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
             'three_mapping_dataset_id': three_mapping_dataset_id,
@@ -3024,7 +3026,8 @@ def enqueue_vendor_clearing(background_tasks: BackgroundTasks, dataset_id: int, 
     task_repository = Repository(Path(repository.db_path))
     clear_stop_request(dataset_id, task_repository)
     task_repository.update_dataset_profile(
-        dataset_id, status='queued', progress=0, last_error=None, processing_started_at=None, processed_at=None,
+        dataset_id, status='queued', progress=0, last_error=None, processing_queued_at=now_iso(),
+        processing_started_at=None, processed_at=None,
         processing_options_json='{}',
     )
     _register_dataset_processing(dataset_id, task_repository)
@@ -7047,10 +7050,7 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
                 rows = connection.execute(
                     """SELECT d.id, d.file_name, p.status, p.progress,
                               p.processing_started_at, p.processed_at,
-                              CASE
-                                  WHEN p.status = 'queued' THEN p.updated_at
-                                  ELSE COALESCE(p.processing_started_at, p.updated_at)
-                              END AS queued_at
+                              COALESCE(p.processing_queued_at, p.processing_started_at, p.updated_at) AS queued_at
                        FROM datasets d
                        JOIN dataset_profiles p ON p.dataset_id = d.id
                        WHERE p.status IN ('queued', 'processing')
