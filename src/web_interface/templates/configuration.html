@@ -47,11 +47,19 @@
         </label>
       </section>
 
-      <section class="configuration-card configuration-field-wide" data-configuration-card>
+      <section class="configuration-card" data-configuration-card>
         <div class="configuration-card-head"><p class="eyebrow">Data Processing</p><h3>Timestamp Filters</h3></div>
         <label class="configuration-toggle">
           <input type="checkbox" name="ignore_event_time_filtering" value="true" {% if configuration.ignore_event_time_filtering %}checked{% endif %}>
           <span><strong>Ignore event time filtering</strong><small>Ignore date filters and template conditions based on Event_Start_Time or Event_End_Time, retaining rows whose timestamps are missing or invalid.</small></span>
+        </label>
+      </section>
+
+      <section class="configuration-card" data-configuration-card>
+        <div class="configuration-card-head"><p class="eyebrow">Background Work</p><h3>Parallel Tasks</h3></div>
+        <label>Maximum simultaneous tasks
+          <input type="number" name="max_background_tasks" value="{{ configuration.max_background_tasks }}" min="1" max="32" step="1" required>
+          <span class="table-help">Tasks run FIFO. Set 1 to run one background task at a time across the application.</span>
         </label>
       </section>
 

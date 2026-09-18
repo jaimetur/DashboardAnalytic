@@ -7148,16 +7148,8 @@ if (queueNode) {
 
     const list = document.createElement('div');
     list.className = 'background-task-list';
-    let previousDashboardName = '';
     tasks.forEach((task) => {
       const dashboardName = String(task.dashboard_name || '');
-      if (dashboardName && dashboardName !== previousDashboardName) {
-        const dashboard = document.createElement('span');
-        dashboard.className = 'background-task-dashboard';
-        dashboard.textContent = `Dashboard - “${dashboardName}”`;
-        list.append(dashboard);
-      }
-      previousDashboardName = dashboardName;
       const item = document.createElement('div');
       item.className = 'background-task-item';
 
@@ -7165,7 +7157,9 @@ if (queueNode) {
       taskHead.className = 'background-task-head';
       const label = document.createElement('span');
       label.className = 'background-task-label';
-      label.textContent = String(task.label || 'Background task');
+      label.textContent = dashboardName
+        ? `Dashboard “${dashboardName}”: ${String(task.label || 'Background task')}`
+        : String(task.label || 'Background task');
       taskHead.append(label);
       if (taskCanStop(task)) {
         const stop = document.createElement('button');

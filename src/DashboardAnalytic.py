@@ -50,6 +50,7 @@ DEFAULT_TRANSFER_PORT = 7278
 
 from src.config import PROJECT_ROOT, settings
 from src.modules.analytics import build_analysis
+from src.modules.background_scheduler import BackgroundTaskScheduler
 from src.modules.auth import SessionUser, verify_password
 from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name
 from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, normalise_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer
@@ -73,11 +74,7 @@ CHART_PREVIEW_CACHE_LOCK = Lock()
 CHART_PREVIEW_LOAD_LOCKS: dict[tuple[int, str], Lock] = {}
 STOP_REQUESTS: set[tuple[str, int]] = set()
 STOP_REQUESTS_LOCK = Lock()
-DATASET_PROCESSING_EXECUTORS: dict[str, ThreadPoolExecutor] = {}
-DATASET_PROCESSING_EXECUTORS_LOCK = Lock()
-DATASET_PROCESSING_WORKERS = 4
-COMBINED_CDR_RECREATION_EXECUTORS: dict[str, ThreadPoolExecutor] = {}
-COMBINED_CDR_RECREATION_EXECUTORS_LOCK = Lock()
+BACKGROUND_TASK_SCHEDULER = BackgroundTaskScheduler(max_workers=1)
 HEAVY_DATASET_PROCESSING_THRESHOLD_BYTES = 256 * 1024 * 1024
 HEAVY_DATASET_PROCESSING_LOCKS: dict[str, Lock] = {}
 HEAVY_DATASET_PROCESSING_LOCKS_GUARD = Lock()
@@ -125,11 +122,22 @@ DEFAULT_SLIDES_TEMPLATES_DIR = settings.slides_templates_dir
 application_config_dir = settings.database_path.parent
 application_data_dir = settings.data_dir
 RUNTIME_CONFIGURATION_STATE_KEY = 'runtime_configuration_v1'
+
+
+def configured_background_task_limit(value: object) -> int:
+    """Return the bounded background-work concurrency setting."""
+    try:
+        return max(1, min(32, int(value or 1)))
+    except (TypeError, ValueError):
+        return 1
+
+
 DEPLOYMENT_RUNTIME_DEFAULTS = {
     'timezone': str(os.environ.get('TZ') or '').strip(),
     'report_chart_renderer': str(os.environ.get('DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER') or 'dashboard-canvas').strip(),
     'chromium_path': str(os.environ.get('DASHBOARD_ANALYTIC_CHROMIUM') or '').strip(),
     'ignore_event_time_filtering': env_flag(IGNORE_EVENT_TIME_FILTERING_ENV),
+    'max_background_tasks': configured_background_task_limit(os.environ.get('DASHBOARD_ANALYTIC_MAX_BACKGROUND_TASKS')),
 }
 
 
@@ -147,6 +155,7 @@ def runtime_configuration() -> dict[str, Any]:
     values['report_chart_renderer'] = str(values.get('report_chart_renderer') or 'dashboard-canvas').strip()
     values['chromium_path'] = str(values.get('chromium_path') or '').strip()
     values['ignore_event_time_filtering'] = bool(values.get('ignore_event_time_filtering'))
+    values['max_background_tasks'] = configured_background_task_limit(values.get('max_background_tasks'))
     values['configured'] = configured
     return values
 
@@ -172,6 +181,9 @@ def apply_runtime_configuration(values: dict[str, Any]) -> None:
     os.environ[IGNORE_EVENT_TIME_FILTERING_ENV] = (
         'true' if bool(values.get('ignore_event_time_filtering')) else 'false'
     )
+    max_background_tasks = configured_background_task_limit(values.get('max_background_tasks'))
+    os.environ['DASHBOARD_ANALYTIC_MAX_BACKGROUND_TASKS'] = str(max_background_tasks)
+    BACKGROUND_TASK_SCHEDULER.configure(max_background_tasks)
 
 
 def _reporting_memory_mb() -> float:
@@ -1783,7 +1795,9 @@ async def lifespan(_: FastAPI):
     # Capture the configured legacy paths once, then retain them as the
     # original workspace while every newly-created workspace gets its own DB
     # and data directories.
-    global workspace_registry, application_config_dir
+    global workspace_registry, application_config_dir, BACKGROUND_TASK_SCHEDULER
+    if BACKGROUND_TASK_SCHEDULER.closed:
+        BACKGROUND_TASK_SCHEDULER = BackgroundTaskScheduler(max_workers=1)
     application_config_dir = settings.database_path.parent
     workspace_registry = WorkspaceRegistry(
         settings.input_dir.parent / 'workspaces' / 'workspace-registry.db',
@@ -1825,16 +1839,7 @@ async def lifespan(_: FastAPI):
                 }),
             )
     yield
-    with DATASET_PROCESSING_EXECUTORS_LOCK:
-        dataset_executors = list(DATASET_PROCESSING_EXECUTORS.values())
-        DATASET_PROCESSING_EXECUTORS.clear()
-    with COMBINED_CDR_RECREATION_EXECUTORS_LOCK:
-        combined_recreation_executors = list(COMBINED_CDR_RECREATION_EXECUTORS.values())
-        COMBINED_CDR_RECREATION_EXECUTORS.clear()
-    for executor in dataset_executors:
-        executor.shutdown(wait=True)
-    for executor in combined_recreation_executors:
-        executor.shutdown(wait=True)
+    BACKGROUND_TASK_SCHEDULER.shutdown(wait=True)
 
 
 app = FastAPI(title=__app_name__, version=__version__, lifespan=lifespan)
@@ -2191,23 +2196,20 @@ def _register_dataset_processing(dataset_id: int, task_repository: Repository) -
         return True
 
 
-def _dataset_processing_executor(task_repository: Repository) -> ThreadPoolExecutor:
-    workspace_key = str(task_repository.db_path.resolve())
-    with DATASET_PROCESSING_EXECUTORS_LOCK:
-        return DATASET_PROCESSING_EXECUTORS.setdefault(
-            workspace_key,
-            ThreadPoolExecutor(max_workers=DATASET_PROCESSING_WORKERS, thread_name_prefix='dataset-processing'),
-        )
+def _dataset_processing_executor(task_repository: Repository) -> BackgroundTaskScheduler:
+    """Return the application-wide FIFO scheduler for Dataset-related work."""
+    del task_repository
+    return BACKGROUND_TASK_SCHEDULER
 
 
-def _combined_cdr_recreation_executor(task_repository: Repository) -> ThreadPoolExecutor:
-    """Return the serial per-workspace queue for manual combined CDR rebuilds."""
-    workspace_key = str(task_repository.db_path.resolve())
-    with COMBINED_CDR_RECREATION_EXECUTORS_LOCK:
-        return COMBINED_CDR_RECREATION_EXECUTORS.setdefault(
-            workspace_key,
-            ThreadPoolExecutor(max_workers=1, thread_name_prefix='combined-cdr-recreation'),
-        )
+def submit_background_task(callback: Callable[..., Any], /, *args: Any) -> Future[Any]:
+    """Submit application work to the shared FIFO background scheduler."""
+    return BACKGROUND_TASK_SCHEDULER.submit(callback, *args)
+
+
+def _combined_cdr_recreation_executor(task_repository: Repository) -> BackgroundTaskScheduler:
+    """Queue combined-table work behind the same global background limit."""
+    return _dataset_processing_executor(task_repository)
 
 
 def _dataset_processing_lock(task_repository: Repository):
@@ -3754,12 +3756,18 @@ def _archive_compression(path: Path) -> int:
     return zipfile.ZIP_STORED if path.suffix.casefold() in UNCOMPRESSED_ARCHIVE_SUFFIXES else zipfile.ZIP_DEFLATED
 
 
-def _archive_file(archive: zipfile.ZipFile, source: Path, archive_name: str, progress_callback: Callable[[int], None] | None = None) -> None:
+def _archive_file(
+    archive: zipfile.ZipFile, source: Path, archive_name: str,
+    progress_callback: Callable[[int], None] | None = None,
+    cancel_callback: Callable[[], None] | None = None,
+) -> None:
     """Archive one file in chunks so long ZIP writes report real progress."""
     info = zipfile.ZipInfo.from_file(source, archive_name)
     info.compress_type = _archive_compression(source)
     with source.open('rb') as input_file, archive.open(info, 'w', force_zip64=True) as output_file:
         while chunk := input_file.read(1024 * 1024):
+            if cancel_callback:
+                cancel_callback()
             output_file.write(chunk)
             if progress_callback:
                 progress_callback(len(chunk))
@@ -3771,6 +3779,7 @@ def _archive_database(
     archive_name: str,
     scratch_dir: Path | None = None,
     progress_callback: Callable[[int], None] | None = None,
+    cancel_callback: Callable[[], None] | None = None,
     exclude_tables: tuple[str, ...] = (),
 ) -> None:
     """Add a consistent SQLite snapshot, compacting databases with substantial free space."""
@@ -3793,19 +3802,25 @@ def _archive_database(
             with closing(sqlite3.connect(snapshot)) as target, target:
                 for table in exclude_tables:
                     target.execute(f'DELETE FROM "{table.replace(chr(34), chr(34) * 2)}"')
-        _archive_file(archive, snapshot, archive_name, progress_callback)
+        _archive_file(archive, snapshot, archive_name, progress_callback, cancel_callback)
 
 
-def _archive_tree(archive: zipfile.ZipFile, source: Path, archive_prefix: str, *, exclude_slides_templates: bool = False, progress_callback: Callable[[int], None] | None = None) -> None:
+def _archive_tree(
+    archive: zipfile.ZipFile, source: Path, archive_prefix: str, *,
+    exclude_slides_templates: bool = False, progress_callback: Callable[[int], None] | None = None,
+    cancel_callback: Callable[[], None] | None = None,
+) -> None:
     if not source.exists():
         return
     for path in source.rglob('*'):
+        if cancel_callback:
+            cancel_callback()
         if not path.is_file() or path.name.endswith(('-wal', '-shm')):
             continue
         relative_path = path.relative_to(source)
         if exclude_slides_templates and relative_path.parts and relative_path.parts[0] == 'slides-templates':
             continue
-        _archive_file(archive, path, f'{archive_prefix}/{relative_path.as_posix()}', progress_callback)
+        _archive_file(archive, path, f'{archive_prefix}/{relative_path.as_posix()}', progress_callback, cancel_callback)
 
 
 def recurring_backup_settings() -> dict[str, Any]:
@@ -3919,12 +3934,16 @@ def recurring_backup_next_run(config: dict[str, Any]) -> str:
 
 def create_recurring_database_backup(
     config: dict[str, Any], progress_callback: Callable[[str, float], None] | None = None,
+    cancel_callback: Callable[[], None] | None = None,
 ) -> Path:
     """Write one consistent ZIP backup for the enabled recurring-backup parts."""
     timestamp = datetime.now().astimezone().strftime('%Y%m%d-%H%M%S')
     backup_root = recurring_backup_path(config)
     backup_root.mkdir(parents=True, exist_ok=True)
     destination = backup_root / f'dashboard-analytic-backup-{timestamp}.zip'
+    def ensure_not_cancelled() -> None:
+        if cancel_callback:
+            cancel_callback()
     # Registry records can outlive interrupted migrations or deleted workspace
     # folders. Never create backup entries for a workspace without its own
     # database, because that would turn stale registry rows into phantom ZIP
@@ -3949,15 +3968,20 @@ def create_recurring_database_backup(
         if component in components
     ]
     def report_progress(message: str, progress: float) -> None:
+        ensure_not_cancelled()
         if progress_callback:
             progress_callback(message, max(1.0, min(98.0, progress)))
 
     report_progress('Inspecting backup sources', 3.0)
     def source_tree_size(source: Path) -> int:
-        return sum(
-            path.stat().st_size for path in source.rglob('*')
-            if path.is_file() and not path.name.endswith(('-wal', '-shm'))
-        ) if source.exists() else 0
+        if not source.exists():
+            return 0
+        total = 0
+        for path in source.rglob('*'):
+            ensure_not_cancelled()
+            if path.is_file() and not path.name.endswith(('-wal', '-shm')):
+                total += path.stat().st_size
+        return total
     total_bytes = (repository.global_db_path.stat().st_size if 'app_database' in components and repository.global_db_path.exists() else 0)
     for workspace in workspaces:
         if 'workspace_database' in components:
@@ -3984,51 +4008,56 @@ def create_recurring_database_backup(
     manifest_components = ['app_database'] if 'app_database' in components else []
     if workspace_manifest_components:
         manifest_components.append('workspace_components')
-    with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
-        manifest = archive_manifest(
-            'database-backup', components=manifest_components,
-            workspace_components=workspace_manifest_components,
-            created_at=datetime.now().astimezone().isoformat(timespec='seconds'),
-            workspaces=[],
-        )
-        if 'app_database' in components:
-            report_progress('Creating application database snapshot', 5.0)
-            _archive_database(archive, repository.global_db_path, 'application/application.db', backup_root, archived_bytes)
-        for workspace in workspaces:
-            item = {'id': workspace.id, 'name': workspace.name}
-            # Workspace IDs are implementation details (for example,
-            # ``default`` or ``workspace-3``). Use the validated visible
-            # name for the archive tree so a backup can be inspected by the
-            # same workspace names shown throughout the application.
-            archive_workspace_root = f'workspaces/{workspace.name}'
-            if 'workspace_database' in components:
-                report_progress(f'Creating workspace database snapshot for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
-                _archive_database(archive, workspace.database_path, f'{archive_workspace_root}/database.sqlite', backup_root, archived_bytes)
-            if 'dashboards' in components:
-                report_progress(f'Exporting Dashboards for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
-                _archive_workspace_dashboards(archive, workspace, archive_workspace_root, archived_bytes)
-            if 'report_templates' in components:
-                report_progress(f'Archiving Report Templates for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
-                _archive_workspace_report_templates(archive, workspace, f'{archive_workspace_root}/report-templates', archived_bytes)
-            if 'operator_mappings' in components:
-                report_progress(f'Exporting Operator Mappings for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
-                _archive_workspace_operator_mappings(archive, workspace, archive_workspace_root, archived_bytes)
-            if 'auto_calculated_fields' in components:
-                report_progress(f'Exporting Auto-calculated Fields for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
-                task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
-                archive.writestr(
-                    f'{archive_workspace_root}/auto-calculated-fields/auto-calculated-fields.json',
-                    json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
-                )
-            if 'input' in components:
-                report_progress(f'Archiving input files for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
-                _archive_tree(archive, workspace.input_dir, f'{archive_workspace_root}/input', progress_callback=archived_bytes)
-            if 'output' in components:
-                report_progress(f'Archiving output files for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
-                _archive_tree(archive, workspace.output_dir, f'{archive_workspace_root}/output', progress_callback=archived_bytes)
-            if workspace_manifest_components:
-                manifest['workspaces'].append(item)
-        archive.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
+    try:
+        with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+            manifest = archive_manifest(
+                'database-backup', components=manifest_components,
+                workspace_components=workspace_manifest_components,
+                created_at=datetime.now().astimezone().isoformat(timespec='seconds'),
+                workspaces=[],
+            )
+            if 'app_database' in components:
+                report_progress('Creating application database snapshot', 5.0)
+                _archive_database(archive, repository.global_db_path, 'application/application.db', backup_root, archived_bytes, cancel_callback=ensure_not_cancelled)
+            for workspace in workspaces:
+                ensure_not_cancelled()
+                item = {'id': workspace.id, 'name': workspace.name}
+                # Workspace IDs are implementation details (for example,
+                # ``default`` or ``workspace-3``). Use the validated visible
+                # name for the archive tree so a backup can be inspected by the
+                # same workspace names shown throughout the application.
+                archive_workspace_root = f'workspaces/{workspace.name}'
+                if 'workspace_database' in components:
+                    report_progress(f'Creating workspace database snapshot for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    _archive_database(archive, workspace.database_path, f'{archive_workspace_root}/database.sqlite', backup_root, archived_bytes, cancel_callback=ensure_not_cancelled)
+                if 'dashboards' in components:
+                    report_progress(f'Exporting Dashboards for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    _archive_workspace_dashboards(archive, workspace, archive_workspace_root, archived_bytes)
+                if 'report_templates' in components:
+                    report_progress(f'Archiving Report Templates for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    _archive_workspace_report_templates(archive, workspace, f'{archive_workspace_root}/report-templates', archived_bytes)
+                if 'operator_mappings' in components:
+                    report_progress(f'Exporting Operator Mappings for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    _archive_workspace_operator_mappings(archive, workspace, archive_workspace_root, archived_bytes)
+                if 'auto_calculated_fields' in components:
+                    report_progress(f'Exporting Auto-calculated Fields for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    task_repository = Repository(workspace.database_path, repository.global_db_path, workspace_registry.registry_path)
+                    archive.writestr(
+                        f'{archive_workspace_root}/auto-calculated-fields/auto-calculated-fields.json',
+                        json.dumps(task_repository.list_calculated_dimensions(), ensure_ascii=False, indent=2),
+                    )
+                if 'input' in components:
+                    report_progress(f'Archiving input files for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    _archive_tree(archive, workspace.input_dir, f'{archive_workspace_root}/input', progress_callback=archived_bytes, cancel_callback=ensure_not_cancelled)
+                if 'output' in components:
+                    report_progress(f'Archiving output files for {workspace.name}', max(5.0, completed_bytes * 96.0 / max(total_bytes, 1)))
+                    _archive_tree(archive, workspace.output_dir, f'{archive_workspace_root}/output', progress_callback=archived_bytes, cancel_callback=ensure_not_cancelled)
+                if workspace_manifest_components:
+                    manifest['workspaces'].append(item)
+            archive.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise
     report_progress('Finalising backup ZIP', 98.0)
     backups = sorted(backup_root.glob('dashboard-analytic-backup-*.zip'), key=lambda item: item.stat().st_mtime, reverse=True)
     for stale in backups[max(1, int(config['max_backups'])):]:
@@ -4100,12 +4129,17 @@ def run_recurring_backup_scheduler() -> None:
                     status='processing', message='Preparing scheduled backup', progress=1,
                     started_at=datetime.now(timezone.utc).timestamp(),
                 )
+            def stop_if_cancelled() -> None:
+                with SCHEDULED_BACKUP_JOBS_LOCK:
+                    if job.get('cancel_requested'):
+                        raise InterruptedError('Scheduled backup stopped by user.')
             def update_progress(message: str, progress: float) -> None:
+                stop_if_cancelled()
                 with SCHEDULED_BACKUP_JOBS_LOCK:
                     current = SCHEDULED_BACKUP_JOBS.get(job_id)
                     if current and current.get('status') == 'processing':
                         current.update(message=message, progress=max(1, min(98, round(progress))))
-            destination = create_recurring_database_backup(config, update_progress)
+            destination = create_recurring_database_backup(config, update_progress, stop_if_cancelled)
             with SCHEDULED_BACKUP_JOBS_LOCK:
                 if job.get('cancel_requested'):
                     destination.unlink(missing_ok=True)
@@ -4123,6 +4157,14 @@ def run_recurring_backup_scheduler() -> None:
                     'job_id': job_id, 'period': period, 'file': destination.name,
                     'executed_by': 'system',
                 }))
+        except InterruptedError as exc:
+            with SCHEDULED_BACKUP_JOBS_LOCK:
+                job.update(status='cancelled', message='Scheduled backup stopped and incomplete ZIP removed', error=str(exc), progress=100,
+                           finished_at=datetime.now(timezone.utc).timestamp())
+            if audit_repository:
+                audit_repository.try_add_log('system', 'scheduled_database_backup_stopped', json.dumps({
+                    'job_id': job_id, 'period': period, 'executed_by': 'system',
+                }))
         except Exception as exc:
             with SCHEDULED_BACKUP_JOBS_LOCK:
                 job.update(status='failed', message=f'Backup failed: {exc}', progress=100,
@@ -4134,7 +4176,7 @@ def run_recurring_backup_scheduler() -> None:
         finally:
             with RECURRING_BACKUP_LOCK:
                 RECURRING_BACKUP_RUNNING = False
-    Thread(target=run, name='recurring-database-backup', daemon=True).start()
+    submit_background_task(run)
 
 
 def start_manual_database_backup(config: dict[str, Any], username: str) -> dict[str, Any]:
@@ -4182,6 +4224,7 @@ def start_manual_database_backup(config: dict[str, Any], username: str) -> dict[
                         }))
                     return
             def update_progress(message: str, progress: float) -> None:
+                stop_if_cancelled()
                 with MANUAL_BACKUP_JOBS_LOCK:
                     current = MANUAL_BACKUP_JOBS.get(job_id)
                     if current and current.get('status') == 'processing':
@@ -4190,7 +4233,12 @@ def start_manual_database_backup(config: dict[str, Any], username: str) -> dict[
                             message=message,
                         )
 
-            destination = create_recurring_database_backup(config, update_progress)
+            def stop_if_cancelled() -> None:
+                with MANUAL_BACKUP_JOBS_LOCK:
+                    if job.get('cancel_requested'):
+                        raise InterruptedError('Backup stopped by user.')
+
+            destination = create_recurring_database_backup(config, update_progress, stop_if_cancelled)
             with MANUAL_BACKUP_JOBS_LOCK:
                 if job.get('cancel_requested'):
                     destination.unlink(missing_ok=True)
@@ -4211,6 +4259,16 @@ def start_manual_database_backup(config: dict[str, Any], username: str) -> dict[
                 audit_repository.try_add_log(username, 'manual_database_backup_completed', json.dumps({
                     'job_id': job_id, 'file': destination.name, 'executed_by': 'system',
                 }))
+        except InterruptedError as exc:
+            with MANUAL_BACKUP_JOBS_LOCK:
+                job.update(
+                    status='cancelled', message='Backup stopped and incomplete ZIP removed', error=str(exc), progress=100,
+                    finished_at=datetime.now(timezone.utc).timestamp(),
+                )
+            if audit_repository:
+                audit_repository.try_add_log(username, 'manual_database_backup_stopped', json.dumps({
+                    'job_id': job_id, 'executed_by': 'system',
+                }))
         except Exception as exc:
             with MANUAL_BACKUP_JOBS_LOCK:
                 job.update(
@@ -4226,7 +4284,7 @@ def start_manual_database_backup(config: dict[str, Any], username: str) -> dict[
                 with RECURRING_BACKUP_LOCK:
                     RECURRING_BACKUP_RUNNING = False
 
-    Thread(target=run, name=f'manual-database-backup-{job_id[:8]}', daemon=True).start()
+    submit_background_task(run)
     return job
 
 
@@ -4400,6 +4458,12 @@ def start_manual_database_restore(archive_path: Path, components: Iterable[str],
     def run() -> None:
         try:
             with MANUAL_RESTORE_JOBS_LOCK:
+                if job.get('cancel_requested'):
+                    job.update(
+                        status='cancelled', message='Backup restore stopped by user.', progress=100,
+                        finished_at=datetime.now(timezone.utc).timestamp(),
+                    )
+                    return
                 job.update(
                     status='processing', message='Restoring selected backup data', progress=15,
                     started_at=datetime.now(timezone.utc).timestamp(),
@@ -4410,7 +4474,7 @@ def start_manual_database_restore(archive_path: Path, components: Iterable[str],
         except Exception as exc:
             with MANUAL_RESTORE_JOBS_LOCK:
                 job.update(status='failed', message='Backup restore failed', error=str(exc), progress=100, finished_at=datetime.now(timezone.utc).timestamp())
-    Thread(target=run, name=f'manual-database-restore-{job_id[:8]}', daemon=True).start()
+    submit_background_task(run)
     return job
 
 
@@ -5066,10 +5130,7 @@ def start_export_job(
     }
     with EXPORT_JOBS_LOCK:
         EXPORT_JOBS[job_id] = job
-    Thread(
-        target=_run_export_job, args=(job_id, target, selected_workspace_ids, include_generated_outputs),
-        name=f'export-{job_id[:8]}', daemon=True,
-    ).start()
+    submit_background_task(_run_export_job, job_id, target, selected_workspace_ids, include_generated_outputs)
     return job
 
 
@@ -5658,19 +5719,29 @@ def _run_import_job(job_id: str) -> None:
         package_path = Path(str(job['path']))
         manifest = dict(job['manifest'])
 
+    def stop_if_cancelled() -> None:
+        with IMPORT_JOBS_LOCK:
+            if bool(job.get('cancel_requested')):
+                raise InterruptedError('Import stopped by user.')
+
     def update_progress(phase: str, progress: float) -> None:
+        stop_if_cancelled()
         with IMPORT_JOBS_LOCK:
             current = IMPORT_JOBS.get(job_id)
             if current:
                 current.update({'phase': phase, 'progress': round(min(100.0, max(0.0, progress)), 1)})
 
     try:
+        stop_if_cancelled()
         notice = _apply_import_archive(
             package_path, manifest, update_progress,
             destination_workspace_ids=job.get('destination_workspace_ids') or (),
         )
         with IMPORT_JOBS_LOCK:
             job.update({'status': 'ready', 'notice': notice, 'finished_at': datetime.now(timezone.utc).timestamp()})
+    except InterruptedError as exc:
+        with IMPORT_JOBS_LOCK:
+            job.update({'status': 'cancelled', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
     except Exception as exc:
         with IMPORT_JOBS_LOCK:
             job.update({'status': 'failed', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
@@ -5702,7 +5773,7 @@ def start_import_job(
             'created_at': datetime.now(timezone.utc).timestamp(),
         }
         IMPORT_JOBS[job_id] = job
-    Thread(target=_run_import_job, args=(job_id,), name=f'import-{job_id[:8]}', daemon=True).start()
+    submit_background_task(_run_import_job, job_id)
     return job
 
 
@@ -5827,6 +5898,10 @@ def _run_received_transfer(offer_id: str) -> None:
         offer = TRANSFER_OFFERS.get(offer_id)
         if not offer:
             return
+        if offer.get('cancel_requested'):
+            offer.update({'status': 'cancelled', 'phase': 'cancelled', 'finished_at': datetime.now(timezone.utc).timestamp()})
+            _save_transfer_offer(offer)
+            return
         package_path = Path(str(offer['path']))
         manifest = dict(offer['manifest'])
         offer.update({'status': 'importing', 'phase': 'validating', 'progress': 0.0})
@@ -5836,6 +5911,8 @@ def _run_received_transfer(offer_id: str) -> None:
         with TRANSFER_LOCK:
             current_offer = TRANSFER_OFFERS.get(offer_id)
             if current_offer:
+                if current_offer.get('cancel_requested'):
+                    raise InterruptedError('Incoming transfer stopped by user.')
                 current_offer.update({'phase': phase, 'progress': round(min(100.0, max(0.0, progress)), 1)})
     try:
         notice = _apply_import_archive(
@@ -5844,6 +5921,10 @@ def _run_received_transfer(offer_id: str) -> None:
         )
         with TRANSFER_LOCK:
             offer.update({'status': 'ready', 'phase': 'complete', 'progress': 100.0, 'notice': notice, 'finished_at': datetime.now(timezone.utc).timestamp()})
+            _save_transfer_offer(offer)
+    except InterruptedError as exc:
+        with TRANSFER_LOCK:
+            offer.update({'status': 'cancelled', 'phase': 'cancelled', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
             _save_transfer_offer(offer)
     except Exception as exc:
         with TRANSFER_LOCK:
@@ -6097,7 +6178,7 @@ def start_transfer_job(
     }
     with TRANSFER_LOCK:
         TRANSFER_JOBS[job_id] = job
-    Thread(target=_run_transfer_job, args=(job_id,), name=f'transfer-{job_id[:8]}', daemon=True).start()
+    submit_background_task(_run_transfer_job, job_id)
     return job
 
 
@@ -6370,6 +6451,16 @@ def describe_workspace_log_entry(log: dict[str, Any]) -> str:
             return f"Report job {details.get('report_id')} failed: {details.get('error', 'Unknown generation error')}"
         if log['action'] == 'chart_set_generation_failed':
             return f"Chart Set job {details.get('job_id')} failed: {details.get('error', 'Unknown generation error')}"
+        if log['action'] == 'prewarm_dashboard_cache':
+            return (
+                f"Prewarmed {details.get('universes', 0)} standard Dashboard universes "
+                f"for Dashboard {details.get('dashboard_id', '')}."
+            )
+        if log['action'] == 'prewarm_dashboard_cache_failed':
+            return (
+                f"Dashboard cache prewarm failed for Dashboard {details.get('dashboard_id', '')}: "
+                f"{details.get('error', 'Unknown error')}"
+            )
         if log['action'] == 'recover_interrupted_background_jobs':
             reports = details.get('reports') or []
             chart_jobs = details.get('chart_jobs') or []
@@ -6432,7 +6523,7 @@ def build_app_logs() -> list[dict[str, Any]]:
             'created_at': created_at,
             'date': created_at[:10],
         }
-        log['summary'] = describe_workspace_log_entry(log)
+        log['summary'] = f'[{created_at}] {describe_workspace_log_entry(log)}' if created_at else describe_workspace_log_entry(log)
         log['log_type'] = classify_workspace_log_entry(log)
         logs.append(log)
     return logs
@@ -7195,9 +7286,13 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
             'progress': progress,
             **_background_task_timing(job),
         }
-        if workspace_id != '__server__' and prefix in {'export', 'import'}:
+        if prefix in {'export', 'import', 'transfer', 'incoming-transfer'}:
             task['stop_task_id'] = f'{prefix}:{job.get("id")}'
-            task['stop_url'] = f'/api/background-tasks/{workspace_id}/stop'
+            task['stop_url'] = (
+                '/api/background-tasks/server/stop'
+                if workspace_id == '__server__'
+                else f'/api/background-tasks/{workspace_id}/stop'
+            )
         tasks.append(task)
 
     with EXPORT_JOBS_LOCK:
@@ -7251,14 +7346,20 @@ def _global_background_tasks(user: SessionUser, accessible_ids: set[str]) -> lis
     for job in manual_restore_jobs:
         if job.get('status') not in {'queued', 'processing'} or job.get('owner') != user.username:
             continue
-        tasks.append({
+        task = {
             'id': f'manual-restore:{job.get("id")}',
             'workspace_id': '__server__',
             'label': 'Restoring database backup',
             'detail': str(job.get('message') or 'Restoring selected backup data'),
             'progress': max(0, min(100, int(job.get('progress') or 0))),
             **_background_task_timing(job),
-        })
+        }
+        # Once restoration has started it replaces live data and cannot be
+        # interrupted safely. A queued restore is still cancellable.
+        if job.get('status') == 'queued':
+            task['stop_task_id'] = f'manual-restore:{job.get("id")}'
+            task['stop_url'] = '/api/background-tasks/server/stop'
+        tasks.append(task)
 
     with TRANSFER_LOCK:
         transfer_jobs = [dict(job) for job in TRANSFER_JOBS.values()]
@@ -7331,6 +7432,10 @@ def background_tasks_status(user: SessionUser = Depends(current_user)) -> JSONRe
                 ),
                 'progress': 100 if job.get('status') == 'ready' else (job.get('progress') if clearing_cache else None),
                 **_background_task_timing(job),
+                **({
+                    'stop_task_id': f'workspace-{job.get("operation")}:{job.get("id")}',
+                    'stop_url': f'/api/background-tasks/{workspace_id}/stop',
+                } if job.get('status') in {'queued', 'processing'} else {}),
             }],
         }
 
@@ -7388,6 +7493,8 @@ def background_tasks_status(user: SessionUser = Depends(current_user)) -> JSONRe
             'detail': str(job.get('message') or 'Deleting generated outputs'),
             'progress': progress,
             **_background_task_timing(job),
+            'stop_task_id': f'bulk-delete:{job.get("id")}',
+            'stop_url': f'/api/background-tasks/{workspace_id}/stop',
         })
 
     global_tasks = _global_background_tasks(user, accessible_ids)
@@ -7506,12 +7613,38 @@ def stop_background_task(
             job = IMPORT_JOBS.get(raw_identifier)
             if not job or workspace_id not in {str(item) for item in (job.get('destination_workspace_ids') or [])}:
                 raise HTTPException(status_code=404, detail='Import task not found.')
-            if job.get('status') == 'processing':
-                raise HTTPException(status_code=409, detail='The import has already started and cannot be stopped.')
-            if job.get('status') != 'queued':
+            if job.get('status') not in {'queued', 'processing'}:
                 raise HTTPException(status_code=409, detail='This import task can no longer be stopped.')
-            Path(str(job.get('path') or '')).unlink(missing_ok=True)
-            job.update(status='cancelled', error='Import stopped by user.', finished_at=datetime.now(timezone.utc).timestamp())
+            job.update(cancel_requested=True, phase='stopping import')
+    elif prefix == 'transfer':
+        with TRANSFER_LOCK:
+            job = TRANSFER_JOBS.get(raw_identifier)
+            if not job or job.get('owner') != user.username:
+                raise HTTPException(status_code=404, detail='Transfer task not found.')
+            if workspace_id not in {str(item) for item in (job.get('workspace_ids') or [])}:
+                raise HTTPException(status_code=404, detail='Transfer task not found.')
+            if job.get('status') in {'ready', 'failed', 'cancelled'}:
+                raise HTTPException(status_code=409, detail='This transfer task can no longer be stopped.')
+            job.update(cancel_requested=True, status='cancelling', phase='cancellation requested')
+    elif prefix in {'workspace-delete', 'workspace-cache-clear'}:
+        operation = 'delete' if prefix == 'workspace-delete' else 'cache-clear'
+        with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+            job = WORKSPACE_LIFECYCLE_JOBS.get(raw_identifier)
+            if (
+                not job or str(job.get('workspace_id') or '') != workspace_id
+                or job.get('operation') != operation or job.get('status') not in {'queued', 'processing'}
+            ):
+                raise HTTPException(status_code=409, detail='This workspace task can no longer be stopped.')
+            job.update(cancel_requested=True, message='Stopping background job')
+    elif prefix == 'bulk-delete':
+        with BULK_REPORT_DELETION_JOBS_LOCK:
+            job = BULK_REPORT_DELETION_JOBS.get(raw_identifier)
+            if (
+                not job or str(job.get('workspace_id') or '') != workspace_id
+                or job.get('status') not in {'queued', 'processing'}
+            ):
+                raise HTTPException(status_code=409, detail='This deletion task can no longer be stopped.')
+            job.update(cancel_requested=True, message='Stopping deletion')
     elif prefix == 'workspace-duplicate':
         if raw_identifier != workspace_id or workspace.status != 'duplicating':
             raise HTTPException(status_code=409, detail='This workspace duplication can no longer be stopped.')
@@ -7526,7 +7659,7 @@ def stop_background_task(
 def stop_server_background_task(task_id: str = Form(...), user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Stop an owner-visible server task that does not belong to one workspace."""
     prefix, _, job_id = str(task_id).partition(':')
-    if prefix not in {'manual-backup', 'scheduled-backup'} or not job_id:
+    if prefix not in {'manual-backup', 'scheduled-backup', 'manual-restore', 'transfer', 'incoming-transfer'} or not job_id:
         raise HTTPException(status_code=400, detail='This background task cannot be stopped.')
     if prefix == 'scheduled-backup':
         if user.role != 'super-admin':
@@ -7536,6 +7669,30 @@ def stop_server_background_task(task_id: str = Form(...), user: SessionUser = De
             if not job or job.get('status') not in {'queued', 'processing'}:
                 raise HTTPException(status_code=409, detail='This database backup can no longer be stopped.')
             job.update(cancel_requested=True, message='Stopping scheduled backup')
+        return JSONResponse({'stopping': task_id})
+    if prefix == 'manual-restore':
+        with MANUAL_RESTORE_JOBS_LOCK:
+            job = MANUAL_RESTORE_JOBS.get(job_id)
+            if not job or job.get('owner') != user.username or job.get('status') != 'queued':
+                raise HTTPException(status_code=409, detail='A restore can only be stopped before it starts.')
+            job.update(cancel_requested=True, message='Stopping database restore')
+        return JSONResponse({'stopping': task_id})
+    if prefix == 'transfer':
+        with TRANSFER_LOCK:
+            job = TRANSFER_JOBS.get(job_id)
+            if not job or job.get('owner') != user.username or job.get('status') in {'ready', 'failed', 'cancelled'}:
+                raise HTTPException(status_code=409, detail='This transfer task can no longer be stopped.')
+            job.update(cancel_requested=True, status='cancelling', phase='cancellation requested')
+        return JSONResponse({'stopping': task_id})
+    if prefix == 'incoming-transfer':
+        if user.role != 'super-admin':
+            raise HTTPException(status_code=403, detail='Only super-admins can stop incoming transfers.')
+        with TRANSFER_LOCK:
+            offer = TRANSFER_OFFERS.get(job_id)
+            if not offer or offer.get('status') not in {'receiving', 'importing'}:
+                raise HTTPException(status_code=409, detail='This incoming transfer can no longer be stopped.')
+            offer.update(cancel_requested=True, status='cancelling', phase='cancellation requested')
+            _save_transfer_offer(offer)
         return JSONResponse({'stopping': task_id})
     with MANUAL_BACKUP_JOBS_LOCK:
         job = MANUAL_BACKUP_JOBS.get(job_id)
@@ -7772,7 +7929,7 @@ def duplicate_workspace(
         if created_workspace is not None:
             with WORKSPACE_DUPLICATION_STOP_REQUESTS_LOCK:
                 WORKSPACE_DUPLICATION_STOP_REQUESTS.discard(created_workspace.id)
-    Thread(target=run_duplication, name=f'workspace-duplicate-{workspace_id}', daemon=True).start()
+    submit_background_task(run_duplication)
     return RedirectResponse('/workspace?workspace_notice=Workspace+duplication+started.+The+copy+will+appear+when+ready.', status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -7834,6 +7991,9 @@ def delete_workspace(
         with WORKSPACE_LIFECYCLE_JOBS_LOCK:
             job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
             if job:
+                if job.get('cancel_requested'):
+                    job.update(status='cancelled', message='Workspace deletion stopped by user.', finished_at=datetime.now(timezone.utc).timestamp())
+                    return
                 job.update(status='processing', started_at=datetime.now(timezone.utc).timestamp())
         try:
             if delete_workspace_files:
@@ -7854,7 +8014,7 @@ def delete_workspace(
                 if job:
                     job.update(status='failed', error=str(exc), finished_at=datetime.now(timezone.utc).timestamp())
 
-    Thread(target=run_deletion, name=f'workspace-delete-{workspace_id}', daemon=True).start()
+    submit_background_task(run_deletion)
     return RedirectResponse(
         '/workspace?workspace_notice=Workspace+deletion+started.+The+workspace+will+disappear+when+the+operation+finishes.',
         status_code=status.HTTP_303_SEE_OTHER,
@@ -7896,6 +8056,9 @@ def delete_workspace_cache(
         with WORKSPACE_LIFECYCLE_JOBS_LOCK:
             job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
             if job:
+                if job.get('cancel_requested'):
+                    job.update(status='cancelled', message='Cache clearing stopped by user.', finished_at=datetime.now(timezone.utc).timestamp())
+                    return
                 job.update(
                     status='processing', progress=15,
                     message='Removing generated Dashboard artifacts',
@@ -7911,6 +8074,11 @@ def delete_workspace_cache(
                 workspace_root / '.dashboard-chart-cache',
             )
             for index, cache_dir in enumerate(cache_directories, start=1):
+                with WORKSPACE_LIFECYCLE_JOBS_LOCK:
+                    job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
+                    if job and job.get('cancel_requested'):
+                        job.update(status='cancelled', message='Cache clearing stopped by user.', finished_at=datetime.now(timezone.utc).timestamp())
+                        return
                 shutil.rmtree(cache_dir, ignore_errors=True)
                 with WORKSPACE_LIFECYCLE_JOBS_LOCK:
                     job = WORKSPACE_LIFECYCLE_JOBS.get(job_id)
@@ -7943,7 +8111,7 @@ def delete_workspace_cache(
                 'executed_by': 'system',
             })
 
-    Thread(target=run_cache_clear, name=f'workspace-cache-clear-{workspace_id}', daemon=True).start()
+    submit_background_task(run_cache_clear)
     notice = 'Workspace cache clearing started. Dashboard data and chart models will be rebuilt when needed.'
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JSONResponse({
@@ -9943,11 +10111,10 @@ def generate_netcheck_cdr_report(
         generate_tooltips=generate_tooltips,
     )
     task_repository = Repository(Path(repository.db_path))
-    Thread(
-        target=_run_netcheck_report_job,
-        args=(report_id, task_repository, selected, technology, multivendor, catalog_entries, template, destination, user.username, selected_catalogue['name'], generate_tooltips),
-        name=f'report-{report_id}', daemon=True,
-    ).start()
+    submit_background_task(
+        _run_netcheck_report_job, report_id, task_repository, selected, technology, multivendor,
+        catalog_entries, template, destination, user.username, selected_catalogue['name'], generate_tooltips,
+    )
     repository.add_log(user.username, 'generate_powerpoint_report_requested', json.dumps({
         'report_id': report_id, 'technology': technology, 'scope': report_scope,
         'template': selected_catalogue['name'], 'datasets': dataset_ids,
@@ -10009,11 +10176,10 @@ def generate_netcheck_cdr_charts(
         'datasets': dataset_ids,
         'generate_tooltips': generate_tooltips,
     }))
-    Thread(
-        target=_run_report_chart_job,
-        args=(job_id, task_repository, dataset_ids, technology, report_scope, selected_catalogue['name'], output_dir, user.username, generate_tooltips),
-        name=f'report-charts-{job_id}', daemon=True,
-    ).start()
+    submit_background_task(
+        _run_report_chart_job, job_id, task_repository, dataset_ids, technology, report_scope,
+        selected_catalogue['name'], output_dir, user.username, generate_tooltips,
+    )
     return JSONResponse({'job_id': job_id, 'status': 'queued'}, status_code=status.HTTP_202_ACCEPTED)
 
 
@@ -10545,8 +10711,15 @@ def start_bulk_report_deletion(workspace: Workspace, kind: str, username: str) -
             workspace.database_path, global_db_path=repository.global_db_path,
             workspace_registry_db_path=workspace_registry.registry_path,
         )
+        def stop_if_cancelled() -> None:
+            with BULK_REPORT_DELETION_JOBS_LOCK:
+                if job.get('cancel_requested'):
+                    raise InterruptedError('Deletion stopped by user.')
         try:
             with BULK_REPORT_DELETION_JOBS_LOCK:
+                if job.get('cancel_requested'):
+                    job.update(status='cancelled', message='Deletion stopped by user.', finished_at=datetime.now(timezone.utc).timestamp())
+                    return
                 job.update(
                     status='processing', message='Preparing generated outputs for deletion',
                     started_at=datetime.now(timezone.utc).timestamp(),
@@ -10557,6 +10730,7 @@ def start_bulk_report_deletion(workspace: Workspace, kind: str, username: str) -
                 with BULK_REPORT_DELETION_JOBS_LOCK:
                     job.update(total=total, message='Deleting PowerPoint reports')
                 for index, row in enumerate(rows, start=1):
+                    stop_if_cancelled()
                     deleted = task_repository.delete_report_run(int(row['id']))
                     if deleted:
                         _delete_report_job_artifacts(deleted, workspace.output_dir)
@@ -10574,10 +10748,12 @@ def start_bulk_report_deletion(workspace: Workspace, kind: str, username: str) -
                 total = max(len(rows), len(chart_directories))
                 with BULK_REPORT_DELETION_JOBS_LOCK:
                     job.update(total=total, message='Deleting Chart Sets')
+                stop_if_cancelled()
                 if charts_root.is_dir():
                     shutil.rmtree(charts_root)
                 charts_root.mkdir(parents=True, exist_ok=True)
                 for index, row in enumerate(rows, start=1):
+                    stop_if_cancelled()
                     task_repository.delete_report_chart_job(int(row['id']))
                     with BULK_REPORT_DELETION_JOBS_LOCK:
                         job.update(completed=index)
@@ -10585,11 +10761,14 @@ def start_bulk_report_deletion(workspace: Workspace, kind: str, username: str) -
             invalidate_workspace_size_cache(workspace.database_path.parent)
             with BULK_REPORT_DELETION_JOBS_LOCK:
                 job.update(status='ready', completed=max(int(job['completed']), int(job['total'])), message='Generated outputs deleted', finished_at=datetime.now(timezone.utc).timestamp())
+        except InterruptedError as exc:
+            with BULK_REPORT_DELETION_JOBS_LOCK:
+                job.update(status='cancelled', message=str(exc), finished_at=datetime.now(timezone.utc).timestamp())
         except Exception as exc:
             with BULK_REPORT_DELETION_JOBS_LOCK:
                 job.update(status='failed', error=str(exc), message='Bulk deletion failed', finished_at=datetime.now(timezone.utc).timestamp())
 
-    Thread(target=run, name=f'bulk-delete-{kind}-{workspace.id}', daemon=True).start()
+    submit_background_task(run)
     return job
 
 
@@ -10695,11 +10874,10 @@ def retry_report_chart_job(job_id: int, user: SessionUser = Depends(current_user
     task_repository = Repository(Path(repository.db_path), repository.global_db_path)
     output_dir = Path(settings.output_dir)
     generate_tooltips = bool(previous['generate_tooltips'])
-    Thread(
-        target=_run_report_chart_job,
-        args=(job_id, task_repository, normalized_ids, technology, str(previous['scope'] or 'single'), template_name, output_dir, user.username, generate_tooltips),
-        name=f'report-charts-{job_id}', daemon=True,
-    ).start()
+    submit_background_task(
+        _run_report_chart_job, job_id, task_repository, normalized_ids, technology,
+        str(previous['scope'] or 'single'), template_name, output_dir, user.username, generate_tooltips,
+    )
     repository.add_log(user.username, 'retry_report_chart_job', json.dumps({
         'job_id': job_id, 'reused': True, 'relaunched': previous_status == 'ready',
         'generate_tooltips': generate_tooltips,
@@ -10863,11 +11041,11 @@ def retry_report_job(report_id: int, user: SessionUser = Depends(current_user)) 
         raise HTTPException(status_code=409, detail='This report job is no longer available for relaunch.')
     task_repository = Repository(Path(repository.db_path))
     generate_tooltips = bool(previous['generate_tooltips'])
-    Thread(
-        target=_run_netcheck_report_job,
-        args=(report_id, task_repository, selected, technology, multivendor, catalog_entries, settings.ppt_templates_dir / TEMPLATE_NAMES[technology], destination, user.username, template_option['name'], generate_tooltips),
-        name=f'report-{report_id}', daemon=True,
-    ).start()
+    submit_background_task(
+        _run_netcheck_report_job, report_id, task_repository, selected, technology, multivendor,
+        catalog_entries, settings.ppt_templates_dir / TEMPLATE_NAMES[technology], destination,
+        user.username, template_option['name'], generate_tooltips,
+    )
     repository.add_log(user.username, 'retry_report_job', json.dumps({
         'report_id': report_id, 'reused': True, 'generate_tooltips': generate_tooltips,
     }))
@@ -11722,6 +11900,7 @@ def save_configuration(
     report_chart_renderer: str = Form(...),
     chromium_path: str = Form(''),
     ignore_event_time_filtering_value: bool = Form(False, alias='ignore_event_time_filtering'),
+    max_background_tasks: int = Form(1),
     user: SessionUser = Depends(admin_user),
 ) -> RedirectResponse:
     timezone_name = timezone_name.strip()
@@ -11734,6 +11913,8 @@ def save_configuration(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     chromium_path = chromium_path.strip()
+    if not 1 <= max_background_tasks <= 32:
+        raise HTTPException(status_code=400, detail='Maximum simultaneous tasks must be between 1 and 32.')
     if chromium_path:
         executable = Path(chromium_path).expanduser()
         if not executable.is_file() or not os.access(executable, os.X_OK):
@@ -11744,6 +11925,7 @@ def save_configuration(
         'report_chart_renderer': renderer,
         'chromium_path': chromium_path,
         'ignore_event_time_filtering': bool(ignore_event_time_filtering_value),
+        'max_background_tasks': max_background_tasks,
     }
     repository.set_application_state(RUNTIME_CONFIGURATION_STATE_KEY, json.dumps(values, sort_keys=True))
     apply_runtime_configuration(values)
@@ -11753,6 +11935,7 @@ def save_configuration(
         'report_chart_renderer': renderer,
         'chromium_configured': bool(chromium_path),
         'ignore_event_time_filtering': bool(ignore_event_time_filtering_value),
+        'max_background_tasks': max_background_tasks,
     }))
     return RedirectResponse('/config?notice=Configuration+saved.', status_code=status.HTTP_303_SEE_OTHER)
 
@@ -12175,6 +12358,9 @@ async def receive_transfer_package(offer_id: str, request: Request) -> JSONRespo
     try:
         with package_path.open('wb') as output:
             async for chunk in request.stream():
+                with TRANSFER_LOCK:
+                    if offer.get('cancel_requested'):
+                        raise InterruptedError('Incoming transfer stopped by user.')
                 output.write(chunk)
                 with TRANSFER_LOCK:
                     offer['bytes_received'] = int(offer.get('bytes_received') or 0) + len(chunk)
@@ -12187,7 +12373,7 @@ async def receive_transfer_package(offer_id: str, request: Request) -> JSONRespo
         with TRANSFER_LOCK:
             offer.update({'path': str(package_path), 'manifest': manifest, 'status': 'received', 'phase': 'package received', 'progress': 100.0})
             _save_transfer_offer(offer)
-        Thread(target=_run_received_transfer, args=(offer_id,), name=f'incoming-transfer-{offer_id[:8]}', daemon=True).start()
+        submit_background_task(_run_received_transfer, offer_id)
         return JSONResponse({'offer_id': offer_id, 'status': 'received'})
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
         package_path.unlink(missing_ok=True)
@@ -12195,6 +12381,12 @@ async def receive_transfer_package(offer_id: str, request: Request) -> JSONRespo
             offer.update({'status': 'failed', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
             _save_transfer_offer(offer)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except InterruptedError as exc:
+        package_path.unlink(missing_ok=True)
+        with TRANSFER_LOCK:
+            offer.update({'status': 'cancelled', 'phase': 'cancelled', 'error': str(exc), 'finished_at': datetime.now(timezone.utc).timestamp()})
+            _save_transfer_offer(offer)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         package_path.unlink(missing_ok=True)
         with TRANSFER_LOCK:
@@ -12253,7 +12445,7 @@ def import_recovered_transfer_package(offer_id: str, user: SessionUser = Depends
             repository.delete_transfer_offer(offer_id)
             raise HTTPException(status_code=404, detail='The recovered transfer package is no longer available.')
         offer.update({'status': 'received', 'phase': 'starting recovered import', 'progress': 100.0, 'accepted_by': user.username})
-    Thread(target=_run_received_transfer, args=(offer_id,), name=f'recovered-transfer-{offer_id[:8]}', daemon=True).start()
+    submit_background_task(_run_received_transfer, offer_id)
     return JSONResponse({'offer_id': offer_id, 'status': 'received'})
 
 

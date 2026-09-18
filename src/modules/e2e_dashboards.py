@@ -16,6 +16,7 @@ from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 from threading import Lock, RLock, Thread
+from types import SimpleNamespace
 from typing import Literal
 from uuid import uuid4
 
@@ -109,7 +110,7 @@ ADAPTATIVE_FILTER_FIELDS = (
     'Market', 'Operator', 'Vendor', 'Region', 'City', 'Campaign', 'RAT', 'Session Type', 'Call Status',
 )
 DASHBOARD_RENDER_CACHE_VERSION = 1
-DASHBOARD_SELECTION_CACHE_VERSION = 10
+DASHBOARD_SELECTION_CACHE_VERSION = 11
 DASHBOARD_SELECTION_CACHE_LIMIT = 128
 DASHBOARD_PROFILE_SELECTION_THRESHOLD = 100_000
 DASHBOARD_CHART_MODEL_CACHE_VERSION = 10
@@ -223,6 +224,9 @@ def install_dashboard_routes(core):
     initialized_ppt_job_databases: set[str] = set()
     dashboard_ppt_runs: dict[tuple[str, int], str] = {}
     dashboard_ppt_data_tokens: dict[tuple[str, int, str], str] = {}
+    dashboard_warmup_runs: set[tuple[str, str]] = set()
+    dashboard_warmup_checked: set[tuple[str, str]] = set()
+    dashboard_warmup_cancellations: dict[tuple[str, str], dict[str, bool]] = {}
     dashboard_work_gate = Lock()
 
     def workspace_key():
@@ -461,14 +465,21 @@ def install_dashboard_routes(core):
                 def preparation_progress(percent, _detail):
                     if run_is_active():
                         update_dashboard_ppt_job(
-                            task_repository, job_id, progress=max(1, min(4, round(percent * 0.04))),
+                            task_repository, job_id,
+                            # Preparing the dataset/cache can be the longest
+                            # part of a cold export, so reserve a visible
+                            # portion instead of leaving the job at 1%.
+                            progress=max(1, min(35, 1 + round(percent * 0.34))),
                         )
 
-                with dashboard_work_gate:
-                    preview = build_preview(
-                        definition, user, workspace=str(Path(task_repository.db_path).resolve()),
-                        cancelled=lambda: not run_is_active(), progress=preparation_progress,
-                    )
+                workspace = str(Path(task_repository.db_path).resolve())
+                preview = restore_matching_preview_manifest(workspace, dashboard_id, definition)
+                if preview is None:
+                    with dashboard_work_gate:
+                        preview = build_preview(
+                            definition, user, workspace=workspace,
+                            cancelled=lambda: not run_is_active(), progress=preparation_progress,
+                        )
                 token = str(preview['token'])
                 with lock:
                     snapshot = snapshots.get(token)
@@ -484,6 +495,7 @@ def install_dashboard_routes(core):
                     ), token,
                 )
                 snapshot = validate_dashboard_export_snapshot(snapshot, task_repository)
+            update_dashboard_ppt_job(task_repository, job_id, progress=35, last_error='')
             with lock:
                 snapshot_token = next((
                     token for token, candidate in snapshots.items() if candidate is snapshot
@@ -494,14 +506,22 @@ def install_dashboard_routes(core):
                 index for index, entry in enumerate(snapshot.entries)
                 if entry.source_kind in selected_sources(snapshot.definition, task_repository)
             ]
-            for index in indexes:
+            for position, index in enumerate(indexes):
                 if not run_is_active():
                     return
+                update_dashboard_ppt_job(
+                    task_repository, job_id,
+                    progress=36 + round(position * 29 / max(len(indexes), 1)), last_error='',
+                )
                 chart_model(
                     snapshot_token, index, user,
                     expected_workspace=str(Path(task_repository.db_path).resolve()),
                 )
-            update_dashboard_ppt_job(task_repository, job_id, progress=5, last_error='')
+                update_dashboard_ppt_job(
+                    task_repository, job_id,
+                    progress=36 + round((position + 1) * 29 / max(len(indexes), 1)), last_error='',
+                )
+            update_dashboard_ppt_job(task_repository, job_id, progress=65, last_error='')
             presentation = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
             _remove_all_slides(presentation)
             grouped = defaultdict(list)
@@ -553,6 +573,10 @@ def install_dashboard_routes(core):
                 for chart_number, ((index, entry), placement) in enumerate(zip(chart_entries, placements, strict=False), 1):
                     if not run_is_active():
                         return
+                    update_dashboard_ppt_job(
+                        task_repository, job_id,
+                        progress=66 + round(rendered * 29 / max(chart_total, 1)), chart_count=rendered,
+                    )
                     model_path = canvas_model_path(snapshot, entry)
                     payload = json.loads(model_path.read_text(encoding='utf-8'))
                     render_width, render_height = dashboard_chart_render_size(placement)
@@ -581,7 +605,7 @@ def install_dashboard_routes(core):
                     rendered += 1
                     update_dashboard_ppt_job(
                         task_repository, job_id,
-                        progress=5 + round(rendered * 85 / max(chart_total, 1)), chart_count=rendered,
+                        progress=66 + round(rendered * 29 / max(chart_total, 1)), chart_count=rendered,
                     )
             if not run_is_active():
                 return
@@ -591,11 +615,16 @@ def install_dashboard_routes(core):
                     'dashboard_id': dashboard_id,
                     'preview_fingerprint': preview_fingerprint,
                     'definition': snapshot.definition.model_dump(mode='json'),
+                    # Keep the exact viewer slide structure alongside the
+                    # immutable PNG/Canvas assets so a completed PPT job can
+                    # later be opened as its own Dashboard snapshot.
+                    'slides': snapshot.payload.get('slides', []),
                     'charts': manifest,
                 }, ensure_ascii=False),
                 encoding='utf-8',
             )
             destination.parent.mkdir(parents=True, exist_ok=True)
+            update_dashboard_ppt_job(task_repository, job_id, progress=96, chart_count=rendered)
             presentation.save(destination)
             if not run_is_active():
                 shutil.rmtree(destination.parent, ignore_errors=True)
@@ -757,8 +786,14 @@ def install_dashboard_routes(core):
 
     @app.get('/api/e2e-dashboards')
     def list_dashboards(user=Depends(dashboard_user)):
+        workspace = workspace_key()
         with lock:
             dashboards = read_dashboards(bound_repository())
+        # Covers existing Dashboards created before automatic warm-up was
+        # introduced.  The scheduler de-duplicates each Dashboard per process.
+        for dashboard_id, raw_definition in dashboards.items():
+            if isinstance(raw_definition, dict):
+                schedule_dashboard_warmup(workspace, dashboard_id, raw_definition, user.username)
         return JSONResponse(
                 dashboards,
             headers={'Cache-Control': 'no-store, max-age=0, must-revalidate'},
@@ -822,26 +857,24 @@ def install_dashboard_routes(core):
             raw_definition.pop('datasets', None)
             raw_definition = runtime_dashboard_definition(raw_definition, task_repository)
         snapshot_definition = DashboardDefinition.model_validate(raw_definition)
-        try:
-            if preparation_token:
-                with lock:
-                    snapshot = snapshots.get(preparation_token)
-                if (
-                    snapshot is None
-                    or snapshot.workspace != workspace
-                    or snapshot.owner not in {user.username, '*'}
-                ):
-                    raise ValueError('The prepared Dashboard has expired. Refresh it before generating the PPT.')
-                if export_definition is not None and snapshot.definition.scope != export_definition.scope:
-                    raise ValueError('The prepared Dashboard Scope no longer matches the selected Scope.')
-                snapshot = validate_dashboard_export_snapshot(snapshot, task_repository)
-                raw_definition = snapshot.definition.model_dump(mode='json')
-            else:
-                snapshot = dashboard_export_snapshot(dashboard_id, raw_definition, task_repository)
-        except ValueError as exc:
-            # Build the required selection and Canvas models inside this
-            # explicitly requested export job when no reusable snapshot exists.
-            snapshot = None
+        # Inserting the export job must remain quick.  A valid active snapshot
+        # is reused when supplied, but cache discovery and preparation for a
+        # closed Dashboard belong to the queued worker, never this request.
+        snapshot = None
+        if preparation_token:
+            with lock:
+                candidate = snapshots.get(preparation_token)
+            if (
+                candidate is not None
+                and candidate.workspace == workspace
+                and candidate.owner in {user.username, '*'}
+                and (export_definition is None or candidate.definition.scope == export_definition.scope)
+            ):
+                try:
+                    snapshot = validate_dashboard_export_snapshot(candidate, task_repository)
+                    raw_definition = snapshot.definition.model_dump(mode='json')
+                except ValueError:
+                    snapshot = None
         dashboard_name = str(raw_definition.get('name') or dashboard_id)
         preview_fingerprint = dashboard_preview_fingerprint(raw_definition, task_repository)
         filters_json = json.dumps(dashboard_filter_lines(raw_definition, task_repository), ensure_ascii=False)
@@ -885,14 +918,11 @@ def install_dashboard_routes(core):
             snapshot_token = next((token for token, value in snapshots.items() if value is snapshot), '')
             if snapshot_token:
                 dashboard_ppt_data_tokens[(str(Path(task_repository.db_path).resolve()), job_id, user.username)] = snapshot_token
-        Thread(
-            target=render_dashboard_ppt_job,
-            args=(
-                job_id, run_token, task_repository, snapshot, snapshot_definition, user, destination,
-                dashboard_id, preview_fingerprint,
-            ),
-            name=f'dashboard-ppt-{job_id}', daemon=True,
-        ).start()
+        core.submit_background_task(
+            render_dashboard_ppt_job,
+            job_id, run_token, task_repository, snapshot, snapshot_definition, user, destination,
+            dashboard_id, preview_fingerprint,
+        )
         task_repository.add_log(user.username, 'export_dashboard_ppt', json.dumps({
             'dashboard_id': dashboard_id, 'job_id': job_id, 'output': str(destination),
         }))
@@ -1008,6 +1038,7 @@ def install_dashboard_routes(core):
             )
             charts.append({
                 'index': len(charts),
+                'entry_index': int(item['entry_index']) if isinstance(item.get('entry_index'), int) else None,
                 'slide': int(item.get('slide') or 0),
                 'title': str(item.get('title') or 'Chart'),
                 'source': str(item.get('source') or ''),
@@ -1019,10 +1050,46 @@ def install_dashboard_routes(core):
                 'payload_url': f'/api/e2e-dashboards/ppt-jobs/{job_id}/chart-models/{model_file}' if model_available else None,
                 'data_url': f'/ppt-jobs/{job_id}/data/{chart_index}' if definition_available and isinstance(item.get('entry_index'), int) else None,
             })
+        chart_by_entry = {
+            int(chart['entry_index']): chart for chart in charts
+            if isinstance(chart.get('entry_index'), int)
+        }
+        slides = []
+        for source_slide in manifest.get('slides', []):
+            if not isinstance(source_slide, dict):
+                continue
+            slide = {
+                key: source_slide.get(key) for key in ('number', 'title', 'subtitle', 'layout', 'structural_type')
+            }
+            slide['charts'] = []
+            for source_chart in source_slide.get('charts', []):
+                if not isinstance(source_chart, dict):
+                    continue
+                entry_index = source_chart.get('index')
+                chart = chart_by_entry.get(entry_index)
+                if chart is None:
+                    continue
+                slide['charts'].append({**source_chart, **chart, 'available': bool(chart.get('payload_url'))})
+            slides.append(slide)
+        # Older PPT jobs did not retain their viewer slide structure. They can
+        # still be opened as simple slide groups when Canvas models are present.
+        if not slides:
+            grouped = defaultdict(list)
+            for chart in charts:
+                grouped[int(chart.get('slide') or 0)].append({**chart, 'available': bool(chart.get('payload_url'))})
+            slides = [
+                {'number': number, 'title': f'Slide {number}', 'subtitle': '', 'layout': '', 'structural_type': '', 'charts': items}
+                for number, items in sorted(grouped.items())
+            ]
         return {
             'job': serialize_dashboard_ppt_job(row),
             'generate_tooltips': bool(manifest.get('generate_tooltips')),
             'charts': charts,
+            'definition': manifest.get('definition') if definition_available else None,
+            'slides': slides,
+            'viewer_available': bool(slides) and any(
+                chart.get('available') for slide in slides for chart in slide.get('charts', [])
+            ),
         }
 
     @app.get('/api/e2e-dashboards/ppt-jobs/{job_id}/charts/{chart_index}/filter-context')
@@ -1269,6 +1336,7 @@ def install_dashboard_routes(core):
 
     @app.put('/api/e2e-dashboards/{dashboard_id}')
     def save_dashboard(dashboard_id: str, definition: DashboardDefinition, user=Depends(dashboard_user)):
+        workspace = workspace_key()
         with lock:
             task_repository = bound_repository()
             validate(definition, task_repository)
@@ -1280,6 +1348,9 @@ def install_dashboard_routes(core):
             dashboards[dashboard_id] = saved_definition
             task_repository.set_workspace_state(STATE_KEY, json.dumps(dashboards))
             task_repository.add_log(user.username, 'save_dashboard', json.dumps({'id': dashboard_id, 'name': definition.name}))
+        # Saving a Dashboard may change template filters, so refresh its three
+        # canonical automatic universes even when it was warmed previously.
+        schedule_dashboard_warmup(workspace, dashboard_id, saved_definition, user.username, force=True)
         return {'id': dashboard_id, 'definition': saved_definition}
 
     @app.patch('/api/e2e-dashboards/{dashboard_id}/name')
@@ -1338,6 +1409,25 @@ def install_dashboard_routes(core):
         if not selected_by_kind:
             raise HTTPException(400, 'Select at least one CDR dataset.')
         return selected_by_kind
+
+    def is_complete_unfiltered_universe(definition, selected_by_kind, task_repository, date_bounds):
+        """Whether the selection exactly matches every row in each combined CDR table."""
+        if definition.filters:
+            return False
+        if not ignore_event_time_filtering() and date_bounds and (
+            str(definition.date_from) != date_bounds['min']
+            or str(definition.date_to) != date_bounds['max']
+        ):
+            return False
+        for kind, selected in selected_by_kind.items():
+            selected_ids = {int(row['id']) for row in selected}
+            ready_ids = {
+                int(row['id']) for row in task_repository.list_datasets()
+                if row['status'] == 'ready' and str(row['dataset_kind'] or '').casefold() == kind
+            }
+            if selected_ids != ready_ids:
+                return False
+        return bool(selected_by_kind)
 
     def resolve_sql_column(columns, field):
         lookup = {identity(column): column for column in columns}
@@ -1740,7 +1830,7 @@ def install_dashboard_routes(core):
 
     def materialize_selection(
         definition, task_repository, dimensions, selected_by_kind, fields, *,
-        use_profile_options=False, progress=None,
+        use_profile_options=False, known_full_row_counts=None, progress=None,
     ):
         cache_key = persistent_selection_key(definition, task_repository, dimensions, selected_by_kind)
         estimated_rows = sum(sum(int(row.get('row_count') or 0) for row in selected) for selected in selected_by_kind.values())
@@ -1753,7 +1843,7 @@ def install_dashboard_routes(core):
         # exact live phase during a potentially long combined-table scan.
         with task_repository.connection() as connection:
             cached = connection.execute(
-                'SELECT id, options_json, row_counts_json FROM dashboard_filter_selections WHERE cache_key = ?',
+                'SELECT id, options_json, row_counts_json, universe_row_counts_json FROM dashboard_filter_selections WHERE cache_key = ?',
                 (cache_key,),
             ).fetchone()
             if cached:
@@ -1762,24 +1852,46 @@ def install_dashboard_routes(core):
                 connection.execute('UPDATE dashboard_filter_selections SET last_accessed_at = CURRENT_TIMESTAMP WHERE id = ?', (cached['id'],))
                 return (
                     int(cached['id']), cache_key,
-                    json.loads(cached['options_json']), json.loads(cached['row_counts_json']), True,
+                    json.loads(cached['options_json']), json.loads(cached['row_counts_json']),
+                    json.loads(cached['universe_row_counts_json']), True,
                 )
+            known_counts = known_full_row_counts if isinstance(known_full_row_counts, dict) else None
             if callable(progress):
-                progress(62, 'Counting Filtered Universe rows in the combined CDR tables')
-            row_counts = {}
+                progress(
+                    62,
+                    'Using materialized combined CDR row counts for the complete Dataset Universe'
+                    if known_counts is not None else 'Counting reduced and filtered Universe rows in the combined CDR tables',
+                )
+            row_counts = dict(known_counts or {})
+            universe_row_counts = dict(known_counts or {})
             selected_groups = list(selected_by_kind.items())
             for group_index, (kind, selected) in enumerate(selected_groups):
+                if known_counts is not None:
+                    continue
                 if callable(progress):
                     progress(
                         62 + round(group_index * 6 / max(len(selected_groups), 1)),
                         f'Counting Filtered Universe CDR-{kind.title()} rows in the combined table',
                     )
                 dataset_ids = [int(row['id']) for row in selected]
-                where, params = selection_where(task_repository, kind, dataset_ids, definition)
+                columns = task_repository.list_reporting_row_columns(kind)
+                universe_definition = definition.model_copy(deep=True)
+                universe_definition.filters = {}
+                universe_where, universe_params = selection_where(
+                    task_repository, kind, dataset_ids, universe_definition, columns=columns,
+                )
+                filtered_where, filtered_params = selection_filter_where(
+                    task_repository, columns, definition,
+                )
                 table = task_repository._quote_identifier(task_repository.reporting_rows_table_name(kind))
-                row_counts[kind] = int(connection.execute(
-                    f'SELECT COUNT(*) AS count FROM {table} WHERE {where}', params,
-                ).fetchone()['count'])
+                counts = connection.execute(
+                    f'''SELECT COUNT(*) AS universe_count,
+                               SUM(CASE WHEN {filtered_where} THEN 1 ELSE 0 END) AS filtered_count
+                        FROM {table} WHERE {universe_where}''',
+                    [*filtered_params, *universe_params],
+                ).fetchone()
+                universe_row_counts[kind] = int(counts['universe_count'] or 0)
+                row_counts[kind] = int(counts['filtered_count'] or 0)
             # A full, unfiltered CDR selection can use its upload-time profile
             # catalogue. This avoids wide DISTINCT scans while row counts and
             # chart previews remain exact from the combined reporting tables.
@@ -1802,8 +1914,8 @@ def install_dashboard_routes(core):
                 progress(78, 'Caching filtered row counts and filter options')
             cursor = connection.execute(
                 'INSERT INTO dashboard_filter_selections '
-                '(cache_key, options_json, row_counts_json) VALUES (?, ?, ?)',
-                (cache_key, json.dumps(options), json.dumps(row_counts)),
+                '(cache_key, options_json, row_counts_json, universe_row_counts_json) VALUES (?, ?, ?, ?)',
+                (cache_key, json.dumps(options), json.dumps(row_counts), json.dumps(universe_row_counts)),
             )
             selection_id = int(cursor.lastrowid)
             stale = connection.execute(
@@ -1812,7 +1924,7 @@ def install_dashboard_routes(core):
             ).fetchall()
             for row in stale:
                 connection.execute('DELETE FROM dashboard_filter_selections WHERE id = ?', (row['id'],))
-            return selection_id, cache_key, options, row_counts, True
+            return selection_id, cache_key, options, row_counts, universe_row_counts, True
 
     def load_filter_options(definition, field_name, task_repository):
         """Load one adaptive filter catalogue without preparing Dashboard charts."""
@@ -1888,20 +2000,16 @@ def install_dashboard_routes(core):
             and str(definition.date_from) == date_bounds['min']
             and str(definition.date_to) == date_bounds['max']
         )
-        selection_id, selection_key, options, row_counts, rows_exact = materialize_selection(
+        complete_unfiltered_universe = is_complete_unfiltered_universe(
+            definition, selected_by_kind, task_repository, date_bounds,
+        )
+        selection_id, selection_key, options, row_counts, universe_rows, rows_exact = materialize_selection(
             definition, task_repository, dimensions, selected_by_kind, fields,
-            use_profile_options=use_profile_options, progress=report,
+            use_profile_options=use_profile_options,
+            known_full_row_counts=selected_source_rows if complete_unfiltered_universe else None,
+            progress=report,
         )
         report(82, 'Preparing the Dashboard slide structure and chart positions')
-        full_date_range = bool(
-            date_bounds
-            and str(definition.date_from) == date_bounds['min']
-            and str(definition.date_to) == date_bounds['max']
-        )
-        universe_rows = (
-            dict(row_counts) if not definition.filters and (full_date_range or not date_bounds)
-            else selected_source_rows
-        )
         slides = OrderedDict()
         deck = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
         for editor_index, (index, entry) in enumerate(sorted(enumerate(entries), key=lambda item: (item[1].slide, item[0]))):
@@ -2088,6 +2196,121 @@ def install_dashboard_routes(core):
             return None
         return None
 
+    def dashboard_warmup_definitions(raw_definition: dict, task_repository: Repository) -> list[DashboardDefinition]:
+        """Return the three automatic, date-unrestricted Dashboard universes."""
+        base = DashboardDefinition.model_validate(
+            runtime_dashboard_definition(raw_definition, task_repository),
+        )
+        ready = [
+            core.serialize_dataset_row(row) for row in task_repository.list_datasets()
+            if row['status'] == 'ready' and row['dataset_kind'] in KINDS
+        ]
+        if not ready:
+            return []
+
+        def recency(row):
+            for field in ('uploaded_at', 'updated_at', 'processed_at', 'created_at'):
+                try:
+                    return datetime.fromisoformat(str(row.get(field) or '').replace('Z', '+00:00')).timestamp()
+                except ValueError:
+                    continue
+            return float(row.get('id') or 0)
+
+        ordered = {
+            kind: sorted(
+                (row for row in ready if row.get('dataset_kind') == kind),
+                key=lambda row: (recency(row), int(row.get('id') or 0)), reverse=True,
+            ) for kind in KINDS
+        }
+        universes = (
+            ('operator', 'single', {kind: [int(row['id']) for row in rows[:2]] for kind, rows in ordered.items()}),
+            ('multivendor', 'multivendor', {kind: [int(row['id']) for row in rows[:1]] for kind, rows in ordered.items()}),
+            ('all-cdrs', 'single', {kind: [int(row['id']) for row in rows] for kind, rows in ordered.items()}),
+        )
+        definitions = []
+        for _name, scope, datasets in universes:
+            definition = base.model_copy(deep=True)
+            definition.scope = scope
+            definition.datasets = datasets
+            # Oldest/Newest deliberately keeps this cache valid for the full
+            # automatic date range instead of pinning it to today's bounds.
+            definition.date_from = 'Oldest'
+            definition.date_to = 'Newest'
+            definitions.append(definition)
+        return definitions
+
+    def schedule_dashboard_warmup(
+        workspace: str, dashboard_id: str, raw_definition: dict, username: str, *, force: bool = False,
+    ) -> None:
+        """Queue missing standard universes without delaying an interactive open."""
+        key = (workspace, dashboard_id)
+        with lock:
+            if key in dashboard_warmup_runs or (not force and key in dashboard_warmup_checked):
+                return
+            dashboard_warmup_runs.add(key)
+            cancellation = dashboard_warmup_cancellations[key] = {'requested': False}
+
+        def run() -> None:
+            completed_check = False
+            warmed = 0
+            try:
+                # A foreground Dashboard preparation owns the same gate.  Do
+                # not wait behind it in the shared application scheduler: a
+                # later library visit will retry this low-priority warm-up.
+                with lock:
+                    foreground_active = any(task.get('workspace') == workspace for task in direct_preparation_tasks.values())
+                if cancellation['requested'] or foreground_active or not dashboard_work_gate.acquire(blocking=False):
+                    return
+                try:
+                    task_repository = Repository(Path(workspace), core.repository.global_db_path)
+                    owner = SimpleNamespace(username=username)
+                    for definition in dashboard_warmup_definitions(raw_definition, task_repository):
+                        if cancellation['requested']:
+                            return
+                        if restore_matching_preview_manifest(workspace, dashboard_id, definition, materialize=False) is not None:
+                            continue
+                        preview = build_preview(
+                            definition, owner, workspace=workspace,
+                            cancelled=lambda: bool(cancellation['requested']),
+                        )
+                        if cancellation['requested']:
+                            return
+                        with lock:
+                            snapshot = snapshots.get(preview['token'])
+                        if snapshot is None:
+                            continue
+                        persist_preview_manifest(
+                            workspace, dashboard_id,
+                            dashboard_preview_fingerprint(snapshot.definition.model_dump(mode='json'), task_repository),
+                            preview['token'],
+                        )
+                        warmed += 1
+                    completed_check = True
+                    if warmed:
+                        task_repository.add_log(username, 'prewarm_dashboard_cache', json.dumps({
+                            'dashboard_id': dashboard_id, 'universes': warmed,
+                        }))
+                finally:
+                    dashboard_work_gate.release()
+            except Exception as exc:
+                # Automatic cache work must never make saving or listing a
+                # Dashboard fail, but its failure is still auditable.
+                if cancellation['requested']:
+                    return
+                Repository(Path(workspace), core.repository.global_db_path).add_log(
+                    username, 'prewarm_dashboard_cache_failed', json.dumps({
+                        'dashboard_id': dashboard_id, 'error': str(exc),
+                    }),
+                )
+            finally:
+                with lock:
+                    dashboard_warmup_runs.discard(key)
+                    dashboard_warmup_cancellations.pop(key, None)
+                    if completed_check:
+                        dashboard_warmup_checked.add(key)
+
+        core.submit_background_task(run)
+
     @app.post('/api/e2e-dashboards/prepare')
     def prepare(
         definition: DashboardDefinition,
@@ -2110,6 +2333,9 @@ def install_dashboard_routes(core):
                 existing_cancellation = task.get('cancellation')
                 if isinstance(existing_cancellation, dict):
                     existing_cancellation['requested'] = True
+            for warmup_key, warmup_cancellation in dashboard_warmup_cancellations.items():
+                if warmup_key[0] == workspace:
+                    warmup_cancellation['requested'] = True
             direct_preparation_tasks[preparation_id] = {
                 'id': preparation_id, 'workspace': workspace, 'name': definition.name,
                 'dashboard_id': dashboard_id,

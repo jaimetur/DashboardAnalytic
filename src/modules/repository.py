@@ -200,6 +200,7 @@ CREATE TABLE IF NOT EXISTS dashboard_filter_selections (
     cache_key TEXT NOT NULL UNIQUE,
     options_json TEXT NOT NULL DEFAULT '{}',
     row_counts_json TEXT NOT NULL DEFAULT '{}',
+    universe_row_counts_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_accessed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -411,6 +412,8 @@ class Repository:
             conn.execute("ALTER TABLE dashboard_filter_selections ADD COLUMN options_json TEXT NOT NULL DEFAULT '{}'")
         if 'row_counts_json' not in columns:
             conn.execute("ALTER TABLE dashboard_filter_selections ADD COLUMN row_counts_json TEXT NOT NULL DEFAULT '{}'")
+        if 'universe_row_counts_json' not in columns:
+            conn.execute("ALTER TABLE dashboard_filter_selections ADD COLUMN universe_row_counts_json TEXT NOT NULL DEFAULT '{}'")
 
     @staticmethod
     def _remove_legacy_dashboard_selection_rows(conn: sqlite3.Connection) -> None:

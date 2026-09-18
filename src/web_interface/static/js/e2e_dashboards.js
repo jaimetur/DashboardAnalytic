@@ -26,10 +26,11 @@
   const dashboardPreparationTokens = new Map();
   let dashboardStatusRefreshing = false;
   let expandedChartRequest = 0;
-  let slidePreloadRequest = 0, expandedChartPreloadRequest = 0;
+  let slidePreloadRequest = 0, expandedChartPreloadRequest = 0, backgroundChartPreloadRequest = 0;
   let backgroundPreparationToken = '';
   let dateBounds = null, templateEditorSaved = false, templateEditorPreloadTimer = 0, dashboardPptColumnFilters = null;
   let dashboardPptJobs = [], dashboardPptCharts = [], dashboardPptChartsJobId = '', dashboardPptChartsRequest = 0;
+  let pptDashboardViewer = null;
   let dashboardPptJobsLoaded = false, dashboardPptJobsRefreshing = false;
   const openStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:open`;
   const libraryStorageKey = `dashboard-analytic:e2e-dashboards:${config.workspace}:library`;
@@ -171,10 +172,14 @@
       ...canonical, scope: 'single', datasets: latestDatasetsForScope('single'), date_from: 'Oldest', date_to: 'Newest',
     };
   };
-  const runtimeDashboardDefinition = (value, id = '') => ({
-    ...savedRuntimeDashboardDefinition(value),
-    ...(rememberedUniverse(id) || {}),
-  });
+  const runtimeDashboardDefinition = (value, id = '') => {
+    const saved = savedRuntimeDashboardDefinition(value);
+    // A Dashboard's saved universe is authoritative when it is opened.  The
+    // session copy exists only to retain the automatic universe of legacy
+    // Dashboards that have never saved one; otherwise a stale browser tab can
+    // make the opening controls briefly show a different selection.
+    return hasStoredUniverse(value) ? saved : {...saved, ...(rememberedUniverse(id) || {})};
+  };
   const rememberUniverse = () => {
     if (!activeId || !definition) return;
     try {
@@ -346,6 +351,14 @@
     document.querySelectorAll('[data-dashboard-ppt-id]').forEach(button => {
       button.disabled = !dashboardIsReady(button.dataset.dashboardPptId);
     });
+    // Status polling runs every two seconds.  Keep immutable PPT snapshots
+    // read-only during those refreshes instead of letting the normal ready
+    // Dashboard synchronization re-enable generation controls.
+    if (pptDashboardViewer) {
+      $('ds-generate-ppt').disabled = true;
+      $('ds-viewer-export-ppt').disabled = true;
+      return;
+    }
     const activePptReady = dashboardIsReady(activeId) && Boolean(prepared?.slides?.length);
     $('ds-generate-ppt').disabled = !activePptReady;
     $('ds-viewer-export-ppt').disabled = !activePptReady;
@@ -481,6 +494,12 @@
     return 'discarded';
   };
   const openActiveDashboardViewer = async () => {
+    if (pptDashboardViewer) {
+      prepared = null;
+      chartPayloads.clear(); renderedChartPayloads.clear();
+    }
+    pptDashboardViewer = null;
+    syncPptDashboardViewerControls();
     const filterDecision = await resolveUnappliedFilterChanges();
     if (!filterDecision) return;
     if (!$('ds-filter-overlay').hidden) await closeFilters();
@@ -513,30 +532,15 @@
       exportDefinition = JSON.parse(JSON.stringify(item));
       exportDefinition.scope = scopeChoice === 'secondary' ? 'multivendor' : 'single';
       // Library exports always build their temporary universe from the latest
-      // CDRs appropriate to the Scope selected in this dialog.
+      // CDRs appropriate to the Scope selected in this dialog. The queued
+      // server worker prepares that universe; never make this button wait for
+      // a cache lookup or every chart model before the job exists.
       delete exportDefinition.datasets;
       delete exportDefinition.date_from;
       delete exportDefinition.date_to;
-      let scopePreview;
-      try {
-        scopePreview = await api(`/prefetched/${encodeURIComponent(id)}?use_scope_universe=1`, 'POST', exportDefinition);
-      } catch (error) {
-        if (error.status !== 409) throw error;
-        scopePreview = await api(`/prepare?dashboard_id=${encodeURIComponent(id)}&use_scope_universe=1`, 'POST', exportDefinition);
-      }
-      const chartIndexes = (scopePreview.slides || []).flatMap(slide => (slide.charts || []))
-        .filter(chart => chart.available).map(chart => chart.index);
-      // A selected Scope may use a universe that has not been warmed yet.
-      // Generate every required model before handing the snapshot to the PPT
-      // worker, so the newly queued job always has a complete chart set.
-      for (const index of chartIndexes) {
-        await api(`/chart/${encodeURIComponent(scopePreview.token)}/${index}`);
-      }
-      preparationToken = scopePreview.token;
     } else {
       filterDecision = id === activeId ? await resolveUnappliedFilterChanges() : 'unchanged';
       if (!filterDecision) return;
-      if (id === activeId && (!prepared || preparationStateFingerprint(definition) !== appliedFilterState)) await prepare();
       if (id === activeId && prepared?.token) {
         const exportAppliedDefinition = appliedDashboardDefinition || definition;
         if (filterDecision !== 'unchanged') {
@@ -622,11 +626,12 @@
       const action = (label, glyph, handler, tone = '') => {
         const button = node('button', glyph, `icon-action ds-dashboard-action ${tone}`); button.type = 'button'; button.title = label; button.setAttribute('aria-label', label); button.onclick = safe(handler); actions.append(button); return button;
       };
-      action(id === activeId ? 'Close Dashboard' : 'Open Dashboard', id === activeId ? '🚪' : '📂', async () => {
+      const open = action(id === activeId ? 'Close Dashboard' : 'Open Dashboard', id === activeId ? 'Close' : 'Open', async () => {
         if (id === activeId) { if (await confirmDiscard()) closeDashboard(); }
         else if (await confirmDiscard()) await openDashboard(id);
       }, id === activeId ? 'ds-dashboard-close' : 'ds-dashboard-open');
-      const view = action('View Dashboard', '◉', async () => {
+      open.classList.remove('icon-action');
+      const view = action('View Dashboard', 'View', async () => {
         if (id !== activeId) {
           if (!await confirmDiscard()) return;
           const loading = openDashboard(id);
@@ -636,6 +641,7 @@
           await openActiveDashboardViewer();
         }
       }, 'ds-dashboard-view');
+      view.classList.remove('icon-action');
       view.dataset.dashboardViewId = id;
       view.disabled = dashboardIsPreparing(id) || (id === activeId && $('ds-view').disabled);
       action('Duplicate Dashboard', '⧉', async () => { if (await confirmDiscard()) await duplicateDashboard(id); });
@@ -849,6 +855,34 @@
       $('ds-ppt-charts-copy').textContent = error instanceof Error ? error.message : 'Dashboard charts could not be loaded.';
     }
   };
+  const viewerDefinition = () => pptDashboardViewer?.definition || definition;
+  const syncPptDashboardViewerControls = () => {
+    const snapshot = Boolean(pptDashboardViewer);
+    for (const id of ['ds-floating-filters', 'ds-viewer-refresh', 'ds-viewer-export-ppt', 'ds-edit']) {
+      const control = $(id);
+      if (control) control.disabled = snapshot;
+    }
+    $('ds-comment-input').disabled = snapshot;
+    $('ds-comment-add').disabled = snapshot;
+  };
+  async function openDashboardPptViewer(job) {
+    const payload = await api(`/ppt-jobs/${job.id}/charts.json`);
+    if (!payload.viewer_available || !Array.isArray(payload.slides) || !payload.definition) {
+      throw new Error('This PowerPoint job does not contain the saved Dashboard viewer snapshot. Relaunch it to create one.');
+    }
+    pptDashboardViewer = {
+      job, definition: canonicalDashboardDefinition(payload.definition),
+    };
+    dashboardPptCharts = Array.isArray(payload.charts) ? payload.charts : [];
+    dashboardPptChartsJobId = String(job.id);
+    chartPayloads.clear(); renderedChartPayloads.clear();
+    prepared = {token: `ppt-job-${job.id}`, slides: payload.slides};
+    slideIndex = 0;
+    stopPresentation();
+    syncPptDashboardViewerControls();
+    overlay('ds-viewer', true);
+    renderSlide();
+  }
   const dashboardPptChartFilterControls = [...document.querySelectorAll('[data-dashboard-ppt-chart-filter]')];
   const dashboardPptChartFilterState = {nr_mode: '', dashboard: '', template: '', scope: ''};
   const normalizeDashboardPptChartFilter = value => String(value || '').trim().toLocaleLowerCase();
@@ -993,6 +1027,7 @@
       if (job.download_url) { const link = node('a', '', 'report-job-download-button report-job-report-download-button'); link.href = job.download_url; link.download = ''; link.title = link.ariaLabel = 'Download Dashboard PPT'; actions.append(link); }
       if (job.charts_download_url) { const link = node('a', '', 'report-job-download-button report-job-charts-download-button'); link.href = job.charts_download_url; link.download = ''; link.title = link.ariaLabel = 'Download Dashboard charts as ZIP'; actions.append(link); }
       if (job.charts_api_url) actions.append(jobAction('Open Dashboard charts', 'report-job-charts-button', () => loadDashboardPptCharts(job.id, true), '📈'));
+      if (job.charts_api_url) actions.append(jobAction('View Dashboard snapshot', 'report-job-dashboard-button', () => openDashboardPptViewer(job), ''));
       if (job.retry_url) actions.append(jobAction(job.status === 'ready' ? 'Relaunch Job' : 'Retry export', 'report-job-retry-button', async () => { await api(`/ppt-jobs/${job.id}/retry`, 'POST'); await refreshDashboardPptJobs(); }, '↻'));
       if (job.stop_url) actions.append(jobAction('Stop export', 'report-job-stop-button', async () => { await api(`/ppt-jobs/${job.id}/stop`, 'POST'); await refreshDashboardPptJobs(); }, '■'));
       if (config.can_manage) actions.append(jobAction('Delete export', 'danger-button', async () => {
@@ -1217,7 +1252,13 @@
     for (const field of fields) {
       const facet = node('div', undefined, 'ds-facet');
       updateFilterControlState(facet, filterState(field));
-      const selected = definition.filters[field];
+      const hasStoredSelection = Object.prototype.hasOwnProperty.call(definition.filters, field);
+      // Preserve saved values in the native select while the asynchronous
+      // preparation request is still obtaining its facet catalogue.  Besides
+      // making the stored Dashboard state visible immediately, this prevents
+      // the custom multiselect from presenting a misleading "None Selected".
+      const selected = Array.isArray(definition.filters[field])
+        ? definition.filters[field].map(value => String(value)) : [];
       const custom = definition.custom_fields.includes(field);
       const label = custom ? field : field === 'technology_primary' ? 'Technology' : field.replaceAll('_',' ').replace(/\b\w/g, letter => letter.toUpperCase());
       const aliases = Object.entries(filterAliases).find(([name]) => identity(name) === identity(field))?.[1] || [];
@@ -1238,14 +1279,14 @@
       });
       head.append(remove); facet.append(head);
       const values = document.createElement('select'); values.multiple = true; values.size = 1; values.dataset.multiselectAutoClose = '1000'; values.setAttribute('aria-label', `${label} filter`);
-      const available = [...new Set([...(facetOptions[field] || []), ...(selected || [])])];
+      const available = [...new Set([...(facetOptions[field] || []), ...selected].map(value => String(value)))];
       for (const value of available) {
-        const item = option(value, value || '(Empty)'); item.selected = !selected || selected.includes(value); values.append(item);
+        const item = option(value, value || '(Empty)'); item.selected = !hasStoredSelection || selected.includes(value); values.append(item);
       }
       if (!available.length) { values.disabled = true; values.append(option('', facetsLoading || facetOptionRequests.has(field) ? 'Loading values…' : 'No matching values')); }
       values.onchange = () => {
         const next = [...values.selectedOptions].map(item => item.value).filter(Boolean);
-        const current = (selected || available).filter(Boolean);
+        const current = (hasStoredSelection ? selected : available).filter(Boolean);
         if (next.length === current.length && next.every(value => current.includes(value))) return;
         definition.filters[field] = next;
         updateFilterControlState(facet, filterState(field));
@@ -1371,6 +1412,7 @@
     setPreparationState('ready');
     syncPreparationRefresh();
     chartPayloads.clear(); renderedChartPayloads.clear(); rememberPrepared(payload);
+    scheduleBackgroundChartPreload(payload.token);
     if (!$('ds-viewer').hidden) renderSlide();
   };
   async function restorePrepared(id) {
@@ -1401,7 +1443,7 @@
   }
   function changed() {
     dismissPreparationStatus(); forgetPrepared();
-    updateDirtyState(); prepared = null; appliedFilterState = ''; ++sequence; controller?.abort(); preparing = null;
+    updateDirtyState(); prepared = null; appliedFilterState = ''; ++sequence; ++backgroundChartPreloadRequest; controller?.abort(); preparing = null;
     setViewEnabled(false);
     setPreparationState('preparing');
     $('ds-rows').textContent = '';
@@ -1498,7 +1540,7 @@
   async function openDashboard(id) {
     clearTimeout(facetsRefreshTimer);
     dismissPreparationStatus();
-    clearTimeout(timer); ++sequence; controller?.abort(); preparing = null;
+    clearTimeout(timer); ++sequence; ++backgroundChartPreloadRequest; controller?.abort(); preparing = null;
     stopPresentation();
     activeId = id; $('ds-viewer-export-ppt').dataset.dashboardPptId = id; definition = runtimeDashboardDefinition(dashboards[id], id); savedDefinition = definitionFingerprint(savedRuntimeDashboardDefinition(dashboards[id])); dirty = false; prepared = null; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; facetOptions = {}; availableFields = []; facetOptionRequests.clear(); slideIndex = 0; setViewEnabled(false); rememberOpen(id);
     resetViewerForDashboard();
@@ -1707,7 +1749,7 @@
   });
   bind('ds-view', openActiveDashboardViewer);
   function loadChartPayload(chart, priority = 'high') {
-    const url = `/api/e2e-dashboards/chart/${prepared.token}/${chart.index}`;
+    const url = chart.payload_url || `/api/e2e-dashboards/chart/${prepared.token}/${chart.index}`;
     const rendered = renderedChartPayloads.get(url);
     if (rendered) return Promise.resolve(rendered);
     let request = chartPayloads.get(url);
@@ -1742,6 +1784,27 @@
     if ('requestIdleCallback' in window) window.requestIdleCallback(() => resolve(), {timeout: 200});
     else window.setTimeout(resolve, 0);
   });
+  function scheduleBackgroundChartPreload(token) {
+    const request = ++backgroundChartPreloadRequest;
+    void (async () => {
+      // Chart models are calculated by the chart endpoint and persisted by the
+      // server.  Warm each available model only after the Dashboard dataset is
+      // ready, one at a time during browser idle time, so opening the viewer
+      // later can reuse both the server model and this in-memory payload.
+      await yieldForSilentPreload();
+      const charts = (prepared?.slides || []).flatMap(slide => slide.charts || []).filter(chart => chart.available);
+      for (const chart of charts) {
+        if (
+          request !== backgroundChartPreloadRequest
+          || prepared?.token !== token
+          || activeId === ''
+          || !$('ds-viewer').hidden
+        ) return;
+        await loadChartPayload(chart, 'low').catch(() => null);
+        await yieldForSilentPreload();
+      }
+    })();
+  }
   function scheduleNearbySlidePreload(token, origin, visibleLoads = []) {
     const request = ++slidePreloadRequest;
     void Promise.allSettled(visibleLoads).then(async () => {
@@ -2046,8 +2109,10 @@
     }
   });
   async function openChartDataset(chart) {
-    dataToken = expandedChartMode === 'ppt' ? `ppt:${dashboardPptChartsJobId}` : prepared.token;
-    dataEndpoint = expandedChartMode === 'ppt' ? String(chart.data_url || '') : `/data/${prepared.token}/${chart.index}`;
+    const pptSnapshotChart = Boolean(pptDashboardViewer && chart.data_url);
+    dataToken = (expandedChartMode === 'ppt' || pptSnapshotChart) ? `ppt:${dashboardPptChartsJobId}` : prepared.token;
+    dataEndpoint = (expandedChartMode === 'ppt' || pptSnapshotChart)
+      ? String(chart.data_url || '') : `/data/${prepared.token}/${chart.index}`;
     if (!dataEndpoint) return;
     window.showLoadingOverlay('Loading Filtered Dataset', 'Please wait while the filtered dataset is prepared.');
     try {
@@ -2287,9 +2352,10 @@
   const currentSlideCommentKey = () => String(prepared?.slides[slideIndex]?.number ?? slideIndex + 1);
   function renderComments() {
     const list = $('ds-comments-list');
-    if (!list || !definition) return;
-    definition.slide_comments ||= {};
-    const comments = definition.slide_comments[currentSlideCommentKey()] || [];
+    const viewer = viewerDefinition();
+    if (!list || !viewer) return;
+    viewer.slide_comments ||= {};
+    const comments = viewer.slide_comments[currentSlideCommentKey()] || [];
     const panel = list.closest('.ds-slide-comments');
     panel?.classList.toggle('ds-has-comments', comments.length > 0);
     if (panel && presentation.active) panel.open = presentation.showComments && comments.length > 0;
@@ -2298,11 +2364,12 @@
     comments.forEach((comment, index) => {
       const item = node('li', undefined, 'ds-comment');
       const editor = document.createElement('input'); editor.type = 'text'; editor.value = comment; editor.maxLength = 500; editor.setAttribute('aria-label', `Comment ${index + 1}`);
+      editor.disabled = Boolean(pptDashboardViewer);
       let savedComment = comment;
       const saveEdit = safe(async () => {
         const value = editor.value.trim();
         if (value === savedComment || !definition) return;
-        const slideComments = definition.slide_comments[currentSlideCommentKey()];
+        const slideComments = viewer.slide_comments[currentSlideCommentKey()];
         if (!slideComments) return;
         slideComments[index] = value;
         await persistComments(); savedComment = value; renderComments();
@@ -2310,12 +2377,13 @@
       editor.addEventListener('change', saveEdit);
       editor.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); editor.blur(); } });
       const remove = node('button', '×', 'ds-comment-remove'); remove.type = 'button'; remove.title = 'Remove comment'; remove.setAttribute('aria-label', 'Remove comment');
-      remove.onclick = safe(async () => { definition.slide_comments[currentSlideCommentKey()].splice(index, 1); await persistComments(); renderComments(); });
+      remove.disabled = Boolean(pptDashboardViewer);
+      remove.onclick = safe(async () => { viewer.slide_comments[currentSlideCommentKey()].splice(index, 1); await persistComments(); renderComments(); });
       item.append(editor, remove); list.append(item);
     });
   }
   async function persistComments() {
-    if (!activeId || !definition) return;
+    if (pptDashboardViewer || !activeId || !definition) return;
     const id = activeId;
     $('ds-comments-status').textContent = 'Saving…';
     const payload = await api(`/${id}/comments`, 'PATCH', {slide_comments: definition.slide_comments || {}});
@@ -2397,7 +2465,8 @@
     // A new Dashboard can be opened while its server snapshot is still being
     // restored. Never leave the previous Dashboard's title, slide or comments
     // visible during that short wait.
-    $('ds-position').textContent = definition ? `${definition.name} · Loading slides` : '';
+    const viewer = viewerDefinition();
+    $('ds-position').textContent = viewer ? `${viewer.name} · Loading slides` : '';
     $('ds-title').textContent = 'Loading Dashboard…';
     $('ds-subtitle').textContent = '';
     $('ds-slide').replaceChildren(option('', 'Loading slides…'));
@@ -2416,7 +2485,7 @@
     const preloadOrigin = slideIndex;
     const visibleLoads = [];
     $('ds-title').textContent = slide.title || `Dashboard ${slide.number}`; $('ds-subtitle').textContent = slide.subtitle;
-    $('ds-position').textContent = `${definition.name} · Slide ${slideIndex+1} / ${prepared.slides.length}`;
+    $('ds-position').textContent = `${viewerDefinition()?.name || 'Dashboard'} · Slide ${slideIndex+1} / ${prepared.slides.length}`;
     $('ds-slide').replaceChildren(...prepared.slides.map((item,index)=>option(String(index),`${item.number} · ${item.title || 'Dashboard'}`))); $('ds-slide').disabled = false; $('ds-slide').value = String(slideIndex);
     $('ds-first').disabled = $('ds-prev').disabled = slideIndex === 0;
     $('ds-next').disabled = $('ds-last').disabled = slideIndex === prepared.slides.length - 1;
@@ -2466,11 +2535,11 @@
       } else message.textContent = chart.source
         ? `No CDR ${chart.source[0].toUpperCase()}${chart.source.slice(1)} dataset has been selected for this chart.`
         : 'No compatible CDR dataset has been selected for this chart.';
-      const data = node('button','', 'ds-chart-data'); data.type = 'button'; data.title = 'View dataset'; data.setAttribute('aria-label', 'View dataset'); data.disabled = !chart.available; data.onclick = safe(async () => { await openChartDataset(chart); });
-      const expand = node('button', '', 'ds-chart-expand'); expand.type = 'button'; expand.title = 'Expand chart'; expand.setAttribute('aria-label', 'Expand chart'); expand.disabled = !chart.available; expand.onclick = safe(async event => { event.stopPropagation(); await openExpandedChart(chart, renderedPayload); });
+      const data = node('button','', 'ds-chart-data'); data.type = 'button'; data.title = 'View dataset'; data.setAttribute('aria-label', 'View dataset'); data.disabled = !chart.available || (Boolean(pptDashboardViewer) && !chart.data_url); data.onclick = safe(async () => { await openChartDataset(chart); });
+      const expand = node('button', '', 'ds-chart-expand'); expand.type = 'button'; expand.title = 'Expand chart'; expand.setAttribute('aria-label', 'Expand chart'); expand.disabled = !chart.available; expand.onclick = safe(async event => { event.stopPropagation(); await openExpandedChart(chart, renderedPayload, pptDashboardViewer ? 'ppt' : 'dashboard'); });
       card.ondblclick = safe(async event => {
         if (!chart.available || event.target.closest('button, a, input, select, label')) return;
-        await openExpandedChart(chart, renderedPayload);
+        await openExpandedChart(chart, renderedPayload, pptDashboardViewer ? 'ppt' : 'dashboard');
       });
       const controls = node('div', undefined, 'ds-chart-controls'); controls.append(data, expand, zoom); card.append(controls);
       let hideTimer;
@@ -2542,7 +2611,7 @@
     next: () => void safe(() => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) + 1))(),
   });
   $('ds-slide').onchange = () => { stopPresentation(); slideIndex = Number($('ds-slide').value); renderSlide(); };
-  bind('ds-comment-add', async () => { const input = $('ds-comment-input'), comment = input.value.trim(); if (!comment || !definition) return; const key = currentSlideCommentKey(); definition.slide_comments ||= {}; const comments = definition.slide_comments[key] ||= []; if (comments.length >= 50) throw new Error('A slide can have at most 50 comments.'); comments.push(comment); input.value = ''; await persistComments(); renderComments(); });
+  bind('ds-comment-add', async () => { const input = $('ds-comment-input'), comment = input.value.trim(); if (!comment || !definition || pptDashboardViewer) return; const key = currentSlideCommentKey(); definition.slide_comments ||= {}; const comments = definition.slide_comments[key] ||= []; if (comments.length >= 50) throw new Error('A slide can have at most 50 comments.'); comments.push(comment); input.value = ''; await persistComments(); renderComments(); });
   $('ds-comment-input').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); $('ds-comment-add').click(); } });
   bind('ds-presentation', () => {
     if (!presentation.active) overlay('ds-presentation-overlay', true);
@@ -2579,7 +2648,11 @@
     expandedChartPreloadRequest += 1;
     if (!$('ds-chart-expanded-overlay').hidden) expandedChartOverlay(false);
     if (!$('ds-filter-overlay').hidden && !await closeFilters()) return;
+    const closingPptSnapshot = Boolean(pptDashboardViewer);
     overlay('ds-viewer', false);
+    pptDashboardViewer = null;
+    if (closingPptSnapshot) { prepared = null; chartPayloads.clear(); renderedChartPayloads.clear(); }
+    syncPptDashboardViewerControls();
   });
   const dashboardDataRequest = async (request) => {
     const parameters = new URLSearchParams({page: String(request.page || 0)});
@@ -2718,11 +2791,12 @@
   window.addEventListener('beforeunload',event=>{ if (dirty) { event.preventDefault(); event.returnValue = ''; } });
   window.addEventListener('auto-calculated-field-job-status',event=>{ const job = event.detail; if (definition && job?.id && ['ready','completed'].includes(job.status) && !completedFieldJobs.has(job.id)) { completedFieldJobs.add(job.id); changed(); } });
   safe(async ()=>{
-    const restoreOpenDashboard = restorePageState;
     let last = '';
     try {
-      last = restoreOpenDashboard ? sessionStorage.getItem(openStorageKey) || '' : '';
-      if (!restoreOpenDashboard) sessionStorage.removeItem(openStorageKey);
+      // Keep the last Dashboard open for the lifetime of this signed-in tab.
+      // Explicit Close and logout still clear this key; fresh module entries
+      // and reloads both restore the same saved Dashboard.
+      last = sessionStorage.getItem(openStorageKey) || '';
       const cached = JSON.parse(sessionStorage.getItem(libraryStorageKey) || '{}');
       dashboards = cached && typeof cached === 'object' && !Array.isArray(cached)
         && Object.values(cached).every(item => item && typeof item === 'object' && typeof item.name === 'string') ? cached : {};

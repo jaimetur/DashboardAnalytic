@@ -8,11 +8,13 @@ from dataclasses import replace
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
+from threading import Event
 from urllib.parse import quote
 import warnings
 import zipfile
 
 import pandas as pd
+import pytest
 from fastapi import BackgroundTasks
 
 from src.modules.auth import hash_password
@@ -167,13 +169,16 @@ def test_config_page_persists_runtime_overrides(client, monkeypatch) -> None:
     assert 'href="/config"' in page.text
     assert 'data-configuration-timezone-picker' in page.text
     assert 'data-timezone="Europe/Madrid"' in page.text
-    assert page.text.count('data-configuration-card') == 3
+    assert page.text.count('data-configuration-card') == 4
+    assert 'name="max_background_tasks" value="1" min="1" max="32"' in page.text
+    assert '<section class="configuration-card configuration-field-wide" data-configuration-card>' not in page.text
 
     response = client.post('/config', data={
         'timezone_name': 'UTC',
         'report_chart_renderer': 'pil',
         'chromium_path': '',
         'ignore_event_time_filtering': 'true',
+        'max_background_tasks': '1',
     }, follow_redirects=False)
     assert response.status_code == 303
     import src.DashboardAnalytic as app_module
@@ -182,6 +187,7 @@ def test_config_page_persists_runtime_overrides(client, monkeypatch) -> None:
     assert persisted['timezone'] == 'UTC'
     assert persisted['report_chart_renderer'] == 'pil'
     assert persisted['ignore_event_time_filtering'] is True
+    assert persisted['max_background_tasks'] == 1
     assert app_module.os.environ['DASHBOARD_ANALYTIC_REPORT_CHART_RENDERER'] == 'pil'
     assert app_module.os.environ['IGNORE_EVENT_TIME_FILTERING'] == 'true'
 
@@ -2662,10 +2668,181 @@ def test_legacy_vendor_recovery_queues_without_writing_in_workspace_request(clie
     assert len(tasks.tasks) == 1
 
 
-def test_dataset_executor_allows_parallel_background_processing(client) -> None:
+def test_dataset_executor_defaults_to_one_fifo_background_worker(client) -> None:
     import src.DashboardAnalytic as app_module
 
-    assert app_module._dataset_processing_executor(app_module.repository)._max_workers > 1
+    assert app_module._dataset_processing_executor(app_module.repository)._max_workers == 1
+
+
+def test_background_task_scheduler_starts_queued_work_in_fifo_order() -> None:
+    from src.modules.background_scheduler import BackgroundTaskScheduler
+
+    scheduler = BackgroundTaskScheduler(max_workers=1, thread_name_prefix='test-fifo')
+    started = Event()
+    release = Event()
+    order: list[str] = []
+
+    def task(name: str, block: bool = False) -> str:
+        order.append(name)
+        if block:
+            started.set()
+            assert release.wait(timeout=2)
+        return name
+
+    try:
+        first = scheduler.submit(task, 'first', True)
+        assert started.wait(timeout=2)
+        second = scheduler.submit(task, 'second')
+        third = scheduler.submit(task, 'third')
+        assert order == ['first']
+        release.set()
+        assert [first.result(timeout=2), second.result(timeout=2), third.result(timeout=2)] == ['first', 'second', 'third']
+        assert order == ['first', 'second', 'third']
+    finally:
+        scheduler.shutdown()
+
+
+def test_cancelled_backup_removes_its_partial_archive(client, tmp_path: Path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    source_file = app_module.settings.input_dir / 'cancelled-backup-source.txt'
+    source_file.write_text('cancel this archive', encoding='utf-8')
+    config = app_module.recurring_backup_settings() | {
+        'components': ['input'],
+        'workspace_ids': [app_module.active_workspace.id],
+        'backup_path': str(tmp_path),
+    }
+    checks = 0
+
+    def cancel_during_archive() -> None:
+        nonlocal checks
+        checks += 1
+        if checks >= 5:
+            raise InterruptedError('Backup stopped by user.')
+
+    with pytest.raises(InterruptedError):
+        app_module.create_recurring_database_backup(config, cancel_callback=cancel_during_archive)
+
+    assert list(tmp_path.glob('dashboard-analytic-backup-*.zip')) == []
+    assert list(tmp_path.glob('dashboard-analytic-export-*')) == []
+
+
+def test_dashboard_library_open_close_and_view_actions_include_labels() -> None:
+    root = Path(__file__).parents[1] / 'src' / 'web_interface' / 'static'
+    script = (root / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
+    styles = (root / 'css' / 'e2e_dashboards.css').read_text(encoding='utf-8')
+
+    assert "id === activeId ? 'Close' : 'Open'" in script
+    assert "action('View Dashboard', 'View'" in script
+    assert 'width:fit-content!important;min-width:max-content!important' in styles
+    assert '.ds-dashboard-action.ds-dashboard-close' in styles
+
+
+def test_dashboard_open_hydrates_saved_state_before_preparation_catalogues() -> None:
+    script = (Path(__file__).parents[1] / 'src' / 'web_interface' / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
+
+    assert 'return hasStoredUniverse(value) ? saved : {...saved, ...(rememberedUniverse(id) || {})};' in script
+    assert 'const hasStoredSelection = Object.prototype.hasOwnProperty.call(definition.filters, field);' in script
+    assert '...selected].map(value => String(value))' in script
+
+
+def test_ready_open_dashboard_preloads_chart_models_before_viewer_opens() -> None:
+    script = (Path(__file__).parents[1] / 'src' / 'web_interface' / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
+
+    assert 'function scheduleBackgroundChartPreload(token)' in script
+    assert "scheduleBackgroundChartPreload(payload.token);" in script
+    assert "await loadChartPayload(chart, 'low').catch(() => null);" in script
+    assert "|| !$('ds-viewer').hidden" in script
+
+
+def test_dashboard_standard_universe_warmup_and_open_state_restoration_are_configured() -> None:
+    root = Path(__file__).parents[1] / 'src'
+    dashboard_source = (root / 'modules' / 'e2e_dashboards.py').read_text(encoding='utf-8')
+    script = (root / 'web_interface' / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
+
+    assert "('operator', 'single', {kind: [int(row['id']) for row in rows[:2]]" in dashboard_source
+    assert "('multivendor', 'multivendor', {kind: [int(row['id']) for row in rows[:1]]" in dashboard_source
+    assert "('all-cdrs', 'single', {kind: [int(row['id']) for row in rows]" in dashboard_source
+    assert "definition.date_from = 'Oldest'" in dashboard_source
+    assert "definition.date_to = 'Newest'" in dashboard_source
+    assert 'schedule_dashboard_warmup(workspace, dashboard_id, saved_definition, user.username, force=True)' in dashboard_source
+    assert "dashboard_warmup_cancellations[key] = {'requested': False}" in dashboard_source
+    assert "cancelled=lambda: bool(cancellation['requested'])" in dashboard_source
+    assert "last = sessionStorage.getItem(openStorageKey) || '';" in script
+    assert 'const restoreOpenDashboard = restorePageState;' not in script
+
+
+def test_ppt_job_can_open_its_immutable_dashboard_snapshot() -> None:
+    root = Path(__file__).parents[1] / 'src'
+    dashboard_source = (root / 'modules' / 'e2e_dashboards.py').read_text(encoding='utf-8')
+    script = (root / 'web_interface' / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
+    styles = (root / 'web_interface' / 'static' / 'css' / 'e2e_dashboards.css').read_text(encoding='utf-8')
+
+    assert "'slides': snapshot.payload.get('slides', [])" in dashboard_source
+    assert "'viewer_available': bool(slides)" in dashboard_source
+    assert "jobAction('View Dashboard snapshot', 'report-job-dashboard-button'" in script
+    assert 'async function openDashboardPptViewer(job)' in script
+    assert 'pptDashboardViewer = {' in script
+    assert 'const url = chart.payload_url ||' in script
+    assert '.report-job-dashboard-button::before' in styles
+    assert 'const pptSnapshotChart = Boolean(pptDashboardViewer && chart.data_url);' in script
+    assert "Boolean(pptDashboardViewer) && !chart.data_url" in script
+    assert "if (pptDashboardViewer) {\n      $('ds-generate-ppt').disabled = true;" in script
+
+
+def test_dashboard_ppt_job_is_queued_before_preparation_and_chart_rendering() -> None:
+    root = Path(__file__).parents[1] / 'src'
+    dashboard_source = (root / 'modules' / 'e2e_dashboards.py').read_text(encoding='utf-8')
+    script = (root / 'web_interface' / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
+
+    assert 'never make this button wait for' in script
+    assert 'scopePreview = await api' not in script
+    assert 'for (const index of chartIndexes)' not in script
+    assert 'Inserting the export job must remain quick.' in dashboard_source
+    assert 'preview = restore_matching_preview_manifest(workspace, dashboard_id, definition)' in dashboard_source
+
+
+def test_cold_dashboard_ppt_job_progress_covers_prepare_models_and_presentation() -> None:
+    source = (Path(__file__).parents[1] / 'src' / 'modules' / 'e2e_dashboards.py').read_text(encoding='utf-8')
+
+    assert 'min(35, 1 + round(percent * 0.34))' in source
+    assert 'progress=36 + round(position * 29 / max(len(indexes), 1))' in source
+    assert 'progress=66 + round(rendered * 29 / max(chart_total, 1))' in source
+    assert 'progress=96, chart_count=rendered' in source
+
+
+def test_dashboard_background_tasks_are_named_without_dashboard_subgroups() -> None:
+    script = (Path(__file__).parents[1] / 'src' / 'web_interface' / 'static' / 'js' / 'app.js').read_text(encoding='utf-8')
+
+    assert 'Dashboard “${dashboardName}”: ${String(task.label || \'Background task\')}' in script
+    assert 'let previousDashboardName' not in script
+
+
+def test_complete_dashboard_universe_uses_materialized_row_counts() -> None:
+    source = (Path(__file__).parents[1] / 'src' / 'modules' / 'e2e_dashboards.py').read_text(encoding='utf-8')
+
+    assert 'def is_complete_unfiltered_universe(' in source
+    assert 'known_full_row_counts=selected_source_rows if complete_unfiltered_universe else None' in source
+    assert "'Using materialized combined CDR row counts for the complete Dataset Universe'" in source
+
+
+def test_dashboard_reduced_and_filtered_universes_share_one_combined_count_query(tmp_path: Path) -> None:
+    root = Path(__file__).parents[1] / 'src' / 'modules'
+    dashboard_source = (root / 'e2e_dashboards.py').read_text(encoding='utf-8')
+    repository_source = (root / 'repository.py').read_text(encoding='utf-8')
+
+    assert 'COUNT(*) AS universe_count' in dashboard_source
+    assert 'SUM(CASE WHEN {filtered_where} THEN 1 ELSE 0 END) AS filtered_count' in dashboard_source
+    assert 'universe_row_counts_json' in dashboard_source
+    assert 'universe_row_counts_json' in repository_source
+    from src.modules.repository import Repository
+
+    repository = Repository(tmp_path / 'dashboard-counts.db')
+    repository.initialize()
+    with repository.connection() as connection:
+        columns = {row['name'] for row in connection.execute('PRAGMA table_info(dashboard_filter_selections)')}
+    assert 'universe_row_counts_json' in columns
 
 
 def test_large_datasets_share_one_memory_slot_per_workspace(client, monkeypatch, tmp_path) -> None:
@@ -3377,16 +3554,12 @@ def test_scheduled_backup_records_automatic_lifecycle_in_app_logs(client, monkey
     }
     destination = tmp_path / 'scheduled.zip'
 
-    class ImmediateThread:
-        def __init__(self, target, **_kwargs):
-            self.target = target
-
-        def start(self):
-            self.target()
+    def run_immediately(callback, *args):
+        callback(*args)
 
     monkeypatch.setattr(app_module, 'recurring_backup_settings', lambda: dict(config))
-    monkeypatch.setattr(app_module, 'create_recurring_database_backup', lambda _config, _progress: destination)
-    monkeypatch.setattr(app_module, 'Thread', ImmediateThread)
+    monkeypatch.setattr(app_module, 'create_recurring_database_backup', lambda *_args: destination)
+    monkeypatch.setattr(app_module, 'submit_background_task', run_immediately)
     app_module.RECURRING_BACKUP_RUNNING = False
 
     app_module.run_recurring_backup_scheduler()
@@ -3827,6 +4000,17 @@ def test_operator_mapping_is_applied_to_charts_but_not_materialized_tables(clien
         follow_redirects=False,
     )
     assert response.status_code == 303
+
+    for _ in range(300):
+        if app_module.repository.get_dataset(1)['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.01)
+    assert app_module.repository.get_dataset(1)['status'] == 'ready'
+    for _ in range(300):
+        if not app_module.combined_cdr_integrity('data')['has_missing_rows']:
+            break
+        time.sleep(0.01)
+    assert app_module.combined_cdr_integrity('data')['has_missing_rows'] is False
 
     dataset = app_module.serialize_dataset_row(app_module.repository.get_dataset(1))
     materialized = app_module.repository.load_dataset_rows(1, ['Operator', 'Subscriber', 'Vendor'], {})
@@ -6623,6 +6807,7 @@ def test_app_logs_use_the_configured_timezone_for_display_and_date_filter(client
 
     assert log['created_at'] == '2026-09-19 00:30:00'
     assert log['date'] == '2026-09-19'
+    assert log['summary'].startswith('[2026-09-19 00:30:00] ')
 
 
 def test_app_logs_normalises_user_case_and_records_login_outcomes(client) -> None:
