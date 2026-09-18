@@ -1710,6 +1710,164 @@ def test_admin_can_retry_stuck_dataset(client) -> None:
     assert "Workspace opened from cache" in dashboard_response.text
 
 
+def test_ready_dataset_can_be_reprocessed_and_return_to_admin(client) -> None:
+    login(client)
+    client.post(
+        "/datasets-analysis/upload",
+        data={"dataset_kinds": "data"},
+        files={"dataset_files": ("ready.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
+        follow_redirects=False,
+    )
+
+    response = client.post(
+        "/datasets-analysis/retry/1",
+        data={"return_to": "admin"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin"
+
+
+def test_workspace_bulk_dataset_actions_reprocess_in_dependency_order(client, monkeypatch) -> None:
+    login(client)
+    client.post(
+        "/datasets-analysis/upload",
+        data={"dataset_kinds": "mapping_three"},
+        files={"dataset_files": ("mapping.csv", BytesIO(b"Cid__ECI,Vendor\n200,Nokia\n"), "text/csv")},
+        follow_redirects=False,
+    )
+    client.post(
+        "/datasets-analysis/upload",
+        data={"dataset_kinds": "data"},
+        files={"dataset_files": ("cdr.csv", BytesIO(b"operator,Cell_ID_A,score\n3,200 -> 200,91\n"), "text/csv")},
+        follow_redirects=False,
+    )
+    import src.DashboardAnalytic as app_module
+
+    app_module.repository.update_dataset_profile(
+        2,
+        processing_options_json=json.dumps({"three_mapping_dataset_id": 1}),
+    )
+    page = client.get('/workspace')
+    assert page.status_code == 200
+    toolbar = page.text.split('<div class="queue-bulk-actions"', 1)[1].split('</div>', 1)[0]
+    assert toolbar.index('>Map All<') < toolbar.index('>Clear All<') < toolbar.index('>Reprocess All<') < toolbar.index('>Stop All<') < toolbar.index('>Remove All<')
+    assert 'data-dataset-reprocess-dialog' in page.text
+    assert 'name="dataset_ids" value="1" data-reprocess-dataset-choice checked' in page.text
+    assert 'name="dataset_ids" value="2" data-reprocess-dataset-choice checked' in page.text
+
+    calls = []
+
+    def capture_enqueue(
+        _background_tasks, dataset_id, dataset_path, _username,
+        vodafone_mapping_dataset_id=None, three_mapping_dataset_id=None,
+        *, dependencies=(), **_kwargs,
+    ):
+        token = object()
+        calls.append({
+            'dataset_id': dataset_id,
+            'path': dataset_path,
+            'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
+            'three_mapping_dataset_id': three_mapping_dataset_id,
+            'dependencies': list(dependencies),
+            'token': token,
+        })
+        return token
+
+    monkeypatch.setattr(app_module, 'enqueue_dataset_processing', capture_enqueue)
+    response = client.post(
+        '/workspace/reprocess-datasets',
+        data={'dataset_ids': ['2', '1']},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert [call['dataset_id'] for call in calls] == [1, 2]
+    assert calls[1]['three_mapping_dataset_id'] == 1
+    assert calls[1]['dependencies'] == [calls[0]['token']]
+
+
+def test_admin_dataset_table_includes_ordered_global_icon_actions(client, monkeypatch) -> None:
+    login(client)
+    client.post(
+        "/datasets-analysis/upload",
+        data={"dataset_kinds": "mapping_three"},
+        files={"dataset_files": ("mapping.csv", BytesIO(b"Cid__ECI,Vendor\n200,Nokia\n"), "text/csv")},
+        follow_redirects=False,
+    )
+    client.post(
+        "/datasets-analysis/upload",
+        data={"dataset_kinds": "data"},
+        files={"dataset_files": ("cdr.csv", BytesIO(b"operator,Cell_ID_A,score\n3,200 -> 200,91\n"), "text/csv")},
+        follow_redirects=False,
+    )
+    page = client.get('/admin')
+
+    assert page.status_code == 200
+    toolbar = page.text.split('class="queue-bulk-actions admin-dataset-bulk-actions"', 1)[1].split('</div>', 1)[0]
+    assert toolbar.index('>Map All<') < toolbar.index('>Clear All<') < toolbar.index('>Reprocess All<') < toolbar.index('>Stop All<') < toolbar.index('>Remove All<')
+    assert 'data-admin-vendor-mapping-dialog' in page.text
+    assert 'data-admin-vendor-clearing-dialog' in page.text
+    assert 'data-admin-dataset-reprocess-dialog' in page.text
+    assert page.text.count('name="return_to" value="admin"') >= 5
+    styles = client.get('/static/css/app.css')
+    assert styles.status_code == 200
+    assert '.admin-stack .admin-dataset-bulk-actions .queue-map-all {' in styles.text
+    assert '.admin-stack .admin-dataset-bulk-actions .queue-clear-all {' in styles.text
+    assert '.admin-stack .admin-dataset-bulk-actions :is(.queue-reprocess-all, .queue-stop-all) {' in styles.text
+    assert '.admin-stack .admin-dataset-bulk-actions .queue-remove-all {' in styles.text
+
+    import src.DashboardAnalytic as app_module
+
+    monkeypatch.setattr(app_module, 'enqueue_dataset_processing', lambda *_args, **_kwargs: object())
+    response = client.post(
+        '/workspace/reprocess-datasets',
+        data={'dataset_ids': '1', 'return_to': 'admin'},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers['location'] == '/admin'
+
+
+def test_workspace_stop_all_stops_only_processing_datasets(client) -> None:
+    login(client)
+    for name in ('first.csv', 'second.csv'):
+        client.post(
+            "/datasets-analysis/upload",
+            data={"dataset_kinds": "data"},
+            files={"dataset_files": (name, BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
+            follow_redirects=False,
+        )
+    import src.DashboardAnalytic as app_module
+
+    app_module.repository.update_dataset_profile(1, status='processing', progress=40)
+    response = client.post('/workspace/stop-datasets', follow_redirects=False)
+
+    assert response.status_code == 303
+    assert app_module.repository.get_dataset(1)['status'] == 'stopped'
+    assert app_module.repository.get_dataset(2)['status'] == 'ready'
+
+
+def test_workspace_remove_all_deletes_every_non_processing_dataset(client) -> None:
+    login(client)
+    for name in ('first.csv', 'second.csv'):
+        client.post(
+            "/datasets-analysis/upload",
+            data={"dataset_kinds": "data"},
+            files={"dataset_files": (name, BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
+            follow_redirects=False,
+        )
+    import src.DashboardAnalytic as app_module
+
+    source_paths = [Path(row['stored_path']) for row in app_module.repository.list_datasets()]
+    response = client.post('/workspace/delete-datasets', follow_redirects=False)
+
+    assert response.status_code == 303
+    assert app_module.repository.list_datasets() == []
+    assert all(not path.exists() for path in source_paths)
+
+
 def test_admin_cannot_retry_queued_dataset(client) -> None:
     login(client)
     client.post(
@@ -1718,10 +1876,13 @@ def test_admin_cannot_retry_queued_dataset(client) -> None:
         files={"dataset_files": ("sample.csv", BytesIO(b"market,period,score\nES,2026-Q1,91\n"), "text/csv")},
         follow_redirects=False,
     )
+    import src.DashboardAnalytic as app_module
+
+    app_module.repository.update_dataset_profile(1, status="queued", progress=0)
 
     response = client.post("/datasets-analysis/retry/1")
     assert response.status_code == 400
-    assert "Only failed or stopped datasets can be retried" in response.text
+    assert "Only ready, failed or stopped datasets can be reprocessed" in response.text
 
 
 def test_admin_can_delete_queued_dataset(client) -> None:
@@ -1757,12 +1918,20 @@ def test_admin_can_stop_processing_dataset(client) -> None:
     import src.DashboardAnalytic as app_module
 
     app_module.repository.update_dataset_profile(1, status="processing", progress=33)
+    processing_page = client.get('/workspace').text
+    processing_actions = processing_page.split('<div class="queue-actions">', 1)[1].split('</div>', 1)[0]
+    assert 'action-link-stop' in processing_actions
+    assert 'action-link-reprocess' not in processing_actions
     response = client.post("/datasets-analysis/stop/1", follow_redirects=False)
     assert response.status_code == 303
 
     dataset = app_module.repository.get_dataset(1)
     assert dataset is not None
     assert dataset["status"] == "stopped"
+    stopped_page = client.get('/workspace').text
+    stopped_actions = stopped_page.split('<div class="queue-actions">', 1)[1].split('</div>', 1)[0]
+    assert 'action-link-reprocess' in stopped_actions
+    assert 'action-link-stop' not in stopped_actions
 
 
 def test_reupload_same_file_reuses_existing_dataset_entry(client) -> None:
@@ -3646,15 +3815,29 @@ def test_queued_dataset_actions_remain_compact_icons_during_live_updates(client)
 
     page = client.get('/workspace')
     assert page.status_code == 200
-    assert 'action-link-preview action-link-disabled' in page.text
-    assert 'Preview unavailable while queued' in page.text
+    assert 'class="ghost-link action-link-preview" disabled' in page.text
+    assert 'aria-label="Preview unavailable"' in page.text
+    assert 'class="action-link-clear-vendors" disabled' in page.text
+    assert 'class="warning-button icon-action action-link-reprocess" aria-label="Reprocess dataset" title="Reprocess dataset" disabled' in page.text
     assert 'class="danger-button icon-action" aria-label="Delete dataset"' in page.text
+    actions = page.text.split('<div class="queue-actions">', 1)[1].split('</div>', 1)[0]
+    assert actions.index('action-link-clear-vendors') < actions.index('action-link-reprocess') < actions.index('danger-button')
 
     script = client.get('/static/js/app.js')
-    assert 'action-link-preview action-link-disabled' in script.text
+    assert 'class="ghost-link action-link-preview" disabled' in script.text
+    assert 'action-link-clear-vendors' in script.text
+    assert 'action-link-reprocess' in script.text
     assert 'class="danger-button icon-action" aria-label="Delete dataset"' in script.text
 
     styles = client.get('/static/css/app.css')
+    assert ".queue-actions .action-link-map-vendors::before, .admin-dataset-actions .action-link-map-vendors::before { content: '';" in styles.text
+    assert ".queue-actions .action-link-clear-vendors::before, .admin-dataset-actions .action-link-clear-vendors::before { content: '';" in styles.text
+    assert '.queue-actions .action-link-reprocess::before, .admin-dataset-actions .action-link-reprocess::before' in styles.text
+    assert '.queue-actions .danger-button::before, .admin-dataset-actions .danger-button::before' in styles.text
+    assert '.queue-actions .action-link-stop::before, .admin-dataset-actions .action-link-stop::before' in styles.text
+    assert '.admin-dataset-actions .danger-button { font-size: 0 !important; }' in styles.text
+    assert '.action-link-clear-vendors { background: linear-gradient(135deg, #d58f1f, #e9ac39);' in styles.text
+    assert '.queue-actions :is(.action-link-reprocess,.action-link-stop), .admin-dataset-actions :is(.action-link-reprocess,.action-link-stop) { background: linear-gradient(135deg, #c75683, #ed98b7);' in styles.text
     assert '.report-job-actions { display: flex; max-width: none; flex-wrap: nowrap;' in styles.text
     assert '.report-jobs-table th:nth-child(2), .report-jobs-table td:nth-child(2) { width: 10%; min-width: 130px;' in styles.text
     assert '.report-jobs-table th:nth-child(10), .report-jobs-table td:nth-child(10) { width: 20%; min-width: 240px;' in styles.text
@@ -3940,7 +4123,7 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     )
 
     workspace = client.get('/workspace')
-    assert 'Map Vendors</button>' in workspace.text
+    assert 'data-vendor-map-open' in workspace.text
     assert 'data-queue-status="ready"' in workspace.text
     assert 'name="cdr_dataset_ids"' in workspace.text
     assert 'name="three_mapping_dataset_id"' in workspace.text
@@ -3968,8 +4151,7 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
 
     workspace_after_mapping = client.get('/workspace').text.split('<table class="queue-table">', 1)[1].split('</tbody>', 1)[0]
     assert 'data-dataset-id="1"' in workspace_after_mapping
-    assert 'Map Vendors</button>' not in workspace_after_mapping
-    assert 'Clear Vendors</button>' in workspace_after_mapping
+    assert 'data-vendor-map-open' not in workspace_after_mapping
     assert 'data-vendor-clear-open' in workspace_after_mapping
     assert 'action="/workspace/clear-vendors"' in workspace.text
     live_status_after_mapping = client.get('/api/datasets/status').json()['datasets']
@@ -3978,8 +4160,8 @@ def test_workspace_maps_unassigned_cdr_vendors_from_available_multivendor_mappin
     clear_response = client.post('/workspace/clear-vendors/1', follow_redirects=False)
     assert clear_response.status_code == 303
     workspace_after_clear = client.get('/workspace').text.split('<table class="queue-table">', 1)[1].split('</tbody>', 1)[0]
-    assert 'Map Vendors</button>' in workspace_after_clear
-    assert 'Clear Vendors</button>' not in workspace_after_clear
+    assert 'data-vendor-map-open' in workspace_after_clear
+    assert 'data-vendor-clear-open' not in workspace_after_clear
 
 
 def test_workspace_queues_vendor_mapping_for_multiple_cdrs(client) -> None:

@@ -188,6 +188,17 @@
           {% endfor %}
         </select>
       </label>
+      <div class="queue-bulk-actions" role="group" aria-label="Bulk dataset actions">
+        <button type="button" class="queue-map-all" data-vendor-map-all-open title="Assign Vendor Mapping to all eligible CDR datasets" aria-label="Assign Vendor Mapping to all eligible CDR datasets"{% if not mappable_cdr_datasets %} disabled{% endif %}>Map All</button>
+        <button type="button" class="queue-clear-all" data-vendor-clear-all-open title="Clear Vendor Mapping from all mapped CDR datasets" aria-label="Clear Vendor Mapping from all mapped CDR datasets"{% if not clearable_cdr_datasets %} disabled{% endif %}>Clear All</button>
+        <button type="button" class="queue-reprocess-all" data-reprocess-all-open title="Reprocess all available datasets from their original source files" aria-label="Reprocess all available datasets from their original source files"{% if not datasets | selectattr('can_reprocess') | list %} disabled{% endif %}>Reprocess All</button>
+        <form method="post" action="/workspace/stop-datasets" data-confirm="Stop every dataset that is currently processing?" data-confirm-title="Stop all processing datasets" data-confirm-label="Stop All">
+          <button type="submit" class="queue-stop-all" title="Stop all datasets being processed" aria-label="Stop all datasets being processed"{% if not datasets | selectattr('status', 'equalto', 'processing') | list %} disabled{% endif %}>Stop All</button>
+        </form>
+        <form method="post" action="/workspace/delete-datasets" data-confirm="Permanently delete every dataset and its original source file from this workspace? This cannot be undone." data-confirm-title="Remove all datasets" data-confirm-label="Remove All">
+          <button type="submit" class="queue-remove-all" title="Remove all datasets" aria-label="Remove all datasets"{% if not datasets or datasets | selectattr('status', 'equalto', 'processing') | list %} disabled{% endif %}>Remove All</button>
+        </form>
+      </div>
     </div>
     <div class="table-wrap queue-table-wrap">
       <table class="queue-table">
@@ -242,11 +253,10 @@
               <div class="queue-actions">
                 {% if dataset.status == 'ready' %}
                 <a class="ghost-link action-link-preview" href="/workspace/preview/{{ dataset.id }}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview" title="Preview dataset" aria-label="Preview dataset">Preview</a>
-                <form method="post" action="/datasets-analysis/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
-                  <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
-                </form>
-                {% if dataset.can_map_vendors or dataset.dataset_kind in ['data', 'voice', 'speech'] %}
-                {% if dataset.dataset_kind in ['data', 'voice', 'speech'] %}
+                {% else %}
+                <button type="button" class="ghost-link action-link-preview" disabled title="Preview is only available for ready datasets" aria-label="Preview unavailable">Preview</button>
+                {% endif %}
+                {% if dataset.status == 'ready' and dataset.dataset_kind in ['data', 'voice', 'speech'] %}
                 <a
                   class="ghost-link action-link-primary"
                   href="/datasets-analysis?dataset_id={{ dataset.id }}{% if dataset.dataset_kind %}&input_kind={{ dataset.dataset_kind }}{% endif %}"
@@ -256,9 +266,8 @@
                   aria-label="Show analysis"
                   {% if dataset.dataset_kind %}data-input-kind="{{ dataset.dataset_kind }}"{% endif %}
                 >Show Analysis</a>
-                {% endif %}
-                {% if dataset.can_clear_vendors %}
-                <button type="button" class="action-link-clear-vendors" data-vendor-clear-open data-dataset-id="{{ dataset.id }}" title="Clear vendor mapping" aria-label="Clear vendor mapping">Clear Vendors</button>
+                {% else %}
+                <button type="button" class="ghost-link action-link-primary" disabled title="Analysis is only available for ready CDR datasets" aria-label="Analysis unavailable">Show Analysis</button>
                 {% endif %}
                 {% if dataset.can_map_vendors %}
                 <button
@@ -268,26 +277,26 @@
                   data-dataset-id="{{ dataset.id }}"
                   data-dataset-name="{{ dataset.file_name }}"
                 >Map Vendors</button>
+                {% else %}
+                <button type="button" class="ghost-link action-link-map-vendors" disabled title="Vendor mapping is not available for this dataset" aria-label="Map vendors unavailable">Map Vendors</button>
                 {% endif %}
+                {% if dataset.can_clear_vendors %}
+                <button type="button" class="action-link-clear-vendors" data-vendor-clear-open data-dataset-id="{{ dataset.id }}" title="Clear vendor mapping" aria-label="Clear vendor mapping">Clear Vendors</button>
+                {% else %}
+                <button type="button" class="action-link-clear-vendors" disabled title="No tool-applied vendor mapping is available to clear" aria-label="Clear vendor mapping unavailable">Clear Vendors</button>
                 {% endif %}
-                {% elif dataset.status == 'processing' %}
-                <span class="ghost-link action-link-preview action-link-disabled" aria-disabled="true" title="Preview unavailable while processing" aria-label="Preview unavailable while processing">Preview</span>
+                {% if dataset.status == 'processing' %}
                 <form method="post" action="/datasets-analysis/stop/{{ dataset.id }}" data-confirm="Stop processing for '{{ dataset.file_name }}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
-                  <button type="submit" class="danger-button icon-action" aria-label="Stop processing" title="Stop processing">■</button>
+                  <button type="submit" class="warning-button icon-action action-link-stop" aria-label="Stop processing" title="Stop processing">Stop Processing</button>
                 </form>
-                {% elif dataset.status == 'queued' %}
-                <span class="ghost-link action-link-preview action-link-disabled" aria-disabled="true" title="Preview unavailable while queued" aria-label="Preview unavailable while queued">Preview</span>
-                <form method="post" action="/datasets-analysis/delete/{{ dataset.id }}" data-confirm="Delete queued dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
-                  <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
-                </form>
-                {% elif dataset.status in ['failed', 'stopped'] %}
-                <form method="post" action="/datasets-analysis/retry/{{ dataset.id }}" data-loading-label="Retrying dataset processing">
-                  <button type="submit" class="warning-button icon-action" aria-label="Retry processing" title="Retry processing">↻</button>
-                </form>
-                <form method="post" action="/datasets-analysis/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
-                  <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
+                {% else %}
+                <form method="post" action="/datasets-analysis/retry/{{ dataset.id }}" data-confirm="Reprocess dataset '{{ dataset.file_name }}' from its source file?" data-confirm-title="Reprocess dataset" data-confirm-label="Reprocess dataset" data-loading-label="Reprocessing dataset">
+                  <button type="submit" class="warning-button icon-action action-link-reprocess" aria-label="Reprocess dataset" title="Reprocess dataset"{% if dataset.status not in ['ready', 'failed', 'stopped'] %} disabled{% endif %}>Reprocess Dataset</button>
                 </form>
                 {% endif %}
+                <form method="post" action="/datasets-analysis/delete/{{ dataset.id }}" data-confirm="Delete dataset '{{ dataset.file_name }}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
+                  <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset"{% if dataset.status == 'processing' %} disabled{% endif %}>Delete Dataset</button>
+                </form>
               </div>
             </td>
           </tr>
@@ -441,6 +450,34 @@
       </div>
     </div>
   </details>
+
+  <dialog class="vendor-mapping-dialog dataset-reprocess-dialog" data-dataset-reprocess-dialog aria-labelledby="dataset-reprocess-title">
+    <form method="post" action="/workspace/reprocess-datasets">
+      <p class="eyebrow">Original source files</p>
+      <h3 id="dataset-reprocess-title">Reprocess Datasets</h3>
+      <p class="lede">Confirm which datasets should be rebuilt from their original raw files. Available datasets are selected by default; queued, processing or missing-source datasets cannot be selected.</p>
+      <fieldset class="vendor-mapping-cdr-list dataset-reprocess-list">
+        <legend>Datasets to reprocess</legend>
+        <label class="vendor-mapping-cdr-choice dataset-reprocess-toggle">
+          <input type="checkbox" data-reprocess-all-toggle checked{% if not datasets | selectattr('can_reprocess') | list %} disabled{% endif %}>
+          <span>Select all available datasets</span>
+        </label>
+        {% for dataset in datasets %}
+        <label class="vendor-mapping-cdr-choice{% if not dataset.can_reprocess %} is-disabled{% endif %}">
+          <input type="checkbox" name="dataset_ids" value="{{ dataset.id }}" data-reprocess-dataset-choice{% if dataset.can_reprocess %} checked{% else %} disabled{% endif %}>
+          <span>{{ dataset.file_name }} <small>· {{ dataset.input_kind_label }} · {{ dataset.status_label }}{% if not dataset.source_exists %} · source file missing{% endif %}</small></span>
+        </label>
+        {% else %}
+        <p class="form-note">No datasets are available in this workspace.</p>
+        {% endfor %}
+      </fieldset>
+      <p class="form-note" data-reprocess-selection-status></p>
+      <div class="vendor-mapping-actions">
+        <button type="button" class="ghost-link" data-reprocess-all-cancel>Cancel</button>
+        <button type="submit" class="dataset-reprocess-submit" data-reprocess-all-submit>Reprocess Selected</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog class="vendor-mapping-dialog" data-vendor-mapping-dialog aria-labelledby="vendor-mapping-title">
     <form
@@ -771,16 +808,74 @@
 </script>
 <script>
 (() => {
+  const dialog = document.querySelector('[data-dataset-reprocess-dialog]');
+  const form = dialog?.querySelector('form[action="/workspace/reprocess-datasets"]');
+  const choices = [...(dialog?.querySelectorAll('[data-reprocess-dataset-choice]') || [])];
+  const toggle = dialog?.querySelector('[data-reprocess-all-toggle]');
+  const submit = dialog?.querySelector('[data-reprocess-all-submit]');
+  const selectionStatus = dialog?.querySelector('[data-reprocess-selection-status]');
+  if (!dialog || !form) return;
+
+  const updateSelection = () => {
+    const availableChoices = choices.filter((choice) => !choice.disabled);
+    const selected = availableChoices.filter((choice) => choice.checked).length;
+    if (toggle) {
+      toggle.disabled = availableChoices.length === 0;
+      toggle.checked = availableChoices.length > 0 && selected === availableChoices.length;
+      toggle.indeterminate = selected > 0 && selected < availableChoices.length;
+    }
+    if (submit) submit.disabled = selected === 0;
+    if (selectionStatus) selectionStatus.textContent = `${selected} of ${availableChoices.length} available datasets selected.`;
+  };
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest?.('[data-reprocess-all-open]')) return;
+    choices.forEach((choice) => { choice.checked = !choice.disabled; });
+    updateSelection();
+    dialog.showModal();
+  });
+  toggle?.addEventListener('change', () => {
+    choices.filter((choice) => !choice.disabled).forEach((choice) => { choice.checked = toggle.checked; });
+    updateSelection();
+  });
+  choices.forEach((choice) => choice.addEventListener('change', updateSelection));
+  dialog.querySelector('[data-reprocess-all-cancel]')?.addEventListener('click', () => dialog.close());
+  form.addEventListener('submit', (event) => {
+    if (!choices.some((choice) => !choice.disabled && choice.checked)) {
+      event.preventDefault();
+      updateSelection();
+      return;
+    }
+    dialog.close();
+  });
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+  document.addEventListener('workspace-dataset-status-updated', (event) => {
+    const datasetsById = new Map((event.detail?.datasets || []).map((dataset) => [String(dataset.id), dataset]));
+    choices.forEach((choice) => {
+      const dataset = datasetsById.get(choice.value);
+      if (!dataset) return;
+      choice.disabled = !dataset.can_reprocess;
+      if (choice.disabled) choice.checked = false;
+      choice.closest('label')?.classList.toggle('is-disabled', choice.disabled);
+    });
+    updateSelection();
+  });
+  updateSelection();
+})();
+</script>
+<script>
+(() => {
   const dialog = document.querySelector('[data-vendor-mapping-dialog]');
   const mappingForm = dialog?.querySelector('form[action="/workspace/map-vendors"]');
   const cdrChoices = dialog?.querySelectorAll('[data-vendor-mapping-cdr-choice]');
   if (!dialog || !cdrChoices?.length) return;
 
   document.addEventListener('click', (event) => {
-    const button = event.target.closest?.('[data-vendor-map-open]');
+    const button = event.target.closest?.('[data-vendor-map-open],[data-vendor-map-all-open]');
     if (!button) return;
     const selectedId = button.dataset.datasetId || '';
-    cdrChoices.forEach((choice) => { choice.checked = choice.value === selectedId; });
+    cdrChoices.forEach((choice) => { choice.checked = button.hasAttribute('data-vendor-map-all-open') || choice.value === selectedId; });
     dialog.showModal();
   });
   dialog.querySelector('[data-vendor-map-cancel]')?.addEventListener('click', (event) => {
@@ -809,10 +904,10 @@
   if (!dialog || !cdrChoices?.length) return;
 
   document.addEventListener('click', (event) => {
-    const button = event.target.closest?.('[data-vendor-clear-open]');
+    const button = event.target.closest?.('[data-vendor-clear-open],[data-vendor-clear-all-open]');
     if (!button) return;
     const selectedId = button.dataset.datasetId || '';
-    cdrChoices.forEach((choice) => { choice.checked = choice.value === selectedId; });
+    cdrChoices.forEach((choice) => { choice.checked = button.hasAttribute('data-vendor-clear-all-open') || choice.value === selectedId; });
     dialog.showModal();
   });
   dialog.querySelector('[data-vendor-clear-cancel]')?.addEventListener('click', (event) => {

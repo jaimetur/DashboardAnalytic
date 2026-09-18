@@ -158,8 +158,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .action-link-preview:hover { background: linear-gradient(135deg, #c9e2ef, #abcfe2); color: #08283d; }
 .action-link-map-vendors { background: linear-gradient(135deg, #a55d08, #d8891f); border-color: rgba(132, 72, 5, 0.50); color: #fff; font-weight: 700; box-shadow: 0 10px 22px rgba(165, 93, 8, 0.22); }
 .action-link-map-vendors:hover { background: linear-gradient(135deg, #824604, #ba7012); color: #fff; }
-.action-link-clear-vendors { background: linear-gradient(135deg, #c75683, #ed98b7); border: 1px solid rgba(167, 54, 103, 0.48); color: #fff; font-weight: 700; box-shadow: 0 10px 22px rgba(188, 74, 124, 0.24); }
-.action-link-clear-vendors:hover { background: linear-gradient(135deg, #a93d6b, #d9769e); color: #fff; }
+.action-link-clear-vendors { background: linear-gradient(135deg, #d58f1f, #e9ac39); border: 1px solid rgba(166, 103, 12, 0.50); color: #fffef9; font-weight: 700; box-shadow: 0 10px 22px rgba(183, 119, 19, 0.22); }
+.action-link-clear-vendors:hover:not(:disabled) { background: linear-gradient(135deg, #b9740d, #d99624); color: #fff; }
 .action-link-disabled { background: linear-gradient(135deg, #e3e8ec, #d5dde4); border-color: rgba(126, 139, 152, 0.24); color: #7a8792; cursor: not-allowed; font-weight: 600; box-shadow: none; }
 .eyebrow { margin: 0 0 0.35rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--brand-2); font-size: 0.78rem; }
 .hero-copy, .panel { background: var(--panel); border: 1px solid rgba(255,255,255,0.55); box-shadow: var(--shadow); border-radius: var(--radius); backdrop-filter: blur(14px); }
@@ -1311,10 +1311,37 @@ body[data-embedded-template-editor] .slides-templates-editor-table-wrap .form-ac
 .vendor-mapping-actions { display: flex; justify-content: flex-end; gap: 0.75rem; flex-wrap: wrap; }
 .vendor-mapping-actions .ghost-link { background: linear-gradient(135deg, #edf3f6, #d7e5eb); border-color: rgba(16, 49, 74, 0.24); color: #10314a; font-weight: 700; box-shadow: none; }
 .vendor-mapping-actions .ghost-link:hover { background: linear-gradient(135deg, #dceaf0, #c5dae4); color: #08283d; }
-.queue-filter-row { display: flex; justify-content: flex-start; margin: -0.1rem 0 0.9rem; }
+.queue-filter-row { display: flex; align-items: end; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin: -0.1rem 0 0.9rem; }
 .queue-type-filter-control { width: min(330px, 100%); font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
 .queue-type-filter-control select { font-weight: 600; text-transform: none; letter-spacing: normal; }
 .queue-type-filter-control select option:disabled { color: #9aa6af; background: #eef1f3; }
+.queue-bulk-actions { display: flex; align-items: center; justify-content: flex-end; gap: 0.38rem; flex-wrap: wrap; margin-bottom: 0.43rem; }
+.admin-dataset-bulk-actions { margin: 0.15rem 0 0.8rem; }
+.queue-bulk-actions form { display: inline-flex; margin: 0; }
+.queue-bulk-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 0.34rem; min-height: 2rem; height: 2rem; padding: 0.3rem 0.55rem; border-radius: 999px; color: #fff; font-size: 0.7rem; font-weight: 800; line-height: 1; white-space: nowrap; box-shadow: none; }
+.queue-bulk-actions button::before { content: ''; width: 0.9rem; height: 0.9rem; flex: 0 0 0.9rem; background-position: center; background-size: contain; background-repeat: no-repeat; }
+.queue-map-all { background: linear-gradient(135deg, #a55d08, #d8891f); border-color: rgba(132, 72, 5, 0.50); }
+.queue-clear-all { background: linear-gradient(135deg, #d58f1f, #e9ac39); border-color: rgba(166, 103, 12, 0.50); }
+.queue-reprocess-all, .queue-stop-all, .dataset-reprocess-submit { background: linear-gradient(135deg, #c75683, #ed98b7); border-color: rgba(167, 54, 103, 0.48); color: #fff; }
+.queue-remove-all { background: linear-gradient(135deg, #c65544, #df7758); border-color: rgba(184, 77, 58, 0.48); color: #fff; }
+.admin-stack .admin-dataset-bulk-actions .queue-map-all { background: linear-gradient(135deg, #a55d08, #d8891f); border-color: rgba(132, 72, 5, 0.50); color: #fff; }
+.admin-stack .admin-dataset-bulk-actions .queue-clear-all { background: linear-gradient(135deg, #d58f1f, #e9ac39); border-color: rgba(166, 103, 12, 0.50); color: #fffef9; }
+.admin-stack .admin-dataset-bulk-actions :is(.queue-reprocess-all, .queue-stop-all) { background: linear-gradient(135deg, #c75683, #ed98b7); border-color: rgba(167, 54, 103, 0.48); color: #fff; }
+.admin-stack .admin-dataset-bulk-actions .queue-remove-all { background: linear-gradient(135deg, #c65544, #df7758); border-color: rgba(184, 77, 58, 0.48); color: #fff; }
+.admin-stack .admin-dataset-bulk-actions .queue-map-all:hover:not(:disabled) { background: linear-gradient(135deg, #824604, #ba7012); }
+.admin-stack .admin-dataset-bulk-actions .queue-clear-all:hover:not(:disabled) { background: linear-gradient(135deg, #b9740d, #d99624); }
+.admin-stack .admin-dataset-bulk-actions :is(.queue-reprocess-all, .queue-stop-all):hover:not(:disabled) { background: linear-gradient(135deg, #a93d6b, #d9769e); }
+.admin-stack .admin-dataset-bulk-actions .queue-remove-all:hover:not(:disabled) { background: linear-gradient(135deg, #a83f31, #c65d43); }
+.admin-stack .admin-dataset-bulk-actions button:disabled { opacity: 0.48; filter: saturate(0.68); box-shadow: none; }
+.queue-map-all::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.6 13.4a4.5 4.5 0 0 0 6.36.14l2.58-2.58a4.5 4.5 0 0 0-6.36-6.36l-1.48 1.48'/%3E%3Cpath d='M13.4 10.6a4.5 4.5 0 0 0-6.36-.14l-2.58 2.58a4.5 4.5 0 0 0 6.36 6.36l1.48-1.48'/%3E%3C/svg%3E"); }
+.queue-clear-all::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 15 8.5-8.5a2.1 2.1 0 0 1 3 0l2 2a2.1 2.1 0 0 1 0 3L9 20H6l-2-2v-3Z'/%3E%3Cpath d='m9.5 9.5 5 5M9 20h11'/%3E%3C/svg%3E"); }
+.queue-reprocess-all::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 7v5h-5'/%3E%3Cpath d='M19 12a7 7 0 1 0-2.05 4.95'/%3E%3C/svg%3E"); }
+.queue-stop-all::before { width: 0.65rem!important; height: 0.65rem!important; flex-basis: 0.65rem!important; border-radius: 2px; background: #fff; }
+.queue-remove-all::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6 6 18'/%3E%3C/svg%3E"); }
+.dataset-reprocess-list { max-height: min(52vh, 420px); overflow-y: auto; }
+.dataset-reprocess-toggle { padding-bottom: 0.55rem; border-bottom: 1px solid rgba(16,49,74,.14); }
+.vendor-mapping-cdr-choice.is-disabled { cursor: not-allowed; opacity: 0.55; }
+@media (max-width: 640px) { .queue-bulk-actions { width: 100%; justify-content: flex-start; margin-bottom: 0; } }
 .dataset-preview-hero { position: relative; z-index: 2; overflow: visible; background: linear-gradient(145deg, rgba(16, 49, 74, 0.97), rgba(11, 122, 117, 0.90)); border-color: rgba(11, 122, 117, 0.48); color: #fff; }
 .dataset-preview-hero .eyebrow, .dataset-preview-hero .lede { color: rgba(255,255,255,0.82); }
 .dataset-preview-hero .pill { background: rgba(255,255,255,0.90); border-color: rgba(255,255,255,0.45); color: #263d50; }
@@ -1721,7 +1748,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .admin-dataset-actions form { display: inline-flex; margin: 0; }
 .admin-dataset-actions .ghost-link, .admin-dataset-actions button { min-height: 1.95rem; padding: 0.34rem 0.48rem; white-space: nowrap; font-size: 0.72rem; line-height: 1.1; }
 .admin-dataset-actions .action-link-map-vendors { background: linear-gradient(135deg, #a55d08, #d8891f); border-color: rgba(132, 72, 5, 0.50); color: #fff; }
-.admin-dataset-actions .action-link-clear-vendors { background: linear-gradient(135deg, #c75683, #ed98b7); border-color: rgba(167, 54, 103, 0.48); color: #fff; }
+.admin-dataset-actions .action-link-clear-vendors { background: linear-gradient(135deg, #d58f1f, #e9ac39); border-color: rgba(166, 103, 12, 0.50); color: #fffef9; }
 .admin-stack .admin-dataset-actions .danger-button { background: linear-gradient(135deg, #8b1d24, #c94c4b); border-color: rgba(116, 18, 24, 0.52); color: #fff; }
 .admin-stack .admin-dataset-actions .danger-button:hover:not(:disabled) { background: linear-gradient(135deg, #69131a, #ad3538); }
 .queue-status-pill { display: inline-flex; align-items: center; justify-content: center; padding: 0.38rem 0.7rem; border-radius: 999px; color: white; font-size: 0.84rem; font-weight: 700; }
@@ -1738,13 +1765,21 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .queue-actions .action-link-primary::before { content: ''; width: 1.15rem; height: 1.15rem; background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 18a8 8 0 1 1 16 0'/%3E%3Cpath d='M12 18l4-6'/%3E%3Ccircle cx='12' cy='18' r='1.4' fill='white' stroke='none'/%3E%3Cpath d='M6.4 14.4 5 13.8M8.2 11.2 7.3 10M12 10V8M15.8 11.2l.9-1.2M17.6 14.4l1.4-.6'/%3E%3C/svg%3E"); }
 .queue-actions .action-link-map-vendors::before { content: '↗'; font-size: 1rem; }
 .queue-actions .action-link-clear-vendors::before { content: '↺'; font-size: 1rem; }
-.queue-actions .danger-button::before { content: '×'; font-size: 1.25rem; }
+.queue-actions .danger-button::before, .admin-dataset-actions .danger-button::before { content: ''; width: 1.05rem; height: 1.05rem; background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6 6 18'/%3E%3C/svg%3E"); }
 .queue-actions .warning-button::before { content: '↻'; font-size: 1.05rem; }
 .admin-dataset-actions .action-link-preview, .admin-dataset-actions .action-link-primary, .admin-dataset-actions .action-link-map-vendors, .admin-dataset-actions .action-link-clear-vendors { width: 2rem; min-width: 2rem; height: 2rem; min-height: 2rem; padding: 0.15rem !important; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: 0 !important; }
 .admin-dataset-actions .action-link-preview::before { content: '▥'; font-size: 0.95rem; }
 .admin-dataset-actions .action-link-primary::before { content: ''; width: 1.15rem; height: 1.15rem; background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 18a8 8 0 1 1 16 0'/%3E%3Cpath d='M12 18l4-6'/%3E%3Ccircle cx='12' cy='18' r='1.4' fill='white' stroke='none'/%3E%3Cpath d='M6.4 14.4 5 13.8M8.2 11.2 7.3 10M12 10V8M15.8 11.2l.9-1.2M17.6 14.4l1.4-.6'/%3E%3C/svg%3E"); }
 .admin-dataset-actions .action-link-map-vendors::before { content: '↗'; font-size: 1rem; }
 .admin-dataset-actions .action-link-clear-vendors::before { content: '↺'; font-size: 1rem; }
+.queue-actions .action-link-map-vendors::before, .admin-dataset-actions .action-link-map-vendors::before { content: ''; width: 1.15rem; height: 1.15rem; background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.6 13.4a4.5 4.5 0 0 0 6.36.14l2.58-2.58a4.5 4.5 0 0 0-6.36-6.36l-1.48 1.48'/%3E%3Cpath d='M13.4 10.6a4.5 4.5 0 0 0-6.36-.14l-2.58 2.58a4.5 4.5 0 0 0 6.36 6.36l1.48-1.48'/%3E%3C/svg%3E"); }
+.queue-actions .action-link-clear-vendors::before, .admin-dataset-actions .action-link-clear-vendors::before { content: ''; width: 1.15rem; height: 1.15rem; background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 15 8.5-8.5a2.1 2.1 0 0 1 3 0l2 2a2.1 2.1 0 0 1 0 3L9 20H6l-2-2v-3Z'/%3E%3Cpath d='m9.5 9.5 5 5M9 20h11'/%3E%3C/svg%3E"); }
+.queue-actions .action-link-reprocess, .queue-actions .action-link-stop, .admin-dataset-actions .action-link-reprocess, .admin-dataset-actions .action-link-stop { font-size: 0 !important; }
+.queue-actions :is(.action-link-reprocess,.action-link-stop), .admin-dataset-actions :is(.action-link-reprocess,.action-link-stop) { background: linear-gradient(135deg, #c75683, #ed98b7); border-color: rgba(167, 54, 103, 0.48); color: #fff; box-shadow: 0 10px 22px rgba(188, 74, 124, 0.24); }
+.queue-actions :is(.action-link-reprocess,.action-link-stop):hover:not(:disabled), .admin-dataset-actions :is(.action-link-reprocess,.action-link-stop):hover:not(:disabled) { background: linear-gradient(135deg, #a93d6b, #d9769e); color: #fff; }
+.queue-actions .action-link-reprocess::before, .admin-dataset-actions .action-link-reprocess::before { content: ''; width: 1.15rem; height: 1.15rem; background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 7v5h-5'/%3E%3Cpath d='M19 12a7 7 0 1 0-2.05 4.95'/%3E%3C/svg%3E"); }
+.queue-actions .action-link-stop::before, .admin-dataset-actions .action-link-stop::before { content: ''; width: 1rem; height: 1rem; background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='5.5' y='5.5' width='13' height='13' rx='1.8' fill='white'/%3E%3C/svg%3E"); }
+.admin-dataset-actions .danger-button { font-size: 0 !important; }
 .active-row { background: rgba(11, 122, 117, 0.06); }
 .queue-table th:nth-child(1), .queue-table td:nth-child(1) { width: 60px; }
 .queue-table th:nth-child(2), .queue-table td:nth-child(2) { width: 220px; }

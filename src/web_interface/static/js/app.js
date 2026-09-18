@@ -6515,40 +6515,29 @@ if (queueNode) {
       const canClearVendors = Boolean(dataset.can_clear_vendors) || hadClearVendors;
       const fileName = String(dataset.file_name || 'dataset')
         .replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      if (dataset.status === 'ready') {
-        actions.innerHTML = `
-          <a class="ghost-link action-link-preview" href="/workspace/preview/${dataset.id}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview" title="Preview dataset" aria-label="Preview dataset">Preview</a>
-          <form method="post" action="/datasets-analysis/delete/${dataset.id}" data-confirm="Delete dataset '${fileName}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
-            <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
-          </form>
-          ${isCdr ? `<a class="ghost-link action-link-primary" href="${openHref}" data-datasets-analysis-open-link data-dataset-id="${dataset.id}" title="Show analysis" aria-label="Show analysis"${datasetKind ? ` data-input-kind="${String(datasetKind)}"` : ''}>Show Analysis</a>` : ''}
-          ${canClearVendors ? `<button type="button" class="action-link-clear-vendors" data-vendor-clear-open data-dataset-id="${dataset.id}" title="Clear vendor mapping" aria-label="Clear vendor mapping">Clear Vendors</button>` : ''}
-          ${canMapVendors ? `<button type="button" class="ghost-link action-link-map-vendors" data-vendor-map-open data-dataset-id="${dataset.id}" data-dataset-name="${fileName}">Map Vendors</button>` : ''}
-        `;
-      } else if (dataset.status === 'processing') {
-        actions.innerHTML = `
-          <span class="ghost-link action-link-preview action-link-disabled" aria-disabled="true" title="Preview unavailable while processing" aria-label="Preview unavailable while processing">Preview</span>
-          <form method="post" action="/datasets-analysis/stop/${dataset.id}" data-confirm="Stop processing for '${dataset.file_name}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing">
-            <button type="submit" class="danger-button icon-action" aria-label="Stop processing" title="Stop processing">■</button>
-          </form>
-        `;
-      } else if (dataset.status === 'queued') {
-        actions.innerHTML = `
-          <span class="ghost-link action-link-preview action-link-disabled" aria-disabled="true" title="Preview unavailable while queued" aria-label="Preview unavailable while queued">Preview</span>
-          <form method="post" action="/datasets-analysis/delete/${dataset.id}" data-confirm="Delete queued dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
-            <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
-          </form>
-        `;
-      } else if (dataset.status === 'failed' || dataset.status === 'stopped') {
-        actions.innerHTML = `
-          <form method="post" action="/datasets-analysis/retry/${dataset.id}" data-loading-label="Retrying dataset processing">
-            <button type="submit" class="warning-button icon-action" aria-label="Retry processing" title="Retry processing">↻</button>
-          </form>
-          <form method="post" action="/datasets-analysis/delete/${dataset.id}" data-confirm="Delete dataset '${dataset.file_name}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
-            <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset">×</button>
-          </form>
-        `;
-      }
+      const isReady = dataset.status === 'ready';
+      const canReprocess = ['ready', 'failed', 'stopped'].includes(dataset.status);
+      const canStop = dataset.status === 'processing';
+      actions.innerHTML = `
+        ${isReady
+          ? `<a class="ghost-link action-link-preview" href="/workspace/preview/${dataset.id}" target="_blank" rel="noopener" data-preview-open-link data-loading-label="Generating dataset preview" title="Preview dataset" aria-label="Preview dataset">Preview</a>`
+          : '<button type="button" class="ghost-link action-link-preview" disabled title="Preview is only available for ready datasets" aria-label="Preview unavailable">Preview</button>'}
+        ${isReady && isCdr
+          ? `<a class="ghost-link action-link-primary" href="${openHref}" data-datasets-analysis-open-link data-dataset-id="${dataset.id}" title="Show analysis" aria-label="Show analysis"${datasetKind ? ` data-input-kind="${String(datasetKind)}"` : ''}>Show Analysis</a>`
+          : '<button type="button" class="ghost-link action-link-primary" disabled title="Analysis is only available for ready CDR datasets" aria-label="Analysis unavailable">Show Analysis</button>'}
+        ${canMapVendors
+          ? `<button type="button" class="ghost-link action-link-map-vendors" data-vendor-map-open data-dataset-id="${dataset.id}" data-dataset-name="${fileName}" title="Map vendors" aria-label="Map vendors">Map Vendors</button>`
+          : '<button type="button" class="ghost-link action-link-map-vendors" disabled title="Vendor mapping is not available for this dataset" aria-label="Map vendors unavailable">Map Vendors</button>'}
+        ${canClearVendors
+          ? `<button type="button" class="action-link-clear-vendors" data-vendor-clear-open data-dataset-id="${dataset.id}" title="Clear vendor mapping" aria-label="Clear vendor mapping">Clear Vendors</button>`
+          : '<button type="button" class="action-link-clear-vendors" disabled title="No tool-applied vendor mapping is available to clear" aria-label="Clear vendor mapping unavailable">Clear Vendors</button>'}
+        ${canStop
+          ? `<form method="post" action="/datasets-analysis/stop/${dataset.id}" data-confirm="Stop processing for '${fileName}'?" data-confirm-title="Stop processing" data-confirm-label="Stop processing"><button type="submit" class="warning-button icon-action action-link-stop" aria-label="Stop processing" title="Stop processing">Stop Processing</button></form>`
+          : `<form method="post" action="/datasets-analysis/retry/${dataset.id}" data-confirm="Reprocess dataset '${fileName}' from its source file?" data-confirm-title="Reprocess dataset" data-confirm-label="Reprocess dataset" data-loading-label="Reprocessing dataset"><button type="submit" class="warning-button icon-action action-link-reprocess" aria-label="Reprocess dataset" title="Reprocess dataset"${canReprocess ? '' : ' disabled'}>Reprocess Dataset</button></form>`}
+        <form method="post" action="/datasets-analysis/delete/${dataset.id}" data-confirm="Delete dataset '${fileName}'?" data-confirm-title="Delete dataset" data-confirm-label="Delete dataset">
+          <button type="submit" class="danger-button icon-action" aria-label="Delete dataset" title="Delete dataset"${canStop ? ' disabled' : ''}>Delete Dataset</button>
+        </form>
+      `;
       applyQueueTypeFilter();
       actions.querySelectorAll('form[data-confirm]').forEach((form) => {
         form.addEventListener('submit', async (event) => {
@@ -6603,6 +6592,17 @@ if (queueNode) {
       const payload = await response.json();
       const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
       datasets.forEach(updateQueueRow);
+      const mapAll = document.querySelector('[data-vendor-map-all-open]');
+      const clearAll = document.querySelector('[data-vendor-clear-all-open]');
+      const reprocessAll = document.querySelector('[data-reprocess-all-open]');
+      const stopAll = document.querySelector('.queue-stop-all');
+      const removeAll = document.querySelector('.queue-remove-all');
+      if (mapAll instanceof HTMLButtonElement) mapAll.disabled = !datasets.some((dataset) => dataset.can_map_vendors);
+      if (clearAll instanceof HTMLButtonElement) clearAll.disabled = !datasets.some((dataset) => dataset.can_clear_vendors);
+      if (reprocessAll instanceof HTMLButtonElement) reprocessAll.disabled = !datasets.some((dataset) => dataset.can_reprocess);
+      if (stopAll instanceof HTMLButtonElement) stopAll.disabled = !datasets.some((dataset) => dataset.status === 'processing');
+      if (removeAll instanceof HTMLButtonElement) removeAll.disabled = datasets.length === 0 || datasets.some((dataset) => dataset.status === 'processing');
+      document.dispatchEvent(new CustomEvent('workspace-dataset-status-updated', {detail: {datasets}}));
       const combinedTables = Array.isArray(payload.combined_tables) ? payload.combined_tables : [];
       combinedTables.forEach(updateCombinedQueueRow);
       applyQueueTypeFilter();

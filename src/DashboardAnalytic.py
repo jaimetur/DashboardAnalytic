@@ -2060,7 +2060,9 @@ def serialize_dataset_row(row) -> dict[str, Any]:
     item['vendor_values_complete'] = bool(item.get('vendor_values_complete'))
     item['is_ready'] = item.get('status') == 'ready'
     dataset_path = Path(item.get('stored_path') or '')
-    size_bytes = dataset_path.stat().st_size if dataset_path.exists() else 0
+    item['source_exists'] = dataset_path.is_file()
+    item['can_reprocess'] = item.get('status') in {'ready', 'failed', 'stopped'} and item['source_exists']
+    size_bytes = dataset_path.stat().st_size if item['source_exists'] else 0
     item['size_bytes'] = int(size_bytes)
     item['size_mb'] = round(size_bytes / (1024 * 1024), 2) if size_bytes else 0.0
     item['size_mb_label'] = f"{item['size_mb']:.2f} MB"
@@ -10957,13 +10959,22 @@ def rename_dataset_file(
 
 @app.post('/dashboard/retry/{dataset_id}', include_in_schema=False)
 @app.post('/datasets-analysis/retry/{dataset_id}')
-def retry_dataset(dataset_id: int, background_tasks: BackgroundTasks, user: SessionUser = Depends(current_user)) -> Response:
+def retry_dataset(
+    dataset_id: int,
+    background_tasks: BackgroundTasks,
+    return_to: str = Form(''),
+    user: SessionUser = Depends(current_user),
+) -> Response:
     dataset = repository.get_dataset(dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail='Dataset not found')
     dataset_payload = serialize_dataset_row(dataset)
-    if dataset_payload['status'] not in {'failed', 'stopped'}:
-        raise HTTPException(status_code=400, detail='Only failed or stopped datasets can be retried')
+    previous_status = str(dataset_payload['status'])
+    if previous_status not in {'ready', 'failed', 'stopped'}:
+        raise HTTPException(status_code=400, detail='Only ready, failed or stopped datasets can be reprocessed')
+    dataset_path = Path(dataset_payload['stored_path'])
+    if not dataset_path.is_file():
+        raise HTTPException(status_code=400, detail='The original source file is missing and this dataset cannot be reprocessed')
     try:
         processing_options = json.loads(str(dataset_payload.get('processing_options_json') or '{}'))
     except (TypeError, json.JSONDecodeError):
@@ -10971,16 +10982,101 @@ def retry_dataset(dataset_id: int, background_tasks: BackgroundTasks, user: Sess
     vodafone_mapping_dataset_id = processing_options.get('vodafone_mapping_dataset_id')
     three_mapping_dataset_id = processing_options.get('three_mapping_dataset_id')
     enqueue_dataset_processing(
-        background_tasks, dataset_id, Path(dataset_payload['stored_path']), user.username,
+        background_tasks, dataset_id, dataset_path, user.username,
         vodafone_mapping_dataset_id, three_mapping_dataset_id,
     )
-    repository.add_log(user.username, 'retry_dataset', json.dumps({
+    repository.add_log(user.username, 'reprocess_dataset' if previous_status == 'ready' else 'retry_dataset', json.dumps({
         'dataset_id': dataset_id,
         'file': dataset_payload['file_name'],
+        'previous_status': previous_status,
         'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
         'three_mapping_dataset_id': three_mapping_dataset_id,
     }))
-    return RedirectResponse(f'/workspace?dataset_id={dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
+    redirect_url = '/admin' if return_to == 'admin' else f'/workspace?dataset_id={dataset_id}'
+    return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/workspace/reprocess-datasets')
+def reprocess_workspace_datasets(
+    background_tasks: BackgroundTasks,
+    dataset_ids: Annotated[list[int] | None, Form()] = None,
+    return_to: str = Form(''),
+    user: SessionUser = Depends(current_user),
+) -> Response:
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace before reprocessing datasets')
+    require_workspace_access(user, active_workspace.id)
+    selected_ids = list(dict.fromkeys(dataset_ids or []))
+    if not selected_ids:
+        raise HTTPException(status_code=400, detail='Select at least one dataset to reprocess')
+
+    selected_datasets: list[dict[str, Any]] = []
+    unavailable: list[str] = []
+    for dataset_id in selected_ids:
+        row = repository.get_dataset(dataset_id)
+        if not row:
+            unavailable.append(f'Dataset {dataset_id}')
+            continue
+        dataset = serialize_dataset_row(row)
+        if not dataset['can_reprocess']:
+            unavailable.append(str(dataset['file_name']))
+            continue
+        selected_datasets.append(dataset)
+    if unavailable:
+        raise HTTPException(
+            status_code=400,
+            detail=f"These datasets cannot be reprocessed from an original source file: {', '.join(unavailable)}",
+        )
+
+    processing_futures: dict[int, Future[Any]] = {}
+    queued_ids: list[int] = []
+    for dataset in sorted(
+        selected_datasets,
+        key=lambda item: 0 if item.get('dataset_kind') in {'mapping_vodafone', 'mapping_three'} else 1,
+    ):
+        try:
+            processing_options = json.loads(str(dataset.get('processing_options_json') or '{}'))
+        except (TypeError, json.JSONDecodeError):
+            processing_options = {}
+        vodafone_mapping_dataset_id = processing_options.get('vodafone_mapping_dataset_id')
+        three_mapping_dataset_id = processing_options.get('three_mapping_dataset_id')
+        dependencies = [
+            processing_futures[mapping_id]
+            for mapping_id in (vodafone_mapping_dataset_id, three_mapping_dataset_id)
+            if mapping_id in processing_futures
+        ]
+        future = enqueue_dataset_processing(
+            background_tasks,
+            int(dataset['id']),
+            Path(dataset['stored_path']),
+            user.username,
+            vodafone_mapping_dataset_id,
+            three_mapping_dataset_id,
+            dependencies=dependencies,
+        )
+        if future is None:
+            continue
+        dataset_id = int(dataset['id'])
+        processing_futures[dataset_id] = future
+        queued_ids.append(dataset_id)
+        repository.add_log(user.username, 'reprocess_dataset', json.dumps({
+            'dataset_id': dataset_id,
+            'file': dataset['file_name'],
+            'previous_status': dataset['status'],
+            'batch': True,
+            'vodafone_mapping_dataset_id': vodafone_mapping_dataset_id,
+            'three_mapping_dataset_id': three_mapping_dataset_id,
+        }))
+
+    if not queued_ids:
+        raise HTTPException(status_code=409, detail='The selected datasets are already queued for processing')
+    notice = f"Reprocessing queued for {len(queued_ids)} dataset{'s' if len(queued_ids) != 1 else ''}."
+    if return_to == 'admin':
+        return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        f'/workspace?{urlencode({"workspace_notice": notice})}',
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.post('/workspace/map-vendors')
@@ -11087,7 +11183,11 @@ def clear_dataset_vendors(dataset_id: int, background_tasks: BackgroundTasks, us
 
 @app.post('/dashboard/stop/{dataset_id}', include_in_schema=False)
 @app.post('/datasets-analysis/stop/{dataset_id}')
-def stop_dataset(dataset_id: int, user: SessionUser = Depends(current_user)) -> Response:
+def stop_dataset(
+    dataset_id: int,
+    return_to: str = Form(''),
+    user: SessionUser = Depends(current_user),
+) -> Response:
     dataset = repository.get_dataset(dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail='Dataset not found')
@@ -11102,7 +11202,99 @@ def stop_dataset(dataset_id: int, user: SessionUser = Depends(current_user)) -> 
         processed_at=now_iso(),
     )
     repository.add_log(user.username, 'stop_dataset_requested', json.dumps({'dataset_id': dataset_id, 'file': dataset_payload['file_name']}))
-    return RedirectResponse(f'/workspace?dataset_id={dataset_id}', status_code=status.HTTP_303_SEE_OTHER)
+    redirect_url = '/admin' if return_to == 'admin' else f'/workspace?dataset_id={dataset_id}'
+    return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post('/workspace/stop-datasets')
+def stop_workspace_datasets(
+    return_to: str = Form(''),
+    user: SessionUser = Depends(current_user),
+) -> Response:
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace before stopping datasets')
+    require_workspace_access(user, active_workspace.id)
+    processing_datasets = [
+        serialize_dataset_row(row)
+        for row in repository.list_datasets()
+        if str(row['status']) == 'processing'
+    ]
+    if not processing_datasets:
+        raise HTTPException(status_code=409, detail='No datasets are currently processing')
+    stopped_at = now_iso()
+    for dataset in processing_datasets:
+        dataset_id = int(dataset['id'])
+        request_stop(dataset_id)
+        repository.update_dataset_profile(
+            dataset_id,
+            status='stopped',
+            last_error='Processing stopped by user.',
+            processed_at=stopped_at,
+        )
+        repository.add_log(user.username, 'stop_dataset_requested', json.dumps({
+            'dataset_id': dataset_id,
+            'file': dataset['file_name'],
+            'batch': True,
+        }))
+    notice = f"Stop requested for {len(processing_datasets)} processing dataset{'s' if len(processing_datasets) != 1 else ''}."
+    if return_to == 'admin':
+        return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        f'/workspace?{urlencode({"workspace_notice": notice})}',
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post('/workspace/delete-datasets')
+def delete_workspace_datasets(
+    return_to: str = Form(''),
+    user: SessionUser = Depends(current_user),
+) -> Response:
+    if not active_workspace:
+        raise HTTPException(status_code=400, detail='Open a workspace before removing datasets')
+    require_workspace_access(user, active_workspace.id)
+    datasets = [serialize_dataset_row(row) for row in repository.list_datasets()]
+    if not datasets:
+        raise HTTPException(status_code=409, detail='No datasets are available to remove')
+    if any(dataset['status'] == 'processing' for dataset in datasets):
+        raise HTTPException(status_code=409, detail='Stop every processing dataset before removing all datasets')
+
+    deleted_count = 0
+    deleted_paths: list[Path] = []
+    for dataset in datasets:
+        dataset_id = int(dataset['id'])
+        request_stop(dataset_id)
+        deleted = repository.delete_dataset(dataset_id)
+        if not deleted:
+            continue
+        dataset_path = Path(deleted['stored_path'])
+        if dataset_path.exists():
+            dataset_path.unlink()
+        repository.drop_dataset_rows(dataset_id)
+        repository.drop_reporting_rows(dataset_id, dataset.get('dataset_kind'))
+        deleted_paths.append(dataset_path)
+        deleted_count += 1
+        repository.add_log(user.username, 'delete_dataset', json.dumps({
+            'dataset_id': dataset_id,
+            'file': deleted['file_name'],
+            'batch': True,
+        }))
+
+    repository.remove_orphaned_dataset_row_tables()
+    repository.remove_orphaned_reporting_rows()
+    invalidate_workspace_size_cache()
+    resolved_paths = {str(path.resolve()) for path in deleted_paths}
+    for cache in (ANALYSIS_CACHE, DATAFRAME_CACHE):
+        stale_keys = [key for key in cache if any(path in key for path in resolved_paths)]
+        for key in stale_keys:
+            cache.pop(key, None)
+    notice = f"Removed {deleted_count} dataset{'s' if deleted_count != 1 else ''} from the workspace."
+    if return_to == 'admin':
+        return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        f'/workspace?{urlencode({"workspace_notice": notice})}',
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.post('/dashboard/delete/{dataset_id}', include_in_schema=False)
