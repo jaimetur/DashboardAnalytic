@@ -188,12 +188,13 @@
           {% endfor %}
         </select>
       </label>
+      {% set stoppable_datasets = (datasets | selectattr('status', 'equalto', 'queued') | list) + (datasets | selectattr('status', 'equalto', 'processing') | list) %}
       <div class="queue-bulk-actions" role="group" aria-label="Bulk dataset actions">
         <button type="button" class="queue-map-all" data-vendor-map-all-open title="Assign Vendor Mapping to all eligible CDR datasets" aria-label="Assign Vendor Mapping to all eligible CDR datasets"{% if not mappable_cdr_datasets %} disabled{% endif %}>Map All</button>
         <button type="button" class="queue-clear-all" data-vendor-clear-all-open title="Clear Vendor Mapping from all mapped CDR datasets" aria-label="Clear Vendor Mapping from all mapped CDR datasets"{% if not clearable_cdr_datasets %} disabled{% endif %}>Clear All</button>
         <button type="button" class="queue-reprocess-all" data-reprocess-all-open title="Reprocess all available datasets from their original source files" aria-label="Reprocess all available datasets from their original source files"{% if not datasets | selectattr('can_reprocess') | list %} disabled{% endif %}>Reprocess All</button>
-        <form method="post" action="/workspace/stop-datasets" data-confirm="Stop every dataset that is currently processing?" data-confirm-title="Stop all processing datasets" data-confirm-label="Stop All">
-          <button type="submit" class="queue-stop-all" title="Stop all datasets being processed" aria-label="Stop all datasets being processed"{% if not datasets | selectattr('status', 'equalto', 'processing') | list %} disabled{% endif %}>Stop All</button>
+        <form method="post" action="/workspace/stop-datasets" data-confirm="Stop every dataset that is currently queued or processing?" data-confirm-title="Stop all queued and processing datasets" data-confirm-label="Stop All">
+          <button type="submit" class="queue-stop-all" title="Stop all queued and processing datasets" aria-label="Stop all queued and processing datasets"{% if not stoppable_datasets %} disabled{% endif %}>Stop All</button>
         </form>
         <form method="post" action="/workspace/delete-datasets" data-confirm="Permanently delete every dataset and its original source file from this workspace? This cannot be undone." data-confirm-title="Remove all datasets" data-confirm-label="Remove All">
           <button type="submit" class="queue-remove-all" title="Remove all datasets" aria-label="Remove all datasets"{% if not datasets or datasets | selectattr('status', 'equalto', 'processing') | list %} disabled{% endif %}>Remove All</button>

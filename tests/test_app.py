@@ -1952,7 +1952,7 @@ def test_database_management_orders_individual_dataset_tables_by_numeric_id_desc
     assert individual_tables.index('value="dataset_rows_10"') < individual_tables.index('value="dataset_rows_2"')
 
 
-def test_workspace_stop_all_stops_only_processing_datasets(client) -> None:
+def test_workspace_stop_all_stops_queued_and_processing_datasets(client) -> None:
     login(client)
     for name in ('first.csv', 'second.csv'):
         client.post(
@@ -1964,11 +1964,20 @@ def test_workspace_stop_all_stops_only_processing_datasets(client) -> None:
     import src.DashboardAnalytic as app_module
 
     app_module.repository.update_dataset_profile(1, status='processing', progress=40)
+    app_module.repository.update_dataset_profile(2, status='queued', progress=0)
+    workspace = client.get('/workspace')
+    assert 'title="Stop all queued and processing datasets" aria-label="Stop all queued and processing datasets">Stop All</button>' in workspace.text
     response = client.post('/workspace/stop-datasets', follow_redirects=False)
 
     assert response.status_code == 303
+    assert 'All+2+queued+or+processing+datasets+have+been+stopped.' in response.headers['location']
     assert app_module.repository.get_dataset(1)['status'] == 'stopped'
-    assert app_module.repository.get_dataset(2)['status'] == 'ready'
+    assert app_module.repository.get_dataset(2)['status'] == 'stopped'
+    assert app_module.repository.get_dataset(1)['last_error'] is None
+    assert app_module.repository.get_dataset(2)['last_error'] is None
+    stopped_page = client.get(response.headers['location'])
+    assert stopped_page.text.count('All 2 queued or processing datasets have been stopped.') == 1
+    assert 'Processing stopped by user.' not in stopped_page.text
 
 
 def test_workspace_remove_all_deletes_every_non_processing_dataset(client) -> None:
@@ -2880,6 +2889,10 @@ def test_workspace_dataset_upload_uses_non_blocking_progress_card(client) -> Non
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
     assert 'formatQueuedAge' in app_script
     assert 'const minimizedPanels = new Map();' in app_script
+    assert 'const locallyStoppedTaskIds = new Set();' in app_script
+    assert 'for (const task of stoppableTasks)' in app_script
+    assert 'Promise.allSettled(stoppableTasks.map(requestTaskStop))' not in app_script
+    assert 'Background tasks stopped' in app_script
     assert ':minimized`' not in app_script
 
     upload = client.post(

@@ -2401,12 +2401,21 @@ def _process_dataset(
                 # visible job instead of extending the ingestion progress.
                 combined_kind_to_recreate = dataset_kind
         except ProcessingStopped as exc:
-            progress = int((task_repository.get_dataset(dataset_id) or {}).get('progress') or 0)
+            current_dataset = task_repository.get_dataset(dataset_id)
+            progress = int(current_dataset['progress'] or 0) if current_dataset else 0
+            # Stop All publishes the final stopped state before workers finish
+            # unwinding. Preserve its empty row-level error so the Workspace
+            # presents one batch completion notice instead of one warning per
+            # dataset. An individual stop keeps its explanatory message.
+            stopped_by_batch = bool(
+                current_dataset and str(current_dataset['status'] or '').casefold() == 'stopped'
+                and not current_dataset['last_error']
+            )
             task_repository.update_dataset_profile(
                 dataset_id,
                 status='stopped',
                 progress=max(0, min(99, progress)),
-                last_error=str(exc),
+                last_error=None if stopped_by_batch else str(exc),
                 processed_at=now_iso(),
             )
             task_repository.add_log(username, 'stop_dataset', json.dumps({'dataset_id': dataset_id, 'file': dataset_path.name}))
@@ -11290,21 +11299,21 @@ def stop_workspace_datasets(
     if not active_workspace:
         raise HTTPException(status_code=400, detail='Open a workspace before stopping datasets')
     require_workspace_access(user, active_workspace.id)
-    processing_datasets = [
+    active_datasets = [
         serialize_dataset_row(row)
         for row in repository.list_datasets()
-        if str(row['status']) == 'processing'
+        if str(row['status']) in {'queued', 'processing'}
     ]
-    if not processing_datasets:
-        raise HTTPException(status_code=409, detail='No datasets are currently processing')
+    if not active_datasets:
+        raise HTTPException(status_code=409, detail='No datasets are currently queued or processing')
     stopped_at = now_iso()
-    for dataset in processing_datasets:
+    for dataset in active_datasets:
         dataset_id = int(dataset['id'])
         request_stop(dataset_id)
         repository.update_dataset_profile(
             dataset_id,
             status='stopped',
-            last_error='Processing stopped by user.',
+            last_error=None,
             processed_at=stopped_at,
         )
         repository.add_log(user.username, 'stop_dataset_requested', json.dumps({
@@ -11312,7 +11321,11 @@ def stop_workspace_datasets(
             'file': dataset['file_name'],
             'batch': True,
         }))
-    notice = f"Stop requested for {len(processing_datasets)} processing dataset{'s' if len(processing_datasets) != 1 else ''}."
+    notice = (
+        'The queued or processing dataset has been stopped.'
+        if len(active_datasets) == 1
+        else f'All {len(active_datasets)} queued or processing datasets have been stopped.'
+    )
     if return_to == 'admin':
         return RedirectResponse('/admin', status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(

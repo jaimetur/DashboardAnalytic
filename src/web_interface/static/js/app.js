@@ -6740,7 +6740,7 @@ if (queueNode) {
       if (mapAll instanceof HTMLButtonElement) mapAll.disabled = !datasets.some((dataset) => dataset.can_map_vendors);
       if (clearAll instanceof HTMLButtonElement) clearAll.disabled = !datasets.some((dataset) => dataset.can_clear_vendors);
       if (reprocessAll instanceof HTMLButtonElement) reprocessAll.disabled = !datasets.some((dataset) => dataset.can_reprocess);
-      if (stopAll instanceof HTMLButtonElement) stopAll.disabled = !datasets.some((dataset) => dataset.status === 'processing');
+      if (stopAll instanceof HTMLButtonElement) stopAll.disabled = !datasets.some((dataset) => ['queued', 'processing'].includes(dataset.status));
       if (removeAll instanceof HTMLButtonElement) removeAll.disabled = datasets.length === 0 || datasets.some((dataset) => dataset.status === 'processing');
       document.dispatchEvent(new CustomEvent('workspace-dataset-status-updated', {detail: {datasets}}));
       const combinedTables = Array.isArray(payload.combined_tables) ? payload.combined_tables : [];
@@ -6800,6 +6800,7 @@ if (queueNode) {
   let serverGroups = [];
   let previousServerTasks = new Map();
   const completedServerTasks = new Map();
+  const locallyStoppedTaskIds = new Set();
   const transientTasks = new Map();
   const minimizedPanels = new Map();
   const completedTaskRetentionMs = 5000;
@@ -6827,6 +6828,7 @@ if (queueNode) {
       const payload = await response.json().catch(() => ({}));
       throw new Error(String(payload.detail || 'The background job could not be stopped.'));
     }
+    locallyStoppedTaskIds.add(String(task.id));
   };
   const formatQueuedAge = (queuedAt) => {
     const timestamp = Number(queuedAt);
@@ -6942,6 +6944,10 @@ if (queueNode) {
     });
     previousServerTasks.forEach((previous, taskId) => {
       if (nextTasks.has(taskId)) return;
+      if (locallyStoppedTaskIds.delete(taskId)) {
+        completedServerTasks.delete(taskId);
+        return;
+      }
       const completedAt = Number(previous.task.completed_at) * 1000 || now;
       const expiresAt = Number.isFinite(completedAt) && completedAt > 0
         ? Math.max(now, completedAt) + completedTaskRetentionMs
@@ -7067,7 +7073,9 @@ if (queueNode) {
       : String(group.workspace_name || 'Workspace');
     panelHeader.append(heading);
 
-    const stoppableTasks = (Array.isArray(group.tasks) ? group.tasks : []).filter(taskCanStop);
+    const stoppableTasks = (Array.isArray(group.tasks) ? group.tasks : [])
+      .filter(taskCanStop)
+      .sort((left, right) => Number(taskIsQueued(right)) - Number(taskIsQueued(left)));
     if (stoppableTasks.length) {
       const stopAll = document.createElement('button');
       stopAll.type = 'button';
@@ -7082,7 +7090,19 @@ if (queueNode) {
         );
         if (!accepted) return;
         stopAll.disabled = true;
-        const outcomes = await Promise.allSettled(stoppableTasks.map(requestTaskStop));
+        const outcomes = [];
+        // These requests can update the same Workspace database. Process them
+        // one at a time so SQLite write coordination cannot leave part of the
+        // batch running. Queued work goes first to prevent it from starting
+        // while an earlier processing task is being interrupted.
+        for (const task of stoppableTasks) {
+          try {
+            await requestTaskStop(task);
+            outcomes.push({status: 'fulfilled', task});
+          } catch (error) {
+            outcomes.push({status: 'rejected', task, reason: error});
+          }
+        }
         await poll();
         const failures = outcomes.filter((outcome) => outcome.status === 'rejected');
         if (failures.length) {
@@ -7092,6 +7112,13 @@ if (queueNode) {
             {title: 'Some tasks are still running', tone: 'error'},
           );
           stopAll.disabled = false;
+        } else {
+          showInfoDialog(
+            outcomes.length === 1
+              ? 'The background task has been stopped.'
+              : `All ${outcomes.length} background tasks have been stopped.`,
+            {title: 'Background tasks stopped', tone: 'info'},
+          );
         }
       });
       panelHeader.append(stopAll);
