@@ -5,7 +5,7 @@ import shutil
 import sqlite3
 import time
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from threading import Event
@@ -2806,10 +2806,13 @@ def test_dashboard_ppt_job_is_queued_before_preparation_and_chart_rendering() ->
 def test_cold_dashboard_ppt_job_progress_covers_prepare_models_and_presentation() -> None:
     source = (Path(__file__).parents[1] / 'src' / 'modules' / 'e2e_dashboards.py').read_text(encoding='utf-8')
 
-    assert 'min(35, 1 + round(percent * 0.34))' in source
-    assert 'progress=36 + round(position * 29 / max(len(indexes), 1))' in source
-    assert 'progress=66 + round(rendered * 29 / max(chart_total, 1))' in source
+    assert 'min(24, 1 + round(percent * 0.23))' in source
+    assert 'model_progress_start = 25 + round(position * 65 / max(len(indexes), 1))' in source
+    assert 'progress=91 + round(rendered * 4 / max(chart_total, 1))' in source
+    assert "progress=90, last_error=''" in source
     assert 'progress=96, chart_count=rendered' in source
+    assert 'def pulse_canvas_progress()' in source
+    assert 'except sqlite3.Error:' in source
 
 
 def test_dashboard_background_tasks_are_named_without_dashboard_subgroups() -> None:
@@ -6768,6 +6771,7 @@ def test_app_logs_combines_operational_and_audit_activity(client) -> None:
     response = client.get("/app-logs")
     assert response.status_code == 200
     assert "App Logs" in response.text
+    assert "App Events" in response.text
     assert response.text.index('data-app-log-date-filter') < response.text.index('data-app-log-user-filter')
     assert response.text.index('data-app-log-user-filter') < response.text.index('data-app-log-executor-filter')
     assert "All events" in response.text
@@ -6778,6 +6782,8 @@ def test_app_logs_combines_operational_and_audit_activity(client) -> None:
     assert "All actions" in response.text
     assert 'data-app-log-refresh' in response.text
     assert 'data-app-log-count' in response.text
+    assert 'data-execution-log-output' in response.text
+    assert 'Execution Log' in response.text
     assert "Type" in response.text
     assert "Error" in response.text
     assert "Synthetic processing failure" in response.text
@@ -6785,6 +6791,20 @@ def test_app_logs_combines_operational_and_audit_activity(client) -> None:
 
     payload = client.get('/api/app-logs').json()
     assert any(log['action'] == 'process_dataset_failed' for log in payload['logs'])
+    assert 'execution_logs' in payload
+
+
+def test_server_log_formatter_uses_the_configured_timezone_and_timestamp_prefix(monkeypatch) -> None:
+    import logging
+
+    from src.main import ConfiguredTimezoneDefaultFormatter
+
+    monkeypatch.setenv('TZ', 'Europe/Madrid')
+    record = logging.LogRecord('uvicorn.error', logging.INFO, __file__, 1, 'Server ready', (), None)
+    record.created = datetime(2026, 9, 18, 20, 30, tzinfo=timezone.utc).timestamp()
+    formatter = ConfiguredTimezoneDefaultFormatter('[%(asctime)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+
+    assert formatter.format(record) == '[2026-09-18 22:30:00] Server ready'
 
 
 def test_app_logs_use_the_configured_timezone_for_display_and_date_filter(client, monkeypatch) -> None:

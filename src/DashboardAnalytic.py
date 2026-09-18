@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import calendar
 import io
@@ -58,6 +59,7 @@ from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_rep
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE, workspace_write_lock
 from src.modules.runtime_config import IGNORE_EVENT_TIME_FILTERING_ENV, env_flag, ignore_event_time_filtering
+from src.runtime_logs import execution_log_entries
 from src.modules.workspaces import Workspace, WorkspaceRegistry
 from src.version import __app_name__, __release_date__, __version__
 from src.utils.filesystem import ensure_directories, safe_join
@@ -8880,6 +8882,7 @@ def app_logs(request: Request, user: SessionUser = Depends(current_user)) -> HTM
             'log_dates': sorted({log['date'] for log in logs if log['date']}, reverse=True),
             'log_types': sorted({log['log_type'] for log in logs if log['log_type']}, key=str.casefold),
             'log_actions': sorted({log['action'] for log in logs if log['action']}, key=str.casefold),
+            'execution_logs': execution_log_entries(),
         },
     )
 
@@ -8887,7 +8890,28 @@ def app_logs(request: Request, user: SessionUser = Depends(current_user)) -> HTM
 @app.get('/api/app-logs')
 def app_logs_data(user: SessionUser = Depends(current_user)) -> JSONResponse:
     """Return current workspace events for incremental App Logs refreshes."""
-    return JSONResponse({'logs': build_app_logs()})
+    return JSONResponse({'logs': build_app_logs(), 'execution_logs': execution_log_entries()})
+
+
+@app.get('/api/app-logs/execution-stream')
+async def app_logs_execution_stream(request: Request, user: SessionUser = Depends(current_user)) -> StreamingResponse:
+    """Push execution log changes without repeatedly rebuilding the App Events table."""
+    async def stream_execution_logs():
+        previous_entries: list[str] | None = None
+        while not await request.is_disconnected():
+            entries = execution_log_entries()
+            if entries != previous_entries:
+                yield f'data: {json.dumps({"execution_logs": entries})}\n\n'
+                previous_entries = entries
+            else:
+                yield ': keepalive\n\n'
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        stream_execution_logs(),
+        media_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+    )
 
 
 @app.get('/dashboard', include_in_schema=False)

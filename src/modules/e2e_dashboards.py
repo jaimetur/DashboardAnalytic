@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
-from threading import Lock, RLock, Thread
+from threading import Event, Lock, RLock, Thread
 from types import SimpleNamespace
 from typing import Literal
 from uuid import uuid4
@@ -34,7 +34,7 @@ from src.modules.cdr_reporting import (
     _set_commentary, _set_slide_header, _set_structural_slide_text, catalog_chart_payload,
     ensure_vendor_group, normalise_operator_aliases, parse_catalog_filters,
     parse_catalog_grouping,
-    prepare_catalog_chart_preview_frame, render_catalog_chart_preview,
+    prepare_catalog_chart_preview_frame, render_catalog_chart_preview, render_unavailable_source_chart,
 )
 
 from src.modules.repository import Repository
@@ -466,10 +466,10 @@ def install_dashboard_routes(core):
                     if run_is_active():
                         update_dashboard_ppt_job(
                             task_repository, job_id,
-                            # Preparing the dataset/cache can be the longest
-                            # part of a cold export, so reserve a visible
-                            # portion instead of leaving the job at 1%.
-                            progress=max(1, min(35, 1 + round(percent * 0.34))),
+                            # Preparation is visible without dominating the
+                            # progress bar; the following Canvas rendering
+                            # phase has a known model count and owns most of it.
+                            progress=max(1, min(24, 1 + round(percent * 0.23))),
                         )
 
                 workspace = str(Path(task_repository.db_path).resolve())
@@ -495,7 +495,7 @@ def install_dashboard_routes(core):
                     ), token,
                 )
                 snapshot = validate_dashboard_export_snapshot(snapshot, task_repository)
-            update_dashboard_ppt_job(task_repository, job_id, progress=35, last_error='')
+            update_dashboard_ppt_job(task_repository, job_id, progress=24, last_error='')
             with lock:
                 snapshot_token = next((
                     token for token, candidate in snapshots.items() if candidate is snapshot
@@ -506,22 +506,60 @@ def install_dashboard_routes(core):
                 index for index, entry in enumerate(snapshot.entries)
                 if entry.source_kind in selected_sources(snapshot.definition, task_repository)
             ]
+            chart_model_errors: dict[int, str] = {}
             for position, index in enumerate(indexes):
                 if not run_is_active():
                     return
+                model_progress_start = 25 + round(position * 65 / max(len(indexes), 1))
+                model_progress_end = 25 + round((position + 1) * 65 / max(len(indexes), 1))
                 update_dashboard_ppt_job(
                     task_repository, job_id,
-                    progress=36 + round(position * 29 / max(len(indexes), 1)), last_error='',
+                    progress=model_progress_start, last_error='',
                 )
-                chart_model(
-                    snapshot_token, index, user,
-                    expected_workspace=str(Path(task_repository.db_path).resolve()),
-                )
+                model_finished = Event()
+
+                def pulse_canvas_progress():
+                    # A single Canvas model can take much longer than the
+                    # others.  It has no internal callback, so advance only
+                    # within its known model slice while it is genuinely
+                    # running; completion still owns the final increment.
+                    elapsed_seconds = 0
+                    while not model_finished.wait(1):
+                        elapsed_seconds += 1
+                        span = max(0, model_progress_end - model_progress_start - 1)
+                        fraction = min(0.9, elapsed_seconds / 18)
+                        progress = model_progress_start + round(span * fraction)
+                        if run_is_active():
+                            try:
+                                update_dashboard_ppt_job(task_repository, job_id, progress=progress, last_error='')
+                            except sqlite3.Error:
+                                # Progress is advisory.  A transient SQLite
+                                # writer contention must never affect the
+                                # Canvas model or cause the PPT job to fail.
+                                pass
+
+                pulse = Thread(target=pulse_canvas_progress, name=f'dashboard-ppt-model-progress-{job_id}', daemon=True)
+                pulse.start()
+                try:
+                    try:
+                        chart_model(
+                            snapshot_token, index, user,
+                            expected_workspace=str(Path(task_repository.db_path).resolve()),
+                        )
+                    except (HTTPException, ValueError) as exc:
+                        # A template can legitimately contain a chart for a
+                        # field absent from one selected CDR type.  Retain a
+                        # visible placeholder for that chart instead of
+                        # discarding the complete PPT job.
+                        chart_model_errors[index] = str(getattr(exc, 'detail', exc))
+                finally:
+                    model_finished.set()
+                    pulse.join(timeout=0.1)
                 update_dashboard_ppt_job(
                     task_repository, job_id,
-                    progress=36 + round((position + 1) * 29 / max(len(indexes), 1)), last_error='',
+                    progress=model_progress_end, last_error='',
                 )
-            update_dashboard_ppt_job(task_repository, job_id, progress=65, last_error='')
+            update_dashboard_ppt_job(task_repository, job_id, progress=90, last_error='')
             presentation = Presentation(core.settings.ppt_templates_dir / 'Template_CDR_analysis.pptx')
             _remove_all_slides(presentation)
             grouped = defaultdict(list)
@@ -575,14 +613,20 @@ def install_dashboard_routes(core):
                         return
                     update_dashboard_ppt_job(
                         task_repository, job_id,
-                        progress=66 + round(rendered * 29 / max(chart_total, 1)), chart_count=rendered,
+                        progress=91 + round(rendered * 4 / max(chart_total, 1)), chart_count=rendered,
                     )
-                    model_path = canvas_model_path(snapshot, entry)
-                    payload = json.loads(model_path.read_text(encoding='utf-8'))
                     render_width, render_height = dashboard_chart_render_size(placement)
-                    png, hover_targets = _render_dashboard_payload(
-                        payload, width=render_width, height=render_height,
-                    )
+                    chart_error = chart_model_errors.get(index)
+                    payload = None
+                    if chart_error:
+                        png = render_unavailable_source_chart(entry, f'Chart unavailable: {chart_error}')
+                        hover_targets = []
+                    else:
+                        model_path = canvas_model_path(snapshot, entry)
+                        payload = json.loads(model_path.read_text(encoding='utf-8'))
+                        png, hover_targets = _render_dashboard_payload(
+                            payload, width=render_width, height=render_height,
+                        )
                     if not run_is_active():
                         return
                     file_name = f'slide-{slide_number:03d}-chart-{chart_number:02d}.png'
@@ -592,20 +636,22 @@ def install_dashboard_routes(core):
                     (charts_dir / hover_file).write_text(
                         json.dumps(hover_targets, ensure_ascii=False), encoding='utf-8',
                     )
-                    (charts_dir / model_file).write_text(
-                        json.dumps(payload, ensure_ascii=False, separators=(',', ':')), encoding='utf-8',
-                    )
+                    if payload is not None:
+                        (charts_dir / model_file).write_text(
+                            json.dumps(payload, ensure_ascii=False, separators=(',', ':')), encoding='utf-8',
+                        )
                     add_dashboard_chart_picture(slide, png, placement)
                     manifest.append({
                         'slide': slide_number, 'title': entry.chart_title or header.slide_title,
                         'source': entry.cdr_source, 'chart_type': entry.chart_type,
                         'entry_index': index, 'focus_row': focus_rows[index],
-                        'file': file_name, 'hover_file': hover_file, 'model_file': model_file,
+                        'file': file_name, 'hover_file': hover_file,
+                        'model_file': model_file if payload is not None else '', 'error': chart_error,
                     })
                     rendered += 1
                     update_dashboard_ppt_job(
                         task_repository, job_id,
-                        progress=66 + round(rendered * 29 / max(chart_total, 1)), chart_count=rendered,
+                        progress=91 + round(rendered * 4 / max(chart_total, 1)), chart_count=rendered,
                     )
             if not run_is_active():
                 return
@@ -634,6 +680,14 @@ def install_dashboard_routes(core):
                 slide_count=len(presentation.slides), chart_count=rendered,
                 finished_at=datetime.now(timezone.utc).isoformat(),
             )
+            if chart_model_errors:
+                task_repository.add_log(user.username, 'export_dashboard_ppt_warning', json.dumps({
+                    'dashboard_id': dashboard_id, 'job_id': job_id,
+                    'placeholder_charts': [
+                        {'slide': snapshot.entries[index].slide, 'error': error}
+                        for index, error in chart_model_errors.items()
+                    ],
+                }, ensure_ascii=False))
         except Exception as exc:
             if run_is_active():
                 update_dashboard_ppt_job(

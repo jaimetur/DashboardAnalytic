@@ -16,7 +16,7 @@
     <div class="section-head tight-head">
       <div>
         <p class="eyebrow">Application Events</p>
-        <h2>App Logs</h2>
+        <h2>App Events</h2>
       </div>
       <div class="app-logs-heading-actions">
         <span class="pill" data-app-log-count>{{ logs | length }} entries</span>
@@ -64,7 +64,7 @@
           {% for row in logs %}
           <tr data-app-log-row data-app-log-user="{{ row.username }}" data-app-log-executor="{{ row.executed_by }}" data-app-log-date="{{ row.date }}" data-app-log-type="{{ row.log_type }}" data-app-log-action="{{ row.action }}">
             <td>{{ row.id }}</td>
-            <td>{{ row.created_at }}</td>
+            <td class="app-log-date"><span>{{ row.created_at[:10] }}</span>{% if row.created_at | length > 10 %}<br><span>{{ row.created_at[11:] }}</span>{% endif %}</td>
             <td>{{ row.username }}</td>
             <td>{{ row.executed_by }}</td>
             <td><span class="log-type-badge log-type-{{ row.log_type | lower }}">{{ row.log_type }}</span></td>
@@ -81,6 +81,18 @@
     {% else %}
     <p class="lede">Open a workspace from Workspace Management to review its App Logs.</p>
     {% endif %}
+  </article>
+
+  <article class="panel execution-log-panel" data-execution-log-panel>
+    <div class="section-head tight-head">
+      <div>
+        <p class="eyebrow">Server process</p>
+        <h2>Execution Log</h2>
+      </div>
+      <span class="pill" data-execution-log-count>{{ execution_logs | length }} entries</span>
+    </div>
+    <p class="lede">Live server output for this running instance. Entries use the configured application timezone.</p>
+    <pre class="execution-log-output" data-execution-log-output aria-live="polite">{% if execution_logs %}{{ execution_logs | join('\n') }}{% else %}No server log entries captured yet. Restart the application once to begin capturing its execution log.{% endif %}</pre>
   </article>
 </section>
 {% endblock %}

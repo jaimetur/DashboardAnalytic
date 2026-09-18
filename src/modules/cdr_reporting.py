@@ -2188,11 +2188,11 @@ def is_empty_catalog_chart(image: bytes, entry: CatalogEntry) -> bool:
     return image in {_empty_chart(title).getvalue(), render_unavailable_source_chart(entry)}
 
 
-def render_unavailable_source_chart(entry: CatalogEntry) -> bytes:
-    """Render a stable placeholder when no CDR of the chart's source type was selected."""
+def render_unavailable_source_chart(entry: CatalogEntry, message: str | None = None) -> bytes:
+    """Render a stable placeholder when a chart source or definition is unavailable."""
     title = entry.chart_title or entry.slide_title
     image, draw = _canvas(title)
-    draw.text((50, 440), f"Unavailable source type: {entry.cdr_source}", fill="#61727D", font=_font(24))
+    draw.text((50, 440), message or f"Unavailable source type: {entry.cdr_source}", fill="#61727D", font=_font(24))
     output = BytesIO(); image.save(output, format="PNG")
     return output.getvalue()
 

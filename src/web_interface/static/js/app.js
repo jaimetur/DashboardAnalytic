@@ -6252,8 +6252,30 @@ if (appLogsPanel) {
   const body = appLogsPanel.querySelector('[data-app-log-body]');
   const count = appLogsPanel.querySelector('[data-app-log-count]');
   const refreshButton = appLogsPanel.querySelector('[data-app-log-refresh]');
+  const executionLogOutput = document.querySelector('[data-execution-log-output]');
+  const executionLogCount = document.querySelector('[data-execution-log-count]');
   let rows = Array.from(appLogsPanel.querySelectorAll('[data-app-log-row]'));
   let refreshInProgress = false;
+  let appLogsSnapshot = '';
+  let executionStreamConnected = false;
+  const restorePagePosition = (position) => {
+    window.requestAnimationFrame(() => window.scrollTo(window.scrollX, position));
+  };
+  const renderExecutionLogs = (entries) => {
+    if (!executionLogOutput) return;
+    const executionLogs = Array.isArray(entries) ? entries : [];
+    const nextOutput = executionLogs.length
+      ? executionLogs.join('\n')
+      : 'No server log entries captured yet. Restart the application once to begin capturing its execution log.';
+    if (executionLogOutput.textContent === nextOutput) return;
+    const pagePosition = window.scrollY;
+    const scrollPosition = executionLogOutput.scrollTop;
+    const wasAtBottom = scrollPosition + executionLogOutput.clientHeight >= executionLogOutput.scrollHeight - 4;
+    executionLogOutput.textContent = nextOutput;
+    executionLogOutput.scrollTop = wasAtBottom ? executionLogOutput.scrollHeight : scrollPosition;
+    if (executionLogCount) executionLogCount.textContent = `${executionLogs.length} entries`;
+    restorePagePosition(pagePosition);
+  };
   const restoreSelectValue = (control, value) => {
     if (!control || !value) return;
     if (Array.from(control.options).some((option) => option.value === value)) control.value = value;
@@ -6342,8 +6364,15 @@ if (appLogsPanel) {
     row.dataset.appLogDate = String(log.date || '');
     row.dataset.appLogType = String(log.log_type || 'Info');
     row.dataset.appLogAction = String(log.action || '');
-    const values = [log.id, log.created_at, log.username, log.executed_by || '—'];
-    values.forEach((value) => { const cell = document.createElement('td'); cell.textContent = String(value ?? ''); row.append(cell); });
+    const values = [log.id, log.username, log.executed_by || '—'];
+    const idCell = document.createElement('td'); idCell.textContent = String(values[0] ?? ''); row.append(idCell);
+    const dateCell = document.createElement('td');
+    dateCell.className = 'app-log-date';
+    const [datePart, timePart] = String(log.created_at || '').split(' ');
+    dateCell.append(datePart || '—');
+    if (timePart) dateCell.append(document.createElement('br'), timePart);
+    row.append(dateCell);
+    values.slice(1).forEach((value) => { const cell = document.createElement('td'); cell.textContent = String(value ?? ''); row.append(cell); });
     const typeCell = document.createElement('td');
     const badge = document.createElement('span');
     badge.className = `log-type-badge log-type-${String(log.log_type || 'Info').toLocaleLowerCase()}`;
@@ -6368,10 +6397,17 @@ if (appLogsPanel) {
       if (!response.ok) throw new Error('Unable to refresh App Logs.');
       const payload = await response.json();
       const logs = Array.isArray(payload.logs) ? payload.logs : [];
-      rows = logs.map(createAppLogRow);
-      body.replaceChildren(...rows, ...(noResults ? [noResults] : []));
-      if (count) count.textContent = `${logs.length} entries`;
-      syncAppLogRows();
+      const nextSnapshot = JSON.stringify(logs);
+      if (nextSnapshot !== appLogsSnapshot) {
+        const pagePosition = window.scrollY;
+        appLogsSnapshot = nextSnapshot;
+        rows = logs.map(createAppLogRow);
+        body.replaceChildren(...rows, ...(noResults ? [noResults] : []));
+        if (count) count.textContent = `${logs.length} entries`;
+        syncAppLogRows();
+        restorePagePosition(pagePosition);
+      }
+      if (!executionStreamConnected) renderExecutionLogs(payload.execution_logs);
     } catch (_error) {
       // Keep the last successfully rendered snapshot if a polling request fails.
     } finally {
@@ -6393,6 +6429,19 @@ if (appLogsPanel) {
     syncAppLogRows({resetMobilePage: true});
   });
   refreshButton?.addEventListener('click', () => refreshAppLogs({manual: true}));
+  if (executionLogOutput && 'EventSource' in window) {
+    const executionLogStream = new EventSource('/api/app-logs/execution-stream');
+    executionLogStream.addEventListener('open', () => { executionStreamConnected = true; });
+    executionLogStream.addEventListener('message', (event) => {
+      try {
+        renderExecutionLogs(JSON.parse(event.data).execution_logs);
+      } catch (_error) {
+        // The existing snapshot remains available until the next valid event.
+      }
+    });
+    executionLogStream.addEventListener('error', () => { executionStreamConnected = false; });
+    window.addEventListener('pagehide', () => executionLogStream.close(), {once: true});
+  }
   window.setInterval(refreshAppLogs, 5000);
   syncAppLogRows({resetMobilePage: true});
 }

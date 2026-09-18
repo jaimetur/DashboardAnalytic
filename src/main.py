@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from datetime import datetime, timezone
+import logging
+import os
 import sys
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import uvicorn
 
@@ -14,6 +19,59 @@ if __package__ in {None, ""}:
 
 from src.DashboardAnalytic import app
 from src.config import settings
+from src.runtime_logs import ExecutionLogHandler
+
+
+class ConfiguredTimezoneFormatter(logging.Formatter):
+    """Format Uvicorn entries in the configured application timezone."""
+
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+        timezone_name = str(os.environ.get('TZ') or 'UTC').strip() or 'UTC'
+        try:
+            configured_timezone = ZoneInfo(timezone_name)
+        except ZoneInfoNotFoundError:
+            configured_timezone = timezone.utc
+        timestamp = datetime.fromtimestamp(record.created, configured_timezone)
+        return timestamp.strftime(datefmt or '%Y-%m-%d %H:%M:%S')
+
+
+class ConfiguredTimezoneAccessFormatter(uvicorn.logging.AccessFormatter):
+    """Keep Uvicorn's access fields while using the configured timezone."""
+
+    formatTime = ConfiguredTimezoneFormatter.formatTime
+
+
+class ConfiguredTimezoneDefaultFormatter(uvicorn.logging.DefaultFormatter):
+    """Keep Uvicorn's level prefix while using the configured timezone."""
+
+    formatTime = ConfiguredTimezoneFormatter.formatTime
+
+
+def execution_log_config() -> dict[str, object]:
+    """Add timestamps and App Logs capture to Uvicorn's standard log setup."""
+    log_config = deepcopy(uvicorn.config.LOGGING_CONFIG)
+    formatters = log_config['formatters']
+    formatters['default'].update({
+        '()': ConfiguredTimezoneDefaultFormatter,
+        'fmt': '[%(asctime)s] %(levelprefix)s %(message)s',
+        'datefmt': '%Y-%m-%d %H:%M:%S',
+    })
+    formatters['access'].update({
+        '()': ConfiguredTimezoneAccessFormatter,
+        'fmt': '[%(asctime)s] %(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s',
+        'datefmt': '%Y-%m-%d %H:%M:%S',
+    })
+    log_config['handlers']['execution_default'] = {
+        '()': ExecutionLogHandler,
+        'formatter': 'default',
+    }
+    log_config['handlers']['execution_access'] = {
+        '()': ExecutionLogHandler,
+        'formatter': 'access',
+    }
+    log_config['loggers']['uvicorn']['handlers'].append('execution_default')
+    log_config['loggers']['uvicorn.access']['handlers'].append('execution_access')
+    return log_config
 
 
 if __name__ == "__main__":
@@ -23,4 +81,5 @@ if __name__ == "__main__":
         port=settings.app_port,
         proxy_headers=True,
         forwarded_allow_ips="*",
+        log_config=execution_log_config(),
     )

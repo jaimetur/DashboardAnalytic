@@ -1573,6 +1573,10 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .app-logs-refresh-button { min-height: 2.35rem; padding: 0.45rem 0.9rem; background: linear-gradient(145deg, #238d88, #0b7a75); border-color: rgba(5, 91, 87, 0.48); color: #fff; }
 .app-logs-refresh-button:hover:not(:disabled) { background: linear-gradient(145deg, #177d78, #075f5b); }
 .app-logs-table code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.app-logs-table th:nth-child(2), .app-logs-table .app-log-date { width: 10rem; min-width: 10rem; white-space: nowrap; }
+.app-logs-panel .table-wrap { height: 45rem; overflow-y: scroll; overscroll-behavior: contain; }
+.execution-log-panel { margin-top: 1.25rem; }
+.execution-log-output { height: 60rem; margin: 1rem 0 0; padding: 1rem; overflow-x: auto; overflow-y: scroll; border: 1px solid rgba(16, 49, 74, 0.22); border-radius: 0.8rem; background: #102033; color: #e5f3fb; font: 0.78rem/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; scrollbar-gutter: stable; }
 .table-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
 .danger-button { background: linear-gradient(135deg, #c65544, #df7758); }
 .warning-button { background: linear-gradient(135deg, #d58f1f, #e9ac39); color: #fffef9; }
