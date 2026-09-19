@@ -5590,6 +5590,11 @@ def test_collapsed_side_navigators_reveal_near_viewport_edges() -> None:
     assert "event.pointerType !== 'mouse'" in app_script
     assert "['touch', 'pen'].includes(event.pointerType)" in app_script
     assert "navigator.classList.add('is-edge-revealed')" in app_script
+    assert 'const autoHideDelay = 5000;' in app_script
+    assert "navigator.classList.remove('is-open', 'is-edge-revealed');" in app_script
+    assert "window.addEventListener('scroll', hideAll, {passive: true});" in app_script
+    assert "lastInteraction === 'mouse' && navigator.matches(':hover')" in app_script
+    assert 'if (navigator.classList.contains(\'is-open\')) scheduleClose(navigator);' in app_script
     assert 'setupEdgeNavigatorReveal();' in app_script
     assert ':not(.is-edge-revealed):not(:focus-within) .page-panel-navigator-tab {' in app_styles
     assert 'transform:translate(calc(-100% + .32rem),-50%);' in app_styles

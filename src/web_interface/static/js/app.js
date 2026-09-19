@@ -4465,7 +4465,10 @@ function setupEdgeNavigatorReveal() {
   ));
   if (!navigators.length) return;
   document.body.dataset.edgeNavigatorsReady = '1';
+  const autoHideDelay = 5000;
   const concealTimers = {left: 0, right: 0};
+  const closeTimers = new WeakMap();
+  let lastInteraction = 'mouse';
 
   const sideOf = (navigator) => (
     navigator.matches('.help-navigator, .release-navigator') ? 'right' : 'left'
@@ -4487,7 +4490,7 @@ function setupEdgeNavigatorReveal() {
       }
     });
   };
-  const scheduleConceal = (side, delay = 240) => {
+  const scheduleConceal = (side, delay = autoHideDelay) => {
     cancelConceal(side);
     concealTimers[side] = window.setTimeout(() => conceal(side), delay);
   };
@@ -4499,18 +4502,66 @@ function setupEdgeNavigatorReveal() {
     if (autoHideDelay) scheduleConceal(side, autoHideDelay);
     return true;
   };
+  const cancelClose = (navigator) => {
+    window.clearTimeout(closeTimers.get(navigator));
+    closeTimers.delete(navigator);
+  };
+  const closeNavigator = (navigator) => {
+    cancelClose(navigator);
+    navigator.classList.remove('is-open', 'is-edge-revealed');
+    navigator.querySelector('[aria-expanded="true"]')?.setAttribute('aria-expanded', 'false');
+  };
+  const shouldRemainOpen = (navigator) => (
+    (lastInteraction === 'mouse' && navigator.matches(':hover'))
+    || (lastInteraction === 'keyboard' && navigator.matches(':focus-within'))
+  );
+  const scheduleClose = (navigator, delay = autoHideDelay) => {
+    cancelClose(navigator);
+    if (!navigator.classList.contains('is-open')) return;
+    closeTimers.set(navigator, window.setTimeout(() => {
+      if (shouldRemainOpen(navigator)) scheduleClose(navigator);
+      else closeNavigator(navigator);
+    }, delay));
+  };
+  const hideAll = () => {
+    cancelConceal();
+    navigators.forEach(closeNavigator);
+    conceal();
+  };
 
   navigators.forEach((navigator) => {
     let wasOpen = navigator.classList.contains('is-open');
-    navigator.addEventListener('pointerenter', () => cancelConceal(sideOf(navigator)));
+    navigator.addEventListener('pointerenter', (event) => {
+      lastInteraction = event.pointerType || 'mouse';
+      cancelConceal(sideOf(navigator));
+      cancelClose(navigator);
+    });
     navigator.addEventListener('pointerleave', (event) => {
-      if (event.pointerType === 'mouse') scheduleConceal(sideOf(navigator));
+      if (event.pointerType !== 'mouse') return;
+      scheduleConceal(sideOf(navigator));
+      scheduleClose(navigator);
+    });
+    navigator.addEventListener('pointerdown', (event) => {
+      lastInteraction = event.pointerType || 'mouse';
+      if (navigator.classList.contains('is-open')) scheduleClose(navigator);
+    });
+    navigator.addEventListener('focusin', () => {
+      if (lastInteraction === 'keyboard') cancelClose(navigator);
+    });
+    navigator.addEventListener('focusout', () => {
+      window.setTimeout(() => {
+        if (!navigator.matches(':focus-within')) scheduleClose(navigator);
+      });
     });
     new MutationObserver(() => {
       const open = navigator.classList.contains('is-open');
-      if (open) cancelConceal(sideOf(navigator));
+      if (open) {
+        cancelConceal(sideOf(navigator));
+        scheduleClose(navigator);
+      }
       else if (wasOpen && navigator.classList.contains('is-edge-revealed')) {
-        scheduleConceal(sideOf(navigator), 1200);
+        cancelClose(navigator);
+        scheduleConceal(sideOf(navigator));
       }
       wasOpen = open;
     }).observe(navigator, {attributes: true, attributeFilter: ['class']});
@@ -4518,6 +4569,7 @@ function setupEdgeNavigatorReveal() {
 
   document.addEventListener('pointermove', (event) => {
     if (event.pointerType !== 'mouse') return;
+    lastInteraction = 'mouse';
     const activationWidth = 44;
     if (event.clientX <= activationWidth) {
       reveal('left');
@@ -4530,6 +4582,7 @@ function setupEdgeNavigatorReveal() {
   }, {passive: true});
 
   document.addEventListener('pointerdown', (event) => {
+    lastInteraction = event.pointerType || 'mouse';
     if (!['touch', 'pen'].includes(event.pointerType)) return;
     const activationWidth = 30;
     const side = event.clientX <= activationWidth
@@ -4538,10 +4591,12 @@ function setupEdgeNavigatorReveal() {
     if (!side) return;
     const collapsed = collapsedOn(side);
     if (!collapsed.length || collapsed.some((navigator) => navigator.contains(event.target))) return;
-    if (reveal(side, 4500)) event.preventDefault();
+    if (reveal(side, autoHideDelay)) event.preventDefault();
   }, {capture: true, passive: false});
 
-  window.addEventListener('blur', () => conceal(), {passive: true});
+  document.addEventListener('keydown', () => { lastInteraction = 'keyboard'; }, {passive: true});
+  window.addEventListener('scroll', hideAll, {passive: true});
+  window.addEventListener('blur', hideAll, {passive: true});
 }
 
 // The Chart Viewer and the Report Template editor deliberately share this
