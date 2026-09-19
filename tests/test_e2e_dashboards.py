@@ -32,10 +32,38 @@ def test_compact_landscape_dashboard_comments_are_docked_to_the_bottom():
     stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
 
     assert '@media (orientation:landscape) and (max-height:600px) {' in stylesheet
+    assert '#ds-viewer.ds-overlay {' in stylesheet
+    assert 'grid-template-columns:minmax(10rem,1fr) auto;' in stylesheet
+    assert '#ds-viewer:not(.ds-presentation-active) .ds-slide-content {' in stylesheet
+    assert 'flex-direction:column;' in stylesheet
+    assert '#ds-viewer:not(.ds-presentation-active) .ds-slide-main {' in stylesheet
+    assert 'grid-template-rows:auto minmax(0,1fr);' in stylesheet
+    assert '#ds-viewer:not(.ds-presentation-active) .ds-positioned .ds-chart {' in stylesheet
+    assert 'left:var(--ds-chart-left)!important;' in stylesheet
+    assert 'height:var(--ds-chart-height)!important;' in stylesheet
+    assert '#ds-viewer:not(.ds-presentation-active) .ds-viewer-panel {' in stylesheet
+    assert 'padding:.5rem .65rem 3.75rem!important;' in stylesheet
     assert '#ds-viewer:not(.ds-presentation-active) .ds-slide-content>.ds-slide-comments {' in stylesheet
-    assert 'position:absolute;' in stylesheet
-    assert 'bottom:0;' in stylesheet
-    assert 'max-height:min(70%,16rem);' in stylesheet
+    assert 'position:fixed;' in stylesheet
+    assert 'bottom:max(.35rem,env(safe-area-inset-bottom,0px));' in stylesheet
+    assert 'left:max(.35rem,env(safe-area-inset-left,0px));' in stylesheet
+    assert 'right:max(.35rem,env(safe-area-inset-right,0px));' in stylesheet
+    assert 'max-height:min(70dvh,16rem);' in stylesheet
+
+
+def test_compact_landscape_presentation_settings_are_vertically_scrollable():
+    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+
+    assert '#ds-presentation-overlay.ds-overlay {' in stylesheet
+    assert '#ds-presentation-overlay .ds-presentation-dialog {' in stylesheet
+    assert 'max-height:100%;' in stylesheet
+    assert 'overflow-y:auto;' in stylesheet
+    assert 'overscroll-behavior:contain;' in stylesheet
+    assert '-webkit-overflow-scrolling:touch;' in stylesheet
+    assert '#ds-presentation-overlay .ds-presentation-dialog>.section-head {' in stylesheet
+    assert 'position:sticky;' in stylesheet
+    assert '#ds-presentation-overlay .ds-presentation-options {' in stylesheet
+    assert 'grid-template-columns:repeat(2,minmax(0,1fr));' in stylesheet
 
 
 def setup_dashboard(client):

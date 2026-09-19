@@ -120,7 +120,7 @@ Hover or focus a chart to reveal Dataset, Expand, Refresh and Zoom controls. The
 - Zoom from 100% to 400% with `−`, `+` and `1:1` reset.
 - At 100%, drag a rectangle over the plot to zoom into it; drag a zoomed chart to pan.
 - Double-click or use Expand to open the focused chart.
-- View Dashboard and its expanded viewer stay above background-task cards and share Reporting's red Close control. The expanded viewer follows Reporting's full-screen card layout, with a descriptive header and an inset chart canvas, while retaining the purple Dashboard palette and floating Chart Definition panel. Both live and expanded charts show boundary-aware left, right, up and down arrows whenever zoom is active; these move the Canvas camera and disable at their respective limits. The expanded viewer's purple First/Previous/Next/Last controls use the same icons and spacing as Reporting. On compact landscape screens, the collapsible Comments drawer remains anchored to the bottom edge of the viewer.
+- View Dashboard and its expanded viewer stay above background-task cards and share Reporting's red Close control. The expanded viewer follows Reporting's full-screen card layout, with a descriptive header and an inset chart canvas, while retaining the purple Dashboard palette and floating Chart Definition panel. Both live and expanded charts show boundary-aware left, right, up and down arrows whenever zoom is active; these move the Canvas camera and disable at their respective limits. The expanded viewer's purple First/Previous/Next/Last controls use the same icons and spacing as Reporting. On compact landscape screens, the viewer reduces its header, places Dashboard selection and actions on one row, groups playback and navigation controls into a compact toolbar and preserves the template's proportional chart positions in the remaining space. The collapsible Comments drawer remains fixed to the visible bottom edge, including the device safe area, independently of overflowing slide content.
 - Adaptative Filters, Auto-calculated Fields and Edit Template remain available in expanded view when permitted.
 - Edit Template focuses the exact template row for the chart. Saving refreshes the Dashboard; closing unchanged retains the current preparation.
 
@@ -135,7 +135,7 @@ Every column provides an Excel-style value filter across the complete chart data
 ### Comments, Presentation and floating tools
 
 - Add, edit or remove slide comments; Enter or leaving an edit saves immediately.
-- **Presentation** supports 3, 5, 10 or 15 seconds with Fade, Slide or no transition. Manual navigation stops it.
+- **Presentation** supports 3, 5, 10 or 15 seconds with Fade, Slide or no transition. Manual navigation stops it. On compact landscape screens, its settings dialog stays within the visible viewport and scrolls vertically while keeping its header and actions accessible.
 - **Adaptative Filters** moves the same panel into a floating dialog; edits refresh visible charts without automatically saving defaults.
 - **Auto-Calculated Fields** opens the shared workspace manager for administrators.
 - Backdrop/Escape closes unchanged dialogs and returns focus. Unsaved Filters, Template Editor or calculated-field changes request a decision first.
