@@ -1080,6 +1080,33 @@
   height:1.25rem;
 }
 
+/* Compact landscape viewers keep Comments attached to the lower edge instead
+   of letting a desktop-style side panel float within the shortened canvas. */
+@media (orientation:landscape) and (max-height:600px) {
+  #ds-viewer:not(.ds-presentation-active) .ds-slide-content>.ds-slide-comments {
+    position:absolute;
+    z-index:11;
+    right:0;
+    bottom:0;
+    left:0;
+    box-sizing:border-box;
+    width:100%;
+    height:auto;
+    max-height:min(70%,16rem);
+    margin:0!important;
+  }
+  #ds-viewer:not(.ds-presentation-active) .ds-slide-content>.ds-slide-comments[open] {
+    display:flex;
+    min-height:0;
+    flex:none;
+    flex-direction:column;
+  }
+  #ds-viewer:not(.ds-presentation-active) .ds-slide-content>.ds-slide-comments[open] .ds-slide-comments-body {
+    flex:1 1 auto;
+    overflow:hidden;
+  }
+}
+
 /* Long individual-chart titles keep a dedicated row on compact screens. */
 @media (max-width:760px), (orientation:landscape) and (max-height:600px) {
   .ds-chart-expanded-overlay .ds-chart-expanded-header {

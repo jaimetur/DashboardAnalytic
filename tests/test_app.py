@@ -3173,11 +3173,13 @@ def test_workspace_dataset_upload_uses_non_blocking_progress_card(client) -> Non
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
     assert 'formatQueuedAge' in app_script
     assert 'const minimizedPanels = new Map();' in app_script
+    assert "const minimizedKey = `dashboard-analytic:background-task-panel:${group.workspace_id}:minimized`;" in app_script
+    assert "localStorage.getItem(minimizedKey) === 'true'" in app_script
+    assert 'localStorage.setItem(minimizedKey, String(value))' in app_script
     assert 'const locallyStoppedTaskIds = new Set();' in app_script
     assert 'for (const task of stoppableTasks)' in app_script
     assert 'Promise.allSettled(stoppableTasks.map(requestTaskStop))' not in app_script
     assert 'Background tasks stopped' in app_script
-    assert ':minimized`' not in app_script
 
     upload = client.post(
         '/datasets-analysis/upload',

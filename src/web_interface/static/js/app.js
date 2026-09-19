@@ -7045,6 +7045,7 @@ if (queueNode) {
 
     const panelStateKey = String(group.workspace_id);
     panel.dataset.backgroundTaskPanelKey = panelStateKey;
+    const minimizedKey = `dashboard-analytic:background-task-panel:${group.workspace_id}:minimized`;
     const minimize = document.createElement('button');
     minimize.type = 'button';
     minimize.className = 'background-task-minimize-button';
@@ -7055,9 +7056,14 @@ if (queueNode) {
       minimize.title = value ? 'Expand background tasks' : 'Minimize background tasks';
       minimize.setAttribute('aria-label', minimize.title);
       minimizedPanels.set(panelStateKey, value);
+      try { localStorage.setItem(minimizedKey, String(value)); } catch (_error) { /* Ignore unavailable local storage. */ }
     };
     minimize.addEventListener('click', () => setMinimized(!panel.classList.contains('is-minimized')));
-    setMinimized(minimizedPanels.get(panelStateKey) === true);
+    let minimized = minimizedPanels.get(panelStateKey) === true;
+    if (!minimizedPanels.has(panelStateKey)) {
+      try { minimized = localStorage.getItem(minimizedKey) === 'true'; } catch (_error) { /* Ignore unavailable local storage. */ }
+    }
+    setMinimized(minimized);
     panel.append(minimize);
 
     const positionKey = `dashboard-analytic:background-task-panel:${group.workspace_id}:position`;

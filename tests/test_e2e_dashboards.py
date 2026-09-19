@@ -28,6 +28,16 @@ def test_dashboard_uses_combined_tables_without_projection_or_warmup_queue():
     assert 'def reporting_source(snapshot, kind, task_repository):' in source
 
 
+def test_compact_landscape_dashboard_comments_are_docked_to_the_bottom():
+    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+
+    assert '@media (orientation:landscape) and (max-height:600px) {' in stylesheet
+    assert '#ds-viewer:not(.ds-presentation-active) .ds-slide-content>.ds-slide-comments {' in stylesheet
+    assert 'position:absolute;' in stylesheet
+    assert 'bottom:0;' in stylesheet
+    assert 'max-height:min(70%,16rem);' in stylesheet
+
+
 def setup_dashboard(client):
     client.post('/login', data={'username': 'super', 'password': 'super123'})
     response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={

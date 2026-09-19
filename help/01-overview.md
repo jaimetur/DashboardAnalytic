@@ -35,7 +35,7 @@ Floating cards group live tasks by execution context and keep their label, detai
 - **Blue — Other workspace**: work that continues for a different workspace after the user switches away from it.
 - **Red — System tasks**: deployment-wide work such as portable-package and server-transfer operations.
 
-Dashboard cards also group preparation and chart-model work under the Dashboard name and distinguish the active item from its queued position. An **Interrupt task** action appears when the job supports cancellation. Cards can be minimized without interrupting their tasks, refresh automatically, and retain a completed task briefly so its final state is visible before the card disappears. Persistent generation jobs remain available in their module table after the floating notification closes.
+Dashboard cards also group preparation and chart-model work under the Dashboard name and distinguish the active item from its queued position. An **Interrupt task** action appears when the job supports cancellation. Cards can be minimized without interrupting their tasks, retain that state while moving between modules or reloading the page, refresh automatically, and retain a completed task briefly so its final state is visible before the card disappears. Persistent generation jobs remain available in their module table after the floating notification closes.
 
 ## Workspace
 
