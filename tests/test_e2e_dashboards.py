@@ -66,6 +66,23 @@ def test_compact_landscape_presentation_settings_are_vertically_scrollable():
     assert 'grid-template-columns:repeat(2,minmax(0,1fr));' in stylesheet
 
 
+def test_compact_portrait_dashboard_preserves_the_template_layout():
+    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+
+    assert '@media (orientation:portrait) and (max-width:640px) {' in stylesheet
+    assert '#ds-viewer:not(.ds-presentation-active) .ds-slide-main {' in stylesheet
+    assert 'grid-template-columns:minmax(0,1fr) minmax(0,1fr);' in stylesheet
+    assert '#ds-viewer:not(.ds-presentation-active) .ds-chart-stage.ds-positioned,' in stylesheet
+    assert 'aspect-ratio:16 / 9;' in stylesheet
+    assert '#ds-viewer:not(.ds-presentation-active) .ds-positioned .ds-chart {' in stylesheet
+    assert 'left:var(--ds-chart-left)!important;' in stylesheet
+    assert 'width:var(--ds-chart-width)!important;' in stylesheet
+    assert '#ds-viewer:not(.ds-presentation-active) .ds-viewer-primary-controls {' in stylesheet
+    assert '#ds-viewer:not(.ds-presentation-active) .ds-viewer-navigation-footer {' in stylesheet
+    assert '#ds-viewer:not(.ds-presentation-active) .ds-viewer-right-actions {' in stylesheet
+    assert 'grid-template-columns:repeat(3,minmax(0,1fr));' in stylesheet
+
+
 def setup_dashboard(client):
     client.post('/login', data={'username': 'super', 'password': 'super123'})
     response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
