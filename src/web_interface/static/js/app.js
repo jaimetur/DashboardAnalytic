@@ -4458,6 +4458,92 @@ function setupModuleNavigator() {
   });
 }
 
+function setupEdgeNavigatorReveal() {
+  if (document.body.dataset.edgeNavigatorsReady === '1') return;
+  const navigators = Array.from(document.querySelectorAll(
+    '.page-panel-navigator, .help-navigator, .release-navigator',
+  ));
+  if (!navigators.length) return;
+  document.body.dataset.edgeNavigatorsReady = '1';
+  const concealTimers = {left: 0, right: 0};
+
+  const sideOf = (navigator) => (
+    navigator.matches('.help-navigator, .release-navigator') ? 'right' : 'left'
+  );
+  const collapsedOn = (side) => navigators.filter((navigator) => (
+    sideOf(navigator) === side && !navigator.classList.contains('is-open')
+  ));
+  const cancelConceal = (side = '') => {
+    const sides = side ? [side] : ['left', 'right'];
+    sides.forEach((item) => {
+      window.clearTimeout(concealTimers[item]);
+      concealTimers[item] = 0;
+    });
+  };
+  const conceal = (side = '') => {
+    navigators.forEach((navigator) => {
+      if ((!side || sideOf(navigator) === side) && !navigator.classList.contains('is-open')) {
+        navigator.classList.remove('is-edge-revealed');
+      }
+    });
+  };
+  const scheduleConceal = (side, delay = 240) => {
+    cancelConceal(side);
+    concealTimers[side] = window.setTimeout(() => conceal(side), delay);
+  };
+  const reveal = (side, autoHideDelay = 0) => {
+    const collapsed = collapsedOn(side);
+    if (!collapsed.length) return false;
+    cancelConceal(side);
+    collapsed.forEach((navigator) => navigator.classList.add('is-edge-revealed'));
+    if (autoHideDelay) scheduleConceal(side, autoHideDelay);
+    return true;
+  };
+
+  navigators.forEach((navigator) => {
+    let wasOpen = navigator.classList.contains('is-open');
+    navigator.addEventListener('pointerenter', () => cancelConceal(sideOf(navigator)));
+    navigator.addEventListener('pointerleave', (event) => {
+      if (event.pointerType === 'mouse') scheduleConceal(sideOf(navigator));
+    });
+    new MutationObserver(() => {
+      const open = navigator.classList.contains('is-open');
+      if (open) cancelConceal(sideOf(navigator));
+      else if (wasOpen && navigator.classList.contains('is-edge-revealed')) {
+        scheduleConceal(sideOf(navigator), 1200);
+      }
+      wasOpen = open;
+    }).observe(navigator, {attributes: true, attributeFilter: ['class']});
+  });
+
+  document.addEventListener('pointermove', (event) => {
+    if (event.pointerType !== 'mouse') return;
+    const activationWidth = 44;
+    if (event.clientX <= activationWidth) {
+      reveal('left');
+    } else if (event.clientX >= window.innerWidth - activationWidth) {
+      reveal('right');
+    } else if (!navigators.some((navigator) => navigator.matches(':hover'))) {
+      scheduleConceal('left');
+      scheduleConceal('right');
+    }
+  }, {passive: true});
+
+  document.addEventListener('pointerdown', (event) => {
+    if (!['touch', 'pen'].includes(event.pointerType)) return;
+    const activationWidth = 30;
+    const side = event.clientX <= activationWidth
+      ? 'left'
+      : (event.clientX >= window.innerWidth - activationWidth ? 'right' : '');
+    if (!side) return;
+    const collapsed = collapsedOn(side);
+    if (!collapsed.length || collapsed.some((navigator) => navigator.contains(event.target))) return;
+    if (reveal(side, 4500)) event.preventDefault();
+  }, {capture: true, passive: false});
+
+  window.addEventListener('blur', () => conceal(), {passive: true});
+}
+
 // The Chart Viewer and the Report Template editor deliberately share this
 // control surface. Keeping the filter builder and the searchable popovers in
 // one component prevents the two previews from drifting apart.
@@ -4807,6 +4893,7 @@ setupWorkspaceUserPickers();
 setupCustomMultiSelects();
 setupPagePanelNavigator();
 setupModuleNavigator();
+setupEdgeNavigatorReveal();
 setupSearchableSingleSelects();
 
 function maybeSyncPersistedGlobalDatasetsAnalysisSelectors() {

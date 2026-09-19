@@ -5580,6 +5580,23 @@ def test_top_navigation_shows_document_links(client) -> None:
     assert 'linear-gradient(135deg, #ff8070, #861919)' in admin.text
 
 
+def test_collapsed_side_navigators_reveal_near_viewport_edges() -> None:
+    root = Path(__file__).parents[1]
+    app_script = (root / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+    app_styles = (root / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')
+
+    assert 'function setupEdgeNavigatorReveal() {' in app_script
+    assert "'.page-panel-navigator, .help-navigator, .release-navigator'" in app_script
+    assert "event.pointerType !== 'mouse'" in app_script
+    assert "['touch', 'pen'].includes(event.pointerType)" in app_script
+    assert "navigator.classList.add('is-edge-revealed')" in app_script
+    assert 'setupEdgeNavigatorReveal();' in app_script
+    assert ':not(.is-edge-revealed):not(:focus-within) .page-panel-navigator-tab {' in app_styles
+    assert 'transform:translate(calc(-100% + .32rem),-50%);' in app_styles
+    assert 'transform:translate(calc(100% - .32rem),-50%);' in app_styles
+    assert '.is-edge-revealed :is(.page-panel-navigator-tab,.help-navigator-tab,.release-navigator-tab)' in app_styles
+
+
 def test_non_admin_navigation_hides_admin_tab(client) -> None:
     response = client.post("/login", data={"username": "demo", "password": "demo123"}, follow_redirects=False)
     assert response.status_code == 303
