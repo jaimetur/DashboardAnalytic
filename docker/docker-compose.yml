@@ -7,6 +7,7 @@ services:
       - .env
     environment:
       TZ: ${TZ:-Europe/Madrid}
+      DASHBOARD_ANALYTIC_BIND_PORT: "7278"
     ports:
       - "${APP_PORT}:7278"
     volumes:

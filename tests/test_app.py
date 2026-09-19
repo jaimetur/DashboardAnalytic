@@ -3168,11 +3168,17 @@ def test_workspace_dataset_upload_uses_non_blocking_progress_card(client) -> Non
     assert 'data-background-upload' in page.text
     assert "new XMLHttpRequest()" in page.text
     assert "dashboard-analytic:background-task" in page.text
+    assert 'cancel: () => request.abort()' in page.text
+    assert "detail: 'Uploading files', progress: uploadProgress" in page.text
+    assert 'if (progress !== null) uploadProgress = progress;' in page.text
+    assert "request.addEventListener('abort'" in page.text
     assert 'data-loading-label="Uploading datasets"' not in page.text
 
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
     assert 'formatQueuedAge' in app_script
     assert 'const minimizedPanels = new Map();' in app_script
+    assert "typeof task?.cancel === 'function'" in app_script
+    assert 'await task.cancel();' in app_script
     assert "const minimizedKey = `dashboard-analytic:background-task-panel:${group.workspace_id}:minimized`;" in app_script
     assert "localStorage.getItem(minimizedKey) === 'true'" in app_script
     assert 'localStorage.setItem(minimizedKey, String(value))' in app_script
@@ -6807,6 +6813,21 @@ def test_server_log_formatter_uses_the_configured_timezone_and_timestamp_prefix(
     formatter = ConfiguredTimezoneDefaultFormatter('[%(asctime)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
     assert formatter.format(record) == '[2026-09-18 22:30:00] Server ready'
+
+
+def test_docker_uses_the_timestamped_server_launcher() -> None:
+    root = Path(__file__).parents[1]
+    dockerfile = (root / 'docker/dockerfile').read_text(encoding='utf-8')
+    production_compose = (root / 'docker/docker-compose.yml').read_text(encoding='utf-8')
+    development_compose = (root / 'docker/docker-compose-dev.yml').read_text(encoding='utf-8')
+    launcher = (root / 'src/main.py').read_text(encoding='utf-8')
+
+    assert 'CMD ["python", "-m", "src.main"]' in dockerfile
+    assert 'DASHBOARD_ANALYTIC_BIND_PORT: "7278"' in production_compose
+    assert 'DASHBOARD_ANALYTIC_RELOAD: "true"' in development_compose
+    assert 'command: python -m src.main' in development_compose
+    assert "'fmt': '[%(asctime)s] %(levelprefix)s %(message)s'" in launcher
+    assert "'src.DashboardAnalytic:app' if reload_enabled else app" in launcher
 
 
 def test_app_logs_use_the_configured_timezone_for_display_and_date_filter(client, monkeypatch) -> None:

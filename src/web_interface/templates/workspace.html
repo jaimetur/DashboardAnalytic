@@ -726,6 +726,7 @@
     const files = Array.from(picker.files || []);
     const taskId = `dataset-upload:${Date.now()}`;
     const startedAt = Date.now() / 1000;
+    const request = new XMLHttpRequest();
     const taskBase = {
       id: taskId,
       workspace_id: form.dataset.workspaceId || '__client__',
@@ -733,27 +734,32 @@
       is_active: true,
       label: `Uploading ${files.length} dataset${files.length === 1 ? '' : 's'}`,
       started_at: startedAt,
+      cancel: () => request.abort(),
     };
     const publish = (detail) => window.dispatchEvent(new CustomEvent(
       'dashboard-analytic:background-task', {detail: {...taskBase, ...detail}},
     ));
-    const request = new XMLHttpRequest();
     submitButton.disabled = true;
     submitButton.textContent = 'Uploading in background…';
     publish({status: 'processing', detail: 'Starting upload', progress: 0, duration_seconds: 0});
+    let uploadProgress = 0;
     const timer = window.setInterval(() => publish({
-      status: 'processing', detail: 'Uploading files', progress: null,
+      status: 'processing', detail: 'Uploading files', progress: uploadProgress,
       duration_seconds: Math.max(0, Date.now() / 1000 - startedAt),
     }), 1000);
     request.upload.addEventListener('progress', (progressEvent) => {
       const progress = progressEvent.lengthComputable && progressEvent.total > 0
         ? Math.min(99, progressEvent.loaded * 100 / progressEvent.total) : null;
+      if (progress !== null) uploadProgress = progress;
       publish({
-        status: 'processing', detail: 'Uploading files', progress,
+        status: 'processing', detail: 'Uploading files', progress: uploadProgress,
         duration_seconds: Math.max(0, Date.now() / 1000 - startedAt),
       });
     });
+    let uploadFinished = false;
     const finish = () => {
+      if (uploadFinished) return;
+      uploadFinished = true;
       window.clearInterval(timer);
       uploadInProgress = false;
       submitButton.disabled = false;
@@ -778,6 +784,13 @@
       publish({status: 'cancelled'});
       showInfoDialog('The upload connection failed. No processing task was started.', {
         title: 'Dataset upload', tone: 'error',
+      });
+    });
+    request.addEventListener('abort', () => {
+      finish();
+      publish({status: 'cancelled'});
+      showInfoDialog('The browser upload was interrupted. Any dataset jobs already accepted by the server remain visible and can be stopped separately.', {
+        title: 'Dataset upload interrupted', tone: 'info',
       });
     });
     request.open('POST', form.action);

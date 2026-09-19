@@ -6865,10 +6865,14 @@ if (queueNode) {
     || String(task?.detail || '').toLowerCase() === 'queued';
   const taskCanStop = (task) => {
     const status = String(task?.status || '').toLowerCase();
-    return Boolean(task?.stop_url && task?.stop_task_id)
+    return (typeof task?.cancel === 'function' || Boolean(task?.stop_url && task?.stop_task_id))
       && !['complete', 'completed', 'cancelled', 'stopped', 'ready'].includes(status);
   };
   const requestTaskStop = async (task) => {
+    if (typeof task?.cancel === 'function') {
+      await task.cancel();
+      return;
+    }
     const body = new URLSearchParams({task_id: String(task.stop_task_id)});
     const response = await fetch(String(task.stop_url), {
       method: 'POST', credentials: 'same-origin',

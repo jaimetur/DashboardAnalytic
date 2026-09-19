@@ -74,12 +74,21 @@ def execution_log_config() -> dict[str, object]:
     return log_config
 
 
+def environment_flag(name: str) -> bool:
+    """Return whether an optional server-launch environment flag is enabled."""
+    return str(os.environ.get(name) or '').strip().casefold() in {'1', 'true', 'yes', 'on'}
+
+
 if __name__ == "__main__":
+    reload_enabled = environment_flag('DASHBOARD_ANALYTIC_RELOAD')
+    bind_port = int(os.environ.get('DASHBOARD_ANALYTIC_BIND_PORT') or settings.app_port)
     uvicorn.run(
-        app,
+        'src.DashboardAnalytic:app' if reload_enabled else app,
         host=settings.app_host,
-        port=settings.app_port,
+        port=bind_port,
         proxy_headers=True,
         forwarded_allow_ips="*",
         log_config=execution_log_config(),
+        reload=reload_enabled,
+        reload_dirs=[str(Path(__file__).resolve().parent)] if reload_enabled else None,
     )

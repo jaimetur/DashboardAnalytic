@@ -77,6 +77,8 @@ Logs:
 docker compose --env-file docker/.env -f docker/docker-compose.yml logs -f
 ```
 
+Docker starts the application through the shared Python launcher. Console and access entries therefore include the configured-local `[yyyy-mm-dd HH:MM:SS]` prefix shown in App Logs; `TZ` selects the timezone used by that prefix.
+
 Restart:
 
 ```bash

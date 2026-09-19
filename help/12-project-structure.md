@@ -33,7 +33,7 @@ Runtime `config/` and `data/` directories use project-local defaults but are exc
 
 ## Python application layer
 
-- `src/main.py`: direct source/PyCharm launcher using `APP_HOST` and `APP_PORT`.
+- `src/main.py`: shared source, PyCharm and Docker launcher using `APP_HOST`, `APP_PORT` and the timestamped Uvicorn logging configuration.
 - `src/DashboardAnalytic.py`: FastAPI application, page/API routes, workspace activation, shared background-task orchestration, Admin portability and classic Reporting jobs.
 - `src/config.py`: environment and `storage-paths.conf` resolution.
 - `src/version.py`: application version and release date shown by the UI.
