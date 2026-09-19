@@ -4506,10 +4506,13 @@ function setupEdgeNavigatorReveal() {
     window.clearTimeout(closeTimers.get(navigator));
     closeTimers.delete(navigator);
   };
-  const closeNavigator = (navigator) => {
+  const closeNavigator = (navigator, forceBlur = false) => {
     cancelClose(navigator);
     navigator.classList.remove('is-open', 'is-edge-revealed');
     navigator.querySelector('[aria-expanded="true"]')?.setAttribute('aria-expanded', 'false');
+    if (navigator.contains(document.activeElement) && (forceBlur || lastInteraction !== 'keyboard')) {
+      document.activeElement?.blur();
+    }
   };
   const shouldRemainOpen = (navigator) => (
     (lastInteraction === 'mouse' && navigator.matches(':hover'))
@@ -4525,7 +4528,7 @@ function setupEdgeNavigatorReveal() {
   };
   const hideAll = () => {
     cancelConceal();
-    navigators.forEach(closeNavigator);
+    navigators.forEach((navigator) => closeNavigator(navigator, true));
     conceal();
   };
 

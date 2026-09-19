@@ -2826,20 +2826,20 @@ body:has(.release-navigator) .help-navigator{top:37%}
 :is(.page-panel-navigator,.help-navigator,.release-navigator) :is(.page-panel-navigator-tab,.help-navigator-tab,.release-navigator-tab) {
   transition:transform .18s ease,opacity .18s ease,filter .18s ease;
 }
-.page-panel-navigator:not(.is-open):not(.is-edge-revealed):not(:focus-within) .page-panel-navigator-tab {
+.page-panel-navigator:not(.is-open):not(.is-edge-revealed):not(:has(:focus-visible)) .page-panel-navigator-tab {
   opacity:.52;
   pointer-events:none;
   transform:translate(calc(-100% + .32rem),-50%);
   filter:saturate(.45) brightness(.82);
 }
-:is(.help-navigator,.release-navigator):not(.is-open):not(.is-edge-revealed):not(:focus-within) :is(.help-navigator-tab,.release-navigator-tab) {
+:is(.help-navigator,.release-navigator):not(.is-open):not(.is-edge-revealed):not(:has(:focus-visible)) :is(.help-navigator-tab,.release-navigator-tab) {
   opacity:.52;
   pointer-events:none;
   transform:translate(calc(100% - .32rem),-50%);
   filter:saturate(.35) brightness(.82);
 }
 :is(.page-panel-navigator,.help-navigator,.release-navigator).is-edge-revealed :is(.page-panel-navigator-tab,.help-navigator-tab,.release-navigator-tab),
-:is(.page-panel-navigator,.help-navigator,.release-navigator):focus-within :is(.page-panel-navigator-tab,.help-navigator-tab,.release-navigator-tab) {
+:is(.page-panel-navigator,.help-navigator,.release-navigator):has(:focus-visible) :is(.page-panel-navigator-tab,.help-navigator-tab,.release-navigator-tab) {
   opacity:1;
   pointer-events:auto;
   transform:translateY(-50%);
