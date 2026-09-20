@@ -4,9 +4,11 @@
 
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) NSTextField *statusLabel;
+@property(nonatomic, strong) NSButton *openBrowserButton;
 @property(nonatomic, strong) NSButton *restartButton;
 @property(nonatomic, strong) NSButton *stopButton;
 @property(nonatomic, strong) NSTask *launcherTask;
+@property(nonatomic, strong) NSURL *serverURL;
 @property(nonatomic, assign) BOOL restarting;
 @property(nonatomic, assign) BOOL stopping;
 
@@ -23,7 +25,7 @@
     [self startServer];
 
     [self.window makeKeyAndOrderFront:nil];
-    [self.window miniaturize:nil];
+    [NSApp activateIgnoringOtherApps:YES];
 }
 
 - (void)buildMainMenu {
@@ -42,7 +44,7 @@
 }
 
 - (void)buildWindow {
-    NSRect frame = NSMakeRect(0, 0, 460, 210);
+    NSRect frame = NSMakeRect(0, 0, 620, 210);
     NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable;
     self.window = [[NSWindow alloc] initWithContentRect:frame styleMask:style backing:NSBackingStoreBuffered defer:NO];
     self.window.title = @"Dashboard Analytic";
@@ -58,23 +60,28 @@
     [contentView addSubview:iconView];
 
     NSTextField *titleLabel = [NSTextField labelWithString:@"Dashboard Analytic"];
-    titleLabel.frame = NSMakeRect(136, 145, 292, 28);
+    titleLabel.frame = NSMakeRect(136, 145, 456, 28);
     titleLabel.font = [NSFont boldSystemFontOfSize:20];
     [contentView addSubview:titleLabel];
 
     self.statusLabel = [NSTextField wrappingLabelWithString:@"Starting the local server…"];
-    self.statusLabel.frame = NSMakeRect(136, 95, 292, 45);
+    self.statusLabel.frame = NSMakeRect(136, 95, 456, 45);
     self.statusLabel.font = [NSFont systemFontOfSize:13];
     self.statusLabel.textColor = [NSColor secondaryLabelColor];
     [contentView addSubview:self.statusLabel];
 
+    self.openBrowserButton = [NSButton buttonWithTitle:@"Open in Browser" target:self action:@selector(openInBrowser:)];
+    self.openBrowserButton.frame = NSMakeRect(96, 28, 150, 36);
+    self.openBrowserButton.bezelStyle = NSBezelStyleRounded;
+    [contentView addSubview:self.openBrowserButton];
+
     self.restartButton = [NSButton buttonWithTitle:@"Restart Server" target:self action:@selector(restartServer:)];
-    self.restartButton.frame = NSMakeRect(92, 28, 140, 36);
+    self.restartButton.frame = NSMakeRect(258, 28, 140, 36);
     self.restartButton.bezelStyle = NSBezelStyleRounded;
     [contentView addSubview:self.restartButton];
 
     self.stopButton = [NSButton buttonWithTitle:@"Stop Server and Quit" target:self action:@selector(stopServerAndQuit:)];
-    self.stopButton.frame = NSMakeRect(246, 28, 182, 36);
+    self.stopButton.frame = NSMakeRect(410, 28, 182, 36);
     self.stopButton.bezelStyle = NSBezelStyleRounded;
     self.stopButton.keyEquivalent = @"\r";
     [contentView addSubview:self.stopButton];
@@ -91,6 +98,9 @@
     task.executableURL = [NSURL fileURLWithPath:@"/bin/zsh"];
     task.arguments = @[launchScript];
     self.launcherTask = task;
+
+    NSString *port = [NSProcessInfo processInfo].environment[@"APP_PORT"] ?: @"7278";
+    self.serverURL = [NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%@", port]];
 
     __weak DashboardAnalyticAppDelegate *weakSelf = self;
     task.terminationHandler = ^(NSTask *finishedTask) {
@@ -121,6 +131,7 @@
         return;
     }
 
+    self.openBrowserButton.enabled = YES;
     self.restartButton.enabled = YES;
     self.stopButton.enabled = YES;
     self.stopButton.title = @"Stop Server and Quit";
@@ -129,6 +140,7 @@
 
 - (void)showLaunchError:(NSString *)message {
     self.statusLabel.stringValue = @"The server could not be started.";
+    self.openBrowserButton.enabled = NO;
     self.restartButton.enabled = NO;
     self.stopButton.title = @"Quit";
     self.stopButton.enabled = YES;
@@ -141,6 +153,18 @@
         (void)returnCode;
         [NSApp terminate:nil];
     }];
+}
+
+- (void)openInBrowser:(id)sender {
+    (void)sender;
+
+    if (self.serverURL == nil || ![[NSWorkspace sharedWorkspace] openURL:self.serverURL]) {
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"Dashboard Analytic could not open the browser";
+        alert.informativeText = @"Open the local server address manually in your browser.";
+        [alert addButtonWithTitle:@"OK"];
+        [alert beginSheetModalForWindow:self.window completionHandler:nil];
+    }
 }
 
 - (void)restartServer:(id)sender {
@@ -156,6 +180,7 @@
 
     self.restarting = YES;
     self.statusLabel.stringValue = @"Stopping the local server before restart…";
+    self.openBrowserButton.enabled = NO;
     self.restartButton.enabled = NO;
     self.stopButton.enabled = NO;
     [self.launcherTask terminate];
@@ -182,6 +207,7 @@
         self.stopping = YES;
         self.restarting = NO;
         self.statusLabel.stringValue = @"Stopping the local server…";
+        self.openBrowserButton.enabled = NO;
         self.restartButton.enabled = NO;
         self.stopButton.enabled = NO;
         [self.window makeKeyAndOrderFront:nil];

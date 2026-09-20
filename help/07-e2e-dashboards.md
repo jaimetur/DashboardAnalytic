@@ -107,7 +107,7 @@ After the visible slide finishes loading, the browser silently caches the remain
 
 ### Slides and navigation
 
-- Select any template slide or use the enlarged First, Previous, Next and Last controls, which match the individual chart viewer. Generate PPT appears in orange immediately before Dashboard Filters in the upper action row, while the red Refresh Dashboard action closes that row. Presentation remains centred above the slide navigation.
+- Select any template slide or use the enlarged First, Previous, Next and Last controls, which match the individual chart viewer. Every action in the upper row combines text with its SVG icon at a consistent size: Generate PPT appears in orange immediately before Dashboard Filters, while the red Refresh Dashboard action closes the row. Presentation is the first button in the navigation row and a spaced vertical divider separates it from First.
 - Left/Right Arrow navigates outside editable controls.
 - Title and Transition slides use branded Dashboard Analytic typography.
 - Chart rows preserve template order and placeholder geometry.

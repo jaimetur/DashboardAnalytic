@@ -388,6 +388,14 @@ def test_dashboards_lifecycle_and_layout(client):
     assert page.text.index('id="ds-viewer-export-ppt"') < page.text.index('id="ds-floating-filters"')
     assert page.text.index('id="ds-floating-filters"') < page.text.index('id="ds-viewer-refresh"')
     assert page.text.index('id="ds-viewer-refresh"') < page.text.index('id="ds-presentation"')
+    assert 'id="ds-viewer-export-ppt" class="ds-viewer-top-action ds-viewer-top-ppt"' in page.text
+    assert '>Generate PPT</button>' in page.text
+    assert 'id="ds-viewer-refresh" class="ds-viewer-top-action ds-viewer-top-refresh"' in page.text
+    assert '>Refresh Dashboard</button>' in page.text
+    assert 'id="ds-floating-filters" class="ds-viewer-top-action ds-viewer-top-filters"' in page.text
+    assert 'class="ds-viewer-top-action ds-viewer-top-auto-fields" data-workspace-manage-calculated-dimensions' in page.text
+    assert 'id="ds-edit" class="ds-viewer-top-action ds-viewer-top-edit"' in page.text
+    assert page.text.index('id="ds-presentation"') < page.text.index('id="ds-first"')
     assert '>Dashboard Filters</button>' in page.text
     assert 'id="ds-prev" class="ds-slide-nav-button" title="Previous slide" aria-label="Previous slide"><svg class="ds-slide-arrow-icon"' in page.text
     assert 'id="ds-next" class="ds-slide-nav-button" title="Next slide" aria-label="Next slide"><svg class="ds-slide-arrow-icon"' in page.text
@@ -530,6 +538,13 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '.e2e-dashboards .ds-slide-arrow-icon {' in dashboard_styles
     assert '.ds-viewer-tool-actions { display: flex;' in dashboard_styles
     assert '.e2e-dashboards .ds-viewer-tool-actions .ds-viewer-icon-action {' in dashboard_styles
+    assert '#ds-viewer.e2e-dashboards .ds-viewer-top-action::before {' in dashboard_styles
+    assert '#ds-viewer.e2e-dashboards .ds-viewer-top-filters::before {' in dashboard_styles
+    assert '#ds-viewer.e2e-dashboards .ds-viewer-top-auto-fields::before {' in dashboard_styles
+    assert '#ds-viewer.e2e-dashboards .ds-viewer-top-edit::before {' in dashboard_styles
+    assert 'class="ds-presentation-navigation-separator"' in page.text
+    assert '#ds-viewer.e2e-dashboards:not(.ds-presentation-active) .ds-presentation-navigation-separator {' in dashboard_styles
+    assert 'border-right:1px solid #b8a8ca;' in dashboard_styles
     assert '.e2e-dashboards .ds-chart-expanded-pan-up {' in dashboard_styles
     assert '.e2e-dashboards .ds-chart-expanded-pan-down {' in dashboard_styles
     assert '.e2e-dashboards .ds-chart-pan-button {' in dashboard_styles

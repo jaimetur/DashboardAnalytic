@@ -168,8 +168,7 @@ while (( local_attempt < 50 )); do
         exit 1
     fi
     if /usr/bin/curl --silent --output /dev/null --max-time 1 "$url"; then
-        /usr/bin/open "$url"
-        notify "Dashboard Analytic" "Server started at ${url}. Quit this app to stop it."
+        notify "Dashboard Analytic" "Server started at ${url}. Use Open in Browser from the launcher window."
         supervise_server
         exit 0
     fi
@@ -177,6 +176,5 @@ while (( local_attempt < 50 )); do
     ((local_attempt++))
 done
 
-/usr/bin/open "$url"
-notify "Dashboard Analytic" "The server is still starting at ${url}. Quit this app to stop it."
+notify "Dashboard Analytic" "The server is still starting at ${url}. Use Open in Browser from the launcher window when ready."
 supervise_server
