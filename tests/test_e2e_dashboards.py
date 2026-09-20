@@ -334,6 +334,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'Total Dashboards: 0' in page.text
     assert '>Dashboard Datasets & Filters<' in page.text
     assert 'id="ds-active-dashboard-heading">Dashboard Filters<' in page.text
+    filter_panel = page.text.split('id="ds-filter-panel"', 1)[1].split('>', 1)[0]
+    assert ' open' not in filter_panel
+    assert 'data-panel-state-storage="session"' in filter_panel
     assert 'id="ds-ppt-dataset-overlay"' in page.text
     assert 'id="ds-ppt-dataset-choices"' in page.text
     assert 'id="ds-ppt-dataset-scope"' in page.text
@@ -667,7 +670,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "setPreparationState('preparing', needsDataPreparation ? 'data' : 'rendering');" in dashboard_script
     assert "bind('ds-view', openActiveDashboardViewer);" in dashboard_script
     assert "async function queueDashboardPptExport(id, item, {chooseScope = false} = {})" in dashboard_script
-    assert "const universeChoice = await chooseDashboardPptUniverse();" in dashboard_script
+    assert "const universeChoice = await chooseDashboardPptUniverse(item);" in dashboard_script
     assert "title: 'Choose PowerPoint Scope'" not in dashboard_script
     assert "const host = node('label', label, 'ds-source-filter')" in dashboard_script
     assert "updateFilterControlState(facet, filterState(field));" in dashboard_script

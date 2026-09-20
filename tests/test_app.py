@@ -2738,7 +2738,10 @@ def test_dashboard_library_open_close_and_view_actions_include_labels() -> None:
     assert script.index("action('View Dashboard', 'View Dashboard'") < script.index("id === activeId ? 'Close Filters' : 'Open Filters'")
     assert 'width:fit-content!important;min-width:max-content!important' in styles
     assert '.ds-dashboard-action.ds-dashboard-close' in styles
-    assert 'grid-column:1 / -1' in styles
+    assert "primaryActionLabel(view, 'View', 'Dashboard');" in script
+    assert "primaryActionLabel(open, id === activeId ? 'Close' : 'Open', 'Filters');" in script
+    assert 'grid-column:span 2' in styles
+    assert '.ds-dashboard-action-label{display:contents}' in styles
 
 
 def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
@@ -2754,15 +2757,28 @@ def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
     assert 'id="ds-ppt-date-to"' in template
     assert template.index('id="ds-ppt-scope-title"') < template.index('id="ds-ppt-cdr-title"') < template.index('id="ds-ppt-dates-title"')
     assert template.index('id="ds-ppt-dates-title"') < template.index('id="ds-ppt-dataset-cancel"') < template.index('id="ds-ppt-dataset-confirm"')
-    assert "const chooseDashboardPptUniverse = ()" in script
+    assert "const chooseDashboardPptUniverse = dashboard" in script
     assert ".slice(0, scope === 'multivendor' ? 1 : 2)" in script
-    assert 'const universeChoice = await chooseDashboardPptUniverse();' in script
+    assert "const savedDateFrom = String(dashboard?.date_from || 'Oldest');" in script
+    assert "const savedDateTo = String(dashboard?.date_to || 'Newest');" in script
+    assert 'const universeChoice = await chooseDashboardPptUniverse(item);' in script
     assert 'exportDefinition.scope = universeChoice.scope;' in script
     assert 'exportDefinition.datasets = universeChoice.datasets;' in script
     assert 'exportDefinition.date_from = universeChoice.date_from;' in script
     assert 'exportDefinition.date_to = universeChoice.date_to;' in script
     assert "title: 'Choose PowerPoint Scope'" not in script
     assert 'delete exportDefinition.datasets;' not in script
+
+
+def test_dashboard_filters_panel_defaults_closed_and_persists_for_the_session() -> None:
+    root = Path(__file__).parents[1] / 'src' / 'web_interface'
+    template = (root / 'templates' / 'e2e_dashboards.html').read_text(encoding='utf-8')
+    app_script = (root / 'static' / 'js' / 'app.js').read_text(encoding='utf-8')
+
+    panel = template.split('id="ds-filter-panel"', 1)[1].split('>', 1)[0]
+    assert ' open' not in panel
+    assert 'data-panel-state-storage="session"' in panel
+    assert "panel.dataset.panelStateStorage === 'session' ? window.sessionStorage : window.localStorage" in app_script
 
 
 def test_dashboard_open_hydrates_saved_state_before_preparation_catalogues() -> None:

@@ -3873,14 +3873,15 @@ function setupPersistentControls() {
 function setupPersistentPanelState() {
   document.querySelectorAll('details[data-panel-state-key]').forEach((panel) => {
     const stateKey = `dashboard-analytic:panel:${panel.dataset.panelStateKey}`;
-    const storedValue = window.localStorage.getItem(stateKey);
+    const storage = panel.dataset.panelStateStorage === 'session' ? window.sessionStorage : window.localStorage;
+    const storedValue = storage.getItem(stateKey);
     if (storedValue !== null) {
       panel.open = storedValue === 'open';
     }
 
     panel.addEventListener('toggle', () => {
       try {
-        window.localStorage.setItem(stateKey, panel.open ? 'open' : 'closed');
+        storage.setItem(stateKey, panel.open ? 'open' : 'closed');
       } catch (_error) {
         // Ignore storage failures.
       }

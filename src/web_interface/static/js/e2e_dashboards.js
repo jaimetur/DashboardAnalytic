@@ -513,7 +513,7 @@
     if (needsPreparation) await prepare();
     if (prepared?.slides.length) renderSlide();
   };
-  const chooseDashboardPptUniverse = () => new Promise(resolve => {
+  const chooseDashboardPptUniverse = dashboard => new Promise(resolve => {
     const scopeControl = $('ds-ppt-dataset-scope');
     scopeControl.value = 'single';
     const choices = $('ds-ppt-dataset-choices'); choices.replaceChildren();
@@ -521,7 +521,11 @@
     const dateFrom = $('ds-ppt-date-from'), dateTo = $('ds-ppt-date-to');
     const automaticFrom = $('ds-ppt-date-from-auto'), automaticTo = $('ds-ppt-date-to-auto');
     const dateStatus = $('ds-ppt-date-status');
-    dateFrom.value = ''; dateTo.value = ''; automaticFrom.checked = true; automaticTo.checked = true;
+    const savedDateFrom = String(dashboard?.date_from || 'Oldest');
+    const savedDateTo = String(dashboard?.date_to || 'Newest');
+    automaticFrom.checked = savedDateFrom === 'Oldest'; automaticTo.checked = savedDateTo === 'Newest';
+    dateFrom.value = /^\d{4}-\d{2}-\d{2}$/.test(savedDateFrom) ? savedDateFrom : '';
+    dateTo.value = /^\d{4}-\d{2}-\d{2}$/.test(savedDateTo) ? savedDateTo : '';
     const updateConfirmState = () => {
       let dateError = '';
       if (!automaticFrom.checked && !dateFrom.value) dateError = 'Choose a start date or use the oldest available date.';
@@ -588,7 +592,7 @@
     let preparationToken = null;
     let filterDecision = 'unchanged';
     if (chooseScope) {
-      const universeChoice = await chooseDashboardPptUniverse();
+      const universeChoice = await chooseDashboardPptUniverse(item);
       if (!universeChoice) return;
       exportDefinition = JSON.parse(JSON.stringify(item));
       exportDefinition.scope = universeChoice.scope;
@@ -686,6 +690,10 @@
       const action = (label, glyph, handler, tone = '') => {
         const button = node('button', glyph, `icon-action ds-dashboard-action ${tone}`); button.type = 'button'; button.title = label; button.setAttribute('aria-label', label); button.onclick = safe(handler); actions.append(button); return button;
       };
+      const primaryActionLabel = (button, firstLine, secondLine) => {
+        const label = node('span', undefined, 'ds-dashboard-action-label');
+        label.append(node('span', firstLine), node('span', secondLine)); button.replaceChildren(label);
+      };
       const view = action('View Dashboard', 'View Dashboard', async () => {
         if (id !== activeId) {
           if (!await confirmDiscard()) return;
@@ -697,6 +705,7 @@
         }
       }, 'ds-dashboard-view');
       view.classList.remove('icon-action');
+      primaryActionLabel(view, 'View', 'Dashboard');
       view.dataset.dashboardViewId = id;
       view.disabled = dashboardIsPreparing(id) || (id === activeId && $('ds-view').disabled);
       const open = action(id === activeId ? 'Close Filters' : 'Open Filters', id === activeId ? 'Close Filters' : 'Open Filters', async () => {
@@ -704,6 +713,7 @@
         else if (await confirmDiscard()) await openDashboard(id);
       }, id === activeId ? 'ds-dashboard-close' : 'ds-dashboard-open');
       open.classList.remove('icon-action');
+      primaryActionLabel(open, id === activeId ? 'Close' : 'Open', 'Filters');
       action('Duplicate Dashboard', '⧉', async () => { if (await confirmDiscard()) await duplicateDashboard(id); });
       action('Export Dashboard', '', () => exportDashboard(id, item), 'ds-dashboard-export');
       const ppt = action('Generate PPT Dashboard', '', () => queueDashboardPptExport(id, item, {chooseScope: true}), 'ds-dashboard-ppt');
