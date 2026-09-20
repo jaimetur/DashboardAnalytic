@@ -224,6 +224,8 @@
 }
 .ds-ppt-filter-tooltip[hidden] { display: none; }
 .ds-multivendor-dialog{box-sizing:border-box;width:min(58rem,94vw);max-height:88vh;overflow:auto;padding:1.2rem 1.35rem}.ds-multivendor-dialog .section-head{margin:0 0 .65rem}.ds-ppt-universe-section{margin-top:.85rem;padding:.85rem;border:1px solid #ded3ed;border-radius:.8rem;background:#fcfaff}.ds-ppt-universe-section>h3{margin:0 0 .65rem;color:#4c3277;font-size:.95rem}.ds-ppt-export-scope{width:min(24rem,100%);margin:0}.ds-multivendor-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.85rem;margin-top:.7rem}.ds-multivendor-group{min-width:0;padding:.8rem;border:1px solid #d6c8ea;border-radius:.75rem;background:#faf8fd}.ds-multivendor-group h3{margin:0 0 .55rem;color:#4c3277;font-size:.88rem}.ds-multivendor-options{display:grid;gap:.38rem;max-height:15rem;overflow:auto}.ds-multivendor-option{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:.45rem;padding:.35rem;border-radius:.4rem;color:#49395d;font-size:.78rem}.ds-multivendor-option:has(input:checked){background:#eee6f8}.ds-multivendor-option input{margin-top:.15rem}.ds-multivendor-option span{overflow-wrap:anywhere}.ds-ppt-date-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.85rem}.ds-ppt-date-choice{display:grid;gap:.5rem}.ds-ppt-date-choice>label:first-child{display:grid;gap:.35rem;color:#55436d;font-size:.82rem;font-weight:800}.ds-ppt-automatic-date{display:flex;align-items:center;gap:.45rem;color:#625474;font-size:.76rem;font-weight:700}.ds-ppt-automatic-date input{margin:0;accent-color:var(--ds-color)}.ds-ppt-date-status{min-height:1.1em;margin:.45rem 0 0;color:#a33850}.ds-multivendor-actions{display:flex;justify-content:flex-end;gap:.65rem;flex-wrap:wrap;margin-top:1rem}.e2e-dashboards #ds-ppt-dataset-cancel{background:#6d7780;border-color:#59636b}.e2e-dashboards #ds-ppt-dataset-cancel:hover{background:#59636b;border-color:#485159}.e2e-dashboards #ds-ppt-dataset-confirm{background:#6d46a8;border-color:#5f3b91}.e2e-dashboards #ds-ppt-dataset-confirm:hover{background:#56358b;border-color:#492d77}@media(max-width:760px){.ds-multivendor-choices,.ds-ppt-date-choices{grid-template-columns:1fr}}
+.ds-multivendor-dialog{display:grid;grid-template-rows:auto minmax(0,1fr) auto;overflow:hidden}.ds-ppt-universe-body{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-right:.2rem;-webkit-overflow-scrolling:touch}.ds-ppt-date-choice input[type="date"]{box-sizing:border-box;width:100%;min-width:0}.e2e-dashboards :is(.ds-multivendor-option,.ds-ppt-automatic-date) input[type="checkbox"]{box-sizing:border-box;width:1rem;min-width:1rem;height:1rem;min-height:1rem!important;padding:0}
+@media(max-width:640px){.ds-multivendor-dialog{width:calc(100vw - .75rem);max-height:calc(100dvh - .75rem);padding:.72rem}.ds-multivendor-dialog .section-head{margin-bottom:.25rem}.ds-multivendor-dialog .section-head h2{font-size:1.05rem;line-height:1.15}.ds-ppt-universe-section{margin-top:.5rem;padding:.55rem}.ds-ppt-universe-section>h3{margin-bottom:.42rem;font-size:.84rem}.ds-ppt-universe-section>.form-note{margin:.2rem 0;font-size:.68rem}.ds-multivendor-choices{grid-template-columns:1fr;gap:.45rem;margin-top:.45rem}.ds-multivendor-group{padding:.5rem}.ds-multivendor-group h3{margin-bottom:.3rem;font-size:.78rem}.ds-multivendor-options{gap:.2rem;max-height:6.25rem}.ds-multivendor-option{gap:.35rem;padding:.24rem;font-size:.7rem;line-height:1.2}.ds-ppt-date-choices{grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem}.ds-ppt-date-choice{gap:.3rem}.ds-ppt-date-choice>label:first-child{gap:.25rem;font-size:.72rem}.ds-ppt-date-choice input[type="date"]{min-height:2.45rem;padding:.35rem;font-size:16px}.ds-ppt-automatic-date{align-items:flex-start;gap:.3rem;font-size:.66rem;line-height:1.15}.ds-ppt-date-status{margin:.25rem 0 0;font-size:.66rem}.ds-multivendor-actions{margin-top:.55rem;padding-top:.55rem;border-top:1px solid #ded3ed;background:#fff}.e2e-dashboards .ds-multivendor-actions button{min-height:2.35rem;padding:.42rem .68rem;font-size:.72rem}}
 
 .ds-scope-control.ds-filter-applied-unsaved select,
 .ds-date-picker.ds-date-picker-applied-unsaved .ds-date-picker-control>input,
@@ -527,8 +529,9 @@
     height:2rem;
     min-height:2rem;
   }
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:nth-child(1),
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:nth-child(2) {
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-view,
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-open,
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action.ds-dashboard-close {
     grid-column:span 2;
     display:grid;
     grid-template-columns:auto auto;
@@ -538,23 +541,25 @@
     column-gap:.32rem;
     width:100%!important;
     min-width:0!important;
-    height:3.15rem;
-    min-height:3.15rem;
+    height:3.35rem!important;
+    min-height:3.35rem!important;
     padding:.32rem .4rem!important;
+    border-radius:.85rem!important;
+    overflow:hidden;
+    font-size:.72rem!important;
     line-height:1.05;
   }
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:nth-child(1)::after,
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:nth-child(2)::after {
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close)::after {
     grid-column:1;
     grid-row:1;
     order:initial;
     width:1.25rem;
     height:1.25rem;
   }
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:nth-child(-n+2) .ds-dashboard-action-label{display:contents}
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:nth-child(-n+2) .ds-dashboard-action-label>span:first-child{grid-column:2;grid-row:1}
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:nth-child(-n+2) .ds-dashboard-action-label>span:last-child{grid-column:1 / -1;grid-row:2}
-  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:nth-child(-n+2) .ds-dashboard-action-label>span+span::before{content:none}
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close) .ds-dashboard-action-label{display:contents}
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close) .ds-dashboard-action-label>span:first-child{grid-column:2;grid-row:1}
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close) .ds-dashboard-action-label>span:last-child{grid-column:1 / -1;grid-row:2}
+  .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:is(.ds-dashboard-view,.ds-dashboard-open,.ds-dashboard-close) .ds-dashboard-action-label>span+span::before{content:none}
   .report-jobs-table.ds-ppt-jobs-table { width: 100%; min-width: 0; }
   .ds-ppt-jobs-table tbody tr { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .ds-ppt-jobs-table tbody td { width: auto !important; min-width: 0 !important; max-width: none !important; }

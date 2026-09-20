@@ -2742,12 +2742,15 @@ def test_dashboard_library_open_close_and_view_actions_include_labels() -> None:
     assert "primaryActionLabel(open, id === activeId ? 'Close' : 'Open', 'Filters');" in script
     assert 'grid-column:span 2' in styles
     assert '.ds-dashboard-action-label{display:contents}' in styles
+    assert 'height:3.35rem!important' in styles
+    assert 'border-radius:.85rem!important' in styles
 
 
 def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
     root = Path(__file__).parents[1] / 'src' / 'web_interface'
     template = (root / 'templates' / 'e2e_dashboards.html').read_text(encoding='utf-8')
     script = (root / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
+    styles = (root / 'static' / 'css' / 'e2e_dashboards.css').read_text(encoding='utf-8')
 
     assert 'id="ds-ppt-dataset-overlay"' in template
     assert 'id="ds-ppt-dataset-choices"' in template
@@ -2768,6 +2771,11 @@ def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
     assert 'exportDefinition.date_to = universeChoice.date_to;' in script
     assert "title: 'Choose PowerPoint Scope'" not in script
     assert 'delete exportDefinition.datasets;' not in script
+    assert 'grid-template-rows:auto minmax(0,1fr) auto' in styles
+    assert '.ds-ppt-universe-body{min-height:0;overflow-y:auto' in styles
+    assert 'max-height:calc(100dvh - .75rem)' in styles
+    assert '.ds-ppt-date-choice input[type="date"]{box-sizing:border-box;width:100%;min-width:0}' in styles
+    assert 'input[type="checkbox"]{box-sizing:border-box;width:1rem' in styles
 
 
 def test_dashboard_filters_panel_defaults_closed_and_persists_for_the_session() -> None:
