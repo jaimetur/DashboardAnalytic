@@ -88,6 +88,19 @@ def test_compact_portrait_dashboard_fills_the_available_viewport():
     assert 'grid-template-columns:repeat(3,minmax(0,1fr));' in stylesheet
 
 
+def test_dashboard_end_navigation_controls_use_line_svgs():
+    template = (Path(__file__).parents[1] / 'src/web_interface/templates/e2e_dashboards.html').read_text(encoding='utf-8')
+
+    assert 'id="ds-first" class="ds-slide-nav-button" title="First slide" aria-label="First slide"><svg class="ds-slide-arrow-icon"' in template
+    assert 'id="ds-last" class="ds-slide-nav-button" title="Last slide" aria-label="Last slide"><svg class="ds-slide-arrow-icon"' in template
+    assert 'id="ds-chart-expanded-first" title="First chart" aria-label="First chart"><svg class="ds-chart-expanded-arrow-icon"' in template
+    assert 'id="ds-chart-expanded-last" title="Last chart" aria-label="Last chart"><svg class="ds-chart-expanded-arrow-icon"' in template
+    assert 'M5 5v14M18 6l-6 6 6 6M12 6l-6 6 6 6' in template
+    assert 'M19 5v14M6 6l6 6-6 6M12 6l6 6-6 6' in template
+    assert '⏮' not in template
+    assert '⏭' not in template
+
+
 def setup_dashboard(client):
     client.post('/login', data={'username': 'super', 'password': 'super123'})
     response = client.post('/datasets-analysis/upload', data={'dataset_kinds': 'data'}, files={
@@ -366,6 +379,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert page.text.index('id="ds-presentation"') < page.text.index('id="ds-viewer-refresh"') < page.text.index('id="ds-viewer-export-ppt"')
     assert 'id="ds-prev" class="ds-slide-nav-button" title="Previous slide" aria-label="Previous slide"><svg class="ds-slide-arrow-icon"' in page.text
     assert 'id="ds-next" class="ds-slide-nav-button" title="Next slide" aria-label="Next slide"><svg class="ds-slide-arrow-icon"' in page.text
+    assert 'id="ds-first" class="ds-slide-nav-button" title="First slide" aria-label="First slide"><svg class="ds-slide-arrow-icon"' in page.text
+    assert 'id="ds-last" class="ds-slide-nav-button" title="Last slide" aria-label="Last slide"><svg class="ds-slide-arrow-icon"' in page.text
     assert 'id="ds-chart-expanded-overlay"' in page.text
     assert 'class="ds-chart-expanded-meta" id="ds-chart-expanded-meta"' in page.text
     assert 'id="ds-chart-expanded-close" class="report-chart-viewer-close" title="Close"' in page.text
@@ -378,10 +393,12 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-chart-expanded-last"' in page.text
     assert 'id="ds-chart-expanded-pan-left"' in page.text
     assert 'id="ds-chart-expanded-pan-right"' in page.text
-    assert 'id="ds-chart-expanded-first" title="First chart" aria-label="First chart">⏮</button>' in page.text
+    assert 'id="ds-chart-expanded-first" title="First chart" aria-label="First chart"><svg class="ds-chart-expanded-arrow-icon"' in page.text
     assert 'id="ds-chart-expanded-prev" title="Previous chart" aria-label="Previous chart"><svg class="ds-chart-expanded-arrow-icon"' in page.text
     assert 'id="ds-chart-expanded-next" title="Next chart" aria-label="Next chart"><svg class="ds-chart-expanded-arrow-icon"' in page.text
-    assert 'id="ds-chart-expanded-last" title="Last chart" aria-label="Last chart">⏭</button>' in page.text
+    assert 'id="ds-chart-expanded-last" title="Last chart" aria-label="Last chart"><svg class="ds-chart-expanded-arrow-icon"' in page.text
+    assert '⏮' not in page.text
+    assert '⏭' not in page.text
     assert 'id="ds-chart-expanded-canvas-shell"' in page.text
     assert 'id="ds-chart-expanded-position"' in page.text
     assert 'id="ds-data-table"' in page.text
