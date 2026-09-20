@@ -513,43 +513,52 @@
     if (needsPreparation) await prepare();
     if (prepared?.slides.length) renderSlide();
   };
-  const chooseDashboardPptDatasets = (scope, dashboardName) => new Promise(resolve => {
-    const defaultDatasets = latestDatasetsForScope(scope);
-    const scopeLabel = scope === 'multivendor' ? 'Multivendor Comparison' : 'Operator Comparison';
-    $('ds-ppt-dataset-scope').textContent = scopeLabel;
-    $('ds-ppt-dataset-title').textContent = `Select CDRs for “${dashboardName}”`;
-    $('ds-ppt-dataset-copy').textContent = scope === 'multivendor'
-      ? 'The newest CDR of each type is selected by default. Choose the CDRs to include in this vendor comparison.'
-      : 'The two newest CDRs of each type are selected by default. Choose the CDRs to include in this operator comparison.';
+  const chooseDashboardPptUniverse = dashboardName => new Promise(resolve => {
+    const scopeControl = $('ds-ppt-dataset-scope');
+    scopeControl.value = 'single';
+    $('ds-ppt-dataset-title').textContent = `Configure PowerPoint for “${dashboardName}”`;
     const choices = $('ds-ppt-dataset-choices'); choices.replaceChildren();
-    for (const kind of ['data', 'voice', 'speech']) {
-      const group = node('section', undefined, 'ds-multivendor-group');
-      group.append(node('h3', `CDR ${kind[0].toUpperCase()}${kind.slice(1)}`));
-      const options = node('div', undefined, 'ds-multivendor-options');
-      const selected = new Set(defaultDatasets[kind].map(Number));
-      const rows = [...(config.datasets[kind] || [])]
-        .sort((left, right) => datasetRecency(right) - datasetRecency(left) || Number(right.id) - Number(left.id));
-      if (!rows.length) options.append(node('p', 'No ready CDRs are available.', 'form-note'));
-      for (const row of rows) {
-        const label = node('label', undefined, 'ds-multivendor-option');
-        const input = document.createElement('input'); input.type = 'checkbox'; input.value = String(row.id); input.dataset.kind = kind; input.checked = selected.has(Number(row.id));
-        label.append(input, node('span', `${row.file_name} · ${row.row_count} rows`)); options.append(label);
+    const confirm = $('ds-ppt-dataset-confirm');
+    const updateConfirmState = () => { confirm.disabled = !choices.querySelector('input:checked'); };
+    const renderChoices = () => {
+      const scope = scopeControl.value;
+      const defaultDatasets = latestDatasetsForScope(scope);
+      $('ds-ppt-dataset-copy').textContent = scope === 'multivendor'
+        ? 'The newest CDR of each type is selected by default. Choose the CDRs to include in this vendor comparison.'
+        : 'The two newest CDRs of each type are selected by default. Choose the CDRs to include in this operator comparison.';
+      choices.replaceChildren();
+      for (const kind of ['data', 'voice', 'speech']) {
+        const group = node('section', undefined, 'ds-multivendor-group');
+        group.append(node('h3', `CDR ${kind[0].toUpperCase()}${kind.slice(1)}`));
+        const options = node('div', undefined, 'ds-multivendor-options');
+        const selected = new Set(defaultDatasets[kind].map(Number));
+        const rows = [...(config.datasets[kind] || [])]
+          .sort((left, right) => datasetRecency(right) - datasetRecency(left) || Number(right.id) - Number(left.id));
+        if (!rows.length) options.append(node('p', 'No ready CDRs are available.', 'form-note'));
+        for (const row of rows) {
+          const label = node('label', undefined, 'ds-multivendor-option');
+          const input = document.createElement('input'); input.type = 'checkbox'; input.value = String(row.id); input.dataset.kind = kind; input.checked = selected.has(Number(row.id));
+          label.append(input, node('span', `${row.file_name} · ${row.row_count} rows`)); options.append(label);
+        }
+        group.append(options); choices.append(group);
       }
-      group.append(options); choices.append(group);
-    }
+      updateConfirmState();
+    };
     let finished = false;
     const finish = value => {
       if (finished) return;
       finished = true; overlay('ds-ppt-dataset-overlay', false); resolve(value);
     };
     $('ds-ppt-dataset-cancel').onclick = () => finish(null);
-    const confirm = $('ds-ppt-dataset-confirm');
-    const updateConfirmState = () => { confirm.disabled = !choices.querySelector('input:checked'); };
     choices.onchange = updateConfirmState;
-    confirm.onclick = () => finish(Object.fromEntries(['data', 'voice', 'speech'].map(kind => [kind,
-      [...choices.querySelectorAll(`input[data-kind="${kind}"]:checked`)].map(input => Number(input.value)),
-    ])));
-    updateConfirmState();
+    scopeControl.onchange = renderChoices;
+    confirm.onclick = () => finish({
+      scope: scopeControl.value,
+      datasets: Object.fromEntries(['data', 'voice', 'speech'].map(kind => [kind,
+        [...choices.querySelectorAll(`input[data-kind="${kind}"]:checked`)].map(input => Number(input.value)),
+      ])),
+    });
+    renderChoices();
     $('ds-ppt-dataset-overlay').querySelector('[role=dialog]').onkeydown = event => { if (event.key === 'Escape') finish(null); };
     overlay('ds-ppt-dataset-overlay', true);
   });
@@ -558,25 +567,14 @@
     let preparationToken = null;
     let filterDecision = 'unchanged';
     if (chooseScope) {
-      const scopeChoice = await window.showConfirmDialog(
-        `Choose the comparison scope for the PowerPoint presentation of “${item.name}”.`,
-        {
-          title: 'Choose PowerPoint Scope',
-          confirmLabel: 'Operator Comparison',
-          secondaryLabel: 'Multivendor Comparison',
-          cancelLabel: 'Cancel',
-          wideActions: true,
-        },
-      );
-      if (!scopeChoice) return;
+      const universeChoice = await chooseDashboardPptUniverse(item.name);
+      if (!universeChoice) return;
       exportDefinition = JSON.parse(JSON.stringify(item));
-      exportDefinition.scope = scopeChoice === 'secondary' ? 'multivendor' : 'single';
-      const selectedDatasets = await chooseDashboardPptDatasets(exportDefinition.scope, item.name);
-      if (!selectedDatasets) return;
+      exportDefinition.scope = universeChoice.scope;
       // The queued server worker prepares this explicit temporary universe;
       // never make the library button wait for a cache lookup or every chart
       // model before the job exists.
-      exportDefinition.datasets = selectedDatasets;
+      exportDefinition.datasets = universeChoice.datasets;
       delete exportDefinition.date_from;
       delete exportDefinition.date_to;
     } else {

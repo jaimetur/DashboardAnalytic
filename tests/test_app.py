@@ -2748,10 +2748,13 @@ def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
 
     assert 'id="ds-ppt-dataset-overlay"' in template
     assert 'id="ds-ppt-dataset-choices"' in template
-    assert "const chooseDashboardPptDatasets = (scope, dashboardName)" in script
+    assert 'id="ds-ppt-dataset-scope"' in template
+    assert "const chooseDashboardPptUniverse = dashboardName" in script
     assert ".slice(0, scope === 'multivendor' ? 1 : 2)" in script
-    assert 'const selectedDatasets = await chooseDashboardPptDatasets(exportDefinition.scope, item.name);' in script
-    assert 'exportDefinition.datasets = selectedDatasets;' in script
+    assert 'const universeChoice = await chooseDashboardPptUniverse(item.name);' in script
+    assert 'exportDefinition.scope = universeChoice.scope;' in script
+    assert 'exportDefinition.datasets = universeChoice.datasets;' in script
+    assert "title: 'Choose PowerPoint Scope'" not in script
     assert 'delete exportDefinition.datasets;' not in script
 
 
