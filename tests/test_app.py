@@ -2749,11 +2749,18 @@ def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
     assert 'id="ds-ppt-dataset-overlay"' in template
     assert 'id="ds-ppt-dataset-choices"' in template
     assert 'id="ds-ppt-dataset-scope"' in template
-    assert "const chooseDashboardPptUniverse = dashboardName" in script
+    assert '>Select Dashboard Datasets Universe<' in template
+    assert 'id="ds-ppt-date-from"' in template
+    assert 'id="ds-ppt-date-to"' in template
+    assert template.index('id="ds-ppt-scope-title"') < template.index('id="ds-ppt-cdr-title"') < template.index('id="ds-ppt-dates-title"')
+    assert template.index('id="ds-ppt-dates-title"') < template.index('id="ds-ppt-dataset-cancel"') < template.index('id="ds-ppt-dataset-confirm"')
+    assert "const chooseDashboardPptUniverse = ()" in script
     assert ".slice(0, scope === 'multivendor' ? 1 : 2)" in script
-    assert 'const universeChoice = await chooseDashboardPptUniverse(item.name);' in script
+    assert 'const universeChoice = await chooseDashboardPptUniverse();' in script
     assert 'exportDefinition.scope = universeChoice.scope;' in script
     assert 'exportDefinition.datasets = universeChoice.datasets;' in script
+    assert 'exportDefinition.date_from = universeChoice.date_from;' in script
+    assert 'exportDefinition.date_to = universeChoice.date_to;' in script
     assert "title: 'Choose PowerPoint Scope'" not in script
     assert 'delete exportDefinition.datasets;' not in script
 

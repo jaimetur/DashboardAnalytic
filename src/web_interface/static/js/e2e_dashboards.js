@@ -513,13 +513,29 @@
     if (needsPreparation) await prepare();
     if (prepared?.slides.length) renderSlide();
   };
-  const chooseDashboardPptUniverse = dashboardName => new Promise(resolve => {
+  const chooseDashboardPptUniverse = () => new Promise(resolve => {
     const scopeControl = $('ds-ppt-dataset-scope');
     scopeControl.value = 'single';
-    $('ds-ppt-dataset-title').textContent = `Configure PowerPoint for “${dashboardName}”`;
     const choices = $('ds-ppt-dataset-choices'); choices.replaceChildren();
     const confirm = $('ds-ppt-dataset-confirm');
-    const updateConfirmState = () => { confirm.disabled = !choices.querySelector('input:checked'); };
+    const dateFrom = $('ds-ppt-date-from'), dateTo = $('ds-ppt-date-to');
+    const automaticFrom = $('ds-ppt-date-from-auto'), automaticTo = $('ds-ppt-date-to-auto');
+    const dateStatus = $('ds-ppt-date-status');
+    dateFrom.value = ''; dateTo.value = ''; automaticFrom.checked = true; automaticTo.checked = true;
+    const updateConfirmState = () => {
+      let dateError = '';
+      if (!automaticFrom.checked && !dateFrom.value) dateError = 'Choose a start date or use the oldest available date.';
+      else if (!automaticTo.checked && !dateTo.value) dateError = 'Choose an end date or use the newest available date.';
+      else if (!automaticFrom.checked && !automaticTo.checked && dateFrom.value > dateTo.value) dateError = 'Date from must not be later than Date to.';
+      dateStatus.textContent = dateError;
+      confirm.disabled = !choices.querySelector('input:checked') || Boolean(dateError);
+    };
+    const syncDateControls = () => {
+      dateFrom.disabled = automaticFrom.checked; dateTo.disabled = automaticTo.checked;
+      dateFrom.max = automaticTo.checked ? '' : dateTo.value;
+      dateTo.min = automaticFrom.checked ? '' : dateFrom.value;
+      updateConfirmState();
+    };
     const renderChoices = () => {
       const scope = scopeControl.value;
       const defaultDatasets = latestDatasetsForScope(scope);
@@ -552,13 +568,18 @@
     $('ds-ppt-dataset-cancel').onclick = () => finish(null);
     choices.onchange = updateConfirmState;
     scopeControl.onchange = renderChoices;
+    automaticFrom.onchange = syncDateControls; automaticTo.onchange = syncDateControls;
+    dateFrom.oninput = syncDateControls; dateTo.oninput = syncDateControls;
     confirm.onclick = () => finish({
       scope: scopeControl.value,
       datasets: Object.fromEntries(['data', 'voice', 'speech'].map(kind => [kind,
         [...choices.querySelectorAll(`input[data-kind="${kind}"]:checked`)].map(input => Number(input.value)),
       ])),
+      date_from: automaticFrom.checked ? 'Oldest' : dateFrom.value,
+      date_to: automaticTo.checked ? 'Newest' : dateTo.value,
     });
     renderChoices();
+    syncDateControls();
     $('ds-ppt-dataset-overlay').querySelector('[role=dialog]').onkeydown = event => { if (event.key === 'Escape') finish(null); };
     overlay('ds-ppt-dataset-overlay', true);
   });
@@ -567,7 +588,7 @@
     let preparationToken = null;
     let filterDecision = 'unchanged';
     if (chooseScope) {
-      const universeChoice = await chooseDashboardPptUniverse(item.name);
+      const universeChoice = await chooseDashboardPptUniverse();
       if (!universeChoice) return;
       exportDefinition = JSON.parse(JSON.stringify(item));
       exportDefinition.scope = universeChoice.scope;
@@ -575,8 +596,8 @@
       // never make the library button wait for a cache lookup or every chart
       // model before the job exists.
       exportDefinition.datasets = universeChoice.datasets;
-      delete exportDefinition.date_from;
-      delete exportDefinition.date_to;
+      exportDefinition.date_from = universeChoice.date_from;
+      exportDefinition.date_to = universeChoice.date_to;
     } else {
       filterDecision = id === activeId ? await resolveUnappliedFilterChanges() : 'unchanged';
       if (!filterDecision) return;
