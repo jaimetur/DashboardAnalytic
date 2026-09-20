@@ -28,6 +28,17 @@ def test_dashboard_uses_combined_tables_without_projection_or_warmup_queue():
     assert 'def reporting_source(snapshot, kind, task_repository):' in source
 
 
+def test_dashboard_filter_panel_state_is_scoped_to_the_authenticated_session():
+    first_user = core.SessionUser(username='super', role='super-admin')
+    second_user = core.SessionUser(username='super', role='super-admin')
+    assert first_user.session_marker
+    assert first_user.session_marker != second_user.session_marker
+
+    app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+    assert "const sessionMarker = document.body.dataset.authenticatedSession || 'anonymous';" in app_script
+    assert "${sessionScoped ? `:${sessionMarker}` : ''}" in app_script
+
+
 def test_compact_landscape_dashboard_comments_are_docked_to_the_bottom():
     stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
 
@@ -297,6 +308,7 @@ def test_dashboards_lifecycle_and_layout(client):
     payload = setup_dashboard(client)
     page = client.get('/e2e-dashboards')
     assert page.status_code == 200
+    assert re.search(r'data-authenticated-session="[^"]+"', page.text)
     assert 'id="page-panel-navigator"' in page.text
     assert 'data-page-panel-navigator-list' in page.text
     assert page.text.index('>Datasets Analysis<') < page.text.index('>E2E Dashboards<') < page.text.index('>E2E Reporting<')

@@ -3,13 +3,14 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(slots=True)
 class SessionUser:
     username: str
     role: str
+    session_marker: str = field(default_factory=lambda: secrets.token_urlsafe(12))
 
 
 def hash_password(password: str) -> str:

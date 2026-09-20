@@ -3872,8 +3872,10 @@ function setupPersistentControls() {
 
 function setupPersistentPanelState() {
   document.querySelectorAll('details[data-panel-state-key]').forEach((panel) => {
-    const stateKey = `dashboard-analytic:panel:${panel.dataset.panelStateKey}`;
-    const storage = panel.dataset.panelStateStorage === 'session' ? window.sessionStorage : window.localStorage;
+    const sessionScoped = panel.dataset.panelStateStorage === 'session';
+    const sessionMarker = document.body.dataset.authenticatedSession || 'anonymous';
+    const stateKey = `dashboard-analytic:panel:${panel.dataset.panelStateKey}${sessionScoped ? `:${sessionMarker}` : ''}`;
+    const storage = sessionScoped ? window.sessionStorage : window.localStorage;
     const storedValue = storage.getItem(stateKey);
     if (storedValue !== null) {
       panel.open = storedValue === 'open';

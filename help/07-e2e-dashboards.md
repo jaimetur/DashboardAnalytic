@@ -24,7 +24,7 @@ Dashboard uses the same Report Template schema and renderer as Reporting. This g
 
 **Export Dashboard** creates the versioned ZIP accepted by Admin Import. **Import Dashboard** also accepts the legacy standalone JSON definition. Imported definitions need a compatible template; saved universes retain their dataset identifiers, while legacy definitions without one start from the newest ready CDRs in the destination workspace.
 
-The last open Dashboard and page scroll position are remembered in the browser session. Real unsaved filter or Dataset Universe changes require Save, Discard or Cancel before navigation. Logging out clears the temporary open-Dashboard, scroll, preview and universe state. Management-only name, NR Mode and Template inputs do not create false unsaved-filter warnings.
+The last open Dashboard and page scroll position are remembered in the browser session. The main Dashboard Filters panel starts collapsed for every new authenticated session; opening or closing it is remembered across reloads and module navigation only while that same authenticated session remains active. Real unsaved filter or Dataset Universe changes require Save, Discard or Cancel before navigation. Logging out clears the temporary open-Dashboard, scroll, preview and universe state. Management-only name, NR Mode and Template inputs do not create false unsaved-filter warnings.
 
 ## Dashboard Datasets & Filters
 
