@@ -1177,6 +1177,9 @@ def test_full_environment_selector_offers_generated_outputs_by_default(client) -
     assert 'Also duplicate generated dashboards, reports and chart sets.' in workspace_page.text
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
     assert "String(group.workspace_id) !== '__server__' && (Boolean(group.is_active) || group.dock === 'right')" in app_script
+    assert "exportTarget?.addEventListener('change'" not in app_script
+    assert 'selectedFullEnvironment' not in app_script
+    assert app_script.count('const selection = await selectFullEnvironmentWorkspaces();') == 2
 
 
 def test_voice_and_speech_import_without_measured_kpis_remain_ready(client) -> None:

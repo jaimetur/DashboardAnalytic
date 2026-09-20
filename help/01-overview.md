@@ -246,7 +246,7 @@ The complete authoring specification, examples and supported chart catalogue are
 ### Import / Export / Transfer
 
 - Export the active workspace's Dashboards, Report Templates, Operator Mappings, Auto-calculated Fields, accessible workspaces or a Full Environment.
-- Select which workspaces belong to a Full Environment package.
+- After choosing Full Environment, press Export or Transfer to select which workspaces belong to that operation's package.
 - Inspect an import before overwriting configuration or workspaces.
 - Dashboard, template, Operator Mapping and Auto-calculated Field packages select the source workspace automatically when a workspace with the same name exists; additional accessible workspaces can also be selected.
 - Transfer authorised content directly to another server.

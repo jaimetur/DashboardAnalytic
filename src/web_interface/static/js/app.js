@@ -5364,9 +5364,7 @@ function selectTransferDestination() {
 }
 
 document.querySelectorAll('[data-export-package-form]').forEach((form) => {
-  const exportTarget = form.querySelector('select[name="export_target"]');
   const transferButton = form.querySelector('[data-server-transfer]');
-  let selectedFullEnvironment = null;
   const confirmGeneratedOutputs = async (formData, operation) => {
     const target = String(formData.get('export_target') || '');
     if (target === 'full-environment') return true;
@@ -5387,26 +5385,12 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
     formData.set('include_generated_outputs', String(result.optionChecked));
     return true;
   };
-  exportTarget?.addEventListener('change', async () => {
-    if (!(exportTarget instanceof HTMLSelectElement) || exportTarget.value !== 'full-environment') {
-      selectedFullEnvironment = null;
-      return;
-    }
-    const selection = await selectFullEnvironmentWorkspaces();
-    if (selection === null) {
-      exportTarget.value = 'config';
-      selectedFullEnvironment = null;
-      return;
-    }
-    selectedFullEnvironment = selection;
-  });
   transferButton?.addEventListener('click', async () => {
     if (!(form instanceof HTMLFormElement)) return;
     const formData = new FormData(form);
     if (formData.get('export_target') === 'full-environment') {
-      const selection = selectedFullEnvironment || await selectFullEnvironmentWorkspaces();
+      const selection = await selectFullEnvironmentWorkspaces();
       if (selection === null) return;
-      selectedFullEnvironment = selection;
       selection.workspaceIds.forEach((workspaceId) => formData.append('workspace_ids', workspaceId));
       formData.set('include_generated_outputs', String(selection.includeGeneratedOutputs));
     }
@@ -5502,9 +5486,8 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
     if (!(form instanceof HTMLFormElement)) return;
     const formData = new FormData(form);
     if (formData.get('export_target') === 'full-environment') {
-      const selection = selectedFullEnvironment || await selectFullEnvironmentWorkspaces();
+      const selection = await selectFullEnvironmentWorkspaces();
       if (selection === null) return;
-      selectedFullEnvironment = selection;
       selection.workspaceIds.forEach((workspaceId) => formData.append('workspace_ids', workspaceId));
       formData.set('include_generated_outputs', String(selection.includeGeneratedOutputs));
     }

@@ -356,7 +356,7 @@ Historical aliases resolve to `VF`, `O2`, `3` and `EE` for display without chang
 
 Admins can export/transfer the active workspace's Dashboards, Report Templates, Operator Mappings and Auto-calculated Fields, plus complete workspaces they can access. Super-admins can also export App Config and a Full Environment. Dashboard, template, mapping and field packages preselect a destination workspace with the same name as their source, where available, and allow one or more accessible destinations to be selected.
 
-A Full Environment always contains App Config and the complete database/input content, Dashboard definitions, Report Templates, Operator Mappings and Auto-calculated Fields for every selected workspace. **Include generated Reports, Chart Sets and Dashboard PPT jobs** controls whether their `output/` trees are included. At least one workspace is required.
+A Full Environment always contains App Config and the complete database/input content, Dashboard definitions, Report Templates, Operator Mappings and Auto-calculated Fields for every selected workspace. Selecting Full Environment only chooses the package type; the workspace picker opens when **Export ZIP** or **Transfer to other server** is pressed. **Include generated Reports, Chart Sets and Dashboard PPT jobs** controls whether their `output/` trees are included. At least one workspace is required.
 
 Exports run as disk-backed jobs and show estimated progress. The ZIP download starts when package creation finishes.
 
