@@ -5894,6 +5894,11 @@ def test_reporting_chart_viewer_uses_hover_canvas_dataset_and_zoom_controls(clie
     assert "hideLoadingOverlay();" in reporting.text
     navigation = reporting.text.split('class="report-chart-viewer-navigation"', 1)[1].split('</div>', 1)[0]
     assert 'data-report-chart-zoom' not in navigation
+    assert navigation.count('class="report-chart-arrow-icon"') == 4
+    assert 'M5 5v14M18 6l-6 6 6 6M12 6l-6 6 6 6' in navigation
+    assert 'M19 5v14M6 6l6 6-6 6M12 6l6 6-6 6' in navigation
+    assert '⏮' not in navigation
+    assert '⏭' not in navigation
     assert "addEventListener('pointerenter', showReportChartViewerControls)" in reporting.text
     assert "addEventListener('pointerleave', hideReportChartViewerControls)" in reporting.text
     assert '}, 3000);' in reporting.text
