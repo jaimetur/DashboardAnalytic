@@ -222,7 +222,7 @@
   pointer-events: none;
 }
 .ds-ppt-filter-tooltip[hidden] { display: none; }
-.ds-multivendor-dialog{box-sizing:border-box;width:min(58rem,94vw);max-height:88vh;overflow:auto;padding:1.2rem 1.35rem}.ds-multivendor-dialog .section-head{margin:0 0 .65rem}.ds-multivendor-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.85rem;margin-top:1rem}.ds-multivendor-group{min-width:0;padding:.8rem;border:1px solid #d6c8ea;border-radius:.75rem;background:#faf8fd}.ds-multivendor-group h3{margin:0 0 .55rem;color:#4c3277;font-size:.88rem}.ds-multivendor-options{display:grid;gap:.38rem;max-height:15rem;overflow:auto}.ds-multivendor-option{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:.45rem;padding:.35rem;border-radius:.4rem;color:#49395d;font-size:.78rem}.ds-multivendor-option:has(input:checked){background:#eee6f8}.ds-multivendor-option input{margin-top:.15rem}.ds-multivendor-option span{overflow-wrap:anywhere}.ds-multivendor-actions{display:flex;justify-content:flex-end;gap:.65rem;flex-wrap:wrap;margin-top:1rem}.e2e-dashboards #ds-multivendor-cancel{background:#6d7780;border-color:#59636b}.e2e-dashboards #ds-multivendor-cancel:hover{background:#59636b;border-color:#485159}.e2e-dashboards #ds-multivendor-keep-current{background:#25745d;border-color:#1d604d}.e2e-dashboards #ds-multivendor-keep-current:hover{background:#1d604d;border-color:#174d3e}.e2e-dashboards #ds-multivendor-use-current,.e2e-dashboards #ds-multivendor-use-latest{background:#6d46a8;border-color:#5f3b91}.e2e-dashboards #ds-multivendor-use-current:hover,.e2e-dashboards #ds-multivendor-use-latest:hover{background:#56358b;border-color:#492d77}@media(max-width:760px){.ds-multivendor-choices{grid-template-columns:1fr}}
+.ds-multivendor-dialog{box-sizing:border-box;width:min(58rem,94vw);max-height:88vh;overflow:auto;padding:1.2rem 1.35rem}.ds-multivendor-dialog .section-head{margin:0 0 .65rem}.ds-multivendor-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.85rem;margin-top:1rem}.ds-multivendor-group{min-width:0;padding:.8rem;border:1px solid #d6c8ea;border-radius:.75rem;background:#faf8fd}.ds-multivendor-group h3{margin:0 0 .55rem;color:#4c3277;font-size:.88rem}.ds-multivendor-options{display:grid;gap:.38rem;max-height:15rem;overflow:auto}.ds-multivendor-option{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:.45rem;padding:.35rem;border-radius:.4rem;color:#49395d;font-size:.78rem}.ds-multivendor-option:has(input:checked){background:#eee6f8}.ds-multivendor-option input{margin-top:.15rem}.ds-multivendor-option span{overflow-wrap:anywhere}.ds-multivendor-actions{display:flex;justify-content:flex-end;gap:.65rem;flex-wrap:wrap;margin-top:1rem}.e2e-dashboards #ds-ppt-dataset-cancel{background:#6d7780;border-color:#59636b}.e2e-dashboards #ds-ppt-dataset-cancel:hover{background:#59636b;border-color:#485159}.e2e-dashboards #ds-ppt-dataset-confirm{background:#6d46a8;border-color:#5f3b91}.e2e-dashboards #ds-ppt-dataset-confirm:hover{background:#56358b;border-color:#492d77}@media(max-width:760px){.ds-multivendor-choices{grid-template-columns:1fr}}
 
 .ds-scope-control.ds-filter-applied-unsaved select,
 .ds-date-picker.ds-date-picker-applied-unsaved .ds-date-picker-control>input,
@@ -528,7 +528,7 @@
   }
   .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:nth-child(1),
   .e2e-dashboards .ds-dashboard-actions>.ds-dashboard-action:nth-child(2) {
-    grid-column:span 2;
+    grid-column:1 / -1;
     width:100%;
     min-width:0;
     height:2.65rem;

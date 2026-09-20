@@ -333,7 +333,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '>Import Dashboard<' in page.text
     assert 'Total Dashboards: 0' in page.text
     assert '>Dashboard Datasets & Filters<' in page.text
-    assert 'id="ds-active-dashboard-heading">Active Dashboard<' in page.text
+    assert 'id="ds-active-dashboard-heading">Dashboard Filters<' in page.text
+    assert 'id="ds-ppt-dataset-overlay"' in page.text
+    assert 'id="ds-ppt-dataset-choices"' in page.text
     assert '>Dataset Universe<' in page.text
     assert '>Select Dataset Universe<' in page.text
     assert '>Select Dataset Filters<' in page.text

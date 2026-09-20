@@ -2733,10 +2733,26 @@ def test_dashboard_library_open_close_and_view_actions_include_labels() -> None:
     script = (root / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
     styles = (root / 'css' / 'e2e_dashboards.css').read_text(encoding='utf-8')
 
-    assert "id === activeId ? 'Close' : 'Open'" in script
-    assert "action('View Dashboard', 'View'" in script
+    assert "action('View Dashboard', 'View Dashboard'" in script
+    assert "id === activeId ? 'Close Filters' : 'Open Filters'" in script
+    assert script.index("action('View Dashboard', 'View Dashboard'") < script.index("id === activeId ? 'Close Filters' : 'Open Filters'")
     assert 'width:fit-content!important;min-width:max-content!important' in styles
     assert '.ds-dashboard-action.ds-dashboard-close' in styles
+    assert 'grid-column:1 / -1' in styles
+
+
+def test_dashboard_library_ppt_export_selects_scope_cdrs_explicitly() -> None:
+    root = Path(__file__).parents[1] / 'src' / 'web_interface'
+    template = (root / 'templates' / 'e2e_dashboards.html').read_text(encoding='utf-8')
+    script = (root / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
+
+    assert 'id="ds-ppt-dataset-overlay"' in template
+    assert 'id="ds-ppt-dataset-choices"' in template
+    assert "const chooseDashboardPptDatasets = (scope, dashboardName)" in script
+    assert ".slice(0, scope === 'multivendor' ? 1 : 2)" in script
+    assert 'const selectedDatasets = await chooseDashboardPptDatasets(exportDefinition.scope, item.name);' in script
+    assert 'exportDefinition.datasets = selectedDatasets;' in script
+    assert 'delete exportDefinition.datasets;' not in script
 
 
 def test_dashboard_open_hydrates_saved_state_before_preparation_catalogues() -> None:
