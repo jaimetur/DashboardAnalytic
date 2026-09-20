@@ -1602,3 +1602,12 @@
   grid-column:1 / -1;
   justify-content:center;
 }
+
+/* Let the Dashboard stack own inter-panel spacing. The filter home must not
+   remain as an empty grid row while its movable panel is hidden or floating. */
+#ds-filter-home:not(:has(> #ds-filter-panel:not([hidden]))) {
+  display:none;
+}
+.e2e-dashboards :is(.ds-ppt-jobs-panel,.ds-ppt-charts-panel) {
+  margin-top:0;
+}

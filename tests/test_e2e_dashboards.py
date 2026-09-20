@@ -62,6 +62,14 @@ def test_compact_landscape_dashboard_comments_are_docked_to_the_bottom():
     assert 'max-height:min(70dvh,16rem);' in stylesheet
 
 
+def test_dashboard_job_panels_use_the_stack_spacing_without_an_empty_filter_row():
+    stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+
+    assert '#ds-filter-home:not(:has(> #ds-filter-panel:not([hidden]))) {' in stylesheet
+    assert '.e2e-dashboards :is(.ds-ppt-jobs-panel,.ds-ppt-charts-panel) {' in stylesheet
+    assert 'margin-top:0;' in stylesheet
+
+
 def test_compact_landscape_presentation_settings_are_vertically_scrollable():
     stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
 
