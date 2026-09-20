@@ -99,27 +99,37 @@ if /usr/sbin/lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
     exit 1
 fi
 
-python_bin="${project_root}/.venv/bin/python"
-if [[ ! -x "$python_bin" ]]; then
+project_venv_python="${project_root}/.venv/bin/python"
+managed_venv="${project_root}/.dashboard-analytic-venv"
+managed_venv_python="${managed_venv}/bin/python"
+python_bin=""
+
+if [[ -x "$project_venv_python" ]] && "$project_venv_python" -c 'import numpy, pandas' >/dev/null 2>&1; then
+    python_bin="$project_venv_python"
+elif [[ -x "$managed_venv_python" ]] && "$managed_venv_python" -c 'import numpy, pandas' >/dev/null 2>&1; then
+    python_bin="$managed_venv_python"
+fi
+
+if [[ -z "$python_bin" ]]; then
+    bootstrap_python=""
     for candidate in /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
         if [[ -x "$candidate" ]] && "$candidate" -c 'import sys; raise SystemExit(not (sys.version_info >= (3, 11)))' 2>/dev/null; then
-            python_bin="$candidate"
+            bootstrap_python="$candidate"
             break
         fi
     done
-fi
 
-if [[ ! -x "$python_bin" ]]; then
-    show_message "Dashboard Analytic" "Python 3.11 or later is required. Install it and open this application again."
-    exit 1
-fi
+    if [[ -z "$bootstrap_python" ]]; then
+        show_message "Dashboard Analytic" "Python 3.11 or later is required. Install it and open this application again."
+        exit 1
+    fi
 
-if [[ ! -x "${project_root}/.venv/bin/python" ]]; then
-    "$python_bin" -m venv "${project_root}/.venv" || {
-        show_message "Dashboard Analytic" "The virtual environment could not be created. Check the project folder permissions."
+    /bin/rm -rf "$managed_venv"
+    "$bootstrap_python" -m venv "$managed_venv" || {
+        show_message "Dashboard Analytic" "The native virtual environment could not be created. Check the project folder permissions."
         exit 1
     }
-    python_bin="${project_root}/.venv/bin/python"
+    python_bin="$managed_venv_python"
     "$python_bin" -m pip install --upgrade pip >>"$log_file" 2>&1
     "$python_bin" -m pip install -r "${project_root}/requirements.txt" >>"$log_file" 2>&1 || {
         show_message "Dashboard Analytic" "Dependencies could not be installed. Check ${log_file}."

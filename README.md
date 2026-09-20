@@ -125,7 +125,7 @@ Open `http://127.0.0.1:7279`.
 
 ### macOS launcher
 
-The project root includes `Dashboard Analytic.app`. It uses the bundled Dashboard Analytic logo as its macOS icon and a universal native launcher for Apple Silicon and Intel Macs. Double-click it to start the local server on port `7278`; it opens the application in the default browser and remains active in the Dock while the server runs. Quit it with `⌘Q` or **Quit** in the Dock to stop the server cleanly. On its first launch it creates `.venv` and installs the dependencies, so Python 3.11 or later must be available on the Mac.
+The project root includes `Dashboard Analytic.app`. It uses the bundled Dashboard Analytic logo as its macOS icon and a universal native launcher for Apple Silicon and Intel Macs. Double-click it to start the local server on port `7278`; it opens the application in the default browser and remains active in the Dock while the server runs. Quit it with `⌘Q` or **Quit** in the Dock to stop the server cleanly. It reuses a working project `.venv` when available; otherwise, including when that environment contains Intel-only packages, it creates the separate native `.dashboard-analytic-venv` environment and installs the dependencies. Python 3.11 or later must be available on the Mac.
 
 To keep it in macOS Applications, drag `Dashboard Analytic.app` from the project root to `/Applications`. When opened outside the project, it asks for the project folder once and remembers it in Application Support. Keep the project folder available: the launcher runs its source code and stores its PID and log in `.dashboard-analytic-runtime/`.
 
