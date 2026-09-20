@@ -107,7 +107,7 @@ After the visible slide finishes loading, the browser silently caches the remain
 
 ### Slides and navigation
 
-- Select any template slide or use the enlarged First, Previous, Next and Last controls, which match the individual chart viewer. Every action in the upper row combines text with its SVG icon at a consistent size: Generate PPT appears in orange immediately before Dashboard Filters, while the red Refresh Dashboard action closes the row. Presentation is the first button in the navigation row and a spaced vertical divider separates it from First.
+- Select any template slide or use the enlarged First, Previous, Next and Last controls, which match the individual chart viewer. Every action in the upper row combines text with its SVG icon at a consistent size: the orange Generate PPT action appears immediately before the red Refresh Dashboard action that closes the row. Presentation is the first button in the navigation row and a spaced vertical divider separates it from First.
 - Left/Right Arrow navigates outside editable controls.
 - Title and Transition slides use branded Dashboard Analytic typography.
 - Chart rows preserve template order and placeholder geometry.
@@ -142,7 +142,7 @@ Every column provides an Excel-style value filter across the complete chart data
 
 ## Generate PPT
 
-Generate PPT appears immediately before View Dashboard in the dataset/filter actions and immediately before Dashboard Filters in the viewer's upper action row. It uses the exact prepared CDRs, dates, scope and applied filters, even if they have not been saved as Dashboard defaults.
+Generate PPT appears immediately before View Dashboard in the dataset/filter actions and immediately before Refresh Dashboard in the viewer's upper action row. It uses the exact prepared CDRs, dates, scope and applied filters, even if they have not been saved as Dashboard defaults.
 
 The job renders the template into `Template_CDR_analysis.pptx`, preserving slides, layouts, chart placeholder proportions, titles, legends and saved comments. It writes the PPT plus chart PNG, tooltip and Canvas-model assets under `output/dashboards`. Folder and PPT names begin with `yyyymmdd_HHMMSS - Dashboard Name`.
 

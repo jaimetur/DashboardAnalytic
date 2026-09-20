@@ -385,8 +385,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'class="ds-viewer-icon-action ds-viewer-refresh-action"' in page.text
     assert 'class="ds-viewer-tool-actions" role="group" aria-label="Dashboard actions"' in page.text
     assert 'id="ds-viewer-close" class="report-chart-viewer-close" title="Close"' in page.text
-    assert page.text.index('id="ds-viewer-export-ppt"') < page.text.index('id="ds-floating-filters"')
-    assert page.text.index('id="ds-floating-filters"') < page.text.index('id="ds-viewer-refresh"')
+    assert page.text.index('id="ds-floating-filters"') < page.text.index('id="ds-viewer-export-ppt"')
+    assert page.text.index('id="ds-viewer-export-ppt"') < page.text.index('id="ds-viewer-refresh"')
     assert page.text.index('id="ds-viewer-refresh"') < page.text.index('id="ds-presentation"')
     assert 'id="ds-viewer-export-ppt" class="ds-viewer-top-action ds-viewer-top-ppt"' in page.text
     assert '>Generate PPT</button>' in page.text
