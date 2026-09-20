@@ -15,6 +15,7 @@
 .ds-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:18px}
 .ds-actions select{width:auto;max-width:320px}.ds-scope-control{display:grid;gap:.4rem;margin:4px 0 0;font-size:.9rem;font-weight:800;color:#55436d;white-space:nowrap}.ds-scope-control select{box-sizing:border-box;width:100%;max-width:none;height:2.55rem;min-height:2.55rem;padding:.35rem 1.9rem .35rem .68rem;font:inherit;font-size:.84rem;font-weight:750}.ds-scope-control.ds-filter-unsaved select{border-color:#cb8a18!important;background:#fff5d7!important;color:#765007!important;box-shadow:0 0 0 2px #e7bd6538}.e2e-dashboards .ds-view-dashboard-action,.e2e-dashboards .ds-generate-ppt-action,.e2e-dashboards .ds-view-filters-action{display:inline-flex;align-items:center;gap:.5rem;font-weight:800}.e2e-dashboards .ds-view-dashboard-action{background:linear-gradient(135deg,#137a61,#22ad83);border-color:#0d6a53;box-shadow:0 7px 16px rgba(18,130,98,.28)}.e2e-dashboards .ds-view-dashboard-action:hover:not(:disabled){background:linear-gradient(135deg,#0e694f,#168967);border-color:#095740}.e2e-dashboards .ds-generate-ppt-action{margin-left:auto;background:linear-gradient(135deg,#6d46a8,#9870d0);border-color:#5f3b91;box-shadow:0 7px 16px rgba(95,69,142,.22)}.e2e-dashboards .ds-generate-ppt-action:hover:not(:disabled){background:linear-gradient(135deg,#4f2d82,#7549b0);border-color:#45246f}.e2e-dashboards .ds-view-filters-action{background:#d7a921;border-color:#b58a2f;color:#fff;box-shadow:none}.e2e-dashboards .ds-view-filters-action:hover:not(:disabled){background:#bd8e13;border-color:#947022}.e2e-dashboards .ds-view-dashboard-action::before,.e2e-dashboards .ds-generate-ppt-action::before,.e2e-dashboards .ds-view-filters-action::before{content:'';width:1rem;height:1rem;flex:0 0 1rem;background:center/contain no-repeat}.e2e-dashboards .ds-view-dashboard-action::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z'/%3E%3Ccircle cx='12' cy='12' r='2.5'/%3E%3C/svg%3E")}.e2e-dashboards .ds-generate-ppt-action::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 25'%3E%3Crect x='2' y='2' width='26' height='18' rx='2.5' fill='none' stroke='white' stroke-width='2.2'/%3E%3Ctext x='15' y='14.5' fill='white' font-family='Arial,sans-serif' font-size='8.5' font-weight='900' text-anchor='middle'%3EPPT%3C/text%3E%3Cpath d='M15 20v3M10.5 23h9' fill='none' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")}.e2e-dashboards .ds-view-filters-action::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5h18l-7 8v5l-4 2v-7L3 5Z'/%3E%3C/svg%3E")}.ds-viewer-right-actions{display:flex;align-items:center;gap:10px;margin-left:auto}.e2e-dashboards .ds-viewer-icon-action{display:grid;place-items:center;width:2rem;min-width:2rem;height:2rem;min-height:2rem;padding:0!important;border-radius:999px!important;font-size:0!important}.e2e-dashboards .ds-viewer-icon-action::after{content:'';width:1rem;height:1rem;background:center/contain no-repeat}.e2e-dashboards .ds-viewer-refresh-action::after{content:'';width:1.05rem;height:1.05rem;background:center/contain no-repeat;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.64 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z'/%3E%3C/svg%3E")}.e2e-dashboards .ds-presentation-action::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M8 5v14l11-7z'/%3E%3C/svg%3E")}.e2e-dashboards .ds-presentation-action.is-running::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Crect x='7' y='7' width='10' height='10' rx='1'/%3E%3C/svg%3E")}
 .e2e-dashboards .ds-filter-close-action{background:#73737c;border-color:#73737c}.e2e-dashboards .ds-filter-close-action:hover{background:#5d5d65;border-color:#5d5d65}.e2e-dashboards #ds-filter-close-action[hidden]{display:none!important}
+.e2e-dashboards :is(#ds-generate-ppt,#ds-view)[hidden]{display:none!important}
 .e2e-dashboards :is(#ds-apply-filters,#ds-save,#ds-clear-filters,#ds-last-saved-filters,#ds-filter-close-action,#ds-add-filter,#ds-ppt-jobs-delete-all){display:inline-flex;align-items:center;justify-content:center;gap:.48rem}
 .e2e-dashboards :is(#ds-apply-filters,#ds-save,#ds-clear-filters,#ds-last-saved-filters,#ds-filter-close-action,#ds-add-filter,#ds-ppt-jobs-delete-all)::before{content:'';width:1.05rem;height:1.05rem;flex:0 0 1.05rem;background:center/contain no-repeat}
 .e2e-dashboards :is(.ds-view-dashboard-action,.ds-generate-ppt-action)::before{width:1.35rem;height:1.35rem;flex-basis:1.35rem}
@@ -1528,3 +1529,37 @@
 
 /* Keep the wide Dashboard column and retain the original Close glyph stroke. */
 .e2e-dashboards .ds-dashboard-close::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 21V4a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v17'/%3E%3Cpath d='M16 21H4'/%3E%3Cpath d='M10 12h10'/%3E%3Cpath d='m17 8 4 4-4 4'/%3E%3Ccircle cx='13' cy='12' r='.6' fill='white' stroke='none'/%3E%3C/svg%3E")}
+
+/* Viewer export and refresh belong to the upper Dashboard action row. */
+.e2e-dashboards #ds-viewer .ds-viewer-right-actions :is(.ds-viewer-top-ppt,.ds-viewer-top-refresh) {
+  flex:0 0 2.45rem;
+  width:2.45rem;
+  min-width:2.45rem;
+  height:2.45rem;
+  min-height:2.45rem;
+  padding:0!important;
+  border-radius:999px!important;
+}
+.e2e-dashboards #ds-viewer .ds-viewer-top-ppt {
+  background:linear-gradient(135deg,#b44720,#e47736);
+  border-color:#963817;
+  box-shadow:0 5px 13px rgba(164,65,27,.26);
+}
+.e2e-dashboards #ds-viewer .ds-viewer-top-ppt:hover:not(:disabled) {
+  background:linear-gradient(135deg,#913515,#c65d25);
+  border-color:#7b2b10;
+}
+.e2e-dashboards #ds-viewer .ds-viewer-top-ppt:disabled {
+  background:#d9d5df;
+  border-color:#c5bfcc;
+  box-shadow:none;
+}
+.e2e-dashboards #ds-viewer .ds-viewer-top-refresh {
+  background:linear-gradient(135deg,#98242e,#c43c48);
+  border-color:#741821;
+  box-shadow:0 5px 13px rgba(143,32,43,.24);
+}
+.e2e-dashboards #ds-viewer .ds-viewer-top-refresh:hover:not(:disabled) {
+  background:linear-gradient(135deg,#741821,#a52934);
+  border-color:#5f121a;
+}

@@ -7,6 +7,7 @@
   const eventTimeFilteringDisabledReason = 'Date filters are disabled because Ignore event time filtering is enabled in Config.';
   const filterAliases = config.filter_aliases || {};
   let dashboards = {}, activeId = '', definition = null, savedDefinition = '', appliedFilterState = '', appliedSelectionState = '', appliedDashboardDefinition = null, prepared = null, slideIndex = 0;
+  let dashboardFiltersOpen = false;
   let sequence = 0, cacheLookupSequence = 0, timer, controller, preparing = null, preparingFilterState = '', preparationProgressTimer = 0, dirty = false, filterActionBusy = false, dataToken = '', dataEndpoint = '';
   let presentationTimer = 0;
   const presentation = {active: false, running: false, delay: 5000, transitionDuration: 1, effect: 'flip', showComments: true};
@@ -697,10 +698,14 @@
       const view = action('View Dashboard', 'View Dashboard', async () => {
         if (id !== activeId) {
           if (!await confirmDiscard()) return;
-          const loading = openDashboard(id);
+          const loading = openDashboard(id, {showFilters: false});
           overlay('ds-viewer', true);
           await loading;
         } else {
+          dashboardFiltersOpen = false;
+          $('ds-filter-panel').hidden = true;
+          document.dispatchEvent(new CustomEvent('page-panel-navigation:update'));
+          library();
           await openActiveDashboardViewer();
         }
       }, 'ds-dashboard-view');
@@ -708,12 +713,18 @@
       primaryActionLabel(view, 'View', 'Dashboard');
       view.dataset.dashboardViewId = id;
       view.disabled = dashboardIsPreparing(id) || (id === activeId && $('ds-view').disabled);
-      const open = action(id === activeId ? 'Close Filters' : 'Open Filters', id === activeId ? 'Close Filters' : 'Open Filters', async () => {
-        if (id === activeId) { if (await confirmDiscard()) closeDashboard(); }
-        else if (await confirmDiscard()) await openDashboard(id);
-      }, id === activeId ? 'ds-dashboard-close' : 'ds-dashboard-open');
+      const filtersAreOpen = id === activeId && dashboardFiltersOpen;
+      const open = action(filtersAreOpen ? 'Close Filters' : 'Open Filters', filtersAreOpen ? 'Close Filters' : 'Open Filters', async () => {
+        if (filtersAreOpen) { if (await confirmDiscard()) closeDashboard(); }
+        else if (id === activeId) {
+          dashboardFiltersOpen = true;
+          $('ds-filter-panel').hidden = false;
+          document.dispatchEvent(new CustomEvent('page-panel-navigation:update'));
+          library();
+        } else if (await confirmDiscard()) await openDashboard(id);
+      }, filtersAreOpen ? 'ds-dashboard-close' : 'ds-dashboard-open');
       open.classList.remove('icon-action');
-      primaryActionLabel(open, id === activeId ? 'Close' : 'Open', 'Filters');
+      primaryActionLabel(open, filtersAreOpen ? 'Close' : 'Open', 'Filters');
       action('Duplicate Dashboard', '⧉', async () => { if (await confirmDiscard()) await duplicateDashboard(id); });
       action('Export Dashboard', '', () => exportDashboard(id, item), 'ds-dashboard-export');
       const ppt = action('Generate PPT Dashboard', '', () => queueDashboardPptExport(id, item, {chooseScope: true}), 'ds-dashboard-ppt');
@@ -1607,15 +1618,15 @@
       void refreshDashboardStatuses();
     }
   }
-  async function openDashboard(id) {
+  async function openDashboard(id, {showFilters = true} = {}) {
     clearTimeout(facetsRefreshTimer);
     dismissPreparationStatus();
     clearTimeout(timer); ++sequence; ++backgroundChartPreloadRequest; controller?.abort(); preparing = null;
     stopPresentation();
-    activeId = id; $('ds-viewer-export-ppt').dataset.dashboardPptId = id; definition = runtimeDashboardDefinition(dashboards[id], id); savedDefinition = definitionFingerprint(savedRuntimeDashboardDefinition(dashboards[id])); dirty = false; prepared = null; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; facetOptions = {}; availableFields = []; facetOptionRequests.clear(); slideIndex = 0; setViewEnabled(false); rememberOpen(id);
+    activeId = id; dashboardFiltersOpen = showFilters; $('ds-viewer-export-ppt').dataset.dashboardPptId = id; definition = runtimeDashboardDefinition(dashboards[id], id); savedDefinition = definitionFingerprint(savedRuntimeDashboardDefinition(dashboards[id])); dirty = false; prepared = null; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; facetOptions = {}; availableFields = []; facetOptionRequests.clear(); slideIndex = 0; setViewEnabled(false); rememberOpen(id);
     resetViewerForDashboard();
     $('ds-name').value = definition.name; setNrMode(definition.technology || definition.template_technology, definition.template);
-    $('ds-filter-panel').hidden = false; document.dispatchEvent(new CustomEvent('page-panel-navigation:update')); setActiveDashboardHeading(definition.name); sources(); facets(); library(); status(''); await prepare();
+    $('ds-filter-panel').hidden = !dashboardFiltersOpen; document.dispatchEvent(new CustomEvent('page-panel-navigation:update')); setActiveDashboardHeading(definition.name); sources(); facets(); library(); status(''); await prepare();
     updateDirtyState();
     // Date defaults may be derived while the prepared payload is restored. Rebuild
     // the controls so their state agrees with the Apply and Save buttons.
@@ -1712,7 +1723,7 @@
   }
   bind('ds-import',() => $('ds-import-file').click());
   $('ds-import-file').onchange = safe(async () => { const file = $('ds-import-file').files[0]; if (!file) return; const payload = JSON.parse(await file.text()); const legacy = payload.format === 'dashboard-analytic-dashboard-set' && payload.version === 1; if (!legacy && (payload.format !== 'dashboard-analytic-dashboard' || payload.version !== 2)) throw new Error('Unsupported Dashboard file.'); if (!await confirmDiscard()) return; payload.definition.name = nextName(payload.definition.name); const id = dashboardId(), result = await api(`/${id}`,'PUT',payload.definition); dashboards[id] = result.definition; await openDashboard(id); $('ds-import-file').value = ''; });
-  function closeDashboard() { delete $('ds-viewer-export-ppt').dataset.dashboardPptId; $('ds-viewer-export-ppt').disabled = true; clearTimeout(facetsRefreshTimer); dismissPreparationStatus(); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; definition = null; savedDefinition = ''; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; prepared = null; dirty = false; updateUnsavedFiltersBadge(); setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; document.dispatchEvent(new CustomEvent('page-panel-navigation:update')); setActiveDashboardHeading(''); $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
+  function closeDashboard() { delete $('ds-viewer-export-ppt').dataset.dashboardPptId; $('ds-viewer-export-ppt').disabled = true; clearTimeout(facetsRefreshTimer); dismissPreparationStatus(); stopPresentation(); rememberOpen(''); ++sequence; clearTimeout(timer); controller?.abort(); preparing = null; activeId = ''; dashboardFiltersOpen = false; definition = null; savedDefinition = ''; appliedFilterState = ''; appliedSelectionState = ''; appliedDashboardDefinition = null; prepared = null; dirty = false; updateUnsavedFiltersBadge(); setViewEnabled(false); setPreparationState('hidden'); $('ds-filter-panel').hidden = true; document.dispatchEvent(new CustomEvent('page-panel-navigation:update')); setActiveDashboardHeading(''); $('ds-name').value = ''; setNrMode('nsa'); library(); status('Dashboard closed.'); }
   $('ds-name').oninput = () => { if (definition) { definition.name = $('ds-name').value; updateDirtyState(); } };
   $('ds-nr-mode').onchange = () => {
     const selected = setNrMode($('ds-nr-mode').value);
@@ -2234,9 +2245,9 @@
   $('ds-chart-expanded-prev').onclick = safe(async () => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) - 1));
   $('ds-chart-expanded-next').onclick = safe(async () => navigateExpandedChart(expandedCharts().findIndex(chart => chart.index === expandedChart?.index) + 1));
   $('ds-chart-expanded-last').onclick = safe(async () => navigateExpandedChart(expandedCharts().length - 1));
-  const openFloatingFilters = () => { const panel = $('ds-filter-panel'); panel.open = true; panel.querySelector('summary').tabIndex = -1; $('ds-filter-float').append(panel); setPreparationState($('ds-preparing').dataset.state || 'hidden'); $('ds-view').hidden = false; $('ds-filter-close-action').hidden = false; overlay('ds-filter-overlay', true); };
+  const openFloatingFilters = () => { const panel = $('ds-filter-panel'); panel.hidden = false; panel.open = true; panel.querySelector('summary').tabIndex = -1; $('ds-filter-float').append(panel); setPreparationState($('ds-preparing').dataset.state || 'hidden'); $('ds-generate-ppt').hidden = true; $('ds-view').hidden = true; $('ds-filter-close-action').hidden = false; overlay('ds-filter-overlay', true); };
   const closeFilters = async () => {
-    const panel = $('ds-filter-panel'); panel.querySelector('summary').removeAttribute('tabindex'); $('ds-filter-home').append(panel); setPreparationState($('ds-preparing').dataset.state || 'hidden'); $('ds-view').hidden = false; $('ds-filter-close-action').hidden = true; overlay('ds-filter-overlay', false);
+    const panel = $('ds-filter-panel'); panel.querySelector('summary').removeAttribute('tabindex'); $('ds-filter-home').append(panel); panel.hidden = !dashboardFiltersOpen; setPreparationState($('ds-preparing').dataset.state || 'hidden'); $('ds-generate-ppt').hidden = false; $('ds-view').hidden = false; $('ds-filter-close-action').hidden = true; overlay('ds-filter-overlay', false);
     return true;
   };
   const templateEditorHasUnsavedChanges = () => {
@@ -2383,7 +2394,7 @@
     $('ds-chart-expanded-auto-fields') && ($('ds-chart-expanded-auto-fields').disabled = false);
     if ($('ds-chart-expanded-edit')) $('ds-chart-expanded-edit').disabled = !Number.isInteger(chart.focus_row);
     $('ds-chart-expanded-data').title = historical && !chart.data_url ? 'Filtered dataset is unavailable for this earlier PowerPoint Job' : 'View dataset';
-    $('ds-chart-expanded-filters').title = 'Adaptative Filters';
+    $('ds-chart-expanded-filters').title = 'Dashboard Filters';
     expandedZoom.reset(); expandedZoom.hidden = true;
     const initialTitle = renderedPayload?.title || chart.title || 'Expanded chart';
     setExpandedChartHeader(chart, initialTitle);

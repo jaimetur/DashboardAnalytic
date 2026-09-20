@@ -3,6 +3,7 @@
 # Opening the app starts the local Dashboard Analytic server. Quitting the
 # application sends a signal to this process and stops the server cleanly.
 set -u
+launcher_pid="$PPID"
 
 show_message() {
     /usr/bin/osascript - "$1" "$2" <<'APPLESCRIPT'
@@ -86,6 +87,8 @@ cleanup() {
     fi
 }
 
+trap cleanup EXIT INT TERM HUP
+
 if is_running; then
     stop_server
     exit 0
@@ -141,8 +144,24 @@ fi
 server_pid=$!
 print -r -- "$server_pid" > "$pid_file"
 
+# A normal quit signals this script, while macOS Force Quit cannot run any
+# application cleanup code. Keep supervising the native launcher as well so an
+# orphaned script still stops the server and removes its PID file.
+supervise_server() {
+    while /bin/kill -0 "$server_pid" 2>/dev/null; do
+        if ! /bin/kill -0 "$launcher_pid" 2>/dev/null; then
+            return 0
+        fi
+        /bin/sleep 0.25
+    done
+    wait "$server_pid"
+}
+
 local_attempt=0
 while (( local_attempt < 50 )); do
+    if ! /bin/kill -0 "$launcher_pid" 2>/dev/null; then
+        exit 0
+    fi
     if ! /bin/kill -0 "$server_pid" 2>/dev/null; then
         /bin/rm -f "$pid_file"
         show_message "Dashboard Analytic" "The server could not start. Check ${log_file}."
@@ -151,8 +170,7 @@ while (( local_attempt < 50 )); do
     if /usr/bin/curl --silent --output /dev/null --max-time 1 "$url"; then
         /usr/bin/open "$url"
         notify "Dashboard Analytic" "Server started at ${url}. Quit this app to stop it."
-        trap cleanup EXIT INT TERM HUP
-        wait "$server_pid"
+        supervise_server
         exit 0
     fi
     /bin/sleep 0.2
@@ -161,5 +179,4 @@ done
 
 /usr/bin/open "$url"
 notify "Dashboard Analytic" "The server is still starting at ${url}. Quit this app to stop it."
-trap cleanup EXIT INT TERM HUP
-wait "$server_pid"
+supervise_server

@@ -385,7 +385,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'class="ds-viewer-icon-action ds-viewer-refresh-action"' in page.text
     assert 'class="ds-viewer-tool-actions" role="group" aria-label="Dashboard actions"' in page.text
     assert 'id="ds-viewer-close" class="report-chart-viewer-close" title="Close"' in page.text
-    assert page.text.index('id="ds-presentation"') < page.text.index('id="ds-viewer-refresh"') < page.text.index('id="ds-viewer-export-ppt"')
+    assert page.text.index('id="ds-viewer-export-ppt"') < page.text.index('id="ds-floating-filters"')
+    assert page.text.index('id="ds-floating-filters"') < page.text.index('id="ds-viewer-refresh"')
+    assert page.text.index('id="ds-viewer-refresh"') < page.text.index('id="ds-presentation"')
+    assert '>Dashboard Filters</button>' in page.text
     assert 'id="ds-prev" class="ds-slide-nav-button" title="Previous slide" aria-label="Previous slide"><svg class="ds-slide-arrow-icon"' in page.text
     assert 'id="ds-next" class="ds-slide-nav-button" title="Next slide" aria-label="Next slide"><svg class="ds-slide-arrow-icon"' in page.text
     assert 'id="ds-first" class="ds-slide-nav-button" title="First slide" aria-label="First slide"><svg class="ds-slide-arrow-icon"' in page.text
@@ -974,7 +977,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-filter-close-action"' in page.text
     assert '#ds-filter-close-action[hidden]{display:none!important}' in dashboard_css
     assert "bind('ds-filter-close-action', closeFilters);" in dashboard_script
-    assert "$('ds-view').hidden = false; $('ds-filter-close-action').hidden = false; overlay('ds-filter-overlay', true);" in dashboard_script
+    assert "$('ds-generate-ppt').hidden = true; $('ds-view').hidden = true; $('ds-filter-close-action').hidden = false; overlay('ds-filter-overlay', true);" in dashboard_script
+    assert "panel.hidden = !dashboardFiltersOpen;" in dashboard_script
     assert '#ds-add-filter::before' in dashboard_css
     assert '#ds-ppt-jobs-delete-all::before' in dashboard_css
     assert '.e2e-dashboards .ds-ppt-charts-filters::before{' in dashboard_css

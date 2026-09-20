@@ -101,13 +101,13 @@ Manage Dashboards reports whether a reusable prepared selection is Ready or must
 
 ## View Dashboard
 
-Use View Dashboard or the library eye action. View Dashboard remains available from the floating Adaptative Filters panel; after resolving changes it closes that panel and returns to the viewer. A centered preparation card remains until updated slides and charts are ready. The viewer uses approximately 96% of the viewport and preserves the template's 16:9 layout.
+Use View Dashboard or the library eye action. Opening the viewer from the library does not expand the main Dashboard Filters panel. **Dashboard Filters** opens those controls in a floating panel without the redundant View Dashboard and Generate PPT actions. A centered preparation card remains until updated slides and charts are ready. The viewer uses approximately 96% of the viewport and preserves the template's 16:9 layout.
 
 After the visible slide finishes loading, the browser silently caches the remaining slides by proximity: next, previous, two ahead, two behind, and so on. Opening an individual chart switches this behaviour to the chart sequence using the same alternating order. Moving to another position restarts the sequence around it, and closing the viewer stops scheduling further work. These requests reuse the normal Canvas-model cache and do not appear in the floating background-task card.
 
 ### Slides and navigation
 
-- Select any template slide or use the enlarged First, Previous, Next and Last controls, which match the individual chart viewer. Presentation, Refresh and Generate PPT are kept in a separate action group, in that order.
+- Select any template slide or use the enlarged First, Previous, Next and Last controls, which match the individual chart viewer. Generate PPT appears in orange immediately before Dashboard Filters in the upper action row, while the red Refresh Dashboard action closes that row. Presentation remains centred above the slide navigation.
 - Left/Right Arrow navigates outside editable controls.
 - Title and Transition slides use branded Dashboard Analytic typography.
 - Chart rows preserve template order and placeholder geometry.
@@ -121,7 +121,7 @@ Hover or focus a chart to reveal Dataset, Expand, Refresh and Zoom controls. The
 - At 100%, drag a rectangle over the plot to zoom into it; drag a zoomed chart to pan.
 - Double-click or use Expand to open the focused chart.
 - View Dashboard and its expanded viewer stay above background-task cards and share Reporting's red Close control. The expanded viewer follows Reporting's full-screen card layout, with a descriptive header and an inset chart canvas, while retaining the purple Dashboard palette and floating Chart Definition panel. Both live and expanded charts show boundary-aware left, right, up and down arrows whenever zoom is active; these move the Canvas camera and disable at their respective limits. The expanded viewer's purple First/Previous/Next/Last controls use the same icons and spacing as Reporting. On compact screens, the viewer reduces its header and combines playback and navigation controls into one row. Landscape also places Dashboard selection and actions on one row, while portrait compacts editing actions, fits every navigation button and expands the proportionally positioned chart composition through all remaining viewport height instead of stacking oversized charts or leaving unused space. The collapsible Comments drawer remains fixed to the visible bottom edge in landscape, including the device safe area, independently of overflowing slide content.
-- Adaptative Filters, Auto-calculated Fields and Edit Template remain available in expanded view when permitted.
+- Dashboard Filters, Auto-calculated Fields and Edit Template remain available in expanded view when permitted.
 - Edit Template focuses the exact template row for the chart. Saving refreshes the Dashboard; closing unchanged retains the current preparation.
 
 For the complete definition of a chart row, see [Administration → Report Template reference](10-administration.md#report-template-reference).
@@ -136,13 +136,13 @@ Every column provides an Excel-style value filter across the complete chart data
 
 - Add, edit or remove slide comments; Enter or leaving an edit saves immediately.
 - **Presentation** supports 3, 5, 10 or 15 seconds with Fade, Slide or no transition. Manual navigation stops it. On compact landscape screens, its settings dialog stays within the visible viewport and scrolls vertically while keeping its header and actions accessible.
-- **Adaptative Filters** moves the same panel into a floating dialog; edits refresh visible charts without automatically saving defaults.
+- **Dashboard Filters** moves the same panel into a floating dialog; edits refresh visible charts without automatically saving defaults. View Dashboard and Generate PPT are omitted because the parent viewer already provides those actions.
 - **Auto-Calculated Fields** opens the shared workspace manager for administrators.
 - Backdrop/Escape closes unchanged dialogs and returns focus. Unsaved Filters, Template Editor or calculated-field changes request a decision first.
 
 ## Generate PPT
 
-Generate PPT appears immediately before View Dashboard in the dataset/filter actions and after Presentation in the viewer. It uses the exact prepared CDRs, dates, scope and applied filters, even if they have not been saved as Dashboard defaults.
+Generate PPT appears immediately before View Dashboard in the dataset/filter actions and immediately before Dashboard Filters in the viewer's upper action row. It uses the exact prepared CDRs, dates, scope and applied filters, even if they have not been saved as Dashboard defaults.
 
 The job renders the template into `Template_CDR_analysis.pptx`, preserving slides, layouts, chart placeholder proportions, titles, legends and saved comments. It writes the PPT plus chart PNG, tooltip and Canvas-model assets under `output/dashboards`. Folder and PPT names begin with `yyyymmdd_HHMMSS - Dashboard Name`.
 
@@ -160,7 +160,7 @@ Charts Panel browses completed Dashboard PPT charts. Filter by NR Mode, Dashboar
 
 Cards fill equal template frames and repaint stored Canvas models with the current renderer. Legacy jobs without models retain their PNG. Open any card in the same expanded viewer and Filtered Chart Dataset used by the live Dashboard.
 
-Historical previews retain the job's exact template and selection. **View Filters** opens that snapshot. Administrators can open the generating template and Auto-calculated Fields. Adaptative Filters are hidden because a completed export is immutable.
+Historical previews retain the job's exact template and selection. **View Filters** opens that snapshot. Administrators can open the generating template and Auto-calculated Fields. Dashboard Filters are hidden because a completed export is immutable.
 
 ## Portability and maintenance
 
