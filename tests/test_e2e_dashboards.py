@@ -973,6 +973,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '<option value="none">None</option><option value="random">Random</option><optgroup label="Effects">' in page.text
     assert '<option value="flip" selected>Flip</option>' in page.text
     assert 'id="ds-presentation-stop-viewer"' in page.text
+    assert 'id="ds-presentation-toggle-viewer"' in page.text
     assert "presentation.showComments = $('ds-presentation-comments').value === 'yes';" in dashboard_script
     assert "$('ds-viewer').style.setProperty('--ds-presentation-transition-duration', `${presentation.transitionDuration}s`);" in dashboard_script
     assert 'animation:ds-slide-fade var(--ds-presentation-transition-duration,1s) ease both' in dashboard_css
@@ -983,6 +984,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "localStorage.setItem(presentationEffectStorageKey, event.target.value)" in dashboard_script
     assert "lastRandomPresentationEffect = '';\n    slideIndex = 0;" in dashboard_script
     assert "bind('ds-presentation-stop-viewer', stopPresentation);" in dashboard_script
+    assert "bind('ds-presentation-toggle-viewer', togglePresentation);" in dashboard_script
     assert "if (presentation.running) pausePresentation(); else resumePresentation();" in dashboard_script
     assert "event.code === 'Space' || event.key === ' '" in dashboard_script
     assert "if (visible === 'ds-viewer' && !editing && event.key === 'F8')" in dashboard_script
@@ -995,9 +997,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '[data-presentation-effect="zoom"]' in dashboard_css
     assert '[data-presentation-effect="rise"]' in dashboard_css
     assert '[data-presentation-effect="blur"]' in dashboard_css
-    assert ':is(#ds-presentation,#ds-presentation-stop-viewer)' in dashboard_css
+    assert ':is(#ds-presentation,#ds-presentation-toggle-viewer,#ds-presentation-stop-viewer)' in dashboard_css
     assert '.ds-presentation-stop-action::after' in dashboard_css
-    assert '#ds-presentation-stop-viewer[hidden] {' in dashboard_css
+    assert ':is(#ds-presentation-toggle-viewer,#ds-presentation-stop-viewer)[hidden] {' in dashboard_css
     assert "function dashboardViewerBrand(className = 'ds-structural-brand')" in dashboard_script
     assert "const brand = dashboardViewerBrand('ds-chart-brand'); card.append(brand);" in dashboard_script
     assert '.ds-chart-brand{' in dashboard_css

@@ -135,7 +135,7 @@ Every column provides an Excel-style value filter across the complete chart data
 ### Comments, Presentation and floating tools
 
 - Add, edit or remove slide comments; Enter or leaving an edit saves immediately.
-- **Presentation** supports 3, 5, 10 or 15 seconds with Fade, Slide or no transition. Manual navigation stops it. On compact landscape screens, its settings dialog stays within the visible viewport and scrolls vertically while keeping its header and actions accessible.
+- **Presentation** supports 3, 5, 10 or 15 seconds with Fade, Slide or no transition. Presentation mode keeps separate floating Pause/Resume and Stop controls available. Manual navigation stops it. On compact landscape screens, its settings dialog stays within the visible viewport and scrolls vertically while keeping its header and actions accessible.
 - **Dashboard Filters** moves the same panel into a floating dialog; edits refresh visible charts without automatically saving defaults. View Dashboard and Generate PPT are omitted because the parent viewer already provides those actions.
 - **Auto-Calculated Fields** opens the shared workspace manager for administrators.
 - Backdrop/Escape closes unchanged dialogs and returns focus. Unsaved Filters, Template Editor or calculated-field changes request a decision first.

@@ -789,7 +789,7 @@
   padding:0;
   border:0;
 }
-#ds-viewer.ds-presentation-active :is(#ds-presentation,#ds-presentation-stop-viewer) {
+#ds-viewer.ds-presentation-active :is(#ds-presentation,#ds-presentation-toggle-viewer,#ds-presentation-stop-viewer) {
   display:grid!important;
   width:2.5rem;
   min-width:2.5rem;
@@ -813,7 +813,7 @@
 .e2e-dashboards .ds-presentation-stop-action::after {
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Crect x='6' y='6' width='12' height='12' rx='1.5'/%3E%3C/svg%3E");
 }
-.e2e-dashboards #ds-presentation-stop-viewer[hidden] {
+.e2e-dashboards :is(#ds-presentation-toggle-viewer,#ds-presentation-stop-viewer)[hidden] {
   display:none!important;
 }
 #ds-viewer.ds-presentation-active .ds-slide-content,

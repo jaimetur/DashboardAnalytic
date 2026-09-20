@@ -2475,15 +2475,18 @@
     $('ds-comments-status').textContent = 'Saved';
   }
   function syncPresentationControls() {
-    const button = $('ds-presentation');
+    const buttons = [$('ds-presentation'), $('ds-presentation-toggle-viewer')];
     $('ds-viewer').classList.toggle('ds-presentation-active', presentation.active);
     $('ds-viewer').classList.toggle('ds-presentation-comments-enabled', presentation.active && presentation.showComments);
-    button.classList.toggle('is-running', presentation.running);
     const action = presentation.active ? (presentation.running ? 'Pause presentation' : 'Resume presentation') : 'Presentation';
-    button.title = action;
-    button.setAttribute('aria-label', action);
+    buttons.forEach((button) => {
+      button.classList.toggle('is-running', presentation.running);
+      button.title = action;
+      button.setAttribute('aria-label', action);
+    });
     $('ds-presentation-start').disabled = presentation.active;
     $('ds-presentation-stop').disabled = !presentation.active;
+    $('ds-presentation-toggle-viewer').hidden = !presentation.active;
     $('ds-presentation-stop-viewer').hidden = !presentation.active;
   }
   function stopPresentation() {
@@ -2694,11 +2697,13 @@
   $('ds-slide').onchange = () => { stopPresentation(); slideIndex = Number($('ds-slide').value); renderSlide(); };
   bind('ds-comment-add', async () => { const input = $('ds-comment-input'), comment = input.value.trim(); if (!comment || !definition || pptDashboardViewer) return; const key = currentSlideCommentKey(); definition.slide_comments ||= {}; const comments = definition.slide_comments[key] ||= []; if (comments.length >= 50) throw new Error('A slide can have at most 50 comments.'); comments.push(comment); input.value = ''; await persistComments(); renderComments(); });
   $('ds-comment-input').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); $('ds-comment-add').click(); } });
-  bind('ds-presentation', () => {
+  const togglePresentation = () => {
     if (!presentation.active) overlay('ds-presentation-overlay', true);
     else if (presentation.running) pausePresentation();
     else resumePresentation();
-  });
+  };
+  bind('ds-presentation', togglePresentation);
+  bind('ds-presentation-toggle-viewer', togglePresentation);
   bind('ds-presentation-close', () => overlay('ds-presentation-overlay', false));
   $('ds-presentation-effect').addEventListener('change', event => {
     try { localStorage.setItem(presentationEffectStorageKey, event.target.value); } catch (_) { /* Local storage is optional. */ }
