@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -109,3 +110,57 @@ def test_workspace_accesses_are_consolidated_into_users_table(tmp_path: Path) ->
         assert conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'user_workspace_access'"
         ).fetchone() is None
+
+
+def test_global_database_replacement_preserves_local_transfer_offers(tmp_path: Path) -> None:
+    application_db = tmp_path / 'application.db'
+    snapshot_db = tmp_path / 'imported-application.db'
+    offer = {
+        'id': 'active-transfer',
+        'status': 'importing',
+        'secret_hash': 'local-secret',
+    }
+    with sqlite3.connect(application_db) as conn:
+        conn.executescript(
+            '''
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE transfer_offers (
+                id TEXT PRIMARY KEY,
+                payload_json TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            '''
+        )
+        conn.execute(
+            'INSERT INTO transfer_offers (id, payload_json, updated_at) VALUES (?, ?, ?)',
+            (offer['id'], json.dumps(offer), 1.0),
+        )
+    with sqlite3.connect(snapshot_db) as conn:
+        conn.executescript(
+            '''
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            );
+            INSERT INTO users (username, password_hash, role, active, created_at)
+            VALUES ('imported', 'hash', 'admin', 1, '2026-09-21 00:00:00');
+            '''
+        )
+
+    repository = Repository(tmp_path / 'workspace.db', application_db)
+    repository.replace_global_database_snapshot(snapshot_db)
+
+    assert repository.list_transfer_offers() == [offer]
+    with sqlite3.connect(application_db) as conn:
+        assert conn.execute('SELECT username FROM users').fetchone() == ('imported',)

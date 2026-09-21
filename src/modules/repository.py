@@ -346,7 +346,7 @@ class Repository:
             conn.close()
 
     def replace_global_database_snapshot(self, snapshot_path: Path) -> None:
-        """Replace the global database and discard stale SQLite sidecars."""
+        """Replace the global database while preserving local transfer state."""
         source = Path(snapshot_path)
         if not source.is_file():
             raise ValueError('The configuration archive does not contain application.db.')
@@ -361,10 +361,39 @@ class Repository:
             raise ValueError('The configuration archive application.db does not contain the users table.')
         destination = self.global_db_path
         temporary = destination.with_name(f'.{destination.name}.importing')
-        shutil.copy2(source, temporary)
-        for suffix in ('-wal', '-shm'):
-            Path(f'{destination}{suffix}').unlink(missing_ok=True)
-        temporary.replace(destination)
+        with workspace_write_lock(destination):
+            local_transfer_offers: list[tuple[str, str, float]] = []
+            if destination.is_file():
+                with closing(sqlite3.connect(destination)) as current:
+                    has_transfer_offers = current.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'transfer_offers'"
+                    ).fetchone()
+                    if has_transfer_offers:
+                        local_transfer_offers = current.execute(
+                            "SELECT id, payload_json, updated_at FROM transfer_offers"
+                        ).fetchall()
+            try:
+                shutil.copy2(source, temporary)
+                with closing(sqlite3.connect(temporary)) as imported, imported:
+                    imported.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS transfer_offers (
+                            id TEXT PRIMARY KEY,
+                            payload_json TEXT NOT NULL,
+                            updated_at REAL NOT NULL
+                        )
+                        """
+                    )
+                    imported.execute("DELETE FROM transfer_offers")
+                    imported.executemany(
+                        "INSERT INTO transfer_offers (id, payload_json, updated_at) VALUES (?, ?, ?)",
+                        local_transfer_offers,
+                    )
+                for suffix in ('-wal', '-shm'):
+                    Path(f'{destination}{suffix}').unlink(missing_ok=True)
+                temporary.replace(destination)
+            finally:
+                temporary.unlink(missing_ok=True)
 
     def remove_legacy_global_tables(self) -> list[str]:
         """Remove global-only tables left inside an old workspace database.
