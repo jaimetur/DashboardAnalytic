@@ -27,7 +27,7 @@
   };
   const textWidth = (context, value) => context.measureText(String(value)).width;
   const displayKey = key => (key || []).filter(value => value !== '(all)').join(' · ') || '(all)';
-  const percent = value => `${(Number(value) * 100).toFixed(1)}%`;
+  const percent = (value, digits = 1) => `${(Number(value) * 100).toFixed(digits)}%`;
   const tooltipPercent = value => `${(Number(value) * 100).toFixed(2)}%`;
   const numericLabel = value => {
     const number = Number(value);
@@ -220,6 +220,13 @@
       verticalLabel(context, label, x + width / 2, y + height / 2, colour, size); return true;
     }
     return false;
+  }
+
+  function drawInsideHorizontalBarLabel(context, value, x, y, width, height, colour, size) {
+    const label = String(value); font(context, size, true); const labelWidth = textWidth(context, label);
+    if (labelWidth + 8 > width || size + 8 > height) return false;
+    context.fillStyle = colour; context.textAlign = 'center'; context.textBaseline = 'middle';
+    context.fillText(label, x + width / 2, y + height / 2); context.textBaseline = 'top'; return true;
   }
 
   function drawOutsideBarLabel(context, value, x, y, colour, size = 12) {
@@ -438,9 +445,9 @@
           const visibleLow = Math.max(segmentLow, yDomain[0]), visibleHigh = Math.min(segmentHigh, yDomain[1]);
           const segmentHeight = Math.max(0, visibleHigh - visibleLow) / ySpan * height, y = top + (yDomain[1] - visibleHigh) / ySpan * height;
           context.fillStyle = series.colour; context.fillRect(x, y, barWidth, segmentHeight);
-          const label = percent(ratio);
+          const label = percent(ratio, 2);
           drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, series.colour, 20, payload.label_position, 'vertical', () => {
-            if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 20)) {}
+            if (ratio >= .08) drawInsideHorizontalBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 15);
             else if (ratio > 0) drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, top, top + height, width / categories.length - barWidth - 18, series.colour, sideLabels);
           });
           if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: category, series: series.name, value: tooltipPercent(ratio)});
@@ -506,9 +513,9 @@
           const visibleLow = Math.max(segmentLow, yDomain[0]), visibleHigh = Math.min(segmentHigh, yDomain[1]);
           const segmentHeight = Math.max(0, visibleHigh - visibleLow) / ySpan * rowHeight, y = paneTop + (yDomain[1] - visibleHigh) / ySpan * rowHeight;
           context.fillStyle = series.colour; context.fillRect(x, y, barWidth, segmentHeight);
-          const label = percent(ratio);
+          const label = percent(ratio, 2);
           drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, series.colour, 21, payload.label_position, 'vertical', () => {
-            if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 21)) {}
+            if (ratio >= .08) drawInsideHorizontalBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 15);
             else if (ratio > 0) drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, paneTop, paneBottom, (columnWidth - barWidth) / 2 - 6, series.colour, sideLabels);
           });
           if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: tooltipPercent(ratio)});
@@ -636,13 +643,11 @@
         const visibleLow = Math.max(segmentLow, yDomain[0]), visibleHigh = Math.min(segmentHigh, yDomain[1]);
         const segmentHeight = Math.max(0, visibleHigh - visibleLow) / ySpan * height, y = top + (yDomain[1] - visibleHigh) / ySpan * height;
         context.fillStyle = bucket.colour; context.fillRect(x, y, barWidth, segmentHeight);
-        const label = percent(ratio); font(context, 17, true);
+        const label = percent(ratio, 2); font(context, 17, true);
         const labelWidth = textWidth(context, label);
         drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, bucket.colour, 17, payload.label_position, 'vertical', () => {
-          if (labelWidth + 10 <= barWidth && segmentHeight >= 24) {
-            context.fillStyle = '#FFFFFF'; context.textAlign = 'center'; context.textBaseline = 'middle';
-            context.fillText(label, x + barWidth / 2, y + segmentHeight / 2); context.textBaseline = 'top';
-          } else if (ratio > 0) drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, top, top + height, width / keys.length - barWidth - 16, bucket.colour, sideLabels);
+          if (ratio >= .08) drawInsideHorizontalBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 14);
+          else if (ratio > 0) drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, top, top + height, width / keys.length - barWidth - 16, bucket.colour, sideLabels);
         });
         if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: displayKey(key), series: bucket.name, value: tooltipPercent(ratio)});
         running += ratio;

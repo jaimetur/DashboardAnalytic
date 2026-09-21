@@ -935,7 +935,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "'Reload the current Report Template, rebuild its slides and render every chart in this Dashboard again?'" in dashboard_script
     assert "event.data?.type === 'dashboard-analytic:template-saved'" in dashboard_script
     chart_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/dashboard_charts.js').read_text(encoding='utf-8')
-    assert "const percent = value => `${(Number(value) * 100).toFixed(1)}%`;" in chart_script
+    assert "const percent = (value, digits = 1) => `${(Number(value) * 100).toFixed(digits)}%`;" in chart_script
+    assert 'function drawInsideHorizontalBarLabel(' in chart_script
     assert "const tooltipPercent = value => `${(Number(value) * 100).toFixed(2)}%`;" in chart_script
     assert 'value: tooltipPercent(ratio)' in chart_script
     assert 'lines.push(tooltipPercent(point.cumulative))' in chart_script

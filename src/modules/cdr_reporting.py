@@ -3735,6 +3735,27 @@ def _draw_inside_bar_label(
     return False
 
 
+def _draw_inside_horizontal_bar_label(
+    draw: ImageDraw.ImageDraw,
+    value: str,
+    *,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    fill: str,
+    font: ImageFont.ImageFont,
+) -> bool:
+    """Draw a horizontal bar label without changing orientation per segment."""
+    label_width = _text_width(draw, value, font)
+    box = draw.textbbox((0, 0), value, font=font)
+    label_height = box[3] - box[1]
+    if label_width + 8 > width or label_height + 8 > height:
+        return False
+    draw.text((x + (width - label_width) / 2, y + (height - label_height) / 2 - box[1]), value, fill=fill, font=font)
+    return True
+
+
 def _draw_adjacent_stacked_bar_label(
     draw: ImageDraw.ImageDraw,
     value: str,
@@ -3983,9 +4004,10 @@ def _render_status_100(title: str, frame: pd.DataFrame, group: str | None, perio
             height = value * chart_height
             y = chart_top + chart_height - running - height
             draw.rectangle((x, y, x + bar_width, y + height), fill=colour)
-            value_label = f"{value:.1%}"
+            value_label = f"{value:.2%}"
             def automatic_label() -> None:
-                if value >= .08 and _draw_inside_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=height, fill="white", font=_font(20, True)):
+                if value >= .08:
+                    _draw_inside_horizontal_bar_label(draw, value_label, x=x, y=y, width=bar_width, height=height, fill="white", font=_font(15, True))
                     return
                 if value > 0:
                     _draw_adjacent_stacked_bar_label(
@@ -4122,9 +4144,10 @@ def _render_status_100_hierarchy(
                 segment_height = ratio * row_height
                 y = pane_bottom - running - segment_height
                 draw.rectangle((x, y, x + bar_width, y + segment_height), fill=colour)
-                ratio_label = f"{ratio:.1%}"
+                ratio_label = f"{ratio:.2%}"
                 def automatic_label() -> None:
-                    if ratio >= 0.08 and _draw_inside_bar_label(image, draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height, fill="white", font=_font(21, True)):
+                    if ratio >= 0.08:
+                        _draw_inside_horizontal_bar_label(draw, ratio_label, x=x, y=y, width=bar_width, height=segment_height, fill="white", font=_font(15, True))
                         return
                     if ratio > 0:
                         _draw_adjacent_stacked_bar_label(
@@ -4466,16 +4489,16 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
         for bucket_index, bucket in enumerate(buckets):
             value = len(subset[subset[stack] == bucket]) / total; segment = value * height; y = top + height - running - segment
             draw.rectangle((x, y, x + bar_width, y + segment), fill=bucket_colours.get((bucket,), _colour(bucket, bucket_index)))
-            value_label = f"{value:.1%}"
+            value_label = f"{value:.2%}"
             label_font = _font(17, True)
             label_box = draw.textbbox((0, 0), value_label, font=label_font)
             label_height = label_box[3] - label_box[1]
             def automatic_label() -> None:
-                if _text_width(draw, value_label, label_font) + 10 <= bar_width and label_height + 8 <= segment:
-                    _draw_inside_bar_label(
-                        image, draw, value_label,
+                if value >= .08:
+                    _draw_inside_horizontal_bar_label(
+                        draw, value_label,
                         x=x, y=y, width=bar_width, height=segment,
-                        fill="#FFFFFF", font=label_font,
+                        fill="#FFFFFF", font=_font(14, True),
                     )
                 elif value > 0:
                     _draw_adjacent_stacked_bar_label(
