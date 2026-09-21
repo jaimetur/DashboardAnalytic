@@ -12,6 +12,7 @@ import json
 import math
 import os
 import re
+import shutil
 import ssl
 import subprocess
 import threading
@@ -90,13 +91,20 @@ _DASHBOARD_CANVAS_RENDERER = None
 _DASHBOARD_CANVAS_RENDERER_LOCK = threading.RLock()
 
 
+def _node_executable() -> str:
+    """Locate Node when a desktop launcher starts without the shell PATH."""
+    configured = os.environ.get('DASHBOARD_ANALYTIC_NODE_PATH', '').strip()
+    candidates = [configured, shutil.which('node'), '/opt/homebrew/bin/node', '/usr/local/bin/node']
+    return next((candidate for candidate in candidates if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK)), 'node')
+
+
 class _DashboardCanvasRenderer:
     """Keep one headless Chromium canvas alive for repeated report PNG exports."""
 
     def __init__(self) -> None:
         script = Path(__file__).with_name("dashboard_canvas_renderer.mjs")
         self.process = subprocess.Popen(
-            ["node", str(script)],
+            [_node_executable(), str(script)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,

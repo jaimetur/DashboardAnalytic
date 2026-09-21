@@ -2329,6 +2329,17 @@ def test_dashboard_canvas_report_renderer_uses_dashboard_payload() -> None:
     assert payload['title'] == 'Radio quality'
 
 
+def test_dashboard_canvas_renderer_uses_configured_node_path(monkeypatch, tmp_path: Path) -> None:
+    import src.modules.cdr_reporting as reporting
+
+    node = tmp_path / 'node'
+    node.write_text('', encoding='utf-8')
+    node.chmod(0o755)
+    monkeypatch.setenv('DASHBOARD_ANALYTIC_NODE_PATH', str(node))
+
+    assert reporting._node_executable() == str(node)
+
+
 def test_report_renderer_rejects_unknown_engine() -> None:
     entry = CatalogEntry(
         1, 'Radio quality', '', '', 'Radio quality', 'CDR-Data',

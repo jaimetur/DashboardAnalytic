@@ -32,6 +32,7 @@
 - Dashboard Filters now stays closed when a new authenticated session begins instead of restoring the Dashboard opened by a previous login in the same browser tab. Its visible/hidden and expanded/collapsed choices remain session-only, with the panel expanded by default until the user explicitly collapses it.
 - Server transfers to literal private IP addresses now bypass HTTP proxy settings inherited by Docker, preventing LAN requests from being sent through an unrelated proxy. Connection failures also identify the required destination bind address, inbound port and the special `host.docker.internal` case.
 - Dashboard PowerPoint generation now isolates a failed chart renderer behind a visible placeholder instead of cancelling the complete presentation, preserves its Canvas model for later inspection, and records both recoverable chart warnings and fatal export errors in App Log with the Dashboard and job identifiers.
+- Dashboard Canvas rendering now locates the installed Node runtime by absolute path when launched from the macOS app, whose environment does not inherit the interactive shell `PATH`, so PowerPoint exports retain their charts instead of replacing every chart with a missing-Node placeholder.
 
 #### 📚 Documentation:
 - Documented workspace-managed Operator/Vendor ordering, thematic chart colours and the combined portable mapping component.
