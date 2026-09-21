@@ -455,9 +455,16 @@ def test_dashboard_refresh_rebuilds_all_models_and_chart_refresh_rebuilds_only_o
     monkeypatch.setattr(dashboards_module, 'catalog_chart_payload', tracked)
 
     current = indexes[1]
+    core.repository.replace_operator_mapping_group(None, 'Alpha', ['A'], '#123456')
+    core.repository.replace_operator_mapping_group(None, 'Beta', ['B'], '#654321')
+    core.repository.move_chart_mapping_group('operator', 'Beta', 'up')
     refreshed_chart = client.post(f'/api/e2e-dashboards/chart/{token}/{current}/refresh')
     assert refreshed_chart.status_code == 200, refreshed_chart.text
     assert len(calls) == 1
+    assert [series['name'] for series in refreshed_chart.json()['series']] == ['Beta', 'Alpha']
+    assert {
+        series['name']: series['colour'] for series in refreshed_chart.json()['series']
+    } == {'Alpha': '#123456', 'Beta': '#654321'}
     assert client.get(f'/api/e2e-dashboards/chart/{token}/{indexes[0]}').status_code == 200
     assert len(calls) == 1
 

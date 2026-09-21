@@ -3077,6 +3077,11 @@ def install_dashboard_routes(core):
         if force:
             with lock:
                 snapshot.chart_payloads.pop(index, None)
+                # The prepared frame carries the mapping aliases, ordering and
+                # theme colours that existed when it was first built. Dropping
+                # only the Canvas payload would immediately rebuild it from
+                # that stale frame after an Admin mapping change.
+                snapshot.chart_frames.pop(index, None)
             model_path.unlink(missing_ok=True)
         with lock:
             payload = snapshot.chart_payloads.get(index)

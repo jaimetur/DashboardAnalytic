@@ -1139,11 +1139,39 @@ def _operator_sort_label(value: object) -> str:
     return str(value or '').strip()
 
 
+def _split_operator_vendor(
+    value: object,
+    operator_mappings: dict[str, str] | None = None,
+    vendor_mappings: dict[str, str] | None = None,
+) -> tuple[str, str, str]:
+    """Split a combined identity without truncating operators containing underscores."""
+    text = str(value or '').strip()
+    candidates = [
+        (text[:index], '_', text[index + 1:])
+        for index, character in enumerate(text)
+        if character == '_' and text[:index].strip() and text[index + 1:].strip()
+    ]
+    if not candidates:
+        return text, '', ''
+    operators = {str(key).strip().casefold() for key in (operator_mappings or {})}
+    vendors = {str(key).strip().casefold() for key in (vendor_mappings or {})}
+    recognised = [
+        candidate for candidate in candidates
+        if candidate[0].strip().casefold() in operators or candidate[2].strip().casefold() in vendors
+    ]
+    if recognised:
+        return max(recognised, key=lambda candidate: (
+            candidate[0].strip().casefold() in operators,
+            candidate[2].strip().casefold() in vendors,
+            len(candidate[0]),
+        ))
+    return candidates[0]
+
+
 def _vendor_operator(value: object, mappings: dict[str, str] | None = None) -> str:
     """Return the operator prefix from an ``Operator_Vendor`` value."""
-    text = str(value or "").strip()
-    operator, _separator, _vendor = text.partition("_")
-    return _normalise_operator_label(operator or text, mappings)
+    operator, _separator, _vendor = _split_operator_vendor(value, mappings)
+    return _normalise_operator_label(operator, mappings)
 
 
 def _normalise_vendor(
@@ -1153,7 +1181,7 @@ def _normalise_vendor(
 ) -> str:
     """Normalise both halves of an ``Operator_Vendor`` label from Admin data."""
     text = str(value or "").strip()
-    operator, separator, vendor = text.partition("_")
+    operator, separator, vendor = _split_operator_vendor(text, operator_mappings, vendor_mappings)
     if separator:
         normalized_operator = _normalise_operator_label(operator, operator_mappings)
         normalized_vendor = _normalise_operator_label(vendor, vendor_mappings)
@@ -2244,7 +2272,7 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
 
     def vendor_sort_key(value: object) -> tuple[int, str, int, str]:
         if split_vendor_hierarchy:
-            normalized_vendor = _vendor_label(value).casefold()
+            normalized_vendor = _vendor_label(value, frame).casefold()
             vendor_group = _mapping_group(normalized_vendor, 'vendor', frame)
             vendor_rank = int(vendor_group.get('position', 0)) if vendor_group else len(_mapping_groups(frame, 'vendor'))
             return 0, "", vendor_rank, normalized_vendor
@@ -2745,13 +2773,30 @@ def _mapping_group(value: object, mapping_type: str, frame: pd.DataFrame | None)
     return None
 
 
+def _mapping_prefix_group(
+    value: object, mapping_type: str, frame: pd.DataFrame | None,
+) -> dict[str, object] | None:
+    """Return the longest configured identity prefix in a composite label."""
+    normalized = str(value or '').strip().casefold()
+    matches: list[tuple[int, dict[str, object]]] = []
+    for group in _mapping_groups(frame, mapping_type):
+        labels = [group.get('canonical'), *(group.get('aliases') or [])]
+        for label in labels:
+            candidate = str(label or '').strip().casefold()
+            if not candidate or not normalized.startswith(candidate):
+                continue
+            remainder = normalized[len(candidate):]
+            if not remainder or re.match(r'^\s*[_·|/]', remainder):
+                matches.append((len(candidate), group))
+    return max(matches, key=lambda item: item[0])[1] if matches else None
+
+
 def _operator_colour(label: object, frame: pd.DataFrame | None = None) -> str | None:
     """Return the workspace theme colour for an Operator identity."""
     text = str(label or '').strip()
     group = _mapping_group(text, 'operator', frame)
     if group is None:
-        operator = re.split(r'[_·|/]', text, maxsplit=1)[0].strip()
-        group = _mapping_group(operator, 'operator', frame)
+        group = _mapping_prefix_group(text, 'operator', frame)
     return str(group.get('color')) if group and group.get('color') else None
 
 
@@ -2842,31 +2887,46 @@ def _dimension_roles(frame: pd.DataFrame, axis_columns: list[str]) -> list[set[s
     return roles
 
 
-def _vendor_label(value: object) -> str:
-    """Extract the vendor portion from an Operator_Vendor-style label."""
-    parts = [part.strip() for part in re.split(r"[_·|/]", str(value)) if part.strip()]
+def _vendor_label(value: object, frame: pd.DataFrame | None = None) -> str:
+    """Extract everything after the longest configured Operator prefix."""
+    text = str(value).strip()
+    prefix_matches: list[str] = []
+    for group in _mapping_groups(frame, 'operator'):
+        for label in [group.get('canonical'), *(group.get('aliases') or [])]:
+            candidate = str(label or '').strip()
+            if not candidate or not text.casefold().startswith(candidate.casefold()):
+                continue
+            remainder = text[len(candidate):]
+            if re.match(r'^\s*[_·|/]', remainder):
+                prefix_matches.append(candidate)
+    if prefix_matches:
+        prefix = max(prefix_matches, key=len)
+        remainder = text[len(prefix):]
+        return re.sub(r'^\s*[_·|/]\s*', '', remainder, count=1).strip()
+    parts = [part.strip() for part in re.split(r"[_·|/]", text) if part.strip()]
     return parts[-1] if parts else str(value).strip()
 
 
 def _vendor_colour(vendor: object, frame: pd.DataFrame | None) -> str | None:
-    group = _mapping_group(_vendor_label(vendor), 'vendor', frame)
+    group = _mapping_group(_vendor_label(vendor, frame), 'vendor', frame)
     return str(group.get('color')) if group and group.get('color') else None
 
 
 def _operator_display_sort_key(value: object, frame: pd.DataFrame | None = None) -> tuple[int, str]:
     """Order configured operators before unknown labels."""
     normalized = _operator_sort_label(value)
-    group = _mapping_group(normalized, 'operator', frame)
+    group = _mapping_group(normalized, 'operator', frame) or _mapping_prefix_group(normalized, 'operator', frame)
     rank = int(group.get('position', 0)) if group else len(_mapping_groups(frame, 'operator'))
-    return rank, normalized.casefold()
+    label = str(group.get('canonical')) if group else normalized
+    return rank, label.casefold()
 
 
 def _vendor_display_sort_key(value: object, frame: pd.DataFrame | None = None) -> tuple[int, str, int, str]:
     """Order ``Operator_Vendor`` values from the two Admin mapping tables."""
     text = str(value).strip()
-    operator, _separator, vendor = text.partition("_")
-    normalized_operator = _operator_sort_label(operator or text)
-    normalized_vendor = _vendor_label(vendor or text).casefold()
+    operator_group = _mapping_prefix_group(text, 'operator', frame)
+    normalized_operator = str(operator_group.get('canonical')) if operator_group else _operator_sort_label(text)
+    normalized_vendor = _vendor_label(text, frame).casefold()
     vendor_group = _mapping_group(normalized_vendor, 'vendor', frame)
     vendor_rank = int(vendor_group.get('position', 0)) if vendor_group else len(_mapping_groups(frame, 'vendor'))
     operator_rank, operator_label = _operator_display_sort_key(normalized_operator, frame)
@@ -2935,7 +2995,7 @@ def _series_colours(
 
     if vendor_levels:
         vendor_level = vendor_levels[0]
-        vendor_keys = [_vendor_label(key[vendor_level]) if len(key) > vendor_level else "" for key in keys]
+        vendor_keys = [_vendor_label(key[vendor_level], frame) if len(key) > vendor_level else "" for key in keys]
         vendor_colours: dict[tuple[str, str, tuple[str, ...]], str] = {}
         family_offsets: dict[str, int] = {}
         neutral_index = 0
@@ -2970,7 +3030,7 @@ def _series_colours(
         palette_keys = []
         for key in keys:
             identity = (
-                f"{operator_for_key[key]} · {_vendor_label(key[vendor_level])}"
+                f"{operator_for_key[key]} · {_vendor_label(key[vendor_level], frame)}"
                 if len(key) > vendor_level else operator_for_key[key]
             )
             if line_chart:

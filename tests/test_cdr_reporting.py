@@ -243,6 +243,16 @@ def test_vendor_aliases_normalise_only_with_workspace_configuration() -> None:
     ]
 
 
+def test_combined_vendor_identity_preserves_an_operator_with_an_underscore() -> None:
+    frame = chart_frame({'Vendor': ['VF_SA_Ericsson', 'VF_NSA_Huawei']})
+    frame.attrs['operator_mappings'] = {'vf_sa': 'VF_SA', 'vf_nsa': 'VF_NSA'}
+    frame.attrs['vendor_mappings'] = {'ericsson': 'Ericsson', 'huawei': 'Huawei'}
+
+    normalized = normalise_operator_aliases(frame)
+
+    assert normalized['Vendor'].tolist() == ['VF_SA_Ericsson', 'VF_NSA_Huawei']
+
+
 def test_vendor_legend_colours_match_the_vendor_bar_colours() -> None:
     entry = CatalogEntry(
         1, "", "", "", "", "CDR-Speech", "LQ", "Average Vertical Bars",
@@ -1782,6 +1792,41 @@ def test_operator_vendor_column_groups_keep_campaign_bars_in_their_operator_pale
     assert colours['Vodafone_Ericsson'] == '#E15759'
     assert colours['Vodafone_Huawei'] == '#8C3637'
     assert colours['3_Ericsson'] == '#F28E2B'
+
+
+def test_exact_operator_mapping_wins_over_underscore_prefix_fallback() -> None:
+    frame = chart_frame({})
+    frame.attrs['operator_mapping_groups'].append({
+        'canonical': 'VF_SA', 'aliases': ['VF SA UK'], 'position': 4, 'color': '#8000FF',
+    })
+    frame.attrs['catalogue_dimension_labels'] = {'__catalog_row_0': ('Operator',)}
+
+    colours = _series_colours(
+        [('VF',), ('VF_SA',)], ['__catalog_row_0'], frame, line_chart=True,
+    )
+
+    assert colours == {('VF',): '#E15759', ('VF_SA',): '#8000FF'}
+
+
+def test_vendor_is_the_complete_suffix_after_the_longest_configured_operator() -> None:
+    frame = chart_frame({})
+    frame.attrs['operator_mapping_groups'].extend([
+        {'canonical': 'VF_SA', 'aliases': [], 'position': 4, 'color': '#8000FF'},
+        {'canonical': 'VF_NSA', 'aliases': [], 'position': 5, 'color': '#0080FF'},
+    ])
+    frame.attrs['vendor_mapping_groups'].append({
+        'canonical': 'Open_RAN', 'aliases': [], 'position': 7, 'color': '#12AB34',
+    })
+    frame.attrs['catalogue_dimension_labels'] = {'__catalog_row_0': ('Vendor',)}
+
+    colours = _series_colours(
+        [('VF_SA_Open_RAN',), ('VF_NSA_Open_RAN',)], ['__catalog_row_0'], frame,
+    )
+
+    assert colours == {
+        ('VF_SA_Open_RAN',): '#12AB34',
+        ('VF_NSA_Open_RAN',): '#0B6A20',
+    }
 
 
 def test_neutral_operator_colour_matches_between_campaign_bars_and_legend() -> None:
