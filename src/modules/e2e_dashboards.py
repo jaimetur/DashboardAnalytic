@@ -114,7 +114,7 @@ DASHBOARD_RENDER_CACHE_VERSION = 1
 DASHBOARD_SELECTION_CACHE_VERSION = 11
 DASHBOARD_SELECTION_CACHE_LIMIT = 128
 DASHBOARD_PROFILE_SELECTION_THRESHOLD = 100_000
-DASHBOARD_CHART_MODEL_CACHE_VERSION = 10
+DASHBOARD_CHART_MODEL_CACHE_VERSION = 11
 DASHBOARD_CHART_MODEL_DISK_LIMIT = 500
 DASHBOARD_CHART_RENDER_WORKERS = 3
 DASHBOARD_PREVIEW_MANIFEST_VERSION = 8
@@ -3118,7 +3118,10 @@ def install_dashboard_routes(core):
     @app.get('/api/e2e-dashboards/chart/{token}/{index}')
     def interactive_chart(token: str, index: int, user=Depends(dashboard_user)):
         payload = chart_model(token, index, user)
-        return JSONResponse(payload, headers={'Cache-Control': 'private, max-age=3600'})
+        # The server already maintains a bounded persistent model cache. A
+        # second browser cache can outlive a renderer change or an explicit
+        # Dashboard refresh and reintroduce an obsolete ordering/model.
+        return JSONResponse(payload, headers={'Cache-Control': 'no-store'})
 
     @app.post('/api/e2e-dashboards/chart/{token}/{index}/refresh')
     def refresh_interactive_chart(token: str, index: int, user=Depends(dashboard_user)):

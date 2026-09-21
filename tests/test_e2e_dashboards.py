@@ -273,6 +273,7 @@ def test_expanded_dashboard_chart_apply_builds_a_new_temporary_model(client):
 
     original = client.get(f'/api/e2e-dashboards/chart/{token}/0')
     assert original.status_code == 200, original.text
+    assert original.headers['cache-control'] == 'no-store'
     assert len(original.json()['series']) == 2
     context = client.get(f'/api/e2e-dashboards/chart/{token}/0/filter-context')
     assert context.status_code == 200, context.text
