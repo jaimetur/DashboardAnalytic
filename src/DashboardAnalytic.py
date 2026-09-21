@@ -54,7 +54,7 @@ from src.modules.analytics import build_analysis
 from src.modules.background_scheduler import BackgroundTaskScheduler
 from src.modules.auth import SessionUser, verify_password
 from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_position, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE, workspace_write_lock
@@ -1754,6 +1754,8 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
             'Label': entry.label_position.title(),
             'Axis X Range': entry.axis_x_range,
             'Axis Y Range': entry.axis_y_range,
+            'Exclude Null/Empty': 'Yes' if entry.exclude_null_empty else '',
+            'Exclude Zero': 'Yes' if entry.exclude_zero else '',
         }
         for entry in entries
     ]
@@ -1773,6 +1775,7 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
             'chart_types': sorted(CHART_TYPES | STRUCTURAL_SLIDE_TYPES, key=str.casefold),
             'legend_positions': ['', 'Top', 'Bottom', 'Left', 'Right'],
             'label_positions': ['', 'None', 'Top', 'Up', 'Middle', 'Down'],
+            'boolean_values': ['', 'Yes'],
             'columns': columns,
         },
     }
@@ -9838,13 +9841,13 @@ def _shared_reporting_preview_frame(
     return frame_key, projected
 
 
-def _temporary_chart_definition_changes(editable: dict[str, Any]) -> dict[str, str]:
+def _temporary_chart_definition_changes(editable: dict[str, Any]) -> dict[str, Any]:
     """Normalise editable values shared by every Interactive Preview entry point."""
     allowed = {
         'chart_title', 'cdr_source', 'kpi', 'chart_type', 'filters',
         'grouping_rows', 'grouping_columns', 'legend', 'legend_position',
         'axis_x_range', 'axis_y_range',
-        'label_position',
+        'label_position', 'exclude_null_empty', 'exclude_zero',
     }
     changes = {key: str(value or '') for key, value in editable.items() if key in allowed}
     if 'legend_position' in changes:
@@ -9856,6 +9859,9 @@ def _temporary_chart_definition_changes(editable: dict[str, Any]) -> dict[str, s
             parse_axis_range(changes[key], axis)
     if 'label_position' in changes:
         changes['label_position'] = parse_label_position(changes['label_position'])
+    for key, label in (('exclude_null_empty', 'Exclude Null/Empty'), ('exclude_zero', 'Exclude Zero')):
+        if key in changes:
+            changes[key] = parse_template_boolean(changes[key], label)
     return changes
 
 
@@ -9906,6 +9912,7 @@ def temporary_chart_preview_context(source: str, identifier: str, chart_index: i
         'legend': entry.legend, 'legend_position': entry.legend_position,
         'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
         'label_position': entry.label_position,
+        'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero,
         'columns_by_source': columns,
     })
 
@@ -10518,6 +10525,8 @@ def _chart_builder_context(payload: dict[str, Any]) -> tuple[pd.DataFrame, Catal
         axis_x_range=str(definition.get('axis_x_range') or '').strip(),
         axis_y_range=str(definition.get('axis_y_range') or '').strip(),
         label_position=parse_label_position(str(definition.get('label_position') or '')),
+        exclude_null_empty=parse_template_boolean(definition.get('exclude_null_empty'), 'Exclude Null/Empty'),
+        exclude_zero=parse_template_boolean(definition.get('exclude_zero'), 'Exclude Zero'),
     )
     parse_axis_range(entry.axis_x_range, 'x')
     parse_axis_range(entry.axis_y_range, 'y')

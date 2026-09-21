@@ -2124,7 +2124,7 @@
         ['kpi', 'KPI'], ['filters', 'Filters'], ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'],
         ['legend', 'Legend'], ['legend_position', 'Legend Position'],
         ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
-        ['label_position', 'Label'],
+        ['label_position', 'Label'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
       ],
       textFields: {chart_title: true}, editableGroupingInputs: true,
       chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Dynamic Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
@@ -2358,6 +2358,16 @@
     const row = Number($('ds-editor-frame').dataset.editorFocusRow);
     if (Number.isInteger(row) && row >= 0) focusTemplateEditorRow(row);
   });
+  const rebuildDashboardAfterTemplateSave = async () => {
+    if (expandedChartMode === 'ppt') return;
+    forgetPrepared();
+    prepared = null;
+    appliedFilterState = '';
+    ++backgroundChartPreloadRequest;
+    chartPayloads.clear();
+    renderedChartPayloads.clear();
+    await prepare();
+  };
   const closeTemplateEditor = async () => {
     const hasUnsavedChanges = templateEditorHasUnsavedChanges();
     if (hasUnsavedChanges && !await window.showConfirmDialog(
@@ -2369,13 +2379,7 @@
     // every reopening parse the template and rebuild the complete table.
     overlay('ds-editor-overlay', false); templateEditorSaved = false;
     if (templateChanged && expandedChartMode !== 'ppt') {
-      forgetPrepared();
-      prepared = null;
-      appliedFilterState = '';
-      ++backgroundChartPreloadRequest;
-      chartPayloads.clear();
-      renderedChartPayloads.clear();
-      await prepare();
+      await rebuildDashboardAfterTemplateSave();
     }
     return true;
   };
@@ -2895,7 +2899,13 @@
   });
   window.addEventListener('message', event => {
     if (event.origin !== window.location.origin || event.source !== $('ds-editor-frame').contentWindow) return;
-    if (event.data?.type === 'dashboard-analytic:template-saved') templateEditorSaved = true;
+    if (event.data?.type === 'dashboard-analytic:template-saved') {
+      templateEditorSaved = true;
+      if (expandedChartMode !== 'ppt') void safe(async () => {
+        await rebuildDashboardAfterTemplateSave();
+        templateEditorSaved = false;
+      })();
+    }
     if (event.data?.type === 'dashboard-analytic:close-template-editor') void closeTemplateEditor();
   });
   let navigationPromptOpen = false;

@@ -2146,7 +2146,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const catalogueHeaders = Array.from(table.querySelectorAll('thead th[data-catalogue-field]'))
     .map((cell) => cell.dataset.catalogueField);
   const fieldColumns = new Set(['Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend']);
-  const assistedFields = new Set(['Layout', 'CDR source', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Label', 'Axis X Range', 'Axis Y Range']);
+  const assistedFields = new Set(['Layout', 'CDR source', 'KPI', 'Chart type', 'Filters', 'Rows Aggregation', 'Column Aggregation', 'Legend', 'Legend Position', 'Label', 'Axis X Range', 'Axis Y Range', 'Exclude Null/Empty', 'Exclude Zero']);
   const groupingColumns = new Set(['Rows Aggregation', 'Column Aggregation']);
   const validationAlert = document.querySelector('[data-catalogue-validation-alert]');
   const validationMessage = validationAlert?.querySelector('[data-catalogue-validation-message]');
@@ -2235,6 +2235,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (field === 'Chart type') return suggestions.chart_types || [];
     if (field === 'Legend Position') return suggestions.legend_positions || [];
     if (field === 'Label') return suggestions.label_positions || [];
+    if (field === 'Exclude Null/Empty' || field === 'Exclude Zero') return suggestions.boolean_values || ['', 'Yes'];
     if (field === 'CDR source') return Object.keys(suggestions.columns || {}).map((source) => source.replace(/^cdr-/, 'CDR-').replace(/(^|-)\w/g, (letter) => letter.toUpperCase()));
     if (fieldColumns.has(field) || field === 'KPI') {
       const row = cell.closest('tr');
@@ -2253,6 +2254,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (field === 'Label') return 'Override bar value labels: None hides them; Top places them outside; Up, Middle and Down place them inside the bar. Leave empty to retain automatic placement.';
     if (field === 'Axis X Range') return 'Optional CDF range in KPI units: [min,max], [min,] or [,max]. Leave empty to keep automatic limits.';
     if (field === 'Axis Y Range') return 'Optional CDF cumulative percentage range from 0 to 100: [min,max], [min,] or [,max]. Leave empty to keep 0–100%.';
+    if (field === 'Exclude Null/Empty') return 'Choose Yes to exclude rows whose plotted value is null or empty. Leave empty to keep them.';
+    if (field === 'Exclude Zero') return 'Choose Yes to exclude rows whose plotted numeric value is exactly zero. Leave empty to keep them.';
     if (field === 'Filters') return 'Build complete conditions from a processed CDR field, operator and real observed value. Conditions are joined with semicolons (AND), and the cell remains manually editable.';
     if (field === 'Rows Aggregation') return 'Select one or more dimensions for the chart category axis or table rows. They are appended with ×.';
     if (field === 'Column Aggregation') return 'Select one or more dimensions for comparison series or table columns. They are appended with ×.';
@@ -2824,6 +2827,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     grouping_columns: rowValue(row, 'Column Aggregation'), legend: rowValue(row, 'Legend'), legend_position: rowValue(row, 'Legend Position'),
     axis_x_range: rowValue(row, 'Axis X Range'), axis_y_range: rowValue(row, 'Axis Y Range'),
     label_position: rowValue(row, 'Label'),
+    exclude_null_empty: rowValue(row, 'Exclude Null/Empty'), exclude_zero: rowValue(row, 'Exclude Zero'),
   });
   const renderChartPreviewSandbox = (row, definition = null) => {
     if (!chartPreviewSandbox || !chartPreviewFields) return;
@@ -2839,7 +2843,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         ['chart_type', 'Chart Type'], ['chart_title', 'Chart Tittle'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['filters', 'Filters'],
         ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
         ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
-        ['label_position', 'Label'],
+        ['label_position', 'Label'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
       ],
       textFields: {chart_title: true},
       // Keep these option sets identical to the persisted Chart Viewer.
@@ -2908,7 +2912,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       {title: 'Update Template?', confirmLabel: 'Update Template', tone: 'warning'},
     );
     if (!accepted) return;
-    const mapping = {chart_title: 'Chart Tittle', chart_type: 'Chart type', cdr_source: 'CDR source', kpi: 'KPI', filters: 'Filters', grouping_rows: 'Rows Aggregation', grouping_columns: 'Column Aggregation', legend: 'Legend', legend_position: 'Legend Position', label_position: 'Label', axis_x_range: 'Axis X Range', axis_y_range: 'Axis Y Range'};
+    const mapping = {chart_title: 'Chart Tittle', chart_type: 'Chart type', cdr_source: 'CDR source', kpi: 'KPI', filters: 'Filters', grouping_rows: 'Rows Aggregation', grouping_columns: 'Column Aggregation', legend: 'Legend', legend_position: 'Legend Position', label_position: 'Label', axis_x_range: 'Axis X Range', axis_y_range: 'Axis Y Range', exclude_null_empty: 'Exclude Null/Empty', exclude_zero: 'Exclude Zero'};
     Object.entries(previewDefinition()).forEach(([key, value]) => {
       const cell = Array.from(chartPreviewRow.querySelectorAll('[data-catalogue-field]')).find((item) => item.dataset.catalogueField === mapping[key]);
       if (!cell) return;
@@ -3306,12 +3310,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (!activeCell) return;
     const field = activeCell.dataset.catalogueField || '';
     const selected = Array.from(options.selectedOptions).map((option) => option.value);
-    if (!selected.length || (!['Legend Position', 'Label'].includes(field) && !selected.some(Boolean))) return;
+    if (!selected.length || (!['Legend Position', 'Label', 'Exclude Null/Empty', 'Exclude Zero'].includes(field) && !selected.some(Boolean))) return;
     const current = activeCell.textContent.trim();
     if (field === 'KPI') {
       const operation = kpiAggregation?.value || '';
       activeCell.textContent = operation ? `${operation}(${selected[0]})` : selected[0];
-    } else if (field === 'Layout' || field === 'CDR source' || field === 'Legend Position' || field === 'Label') {
+    } else if (field === 'Layout' || field === 'CDR source' || field === 'Legend Position' || field === 'Label' || field === 'Exclude Null/Empty' || field === 'Exclude Zero') {
       activeCell.textContent = selected[0];
     } else if (field === 'Chart type') {
       activeCell.textContent = displayChartType(selected[0]);
@@ -4976,7 +4980,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     ['chart_type', 'Chart Type'], ['cdr_source', 'CDR Source'], ['kpi', 'KPI'], ['filters', 'Filters'],
     ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
     ['axis_x_range', 'Axis X Range'], ['axis_y_range', 'Axis Y Range'],
-    ['label_position', 'Label'],
+    ['label_position', 'Label'], ['exclude_null_empty', 'Exclude Null/Empty'], ['exclude_zero', 'Exclude Zero'],
   ];
   const multiFields = new Set(['dataset_ids', 'grouping_rows', 'grouping_columns', 'legend']);
   const parseKpiDefinition = (value) => {
@@ -5149,6 +5153,12 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     }
     else if (key === 'legend_position') (options.legendPositions || ['', 'Top', 'Bottom', 'Left', 'Right']).forEach((value) => control.add(new Option(value || 'No legend position', value, false, normalisePreviewValue(value) === normalisePreviewValue(definition[key]))));
     else if (key === 'label_position') (options.labelPositions || ['', 'None', 'Top', 'Up', 'Middle', 'Down']).forEach((value) => control.add(new Option(value || 'Automatic', value, false, normalisePreviewValue(value) === normalisePreviewValue(definition[key]))));
+    else if (key === 'exclude_null_empty' || key === 'exclude_zero') {
+      const enabled = definition[key] === true || ['yes', 'true', '1'].includes(String(definition[key] || '').trim().toLocaleLowerCase());
+      const keepLabel = key === 'exclude_null_empty' ? 'Keep null/empty values' : 'Keep zero values';
+      control.add(new Option(keepLabel, '', false, !enabled));
+      control.add(new Option('Yes', 'Yes', false, enabled));
+    }
     else {
       const available = columnsFor(definition.cdr_source);
       const definitionValue = key === 'kpi' ? kpiDefinition.field : definition[key];

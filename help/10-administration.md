@@ -104,6 +104,8 @@ This is the canonical authoring reference for templates used by both [E2E Dashbo
 | `Label` | Optional bar-value placement: `None`, `Top`, `Up`, `Middle` or `Down`. Blank retains automatic placement. |
 | `Axis X Range` | Optional CDF limits in KPI units: `[min,max]`, `[min,]` or `[,max]`. Blank keeps the automatic domain. |
 | `Axis Y Range` | Optional CDF cumulative-percentage limits from 0 to 100, using the same syntax. Blank keeps 0–100%. |
+| `Exclude Null/Empty` | `Yes` removes rows whose plotted value is null or empty before chart calculations. Blank keeps them. |
+| `Exclude Zero` | `Yes` removes rows whose plotted numeric value is exactly zero before chart calculations. Blank keeps them. |
 
 For multi-chart slides, the editor visually groups `Slide`, `Slide Tittle`, `Slide Subtittle` and `Layout`; the CSV still stores them on every row.
 
@@ -150,6 +152,8 @@ Choose a KPI and at least one Rows or Column Aggregation dimension. `CDF Line` c
 CDF ranges are visual settings, not data filters. For example, `Axis X Range: [0.01,]` starts the horizontal axis at `0.01` while retaining its automatically calculated maximum; `[,30]` retains the automatic minimum and fixes the maximum at `30`. Empty range cells preserve the existing automatic behaviour. The editor enables these columns only for CDF charts and clears them automatically if the chart type changes to another family.
 
 `Label` overrides value-label placement only for bar charts. `None` hides values, `Top` places them outside the bar, and `Up`, `Middle` and `Down` place them inside near the leading edge, centre or origin edge. For horizontal bars those directions map respectively to outside-right, inside-right, centre and inside-left. An empty cell preserves each renderer's existing fit-aware behaviour; the editor disables and clears this field for non-bar charts.
+
+`Exclude Null/Empty` and `Exclude Zero` are independent and apply to every chart family. For scatter charts the exclusions are checked on both plotted axes; for CDF and Multi KPI CDF charts they are checked on each plotted metric before the cumulative distribution is calculated. This allows a CDF to begin at its first non-zero observation instead of merely hiding the zero-valued section with an axis range.
 
 ### Chart recipes
 

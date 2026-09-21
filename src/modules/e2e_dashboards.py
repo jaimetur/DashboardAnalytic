@@ -89,6 +89,8 @@ class DashboardChartFilterPreviewRequest(BaseModel):
     axis_x_range: str | None = None
     axis_y_range: str | None = None
     label_position: str | None = None
+    exclude_null_empty: str | bool | None = None
+    exclude_zero: str | bool | None = None
 
 
 class DashboardComments(BaseModel):
@@ -1205,6 +1207,7 @@ def install_dashboard_routes(core):
             'legend_position': entry.legend_position,
             'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
             'label_position': entry.label_position,
+            'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero,
             'template_available': template_available, 'datasets_by_source': datasets_by_source,
             'columns_by_source': columns_by_source, 'columns': columns,
         })
@@ -3204,6 +3207,7 @@ def install_dashboard_routes(core):
             'legend_position': entry.legend_position,
             'axis_x_range': entry.axis_x_range, 'axis_y_range': entry.axis_y_range,
             'label_position': entry.label_position,
+            'exclude_null_empty': entry.exclude_null_empty, 'exclude_zero': entry.exclude_zero,
             'template_available': template_available,
             'datasets_by_source': datasets_by_source, 'columns_by_source': columns_by_source,
             'columns': columns_by_source.get(f'cdr-{entry.source_kind}', [str(column) for column in columns if identity(column) not in hidden]),
@@ -3221,7 +3225,7 @@ def install_dashboard_routes(core):
             key: value for key, value in request.model_dump().items()
             if value is not None and key in {
                 'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'grouping_rows',
-                'grouping_columns', 'legend', 'legend_position', 'axis_x_range', 'axis_y_range', 'label_position',
+                'grouping_columns', 'legend', 'legend_position', 'axis_x_range', 'axis_y_range', 'label_position', 'exclude_null_empty', 'exclude_zero',
             }
         }
         # The template owns these required chart attributes. Custom dropdowns
@@ -3235,6 +3239,12 @@ def install_dashboard_routes(core):
                 changes['label_position'] = core.parse_label_position(str(changes['label_position']))
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
+        for key, label in (('exclude_null_empty', 'Exclude Null/Empty'), ('exclude_zero', 'Exclude Zero')):
+            if key in changes:
+                try:
+                    changes[key] = core.parse_template_boolean(changes[key], label)
+                except ValueError as exc:
+                    raise HTTPException(400, str(exc)) from exc
         preview_entry = replace(entry, **changes)
         try:
             core.parse_axis_range(preview_entry.axis_x_range, 'x')
@@ -3414,7 +3424,7 @@ def install_dashboard_routes(core):
             key: value for key, value in request.model_dump().items()
             if value is not None and key in {
                 'filters', 'chart_title', 'cdr_source', 'kpi', 'chart_type', 'grouping_rows',
-                'grouping_columns', 'legend', 'legend_position', 'axis_x_range', 'axis_y_range', 'label_position',
+                'grouping_columns', 'legend', 'legend_position', 'axis_x_range', 'axis_y_range', 'label_position', 'exclude_null_empty', 'exclude_zero',
             }
         }
         for key in ('cdr_source', 'kpi', 'chart_type'):
@@ -3425,6 +3435,12 @@ def install_dashboard_routes(core):
                 changes['label_position'] = core.parse_label_position(str(changes['label_position']))
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
+        for key, label in (('exclude_null_empty', 'Exclude Null/Empty'), ('exclude_zero', 'Exclude Zero')):
+            if key in changes:
+                try:
+                    changes[key] = core.parse_template_boolean(changes[key], label)
+                except ValueError as exc:
+                    raise HTTPException(400, str(exc)) from exc
         updated_entry = replace(entries[index], **changes)
         try:
             core.parse_axis_range(updated_entry.axis_x_range, 'x')

@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_stacked_distribution, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_kpi_expression, parse_label_position, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _cdf_visible_points, _draw_chart_legend, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_stacked_distribution, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_kpi_expression, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
 
 
 def test_kpi_expression_supports_explicit_aggregation_aliases() -> None:
@@ -601,6 +601,73 @@ def test_catalogue_bar_label_position_is_validated_and_serialised() -> None:
     assert b',Down,,' in catalogue_csv([entry])
 
 
+def test_catalogue_null_and_zero_exclusions_are_independent_and_backward_compatible() -> None:
+    assert parse_template_boolean('', 'Exclude Zero') is False
+    assert parse_template_boolean('Yes', 'Exclude Zero') is True
+    with pytest.raises(ValueError, match='Exclude Zero'):
+        parse_template_boolean('Sometimes', 'Exclude Zero')
+
+    previous_visual_schema = (
+        'Slide,Slide Tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Filters,Rows Aggregation,Column Aggregation,Legend,Legend Position,Label,Axis X Range,Axis Y Range\n'
+        '8,Quality,,Layout,Quality,CDR-Data,Metric,CDF Line,,Operator,,,Top,,,\n'
+    )
+    previous = parse_catalog_csv(previous_visual_schema, 'nsa')[0]
+    assert previous.exclude_null_empty is False
+    assert previous.exclude_zero is False
+
+    content = (
+        ','.join(CATALOG_HEADERS)
+        + '\n8,Quality,,Layout,Quality,CDR-Data,Metric,CDF Line,,Operator,,,Top,,,,Yes,Yes\n'
+    )
+    entry = parse_catalog_csv(content, 'nsa')[0]
+    assert entry.exclude_null_empty is True
+    assert entry.exclude_zero is True
+    assert b'Exclude Null/Empty,Exclude Zero' in catalogue_csv([entry])
+
+
+def test_null_and_zero_exclusions_filter_plotted_values_independently() -> None:
+    frame = pd.DataFrame({'Operator': ['A'] * 4, 'Metric': [None, 0.0, 1.0, 2.0]})
+    base = dict(
+        slide=1, slide_title='Chart', slide_subtitle='', layout='Layout', chart_title='Chart',
+        cdr_source='CDR-Data', kpi='Metric', chart_type='CDF Line', legend='', filters='',
+        grouping_rows='Operator', grouping_columns='',
+    )
+
+    without_nulls, _ = prepare_catalog_chart_preview_frame(
+        frame, CatalogEntry(exclude_null_empty=True, **base),
+    )
+    without_zeroes, _ = prepare_catalog_chart_preview_frame(
+        frame, CatalogEntry(exclude_zero=True, **base),
+    )
+    without_either, _ = prepare_catalog_chart_preview_frame(
+        frame, CatalogEntry(exclude_null_empty=True, exclude_zero=True, **base),
+    )
+
+    assert without_nulls['Metric'].tolist() == [0.0, 1.0, 2.0]
+    assert without_zeroes['Metric'].isna().sum() == 1
+    assert without_zeroes['Metric'].dropna().tolist() == [1.0, 2.0]
+    assert without_either['Metric'].tolist() == [1.0, 2.0]
+
+    payload = catalog_chart_payload(without_either, CatalogEntry(exclude_null_empty=True, exclude_zero=True, **base), prefiltered=True)
+    assert payload['series'][0]['samples'] == 2
+    assert payload['domain']['x'][0] == 1.0
+
+    scatter_frame = pd.DataFrame({
+        'Operator': ['A'] * 5,
+        'Y': [10.0, 0.0, 20.0, None, 30.0],
+        'X': [1.0, 2.0, 0.0, 3.0, None],
+    })
+    scatter = catalog_chart_payload(
+        scatter_frame,
+        CatalogEntry(
+            slide=1, slide_title='Scatter', slide_subtitle='', layout='Layout', chart_title='Scatter',
+            cdr_source='CDR-Data', kpi='Y vs X', chart_type='Scatter', legend='', filters='',
+            grouping_rows='Operator', grouping_columns='', exclude_null_empty=True, exclude_zero=True,
+        ),
+    )
+    assert scatter['series'][0]['points'] == [[1.0, 10.0]]
+
+
 def test_catalogue_rejects_visual_settings_for_incompatible_chart_types() -> None:
     non_cdf_range = (
         ','.join(CATALOG_HEADERS)
@@ -638,6 +705,31 @@ def test_chart_payload_applies_cdf_ranges_and_bar_label_override() -> None:
     assert cdf['domain'] == {'x': [0.01, 3.0], 'y': [0.5, 1.0]}
     assert cdf['series'][0]['x'][0] == 0.01
     assert bars['label_position'] == 'down'
+
+
+def test_cdf_visible_points_preserve_the_vertical_step_at_the_automatic_minimum() -> None:
+    values = [0.0, 0.0, 0.0, 1.0]
+
+    assert _cdf_visible_points(values, 0.0, 1.0) == [
+        (0.0, 0.25), (0.0, 0.5), (0.0, 0.75), (1.0, 1.0),
+    ]
+    assert _cdf_visible_points(values, 0.01, 1.0) == [
+        (0.01, 0.75), (1.0, 1.0),
+    ]
+
+    frame = pd.DataFrame({'Operator': ['A'] * 4, 'Metric': values})
+    payload = catalog_chart_payload(
+        frame,
+        CatalogEntry(
+            slide=1, slide_title='CDF', slide_subtitle='', layout='Layout', chart_title='CDF',
+            cdr_source='CDR-Data', kpi='Metric', chart_type='CDF Line', legend='', filters='',
+            grouping_rows='Operator', grouping_columns='',
+        ),
+        prefiltered=True,
+    )
+    assert payload['domain']['x'] == [0.0, 1.0]
+    assert payload['series'][0]['x'] == [0.0, 0.0, 0.0, 1.0]
+    assert payload['series'][0]['y'] == [0.25, 0.5, 0.75, 1.0]
 
 
 @pytest.mark.parametrize('value', ['0,1', '[,]', '[2,1]', '[nan,3]'])

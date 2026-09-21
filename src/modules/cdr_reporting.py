@@ -49,7 +49,8 @@ TEMPLATE_NAMES = {
 CDR_REPORT_VERSION = "2026-09-21-v12"
 REPORTING_KINDS = {"data", "voice", "speech"}
 COMMENT_HINTS = ("having ", "observed", "shows ", "similar performance", "worse ", "improvement", "degradation", "gap ")
-CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label", "Axis X Range", "Axis Y Range")
+VISUAL_CATALOG_HEADERS = ("Slide", "Slide Tittle", "Slide Subtittle", "Layout", "Chart Tittle", "CDR source", "KPI", "Chart type", "Filters", "Rows Aggregation", "Column Aggregation", "Legend", "Legend Position", "Label", "Axis X Range", "Axis Y Range")
+CATALOG_HEADERS = (*VISUAL_CATALOG_HEADERS, "Exclude Null/Empty", "Exclude Zero")
 # Templates created before configurable visual settings remain valid and
 # acquire empty Label/axis cells the next time they are saved in the editor.
 RANGELESS_CATALOG_HEADERS = CATALOG_HEADERS[:13]
@@ -260,6 +261,8 @@ CATALOG_HEADER_ALIASES = {
     "label": "Label",
     "axisxrange": "Axis X Range",
     "axisyrange": "Axis Y Range",
+    "excludenullempty": "Exclude Null/Empty",
+    "excludezero": "Exclude Zero",
     "filter": "Filters",
     "filters": "Filters",
     "rowsaggregation": "Rows Aggregation",
@@ -357,6 +360,8 @@ class CatalogEntry:
     axis_x_range: str = ""
     axis_y_range: str = ""
     label_position: str = ""
+    exclude_null_empty: bool = False
+    exclude_zero: bool = False
 
     @property
     def source_kind(self) -> str | None:
@@ -779,6 +784,18 @@ def parse_label_position(value: str) -> str:
     return normalized
 
 
+def parse_template_boolean(value: object, field: str) -> bool:
+    """Parse an optional Yes/No template switch."""
+    if isinstance(value, bool):
+        return value
+    normalized = str(value or "").strip().casefold()
+    if not normalized or normalized in {"no", "false", "0"}:
+        return False
+    if normalized in {"yes", "true", "1"}:
+        return True
+    raise ValueError(f"{field} must be Yes, No or empty.")
+
+
 def parse_axis_range(value: str, axis: str) -> tuple[float | None, float | None]:
     """Parse a template axis range such as ``[0.01,]`` or ``[,30]``."""
     raw = value.strip()
@@ -824,7 +841,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
     fieldnames = tuple(reader.fieldnames or ())
     accepted_schemas = {
         _canonical_catalog_headers(schema)
-        for schema in (CATALOG_HEADERS, RANGELESS_CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_ROWS_COLUMNS_HEADERS, LEGACY_CATALOG_HEADERS)
+        for schema in (CATALOG_HEADERS, VISUAL_CATALOG_HEADERS, RANGELESS_CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, OLDER_CATALOG_HEADERS, LEGACY_ROWS_COLUMNS_HEADERS, LEGACY_CATALOG_HEADERS)
     }
     if _canonical_catalog_headers(fieldnames) not in accepted_schemas:
         raise ValueError("The report template must use exactly these columns: " + ", ".join(CATALOG_HEADERS))
@@ -862,6 +879,8 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             axis_x_range=(row.get("Axis X Range") or "").strip(),
             axis_y_range=(row.get("Axis Y Range") or "").strip(),
             label_position=parse_label_position(row.get("Label") or ""),
+            exclude_null_empty=parse_template_boolean(row.get("Exclude Null/Empty") or "", "Exclude Null/Empty"),
+            exclude_zero=parse_template_boolean(row.get("Exclude Zero") or "", "Exclude Zero"),
         )
         if entry.source_kind:
             chart_positions[entry.slide] += 1
@@ -876,7 +895,7 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
                 entry.filters, entry.grouping_rows, entry.grouping_columns,
                 entry.axis_x_range, entry.axis_y_range, entry.label_position,
             )
-            if any(value.strip() for value in structural_chart_fields):
+            if any(value.strip() for value in structural_chart_fields) or entry.exclude_null_empty or entry.exclude_zero:
                 raise ValueError(
                     f"Catalog row {line_number} is a {entry.chart_type} and cannot define chart, CDR, KPI, "
                     "legend, filter or grouping values."
@@ -1035,6 +1054,8 @@ def catalogue_csv(entries: list[CatalogEntry]) -> bytes:
             "Label": entry.label_position.title(),
             "Axis X Range": entry.axis_x_range,
             "Axis Y Range": entry.axis_y_range,
+            "Exclude Null/Empty": "Yes" if entry.exclude_null_empty else "",
+            "Exclude Zero": "Yes" if entry.exclude_zero else "",
         })
     return output.getvalue().encode("utf-8")
 
@@ -2513,6 +2534,7 @@ def catalog_chart_hover_targets(
     try:
         if not prefiltered:
             data = _apply_catalog_filters(data, render_entry, multivendor, _metric_column(data, spec))
+        data = _exclude_chart_values(data, render_entry, spec, multivendor)
         data, group, period = _apply_catalog_grouping(data, render_entry, multivendor, _metric_column(data, spec))
     except ValueError:
         return []
@@ -4242,24 +4264,25 @@ def _cdf_domains(
 
 
 def _cdf_visible_points(values: list[float], low: float, high: float) -> list[tuple[float, float]]:
-    """Return a clipped CDF polyline, including exact viewport boundaries."""
+    """Return a clipped CDF polyline without collapsing vertical steps."""
     if not values:
         return []
     total = len(values)
-    start = bisect_right(values, low)
+    start = bisect_left(values, low)
     end = bisect_right(values, high)
-    points = [(low, start / total)]
+    points: list[tuple[float, float]] = []
+    # If the viewport starts after observations that are no longer visible,
+    # anchor the line at their cumulative level. When ``low`` is the natural
+    # minimum there is no synthetic zero-percent point: retaining every
+    # repeated minimum reproduces the original vertical CDF step.
+    if start:
+        points.append((low, start / total))
     for index in range(start, end):
         value = float(values[index])
         cumulative = (index + 1) / total
-        if points[-1][0] == value:
-            points[-1] = (value, cumulative)
-        else:
-            points.append((value, cumulative))
+        points.append((value, cumulative))
     terminal = end / total
-    if points[-1][0] == high:
-        points[-1] = (high, terminal)
-    else:
+    if not points or points[-1][0] != high:
         points.append((high, terminal))
     return points
 
@@ -4275,6 +4298,8 @@ def _render_cdf_line(
     layout_legend_position: str | None = None,
     axis_x_range: str = "",
     axis_y_range: str = "",
+    exclude_null_empty: bool = False,
+    exclude_zero: bool = False,
 ) -> BytesIO:
     if frame.empty or not group or not metric: return _empty_chart(title)
     campaign_column = _period_column(frame)
@@ -4295,6 +4320,8 @@ def _render_cdf_line(
     data[metric] = pd.to_numeric(data[metric], errors="coerce")
     # Optional campaign metadata must not discard otherwise valid CDF samples.
     data = data.dropna(subset=[metric, *grouping_columns])
+    if exclude_zero:
+        data = data[data[metric].ne(0)]
     if data.empty: return _empty_chart(title)
     combinations = _hierarchical_unique_keys(data, grouping_columns)
     series_data: list[tuple[tuple[str, ...], pd.DataFrame, list[float]]] = []
@@ -4776,10 +4803,41 @@ def prepare_catalog_chart_preview_frame(
     filtered.attrs["catalogue_calculated_dimensions"] = render_entry.calculated_dimensions
     filtered.attrs["catalogue_cdr_source"] = render_entry.cdr_source
     metric = _metric_column(filtered, spec)
-    return (
-        filtered if template_filters_applied else _apply_catalog_filters(filtered, render_entry, multivendor, metric),
-        render_entry,
+    filtered = filtered if template_filters_applied else _apply_catalog_filters(
+        filtered, render_entry, multivendor, metric,
     )
+    return _exclude_chart_values(filtered, render_entry, spec, multivendor), render_entry
+
+
+def _exclude_chart_values(
+    frame: pd.DataFrame,
+    entry: CatalogEntry,
+    spec: dict[str, object],
+    multivendor: bool,
+) -> pd.DataFrame:
+    """Exclude configured missing and/or exact-zero values from plotted measures."""
+    if (not entry.exclude_null_empty and not entry.exclude_zero) or frame.empty:
+        return frame
+    columns: list[str] = []
+    metric = _metric_column(frame, spec)
+    if metric and spec.get("kind") != "multi_cdf":
+        columns.append(metric)
+    if spec.get("kind") in {"scatter", "map"}:
+        resolved = _column(frame, spec.get("x_metric", ()))
+        if resolved:
+            columns.append(resolved)
+    mask = pd.Series(True, index=frame.index)
+    for column in dict.fromkeys(columns):
+        series = frame[column]
+        populated = series.notna() & series.astype(str).str.strip().ne("")
+        numeric = pd.to_numeric(series, errors="coerce")
+        if entry.exclude_null_empty:
+            mask &= populated
+        if entry.exclude_zero:
+            mask &= ~(numeric.notna() & numeric.eq(0))
+    result = frame.loc[mask].copy()
+    result.attrs = frame.attrs.copy()
+    return result
 
 
 INTERACTIVE_CHART_POINTS_PER_SERIES = 900
@@ -4895,6 +4953,7 @@ def catalog_chart_payload(
         filtered = _apply_catalog_filters(filtered, render_entry, multivendor, metric)
     filtered.attrs["catalogue_calculated_dimensions"] = render_entry.calculated_dimensions
     filtered.attrs["catalogue_cdr_source"] = render_entry.cdr_source
+    filtered = _exclude_chart_values(filtered, render_entry, spec, multivendor)
     metric = _metric_column(filtered, spec)
     try:
         data, group, period = _apply_catalog_grouping(filtered, render_entry, multivendor, metric)
@@ -4945,6 +5004,8 @@ def catalog_chart_payload(
             numeric["__cdf_campaign"] = campaign_values.map(campaign_labels)
         numeric[candidate_metric] = pd.to_numeric(numeric[candidate_metric], errors="coerce")
         numeric = numeric.dropna(subset=[candidate_metric, *grouping_columns])
+        if render_entry.exclude_zero:
+            numeric = numeric[numeric[candidate_metric].ne(0)]
         if numeric.empty:
             return None
         # Some imported Tableau catalogues include per-test identifiers ahead
@@ -5632,6 +5693,7 @@ def _chart_for_catalog_entry(
     try:
         if not prefiltered:
             frame = _apply_catalog_filters(frame, entry, multivendor, metric)
+        frame = _exclude_chart_values(frame, entry, spec, multivendor)
         frame, group, period = _apply_catalog_grouping(frame, entry, multivendor, metric)
     except ValueError:
         # A partial CDR upload should leave only the affected chart empty, not fail the report.
@@ -5658,6 +5720,7 @@ def _chart_for_catalog_entry(
                     candidate, frame, group, period, resolved, legend_dimensions,
                     renderer_legend_position, layout_legend_position=legend_position,
                     axis_x_range=entry.axis_x_range, axis_y_range=entry.axis_y_range,
+                    exclude_null_empty=entry.exclude_null_empty, exclude_zero=entry.exclude_zero,
                 ))
         return _combine_charts(chart_title, charts) if charts else _empty_chart(chart_title)
     if chart_type == "distribution stacked vertical bars":
@@ -5689,6 +5752,7 @@ def _chart_for_catalog_entry(
         chart_title, frame, group, period, metric, (), renderer_legend_position,
         layout_legend_position=legend_position,
         axis_x_range=entry.axis_x_range, axis_y_range=entry.axis_y_range,
+        exclude_null_empty=entry.exclude_null_empty, exclude_zero=entry.exclude_zero,
     ))
 
 

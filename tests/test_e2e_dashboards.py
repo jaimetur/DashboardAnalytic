@@ -64,6 +64,17 @@ def test_template_visual_controls_follow_the_selected_chart_type():
     assert "if (control.name === 'chart_type') syncConditionalVisualControls();" in app_script
     assert "['axis_x_range', 'Axis X Range']" in reporting_template
     assert "['label_position', 'Label']" in reporting_template
+    assert "['exclude_null_empty', 'Exclude Null/Empty']" in app_script
+    assert "['exclude_zero', 'Exclude Zero']" in app_script
+
+
+def test_saving_the_embedded_template_rebuilds_the_dashboard_immediately():
+    script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+
+    assert 'const rebuildDashboardAfterTemplateSave = async () =>' in script
+    assert "if (event.data?.type === 'dashboard-analytic:template-saved')" in script
+    assert 'await rebuildDashboardAfterTemplateSave();' in script
+    assert 'templateEditorSaved = false;' in script
 
 
 def test_compact_landscape_dashboard_comments_are_docked_to_the_bottom():
@@ -321,6 +332,8 @@ def test_expanded_dashboard_chart_apply_builds_a_new_temporary_model(client):
     context = client.get(f'/api/e2e-dashboards/chart/{token}/0/filter-context')
     assert context.status_code == 200, context.text
     assert context.json()['kpi'] == 'Mean_Data_Rate'
+    assert context.json()['exclude_null_empty'] is False
+    assert context.json()['exclude_zero'] is False
 
     preview = client.post(f'/api/e2e-dashboards/chart/{token}/0/filter-preview', json={
         'chart_title': 'Filtered operator preview',
@@ -345,16 +358,21 @@ def test_expanded_dashboard_chart_apply_builds_a_new_temporary_model(client):
     updated = client.post(f'/api/e2e-dashboards/chart/{token}/0/update-template', json={
         'chart_title': 'Updated template chart', 'grouping_rows': 'Test_Name × Operator',
         'grouping_columns': 'City', 'legend_position': 'Right',
+        'exclude_null_empty': 'Yes', 'exclude_zero': 'Yes',
     })
     assert updated.status_code == 200, updated.text
     entry = core.load_template_catalogue(core.repository.report_template_content('nsa', 'Dashboard test'), 'nsa')[0]
     assert (entry.chart_title, entry.grouping_rows, entry.grouping_columns, entry.legend_position) == (
         'Updated template chart', 'Test_Name × Operator', 'City', 'right',
     )
+    assert entry.exclude_null_empty is True
+    assert entry.exclude_zero is True
     refreshed_context = client.get(f'/api/e2e-dashboards/chart/{token}/0/filter-context')
     assert refreshed_context.status_code == 200, refreshed_context.text
     assert refreshed_context.json()['chart_title'] == 'Updated template chart'
     assert refreshed_context.json()['grouping_rows'] == 'Test_Name × Operator'
+    assert refreshed_context.json()['exclude_null_empty'] is True
+    assert refreshed_context.json()['exclude_zero'] is True
     assert updated.json()['updated_at']
 
 
