@@ -41,6 +41,8 @@ fi
 bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$info_plist_source")"
 temporary_directory="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/dashboard-analytic-installer.XXXXXX")"
 temporary_executable="${temporary_directory}/DashboardAnalyticLauncher"
+package_root="${temporary_directory}/root"
+component_plist="${temporary_directory}/components.plist"
 temporary_package="${temporary_directory}/Dashboard Analytic Installer.pkg"
 
 cleanup() {
@@ -67,8 +69,14 @@ trap cleanup EXIT INT TERM HUP
 /usr/bin/codesign --force --sign - "$app_bundle"
 /usr/bin/xattr -cr "$app_bundle"
 
+/bin/mkdir -p "$package_root"
+/usr/bin/ditto --norsrc --noqtn "$app_bundle" "${package_root}/Dashboard Analytic.app"
+/usr/bin/pkgbuild --analyze --root "$package_root" "$component_plist"
+/usr/libexec/PlistBuddy -c 'Set :0:BundleIsRelocatable false' "$component_plist"
+
 COPYFILE_DISABLE=1 /usr/bin/pkgbuild \
-    --component "$app_bundle" \
+    --root "$package_root" \
+    --component-plist "$component_plist" \
     --install-location "/Applications" \
     --identifier "com.jaimetur.dashboardanalytic.installer" \
     --version "$bundle_version" \

@@ -13,6 +13,7 @@
 - Consolidated macOS launcher packaging into a single reproducible build script that compiles and signs the universal ARM64/x86_64 application under `macos-launcher/` and writes its installer package under `macos-installer/`, keeping both deliverables out of the project root.
 
 #### 🐛 Bug fixes:
+- The macOS installer now disables application-bundle relocation explicitly, ensuring it installs Dashboard Analytic into `/Applications` even when another copy of the app exists inside the project.
 
 #### 📚 Documentation:
 
