@@ -3597,8 +3597,12 @@ def install_dashboard_routes(core):
                 warmup = dashboard_warmup_cancellations.get((workspace, dashboard_id))
                 warmup_active = bool(warmup and not warmup.get('requested'))
             if definitions and not warmup_active:
+                # Status polling must only ensure that a missing warm-up is
+                # queued.  Forcing it here cancels an already submitted
+                # low-priority run between two polls, so no universe can
+                # reach its persisted manifest after an application restart.
                 schedule_dashboard_warmup(
-                    workspace, dashboard_id, raw_definition, username, force=True,
+                    workspace, dashboard_id, raw_definition, username,
                 )
                 with lock:
                     warmup = dashboard_warmup_cancellations.get((workspace, dashboard_id))
