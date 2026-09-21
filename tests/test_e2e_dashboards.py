@@ -70,6 +70,38 @@ def test_dashboard_job_panels_use_the_stack_spacing_without_an_empty_filter_row(
     assert 'margin-top:0;' in stylesheet
 
 
+def test_dashboard_discard_restores_saved_filters_and_universe_before_navigation():
+    script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+
+    assert "const discardPart = (part) => {" in script
+    assert "copyDefinitionFields(definition, savedDashboardDefinition(), fields);" in script
+    assert "if (part === 'universe') rememberUniverse();" in script
+    assert "else if (choice === 'secondary') discardPart('filters');" in script
+    assert "else if (choice === 'secondary') discardPart('universe');" in script
+
+
+def test_dashboard_prepare_retries_one_transient_proxy_501_response():
+    script = (Path(__file__).parents[1] / 'src/web_interface/static/js/e2e_dashboards.js').read_text(encoding='utf-8')
+
+    assert "path.startsWith('/prepare') && response.status === 501" in script
+    assert "await new Promise(resolve => window.setTimeout(resolve, 250));" in script
+
+
+def test_dashboard_warmup_retries_contention_and_compact_panel_headers_stay_aligned():
+    dashboard_module = (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
+    app_stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/app.css').read_text(encoding='utf-8')
+    dashboard_stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
+
+    assert 'dashboard_warmup_pending: dict[tuple[str, str], tuple[dict, str]] = {}' in dashboard_module
+    assert 'def retry_later() -> None:' in dashboard_module
+    assert 'core.submit_background_task(delayed_retry)' in dashboard_module
+    assert '.collapsible-summary .collapse-chip {' in app_stylesheet
+    assert 'position: absolute; top: .7rem; right: .75rem;' in app_stylesheet
+    assert '.report-charts-panel .report-charts-chart-count .pill {' in app_stylesheet
+    assert '#ds-viewer.ds-presentation-active .ds-viewer-primary-controls>.ds-viewer-tool-actions {' in dashboard_stylesheet
+    assert 'visibility:visible!important;' in dashboard_stylesheet
+
+
 def test_compact_landscape_presentation_settings_are_vertically_scrollable():
     stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
 
@@ -468,14 +500,13 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "document.addEventListener('visibilitychange'" in dashboard_script
     assert "document.documentElement.scrollHeight - window.innerHeight" in dashboard_script
     assert "const restorePageState = navigationEntry?.type === 'reload';" in dashboard_script
-    assert "const restoreOpenDashboard = restorePageState;" in dashboard_script
     assert "if (!restorePageState) resetScroll();" in dashboard_script
     assert "if (restorePageState) restoreScroll(); else resetScroll();" in dashboard_script
     assert "sessionStorage.removeItem(scrollStorageKey);" in dashboard_script
-    assert "last = restoreOpenDashboard ? sessionStorage.getItem(openStorageKey) || '' : '';" in dashboard_script
-    assert "if (!restoreOpenDashboard) sessionStorage.removeItem(openStorageKey);" in dashboard_script
+    assert "last = sessionStorage.getItem(openStorageKey) || '';" in dashboard_script
+    assert 'const restoreOpenDashboard = restorePageState;' not in dashboard_script
     assert "if (dashboards[last]) await openDashboard(last);" in dashboard_script
-    assert dashboard_script.index("action(id === activeId ? 'Close Dashboard' : 'Open Dashboard'") < dashboard_script.index("action('View Dashboard', '◉'")
+    assert dashboard_script.index("action('View Dashboard', 'View Dashboard'") < dashboard_script.index("filtersAreOpen ? 'Close Filters' : 'Open Filters'")
     assert "preview_snapshot = replace(" in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     assert "The template owns these required chart attributes." in (Path(__file__).parents[1] / 'src/modules/e2e_dashboards.py').read_text(encoding='utf-8')
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
@@ -505,8 +536,10 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'id="ds-ppt-charts-panel" open data-panel-state-key="e2e-dashboards:ppt-charts" hidden' in dashboard_template
     assert "$('ds-ppt-charts-panel').hidden = false;" in dashboard_script
     assert "$('ds-ppt-charts-panel').hidden = true;" in dashboard_script
-    assert "$('ds-filter-panel').hidden = false; document.dispatchEvent(new CustomEvent('page-panel-navigation:update'));" in dashboard_script
-    assert "$('ds-filter-panel').hidden = true; document.dispatchEvent(new CustomEvent('page-panel-navigation:update'));" in dashboard_script
+    assert "dashboardFiltersOpen = true;" in dashboard_script
+    assert "$('ds-filter-panel').hidden = false;" in dashboard_script
+    assert "dashboardFiltersOpen = false;" in dashboard_script
+    assert "$('ds-filter-panel').hidden = true;" in dashboard_script
     chart_builder_template = (Path(__file__).parents[1] / 'src/web_interface/templates/chart_builder.html').read_text(encoding='utf-8')
     assert '<p class="eyebrow">Chart Builder</p><h2>Ad-Hoc Analysis</h2>' in chart_builder_template
     assert 'data-page-panel-label="Interactive Preview"' in chart_builder_template
@@ -682,7 +715,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'function datePicker(key, label)' in dashboard_script
     assert "previous.addEventListener('click', () => { month.setMonth(month.getMonth() - 1); render(); });" in dashboard_script
     assert "button.addEventListener('click', () => { input.value = iso; definition[key] = iso; automatic.setAttribute('aria-pressed', 'false'); updateFilterControlState(wrapper, dateState(key), true); menu.hidden = true; filterChanged(); });" in dashboard_script
-    assert 'const current = (selected || available).filter(Boolean);' in dashboard_script
+    assert 'const current = (hasStoredSelection ? selected : available).filter(Boolean);' in dashboard_script
     assert "const filterControlState = (current, applied, saved, equal = sameFilterValues) =>" in dashboard_script
     assert "if (!equal(current, applied)) return 'unapplied';" in dashboard_script
     assert "return equal(applied, saved) ? '' : 'applied-unsaved';" in dashboard_script
@@ -766,7 +799,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "'Waiting to prepare Dashboard dataset'" in dashboard_module
     assert "'progress': task.get('progress', 0)," in dashboard_module
     assert "@app.get('/api/e2e-dashboards/preparation-progress/{preparation_id}')" in dashboard_module
-    assert "progress(62, 'Counting Filtered Universe rows in the combined CDR tables')" in dashboard_module
+    assert "'Counting reduced and filtered Universe rows in the combined CDR tables'" in dashboard_module
+    assert "f'Counting Filtered Universe CDR-{kind.title()} rows in the combined table'" in dashboard_module
     assert "progress(78, 'Restoring cached row counts and filter options')" in dashboard_module
     assert "update_preparation_progress(94, 'Saving the reusable Dashboard preparation cache')" in dashboard_module
     assert 'with lock, task_repository.connection() as connection:' not in dashboard_module
@@ -800,7 +834,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'const dashboardPreparationTokens = new Map();' in dashboard_script
     assert "if (!dashboardPreparationTokens.has(id)) dashboardStatuses.set(id, value);" in dashboard_script
     assert "bind('ds-generate-ppt', async () => {" in dashboard_script
-    assert "heading.replaceChildren(document.createTextNode(name ? 'Active Dashboard: ' : 'Active Dashboard'));" in dashboard_script
+    assert "heading.replaceChildren(document.createTextNode(name ? 'Dashboard Filters: ' : 'Dashboard Filters'));" in dashboard_script
     assert "heading.append(node('span', name.toUpperCase(), 'ds-active-dashboard-name'))" in dashboard_script
     assert 'setActiveDashboardHeading(definition.name);' in dashboard_script
     assert "setActiveDashboardHeading('');" in dashboard_script
@@ -811,21 +845,21 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "const setViewEnabled = enabled => { $('ds-view').disabled = !enabled; syncDashboardViewActions(); syncDashboardPptActions(); };" in dashboard_script
     assert "const payload = await api('/statuses', 'POST', statusDefinitions);" in dashboard_script
     assert "window.setInterval(refreshDashboardStatuses, 2000);" in dashboard_script
-    assert "let previousDashboardName = '';" in app_script
-    assert 'if (dashboardName && dashboardName !== previousDashboardName)' in app_script
+    assert "const dashboardName = String(task.dashboard_name || '');" in app_script
+    assert "? `Dashboard “${dashboardName}”: ${String(task.label || 'Background task')}`" in app_script
     assert 'completedByWorkspace.forEach((entries) =>' in app_script
     assert 'entry.group.tasks.splice(Math.min(entry.position + offset, entry.group.tasks.length), 0, entry.task);' in app_script
     selection_key_source = dashboard_module[dashboard_module.index('def persistent_selection_key'):dashboard_module.index('def selected_date_bounds')]
     assert "'scope': definition.scope," not in selection_key_source
     assert "'schema': DASHBOARD_SELECTION_CACHE_VERSION," in selection_key_source
-    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 10' in dashboard_module
+    assert 'DASHBOARD_SELECTION_CACHE_VERSION = 11' in dashboard_module
     assert "kind: sorted([" in selection_key_source
     assert "kind: sorted(set(dataset_ids))" in selection_key_source
     assert "field: sorted(set(values))" in selection_key_source
     assert '{entry_key}:{operator_mapping_key}' in dashboard_module
     assert "'rendering_only': rendering_only," in dashboard_module
     assert 'def materialize_selection(' in dashboard_module
-    assert 'use_profile_options=False, progress=None,' in dashboard_module
+    assert 'use_profile_options=False, known_full_row_counts=None, progress=None,' in dashboard_module
     assert 'use_profile_options=use_profile_options,' in dashboard_module
     assert 'DASHBOARD_CHART_RENDER_WORKERS = 3' in dashboard_module
     assert 'DASHBOARD_PREVIEW_MANIFEST_VERSION = 8' in dashboard_module

@@ -319,7 +319,15 @@
     syncPreparationRefresh();
   };
   const api = async (path = '', method = 'GET', body, signal) => {
-    const response = await fetch(`/api/e2e-dashboards${path}`, {method, signal, cache: 'no-store', headers: {'Content-Type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
+    const request = () => fetch(`/api/e2e-dashboards${path}`, {method, signal, cache: 'no-store', headers: {'Content-Type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
+    let response = await request();
+    // Some reverse proxies can return a transient, non-JSON 501 while the
+    // preparation worker route is being refreshed. A single retry is safe:
+    // a 501 response means the POST was rejected before Dashboard processing.
+    if (method === 'POST' && path.startsWith('/prepare') && response.status === 501 && !signal?.aborted) {
+      await new Promise(resolve => window.setTimeout(resolve, 250));
+      response = await request();
+    }
     const contentType = String(response.headers.get('content-type') || '').toLocaleLowerCase();
     const payload = contentType.includes('application/json') ? await response.json() : null;
     if (!response.ok) {
@@ -1638,6 +1646,13 @@
     for (const field of fields) target[field] = structuredClone(source[field]);
     return target;
   };
+  const discardPart = (part) => {
+    if (!definition) return;
+    const fields = part === 'filters' ? filterDefinitionFields : universeDefinitionFields;
+    copyDefinitionFields(definition, savedDashboardDefinition(), fields);
+    if (part === 'universe') rememberUniverse();
+    updateDirtyState(); sources(); facets();
+  };
   async function preparePart(part) {
     const draft = definition;
     const request = canonicalDashboardDefinition(structuredClone(draft));
@@ -2837,7 +2852,8 @@
             },
           );
           if (choice === 'confirm') await save();
-          else if (choice !== 'secondary') return;
+          else if (choice === 'secondary') discardPart('filters');
+          else return;
           resolvedDashboardChanges = true;
         }
         if (hasUnsavedUniverseChanges()) {
@@ -2851,7 +2867,8 @@
             },
           );
           if (choice === 'confirm') await savePart('universe');
-          else if (choice !== 'secondary') return;
+          else if (choice === 'secondary') discardPart('universe');
+          else return;
           resolvedDashboardChanges = true;
         }
         if (!resolvedDashboardChanges && !await window.showConfirmDialog(

@@ -2737,12 +2737,12 @@ def test_dashboard_library_open_close_and_view_actions_include_labels() -> None:
     styles = (root / 'css' / 'e2e_dashboards.css').read_text(encoding='utf-8')
 
     assert "action('View Dashboard', 'View Dashboard'" in script
-    assert "id === activeId ? 'Close Filters' : 'Open Filters'" in script
-    assert script.index("action('View Dashboard', 'View Dashboard'") < script.index("id === activeId ? 'Close Filters' : 'Open Filters'")
+    assert "filtersAreOpen ? 'Close Filters' : 'Open Filters'" in script
+    assert script.index("action('View Dashboard', 'View Dashboard'") < script.index("filtersAreOpen ? 'Close Filters' : 'Open Filters'")
     assert 'width:fit-content!important;min-width:max-content!important' in styles
     assert '.ds-dashboard-action.ds-dashboard-close' in styles
     assert "primaryActionLabel(view, 'View', 'Dashboard');" in script
-    assert "primaryActionLabel(open, id === activeId ? 'Close' : 'Open', 'Filters');" in script
+    assert "primaryActionLabel(open, filtersAreOpen ? 'Close' : 'Open', 'Filters');" in script
     assert 'grid-column:span 2' in styles
     assert '.ds-dashboard-action-label{display:contents}' in styles
     assert 'height:3.35rem!important' in styles
@@ -2789,7 +2789,8 @@ def test_dashboard_filters_panel_defaults_closed_and_persists_for_the_session() 
     panel = template.split('id="ds-filter-panel"', 1)[1].split('>', 1)[0]
     assert ' open' not in panel
     assert 'data-panel-state-storage="session"' in panel
-    assert "panel.dataset.panelStateStorage === 'session' ? window.sessionStorage : window.localStorage" in app_script
+    assert "const sessionScoped = panel.dataset.panelStateStorage === 'session';" in app_script
+    assert 'const storage = sessionScoped ? window.sessionStorage : window.localStorage;' in app_script
 
 
 def test_dashboard_open_hydrates_saved_state_before_preparation_catalogues() -> None:
@@ -2849,7 +2850,7 @@ def test_dashboard_ppt_job_is_queued_before_preparation_and_chart_rendering() ->
     dashboard_source = (root / 'modules' / 'e2e_dashboards.py').read_text(encoding='utf-8')
     script = (root / 'web_interface' / 'static' / 'js' / 'e2e_dashboards.js').read_text(encoding='utf-8')
 
-    assert 'never make this button wait for' in script
+    assert 'never make the library button wait for' in script
     assert 'scopePreview = await api' not in script
     assert 'for (const index of chartIndexes)' not in script
     assert 'Inserting the export job must remain quick.' in dashboard_source

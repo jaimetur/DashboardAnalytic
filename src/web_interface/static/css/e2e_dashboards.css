@@ -747,7 +747,7 @@
 }
 
 /* Presentation mode dedicates the complete viewport to the current slide.
-   The stop control remains as a small floating affordance. */
+   Pause/Resume and Stop remain as small floating controls. */
 #ds-viewer.ds-presentation-active { padding:0; background:#000; backdrop-filter:none; }
 #ds-viewer.ds-presentation-active .ds-viewer-panel {
   width:100vw!important;
@@ -1018,7 +1018,7 @@
   }
 }
 
-/* Presentation keeps only the Stop control over the full-screen slide. */
+/* Presentation keeps Pause/Resume and Stop over the full-screen slide. */
 #ds-viewer.ds-presentation-active .ds-viewer-panel>.ds-actions,
 #ds-viewer.ds-presentation-active .ds-viewer-navigation-footer { display:none!important; }
 #ds-viewer.ds-presentation-active .ds-slide-comments { display:none!important; }
@@ -1068,6 +1068,11 @@
   right:max(.55rem,env(safe-area-inset-right));
   display:flex;
   padding:0;
+}
+#ds-viewer.ds-presentation-active .ds-viewer-primary-controls,
+#ds-viewer.ds-presentation-active .ds-viewer-primary-controls>.ds-viewer-tool-actions {
+  visibility:visible!important;
+  opacity:1!important;
 }
 
 /* Viewer controls use comfortable touch targets and clear separation. */

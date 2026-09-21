@@ -2946,7 +2946,7 @@ def test_report_chart_generation_failures_return_json_and_are_logged(client, mon
     assert app_log['log_type'] == 'Error'
     assert app_log['username'] == 'admin'
     assert app_log['executed_by'] == 'system'
-    assert app_log['summary'].startswith("Chart Set job 1 failed: Slide ")
+    assert re.match(r'^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] Chart Set job 1 failed: Slide ', app_log['summary'])
     assert app_log['summary'].endswith(': Synthetic renderer failure')
     assert 'Synthetic renderer failure' in client.get('/reporting').text
     app_logs_page = client.get('/app-logs').text
@@ -2981,7 +2981,10 @@ def test_report_generation_failures_show_the_error_and_are_logged(client, monkey
     assert job['status'] == 'failed'
     assert job['error'] == 'Synthetic PowerPoint failure'
     app_log = next(row for row in app_module.build_app_logs() if row['action'] == 'export_netcheck_cdr_report_failed')
-    assert app_log['summary'] == 'Report job 1 failed: Synthetic PowerPoint failure'
+    assert re.match(
+        r'^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] Report job 1 failed: Synthetic PowerPoint failure$',
+        app_log['summary'],
+    )
     assert 'Synthetic PowerPoint failure' in client.get('/reporting').text
     assert 'Report job 1 failed: Synthetic PowerPoint failure' in client.get('/app-logs').text
 

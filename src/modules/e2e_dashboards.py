@@ -227,6 +227,8 @@ def install_dashboard_routes(core):
     dashboard_warmup_runs: set[tuple[str, str]] = set()
     dashboard_warmup_checked: set[tuple[str, str]] = set()
     dashboard_warmup_cancellations: dict[tuple[str, str], dict[str, bool]] = {}
+    dashboard_warmup_pending: dict[tuple[str, str], tuple[dict, str]] = {}
+    dashboard_warmup_retries: set[tuple[str, str]] = set()
     dashboard_work_gate = Lock()
 
     def workspace_key():
@@ -2299,13 +2301,59 @@ def install_dashboard_routes(core):
         """Queue missing standard universes without delaying an interactive open."""
         key = (workspace, dashboard_id)
         with lock:
-            if key in dashboard_warmup_runs or (not force and key in dashboard_warmup_checked):
+            if not force and key in dashboard_warmup_checked:
+                return
+            dashboard_warmup_pending[key] = (dict(raw_definition), username)
+            if force:
+                dashboard_warmup_checked.discard(key)
+            if key in dashboard_warmup_runs:
+                if force:
+                    dashboard_warmup_cancellations.get(key, {})['requested'] = True
                 return
             dashboard_warmup_runs.add(key)
             cancellation = dashboard_warmup_cancellations[key] = {'requested': False}
+            scheduled_definition = dict(raw_definition)
+
+        def retry_later() -> None:
+            with lock:
+                if key in dashboard_warmup_retries or key not in dashboard_warmup_pending:
+                    return
+                dashboard_warmup_retries.add(key)
+
+            def delayed_retry() -> None:
+                Event().wait(0.5)
+                with lock:
+                    dashboard_warmup_retries.discard(key)
+                    pending = dashboard_warmup_pending.get(key)
+                if pending is not None:
+                    pending_definition, pending_username = pending
+                    try:
+                        schedule_dashboard_warmup(
+                            workspace, dashboard_id, pending_definition, pending_username,
+                        )
+                    except RuntimeError:
+                        # Application shutdown can race this low-priority retry.
+                        # The next Dashboard-library visit will queue it again.
+                        with lock:
+                            dashboard_warmup_runs.discard(key)
+                            dashboard_warmup_cancellations.pop(key, None)
+                            dashboard_warmup_retries.discard(key)
+                            dashboard_warmup_pending.pop(key, None)
+
+            try:
+                core.submit_background_task(delayed_retry)
+            except RuntimeError:
+                # The application is already shutting down. The next
+                # Dashboard-library visit will queue the warm-up again.
+                with lock:
+                    dashboard_warmup_runs.discard(key)
+                    dashboard_warmup_cancellations.pop(key, None)
+                    dashboard_warmup_retries.discard(key)
+                    dashboard_warmup_pending.pop(key, None)
 
         def run() -> None:
             completed_check = False
+            retry_needed = False
             warmed = 0
             try:
                 # A foreground Dashboard preparation owns the same gate.  Do
@@ -2314,6 +2362,7 @@ def install_dashboard_routes(core):
                 with lock:
                     foreground_active = any(task.get('workspace') == workspace for task in direct_preparation_tasks.values())
                 if cancellation['requested'] or foreground_active or not dashboard_work_gate.acquire(blocking=False):
+                    retry_needed = True
                     return
                 try:
                     task_repository = Repository(Path(workspace), core.repository.global_db_path)
@@ -2360,8 +2409,15 @@ def install_dashboard_routes(core):
                 with lock:
                     dashboard_warmup_runs.discard(key)
                     dashboard_warmup_cancellations.pop(key, None)
-                    if completed_check:
+                    pending = dashboard_warmup_pending.get(key)
+                    current_request = pending == (scheduled_definition, username)
+                    if completed_check and current_request:
                         dashboard_warmup_checked.add(key)
+                        dashboard_warmup_pending.pop(key, None)
+                    elif pending is not None:
+                        retry_needed = True
+                if retry_needed:
+                    retry_later()
 
         core.submit_background_task(run)
 
