@@ -579,11 +579,12 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     assert page.text.index('workspace-calculated-dimensions-import-panel') < page.text.index('workspace-calculated-dimensions-list-panel')
     assert page.text.index('<h2>Datasets</h2>') < page.text.index('id="calculated-dimensions"')
     assert page.text.index('data-auto-calculated-field-progress') < page.text.index('id="calculated-dimensions"')
+    materialization_panel = page.text.split('data-auto-calculated-field-progress', 1)[1].split('</section>', 1)[0]
+    assert '<span>Re-materialize auto-calculate fields</span>' in materialization_panel
+    assert materialization_panel.index('data-auto-calculated-field-rematerialize') < materialization_panel.index('data-auto-calculated-field-progress-status')
     calculated_panel = page.text.split('id="calculated-dimensions"', 1)[1]
     assert 'workspace-calculated-dimensions-intro' in calculated_panel
-    assert '<span>Re-materialize auto-calculate fields</span>' in calculated_panel
-    assert calculated_panel.index('data-auto-calculated-field-rematerialize') < calculated_panel.index('workspace-calculated-dimensions-layout')
-    assert calculated_panel.index('data-auto-calculated-field-rematerialize') < calculated_panel.index('data-workspace-manage-calculated-dimensions')
+    assert 'data-auto-calculated-field-rematerialize' not in calculated_panel
     assert calculated_panel.index('data-workspace-manage-calculated-dimensions') < calculated_panel.index('workspace-calculated-dimensions-export-link')
 
     status = client.get('/api/workspace/auto-calculated-fields/materialization')
@@ -3452,6 +3453,7 @@ def test_incoming_transfer_uses_server_stop_and_stops_child_materialization(clie
     assert workspace is not None
     offer_id = 'incoming-stop-test'
     monkeypatch.setattr(app_module, '_save_transfer_offer', lambda _offer: None)
+    monkeypatch.setattr(app_module, '_refresh_persisted_transfer_offers', lambda: None)
     monkeypatch.setattr(app_module, 'TRANSFER_OFFERS', {
         offer_id: {
             'id': offer_id, 'status': 'importing', 'phase': 'validating', 'progress': 0,
@@ -3478,6 +3480,51 @@ def test_incoming_transfer_uses_server_stop_and_stops_child_materialization(clie
     assert response.status_code == 200
     assert app_module.TRANSFER_OFFERS[offer_id]['cancel_requested'] is True
     assert app_module.AUTO_CALCULATED_FIELD_JOBS['child-materialization']['cancel_requested'] is True
+    assert app_module.persisted_auto_field_stop_requested(workspace.id) is True
+
+
+def test_persisted_materialization_stop_is_observed_across_workers(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace = app_module.active_workspace
+    assert workspace is not None
+    job_id = 'job-owned-by-another-worker'
+    created_at = time.time() - 1
+    monkeypatch.setattr(app_module, 'AUTO_CALCULATED_FIELD_JOBS', {
+        job_id: {
+            'id': job_id, 'workspace_id': workspace.id, 'status': 'processing',
+            'created_at': created_at,
+        },
+    })
+    app_module.request_persisted_auto_field_stop(workspace.id, job_id)
+
+    with pytest.raises(app_module.ProcessingStopped):
+        app_module.ensure_auto_calculated_field_job_not_stopped(job_id)
+
+
+def test_interactive_template_save_fails_fast_while_workspace_writer_is_busy(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    template = app_module.report_catalogue_options('nsa')[0]
+
+    class BusyWorkspaceLock:
+        def acquire(self, timeout=None):
+            return False
+
+        def release(self):
+            raise AssertionError('An unacquired lock must not be released.')
+
+    monkeypatch.setattr(app_module, 'workspace_write_lock', lambda _path: BusyWorkspaceLock())
+    response = client.post(
+        f'/admin/report-templates/nsa/{quote(template["identifier"], safe="")}/save',
+        data={'catalogue_content': bytes(template['content']).decode('utf-8')},
+        headers={'accept': 'application/json'},
+    )
+
+    assert response.status_code == 409
+    assert 'workspace is busy updating CDR tables' in response.json()['detail']
 
 
 def test_dashboard_interruption_succeeds_when_its_audit_log_is_locked(client, monkeypatch) -> None:

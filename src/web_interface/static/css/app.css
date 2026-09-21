@@ -526,11 +526,12 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
 .catalogue-calculated-dimensions-button { background: linear-gradient(145deg, #fff2ad, #efd66e); border-color: rgba(174, 132, 28, 0.54); color: #715211; box-shadow: 0 8px 18px rgba(167, 122, 19, 0.16); }
 .catalogue-calculated-dimensions-button:hover:not(:disabled) { background: linear-gradient(145deg, #ffea84, #dfbd45); color: #533b09; }
 .workspace-calculated-dimensions-content { display: grid; gap: 1rem; padding-top: 0.8rem; }
-.workspace-calculated-dimensions-intro { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.workspace-calculated-dimensions-intro { display: block; }
 .workspace-calculated-dimensions-intro .lede { min-width: 0; margin: 0; }
 .auto-calculated-field-progress { display: grid; gap: 0.55rem; padding: 0.8rem 0.95rem; border: 1px solid #cfe0e8; border-radius: 12px; background: linear-gradient(135deg, #f7fbfd, #eef7f6); }
 .auto-calculated-field-progress-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
 .auto-calculated-field-progress-heading strong { color: #294b5d; font-size: 0.84rem; }
+.auto-calculated-field-progress-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.55rem; }
 .auto-calculated-field-progress-statuses { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.4rem; }
 .auto-calculated-field-progress-heading .status-pill { min-width: 6rem; padding: 0.25rem 0.6rem; text-align: center; }
 .auto-calculated-field-job-list { display: grid; gap: 0.7rem; }
@@ -701,7 +702,8 @@ a.topnav-link-logout { background: linear-gradient(135deg, #ffd8d8, #ffc6c6); bo
     .calculated-dimension-item, .calculated-dimension-editor { grid-template-columns: 1fr; }
     .calculated-dimension-actions { justify-content: flex-start; }
     .calculated-dimension-editor .calculated-dimension-rules { grid-column: 1; }
-    .workspace-calculated-dimensions-intro { align-items: flex-start; flex-direction: column; }
+    .auto-calculated-field-progress-heading { align-items: flex-start; flex-direction: column; }
+    .auto-calculated-field-progress-actions { width: 100%; justify-content: space-between; }
     .workspace-calculated-dimensions-layout { grid-template-columns: 1fr; }
     .workspace-calculated-dimensions-list { min-height: 15rem; max-height: 15rem; }
     .workspace-calculated-dimension-columns { display: none; }

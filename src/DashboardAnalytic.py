@@ -85,6 +85,7 @@ ACTIVE_DATASET_PROCESSING_LOCK = Lock()
 REPORT_CHART_JOB_LOCKS: dict[str, Lock] = {}
 REPORT_CHART_JOB_LOCKS_LOCK = Lock()
 TEMPLATE_SAVE_LOCK = Lock()
+TEMPLATE_SAVE_WAIT_SECONDS = 3.0
 WORKSPACE_ACTIVATION_LOCK = Lock()
 INITIALIZED_WORKSPACE_DATABASES: set[tuple[str, int | None]] = set()
 CATALOGUE_LAYOUT_NAMES_CACHE: dict[str, tuple[int, int, list[str]]] = {}
@@ -979,11 +980,58 @@ def _auto_calculated_field_workspace_lock(workspace_id: str) -> Lock:
         return AUTO_CALCULATED_FIELD_WORKSPACE_LOCKS.setdefault(workspace_id, Lock())
 
 
+def _auto_field_stop_marker_path(workspace_id: str, job_id: str = 'all') -> Path:
+    """Return a shared-file cancellation marker safe for multi-worker deployments."""
+    marker_root = settings.output_dir.parent / '.background-stop-requests'
+    workspace_key = hashlib.sha256(str(workspace_id).encode()).hexdigest()[:24]
+    job_key = 'all' if job_id == 'all' else hashlib.sha256(str(job_id).encode()).hexdigest()[:24]
+    return marker_root / f'auto-fields-{workspace_key}-{job_key}.stop'
+
+
+def request_persisted_auto_field_stop(workspace_id: str, job_id: str = 'all') -> None:
+    """Publish cancellation without writing to the busy Workspace database."""
+    marker = _auto_field_stop_marker_path(workspace_id, job_id)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    temporary = marker.with_suffix(f'.{uuid4().hex}.tmp')
+    temporary.write_text(str(time_module.time()), encoding='utf-8')
+    temporary.replace(marker)
+
+
+def clear_persisted_auto_field_stops(workspace_id: str) -> None:
+    marker_root = settings.output_dir.parent / '.background-stop-requests'
+    workspace_key = hashlib.sha256(str(workspace_id).encode()).hexdigest()[:24]
+    if not marker_root.is_dir():
+        return
+    for marker in marker_root.glob(f'auto-fields-{workspace_key}-*.stop'):
+        marker.unlink(missing_ok=True)
+
+
+def persisted_auto_field_stop_requested(
+    workspace_id: str, job_id: str = 'all', *, created_at: float = 0,
+) -> bool:
+    for marker in (
+        _auto_field_stop_marker_path(workspace_id, job_id),
+        _auto_field_stop_marker_path(workspace_id),
+    ):
+        try:
+            requested_at = float(marker.read_text(encoding='utf-8').strip())
+        except (OSError, ValueError):
+            continue
+        if requested_at >= float(created_at or 0):
+            return True
+    return False
+
+
 def ensure_auto_calculated_field_job_not_stopped(job_id: str) -> None:
     with AUTO_CALCULATED_FIELD_JOBS_LOCK:
         job = AUTO_CALCULATED_FIELD_JOBS.get(job_id)
-        if not job or job.get('cancel_requested'):
-            raise ProcessingStopped('Background job stopped by user.')
+        stopped_in_memory = not job or job.get('cancel_requested')
+        workspace_id = str(job.get('workspace_id') or '') if job else ''
+        created_at = float(job.get('created_at') or 0) if job else 0
+    if stopped_in_memory or (
+        workspace_id and persisted_auto_field_stop_requested(workspace_id, job_id, created_at=created_at)
+    ):
+        raise ProcessingStopped('Background job stopped by user.')
 
 
 def materialization_job_progress_percent(job: dict[str, Any]) -> int:
@@ -1079,6 +1127,7 @@ def start_auto_calculated_field_job(
     parent_task_id: str = '',
 ) -> dict[str, Any]:
     """Queue materialization so the web request and UI remain responsive."""
+    clear_persisted_auto_field_stops(workspace.id)
     job_id = uuid4().hex
     previous_items = tuple(previous)
     current_items = tuple(current)
@@ -1209,6 +1258,7 @@ def start_combined_cdr_recreation_job(
     workspace: Workspace, kind: str, username: str, *, background: bool = True,
 ) -> dict[str, Any]:
     """Restart one combined-table rebuild in the shared materialization progress UI."""
+    clear_persisted_auto_field_stops(workspace.id)
     job_id = uuid4().hex
     job = {
         'id': job_id, 'workspace_id': workspace.id, 'workspace_name': workspace.name,
@@ -1360,6 +1410,27 @@ def persist_report_template(technology: str, name: str, content: bytes, *, is_de
         is_default = bool(next(row for row in repository.list_report_templates(technology) if str(row['name']) == name)['is_default'])
     if active_workspace:
         queue_workspace_dimension_materialization(active_workspace)
+
+
+def persist_report_template_for_request(
+    technology: str, name: str, content: bytes, *, is_default: bool,
+) -> None:
+    """Bound an interactive save instead of waiting indefinitely behind materialization."""
+    if not TEMPLATE_SAVE_LOCK.acquire(timeout=TEMPLATE_SAVE_WAIT_SECONDS):
+        raise TimeoutError('Another Report Template update is still finishing. Try again in a moment.')
+    workspace_lock = workspace_write_lock(repository.db_path)
+    workspace_acquired = False
+    try:
+        workspace_acquired = workspace_lock.acquire(timeout=TEMPLATE_SAVE_WAIT_SECONDS)
+        if not workspace_acquired:
+            raise TimeoutError(
+                'The workspace is busy updating CDR tables. Stop or wait for the background task, then save again.'
+            )
+        persist_report_template(technology, name, content, is_default=is_default)
+    finally:
+        if workspace_acquired:
+            workspace_lock.release()
+        TEMPLATE_SAVE_LOCK.release()
 
 
 def synchronize_template_file_names(technology: str) -> None:
@@ -7482,10 +7553,12 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
                     "SELECT value FROM workspace_state WHERE key = 'calculated_dimensions_need_materialization'"
                 ).fetchone()
                 if materialization and str(materialization['value']) == 'processing':
+                    stopping = persisted_auto_field_stop_requested(workspace.id)
                     tasks.append({
                         'id': f'auto-fields-state:{workspace.id}',
                         'label': 'Materializing Auto-calculated Fields',
-                        'detail': 'Updating CDR tables',
+                        'detail': 'Stopping background job' if stopping else 'Updating CDR tables',
+                        'status': 'stopping' if stopping else 'processing',
                         'progress': None,
                         # This persisted marker can survive an application
                         # restart after its worker has disappeared. Keep the
@@ -7826,9 +7899,13 @@ def stop_background_task(
     elif prefix == 'auto-fields':
         with AUTO_CALCULATED_FIELD_JOBS_LOCK:
             job = AUTO_CALCULATED_FIELD_JOBS.get(raw_identifier)
-            if not job or str(job.get('workspace_id') or '') != workspace_id or job.get('status') not in {'queued', 'processing'}:
+            if job and str(job.get('workspace_id') or '') != workspace_id:
                 raise HTTPException(status_code=409, detail='This materialization task can no longer be stopped.')
-            job.update(cancel_requested=True, message='Stopping background job')
+            if job and job.get('status') in {'queued', 'processing'}:
+                job.update(cancel_requested=True, message='Stopping background job')
+            elif job:
+                raise HTTPException(status_code=409, detail='This materialization task can no longer be stopped.')
+        request_persisted_auto_field_stop(workspace_id, raw_identifier)
     elif prefix == 'auto-fields-state':
         if raw_identifier != workspace_id:
             raise HTTPException(status_code=400, detail='Invalid materialization task.')
@@ -7840,14 +7917,12 @@ def stop_background_task(
             ]
             for job in running_jobs:
                 job.update(cancel_requested=True, message='Stopping background job')
-        if not running_jobs:
-            state = task_repository.get_workspace_state('calculated_dimensions_need_materialization')
-            if state != 'processing':
-                raise HTTPException(status_code=409, detail='This materialization task can no longer be stopped.')
-            task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'stopped')
-        task_repository.try_add_log(
-            user.username, 'stop_orphaned_auto_calculated_fields',
-            json.dumps({'workspace_id': workspace_id, 'active_jobs': len(running_jobs)}),
+        # Do not write the Workspace database here: a materialization may own
+        # its write coordinator for minutes. The shared marker is immediate,
+        # works across web workers and is observed between table operations.
+        request_persisted_auto_field_stop(workspace_id)
+        task_repository.try_set_workspace_state(
+            'calculated_dimensions_need_materialization', 'stopped', timeout_seconds=0.1,
         )
     elif prefix == 'dashboard-prepare':
         stop_dashboard = getattr(sys.modules[__name__], 'e2e_dashboard_stop_task', None)
@@ -7877,6 +7952,8 @@ def stop_background_task(
                     and child_job.get('status') in {'queued', 'processing'}
                 ):
                     child_job.update(cancel_requested=True, message='Stopping with parent import')
+        for destination_workspace_id in job.get('destination_workspace_ids') or []:
+            request_persisted_auto_field_stop(str(destination_workspace_id))
     elif prefix == 'transfer':
         with TRANSFER_LOCK:
             job = TRANSFER_JOBS.get(raw_identifier)
@@ -7949,11 +8026,15 @@ def stop_server_background_task(task_id: str = Form(...), user: SessionUser = De
         if user.role != 'super-admin':
             raise HTTPException(status_code=403, detail='Only super-admins can stop incoming transfers.')
         with TRANSFER_LOCK:
+            _refresh_persisted_transfer_offers()
             offer = TRANSFER_OFFERS.get(job_id)
             if not offer or offer.get('status') not in {'receiving', 'importing'}:
                 raise HTTPException(status_code=409, detail='This incoming transfer can no longer be stopped.')
             offer.update(cancel_requested=True, status='cancelling', phase='cancellation requested')
             _save_transfer_offer(offer)
+            destination_workspace_ids = [str(value) for value in offer.get('destination_workspace_ids') or []]
+        for destination_workspace_id in destination_workspace_ids:
+            request_persisted_auto_field_stop(destination_workspace_id)
         with AUTO_CALCULATED_FIELD_JOBS_LOCK:
             for child_job in AUTO_CALCULATED_FIELD_JOBS.values():
                 if (
@@ -13727,12 +13808,17 @@ def save_report_catalogue(
         content = catalogue_csv(entries)
         # The lock only covers the short atomic replacements. Expensive
         # metadata and audit writes run after the response is sent.
-        with TEMPLATE_SAVE_LOCK:
-            persist_report_template(technology, template_name, content, is_default=is_default)
+        persist_report_template_for_request(
+            technology, template_name, content, is_default=is_default,
+        )
     except ValueError as exc:
         if wants_json:
             return JSONResponse({'detail': str(exc)}, status_code=400)
         return render_admin_template(request, user, error=str(exc), status_code=400)
+    except TimeoutError as exc:
+        if wants_json:
+            return JSONResponse({'detail': str(exc)}, status_code=status.HTTP_409_CONFLICT)
+        return render_admin_template(request, user, error=str(exc), status_code=status.HTTP_409_CONFLICT)
     except (FileNotFoundError, OSError, sqlite3.Error) as exc:
         detail = f'Unable to save the Report Template: {exc}'
         if wants_json:
@@ -14308,9 +14394,11 @@ def latest_auto_calculated_field_materialization(
         return JSONResponse(public_job)
     workspace_state = repository.get_workspace_state('calculated_dimensions_need_materialization')
     if workspace_state in {'1', 'processing'}:
+        stopping = persisted_auto_field_stop_requested(active_workspace.id)
         return JSONResponse({
             'status': 'processing', 'completed': 0, 'total': 0,
             'message': 'Updating CDR tables', 'workspace_id': active_workspace.id,
+            'cancel_requested': stopping,
         })
     if workspace_state == 'stopped':
         return JSONResponse({

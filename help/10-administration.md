@@ -224,17 +224,19 @@ Change only `Chart type` to `Median Vertical Bars` for the median.
 
 #### Distribution Stacked Vertical Bars
 
-Use explicit numeric ranges. Add `Buckets` to Filters and use `Rate Bucket` as the final column aggregation.
+Use explicit numeric ranges with `Buckets = ...`, or ordered upper bounds with `Buckets < ...` / `Buckets <= ...`. Upper-bound mode generates `belowN` categories plus `Above`; use `Rate Bucket` as the final column aggregation.
 
 ```text
 CDR source: CDR-Data
 KPI: Mean_Data_Rate
 Chart type: Distribution Stacked Vertical Bars
-Filters: Test_Result = Completed; Test_Name CONTAINS FDTT; Buckets = 1,5,20,100
+Filters: Test_Result = Completed; Test_Name = FDTT http DL MT; Buckets < 2,5,20,100
 Rows Aggregation: Operator
 Column Aggregation: Campaign × Rate Bucket
 Legend Position: Right
 ```
+
+With upper-bound mode, `Buckets < 2,5,20,100` evaluates each value against the limits in order and produces `below2`, `below5`, `below20`, `below100` or `Above`. Use `Buckets < 1,3,10,20` for the corresponding FDTT UDP UL distribution. `<=` is also accepted when boundary values must remain inside their named bucket.
 
 #### Threshold Stacked Vertical Bars
 

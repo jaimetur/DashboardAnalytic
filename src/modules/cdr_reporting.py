@@ -758,6 +758,10 @@ OPERATOR_COLOUR_VARIANTS = {
 
 NEUTRAL_SERIES_COLORS = ("#6F42C1", "#2E8B57", "#A0612A", "#C23B8B", "#607D8B", "#B8860B")
 
+# Tableau palette used by the throughput-below calculation, ordered from the
+# lowest bucket through the successful Above bucket.
+THROUGHPUT_DISTRIBUTION_COLORS = ("#FF9DA7", "#F28E2B", "#E15759", "#76B7B2", "#4E79A7")
+
 VENDOR_COLOUR_VARIANTS = {
     # A vendor remains recognisable in every chart. Different operators using
     # the same vendor receive contrasting shades from that vendor's family.
@@ -1301,6 +1305,7 @@ def _catalog_column(
     multivendor: bool,
     metric: str | None = None,
     bucket_edges: list[float] | None = None,
+    bucket_operator: str = "=",
     operator_as_vendor: bool = True,
 ) -> str | None:
     """Resolve a template field name against a source column or supported semantic dimension."""
@@ -1458,6 +1463,16 @@ def _catalog_column(
         if not metric:
             return None
         numeric = pd.to_numeric(frame[metric], errors="coerce")
+        if bucket_edges and bucket_operator in {"<", "<="}:
+            output = pd.Series(pd.NA, index=frame.index, dtype="string")
+            remaining = numeric.notna()
+            for threshold in bucket_edges:
+                selected = remaining & (numeric.lt(threshold) if bucket_operator == "<" else numeric.le(threshold))
+                output.loc[selected] = f"below{threshold:g}"
+                remaining &= ~selected
+            output.loc[remaining & numeric.gt(bucket_edges[-1])] = "Above"
+            frame["__catalog_rate_bucket"] = output
+            return "__catalog_rate_bucket"
         edges = bucket_edges or [1, 5, 10, 25, 50]
         labels = [f"<{edges[0]:g}"] + [f"{low:g}-{high:g}" for low, high in zip(edges, edges[1:])] + [f"{edges[-1]:g}+"]
         frame["__catalog_rate_bucket"] = pd.cut(numeric, bins=[float("-inf"), *edges, float("inf")], labels=labels, right=False).astype("string")
@@ -1494,6 +1509,65 @@ def _campaign_sort_key(value: object) -> tuple[int, int, str]:
 def _campaign_display_value(value: object) -> str:
     """Reduce NetCheck campaign identifiers to a stable year/quarter label."""
     return compact_campaign_value(value)
+
+
+def _cdf_campaign_line_widths(
+    series_campaigns: list[tuple[tuple[object, ...], Iterable[object]]],
+    axis_columns: list[str],
+    frame: pd.DataFrame,
+) -> dict[tuple[str, ...], int]:
+    """Rank CDF campaign weights independently inside each operator family."""
+    labels = frame.attrs.get("catalogue_dimension_labels", {})
+
+    def dimension_positions(name: str) -> list[int]:
+        normalized_name = _normalise_catalog_name(name)
+        positions: list[int] = []
+        for index, column in enumerate(axis_columns):
+            declared = labels.get(column, column)
+            declared_names = declared if isinstance(declared, tuple) else (declared,)
+            if any(_normalise_catalog_name(str(value)) == normalized_name for value in declared_names):
+                positions.append(index)
+        return positions
+
+    operator_positions = dimension_positions("Operator")
+    campaign_positions = dimension_positions("Campaign")
+    normalized_rows: list[tuple[tuple[str, ...], set[str], tuple[str, ...]]] = []
+    campaigns_by_family: dict[tuple[str, ...], set[str]] = {}
+    for key, campaigns in series_campaigns:
+        normalized_key = tuple(str(value) for value in key)
+        normalized_campaigns = {
+            _campaign_display_value(value)
+            for value in campaigns
+            if str(value).strip()
+        }
+        if operator_positions:
+            family = tuple(normalized_key[index] for index in operator_positions)
+        else:
+            family = tuple(
+                value for index, value in enumerate(normalized_key)
+                if index not in campaign_positions
+            )
+        normalized_rows.append((normalized_key, normalized_campaigns, family))
+        campaigns_by_family.setdefault(family, set()).update(normalized_campaigns)
+
+    widths_by_family: dict[tuple[str, ...], dict[str, int]] = {}
+    for family, campaigns in campaigns_by_family.items():
+        ordered = sorted(campaigns, key=_campaign_sort_key)
+        if len(ordered) <= 1:
+            widths_by_family[family] = {campaign: 4 for campaign in ordered}
+        elif len(ordered) == 2:
+            widths_by_family[family] = {ordered[0]: 1, ordered[1]: 4}
+        else:
+            widths_by_family[family] = {
+                campaign: max(1, 4 - recency_index)
+                for recency_index, campaign in enumerate(reversed(ordered))
+            }
+
+    widths: dict[tuple[str, ...], int] = {}
+    for key, campaigns, family in normalized_rows:
+        family_widths = widths_by_family.get(family, {})
+        widths[key] = max((family_widths.get(campaign, 1) for campaign in campaigns), default=4)
+    return widths
 
 
 def _apply_catalog_filters(frame: pd.DataFrame, entry: CatalogEntry, multivendor: bool, metric: str | None) -> pd.DataFrame:
@@ -1622,12 +1696,59 @@ def _catalog_bucket_edges(entry: CatalogEntry) -> list[float] | None:
     return None
 
 
+def _catalog_bucket_operator(entry: CatalogEntry) -> str:
+    condition = next((
+        item for item in parse_catalog_filters(entry.filters)
+        if _normalise_catalog_name(item.column) == "buckets"
+    ), None)
+    return condition.operator if condition else "="
+
+
+def _throughput_distribution_domain(frame: pd.DataFrame) -> list[str]:
+    """Return Tableau's low-to-high legend domain for throughput buckets."""
+    configured = frame.attrs.get("catalogue_distribution_buckets")
+    if configured:
+        return [str(value) for value in configured]
+    if "__catalog_stack" not in frame:
+        return []
+    observed = [str(value) for value in frame["__catalog_stack"].dropna().unique()]
+    if observed and all(value == "Above" or re.fullmatch(r"below\d+(?:\.\d+)?", value) for value in observed):
+        below = sorted(
+            (value for value in observed if value != "Above"),
+            key=lambda value: float(value.removeprefix("below")),
+        )
+        return [*below, "Above"] if "Above" in observed else below
+    return []
+
+
+def _distribution_buckets(frame: pd.DataFrame, *, legend: bool = False) -> list[str]:
+    """Resolve stable stack and legend orders for distribution charts."""
+    domain = _throughput_distribution_domain(frame)
+    if domain:
+        return domain if legend else list(reversed(domain))
+    if "__catalog_stack" not in frame:
+        return []
+    return [str(value) for value in frame["__catalog_stack"].dropna().drop_duplicates()]
+
+
+def _distribution_bucket_colours(
+    buckets: list[str], frame: pd.DataFrame,
+) -> dict[tuple[object, ...], str]:
+    """Use Tableau's semantic throughput palette or the normal category palette."""
+    domain = _throughput_distribution_domain(frame)
+    if domain and len(domain) == len(THROUGHPUT_DISTRIBUTION_COLORS):
+        semantic = dict(zip(domain, THROUGHPUT_DISTRIBUTION_COLORS, strict=True))
+        return {(bucket,): semantic[bucket] for bucket in buckets}
+    return _series_colours([(bucket,) for bucket in buckets], ["__catalog_stack"], frame)
+
+
 def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendor: bool, metric: str | None) -> tuple[pd.DataFrame, str, str]:
     frame.attrs["catalogue_calculated_dimensions"] = entry.calculated_dimensions
     frame.attrs["catalogue_cdr_source"] = entry.cdr_source
     row_spec = parse_catalog_grouping(entry.grouping_rows)
     column_spec = parse_catalog_grouping(entry.grouping_columns)
     bucket_edges = _catalog_bucket_edges(entry)
+    bucket_operator = _catalog_bucket_operator(entry)
     # Multivendor data stores the effective comparison identity as one
     # ``Operator_Vendor`` field. Materialise its two display levels here so
     # every bar chart can render Operator above its individual vendors.
@@ -1649,7 +1770,7 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
             elif multivendor and normalized == "vendor":
                 column = "__catalog_multivendor_vendor" if "__catalog_multivendor_vendor" in frame else None
             else:
-                column = _catalog_column(frame, dimension, multivendor, metric, bucket_edges)
+                column = _catalog_column(frame, dimension, multivendor, metric, bucket_edges, bucket_operator)
             if not column:
                 raise ValueError(f"Slide {entry.slide}: {axis} grouping dimension '{dimension}' does not exist in {entry.cdr_source}.")
             resolved.append(column)
@@ -1727,6 +1848,13 @@ def _apply_catalog_grouping(frame: pd.DataFrame, entry: CatalogEntry, multivendo
         series_columns = column_display_columns[:-1]
         materialise(series_columns, series)
         frame["__catalog_stack"] = frame[stack_column].fillna("(blank)").astype(str)
+        if bucket_edges and bucket_operator in {"<", "<="}:
+            frame.attrs["catalogue_distribution_buckets"] = [
+                *(f"below{threshold:g}" for threshold in bucket_edges),
+                "Above",
+            ]
+        elif domain := _throughput_distribution_domain(frame):
+            frame.attrs["catalogue_distribution_buckets"] = domain
     else:
         materialise(column_display_columns, series)
     frame.attrs["catalogue_dimension_values"] = configured_dimension_values
@@ -1834,12 +1962,13 @@ def preview_catalog_chart_data(
     # Include the physical/effective CDR fields referenced by every part of
     # the chart definition, not only the synthetic labels used by renderers.
     bucket_edges = _catalog_bucket_edges(entry)
+    bucket_operator = _catalog_bucket_operator(entry)
     for condition in parse_catalog_filters(entry.filters):
         if _normalise_catalog_name(condition.column) not in {'threshold', 'buckets'}:
-            include(_catalog_column(grouped, condition.column, False, metric, bucket_edges, operator_as_vendor=False), f'Filter · {condition.column}')
+            include(_catalog_column(grouped, condition.column, False, metric, bucket_edges, bucket_operator, operator_as_vendor=False), f'Filter · {condition.column}')
     for axis, grouping in (('Rows Aggregation', entry.grouping_rows), ('Column Aggregation', entry.grouping_columns)):
         for dimension in parse_catalog_grouping(grouping).dimensions:
-            include(_catalog_column(grouped, dimension, False, metric, bucket_edges), f'{axis} · {dimension}')
+            include(_catalog_column(grouped, dimension, False, metric, bucket_edges, bucket_operator), f'{axis} · {dimension}')
     include(metric, f'KPI · {metric}' if metric else 'KPI')
     include(primary, 'Resolved Rows Aggregation')
     include(series, 'Resolved Column Aggregation')
@@ -2137,7 +2266,8 @@ def catalog_chart_hover_targets(
                 running += height
         return targets
     if chart_type == 'distribution stacked vertical bars' and group and period and '__catalog_stack' in data:
-        axes = _chart_axis_hierarchy(data, distribution=True) or [group, period]; combinations = _hierarchical_unique_keys(data, axes); buckets = list(data['__catalog_stack'].drop_duplicates())
+        data = data[data['__catalog_stack'].astype(str).ne('(blank)')]
+        axes = _chart_axis_hierarchy(data, distribution=True) or [group, period]; combinations = _hierarchical_unique_keys(data, axes); buckets = _distribution_buckets(data)
         for index, key in enumerate(combinations):
             subset = data
             for column, value in zip(axes, key, strict=True): subset = subset[subset[column].astype(str) == str(value)]
@@ -2582,10 +2712,8 @@ def _resolved_legend_items(
     is_cdf = "cdf" in entry.chart_type.casefold()
     axis_columns = _chart_axis_hierarchy(frame)
     if bucket_legend_requested and "__catalog_stack" in frame.columns:
-        buckets = list(frame["__catalog_stack"].dropna().drop_duplicates())
-        bucket_colours = _series_colours(
-            [(bucket,) for bucket in buckets], ["__catalog_stack"], frame,
-        )
+        buckets = _distribution_buckets(frame, legend=True)
+        bucket_colours = _distribution_bucket_colours(buckets, frame)
         items.extend(
             (str(bucket), bucket_colours.get((bucket,), _colour(bucket, index)), 2)
             for index, bucket in enumerate(buckets)
@@ -2599,21 +2727,17 @@ def _resolved_legend_items(
             for key, subset in frame.groupby(grouper, sort=False, dropna=False)
         }
         campaign_column = _period_column(frame)
-        campaigns = (
-            sorted(
-                frame[campaign_column].dropna().astype(str).map(_campaign_display_value).unique(),
-                key=_campaign_sort_key,
-            )
-            if campaign_column else []
-        )
-        latest_campaign = campaigns[-1] if len(campaigns) > 1 else None
-        for index, combination in enumerate(combinations):
+        series_campaigns = []
+        for combination in combinations:
             subset = grouped_subsets.get(tuple(str(value) for value in combination), frame.iloc[0:0])
             subset_campaigns = (
                 subset[campaign_column].dropna().astype(str).map(_campaign_display_value).unique()
                 if campaign_column else ()
             )
-            width = 4 if latest_campaign is None or latest_campaign in subset_campaigns else 1
+            series_campaigns.append((combination, subset_campaigns))
+        line_widths = _cdf_campaign_line_widths(series_campaigns, axis_columns, frame)
+        for index, combination in enumerate(combinations):
+            width = line_widths.get(tuple(str(value) for value in combination), 4)
             caption = _legend_key_caption(combination, axis_columns, frame, tuple(chart_fields))
             items.append((caption, colours.get(combination, _colour(caption, index)), width))
     elif (
@@ -3531,13 +3655,15 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
     axis_columns = _chart_axis_hierarchy(frame, distribution=True) or [group, series]
     data = frame[[*axis_columns, stack]].dropna()
     data.attrs = frame.attrs.copy()
+    data = data[data[stack].astype(str).ne("(blank)")]
+    data.attrs = frame.attrs.copy()
     combinations = _hierarchical_unique_keys(data, axis_columns)
-    buckets = list(data[stack].drop_duplicates())
+    buckets = _distribution_buckets(data)
     if not combinations or not buckets:
         return _empty_chart(title)
     image, draw = _canvas(title); left, top, width, height = 125, 260, 1260, 475
     bar_width = max(20, min(70, width // max(len(combinations) * 2, 1)))
-    bucket_colours = _series_colours([(bucket,) for bucket in buckets], [stack], data)
+    bucket_colours = _distribution_bucket_colours(buckets, data)
     for index, key in enumerate(combinations):
         subset = data
         for column, value in zip(axis_columns, key, strict=True):
@@ -3557,7 +3683,8 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
         bottom=top + height,
     )
     _draw_hierarchical_axis_labels(image, draw, combinations, left, width, top, top + height)
-    _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, bucket), bucket_colours.get((bucket,), _colour(bucket, index)), 2) for index, bucket in enumerate(buckets[:8])], legend_position)
+    legend_buckets = _distribution_buckets(data, legend=True)
+    _draw_chart_legend(draw, [(_legend_caption(legend_labels, index, bucket), bucket_colours.get((bucket,), _colour(bucket, index)), 2) for index, bucket in enumerate(legend_buckets[:8])], legend_position)
     output = BytesIO(); image.save(output, format="PNG"); output.seek(0); return output
 
 
@@ -3704,13 +3831,14 @@ def _render_cdf_line(
     # A campaign is the temporal comparison within an operator/vendor.  Keep
     # that relationship visible even in monochrome printouts by making newer
     # campaigns progressively thicker than their earlier counterparts.
-    latest_campaign = None
-    campaign_count = 0
-    if campaign_column and "__cdf_campaign" in data:
-        campaigns = sorted(data["__cdf_campaign"].dropna().astype(str).unique(), key=_campaign_sort_key)
-        campaign_count = len(campaigns)
-        if len(campaigns) > 1:
-            latest_campaign = campaigns[-1]
+    series_campaigns = [
+        (
+            combination,
+            subset["__cdf_campaign"].astype(str).unique() if "__cdf_campaign" in subset else (),
+        )
+        for combination, subset, _values in series_data
+    ]
+    line_widths = _cdf_campaign_line_widths(series_campaigns, grouping_columns, data)
     legend_items: list[tuple[str, str, int]] = []
     for index, (combination, subset, values) in enumerate(series_data):
         visible_values = [value for value in values if value <= high]
@@ -3718,10 +3846,7 @@ def _render_cdf_line(
             continue
         label = _legend_key_caption(combination, grouping_columns, data, legend_labels)
         points = [(left + (value - low) / (high - low) * width, top + height - ((n + 1) / len(values)) * height) for n, value in enumerate(visible_values)]
-        line_campaigns = subset["__cdf_campaign"].astype(str).unique() if latest_campaign else ()
-        # A single-campaign chart has no historical curve to de-emphasise, so
-        # use the same readable weight as the newest curve in a comparison.
-        line_width = 4 if campaign_count <= 1 or (latest_campaign and latest_campaign in line_campaigns) else 1
+        line_width = line_widths.get(tuple(str(value) for value in combination), 4)
         colour = comparison_colours.get(combination, _colour(label, index))
         draw.line(points, fill=colour, width=line_width)
         legend_items.append((label, colour, line_width))
@@ -4389,12 +4514,11 @@ def catalog_chart_payload(
         high = _cdf_terminal_x_maximum([values for _key, values, _campaigns in series_rows], low, observed_high)
         high = high if high > low else low + 1
         colours = _series_colours(combinations, grouping_columns, numeric, line_chart=True)
-        latest_campaign = None
-        campaign_count = 0
-        if campaign_column and "__cdf_campaign" in numeric:
-            campaigns = sorted(numeric["__cdf_campaign"].dropna().astype(str).unique(), key=_campaign_sort_key)
-            campaign_count = len(campaigns)
-            latest_campaign = campaigns[-1] if len(campaigns) > 1 else None
+        line_widths = _cdf_campaign_line_widths(
+            [(combination, campaigns) for combination, _values, campaigns in series_rows],
+            grouping_columns,
+            numeric,
+        )
         payload_series = []
         fallback_legend = []
         requested_legend = _legend_dimensions(render_entry.legend)
@@ -4403,7 +4527,7 @@ def catalog_chart_payload(
             if not visible_values:
                 continue
             sampled = _interactive_sample(visible_values, INTERACTIVE_CHART_POINTS_PER_SERIES)
-            line_width = 4 if campaign_count <= 1 or (latest_campaign and latest_campaign in campaigns) else 1
+            line_width = line_widths.get(tuple(str(value) for value in combination), 4)
             full_label = _legend_key_caption(combination, grouping_columns, numeric, ())
             # A CDF legend and tooltip identify a concrete curve. Retaining
             # the full hierarchy prevents Operator-only captions when Vendor
@@ -4622,11 +4746,13 @@ def catalog_chart_payload(
         axes = _chart_axis_hierarchy(data, distribution=True) or [group, period]
         distribution = data[[*axes, "__catalog_stack"]].dropna()
         distribution.attrs = data.attrs.copy()
+        distribution = distribution[distribution["__catalog_stack"].astype(str).ne("(blank)")]
+        distribution.attrs = data.attrs.copy()
         combinations = _hierarchical_unique_keys(distribution, axes)
-        buckets = list(distribution["__catalog_stack"].drop_duplicates())
+        buckets = _distribution_buckets(distribution)
         if not combinations or not buckets:
             return empty("No valid samples for this KPI and technology filter")
-        colours = _series_colours([(bucket,) for bucket in buckets], ["__catalog_stack"], distribution)
+        colours = _distribution_bucket_colours(buckets, distribution)
         counts = distribution.groupby([*axes, "__catalog_stack"], sort=False, dropna=False).size()
         axis_grouper = axes[0] if len(axes) == 1 else axes
         totals = distribution.groupby(axis_grouper, sort=False, dropna=False).size()
@@ -4635,12 +4761,13 @@ def catalog_chart_payload(
             lookup = key[0] if len(axes) == 1 else key
             return int(totals.get(lookup, 0))
 
+        legend_buckets = _distribution_buckets(distribution, legend=True)
         fallback = [
             (
                 _legend_caption(_legend_labels(render_entry.legend), index, bucket),
                 colours.get((bucket,), _colour(bucket, index)), 2,
             )
-            for index, bucket in enumerate(buckets)
+            for index, bucket in enumerate(legend_buckets)
         ]
         model = _chart_payload_base("distribution", title, render_entry, distribution, metric, fallback)
         model.update({

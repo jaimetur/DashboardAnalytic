@@ -191,7 +191,7 @@ Smart Orchestrator Logs is reserved in the input-type catalogue so existing work
 
 The **Auto-calculated Fields** panel follows Datasets in Workspace. Fields define a name, optional fallback and ordered rules, and select the applicable CDR types through **Available for**. Rule matching is case-insensitive.
 
-Saving an edit, deleting a field, importing JSON or pressing the green rematerialization action creates a background materialization job. Workspace remains usable while it runs. The **Materialization status** panel shows progress, affected individual/combined table totals and completion or failure.
+Saving an edit, deleting a field, importing JSON or pressing the green rematerialization action in the **Materialization status** panel creates a background materialization job. Workspace remains usable while it runs. The panel shows progress, affected individual/combined table totals and completion or failure.
 
 Fields are applied only to their selected CDR types. The job retains preview-filter fields, fields referenced by rules and the resulting Auto-calculated Fields in the applicable combined table. It removes stale fields from CDR types to which they no longer apply.
 

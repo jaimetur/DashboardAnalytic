@@ -620,6 +620,42 @@ def test_cdf_resolved_legend_reproduces_historical_and_latest_line_widths() -> N
     ]
 
 
+def test_cdf_resolved_legend_decreases_four_campaign_widths_per_operator() -> None:
+    frame = pd.DataFrame({
+        '__catalog_row_0': ['EE'] * 4 + ['O2'] * 3,
+        '__catalog_column_0': [
+            '2026-Q1', '2026-Q2', '2026-Q3', '2026-Q4',
+            '2025-Q4', '2026-Q1', '2026-Q2',
+        ],
+        'Campaign': [
+            '2026-Q1', '2026-Q2', '2026-Q3', '2026-Q4',
+            '2025-Q4', '2026-Q1', '2026-Q2',
+        ],
+        'KPI': [1.0, 2.0, 3.0, 4.0, 1.5, 2.5, 3.5],
+    })
+    frame.attrs['catalogue_dimension_labels'] = {
+        '__catalog_row_0': ('Operator',),
+        '__catalog_column_0': ('Campaign',),
+    }
+    entry = CatalogEntry(
+        slide=1, slide_title='', slide_subtitle='', layout='', chart_title='', cdr_source='CDR-Data',
+        kpi='KPI', chart_type='CDF Lines', legend='Operator, Campaign', filters='',
+        grouping_rows='Operator', grouping_columns='Campaign', legend_position='top',
+    )
+
+    items = _resolved_legend_items(entry, frame, 'KPI')
+
+    assert {caption: width for caption, _colour_value, width in items} == {
+        'EE · 2026-Q1': 1,
+        'EE · 2026-Q2': 2,
+        'EE · 2026-Q3': 3,
+        'EE · 2026-Q4': 4,
+        'O2 · 2025-Q4': 2,
+        'O2 · 2026-Q1': 3,
+        'O2 · 2026-Q2': 4,
+    }
+
+
 def test_interactive_cdf_model_uses_reporting_hierarchy_palette_and_legend() -> None:
     entry = CatalogEntry(
         1, 'Speech', '', '', 'POLQA CDF', 'CDR-Speech', 'LQ', 'CDF Line',
@@ -653,6 +689,24 @@ def test_interactive_cdf_model_uses_reporting_hierarchy_palette_and_legend() -> 
         ],
     }
     assert all(series['x'] and series['y'] and series['samples'] == 2 for series in model['series'])
+
+
+def test_interactive_cdf_model_uses_progressive_campaign_widths() -> None:
+    entry = CatalogEntry(
+        1, 'Data', '', '', 'Rate CDF', 'CDR-Data', 'Rate', 'CDF Line',
+        'Operator, Campaign', '', 'Operator', 'Campaign', 'Top',
+    )
+    campaigns = ['2026-Q1', '2026-Q2', '2026-Q3', '2026-Q4']
+    frame = pd.DataFrame({
+        'Operator': ['EE'] * 8,
+        'Campaign': [campaign for campaign in campaigns for _ in range(2)],
+        'Rate': [1.0, 2.0, 1.1, 2.1, 1.2, 2.2, 1.3, 2.3],
+    })
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert [series['width'] for series in model['series']] == [1, 2, 3, 4]
+    assert [item['width'] for item in model['legend']['items']] == [1, 2, 3, 4]
 
 
 def test_multi_cdf_payload_bounds_high_cardinality_identifier_groups() -> None:
@@ -813,6 +867,56 @@ def test_interactive_distribution_model_uses_reporting_buckets_and_nested_keys()
     assert [item['colour'] for item in model['legend']['items']] == [
         bucket['colour'] for bucket in model['buckets']
     ]
+
+
+def test_distribution_upper_bound_buckets_match_tableau_formula_and_palette() -> None:
+    entry = CatalogEntry(
+        1, 'FDTT DL', '', '', 'FDTT http DL MT', 'CDR-Data', 'Mean_Data_Rate',
+        'Distribution Stacked Vertical Bars', 'Buckets', 'Buckets < 2,5,20,100;',
+        'Operator', 'Campaign × Rate Bucket', 'Right',
+    )
+    frame = pd.DataFrame({
+        'Operator': ['EE'] * 6,
+        'Campaign': ['UK_Q2_2026'] * 6,
+        'Mean_Data_Rate': [.5, 2, 5, 20, 100, 101],
+    })
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert [bucket['name'] for bucket in model['buckets']] == [
+        'Above', 'below100', 'below20', 'below5', 'below2',
+    ]
+    assert [bucket['colour'] for bucket in model['buckets']] == [
+        '#4E79A7', '#76B7B2', '#E15759', '#F28E2B', '#FF9DA7',
+    ]
+    assert model['cells'] == [pytest.approx([.2, .2, .2, .2, .2])]
+    assert model['legend']['items'] == [
+        {'label': 'below2', 'colour': '#FF9DA7', 'width': 2},
+        {'label': 'below5', 'colour': '#F28E2B', 'width': 2},
+        {'label': 'below20', 'colour': '#E15759', 'width': 2},
+        {'label': 'below100', 'colour': '#76B7B2', 'width': 2},
+        {'label': 'Above', 'colour': '#4E79A7', 'width': 2},
+    ]
+
+
+def test_distribution_inclusive_upper_bound_buckets_are_supported() -> None:
+    entry = CatalogEntry(
+        1, 'Custom', '', '', 'Custom distribution', 'CDR-Data', 'Rate',
+        'Distribution Stacked Vertical Bars', 'Buckets', 'Buckets <= 1,3,10,20;',
+        'Operator', 'Campaign × Rate Bucket', 'Right',
+    )
+    frame = pd.DataFrame({
+        'Operator': ['EE'] * 5,
+        'Campaign': ['2026-Q2'] * 5,
+        'Rate': [1, 3, 10, 20, 21],
+    })
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert [bucket['name'] for bucket in model['buckets']] == [
+        'Above', 'below20', 'below10', 'below3', 'below1',
+    ]
+    assert model['cells'] == [pytest.approx([.2, .2, .2, .2, .2])]
 
 
 def test_interactive_mean_model_uses_reporting_aggregation_and_vendor_palette() -> None:
@@ -1331,6 +1435,27 @@ def test_cdf_uses_emphasised_lines_when_only_one_campaign_is_rendered() -> None:
         _render_cdf_line('CDF', frame, '__catalog_primary', '__catalog_series', 'Metric')
 
     assert {item[2] for item in draw_legend.call_args.args[1]} == {4}
+
+
+def test_cdf_renderer_uses_progressive_widths_for_four_campaigns() -> None:
+    campaigns = ['2026-Q1', '2026-Q2', '2026-Q3', '2026-Q4']
+    frame = pd.DataFrame({
+        '__catalog_row_0': ['Vodafone'] * 8,
+        '__catalog_column_0': [campaign for campaign in campaigns for _ in range(2)],
+        '__catalog_primary': ['unused'] * 8,
+        '__catalog_series': ['unused'] * 8,
+        'Campaign': [campaign for campaign in campaigns for _ in range(2)],
+        'Metric': [1.0, 2.0, 1.1, 2.1, 1.2, 2.2, 1.3, 2.3],
+    })
+    frame.attrs['catalogue_dimension_labels'] = {
+        '__catalog_row_0': ('Operator',),
+        '__catalog_column_0': ('Campaign',),
+    }
+
+    with patch('src.modules.cdr_reporting._draw_chart_legend') as draw_legend:
+        _render_cdf_line('CDF', frame, '__catalog_primary', '__catalog_series', 'Metric')
+
+    assert [item[2] for item in draw_legend.call_args.args[1]] == [1, 2, 3, 4]
 
 
 def test_cdf_trims_only_after_80_percent_of_curves_exceed_99_percent() -> None:

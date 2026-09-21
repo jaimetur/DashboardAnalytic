@@ -1437,6 +1437,20 @@ class Repository:
                 (key, value),
             )
 
+    def try_set_workspace_state(self, key: str, value: str, *, timeout_seconds: float = 0.25) -> bool:
+        """Best-effort state update that never waits behind a long Workspace writer."""
+        try:
+            with closing(sqlite3.connect(self.db_path, timeout=timeout_seconds)) as conn, conn:
+                conn.execute(f"PRAGMA busy_timeout = {max(1, int(timeout_seconds * 1000))}")
+                conn.execute(
+                    'INSERT INTO workspace_state (key, value) VALUES (?, ?) '
+                    'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+                    (key, value),
+                )
+            return True
+        except sqlite3.OperationalError:
+            return False
+
     def get_application_state(self, key: str) -> str | None:
         with self.global_connection() as conn:
             conn.executescript(GLOBAL_SCHEMA)

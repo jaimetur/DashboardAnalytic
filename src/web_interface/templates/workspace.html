@@ -367,9 +367,15 @@
     <section class="auto-calculated-field-progress datasets-materialization-status" data-auto-calculated-field-progress data-status-url="/api/workspace/auto-calculated-fields/materialization" aria-live="polite">
       <div class="auto-calculated-field-progress-heading">
         <strong data-auto-calculated-field-progress-title>Materialization status</strong>
-        <div class="auto-calculated-field-progress-statuses">
-          <span class="status-pill status-ready" data-auto-calculated-field-progress-status>Up to date</span>
-          <span class="status-pill status-ready" data-auto-calculated-field-queued-status hidden></span>
+        <div class="auto-calculated-field-progress-actions">
+          <button type="button" class="auto-calculated-field-rematerialize-button" data-auto-calculated-field-rematerialize title="Re-materialize auto-calculate fields" aria-label="Re-materialize auto-calculate fields">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0 1.2 5.2M20 4v7h-7"/></svg>
+            <span>Re-materialize auto-calculate fields</span>
+          </button>
+          <div class="auto-calculated-field-progress-statuses">
+            <span class="status-pill status-ready" data-auto-calculated-field-progress-status>Up to date</span>
+            <span class="status-pill status-ready" data-auto-calculated-field-queued-status hidden></span>
+          </div>
         </div>
       </div>
       <div class="auto-calculated-field-job-list" data-auto-calculated-field-job-list>
@@ -402,10 +408,6 @@
     <div class="workspace-calculated-dimensions-content">
       <div class="workspace-calculated-dimensions-intro">
         <p class="lede">Auto-calculated fields belong to this workspace and are materialized in every applicable individual and combined CDR table.</p>
-        <button type="button" class="auto-calculated-field-rematerialize-button" data-auto-calculated-field-rematerialize title="Re-materialize auto-calculate fields" aria-label="Re-materialize auto-calculate fields">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0 1.2 5.2M20 4v7h-7"/></svg>
-          <span>Re-materialize auto-calculate fields</span>
-        </button>
       </div>
       <div class="workspace-calculated-dimensions-layout">
         <section class="workspace-calculated-dimensions-subpanel workspace-calculated-dimensions-import-panel">
