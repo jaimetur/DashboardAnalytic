@@ -3750,7 +3750,6 @@ def _draw_adjacent_stacked_bar_label(
     label_y = below if below + label_height + 4 <= bar_bottom else above if above >= bar_top else None
     if label_y is None:
         return False
-    draw.rectangle((x + 2, label_y - 1, x + width - 2, label_y + label_height + 3), fill=(255, 255, 255))
     draw.text(
         (x + (width - label_width) / 2, label_y - box[1]),
         value, fill=fill, font=font,
@@ -4438,6 +4437,14 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
     image, draw = _canvas(title); left, top, width, height = 125, 260, 1260, 475
     bar_width = max(20, min(96, width // max(len(combinations) * 2, 1)))
     bucket_colours = _distribution_bucket_colours(buckets, data)
+    for tick in range(6):
+        value = tick * 20
+        y = top + height - tick / 5 * height
+        draw.line((left, y, left + width, y), fill="#E4E9ED", width=1)
+        label = f"{value}%"
+        label_width = _text_width(draw, label, _font(16, True))
+        draw.text((left - label_width - 12, y - 9), label, fill="#4E6271", font=_font(16, True))
+    draw.line((left, top, left, top + height), fill="#AEBBC4", width=2)
     for index, key in enumerate(combinations):
         subset = data
         for column, value in zip(axis_columns, key, strict=True):
@@ -4447,15 +4454,21 @@ def _render_stacked_distribution(title: str, frame: pd.DataFrame, group: str | N
             value = len(subset[subset[stack] == bucket]) / total; segment = value * height; y = top + height - running - segment
             draw.rectangle((x, y, x + bar_width, y + segment), fill=bucket_colours.get((bucket,), _colour(bucket, bucket_index)))
             value_label = f"{value:.1%}"
-            label_font = _font(22, True)
+            label_font = _font(17, True)
             label_box = draw.textbbox((0, 0), value_label, font=label_font)
             label_height = label_box[3] - label_box[1]
             def automatic_label() -> None:
-                if _text_width(draw, value_label, label_font) + 12 <= bar_width and label_height + 10 <= segment:
+                if _text_width(draw, value_label, label_font) + 10 <= bar_width and label_height + 8 <= segment:
                     _draw_inside_bar_label(
                         image, draw, value_label,
                         x=x, y=y, width=bar_width, height=segment,
                         fill="#FFFFFF", font=label_font,
+                    )
+                elif value > 0:
+                    _draw_adjacent_stacked_bar_label(
+                        draw, value_label, x=x, y=y, width=bar_width, height=segment,
+                        bar_top=top, bar_bottom=top + height,
+                        fill=colour, font=_font(12, True),
                     )
             colour = bucket_colours.get((bucket,), _colour(bucket, bucket_index))
             _draw_configured_bar_label(image, draw, value_label, x=x, y=y, width=bar_width, height=segment, colour=colour, font=label_font, position=label_position, horizontal=False, automatic=automatic_label)

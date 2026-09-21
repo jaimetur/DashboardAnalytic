@@ -1229,7 +1229,7 @@ def test_static_distribution_draws_horizontal_white_percentage_labels_inside_seg
 
     assert [item.args[2] for item in draw_label.call_args_list] == ['80.0%', '20.0%']
     assert {item.kwargs['fill'] for item in draw_label.call_args_list} == {'#FFFFFF'}
-    assert {item.kwargs['font'].size for item in draw_label.call_args_list} == {22}
+    assert {item.kwargs['font'].size for item in draw_label.call_args_list} == {17}
 
 
 def test_interactive_mean_model_uses_reporting_aggregation_and_vendor_palette() -> None:
@@ -1328,7 +1328,7 @@ def test_tiny_stacked_label_stays_inside_its_own_bar_below_the_segment() -> None
     )
 
     assert drawn is True
-    assert draw.rectangle.call_args.args[0] == (102, 24, 178, 40)
+    draw.rectangle.assert_not_called()
     assert draw.text.call_args.args[0][0] == pytest.approx(126)
     assert 100 <= draw.text.call_args.args[0][0] <= 180
 

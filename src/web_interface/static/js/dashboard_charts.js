@@ -243,8 +243,6 @@
     context.save(); font(context, size, true);
     const label = String(value), labelWidth = textWidth(context, label);
     if (labelWidth + 8 > width) { context.restore(); return false; }
-    context.fillStyle = 'rgba(255, 255, 255, 0.9)';
-    context.fillRect(x + 2, labelY - 1, width - 4, size + 4);
     context.fillStyle = colour; context.textAlign = 'center'; context.textBaseline = 'top';
     context.fillText(label, x + width / 2, labelY);
     context.restore(); return true;
@@ -447,7 +445,7 @@
             else if (ratio >= .005) drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, top, top + height, series.colour);
           });
           if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: category, series: series.name, value: tooltipPercent(ratio)});
-          running += segmentHeight;
+          running += ratio;
         });
         const label = String(category).slice(0, 24); font(context, 18, true);
         if (textWidth(context, label) > width / categories.length - 8) rotatedLabel(context, label, x + barWidth / 2, top + height + 75, '#5A6B78', 18);
@@ -514,7 +512,7 @@
             else if (ratio >= .005) drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, paneTop, paneBottom, series.colour);
           });
           if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: tooltipPercent(ratio)});
-          running += segmentHeight;
+          running += ratio;
         });
       });
     });
@@ -623,6 +621,13 @@
     const height = Math.max(180, usableBottom - top - bottomAxisReserve(context, keys, width));
     const yDomain = expandedDomain(payload.domain?.y), ySpan = yDomain[1] - yDomain[0];
     const barWidth = Math.max(24, Math.min(220, Math.floor(width / Math.max(keys.length * 1.25, 1))));
+    for (let tick = 0; tick <= 5; tick += 1) {
+      const value = yDomain[0] + ySpan * tick / 5, y = top + height - tick / 5 * height;
+      line(context, left, y, left + width, y, '#E4E9ED');
+      context.fillStyle = '#4E6271'; context.textAlign = 'right'; font(context, 16, true);
+      context.fillText(`${(value * 100).toFixed(0)}%`, left - 12, y - 8);
+    }
+    line(context, left, top, left, top + height, '#AEBBC4', 2);
     keys.forEach((key, index) => {
       const ratios = payload.cells[index] || [], x = left + index * width / keys.length + 10; let running = 0;
       buckets.forEach((bucket, bucketIndex) => {
@@ -630,16 +635,16 @@
         const visibleLow = Math.max(segmentLow, yDomain[0]), visibleHigh = Math.min(segmentHigh, yDomain[1]);
         const segmentHeight = Math.max(0, visibleHigh - visibleLow) / ySpan * height, y = top + (yDomain[1] - visibleHigh) / ySpan * height;
         context.fillStyle = bucket.colour; context.fillRect(x, y, barWidth, segmentHeight);
-        const label = percent(ratio); font(context, 22, true);
+        const label = percent(ratio); font(context, 17, true);
         const labelWidth = textWidth(context, label);
-        drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, bucket.colour, 22, payload.label_position, 'vertical', () => {
-          if (labelWidth + 12 <= barWidth && segmentHeight >= 28) {
+        drawConfiguredBarLabel(context, label, x, y, barWidth, segmentHeight, bucket.colour, 17, payload.label_position, 'vertical', () => {
+          if (labelWidth + 10 <= barWidth && segmentHeight >= 24) {
             context.fillStyle = '#FFFFFF'; context.textAlign = 'center'; context.textBaseline = 'middle';
             context.fillText(label, x + barWidth / 2, y + segmentHeight / 2); context.textBaseline = 'top';
-          }
+          } else if (ratio > 0) drawAdjacentStackLabel(context, label, x, y, barWidth, segmentHeight, top, top + height, bucket.colour, 12);
         });
         if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: displayKey(key), series: bucket.name, value: tooltipPercent(ratio)});
-        running += segmentHeight;
+        running += ratio;
       });
     });
     drawTopColumnSeparators(context, keys, payload.axis_columns || [], left, width, top, top + height);
