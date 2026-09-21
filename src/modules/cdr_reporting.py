@@ -341,6 +341,18 @@ class CalculatedDimension:
     expression_text: str = ""
 
 
+def split_calculated_dimension_aliases(value: object) -> tuple[str, ...]:
+    """Split alternative source fields from either the legacy pipe or readable OR syntax."""
+    aliases: list[str] = []
+    for part in re.split(r"\s+(?:OR)\s+|\s*\|\s*", str(value or ""), flags=re.I):
+        alias = part.strip()
+        if alias.startswith('[') and alias.endswith(']'):
+            alias = alias[1:-1].strip()
+        if alias:
+            aliases.append(alias)
+    return tuple(aliases)
+
+
 @dataclass(frozen=True)
 class CatalogEntry:
     slide: int
@@ -704,7 +716,7 @@ def parse_calculated_dimensions(payload: object) -> tuple[CalculatedDimension, .
             rules.append(CalculatedDimensionRule(parse_catalog_filters(when), value))
         if expression is not None:
             rules = list(_flatten_calculated_expression(expression))
-        default_from = tuple(part.strip() for part in str(item.get("default_from") or "").split("|") if part.strip())
+        default_from = split_calculated_dimension_aliases(item.get("default_from"))
         default = str(item.get("default") or "")
         if not rules and not default_from and not default:
             raise ValueError(f"Auto-calculated field '{name}' requires at least one rule, a default value or a default source field.")
@@ -720,13 +732,12 @@ def calculated_dimensions_json(dimensions: Iterable[CalculatedDimension]) -> lis
         """Keep distinct physical fallbacks while removing case-only duplicates."""
         aliases: list[str] = []
         seen: set[str] = set()
-        for candidate in str(value).split("|"):
-            candidate = candidate.strip()
+        for candidate in split_calculated_dimension_aliases(value):
             key = _normalise_catalog_name(candidate)
             if candidate and key not in seen:
                 aliases.append(candidate)
                 seen.add(key)
-        return "|".join(aliases)
+        return " OR ".join(f"[{alias}]" for alias in aliases)
 
     def condition_text(condition: FilterCondition) -> str:
         values = ", ".join(condition.values)
@@ -1593,7 +1604,7 @@ def _normalise_catalog_name(value: str) -> str:
 
 
 def _calculated_condition_mask(frame: pd.DataFrame, condition: FilterCondition) -> pd.Series | None:
-    column = _column(frame, tuple(part.strip() for part in condition.column.split("|") if part.strip()))
+    column = _column(frame, split_calculated_dimension_aliases(condition.column))
     if not column:
         return None
     series = frame[column]

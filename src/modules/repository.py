@@ -1814,7 +1814,9 @@ class Repository:
                 (local_now_iso(),),
             )
 
-    def replace_calculated_dimensions(self, definitions: list[dict[str, Any]]) -> None:
+    def replace_calculated_dimensions(
+        self, definitions: list[dict[str, Any]], *, materialization_state: str = '1',
+    ) -> None:
         timestamp = local_now_iso()
         with self.connection() as conn:
             conn.execute('DELETE FROM autocalculated_fields')
@@ -1830,14 +1832,14 @@ class Repository:
                 'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
                 ('calculated_dimensions_initialized', '1'),
             )
-            # Persist the rebuild marker in the same transaction as the
-            # definitions.  Besides making the update crash-safe, this avoids
-            # a second Workspace write racing the materialization worker after
-            # a Save and Materialize request has already queued it.
+            # Persist the requested materialization state in the same
+            # transaction as the definitions. This keeps both deferred saves
+            # and queued rebuilds crash-safe without a second Workspace write
+            # racing a materialization worker.
             conn.execute(
                 'INSERT INTO workspace_state (key, value) VALUES (?, ?) '
                 'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-                ('calculated_dimensions_need_materialization', '1'),
+                ('calculated_dimensions_need_materialization', materialization_state),
             )
 
     def drop_reporting_table(self, dataset_kind: str) -> None:

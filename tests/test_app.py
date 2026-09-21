@@ -231,8 +231,30 @@ def test_calculated_dimension_rules_ignore_case_and_compact_redundant_field_alia
     assert frame['Test Family'].tolist() == ['YouTube']
     assert 'Test Family' not in voice_frame.columns
     payload = calculated_dimensions_json(dimensions)[0]
-    assert payload['default_from'] == 'Test_Name'
-    assert payload['rules'][0]['when'] == 'Test_Name CONTAINS YOUTUBE'
+    assert payload['default_from'] == '[Test_Name]'
+    assert payload['rules'][0]['when'] == '[Test_Name] CONTAINS YOUTUBE'
+
+
+def test_calculated_dimension_alias_separators_are_serialized_with_readable_spacing() -> None:
+    import pandas as pd
+    from src.modules.cdr_reporting import (
+        calculated_dimensions_json, materialize_calculated_dimensions, parse_calculated_dimensions,
+    )
+
+    dimensions = parse_calculated_dimensions([{
+        'name': 'Fallback Group', 'sources': ['cdr-data'], 'default': '',
+        'default_from': 'RAT | RAT_A| Sample_RAT_A',
+        'rules': [{
+            'when': 'RAT | RAT_A| Sample_RAT_A CONTAINS LTE',
+            'value': 'LTE',
+        }],
+    }])
+
+    payload = calculated_dimensions_json(dimensions)[0]
+    assert payload['default_from'] == '[RAT] OR [RAT_A] OR [Sample_RAT_A]'
+    assert payload['rules'][0]['when'] == '[RAT] OR [RAT_A] OR [Sample_RAT_A] CONTAINS LTE'
+    frame = materialize_calculated_dimensions(pd.DataFrame({'RAT_A': ['LTE']}), dimensions, 'cdr-data')
+    assert frame['Fallback Group'].tolist() == ['LTE']
 
 
 def test_calculated_dimensions_support_nested_tableau_if_expressions() -> None:
@@ -429,6 +451,7 @@ def test_incremental_auto_field_materialization_yields_between_write_batches(
     }])
     monkeypatch.setattr(app_module, 'AUTO_FIELD_UPDATE_BATCH_SIZE', 2)
     checkpoints: list[int] = []
+    row_progress: list[tuple[int, int]] = []
 
     def checkpoint() -> None:
         checkpoints.append(len(checkpoints) + 1)
@@ -438,9 +461,13 @@ def test_incremental_auto_field_materialization_yields_between_write_batches(
     app_module._incremental_auto_field_table_update(
         repository, 'dataset_rows_1', 'cdr-data', (), dimensions, {},
         checkpoint=checkpoint,
+        row_progress=lambda completed, total: row_progress.append((completed, total)),
     )
 
     assert len(checkpoints) >= 5
+    assert row_progress[0] == (0, 7)
+    assert row_progress[-1] == (7, 7)
+    assert any(0 < completed < total for completed, total in row_progress)
     assert repository.get_workspace_state('foreground_save') == 'completed'
     with repository.connection() as connection:
         assert connection.execute(
@@ -488,12 +515,16 @@ def test_incremental_auto_fields_update_existing_combined_reporting_table(tmp_pa
         'rules': [{'when': 'Test_Name CONTAINS youtube', 'value': 'Video'}],
     }])
 
+    progress: list[tuple[int, int, str]] = []
     stats = app_module.materialize_workspace_auto_fields_incrementally(
         (), dimensions, {}, repository, {'cdr-data'},
+        progress_callback=lambda completed, total, message: progress.append((completed, total, message)),
     )
 
     assert stats['datasets'] == 1
     assert stats['combined_tables'] == 1
+    assert progress[-1][0] == progress[-1][1] == 2_000
+    assert any('Table 1 of 2' in message and 'row operations' in message for _, _, message in progress)
     with repository.connection() as connection:
         value = connection.execute('SELECT Family FROM reporting_rows_data').fetchone()[0]
     assert value == 'Video'
@@ -712,6 +743,7 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     assert 'data-workspace-calculated-dimensions-panel' in page.text
     assert 'data-auto-calculated-field-progress' in page.text
     assert 'data-auto-calculated-field-job-list' in page.text
+    assert 'data-materialization-job-key="initial"' in page.text
     assert '>Edit</button>' in page.text
     assert 'Manage Auto-calculated Fields' not in page.text
     assert 'workspace-calculated-dimensions-import-panel' in page.text
@@ -737,6 +769,8 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     assert current_definitions.json()['dimensions'] == app_module.calculated_dimensions_json(
         app_module.load_workspace_calculated_dimensions()
     )
+    assert {'cdr-data', 'cdr-voice', 'cdr-speech'} == set(current_definitions.json()['columns'])
+    assert 'RAT' in current_definitions.json()['columns']['cdr-data']
 
     status = client.get('/api/workspace/auto-calculated-fields/materialization')
     assert status.status_code == 200
@@ -763,6 +797,35 @@ def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) 
     assert imported.status_code == 303
     assert any(item.name == 'Imported Group' for item in app_module.load_workspace_calculated_dimensions())
     assert not list(app_module.settings.slides_templates_dir.rglob('*.dimensions.json'))
+
+
+def test_saving_calculated_dimensions_without_materialization_does_not_start_a_job(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    dimensions = app_module.calculated_dimensions_json(app_module.load_workspace_calculated_dimensions())
+    dimensions[0]['default'] = 'Saved without materialization'
+    monkeypatch.setattr(
+        app_module,
+        'start_auto_calculated_field_job',
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('materialization must not start')),
+    )
+
+    response = client.put('/api/workspace/calculated-dimensions', json={
+        'dimensions': dimensions,
+        'renames': [],
+        'materialize': False,
+    })
+
+    assert response.status_code == 200
+    assert response.json()['notice'] == 'The fields were saved. Materialization was not started.'
+    assert 'materialization_job' not in response.json()
+    assert 'materialization_status_url' not in response.json()
+    assert app_module.repository.get_workspace_state('calculated_dimensions_need_materialization') == 'saved'
+    assert app_module.calculated_dimensions_json(app_module.load_workspace_calculated_dimensions())[0]['default'] == 'Saved without materialization'
+
+    status = client.get('/api/workspace/auto-calculated-fields/materialization')
+    assert status.json()['status'] == 'pending'
 
 
 def test_materialization_status_returns_every_active_workspace_job(client, monkeypatch) -> None:
@@ -799,6 +862,28 @@ def test_materialization_status_returns_every_active_workspace_job(client, monke
     assert task_by_id['auto-fields:data-job']['status'] == 'queued'
     assert task_by_id['auto-fields:data-job']['progress'] == 0
     assert task_by_id['auto-fields:data-job']['started_at'] is None
+
+
+def test_stopped_materialization_status_retains_its_real_progress(client, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login(client)
+    workspace_id = app_module.active_workspace.id
+    app_module.repository.set_workspace_state('calculated_dimensions_need_materialization', 'stopped')
+    monkeypatch.setattr(app_module, 'AUTO_CALCULATED_FIELD_JOBS', {
+        'stopped-job': {
+            'id': 'stopped-job', 'workspace_id': workspace_id, 'status': 'stopped',
+            'completed': 2, 'total': 10, 'created_at': 1,
+            'message': 'Materialization stopped by user.',
+        },
+    })
+
+    status = client.get('/api/workspace/auto-calculated-fields/materialization').json()
+
+    assert status['status'] == 'stopped'
+    assert status['completed'] == 2
+    assert status['total'] == 10
+    assert status['jobs'] == []
 
 
 def test_combined_table_progress_matches_its_active_recreation_job(client, monkeypatch) -> None:
@@ -3605,6 +3690,7 @@ def test_orphaned_auto_field_materialization_can_be_stopped_from_background_pane
     workspace = app_module.active_workspace
     assert workspace is not None
     monkeypatch.setattr(app_module, 'AUTO_CALCULATED_FIELD_JOBS', {})
+    monkeypatch.setattr(app_module, 'read_persisted_auto_field_progress', lambda _workspace_id: {})
     workspace_repository = app_module.Repository(
         workspace.database_path,
         global_db_path=app_module.repository.global_db_path,
@@ -3683,9 +3769,24 @@ def test_persisted_materialization_stop_is_observed_across_workers(client, monke
         },
     })
     app_module.request_persisted_auto_field_stop(workspace.id, job_id)
+    app_module.persist_auto_field_progress({
+        'id': job_id, 'workspace_id': workspace.id, 'status': 'processing',
+        'completed': 250, 'total': 1_000, 'message': 'Table 1 of 4 · 250 of 1,000 row operations',
+        'created_at': created_at,
+    })
 
+    assert app_module.any_persisted_auto_field_stop_requested(workspace.id) is True
     with pytest.raises(app_module.ProcessingStopped):
         app_module.ensure_auto_calculated_field_job_not_stopped(job_id)
+
+    monkeypatch.setattr(app_module, 'AUTO_CALCULATED_FIELD_JOBS', {})
+    app_module.repository.set_workspace_state('calculated_dimensions_need_materialization', 'processing')
+    status = client.get('/api/workspace/auto-calculated-fields/materialization').json()
+    assert status['status'] == 'processing'
+    assert status['cancel_requested'] is True
+    assert status['completed'] == 250
+    assert status['total'] == 1_000
+    assert status['message'] == 'Table 1 of 4 · 250 of 1,000 row operations'
 
 
 def test_interactive_template_save_fails_fast_while_workspace_writer_is_busy(client, monkeypatch) -> None:

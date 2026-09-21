@@ -37,6 +37,7 @@ from src.modules.cdr_reporting import (
     ensure_vendor_group, normalise_operator_aliases, parse_catalog_filters,
     parse_catalog_grouping,
     prepare_catalog_chart_preview_frame, render_catalog_chart_preview, render_unavailable_source_chart,
+    split_calculated_dimension_aliases,
 )
 
 from src.modules.repository import Repository
@@ -2610,7 +2611,7 @@ def install_dashboard_routes(core):
             explicit.update(dimension.default_from)
             for rule in dimension.rules:
                 for condition in rule.conditions:
-                    explicit.update(part.strip() for part in condition.column.split('|') if part.strip())
+                    explicit.update(split_calculated_dimension_aliases(condition.column))
         selected = list(reported)
         selected.extend(('dataset_id', 'source_row_id'))
         return list(dict.fromkeys(selected))
@@ -2630,7 +2631,7 @@ def install_dashboard_routes(core):
                 continue
             column = next((
                 resolve_sql_column(columns, candidate.strip())
-                for candidate in condition.column.split('|')
+                for candidate in split_calculated_dimension_aliases(condition.column)
                 if resolve_sql_column(columns, candidate.strip())
             ), None)
             if not column:

@@ -54,7 +54,7 @@ from src.modules.analytics import build_analysis
 from src.modules.background_scheduler import BackgroundTaskScheduler
 from src.modules.auth import SessionUser, verify_password
 from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, normalise_operator_aliases, parse_axis_range, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_label_position, parse_legend_position, parse_template_boolean, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer, split_calculated_dimension_aliases
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE, workspace_write_lock
@@ -427,9 +427,12 @@ def load_repository_calculated_dimensions(task_repository: Repository) -> tuple[
     return parse_calculated_dimensions(payload)
 
 
-def write_workspace_calculated_dimensions(payload: object) -> tuple:
+def write_workspace_calculated_dimensions(payload: object, *, materialize: bool = True) -> tuple:
     dimensions = parse_calculated_dimensions(payload)
-    repository.replace_calculated_dimensions(calculated_dimensions_json(dimensions))
+    repository.replace_calculated_dimensions(
+        calculated_dimensions_json(dimensions),
+        materialization_state='1' if materialize else 'saved',
+    )
     return dimensions
 
 
@@ -812,7 +815,7 @@ def _auto_field_sql_expression(
     column_lookup = {_normalise_catalogue_dimension_name(column): str(column) for column in columns}
 
     def resolve(value: str | Iterable[str]) -> str | None:
-        candidates = value.split('|') if isinstance(value, str) else value
+        candidates = split_calculated_dimension_aliases(value) if isinstance(value, str) else value
         return next((column_lookup.get(_normalise_catalogue_dimension_name(item)) for item in candidates if column_lookup.get(_normalise_catalogue_dimension_name(item))), None)
 
     def numeric_value(value: str) -> float | None:
@@ -902,7 +905,7 @@ def _auto_field_sql_expression(
     return expression, parameters
 
 
-AUTO_FIELD_UPDATE_BATCH_SIZE = 25_000
+AUTO_FIELD_UPDATE_BATCH_SIZE = 50_000
 
 
 def _incremental_auto_field_table_update(
@@ -913,6 +916,7 @@ def _incremental_auto_field_table_update(
     current: Iterable[Any],
     renames: dict[str, str],
     checkpoint: Callable[[], None] | None = None,
+    row_progress: Callable[[int, int], None] | None = None,
 ) -> bool:
     """Apply changed fields in bounded transactions without replacing the source table."""
     quote = task_repository._quote_identifier
@@ -940,6 +944,17 @@ def _incremental_auto_field_table_update(
             return parsed if pd.notna(parsed) else None
 
         connection.create_function('da_try_number', 1, try_number, deterministic=True)
+        if checkpoint:
+            def stop_sql_when_requested() -> int:
+                try:
+                    checkpoint()
+                except ProcessingStopped:
+                    return 1
+                return 0
+
+            # Interrupt a long SQLite statement as soon as a cross-worker stop
+            # marker appears instead of waiting for the next row-batch boundary.
+            connection.set_progress_handler(stop_sql_when_requested, 10_000)
 
     updates: list[tuple[str, list[Any], Any]] = []
     removable_keys: set[str] = set()
@@ -1027,6 +1042,8 @@ def _incremental_auto_field_table_update(
     if checkpoint:
         checkpoint()
     if not updates:
+        if row_progress:
+            row_progress(1, 1)
         return bool(removable_keys or renames)
 
     changed_keys = {
@@ -1038,7 +1055,7 @@ def _incremental_auto_field_table_update(
             _normalise_catalogue_dimension_name(alias)
             for rule in definition.rules
             for condition in rule.conditions
-            for alias in condition.column.split('|')
+            for alias in split_calculated_dimension_aliases(condition.column)
         } | {
             _normalise_catalogue_dimension_name(alias) for alias in definition.default_from
         })
@@ -1052,12 +1069,18 @@ def _incremental_auto_field_table_update(
     first_row = int(bounds['first_row']) if bounds and bounds['first_row'] is not None else None
     last_row = int(bounds['last_row']) if bounds and bounds['last_row'] is not None else None
     if first_row is None or last_row is None:
+        if row_progress:
+            row_progress(1, 1)
         return True
+    row_span = max(last_row - first_row + 1, 1)
+    total_row_operations = row_span * len(update_groups)
+    if row_progress:
+        row_progress(0, total_row_operations)
 
     # A single UPDATE on a large CDR can own SQLite's only writer for tens of
     # seconds.  Commit bounded rowid ranges so foreground metadata saves can
     # acquire the writer between batches while materialization continues.
-    for group in update_groups:
+    for group_index, group in enumerate(update_groups):
         lower_bound = first_row - 1
         while lower_bound < last_row:
             upper_bound = min(lower_bound + AUTO_FIELD_UPDATE_BATCH_SIZE, last_row)
@@ -1074,6 +1097,9 @@ def _incremental_auto_field_table_update(
                     [*parameters, lower_bound, upper_bound],
                 )
             lower_bound = upper_bound
+            if row_progress:
+                processed_in_group = min(max(lower_bound - first_row + 1, 0), row_span)
+                row_progress(group_index * row_span + processed_in_group, total_row_operations)
     return True
 
 
@@ -1135,7 +1161,7 @@ def combined_reporting_required_columns(
             alias.strip()
             for rule in definition.rules
             for condition in rule.conditions
-            for alias in condition.column.split('|')
+            for alias in split_calculated_dimension_aliases(condition.column)
             if alias.strip()
         )
     return list(dict.fromkeys(column for column in requested if str(column).strip()))
@@ -1196,19 +1222,54 @@ def materialize_workspace_auto_fields_incrementally(
         and str(row['dataset_kind'] or '').casefold() in selected_sources
     ]
     reporting_kinds = sorted({str(row['dataset_kind']).casefold() for row in datasets})
-    total = max(len(datasets) + len(reporting_kinds), 1)
+    table_count = len(datasets) + len(reporting_kinds)
+    total = max(table_count * 1_000, 1)
     completed = 0
+
+    def table_progress(label: str, processed: int, row_total: int) -> None:
+        if not progress_callback:
+            return
+        safe_total = max(int(row_total or 0), 1)
+        safe_processed = min(max(int(processed or 0), 0), safe_total)
+        table_units = round(safe_processed * 1_000 / safe_total)
+        overall = min(completed * 1_000 + table_units, total)
+        progress_callback(
+            overall,
+            total,
+            f'Table {completed + 1} of {max(table_count, 1)} · {label} · '
+            f'{safe_processed:,} of {safe_total:,} row operations',
+        )
+
     for dataset in datasets:
         kind = str(dataset['dataset_kind']).casefold()
+        label = f'Updating {dataset["file_name"]}'
+        if progress_callback:
+            progress_callback(
+                completed * 1_000, total,
+                f'Table {completed + 1} of {max(table_count, 1)} · Preparing {dataset["file_name"]}',
+            )
         _incremental_auto_field_table_update(
             task_repository, task_repository.dataset_rows_table_name(int(dataset['id'])),
             f'cdr-{kind}', previous, current, renames,
             checkpoint=stop_callback,
+            row_progress=lambda processed, row_total, current_label=label: table_progress(
+                current_label, processed, row_total,
+            ),
         )
         completed += 1
         if progress_callback:
-            progress_callback(completed, total, f'Updating {dataset["file_name"]}')
+            progress_callback(
+                completed * 1_000, total,
+                f'Completed table {completed} of {max(table_count, 1)} · {dataset["file_name"]}',
+            )
     for kind in reporting_kinds:
+        combined_label = f'Updating combined CDR-{kind.upper()} table'
+        if progress_callback:
+            progress_callback(
+                completed * 1_000, total,
+                f'Table {completed + 1} of {max(table_count, 1)} · '
+                f'Synchronizing rows for combined CDR-{kind.upper()}',
+            )
         required_columns = combined_reporting_required_columns(current, kind, task_repository)
         # Reconcile membership before updating calculated columns. A combined
         # table may predate a newly processed CDR of the same type, so an
@@ -1223,13 +1284,19 @@ def materialize_workspace_auto_fields_incrementally(
                 task_repository, task_repository.reporting_rows_table_name(kind),
                 f'cdr-{kind}', previous, current, renames,
                 checkpoint=stop_callback,
+                row_progress=lambda processed, row_total, current_label=combined_label: table_progress(
+                    current_label, processed, row_total,
+                ),
             )
         completed += 1
         task_repository.set_workspace_state(
             f'combined_reporting_updated_{kind}', now_iso(),
         )
         if progress_callback:
-            progress_callback(completed, total, f'Updating combined CDR-{kind.upper()} table')
+            progress_callback(
+                completed * 1_000, total,
+                f'Completed table {completed} of {max(table_count, 1)} · combined CDR-{kind.upper()}',
+            )
     DATAFRAME_CACHE.clear()
     ANALYSIS_CACHE.clear()
     CHART_PREVIEW_DATA_CACHE.clear()
@@ -1270,6 +1337,39 @@ def _auto_field_stop_marker_path(workspace_id: str, job_id: str = 'all') -> Path
     return marker_root / f'auto-fields-{workspace_key}-{job_key}.stop'
 
 
+def _auto_field_progress_path(workspace_id: str) -> Path:
+    """Return the cross-worker materialization progress snapshot path."""
+    marker_root = settings.output_dir.parent / '.background-stop-requests'
+    workspace_key = hashlib.sha256(str(workspace_id).encode()).hexdigest()[:24]
+    return marker_root / f'auto-fields-{workspace_key}.progress.json'
+
+
+def persist_auto_field_progress(job: dict[str, Any]) -> None:
+    """Publish materialization progress without contending for the Workspace database."""
+    path = _auto_field_progress_path(str(job.get('workspace_id') or ''))
+    payload = {
+        key: value for key, value in job.items()
+        if key not in {'previous_definitions', 'affected_sources', 'renames', 'username'}
+    }
+    temporary = path.with_suffix(f'.{uuid4().hex}.tmp')
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(json.dumps(payload), encoding='utf-8')
+        temporary.replace(path)
+    except OSError:
+        # Progress remains available in-process when a read-only deployment
+        # cannot publish the optional cross-worker snapshot.
+        temporary.unlink(missing_ok=True)
+
+
+def read_persisted_auto_field_progress(workspace_id: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(_auto_field_progress_path(workspace_id).read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+    return payload if isinstance(payload, dict) and str(payload.get('workspace_id') or '') == str(workspace_id) else {}
+
+
 def request_persisted_auto_field_stop(workspace_id: str, job_id: str = 'all') -> None:
     """Publish cancellation without writing to the busy Workspace database."""
     marker = _auto_field_stop_marker_path(workspace_id, job_id)
@@ -1304,6 +1404,13 @@ def persisted_auto_field_stop_requested(
     return False
 
 
+def any_persisted_auto_field_stop_requested(workspace_id: str) -> bool:
+    """Return whether any materialization job in the workspace is stopping."""
+    marker_root = settings.output_dir.parent / '.background-stop-requests'
+    workspace_key = hashlib.sha256(str(workspace_id).encode()).hexdigest()[:24]
+    return marker_root.is_dir() and any(marker_root.glob(f'auto-fields-{workspace_key}-*.stop'))
+
+
 def ensure_auto_calculated_field_job_not_stopped(job_id: str) -> None:
     with AUTO_CALCULATED_FIELD_JOBS_LOCK:
         job = AUTO_CALCULATED_FIELD_JOBS.get(job_id)
@@ -1335,6 +1442,7 @@ def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
             status='processing', message='Preparing CDR tables',
             started_at=datetime.now(timezone.utc).timestamp(),
         )
+        persist_auto_field_progress(job)
         previous = parse_calculated_dimensions(job['previous_definitions'])
         affected_sources = tuple(job['affected_sources'])
         renames = dict(job['renames'])
@@ -1350,6 +1458,19 @@ def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
             job = AUTO_CALCULATED_FIELD_JOBS.get(job_id)
             if job:
                 job.update(completed=completed, total=total, message=message)
+                persist_auto_field_progress(job)
+
+    def mark_stopped(exc: ProcessingStopped) -> None:
+        task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'stopped')
+        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+            AUTO_CALCULATED_FIELD_JOBS[job_id].update(
+                status='stopped', error=str(exc), message='Materialization stopped by user.',
+                finished_at=datetime.now(timezone.utc).timestamp(),
+            )
+            persist_auto_field_progress(AUTO_CALCULATED_FIELD_JOBS[job_id])
+        task_repository.try_add_log(str(job.get('username') or 'system'), 'materialize_auto_calculated_fields_stopped', json.dumps({
+            'job_id': job_id, 'workspace': workspace.id, 'error': str(exc), 'executed_by': 'system',
+        }))
 
     try:
         with _auto_calculated_field_workspace_lock(workspace.id):
@@ -1378,27 +1499,29 @@ def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
                 message=f"Updated {' and '.join(updated_parts)}",
                 finished_at=datetime.now(timezone.utc).timestamp(),
             )
+            persist_auto_field_progress(AUTO_CALCULATED_FIELD_JOBS[job_id])
         task_repository.try_add_log(str(job.get('username') or 'system'), 'materialize_auto_calculated_fields_completed', json.dumps({
             'job_id': job_id, 'workspace': workspace.id, 'datasets': dataset_count,
             'combined_tables': combined_count, 'executed_by': 'system',
         }))
     except ProcessingStopped as exc:
-        task_repository.set_workspace_state('calculated_dimensions_need_materialization', 'stopped')
-        with AUTO_CALCULATED_FIELD_JOBS_LOCK:
-            AUTO_CALCULATED_FIELD_JOBS[job_id].update(
-                status='stopped', error=str(exc), message='Materialization stopped by user.',
-                finished_at=datetime.now(timezone.utc).timestamp(),
-            )
-        task_repository.try_add_log(str(job.get('username') or 'system'), 'materialize_auto_calculated_fields_stopped', json.dumps({
-            'job_id': job_id, 'workspace': workspace.id, 'error': str(exc), 'executed_by': 'system',
-        }))
+        mark_stopped(exc)
     except Exception as exc:
+        try:
+            ensure_auto_calculated_field_job_not_stopped(job_id)
+        except ProcessingStopped as stopped:
+            # sqlite3 reports progress-handler cancellation as
+            # OperationalError("interrupted"); retain the user-facing stopped
+            # state instead of misclassifying that interruption as a failure.
+            mark_stopped(stopped)
+            return
         task_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
         with AUTO_CALCULATED_FIELD_JOBS_LOCK:
             AUTO_CALCULATED_FIELD_JOBS[job_id].update(
                 status='failed', error=str(exc), message='Materialization failed',
                 finished_at=datetime.now(timezone.utc).timestamp(),
             )
+            persist_auto_field_progress(AUTO_CALCULATED_FIELD_JOBS[job_id])
         task_repository.try_add_log(str(job.get('username') or 'system'), 'materialize_auto_calculated_fields_failed', json.dumps({
             'job_id': job_id, 'workspace': workspace.id, 'error': str(exc), 'executed_by': 'system',
         }))
@@ -1435,6 +1558,7 @@ def start_auto_calculated_field_job(
         ]:
             AUTO_CALCULATED_FIELD_JOBS.pop(stale_id, None)
         AUTO_CALCULATED_FIELD_JOBS[job_id] = job
+        persist_auto_field_progress(job)
     if before_submit:
         try:
             before_submit(job)
@@ -1447,6 +1571,7 @@ def start_auto_calculated_field_job(
             status='ready', message='No CDR tables required changes',
             finished_at=datetime.now(timezone.utc).timestamp(),
         )
+        persist_auto_field_progress(job)
         return job
     # replace_calculated_dimensions() stores the recoverable pending marker in
     # the same transaction as the definitions.  Do not write it again here:
@@ -7861,19 +7986,35 @@ def _workspace_background_tasks(workspace: Workspace) -> list[dict[str, Any]]:
                     "SELECT value FROM workspace_state WHERE key = 'calculated_dimensions_need_materialization'"
                 ).fetchone()
                 if materialization and str(materialization['value']) == 'processing':
-                    stopping = persisted_auto_field_stop_requested(workspace.id)
-                    tasks.append({
-                        'id': f'auto-fields-state:{workspace.id}',
-                        'label': 'Materializing Auto-calculated Fields',
-                        'detail': 'Stopping background job' if stopping else 'Updating CDR tables',
-                        'status': 'stopping' if stopping else 'processing',
-                        'progress': None,
-                        # This persisted marker can survive an application
-                        # restart after its worker has disappeared. Keep the
-                        # orphaned task dismissible from the same global panel.
-                        'stop_task_id': f'auto-fields-state:{workspace.id}',
-                        'stop_url': f'/api/background-tasks/{workspace.id}/stop',
-                    })
+                    stopping = any_persisted_auto_field_stop_requested(workspace.id)
+                    persisted_job = read_persisted_auto_field_progress(workspace.id)
+                    if persisted_job.get('status') in {'queued', 'processing'}:
+                        persisted_id = str(persisted_job.get('id') or '')
+                        tasks.append({
+                            'id': f'auto-fields:{persisted_id}',
+                            'label': 'Materializing Auto-calculated Fields',
+                            'detail': 'Stopping background job' if stopping else str(
+                                persisted_job.get('message') or 'Updating CDR tables'
+                            ),
+                            'status': 'stopping' if stopping else str(persisted_job.get('status') or 'processing'),
+                            'progress': materialization_job_progress_percent(persisted_job),
+                            **_background_task_timing(persisted_job),
+                            'stop_task_id': f'auto-fields:{persisted_id}',
+                            'stop_url': f'/api/background-tasks/{workspace.id}/stop',
+                        })
+                    else:
+                        tasks.append({
+                            'id': f'auto-fields-state:{workspace.id}',
+                            'label': 'Materializing Auto-calculated Fields',
+                            'detail': 'Stopping background job' if stopping else 'Updating CDR tables',
+                            'status': 'stopping' if stopping else 'processing',
+                            'progress': None,
+                            # This persisted marker can survive an application
+                            # restart after its worker has disappeared. Keep the
+                            # orphaned task dismissible from the same global panel.
+                            'stop_task_id': f'auto-fields-state:{workspace.id}',
+                            'stop_url': f'/api/background-tasks/{workspace.id}/stop',
+                        })
     except sqlite3.Error:
         # A worker may briefly hold the database while publishing a progress
         # update. The next browser poll will retry without disrupting the page.
@@ -8068,12 +8209,14 @@ def background_tasks_status(user: SessionUser = Depends(current_user)) -> JSONRe
             'is_active': bool(active_workspace and active_workspace.id == workspace_id),
             'tasks': [],
         })
+        job_task_id = f'auto-fields:{job.get("id")}'
         group['tasks'] = [
             task for task in group['tasks']
             if not str(task.get('id') or '').startswith('auto-fields-state:')
+            and str(task.get('id') or '') != job_task_id
         ]
         group['tasks'].append({
-            'id': f'auto-fields:{job.get("id")}',
+            'id': job_task_id,
             'label': 'Recreating combined CDR table' if job.get('operation') == 'combined_recreation' else 'Materializing Auto-calculated Fields',
             'detail': str(job.get('message') or 'Processing'),
             'status': str(job.get('status') or 'queued').casefold(),
@@ -9687,7 +9830,7 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
             requested.update(dimension.default_from)
             for rule in dimension.rules:
                 for condition in rule.conditions:
-                    requested.update(part.strip() for part in condition.column.split('|') if part.strip())
+                    requested.update(split_calculated_dimension_aliases(condition.column))
     try:
         workspace_dimensions = repository.list_calculated_dimensions()
     except sqlite3.OperationalError:
@@ -14759,13 +14902,31 @@ async def _save_workspace_dimensions(request: Request, user: SessionUser) -> JSO
     try:
         payload = await request.json()
 
-        def save_and_queue() -> tuple[Any, set[str], int, dict[str, Any]]:
+        materialize = payload.get('materialize', True)
+        if not isinstance(materialize, bool):
+            raise ValueError('The materialize option must be a boolean.')
+
+        def save_and_queue() -> tuple[Any, set[str], int, int, dict[str, Any] | None]:
             previous = load_workspace_calculated_dimensions()
-            dimensions = write_workspace_calculated_dimensions(payload.get('dimensions'))
+            previously_saved_without_materialization = (
+                repository.get_workspace_state('calculated_dimensions_need_materialization') == 'saved'
+            )
+            dimensions = write_workspace_calculated_dimensions(
+                payload.get('dimensions'), materialize=materialize,
+            )
             affected_sources = affected_calculated_dimension_sources(previous, dimensions)
             renames = calculated_dimension_rename_map(payload, previous, dimensions)
             renamed_templates = rename_calculated_dimension_template_references(renames)
             renamed_dashboards = rename_calculated_dimension_dashboard_references(renames)
+
+            if not materialize:
+                repository.add_log(user.username, 'save_workspace_calculated_dimensions', json.dumps({
+                    'workspace': workspace.id, 'count': len(dimensions),
+                    'materialization_job': None, 'renamed_templates': renamed_templates,
+                    'renamed_dashboards': renamed_dashboards,
+                    'affected_sources': sorted(affected_sources),
+                }))
+                return dimensions, affected_sources, renamed_templates, renamed_dashboards, None
 
             def record_save(job: dict[str, Any]) -> None:
                 repository.add_log(user.username, 'save_workspace_calculated_dimensions', json.dumps({
@@ -14776,7 +14937,8 @@ async def _save_workspace_dimensions(request: Request, user: SessionUser) -> JSO
                 }))
 
             job = start_auto_calculated_field_job(
-                workspace, previous, dimensions, renames, user.username,
+                workspace, () if previously_saved_without_materialization else previous,
+                dimensions, renames, user.username,
                 before_submit=record_save,
             )
             return dimensions, affected_sources, renamed_templates, renamed_dashboards, job
@@ -14789,17 +14951,23 @@ async def _save_workspace_dimensions(request: Request, user: SessionUser) -> JSO
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (OSError, sqlite3.Error) as exc:
         raise HTTPException(status_code=503, detail=f'Unable to save auto-calculated fields: {exc}') from exc
-    return JSONResponse({
+    response_payload = {
         'dimensions': calculated_dimensions_json(dimensions),
-        'materialization_job': job['id'],
-        'materialization_status_url': f'/api/workspace/auto-calculated-fields/materialization/{job["id"]}',
         'renamed_templates': renamed_templates,
         'renamed_dashboards': renamed_dashboards,
         'notice': (
             'The fields were saved. Updating applicable CDR tables can take a while and is running in the background.'
-            if affected_sources else 'The fields were already up to date; no CDR tables required changes.'
+            if job and affected_sources else
+            'The fields were saved. Materialization was not started.'
+            if not job else 'The fields were already up to date; no CDR tables required changes.'
         ),
-    })
+    }
+    if job:
+        response_payload.update({
+            'materialization_job': job['id'],
+            'materialization_status_url': f'/api/workspace/auto-calculated-fields/materialization/{job["id"]}',
+        })
+    return JSONResponse(response_payload)
 
 
 @app.put('/api/workspace/calculated-dimensions')
@@ -14816,10 +14984,11 @@ def get_workspace_calculated_dimensions(
     """Return the current definitions so long-lived editors never use a stale snapshot."""
     if not active_workspace:
         raise HTTPException(status_code=400, detail='Open a workspace first.')
-    return JSONResponse(
-        {'dimensions': calculated_dimensions_json(load_workspace_calculated_dimensions())},
-        headers={'Cache-Control': 'no-store'},
-    )
+    dimensions = load_workspace_calculated_dimensions()
+    return JSONResponse({
+        'dimensions': calculated_dimensions_json(dimensions),
+        'columns': catalogue_editor_columns(calculated_dimensions=dimensions),
+    }, headers={'Cache-Control': 'no-store'})
 
 
 @app.put('/api/admin/report-templates/{technology}/{catalogue_id}/calculated-dimensions')
@@ -14856,10 +15025,22 @@ def latest_auto_calculated_field_materialization(
             dict(job) for job in AUTO_CALCULATED_FIELD_JOBS.values()
             if job.get('workspace_id') == active_workspace.id
         ]
-    if workspace_jobs:
-        active_jobs = [job for job in workspace_jobs if job.get('status') in {'queued', 'processing'}]
+    workspace_state = repository.get_workspace_state('calculated_dimensions_need_materialization')
+    persisted_job = read_persisted_auto_field_progress(active_workspace.id)
+    if (
+        persisted_job.get('status') in {'queued', 'processing'}
+        and workspace_state in {'1', 'processing'}
+        and not any(job.get('id') == persisted_job.get('id') for job in workspace_jobs)
+    ):
+        workspace_jobs.append(persisted_job)
+    active_jobs = [job for job in workspace_jobs if job.get('status') in {'queued', 'processing'}]
+    if active_jobs:
+        stopping = any_persisted_auto_field_stop_requested(active_workspace.id)
+        for active_job in active_jobs:
+            if stopping:
+                active_job['cancel_requested'] = True
         processing_jobs = [job for job in active_jobs if job.get('status') == 'processing']
-        job = max(processing_jobs or active_jobs or workspace_jobs, key=lambda item: float(item.get('created_at') or 0))
+        job = max(processing_jobs or active_jobs, key=lambda item: float(item.get('created_at') or 0))
         public_job = {
             key: value for key, value in job.items()
             if key not in {'previous_definitions', 'affected_sources', 'renames', 'username'}
@@ -14878,19 +15059,41 @@ def latest_auto_calculated_field_materialization(
             )
         ]
         return JSONResponse(public_job)
-    workspace_state = repository.get_workspace_state('calculated_dimensions_need_materialization')
     if workspace_state in {'1', 'processing'}:
-        stopping = persisted_auto_field_stop_requested(active_workspace.id)
+        stopping = any_persisted_auto_field_stop_requested(active_workspace.id)
         return JSONResponse({
             'status': 'processing', 'completed': 0, 'total': 0,
             'message': 'Updating CDR tables', 'workspace_id': active_workspace.id,
             'cancel_requested': stopping,
         })
     if workspace_state == 'stopped':
+        stopped_jobs = [job for job in workspace_jobs if job.get('status') == 'stopped']
+        if stopped_jobs:
+            job = max(stopped_jobs, key=lambda item: float(item.get('created_at') or 0))
+            public_job = {
+                key: value for key, value in job.items()
+                if key not in {'previous_definitions', 'affected_sources', 'renames', 'username'}
+            }
+            public_job['jobs'] = []
+            return JSONResponse(public_job)
         return JSONResponse({
             'status': 'stopped', 'completed': 0, 'total': 0,
             'message': 'Materialization stopped by user.', 'workspace_id': active_workspace.id,
         })
+    if workspace_state == 'saved':
+        return JSONResponse({
+            'status': 'pending', 'completed': 0, 'total': 0,
+            'message': 'Field changes are saved and waiting for materialization.',
+            'workspace_id': active_workspace.id,
+        })
+    if workspace_jobs:
+        job = max(workspace_jobs, key=lambda item: float(item.get('created_at') or 0))
+        public_job = {
+            key: value for key, value in job.items()
+            if key not in {'previous_definitions', 'affected_sources', 'renames', 'username'}
+        }
+        public_job['jobs'] = []
+        return JSONResponse(public_job)
     return JSONResponse({
         'status': 'idle', 'completed': 0, 'total': 0,
         'message': 'All materialized fields are up to date', 'workspace_id': active_workspace.id,

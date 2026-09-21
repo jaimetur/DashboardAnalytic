@@ -141,9 +141,32 @@ def test_auto_calculated_field_editor_uses_wide_content_aware_dialog_geometry():
     assert script.count("overlay.className = 'confirm-overlay calculated-dimensions-overlay';") == 2
     assert '.calculated-dimensions-list { display: grid; flex: 0 1 auto;' in stylesheet
     assert '.calculated-dimension-editor { display: grid; flex: 0 1 auto;' in stylesheet
+    assert '.calculated-dimension-editor[hidden] { display: none; }' in stylesheet
     assert 'grid-template-rows: auto auto minmax(12rem, 1fr) auto;' in stylesheet
     assert '.calculated-dimensions-manager-actions { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end;' in stylesheet
+    assert '.calculated-dimensions-manager-actions[hidden] { display: none; }' in stylesheet
     assert '.calculated-dimension-editor > .confirm-actions.calculated-dimension-rules > button { flex: 0 0 auto;' in stylesheet
+    assert script.count("save.textContent = 'Save'; save.disabled = true;") == 2
+    assert script.count("saveAndMaterialize.textContent = 'Save & Materialize'; saveAndMaterialize.disabled = true;") == 2
+    assert script.count("discard.textContent = 'Discard';") == 2
+    assert script.count("const apply = document.createElement('button'); apply.type = 'button'; apply.textContent = 'Apply';") == 2
+    assert script.count("orderActions.className = 'calculated-dimension-order-actions';") == 2
+    assert "const formatCalculatedDimensionAliases = (value) => String(value || '')" in script
+    assert script.count('default_from: formatCalculatedDimensionAliases(') == 2
+    assert script.count('when: formatCalculatedDimensionRuleAliases(line.slice(0, separator))') == 2
+    assert script.count('Default source fields (optional, use [Field A] OR [Field B])') == 2
+    assert 'function configureCalculatedDimensionFieldAutocomplete(input, getColumns)' in script
+    assert "input.closest('.calculated-dimensions-overlay') || ownerDocument.body" in script
+    assert script.count('configureCalculatedDimensionFieldAutocomplete(field, selectedColumns)') == 2
+    assert script.count("...(availableDimensionColumns[checkbox.value] || [])") == 2
+    assert ".map((alias) => `[${alias}]`)" in script
+    assert '.calculated-dimension-field-suggestions { position: fixed;' in stylesheet
+    assert script.count('updateSaveActions();\n        });\n        moveDown.addEventListener') == 2
+    assert ".auto-calculated-field-job:not([data-materialization-job-key])" in script
+    assert "if (status === 'ready') return 100;" in script
+    assert '.calculated-dimension-order-actions { display: grid;' in stylesheet
+    assert 'body: JSON.stringify({dimensions: next, renames, materialize}),' in script
+    assert 'body: JSON.stringify({dimensions: calculatedDimensions, renames, materialize}),' in script
 
 
 def test_dashboard_warmup_retries_contention_and_compact_panel_headers_stay_aligned():
