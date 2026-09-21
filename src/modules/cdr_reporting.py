@@ -58,7 +58,7 @@ LEGACY_ROWS_COLUMNS_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layo
 LEGACY_CATALOG_HEADERS = ("Slide", "Slide tittle", "Slide Subtittle", "Layout", "CDR source", "KPI", "Chart type", "Filters", "Grouping")
 CATALOG_SOURCE_KINDS = {"cdr-data": "data", "cdr-voice": "voice", "cdr-speech": "speech"}
 CHART_TYPES = {
-    "100% stacked vertical bars", "count stacked horizontal bars", "cdf line", "multi kpi cdf lines", "scatter", "table",
+    "100% stacked vertical bars", "count stacked horizontal bars", "cdf line", "multi kpi cdf lines", "scatter", "table", "dynamic table",
     "distribution stacked vertical bars", "threshold stacked vertical bars", "average vertical bars", "median vertical bars", "map",
 }
 STRUCTURAL_SLIDE_TYPES = {"title slide", "transition slide"}
@@ -529,7 +529,9 @@ def parse_catalog_csv(content: bytes | str, technology: str, *, validate_filters
             kpi=(row.get("KPI") or "").strip(),
             chart_type=(row.get("Chart type") or "").strip(),
             legend=(row.get("Legend") or "").strip(),
-            legend_position=parse_legend_position((row.get("Legend Position") or "").strip()),
+            # Keep an intentionally empty editor cell empty. Renderers still
+            # interpret it as their default position if a legend exists.
+            legend_position=(row.get("Legend Position") or "").strip().casefold(),
             filters=(row.get("Filters") or "").strip(),
             grouping_rows=((row.get("Rows Aggregation") or row.get("Grouping_Rows") or "").strip() or " × ".join(legacy_dimensions[:1])),
             grouping_columns=((row.get("Column Aggregation") or row.get("Grouping_Columns") or "").strip() or " × ".join(legacy_dimensions[1:])),
@@ -2545,11 +2547,7 @@ def _resolved_legend_items(
         ]
     row_dimensions = parse_catalog_grouping(entry.grouping_rows).dimensions
     column_dimensions = parse_catalog_grouping(entry.grouping_columns).dimensions
-    kpi_dimensions = tuple(
-        part.strip(" `")
-        for part in re.split(r"\s+vs\s+", entry.kpi, flags=re.I)
-        if part.strip(" `")
-    )
+    kpi_dimensions = catalog_kpi_fields(entry.kpi)
     chart_names = {
         _normalise_catalog_name(value)
         for value in (*row_dimensions, *column_dimensions, *kpi_dimensions)
@@ -3921,9 +3919,7 @@ def _render_mean_column(
     axis_columns = _chart_axis_hierarchy(frame) or ([group, series] if series and series != group else [group])
     data = frame[[*axis_columns, metric]].copy()
     data.attrs = frame.attrs.copy()
-    data[metric] = pd.to_numeric(data[metric], errors="coerce")
-    aggregate = data.dropna().groupby(axis_columns, dropna=False, sort=False)[metric]
-    means = aggregate.median() if aggregation == "median" else aggregate.mean()
+    means = _aggregate_metric(data, axis_columns, metric, aggregation)
     if means.empty:
         return _empty_chart(title)
     image, draw = _canvas(title)
@@ -3982,34 +3978,40 @@ def _render_table(
     metric: str | None,
     *,
     percentiles: bool = False,
+    aggregation: str | None = None,
 ) -> BytesIO:
     """Render numeric summaries or categorical ratios from a template table."""
     if frame.empty or not group or not metric:
         return _empty_chart(title)
     data = frame[[group, series, metric]].copy() if series else frame[[group, metric]].copy()
-    numeric_metric = pd.to_numeric(data[metric], errors="coerce")
     has_series = bool(series) and not data[series].fillna("(all)").astype(str).eq("(all)").all()
     value_suffix = ""
-    if numeric_metric.notna().any():
-        data[metric] = numeric_metric
-        data = data.dropna(subset=[metric])
-        if percentiles:
-            table = data.groupby(group, sort=False)[metric].quantile([.1, .5, .9]).unstack()
-            table.columns = ["P10", "P50", "P90"]
-        elif has_series:
-            table = data.pivot_table(index=group, columns=series, values=metric, aggfunc="mean", sort=False)
-        else:
-            table = data.groupby(group, sort=False)[metric].mean().to_frame("Value")
+    if aggregation:
+        dimensions = [group, *([series] if has_series else [])]
+        values = _aggregate_metric(data, dimensions, metric, aggregation)
+        table = values.unstack(series) if has_series else values.to_frame(aggregation.upper())
     else:
-        # Tableau count/percent-of-total tables commonly use a categorical KPI
-        # such as Test_Result. Preserve that meaning instead of coercing every
-        # value to NaN and returning an empty chart.
-        categorical = data.dropna(subset=[group, metric]).copy()
-        if categorical.empty:
-            return _empty_chart(title)
-        columns = [series, metric] if has_series else [metric]
-        table = pd.crosstab(categorical[group], [categorical[column] for column in columns], normalize="index") * 100
-        value_suffix = "%"
+        numeric_metric = pd.to_numeric(data[metric], errors="coerce")
+        if numeric_metric.notna().any():
+            data[metric] = numeric_metric
+            data = data.dropna(subset=[metric])
+            if percentiles:
+                table = data.groupby(group, sort=False)[metric].quantile([.1, .5, .9]).unstack()
+                table.columns = ["P10", "P50", "P90"]
+            elif has_series:
+                table = data.pivot_table(index=group, columns=series, values=metric, aggfunc="mean", sort=False)
+            else:
+                table = data.groupby(group, sort=False)[metric].mean().to_frame("Value")
+        else:
+            # Tableau count/percent-of-total tables commonly use a categorical KPI
+            # such as Test_Result. Preserve that meaning instead of coercing every
+            # value to NaN and returning an empty chart.
+            categorical = data.dropna(subset=[group, metric]).copy()
+            if categorical.empty:
+                return _empty_chart(title)
+            columns = [series, metric] if has_series else [metric]
+            table = pd.crosstab(categorical[group], [categorical[column] for column in columns], normalize="index") * 100
+            value_suffix = "%"
     image, draw = _canvas(title)
     headers = [str(table.index.name or "Category")] + [str(value) for value in table.columns]
     rows = [
@@ -4043,12 +4045,77 @@ def _catalog_tokens(filters: str, keyword: str) -> tuple[str, ...]:
     return ()
 
 
+KPI_AGGREGATION_ALIASES = {
+    "SUM": "sum",
+    "COUNT": "count",
+    "COUNTD": "countd",
+    "AVERAGE": "mean",
+    "AVG": "mean",
+    "MEAN": "mean",
+    "MAX": "max",
+    "MIN": "min",
+    "MEDIAN": "median",
+}
+
+
+def parse_kpi_expression(value: str) -> tuple[str, str | None]:
+    """Return the physical KPI field and an optional explicit aggregation."""
+    raw = str(value or "").strip()
+    match = re.fullmatch(
+        r"(?i)(SUM|COUNTD|COUNT|AVERAGE|AVG|MEAN|MAX|MIN|MEDIAN)\s*\(\s*(.+?)\s*\)",
+        raw,
+    )
+    if not match:
+        return raw.strip(" `"), None
+    operation, field = match.groups()
+    return field.strip(" `"), KPI_AGGREGATION_ALIASES[operation.upper()]
+
+
+def catalog_kpi_fields(value: str) -> tuple[str, ...]:
+    """Return the physical CDR fields referenced by a KPI definition."""
+    return tuple(
+        parse_kpi_expression(part)[0]
+        for part in re.split(r"\s+vs\s+|\s*\|\s*", str(value or ""), flags=re.I)
+        if part.strip() and parse_kpi_expression(part)[0]
+    )
+
+
+def _aggregate_metric(
+    frame: pd.DataFrame, dimensions: list[str], metric: str, aggregation: str,
+) -> pd.Series:
+    """Aggregate one KPI with Tableau-compatible count and numeric semantics."""
+    working = frame[[*dimensions, metric]].copy()
+    if aggregation not in {"count", "countd"}:
+        working[metric] = pd.to_numeric(working[metric], errors="coerce")
+    grouped = working.groupby(dimensions, dropna=False, sort=False)[metric] if dimensions else None
+    if dimensions:
+        if aggregation == "count":
+            return grouped.count()
+        if aggregation == "countd":
+            return grouped.nunique(dropna=True)
+        return getattr(grouped, aggregation)()
+    series = working[metric]
+    if aggregation == "count":
+        value = series.count()
+    elif aggregation == "countd":
+        value = series.nunique(dropna=True)
+    else:
+        value = getattr(series, aggregation)()
+    return pd.Series([value], index=pd.Index(["All"], name="Category"))
+
+
 def _catalog_spec(entry: CatalogEntry) -> dict:
     chart_type = entry.chart_type.casefold()
-    metric_parts = tuple(part.strip(" `") for part in re.split(r"\s+vs\s+", entry.kpi, flags=re.I) if part.strip())
-    spec: dict = {"source": entry.source_kind, "metric": metric_parts[:1] or (entry.kpi,)}
+    raw_metric_parts = tuple(part for part in re.split(r"\s+vs\s+", entry.kpi, flags=re.I) if part.strip())
+    metric_parts = tuple(parse_kpi_expression(part)[0] for part in raw_metric_parts)
+    _field, aggregation = parse_kpi_expression(raw_metric_parts[0] if raw_metric_parts else entry.kpi)
+    spec: dict = {
+        "source": entry.source_kind,
+        "metric": metric_parts[:1] or (entry.kpi,),
+        "aggregation": aggregation,
+    }
     if chart_type == "multi kpi cdf lines":
-        metrics = tuple(part.strip(" `") for part in entry.kpi.split("|") if part.strip())
+        metrics = tuple(parse_kpi_expression(part)[0] for part in entry.kpi.split("|") if part.strip())
         spec["kind"] = "multi_cdf"
         spec["metric"] = metrics[:1]
         spec["metrics"] = metrics
@@ -4668,7 +4735,95 @@ def catalog_chart_payload(
             "series": series_payload,
         }
 
-    if chart_type == "table" and metric:
+    if chart_type in {"table", "dynamic table"} and metric:
+        dynamic_table = chart_type == "dynamic table"
+        aggregation = spec.get("aggregation")
+        if dynamic_table and not aggregation:
+            aggregation = "mean" if pd.to_numeric(data[metric], errors="coerce").notna().any() else "count"
+        if aggregation:
+            labels = data.attrs.get("catalogue_dimension_labels", {})
+            metric_name = _normalise_catalog_name(metric)
+            visible_columns = [
+                column for column in column_hierarchy
+                if _normalise_catalog_name(str(labels.get(column, column))) != metric_name
+            ]
+            column_dimension_names = {
+                _normalise_catalog_name(str(labels.get(column, column)))
+                for column in visible_columns
+            }
+            visible_rows = [
+                column for column in row_hierarchy
+                if _normalise_catalog_name(str(labels.get(column, column))) not in {
+                    metric_name, *column_dimension_names,
+                }
+            ]
+            if dynamic_table and visible_columns:
+                pivot_width = len(data[visible_columns].drop_duplicates())
+                if pivot_width > 20:
+                    column_names = " × ".join(str(labels.get(column, column)) for column in visible_columns)
+                    return empty(
+                        f"Dynamic Table has {pivot_width} distinct column values for {column_names}. "
+                        "Add a filter to reduce the table to 20 columns or fewer."
+                    )
+            dimensions = [*visible_rows, *visible_columns]
+            aggregated = _aggregate_metric(data, dimensions, metric, aggregation)
+            if aggregated.empty:
+                return empty("No valid samples for this KPI and technology filter")
+
+            def dimension_label(column: str) -> str:
+                declared = labels.get(column, column)
+                if isinstance(declared, (tuple, list)):
+                    return " · ".join(str(item) for item in declared)
+                return str(declared)
+
+            def formatted(value: object) -> str:
+                if pd.isna(value):
+                    return ""
+                if aggregation in {"count", "countd"}:
+                    return f"{int(value):,}"
+                return f"{float(value):.2f}"
+
+            if visible_columns:
+                table = aggregated.unstack(visible_columns)
+                column_keys = [
+                    value if isinstance(value, tuple) else (value,)
+                    for value in table.columns
+                ]
+                column_names = [
+                    " · ".join(str(item) for item in value)
+                    for value in column_keys
+                ]
+                column_order = sorted(
+                    range(len(column_keys)),
+                    key=lambda index: tuple(str(value).casefold() for value in column_keys[index]),
+                )
+                table = table.iloc[:, column_order]
+                column_keys = [column_keys[index] for index in column_order]
+                column_names = [column_names[index] for index in column_order]
+                headers = [*[dimension_label(column) for column in visible_rows], *column_names]
+                rows = []
+                for index, values in table.iterrows():
+                    index_values = index if isinstance(index, tuple) else (index,)
+                    rows.append([*[_chart_payload_value(value) for value in index_values], *[formatted(value) for value in values]])
+            else:
+                headers = [*[dimension_label(column) for column in visible_rows], f"{aggregation.upper()}({metric})"]
+                rows = []
+                for index, value in aggregated.items():
+                    index_values = index if isinstance(index, tuple) else (index,)
+                    rows.append([*[_chart_payload_value(item) for item in index_values], formatted(value)])
+            if dynamic_table:
+                rows.sort(key=lambda row: tuple(str(value).casefold() for value in row[:len(visible_rows)]))
+            rows = rows[:36 if dynamic_table else 18]
+            return {
+                **_chart_payload_base("table", title, render_entry, data, metric),
+                "aggregation": aggregation,
+                "dynamic": dynamic_table,
+                "row_dimension_count": len(visible_rows),
+                "column_keys": [serialise_key(key) for key in column_keys] if visible_columns else [],
+                "column_heading": " · ".join(dimension_label(column) for column in visible_columns),
+                "headers": headers,
+                "rows": rows,
+            }
         table_data = data[[group, period, metric]].copy() if period else data[[group, metric]].copy()
         numeric_metric = pd.to_numeric(table_data[metric], errors="coerce")
         has_series = bool(period) and not table_data[period].fillna("(all)").astype(str).eq("(all)").all()
@@ -4705,10 +4860,8 @@ def catalog_chart_payload(
         axes = _chart_axis_hierarchy(data) or ([group, period] if period and period != group else [group])
         values = data[[*axes, metric]].copy()
         values.attrs = data.attrs.copy()
-        values[metric] = pd.to_numeric(values[metric], errors="coerce")
-        aggregate = values.dropna().groupby(axes, dropna=False, sort=False)[metric]
-        aggregation = "median" if chart_type == "median vertical bars" else "mean"
-        means = aggregate.median() if aggregation == "median" else aggregate.mean()
+        aggregation = spec.get("aggregation") or ("median" if chart_type == "median vertical bars" else "mean")
+        means = _aggregate_metric(values, axes, metric, aggregation)
         if means.empty:
             return empty("No valid samples for this KPI and technology filter")
         # A column-only hierarchy still needs the matrix model. Rendering it
@@ -4719,8 +4872,7 @@ def catalog_chart_payload(
             render_columns = column_hierarchy or ["__catalog_single_column"]
             if render_columns == ["__catalog_single_column"]:
                 values["__catalog_single_column"] = "(all)"
-                aggregate = values.dropna().groupby([*row_hierarchy, *render_columns], dropna=False, sort=False)[metric]
-                means = aggregate.median() if aggregation == "median" else aggregate.mean()
+                means = _aggregate_metric(values, [*row_hierarchy, *render_columns], metric, aggregation)
             row_keys = _hierarchical_unique_keys(values, row_hierarchy) if row_hierarchy else [()]
             column_keys = _hierarchical_unique_keys(values, render_columns)
             lookup = {key if len(axes) > 1 else key[0]: float(value) for key, value in means.items()}
@@ -4884,15 +5036,16 @@ def _chart_for_catalog_entry(
     ]
     if spec["kind"] == "scatter":
         return finish(_render_scatter(chart_title, frame, "__catalog_label", metric, _column(frame, spec.get("x_metric", ())), (), renderer_legend_position))
-    if chart_type == "table":
+    if chart_type in {"table", "dynamic table"}:
         return finish(_render_table(
             chart_title, frame, group, period, metric,
             percentiles="percentile" in chart_title.casefold(),
+            aggregation=spec.get("aggregation"),
         ))
     if "vertical bars" in chart_type:
         return finish(_render_mean_column(
             chart_title, frame, group, period, metric,
-            aggregation="median" if chart_type == "median vertical bars" else "mean",
+            aggregation=spec.get("aggregation") or ("median" if chart_type == "median vertical bars" else "mean"),
             legend_dimensions=() if not legend_labels else legend_dimensions,
             legend_position=renderer_legend_position,
         ))

@@ -1433,6 +1433,10 @@
     const viewerPreviewDefinition = () => Object.fromEntries(Array.from(reportChartViewerFields?.querySelectorAll('[name]') || []).map((input) => {
       const values = input.multiple ? Array.from(input.selectedOptions).map((option) => option.value).filter(Boolean) : null;
       const separator = input.name === 'legend' || input.name === 'dataset_ids' ? ', ' : ' × ';
+      if (input.name === 'kpi' && !values) {
+        const operation = reportChartViewerFields?.querySelector('[data-preview-kpi-aggregation]')?.value || '';
+        return [input.name, operation && input.value ? `${operation}(${input.value})` : input.value];
+      }
       return [input.name, values ? values.join(separator) : input.value];
     }));
     let reportChartViewerSelectMenu = null;

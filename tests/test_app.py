@@ -504,6 +504,61 @@ def test_recreate_combined_table_recovers_empty_source_rows_and_required_columns
     assert progress[-1][0] == progress[-1][1]
 
 
+def test_replacing_calculated_dimensions_marks_materialization_pending_atomically(tmp_path: Path) -> None:
+    from src.modules.repository import Repository
+
+    repository = Repository(tmp_path / 'workspace.db')
+    repository.initialize()
+    repository.set_workspace_state('calculated_dimensions_need_materialization', '0')
+
+    repository.replace_calculated_dimensions([{
+        'name': 'Seven Cities', 'sources': ['cdr-data'], 'default': 'No', 'default_from': '',
+        'rules': [{'when': 'G Level 4 IN (Belfast, Bristol)', 'value': 'Yes'}],
+    }])
+
+    assert repository.get_workspace_state('calculated_dimensions_need_materialization') == '1'
+
+
+def test_starting_auto_field_job_does_not_repeat_pending_state_write(tmp_path: Path, monkeypatch) -> None:
+    import src.DashboardAnalytic as app_module
+    from src.modules.cdr_reporting import parse_calculated_dimensions
+    from src.modules.repository import Repository
+    from src.modules.workspaces import Workspace
+
+    database_path = tmp_path / 'workspace.db'
+    repository = Repository(database_path)
+    repository.initialize()
+    workspace = Workspace(
+        'test', 'Test', database_path, tmp_path, tmp_path, tmp_path, tmp_path, '', '',
+    )
+    submitted = []
+    events = []
+
+    class Scheduler:
+        def submit(self, callback, *args):
+            events.append('submit')
+            submitted.append((callback, args))
+
+    monkeypatch.setattr(app_module, '_dataset_processing_executor', lambda _repository: Scheduler())
+    monkeypatch.setattr(
+        Repository, 'set_workspace_state',
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('redundant pending-state write')),
+    )
+    current = parse_calculated_dimensions([{
+        'name': 'Seven Cities', 'sources': ['cdr-data'], 'default': 'No',
+        'rules': [{'when': 'G Level 4 IN (Belfast, Bristol)', 'value': 'Yes'}],
+    }])
+
+    job = app_module.start_auto_calculated_field_job(
+        workspace, (), current, {}, 'tester', background=True,
+        before_submit=lambda _job: events.append('audit'),
+    )
+
+    assert job['status'] == 'queued'
+    assert len(submitted) == 1
+    assert events == ['audit', 'submit']
+
+
 def test_workspace_calculated_dimensions_panel_exports_and_imports_json(client) -> None:
     import src.DashboardAnalytic as app_module
 
@@ -855,7 +910,7 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     assert admin_response.status_code == 200
     assert 'Import / Export / Transfer' in admin_response.text
     assert 'Transfer to other server' in admin_response.text
-    assert 'name="export_target" multiple size="1" data-multiselect-single="true" data-multiselect-groups="true"' in admin_response.text
+    assert 'name="export_target" multiple size="1" data-export-target-select data-multiselect-groups="true"' in admin_response.text
     assert '<optgroup label="Configuration Content">' in admin_response.text
     assert '<optgroup label="Workspace Content">' in admin_response.text
     assert '<optgroup label="Full Workspace">' in admin_response.text
@@ -960,6 +1015,54 @@ def test_admin_import_export_packages_detect_configuration_and_workspaces(client
     )
     assert full_import_response.status_code == 303
     assert len(app_module.workspace_registry.list()) == 1
+
+
+def test_multi_selection_export_applies_containment_rules_and_builds_importable_bundle(client, tmp_path) -> None:
+    import src.DashboardAnalytic as app_module
+
+    login_super(client)
+    assert app_module.normalize_export_targets([
+        'config', 'dashboards', 'workspace:default', 'auto-calculated-fields',
+    ]) == ['config', 'workspace:default']
+    assert app_module.normalize_export_targets([
+        'config', 'workspace:default', 'full-environment',
+    ]) == ['full-environment']
+
+    package_path = tmp_path / 'selection.zip'
+    filename = app_module.build_export_archive_file(
+        ['config', 'workspace:default'], package_path, include_generated_outputs=False,
+    )
+    assert filename.startswith('dashboard-analytic-selection_')
+    with zipfile.ZipFile(package_path) as archive:
+        manifest = json.loads(archive.read('manifest.json'))
+        assert manifest['kind'] == 'bundle'
+        assert manifest['targets'] == ['config', 'workspace:default']
+        assert [entry['kind'] for entry in manifest['packages']] == ['config', 'workspace']
+        assert all(entry['archive_path'] in archive.namelist() for entry in manifest['packages'])
+
+    inspection = client.post(
+        '/admin/import-export/inspect',
+        files={'package': ('selection.zip', package_path.read_bytes(), 'application/zip')},
+    )
+    assert inspection.status_code == 200
+    assert inspection.json()['kind'] == 'bundle'
+    assert inspection.json()['workspace_collisions'] == ['Default']
+
+    imported = client.post(
+        '/admin/import-export/import/jobs',
+        data={
+            'upload_id': inspection.headers['X-Import-Upload-Id'],
+            'confirmed_import': 'true',
+        },
+    )
+    assert imported.status_code == 200
+    for _attempt in range(200):
+        import_status = client.get(imported.json()['status_url']).json()
+        if import_status['status'] in {'ready', 'failed'}:
+            break
+        time.sleep(0.01)
+    assert import_status['status'] == 'ready'
+    assert import_status['notice'] == 'Import selection completed (2 packages).'
 
 
 def test_operator_mappings_export_and_import_replace_the_selected_workspace_groups(client) -> None:
@@ -2838,7 +2941,7 @@ def test_ppt_job_can_open_its_immutable_dashboard_snapshot() -> None:
     assert "jobAction('View Dashboard snapshot', 'report-job-dashboard-button'" in script
     assert 'async function openDashboardPptViewer(job)' in script
     assert 'pptDashboardViewer = {' in script
-    assert 'const url = chart.payload_url ||' in script
+    assert 'const chartPayloadUrl = chart => chart.payload_url ||' in script
     assert '.report-job-dashboard-button::before' in styles
     assert 'const pptSnapshotChart = Boolean(pptDashboardViewer && chart.data_url);' in script
     assert "Boolean(pptDashboardViewer) && !chart.data_url" in script
@@ -5698,7 +5801,7 @@ def test_admin_imports_report_catalogue(client) -> None:
 
     exported = client.get('/admin/report-templates/nsa/export')
     assert exported.status_code == 200
-    assert exported.content == content.rstrip(b'\n').rstrip(b',') + b',Top\n'
+    assert exported.content == content
 
     confirmation = client.get('/admin?catalogue_notice=Imported%20Test%20baseline%20%28NSA%29.')
     assert 'data-catalogue-import-notice' in confirmation.text
@@ -5829,6 +5932,8 @@ def test_admin_stores_multiple_named_report_catalogues_and_can_activate_one(clie
     assert 'Import / Export / Transfer' not in embedded_editor.text
     assert 'data-catalogue-field="Layout"' in embedded_editor.text
     assert 'data-catalogue-editor-options' in embedded_editor.text
+    assert 'data-catalogue-editor-kpi-aggregation' in embedded_editor.text
+    assert '<option value="COUNTD">COUNTD</option>' in embedded_editor.text
     assert '<th class="catalogue-slide-actions-heading">Slide Actions</th>' in embedded_editor.text
     assert '<th class="catalogue-chart-actions-heading">Chart Actions</th>' in embedded_editor.text
     assert 'data-catalogue-slide-actions' in embedded_editor.text
@@ -5956,6 +6061,8 @@ def test_reporting_chart_viewer_uses_hover_canvas_dataset_and_zoom_controls(clie
     assert "addEventListener('pointerenter', showReportChartViewerControls)" in reporting.text
     assert "addEventListener('pointerleave', hideReportChartViewerControls)" in reporting.text
     assert '}, 3000);' in reporting.text
+    assert "querySelector('[data-preview-kpi-aggregation]')?.value" in reporting.text
+    assert "`${operation}(${input.value})`" in reporting.text
     css = app_module.PROJECT_ROOT.joinpath(
         'src/web_interface/static/css/app.css',
     ).read_text(encoding='utf-8')

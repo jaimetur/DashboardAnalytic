@@ -35,6 +35,8 @@ def test_dashboard_filter_panel_state_is_scoped_to_the_authenticated_session():
     assert first_user.session_marker != second_user.session_marker
 
     app_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+    assert "activeCell.textContent = operation ? `${operation}(${selected[0]})` : selected[0];" in app_script
+    assert "if (editedCell?.dataset.catalogueField === 'CDR source' && !assistanceFocused) normaliseCatalogueRows();" in app_script
     assert "const sessionMarker = document.body.dataset.authenticatedSession || 'anonymous';" in app_script
     assert "${sessionScoped ? `:${sessionMarker}` : ''}" in app_script
 
@@ -305,6 +307,63 @@ def test_expanded_dashboard_chart_apply_builds_a_new_temporary_model(client):
     assert (entry.chart_title, entry.grouping_rows, entry.grouping_columns, entry.legend_position) == (
         'Updated template chart', 'Test_Name × Operator', 'City', 'right',
     )
+    refreshed_context = client.get(f'/api/e2e-dashboards/chart/{token}/0/filter-context')
+    assert refreshed_context.status_code == 200, refreshed_context.text
+    assert refreshed_context.json()['chart_title'] == 'Updated template chart'
+    assert refreshed_context.json()['grouping_rows'] == 'Test_Name × Operator'
+    assert updated.json()['updated_at']
+
+
+def test_expanded_dashboard_chart_apply_can_render_outside_the_proxy_request(client):
+    payload = setup_dashboard(client)
+    prepared = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert prepared.status_code == 200, prepared.text
+    token = prepared.json()['token']
+
+    queued = client.post(
+        f'/api/e2e-dashboards/chart/{token}/0/filter-preview?background=true',
+        json={'filters': 'Operator = A', 'grouping_rows': 'Operator'},
+    )
+
+    assert queued.status_code == 202, queued.text
+    assert queued.json()['state'] == 'processing'
+    completed = client.get(
+        f"/api/e2e-dashboards/chart-preview-jobs/{queued.json()['job_id']}"
+    )
+    assert completed.status_code == 200, completed.text
+    assert completed.json()['series'][0]['name'] == 'A'
+
+
+def test_update_template_synchronizes_chart_definition_across_live_snapshots(client):
+    payload = setup_dashboard(client)
+    first = client.post('/api/e2e-dashboards/prepare', json=payload)
+    second = client.post('/api/e2e-dashboards/prepare', json=payload)
+    assert first.status_code == second.status_code == 200
+    first_token = first.json()['token']
+    second_token = second.json()['token']
+
+    filtered = client.post(
+        f'/api/e2e-dashboards/chart/{first_token}/0/update-template',
+        json={'filters': 'Operator = A'},
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert filtered.json()['synced_snapshots'] == 2
+    second_context = client.get(
+        f'/api/e2e-dashboards/chart/{second_token}/0/filter-context'
+    )
+    assert second_context.status_code == 200, second_context.text
+    assert second_context.json()['filters'] == 'Operator = A'
+
+    cleared = client.post(
+        f'/api/e2e-dashboards/chart/{first_token}/0/update-template',
+        json={'filters': ''},
+    )
+    assert cleared.status_code == 200, cleared.text
+    reopened_context = client.get(
+        f'/api/e2e-dashboards/chart/{second_token}/0/filter-context'
+    )
+    assert reopened_context.status_code == 200, reopened_context.text
+    assert reopened_context.json()['filters'] == ''
 
 
 def test_dashboard_refresh_rebuilds_all_models_and_chart_refresh_rebuilds_only_one(client, monkeypatch):
@@ -626,6 +685,9 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "const preview = node('div', undefined, 'ds-ppt-chart-thumbnail');" in dashboard_script
     assert 'globalThis.renderDashboardChart(canvas, model);' in dashboard_script
     assert 'preview.replaceChildren(cachedImage(chart))' in dashboard_script
+    assert 'const rememberRenderedChartPayload = (chart, payload) =>' in dashboard_script
+    assert 'rememberRenderedChartPayload(chart, payload);' in dashboard_script
+    assert 'if (expandedChartSlide(chart) === prepared?.slides[slideIndex]) renderSlide();' in dashboard_script
     assert "card.ondblclick = safe(async event =>" in dashboard_script
     assert "const syncExpandedChartNavigation" in dashboard_script
     assert 'const setExpandedChartHeader = (chart, title = \'\') =>' in dashboard_script
@@ -644,13 +706,21 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "/filter-preview" in dashboard_script
     assert "editableGroupingInputs: true" in dashboard_script
     assert "previewDefinition = expandedChartFilterControls.definition()" in dashboard_script
+    assert "operation && value ? `${operation}(${value})` : value" in app_script
+    assert "operation.dataset.previewKpiAggregation = ''" in app_script
+    assert "['COUNTD', 'COUNTD']" in app_script
     assert "id = 'ds-chart-filter-update'" in dashboard_script
     assert "/update-template" in dashboard_script
+    assert 'refreshEmbeddedTemplateEditor(updated, expandedChart?.focus_row);' in dashboard_script
+    assert "parameters.set('template_revision', String(updatedTemplate.updated_at));" in dashboard_script
     assert 'const renderExpandedChartDefinition = async ({closePanel = true} = {}) =>' in dashboard_script
     assert 'const rendered = await renderExpandedChartDefinition({closePanel: false});' in dashboard_script
     assert dashboard_script.index('const rendered = await renderExpandedChartDefinition({closePanel: false});') < dashboard_script.index("/update-template`, 'POST', rendered.previewDefinition")
     assert "const preparedContext = await api(`${expandedChartFilterContextPath}?prepare=true`);" in dashboard_script
     assert "if (open && !expandedChartFilterControls) await loadExpandedChartFilters();" in dashboard_script
+    assert 'const discardExpandedChartDefinitionDraft = () =>' in dashboard_script
+    assert "$('ds-chart-filter-close').onclick = discardExpandedChartDefinitionDraft;" in dashboard_script
+    assert 'request !== expandedChartFilterLoadRequest' in dashboard_script
     assert "expandedCanvasShell.classList.add('ds-hover')" in dashboard_script
     assert 'const scheduleExpandedChartFiltersClose = () =>' in dashboard_script
     assert '}, 5000);' in dashboard_script
@@ -671,9 +741,20 @@ def test_dashboards_lifecycle_and_layout(client):
     assert "This Dashboard has unsaved changes. Close Adaptative Filters without saving them?" not in dashboard_script
     assert "This Report Template has unsaved changes. Close the editor without saving them?" in dashboard_script
     assert 'const templateChanged = templateEditorSaved;' in dashboard_script
-    assert "if (templateChanged && expandedChartMode !== 'ppt') await prepare();" in dashboard_script
+    assert "if (templateChanged && expandedChartMode !== 'ppt') {" in dashboard_script
+    assert dashboard_script.count('forgetPrepared();') >= 2
+    assert "'Reload the current Report Template, rebuild its slides and render every chart in this Dashboard again?'" in dashboard_script
     assert "event.data?.type === 'dashboard-analytic:template-saved'" in dashboard_script
     chart_script = (Path(__file__).parents[1] / 'src/web_interface/static/js/dashboard_charts.js').read_text(encoding='utf-8')
+    assert "const percent = value => `${(Number(value) * 100).toFixed(1)}%`;" in chart_script
+    assert "const tooltipPercent = value => `${(Number(value) * 100).toFixed(2)}%`;" in chart_script
+    assert 'value: tooltipPercent(ratio)' in chart_script
+    assert 'lines.push(tooltipPercent(point.cumulative))' in chart_script
+    assert "const dynamic = Boolean(payload.dynamic)" in chart_script
+    assert "const repeatedHierarchyValue = dynamic" in chart_script
+    assert 'function sameImmediateHierarchyParent(left, right)' in chart_script
+    assert 'cell.row >= drag.parent.start && cell.row < drag.parent.end' in chart_script
+    assert 'sameImmediateHierarchyParent(drag.sourceKey, targetKey)' in chart_script
     assert 'function chartPanState(canvas)' in chart_script
     assert 'function panChart(canvas, direction)' in chart_script
     assert "['left', 'right', 'up', 'down'].includes(direction)" in chart_script
@@ -896,7 +977,7 @@ def test_dashboards_lifecycle_and_layout(client):
     assert '.ds-filter-groups{display:grid;grid-template-rows:max-content max-content minmax(0,1fr);gap:14px}' in dashboard_css
     assert '.ds-default-filter-panel{border-color:#afd1e8;background:#f1f8fd}' in dashboard_css
     assert "d='M12 2v10'" in dashboard_css
-    assert "title: 'Refresh Dashboard charts?'" in dashboard_script
+    assert "title: 'Refresh Dashboard?'" in dashboard_script
     assert "api(`/charts/${encodeURIComponent(token)}/refresh`, 'POST')" in dashboard_script
     assert "api(`/chart/${encodeURIComponent(token)}/${chart.index}/refresh`, 'POST')" in dashboard_script
     assert "function resetAutomaticDatesForDatasetChange()" in dashboard_script
@@ -915,8 +996,8 @@ def test_dashboards_lifecycle_and_layout(client):
     assert 'if (await restorePrepared(activeId))' in dashboard_script
     assert "const payload = await api(`/prepared/${encodeURIComponent(inMemory.payload.token)}`);" in dashboard_script
     assert 'forgetPreparedToken(inMemory.payload.token);' in dashboard_script
-    assert "status('Restoring the expired Dashboard preview…');" in dashboard_script
-    assert "if (!await restorePrepared(activeId)) await prepare();" in dashboard_script
+    assert 'forgetPrepared();' in dashboard_script
+    assert "await prepare();\n      token = prepared?.token || '';" in dashboard_script
     assert "api(`/prefetched/${encodeURIComponent(id)}`, 'POST', definition)" in dashboard_script
     assert 'if (error.status === 409) return false;' in dashboard_script
     assert 'No CDR ${chart.source[0].toUpperCase()}${chart.source.slice(1)} dataset has been selected for this chart.' in dashboard_script

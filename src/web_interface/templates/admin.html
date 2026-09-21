@@ -204,7 +204,7 @@
     <form class="catalogue-new-template-form" action="/admin/slides-templates/new" method="post">
       <button type="submit" class="catalogue-new-template-button">New Template</button>
     </form>
-    <p class="form-note">Required columns: Slide, Slide Tittle, Slide Subtittle, Layout, Chart Tittle, CDR source, KPI, Chart type, Filters, Rows Aggregation, Column Aggregation, Legend and Legend Position. Legend Position accepts Top, Bottom, Left or Right. Each slide number creates a new slide from its named layout. Use Title Slide or Transition Slide for structural rows without KPI/chart fields. Rows Aggregation defines chart categories/table rows; Column Aggregation defines comparison series/table columns. Chart layouts need one image placeholder per CDR row and keep analyst comments blank.</p>
+    <p class="form-note">Required columns: Slide, Slide Tittle, Slide Subtittle, Layout, Chart Tittle, CDR source, KPI, Chart type, Filters, Rows Aggregation, Column Aggregation, Legend and Legend Position. Legend Position may be empty, or use Top, Bottom, Left or Right. Each slide number creates a new slide from its named layout. Use Title Slide or Transition Slide for structural rows without KPI/chart fields. Rows Aggregation defines chart categories/table rows; Column Aggregation defines comparison series/table columns. Chart layouts need one image placeholder per CDR row and keep analyst comments blank.</p>
     </div>
   </details>
 
@@ -328,6 +328,18 @@
             </optgroup>
           </select>
         </label>
+        <label data-catalogue-editor-kpi-aggregation-label hidden>KPI operation
+          <select data-catalogue-editor-kpi-aggregation aria-label="KPI operation">
+            <option value="">Chart default</option>
+            <option value="SUM">SUM</option>
+            <option value="COUNT">COUNT</option>
+            <option value="COUNTD">COUNTD</option>
+            <option value="AVERAGE">AVERAGE / MEAN</option>
+            <option value="MAX">MAX</option>
+            <option value="MIN">MIN</option>
+            <option value="MEDIAN">MEDIAN</option>
+          </select>
+        </label>
         <button type="button" data-catalogue-editor-apply hidden>Apply selected values</button>
         <section class="catalogue-filter-builder" data-catalogue-filter-builder hidden>
           <p class="eyebrow">Filter builder</p>
@@ -412,11 +424,11 @@
       <form class="form-stack" action="/admin/import-export/export/jobs" method="post" data-export-package-form data-loading-label="Preparing export package" data-loading-copy="Please wait while Dashboard Analytic creates the selected export package. You can keep this page open while it runs.">
         <h3>Export / Transfer</h3>
         <label class="admin-export-components">Content to export/transfer
-          <select name="export_target" multiple size="1" data-multiselect-single="true" data-multiselect-groups="true" data-multiselect-auto-close="1000" aria-label="Content to export or transfer">
+          <select name="export_target" multiple size="1" data-export-target-select data-multiselect-groups="true" data-multiselect-auto-close="1000" aria-label="Content to export or transfer">
             {% set export_selection = namespace(selected=false) %}{% for group_label, options in export_option_groups %}<optgroup label="{{ group_label }}">{% for option in options %}<option value="{{ option.value }}" {% if option.disabled | default(false) %}disabled{% elif not export_selection.selected %}selected{% set export_selection.selected = true %}{% endif %}>{{ option.label }}</option>{% endfor %}</optgroup>{% endfor %}
           </select>
         </label>
-        <p class="form-note">{% if user.role == 'super-admin' %}Choose configuration, Dashboards, Report Templates, the active workspace's Auto-calculated Fields, one workspace or the complete environment.{% else %}Admins can export or transfer the active workspace's Dashboards, Report Templates, Auto-calculated Fields and accessible workspaces.{% endif %}</p>
+        <p class="form-note">{% if user.role == 'super-admin' %}Choose one or more items. Full Workspace includes its workspace elements; Full Environment includes every workspace and Config.{% else %}Choose one or more workspace elements or accessible Full Workspaces. Full Workspace includes its workspace elements.{% endif %}</p>
         <div class="import-export-actions">
           <button type="submit" class="import-export-action">Export ZIP</button>
           <button type="button" class="server-transfer-action" data-server-transfer>Transfer to other server</button>

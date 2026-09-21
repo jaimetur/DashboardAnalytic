@@ -359,8 +359,22 @@ document.querySelectorAll('[data-workspace-calculated-dimensions-panel]').forEac
             ? `Renaming '${rename.from}' to '${rename.to}' will rebuild every applicable CDR table and update every Report Template that uses this field. Continue?`
             : 'Saving will rebuild this auto-calculated field in every applicable CDR table. Continue?';
           if (!await showConfirmDialog(message, {title: 'Save and Materialize', confirmLabel: 'Save and Materialize', tone: 'warning'})) return;
-          save.disabled = true; await saveDimensions(next, rename); form.hidden = true; list.hidden = false; restoreManagerActions(); render();
-        } catch (error) { save.disabled = false; showInfoDialog(error.message || 'Unable to save auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'}); }
+          const originalLabel = save.textContent;
+          save.disabled = true;
+          save.setAttribute('aria-busy', 'true');
+          save.textContent = 'Saving…';
+          try {
+            await saveDimensions(next, rename);
+            form.hidden = true;
+            list.hidden = false;
+            restoreManagerActions();
+            render();
+          } finally {
+            save.disabled = false;
+            save.removeAttribute('aria-busy');
+            save.textContent = originalLabel;
+          }
+        } catch (error) { showInfoDialog(error.message || 'Unable to save auto-calculated field.', {title: 'Auto-calculated Fields', tone: 'error'}); }
       });
       savedEditorState = editorState();
       name.focus();
@@ -1624,6 +1638,8 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   const copy = editor.querySelector('[data-catalogue-editor-copy]');
   const optionsLabel = editor.querySelector('[data-catalogue-editor-options-label]');
   const options = editor.querySelector('[data-catalogue-editor-options]');
+  const kpiAggregationLabel = editor.querySelector('[data-catalogue-editor-kpi-aggregation-label]');
+  const kpiAggregation = editor.querySelector('[data-catalogue-editor-kpi-aggregation]');
   const apply = editor.querySelector('[data-catalogue-editor-apply]');
   const helper = editor.querySelector('.catalogue-editor-helper');
   const helperClose = editor.querySelector('[data-catalogue-editor-helper-close]');
@@ -1981,9 +1997,9 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     if (field === 'Layout') return 'Choose one of the layouts defined by the selected PowerPoint template. It replaces the current value.';
     if (field === 'Chart type') return 'Choose one supported chart type. It replaces the current value.';
     if (field === 'CDR source') return 'Choose the CDR source used to create this chart. It replaces the current value.';
-    if (field === 'KPI') return 'Choose a processed field from the CDR source. It replaces the current value.';
+    if (field === 'KPI') return 'Choose a processed field and, optionally, an explicit aggregation. COUNT counts non-empty rows; COUNTD counts distinct values.';
     if (field === 'Legend') return 'Select one or more CDR fields to use as the displayed legend labels. Values are stored as a comma-separated list.';
-    if (field === 'Legend Position') return 'Choose where the legend is drawn: Top or Bottom uses a horizontal row; Left or Right uses a vertical column.';
+    if (field === 'Legend Position') return 'Leave this empty when the chart has no legend, or choose where the legend is drawn.';
     if (field === 'Filters') return 'Build complete conditions from a processed CDR field, operator and real observed value. Conditions are joined with semicolons (AND), and the cell remains manually editable.';
     if (field === 'Rows Aggregation') return 'Select one or more dimensions for the chart category axis or table rows. They are appended with ×.';
     if (field === 'Column Aggregation') return 'Select one or more dimensions for comparison series or table columns. They are appended with ×.';
@@ -2183,6 +2199,11 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     helper.dataset.catalogueAssistanceField = field;
     heading.textContent = field || 'Selected cell';
     copy.textContent = helperCopy(field);
+    const kpiExpression = cell.textContent.trim().match(/^\s*(SUM|COUNTD|COUNT|AVERAGE|AVG|MEAN|MAX|MIN|MEDIAN)\s*\(\s*(.+?)\s*\)\s*$/i);
+    if (kpiAggregationLabel) kpiAggregationLabel.hidden = field !== 'KPI';
+    if (kpiAggregation) kpiAggregation.value = field === 'KPI' && kpiExpression
+      ? ({AVG: 'AVERAGE', MEAN: 'AVERAGE'}[kpiExpression[1].toUpperCase()] || kpiExpression[1].toUpperCase())
+      : '';
     const values = optionList(field, cell);
     const allowsMultiple = fieldColumns.has(field);
     options.multiple = allowsMultiple;
@@ -2191,7 +2212,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     const existingValues = new Set(
       (allowsMultiple
         ? cell.textContent.split(groupingColumns.has(field) ? /(?:\s*×\s*|\s+[xX]\s+)/ : /\s*,\s*/)
-        : [cell.textContent])
+        : [field === 'KPI' && kpiExpression ? kpiExpression[2] : cell.textContent])
         .map((value) => value.trim())
         .filter(Boolean),
     );
@@ -2205,7 +2226,10 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         ...existingValues,
         ...values.filter((value) => !hasExistingValue(value)),
       ];
-      orderedValues.forEach((value) => options.add(new Option(value, value, false, hasExistingValue(value))));
+      orderedValues.forEach((value) => options.add(new Option(
+        field === 'Legend Position' && !value ? 'No legend position' : value,
+        value, false, hasExistingValue(value),
+      )));
       // Explicitly assign the matching value as well as marking its option.
       // This keeps the searchable single-select hydrated after it is rebuilt.
       if (!allowsMultiple) {
@@ -2505,7 +2529,13 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     }
   };
   const previewDefinition = () => Object.fromEntries(Array.from(chartPreviewFields?.querySelectorAll('[name]') || []).map((control) => {
-    if (!control.multiple) return [control.name, control.value];
+    if (!control.multiple) {
+      if (control.name === 'kpi') {
+        const operation = chartPreviewFields?.querySelector('[data-preview-kpi-aggregation]')?.value || '';
+        return [control.name, operation && control.value ? `${operation}(${control.value})` : control.value];
+      }
+      return [control.name, control.value];
+    }
     const separator = control.name === 'legend' ? ', ' : ' × ';
     return [control.name, Array.from(control.selectedOptions).map((option) => option.value).filter(Boolean).join(separator)];
   }));
@@ -2530,9 +2560,9 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       ],
       textFields: {chart_title: true},
       // Keep these option sets identical to the persisted Chart Viewer.
-      chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
+      chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Dynamic Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
       cdrSources: ['CDR-Data', 'CDR-Voice', 'CDR-Speech'],
-      legendPositions: ['Top', 'Bottom', 'Left', 'Right'],
+      legendPositions: ['', 'Top', 'Bottom', 'Left', 'Right'],
       onChange: regenerate,
       onSourceChange: (next) => {
         renderChartPreviewSandbox(row, next);
@@ -2967,10 +2997,11 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       else { editedCell.replaceChildren(); renderAddedText(editedCell, value, editedCell.dataset.originalValue || ''); }
       refreshCellEditedState(editedCell);
     }
-    if (editedCell?.dataset.catalogueField === 'CDR source') normaliseCatalogueRows();
     window.requestAnimationFrame(() => {
       const focused = document.activeElement;
-      if (!focused?.closest?.('[data-catalogue-field]') && !helper.contains(focused)) hideCellAssistance();
+      const assistanceFocused = helper.contains(focused);
+      if (editedCell?.dataset.catalogueField === 'CDR source' && !assistanceFocused) normaliseCatalogueRows();
+      if (!focused?.closest?.('[data-catalogue-field]') && !assistanceFocused) hideCellAssistance();
     });
   });
   addFilter?.addEventListener('click', () => addFilterCondition());
@@ -2987,11 +3018,14 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   ));
   apply.addEventListener('click', () => {
     if (!activeCell) return;
-    const selected = Array.from(options.selectedOptions).map((option) => option.value).filter(Boolean);
-    if (!selected.length) return;
     const field = activeCell.dataset.catalogueField || '';
+    const selected = Array.from(options.selectedOptions).map((option) => option.value);
+    if (!selected.length || (field !== 'Legend Position' && !selected.some(Boolean))) return;
     const current = activeCell.textContent.trim();
-    if (field === 'Layout' || field === 'CDR source' || field === 'KPI' || field === 'Legend Position') {
+    if (field === 'KPI') {
+      const operation = kpiAggregation?.value || '';
+      activeCell.textContent = operation ? `${operation}(${selected[0]})` : selected[0];
+    } else if (field === 'Layout' || field === 'CDR source' || field === 'Legend Position') {
       activeCell.textContent = selected[0];
     } else if (field === 'Chart type') {
       activeCell.textContent = displayChartType(selected[0]);
@@ -4055,11 +4089,45 @@ function setupWorkspaceUserPickers() {
   });
 }
 
+const workspaceElementExportTargets = new Set([
+  'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings',
+]);
+
+function normalizeExportTargetSelection(select) {
+  if (!select.matches('[data-export-target-select]')) return;
+  const options = Array.from(select.options);
+  options.forEach((option) => {
+    if (option.dataset.exportOriginallyDisabled === undefined) {
+      option.dataset.exportOriginallyDisabled = String(option.disabled);
+    }
+    option.disabled = option.dataset.exportOriginallyDisabled === 'true';
+  });
+  const selected = options.filter((option) => option.selected && !option.disabled);
+  const fullEnvironment = selected.find((option) => option.value === 'full-environment');
+  if (fullEnvironment) {
+    options.forEach((option) => {
+      if (option !== fullEnvironment) {
+        option.selected = false;
+        option.disabled = true;
+      }
+    });
+    return;
+  }
+  const hasFullWorkspace = selected.some((option) => option.value.startsWith('workspace:'));
+  options.forEach((option) => {
+    if (hasFullWorkspace && workspaceElementExportTargets.has(option.value)) {
+      option.selected = false;
+      option.disabled = true;
+    }
+  });
+}
+
 function setupCustomMultiSelects() {
   document.querySelectorAll('select[multiple]').forEach((select) => {
     if (select.dataset.multiselectReady === '1') return;
     select.dataset.multiselectReady = '1';
     select.classList.add('multiselect-native');
+    normalizeExportTargetSelection(select);
 
     const shell = document.createElement('div');
     shell.className = 'multiselect-shell';
@@ -4154,6 +4222,7 @@ function setupCustomMultiSelects() {
       options.forEach((option) => {
         option.selected = shouldSelectAll;
       });
+      normalizeExportTargetSelection(select);
       Array.from(menu.querySelectorAll('input[type="checkbox"][data-option-value]')).forEach((checkbox) => {
         if (!checkbox.disabled) {
           checkbox.checked = shouldSelectAll;
@@ -4199,6 +4268,7 @@ function setupCustomMultiSelects() {
         } else {
           option.selected = checkbox.checked;
         }
+        normalizeExportTargetSelection(select);
         dispatchNativeChange();
         if (singleChoice) menu.hidden = true;
       });
@@ -4248,6 +4318,11 @@ function setupCustomMultiSelects() {
         const option = Array.from(select.options).find((item) => item.value === checkbox.getAttribute('data-option-value'));
         if (option) {
           checkbox.checked = option.selected;
+          checkbox.disabled = option.disabled;
+          const optionLabel = checkbox.closest('.multiselect-option');
+          optionLabel?.classList.toggle('is-disabled', option.disabled);
+          if (optionLabel) optionLabel.title = option.disabled
+            ? 'This option is already included by the selected package.' : '';
         }
       });
       orderSelectedOptionsFirst();
@@ -4615,6 +4690,14 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     ['grouping_rows', 'Rows'], ['grouping_columns', 'Columns'], ['legend', 'Legend'], ['legend_position', 'Legend Position'],
   ];
   const multiFields = new Set(['dataset_ids', 'grouping_rows', 'grouping_columns', 'legend']);
+  const parseKpiDefinition = (value) => {
+    const text = String(value || '').trim();
+    const match = text.match(/^\s*(SUM|COUNTD|COUNT|AVERAGE|AVG|MEAN|MAX|MIN|MEDIAN)\s*\(\s*(.+?)\s*\)\s*$/i);
+    if (!match) return {field: text, operation: ''};
+    const operation = match[1].toUpperCase();
+    return {field: match[2].trim(), operation: ['AVG', 'MEAN'].includes(operation) ? 'AVERAGE' : operation};
+  };
+  const kpiDefinition = parseKpiDefinition(definition.kpi);
   const sourceKey = (source) => {
     const normalized = String(source || '').trim().toLowerCase();
     return ({data: 'cdr-data', voice: 'cdr-voice', speech: 'cdr-speech'})[normalized] || (normalized.startsWith('cdr-') ? normalized : `cdr-${normalized}`);
@@ -4639,7 +4722,14 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       const editor = control.parentElement?.querySelector('[data-preview-grouping-text]');
       if (editor) return [control.name, editor.value.trim()];
     }
-    if (!control.multiple) return [control.name, control.value || control.dataset.previewDisplay || ''];
+    if (!control.multiple) {
+      const value = control.value || control.dataset.previewDisplay || '';
+      if (control.name === 'kpi') {
+        const operation = fieldsElement.querySelector('[data-preview-kpi-aggregation]')?.value || '';
+        return [control.name, operation && value ? `${operation}(${value})` : value];
+      }
+      return [control.name, value];
+    }
     return [control.name, orderedSelectedValues(control).join(control.name === 'legend' || control.name === 'dataset_ids' ? ', ' : ' × ')];
   }));
   let activeMenu = null;
@@ -4659,7 +4749,7 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     // Filter-condition selects are dynamic and do not have a name. Include
     // them explicitly so Column and Operator receive the same searchable,
     // single-value dropdown used by KPI and CDR Source in every preview host.
-    root.querySelectorAll('select[name], select[data-report-chart-filter-select], .report-chart-filter-condition select').forEach((select) => {
+    root.querySelectorAll('select[name], select[data-preview-kpi-aggregation], select[data-report-chart-filter-select], .report-chart-filter-condition select').forEach((select) => {
       if (select.classList.contains('report-chart-preview-select-native')) return;
       const shell = document.createElement('div'); shell.className = 'report-chart-preview-select';
       const trigger = document.createElement('button'); trigger.type = 'button'; trigger.className = 'report-chart-preview-select-trigger'; trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-expanded', 'false');
@@ -4768,12 +4858,13 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
       const selected = new Set(Array.isArray(definition[key]) ? definition[key].map(String) : String(definition[key] || '').split(',').map((value) => value.trim()).filter(Boolean));
       (options.datasetsBySource?.[sourceKey(definition.cdr_source)] || []).forEach((dataset) => control.add(new Option(dataset.label, String(dataset.value), false, selected.has(String(dataset.value)))));
     }
-    else if (key === 'legend_position') (options.legendPositions || ['Top', 'Bottom', 'Left', 'Right']).forEach((value) => control.add(new Option(value, value, false, normalisePreviewValue(value) === normalisePreviewValue(definition[key]))));
+    else if (key === 'legend_position') (options.legendPositions || ['', 'Top', 'Bottom', 'Left', 'Right']).forEach((value) => control.add(new Option(value || 'No legend position', value, false, normalisePreviewValue(value) === normalisePreviewValue(definition[key]))));
     else {
       const available = columnsFor(definition.cdr_source);
+      const definitionValue = key === 'kpi' ? kpiDefinition.field : definition[key];
       const configuredValues = multiFields.has(key)
-        ? Array.from(valuesFor(definition[key], key))
-        : [String(definition[key] || '').trim()].filter(Boolean);
+        ? Array.from(valuesFor(definitionValue, key))
+        : [String(definitionValue || '').trim()].filter(Boolean);
       const selected = new Set(configuredValues.map((value) => matchingPreviewValue(value, available)));
       if (multiFields.has(key)) control.multiple = true; else control.add(new Option('Choose a field…', ''));
       Array.from(new Set([...selected, ...available])).filter(Boolean).forEach((value) => control.add(new Option(value, value, false, selected.has(value))));
@@ -4789,7 +4880,8 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
         option.selected = Array.from(requested).some((value) => normalisePreviewValue(value) === normalisePreviewValue(option.value));
       });
     } else {
-      const requested = key === 'cdr_source' ? sourceKey(definition[key]) : normalisePreviewValue(definition[key]);
+      const definitionValue = key === 'kpi' ? kpiDefinition.field : definition[key];
+      const requested = key === 'cdr_source' ? sourceKey(definitionValue) : normalisePreviewValue(definitionValue);
       const matching = Array.from(control.options).find((option) => (
         key === 'cdr_source' ? sourceKey(option.value) === requested : normalisePreviewValue(option.value) === requested
       ));
@@ -4801,7 +4893,18 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
         : Array.from(valuesFor(definition[key], key));
       control.dataset.previewSelectionOrder = JSON.stringify(requestedOrder.map((value) => matchingPreviewValue(value, Array.from(control.options).map((option) => option.value))));
     }
-    control.name = key; control.dataset.previewDisplay = String(definition[key] || ''); control.setAttribute('aria-label', label); field.append(control);
+    const definitionValue = key === 'kpi' ? kpiDefinition.field : definition[key];
+    control.name = key; control.dataset.previewDisplay = String(definitionValue || ''); control.setAttribute('aria-label', label); field.append(control);
+    if (key === 'kpi') {
+      const operationLabel = document.createElement('span'); operationLabel.className = 'report-chart-preview-subfield-label'; operationLabel.textContent = 'KPI operation';
+      const operation = document.createElement('select'); operation.dataset.previewKpiAggregation = ''; operation.setAttribute('aria-label', 'KPI operation');
+      [
+        ['', 'Chart default'], ['SUM', 'SUM'], ['COUNT', 'COUNT'], ['COUNTD', 'COUNTD'],
+        ['AVERAGE', 'AVERAGE / MEAN'], ['MAX', 'MAX'], ['MIN', 'MIN'], ['MEDIAN', 'MEDIAN'],
+      ].forEach(([value, text]) => operation.add(new Option(text, value, false, value === kpiDefinition.operation)));
+      operation.value = kpiDefinition.operation;
+      field.append(operationLabel, operation);
+    }
     if (key === 'grouping_rows' || key === 'grouping_columns') {
       const parsed = document.createElement('input'); parsed.type = 'text'; parsed.className = 'report-chart-preview-parsed'; parsed.readOnly = !options.editableGroupingInputs; parsed.dataset.previewGroupingText = ''; parsed.placeholder = `No ${label.toLowerCase()} selected`; parsed.setAttribute('aria-label', `Selected ${label.toLowerCase()}`);
       const syncParsed = () => { parsed.value = orderedSelectedValues(control).join(' × '); };
@@ -4826,6 +4929,9 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
   fieldsElement.querySelector('[name="cdr_source"]')?.addEventListener('change', () => options.onSourceChange?.(currentDefinition()));
   fieldsElement.querySelectorAll('[name]').forEach((control) => control.addEventListener('input', () => options.onChange?.(currentDefinition())));
   fieldsElement.querySelectorAll('select[name]').forEach((control) => control.addEventListener('change', () => options.onChange?.(currentDefinition())));
+  const kpiAggregation = fieldsElement.querySelector('[data-preview-kpi-aggregation]');
+  kpiAggregation?.addEventListener('input', () => options.onChange?.(currentDefinition()));
+  kpiAggregation?.addEventListener('change', () => options.onChange?.(currentDefinition()));
   return {definition: currentDefinition, close: closeMenu};
 }
 
@@ -5000,6 +5106,14 @@ maybeSyncPersistedGlobalDatasetsAnalysisSelectors();
 function importWarningDetails(payload) {
   const kind = String(payload.kind || '');
   const collisions = Array.isArray(payload.workspace_collisions) ? payload.workspace_collisions : [];
+  if (kind === 'bundle') {
+    const collisionCopy = collisions.length
+      ? ` Existing workspaces that will be replaced: ${collisions.join(', ')}.` : '';
+    return {
+      title: 'Import selected content?',
+      message: `Every package in this export selection will be imported in order.${collisionCopy}${payload.requires_destination_workspaces ? ' Next, choose the destination workspaces for its workspace elements.' : ''}`,
+    };
+  }
   if (kind === 'config') {
     return payload.includes_slides_templates
       ? {
@@ -5071,7 +5185,9 @@ function selectAutoCalculatedFieldWorkspaces(workspaces, kind = 'auto-calculated
       ? 'Dashboard definitions and their saved filters will replace the Dashboard list in every selected workspace. The original workspace is preselected when present; generated caches are not imported.'
       : kind === 'operator-mappings'
         ? 'The complete Operator Mapping list will replace the mappings in every selected workspace. Stored CDR values will remain unchanged.'
-      : 'The original workspace is preselected when present. Fields will be merged into every selected workspace; matching field names will be replaced.';
+      : kind === 'bundle'
+        ? 'Workspace elements in the selection will be imported into every selected workspace. Full Workspace packages keep their own workspace identity.'
+        : 'The original workspace is preselected when present. Fields will be merged into every selected workspace; matching field names will be replaced.';
   const toolbar = document.createElement('div'); toolbar.className = 'full-environment-workspace-toolbar';
   const selectAll = document.createElement('button'); selectAll.type = 'button'; selectAll.className = 'ghost-link'; selectAll.textContent = 'Select all';
   const selectNone = document.createElement('button'); selectNone.type = 'button'; selectNone.className = 'ghost-link'; selectNone.textContent = 'Select none'; toolbar.append(selectAll, selectNone);
@@ -5179,10 +5295,10 @@ document.querySelectorAll('[data-import-package-form]').forEach((form) => {
         }).catch(() => {});
         return;
       }
-      const destinationWorkspaceIds = ['auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'].includes(payload.kind)
+      const destinationWorkspaceIds = payload.requires_destination_workspaces
         ? await selectAutoCalculatedFieldWorkspaces(payload.destination_workspaces, payload.kind, payload.selected_workspace_ids || [])
         : [];
-      if (['auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'].includes(payload.kind) && !destinationWorkspaceIds) {
+      if (payload.requires_destination_workspaces && !destinationWorkspaceIds) {
         await fetch(`/admin/import-export/import/uploads/${encodeURIComponent(uploadId)}`, {
           method: 'DELETE', credentials: 'same-origin',
         }).catch(() => {});
@@ -5365,10 +5481,11 @@ function selectTransferDestination() {
 
 document.querySelectorAll('[data-export-package-form]').forEach((form) => {
   const transferButton = form.querySelector('[data-server-transfer]');
+  const selectedExportTargets = (formData) => formData.getAll('export_target').map((value) => String(value));
   const confirmGeneratedOutputs = async (formData, operation) => {
-    const target = String(formData.get('export_target') || '');
-    if (target === 'full-environment') return true;
-    if (!target.startsWith('workspace:')) {
+    const targets = selectedExportTargets(formData);
+    if (targets.includes('full-environment')) return true;
+    if (!targets.some((target) => target.startsWith('workspace:'))) {
       formData.set('include_generated_outputs', 'true');
       return true;
     }
@@ -5388,7 +5505,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
   transferButton?.addEventListener('click', async () => {
     if (!(form instanceof HTMLFormElement)) return;
     const formData = new FormData(form);
-    if (formData.get('export_target') === 'full-environment') {
+    if (selectedExportTargets(formData).includes('full-environment')) {
       const selection = await selectFullEnvironmentWorkspaces();
       if (selection === null) return;
       selection.workspaceIds.forEach((workspaceId) => formData.append('workspace_ids', workspaceId));
@@ -5485,7 +5602,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
     event.stopImmediatePropagation();
     if (!(form instanceof HTMLFormElement)) return;
     const formData = new FormData(form);
-    if (formData.get('export_target') === 'full-environment') {
+    if (selectedExportTargets(formData).includes('full-environment')) {
       const selection = await selectFullEnvironmentWorkspaces();
       if (selection === null) return;
       selection.workspaceIds.forEach((workspaceId) => formData.append('workspace_ids', workspaceId));
@@ -5628,7 +5745,7 @@ document.querySelectorAll('[data-export-package-form]').forEach((form) => {
         confirmOverlay?.classList.remove('incoming-transfer-confirm');
       }
       let destinationWorkspaceIds = [];
-      if (accepted && ['auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'].includes(offer.kind)) {
+      if (accepted && (offer.requires_destination_workspaces || ['auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'].includes(offer.kind))) {
         const matchingIds = (payload.destination_workspaces || []).filter((workspace) =>
           (offer.workspaces || []).some((name) => String(name).toLowerCase() === workspace.name.toLowerCase())
         ).map((workspace) => workspace.id);

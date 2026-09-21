@@ -16,7 +16,91 @@ from urllib.parse import urlencode
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 
-from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
+from src.modules.cdr_reporting import CATALOG_HEADERS, CatalogEntry, _apply_catalog_filters, _apply_catalog_grouping, _cdf_plot_geometry, _cdf_terminal_x_maximum, _draw_chart_legend, _draw_inside_bar_label, _draw_top_column_group_separators, _hierarchical_complete_keys, _hierarchical_unique_keys, _hierarchy_caption_spans, _hierarchy_group_colours, _hierarchy_spans, _layout_chart_frames, _legend_dimensions, _legend_labels, _named_slide_layout, _render_cdf_line, _render_failure_count, _render_failure_count_hierarchy, _render_map, _render_mean_column, _render_status_100, _render_table, _resolved_legend_items, _series_colours, _status_chart_categories, assign_cdr_vendors, catalog_chart_hover_targets, catalog_chart_payload, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, load_catalog_csv, normalise_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_kpi_expression, parse_legend_position, prepare_multivendor_catalog_entry, render_catalog_chart_preview, render_cdr_report, vendor_from_cells
+
+
+def test_kpi_expression_supports_explicit_aggregation_aliases() -> None:
+    assert parse_kpi_expression('COUNTD(Test_ID)') == ('Test_ID', 'countd')
+    assert parse_kpi_expression('MEAN(`Mean Data Rate`)') == ('Mean Data Rate', 'mean')
+    assert parse_kpi_expression('AVERAGE(Mean_Data_Rate)') == ('Mean_Data_Rate', 'mean')
+    assert parse_kpi_expression('Test_ID') == ('Test_ID', None)
+
+
+def test_table_payload_counts_test_ids_across_the_declared_row_hierarchy() -> None:
+    frame = pd.DataFrame({
+        'Benchmark': ['UK_Q1_2026'] * 4,
+        'Subscriber': ['EE'] * 4,
+        'G Level 4': ['Belfast'] * 4,
+        'Test Result': ['Completed'] * 4,
+        'Test_ID': ['A', 'A', 'B', None],
+    })
+    base = dict(
+        slide=3, slide_title='Validation', slide_subtitle='', layout='', chart_title='Test count',
+        cdr_source='CDR-Data', chart_type='Table', legend='', filters='',
+        grouping_rows='Benchmark × Subscriber × G Level 4 × Test Result',
+        # A KPI accidentally repeated as a column dimension must not split its
+        # own aggregation. Cell Assistance now makes the intended KPI syntax explicit.
+        grouping_columns='Test_ID', legend_position='Top',
+    )
+
+    count = catalog_chart_payload(frame, CatalogEntry(kpi='COUNT(Test_ID)', **base), prefiltered=True)
+    distinct = catalog_chart_payload(frame, CatalogEntry(kpi='COUNTD(Test_ID)', **base), prefiltered=True)
+
+    assert count['headers'] == ['Benchmark', 'Subscriber', 'G Level 4', 'Test Result', 'COUNT(Test_ID)']
+    assert count['rows'] == [['UK_Q1_2026', 'EE', 'Belfast', 'Completed', '3']]
+    assert distinct['rows'] == [['UK_Q1_2026', 'EE', 'Belfast', 'Completed', '2']]
+
+
+def test_dynamic_table_pivots_columns_and_exposes_hierarchy_metadata() -> None:
+    frame = pd.DataFrame({
+        'Benchmark': ['UK_Q1_2026'] * 6,
+        'Subscriber': ['EE'] * 6,
+        'Test_Result': ['Completed', 'Cutoff', 'Failed', 'Completed', 'Failed', 'Completed'],
+        'G_Level_4': ['Bristol', 'Bristol', 'Bristol', 'Belfast', 'Belfast', 'Belfast'],
+        'Test_ID': ['A', 'B', 'C', 'D', 'E', 'F'],
+    })
+    entry = CatalogEntry(
+        slide=3, slide_title='Validation', slide_subtitle='', layout='', chart_title='Test count',
+        cdr_source='CDR-Data', kpi='COUNT(Test_ID)', chart_type='Dynamic Table', legend='Subscriber', filters='',
+        grouping_rows='Benchmark × Subscriber × G Level 4 × Test_Result', grouping_columns='G Level 4',
+        legend_position='',
+    )
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert model['type'] == 'table'
+    assert model['dynamic'] is True
+    assert model['row_dimension_count'] == 3
+    assert model['column_heading'] == 'G Level 4'
+    assert model['legend']['position'] == 'top'
+    assert model['headers'] == ['Benchmark', 'Subscriber', 'Test_Result', 'Belfast', 'Bristol']
+    assert model['column_keys'] == [['Belfast'], ['Bristol']]
+    assert model['rows'] == [
+        ['UK_Q1_2026', 'EE', 'Completed', '2', '1'],
+        ['UK_Q1_2026', 'EE', 'Cutoff', '', '1'],
+        ['UK_Q1_2026', 'EE', 'Failed', '1', '1'],
+    ]
+
+
+def test_dynamic_table_rejects_an_unreadable_number_of_pivot_columns() -> None:
+    frame = pd.DataFrame({
+        'Benchmark': ['UK_Q1_2026'] * 21,
+        'G_Level_4': [f'City {index}' for index in range(21)],
+        'Test_ID': [f'Test {index}' for index in range(21)],
+    })
+    entry = CatalogEntry(
+        slide=3, slide_title='Validation', slide_subtitle='', layout='', chart_title='Test count',
+        cdr_source='CDR-Data', kpi='COUNT(Test_ID)', chart_type='Dynamic Table', legend='', filters='',
+        grouping_rows='Benchmark', grouping_columns='G Level 4', legend_position='',
+    )
+
+    model = catalog_chart_payload(frame, entry, prefiltered=True)
+
+    assert model['type'] == 'empty'
+    assert model['message'] == (
+        'Dynamic Table has 21 distinct column values for G Level 4. '
+        'Add a filter to reduce the table to 20 columns or fewer.'
+    )
 from src.modules.repository import Repository
 
 
@@ -480,9 +564,9 @@ def test_catalogue_parses_legend_position_and_accepts_prior_schema() -> None:
         parse_legend_position('Centre')
 
     previous = 'Slide,Slide tittle,Slide Subtittle,Layout,Chart Tittle,CDR source,KPI,Chart type,Legend,Filters,Grouping_Rows,Grouping_Columns' + '\n8,Quality,,Title and 1 column + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,,Operator,Campaign\n'
-    assert parse_catalog_csv(previous, 'nsa')[0].legend_position == 'top'
+    assert parse_catalog_csv(previous, 'nsa')[0].legend_position == ''
     two_columns = ','.join(CATALOG_HEADERS) + '\n8,Quality,,Title and 2 columns + Comments,,CDR-Voice,Call_Status,100% Stacked Vertical Bars,,Operator,Campaign,,\n'
-    assert parse_catalog_csv(two_columns, 'nsa')[0].legend_position == 'top'
+    assert parse_catalog_csv(two_columns, 'nsa')[0].legend_position == ''
 
 
 def test_legend_parser_supports_manual_captions_and_dimension_selection() -> None:

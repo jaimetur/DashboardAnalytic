@@ -22,7 +22,7 @@ from uuid import uuid4
 
 import pandas as pd
 from src.modules.column_names import column_identity
-from fastapi import Depends, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from pptx import Presentation
@@ -32,6 +32,7 @@ from src.modules.cdr_reporting import (
     _catalog_spec, _clear_commentary, _layout_chart_frames, _legend_dimensions, _named_slide_layout,
     _remove_all_slides, _remove_template_chart_placeholders, _render_dashboard_payload,
     _set_commentary, _set_slide_header, _set_structural_slide_text, catalog_chart_payload,
+    catalog_kpi_fields,
     ensure_vendor_group, normalise_operator_aliases, parse_catalog_filters,
     parse_catalog_grouping,
     prepare_catalog_chart_preview_frame, render_catalog_chart_preview, render_unavailable_source_chart,
@@ -229,6 +230,7 @@ def install_dashboard_routes(core):
     dashboard_warmup_cancellations: dict[tuple[str, str], dict[str, bool]] = {}
     dashboard_warmup_pending: dict[tuple[str, str], tuple[dict, str]] = {}
     dashboard_warmup_retries: set[tuple[str, str]] = set()
+    interactive_chart_preview_jobs: OrderedDict[str, dict] = OrderedDict()
     dashboard_work_gate = Lock()
 
     def workspace_key():
@@ -2589,11 +2591,7 @@ def install_dashboard_routes(core):
 
     def chart_query_columns(entry, multivendor):
         reported = core.reporting_query_columns(entry.source_kind, [entry], multivendor)
-        explicit = {
-            part.strip(' `')
-            for part in re.split(r'\s+vs\s+|\s*\|\s*', entry.kpi, flags=re.I)
-            if part.strip()
-        }
+        explicit = set(catalog_kpi_fields(entry.kpi))
         explicit.update(_legend_dimensions(entry.legend))
         explicit.update(parse_catalog_grouping(entry.grouping_rows).dimensions)
         explicit.update(parse_catalog_grouping(entry.grouping_columns).dimensions)
@@ -2688,11 +2686,7 @@ def install_dashboard_routes(core):
         requested = [
             *parse_catalog_grouping(entry.grouping_rows).dimensions,
             *parse_catalog_grouping(entry.grouping_columns).dimensions,
-            *(
-                part.strip(' `')
-                for part in re.split(r'\s+vs\s+|\s*\|\s*', entry.kpi, flags=re.I)
-                if part.strip()
-            ),
+            *catalog_kpi_fields(entry.kpi),
         ]
         resolved = [resolve_sql_column(columns, name) for name in requested]
         if any(column is None for column in resolved):
@@ -3202,14 +3196,13 @@ def install_dashboard_routes(core):
             'columns': columns_by_source.get(f'cdr-{entry.source_kind}', [str(column) for column in columns if identity(column) not in hidden]),
         })
 
-    @app.post('/api/e2e-dashboards/chart/{token}/{index}/filter-preview')
-    def interactive_chart_filter_preview(
+    def build_interactive_chart_filter_preview(
         token: str,
         index: int,
         request: DashboardChartFilterPreviewRequest,
-        user=Depends(dashboard_user),
+        user,
     ):
-        """Render one expanded chart with temporary, unsaved template filters."""
+        """Build one expanded chart with temporary, unsaved template filters."""
         snapshot, entry, _ = snapshot_chart(token, index, user, include_frame=False)
         changes = {
             key: value for key, value in request.model_dump().items()
@@ -3286,9 +3279,89 @@ def install_dashboard_routes(core):
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        return JSONResponse(catalog_chart_payload(
+        return catalog_chart_payload(
             frame, preview_entry, multivendor=snapshot.multivendor, prefiltered=True,
-        ), headers={'Cache-Control': 'no-store'})
+        )
+
+    def run_interactive_chart_filter_preview(
+        job_id: str,
+        token: str,
+        index: int,
+        request: DashboardChartFilterPreviewRequest,
+        user,
+    ) -> None:
+        """Finish a potentially slow preview without holding a proxy request open."""
+        try:
+            payload = build_interactive_chart_filter_preview(token, index, request, user)
+            result = {'state': 'ready', 'payload': payload}
+        except HTTPException as exc:
+            result = {'state': 'failed', 'status': exc.status_code, 'detail': str(exc.detail)}
+        except Exception as exc:
+            result = {'state': 'failed', 'status': 500, 'detail': str(exc)}
+        with lock:
+            job = interactive_chart_preview_jobs.get(job_id)
+            if job is not None:
+                job.update(result)
+
+    @app.post('/api/e2e-dashboards/chart/{token}/{index}/filter-preview')
+    def interactive_chart_filter_preview(
+        token: str,
+        index: int,
+        request: DashboardChartFilterPreviewRequest,
+        background_tasks: BackgroundTasks,
+        background: bool = False,
+        user=Depends(dashboard_user),
+    ):
+        """Render one temporary chart, optionally outside the proxy request."""
+        if not background:
+            return JSONResponse(
+                build_interactive_chart_filter_preview(token, index, request, user),
+                headers={'Cache-Control': 'no-store'},
+            )
+        # Validate access before returning a job identifier. The worker repeats
+        # the check so an expired snapshot still becomes an actionable error.
+        snapshot_chart(token, index, user, include_frame=False)
+        job_id = uuid4().hex
+        with lock:
+            interactive_chart_preview_jobs[job_id] = {
+                'state': 'processing', 'owner': user.username, 'workspace': workspace_key(),
+            }
+            while len(interactive_chart_preview_jobs) > 32:
+                removable = next((
+                    key for key, value in interactive_chart_preview_jobs.items()
+                    if value.get('state') != 'processing'
+                ), None)
+                if removable is None:
+                    break
+                interactive_chart_preview_jobs.pop(removable, None)
+        background_tasks.add_task(
+            run_interactive_chart_filter_preview, job_id, token, index, request, user,
+        )
+        return JSONResponse(
+            {'state': 'processing', 'job_id': job_id}, status_code=202,
+            headers={'Cache-Control': 'no-store'},
+        )
+
+    @app.get('/api/e2e-dashboards/chart-preview-jobs/{job_id}')
+    def interactive_chart_filter_preview_status(job_id: str, user=Depends(dashboard_user)):
+        """Return a temporary Chart Definition preview once its query completes."""
+        with lock:
+            job = interactive_chart_preview_jobs.get(job_id)
+            if (
+                job is None
+                or job.get('owner') != user.username
+                or job.get('workspace') != workspace_key()
+            ):
+                raise HTTPException(404, 'Chart preview job not found.')
+            result = dict(job)
+        if result.get('state') == 'processing':
+            return JSONResponse(
+                {'state': 'processing', 'job_id': job_id}, status_code=202,
+                headers={'Cache-Control': 'no-store'},
+            )
+        if result.get('state') == 'failed':
+            raise HTTPException(int(result.get('status') or 500), str(result.get('detail') or 'Unable to render chart preview.'))
+        return JSONResponse(result['payload'], headers={'Cache-Control': 'no-store'})
 
     @app.post('/api/e2e-dashboards/chart/{token}/{index}/update-template')
     def update_interactive_chart_template(
@@ -3320,15 +3393,51 @@ def install_dashboard_routes(core):
         for key in ('cdr_source', 'kpi', 'chart_type'):
             if not str(changes.get(key, '')).strip():
                 changes.pop(key, None)
-        entries[index] = replace(entries[index], **changes)
+        updated_entry = replace(entries[index], **changes)
+        entries[index] = updated_entry
         try:
             task_repository.set_report_template_content(technology, template_name, core.catalogue_csv(entries))
         except (OSError, ValueError) as exc:
             raise HTTPException(503, f'Unable to update the Report Template: {exc}') from exc
+        # Keep every live view of this Report Template consistent with the row
+        # just persisted. The Dashboard viewer, an expanded chart and a
+        # restored/PPT chart can legitimately use different snapshot tokens;
+        # updating only the request's snapshot makes another one reopen the
+        # previous Chart Definition even though the CSV was saved correctly.
+        with lock:
+            matching_snapshots = [
+                candidate for candidate in snapshots.values()
+                if (
+                    candidate.workspace == snapshot.workspace
+                    and candidate.definition.template_technology == technology
+                    and candidate.definition.template == template_name
+                    and index < len(candidate.entries)
+                )
+            ]
+            for candidate in matching_snapshots:
+                candidate.entries[index] = updated_entry
+                candidate.chart_frames.pop(index, None)
+                candidate.chart_payloads.pop(index, None)
+                for slide in candidate.payload.get('slides', []):
+                    for chart in slide.get('charts', []):
+                        if chart.get('index') == index:
+                            chart.update({
+                                'title': updated_entry.chart_title,
+                                'source': updated_entry.source_kind,
+                                'cdr_source': updated_entry.cdr_source,
+                                'chart_type': updated_entry.chart_type,
+                            })
         task_repository.add_log(user.username, 'update_dashboard_chart_template', json.dumps({
             'technology': technology, 'template': template_name, 'chart_index': index,
         }))
-        return {'template': template_name, 'technology': technology, 'chart_index': index}
+        return {
+            'template': template_name, 'technology': technology, 'chart_index': index,
+            'synced_snapshots': len(matching_snapshots),
+            'updated_at': str(next((
+                row['updated_at'] for row in task_repository.list_report_templates(technology)
+                if str(row['name']) == template_name
+            ), '')),
+        }
 
     def dashboard_status_payload(requested_definitions=None):
         """Return preparation states without starting background work."""

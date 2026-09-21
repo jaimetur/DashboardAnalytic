@@ -10,6 +10,7 @@
   const cameraStates = new WeakMap();
   const nativeFillTexts = new WeakMap();
   const renderStates = new WeakMap();
+  const tableDragStates = new WeakMap();
   const observed = new WeakSet();
   const mapTiles = new Map();
   const mapWaits = new WeakMap();
@@ -25,6 +26,7 @@
   const textWidth = (context, value) => context.measureText(String(value)).width;
   const displayKey = key => (key || []).filter(value => value !== '(all)').join(' · ') || '(all)';
   const percent = value => `${(Number(value) * 100).toFixed(1)}%`;
+  const tooltipPercent = value => `${(Number(value) * 100).toFixed(2)}%`;
   const numericLabel = value => {
     const number = Number(value);
     if (!Number.isFinite(number)) return String(value ?? '');
@@ -363,7 +365,7 @@
           const label = percent(ratio);
           if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 16)) {}
           else if (ratio >= .005) drawOutsideBarLabel(context, label, x + barWidth + 5, Math.max(top, y - 7), series.colour);
-          if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: category, series: series.name, value: percent(ratio)});
+          if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: category, series: series.name, value: tooltipPercent(ratio)});
           running += segmentHeight;
         });
         const label = String(category).slice(0, 24); font(context, 18, true);
@@ -425,7 +427,7 @@
           const label = percent(ratio);
           if (ratio >= .08 && drawInsideBarLabel(context, label, x, y, barWidth, segmentHeight, '#FFFFFF', 17)) {}
           else if (ratio >= .005) drawOutsideBarLabel(context, label, x + barWidth + 5, Math.max(paneTop, y - 7), series.colour);
-          if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: percent(ratio)});
+          if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: displayKey([...rowKey, ...columnKey]), series: series.name, value: tooltipPercent(ratio)});
           running += segmentHeight;
         });
       });
@@ -535,7 +537,7 @@
       buckets.forEach((bucket, bucketIndex) => {
         const ratio = Number(ratios[bucketIndex] || 0), segmentHeight = ratio * height, y = top + height - running - segmentHeight;
         context.fillStyle = bucket.colour; context.fillRect(x, y, barWidth, segmentHeight);
-        if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: displayKey(key), series: bucket.name, value: percent(ratio)});
+        if (segmentHeight > 0) pushRectangleHit(state, transform, {x, y, width: barWidth, height: segmentHeight}, {label: displayKey(key), series: bucket.name, value: tooltipPercent(ratio)});
         running += segmentHeight;
       });
     });
@@ -720,21 +722,56 @@
     }
   }
 
-  function drawTable(context, payload) {
+  function drawTable(context, payload, state) {
     const headers = payload.headers || [], rows = payload.rows || []; if (!headers.length) return;
     const layout = legendLayout(payload.legend), left = layout.left, top = layout.top;
     const columnWidth = Math.floor((layout.right - left) / Math.max(headers.length, 1)), availableHeight = layout.bottom - top;
-    const rowHeight = Math.max(34, Math.min(58, Math.floor(availableHeight / Math.max(rows.length + 1, 1)))); context.textBaseline = 'top';
+    const dynamic = Boolean(payload.dynamic), rowDimensionCount = Math.max(0, Number(payload.row_dimension_count) || 0);
+    const columnHeading = String(payload.column_heading || ''), headerBands = dynamic && columnHeading ? 2 : 1;
+    const rowHeight = dynamic
+      ? Math.max(20, Math.min(38, Math.floor(availableHeight / Math.max(rows.length + headerBands, 1))))
+      : Math.max(34, Math.min(58, Math.floor(availableHeight / Math.max(rows.length + 1, 1))));
+    const headerTop = top + (headerBands - 1) * rowHeight; context.textBaseline = 'top';
+    state.table = dynamic ? {
+      left, top, right: layout.right, bottom: layout.bottom, columnWidth, rowHeight,
+      headerTop, headerBands, rowDimensionCount, headerCount: headers.length, rowCount: rows.length,
+    } : null;
+    if (dynamic && columnHeading) {
+      const pivotLeft = left + rowDimensionCount * columnWidth;
+      context.fillStyle = '#23384A'; context.fillRect(pivotLeft, top, Math.max(columnWidth, layout.right - pivotLeft), rowHeight);
+      context.fillStyle = '#FFFFFF'; context.textAlign = 'center'; font(context, 13, true);
+      context.fillText(columnHeading.slice(0, 40), pivotLeft + Math.max(columnWidth, layout.right - pivotLeft) / 2, top + 6);
+    }
     headers.forEach((header, column) => {
-      const x = left + column * columnWidth; context.fillStyle = '#23384A'; context.fillRect(x, top, columnWidth, rowHeight);
-      context.fillStyle = '#FFFFFF'; context.textAlign = 'left'; font(context, 14, true); context.fillText(String(header).slice(0, 28), x + 8, top + 8);
+      const x = left + column * columnWidth; context.fillStyle = '#23384A'; context.fillRect(x, headerTop, columnWidth, rowHeight);
+      context.fillStyle = '#FFFFFF'; context.textAlign = 'left'; font(context, dynamic ? 12 : 14, true); context.fillText(String(header).slice(0, 28), x + 8, headerTop + (dynamic ? 5 : 8));
     });
     rows.forEach((row, rowIndex) => row.forEach((value, column) => {
-      const x = left + column * columnWidth, y = top + (rowIndex + 1) * rowHeight;
+      const x = left + column * columnWidth, y = top + (rowIndex + headerBands) * rowHeight;
+      const repeatedHierarchyValue = dynamic && column < rowDimensionCount && rowIndex > 0
+        && Array.from({length: column + 1}, (_item, index) => String(rows[rowIndex - 1]?.[index] ?? '') === String(row[index] ?? '')).every(Boolean);
+      const displayValue = repeatedHierarchyValue ? '' : value;
       context.fillStyle = rowIndex % 2 ? '#FFFFFF' : '#F4F7F9'; context.fillRect(x, y, columnWidth, rowHeight);
       context.strokeStyle = '#D9E1E6'; context.lineWidth = 1; context.strokeRect(x, y, columnWidth, rowHeight);
-      context.fillStyle = '#34495A'; context.textAlign = 'left'; font(context, 13); context.fillText(String(value).slice(0, 28), x + 8, y + 8);
+      context.fillStyle = '#34495A'; context.textAlign = column >= rowDimensionCount && dynamic ? 'right' : 'left'; font(context, dynamic ? 11 : 13, dynamic && column < rowDimensionCount);
+      const text = String(displayValue).slice(0, 28); const textX = column >= rowDimensionCount && dynamic ? x + columnWidth - 8 : x + 8;
+      context.fillText(text, textX, y + (dynamic ? 4 : 8));
     }));
+    const drag = tableDragStates.get(state.canvas);
+    if (dynamic && drag?.targetIndex !== undefined) {
+      context.save();
+      context.strokeStyle = '#7C4DCC'; context.lineWidth = 5;
+      if (drag.mode === 'column') {
+        const boundary = drag.targetIndex + (drag.after ? 1 : 0);
+        const x = left + boundary * columnWidth;
+        context.beginPath(); context.moveTo(x, headerTop); context.lineTo(x, top + (rows.length + headerBands) * rowHeight); context.stroke();
+      } else {
+        const boundary = drag.targetBoundary;
+        const y = top + (headerBands + boundary) * rowHeight;
+        context.beginPath(); context.moveTo(left, y); context.lineTo(layout.right, y); context.stroke();
+      }
+      context.restore();
+    }
     drawLegend(context, payload.legend);
   }
 
@@ -752,7 +789,7 @@
     else if (payload.type === 'mean_bar') drawMeanBars(context, payload, state, transform);
     else if (payload.type === 'scatter') drawScatter(context, payload, state, transform);
     else if (payload.type === 'map') drawMap(context, payload, state, transform);
-    else if (payload.type === 'table') drawTable(context, payload);
+    else if (payload.type === 'table') drawTable(context, payload, state);
   }
 
   function draw(canvas, payload) {
@@ -792,7 +829,7 @@
       const y = ((event.clientY - bounds.top) / view.scaleY - view.originY) / view.zoom;
       const hit = closestHit(state.hits, x, y); if (!hit) { tooltip.hidden = true; return; }
       const point = hit.point, lines = [hit.label, hit.series, hit.value || (point ? numericLabel(point.value) : '')].filter(Boolean);
-      if (point && finite(point.cumulative)) lines.push(percent(point.cumulative));
+      if (point && finite(point.cumulative)) lines.push(tooltipPercent(point.cumulative));
       tooltip.replaceChildren(...lines.map((value, index) => { const element = document.createElement(index === 0 ? 'strong' : 'span'); element.textContent = value; return element; }));
       tooltip.hidden = false;
       const parentBounds = canvas.parentElement.getBoundingClientRect(), left = event.clientX - parentBounds.left + 14, top = event.clientY - parentBounds.top + 14;
@@ -800,6 +837,148 @@
       tooltip.style.top = `${clamp(top, 8, Math.max(8, parentBounds.height - tooltip.offsetHeight - 8))}px`;
     });
     canvas.addEventListener('pointerleave', () => { const tooltip = tooltipFor(canvas); if (tooltip) tooltip.hidden = true; });
+  }
+
+  function tableLogicalPoint(canvas, event) {
+    const view = views.get(canvas), bounds = canvas.getBoundingClientRect();
+    if (!view) return null;
+    return {
+      x: ((event.clientX - bounds.left) / view.scaleX - view.originX) / view.zoom,
+      y: ((event.clientY - bounds.top) / view.scaleY - view.originY) / view.zoom,
+    };
+  }
+
+  function tableCellAt(canvas, event) {
+    const state = renderStates.get(canvas), table = state?.table, point = tableLogicalPoint(canvas, event);
+    if (!table || !point || point.x < table.left || point.x >= table.right) return null;
+    const column = Math.max(0, Math.min(table.headerCount - 1, Math.floor((point.x - table.left) / table.columnWidth)));
+    if (point.y >= table.headerTop && point.y < table.headerTop + table.rowHeight) return {kind: 'header', column, point, table};
+    const bodyTop = table.top + table.headerBands * table.rowHeight;
+    if (point.y < bodyTop || point.y >= bodyTop + table.rowCount * table.rowHeight) return null;
+    return {
+      kind: 'row', column,
+      row: Math.max(0, Math.min(table.rowCount - 1, Math.floor((point.y - bodyTop) / table.rowHeight))),
+      point, table,
+    };
+  }
+
+  function hierarchyRange(rows, rowIndex, depth) {
+    const prefix = rows[rowIndex].slice(0, depth + 1).map(String);
+    const matches = row => prefix.every((value, index) => String(row[index]) === value);
+    let start = rowIndex, end = rowIndex + 1;
+    while (start > 0 && matches(rows[start - 1])) start -= 1;
+    while (end < rows.length && matches(rows[end])) end += 1;
+    return {start, end};
+  }
+
+  function moveArrayItem(values, from, to) {
+    const [item] = values.splice(from, 1);
+    values.splice(to > from ? to - 1 : to, 0, item);
+  }
+
+  function sameImmediateHierarchyParent(left, right) {
+    const leftKey = Array.isArray(left) ? left.map(String) : [];
+    const rightKey = Array.isArray(right) ? right.map(String) : [];
+    const parentDepth = Math.max(0, Math.min(leftKey.length, rightKey.length) - 1);
+    return Array.from({length: parentDepth}, (_item, index) => leftKey[index] === rightKey[index]).every(Boolean);
+  }
+
+  function attachTableReordering(canvas) {
+    if (canvas.dataset.tableReorderReady) return;
+    canvas.dataset.tableReorderReady = 'true';
+    let drag = null;
+    const stopEvent = event => { event.preventDefault(); event.stopImmediatePropagation(); };
+    canvas.addEventListener('pointerdown', event => {
+      if (event.button !== 0 || cameraFor(canvas).zoom !== 1) return;
+      const payload = models.get(canvas), cell = tableCellAt(canvas, event);
+      if (!payload?.dynamic || !cell) return;
+      if (cell.kind === 'header' && cell.column >= cell.table.rowDimensionCount) {
+        const sourceKeyIndex = cell.column - cell.table.rowDimensionCount;
+        drag = {
+          mode: 'column', pointerId: event.pointerId, sourceIndex: cell.column,
+          sourceKeyIndex, sourceKey: payload.column_keys?.[sourceKeyIndex] || [],
+          targetIndex: cell.column, after: false,
+        };
+      } else if (cell.kind === 'row') {
+        const depth = Math.min(cell.column, Math.max(0, cell.table.rowDimensionCount - 1));
+        const source = hierarchyRange(payload.rows, cell.row, depth);
+        const parent = depth > 0 ? hierarchyRange(payload.rows, cell.row, depth - 1) : {start: 0, end: payload.rows.length};
+        drag = {mode: 'row', pointerId: event.pointerId, depth, source, parent, targetIndex: cell.row, targetBoundary: source.start};
+      } else return;
+      tableDragStates.set(canvas, drag);
+      canvas.classList.add('is-table-reordering');
+      canvas.style.cursor = 'grabbing';
+      canvas.setPointerCapture?.(event.pointerId);
+      const tooltip = tooltipFor(canvas); if (tooltip) tooltip.hidden = true;
+      stopEvent(event);
+    });
+    canvas.addEventListener('pointermove', event => {
+      if (!drag) {
+        const payload = models.get(canvas), cell = tableCellAt(canvas, event);
+        const draggable = payload?.dynamic && cell && (cell.kind === 'row' || cell.column >= cell.table.rowDimensionCount);
+        canvas.style.cursor = draggable ? 'grab' : '';
+        return;
+      }
+      if (event.pointerId !== drag.pointerId) return;
+      const payload = models.get(canvas), cell = tableCellAt(canvas, event);
+      if (!payload?.dynamic || !cell) { stopEvent(event); return; }
+      if (drag.mode === 'column' && cell.kind === 'header' && cell.column >= cell.table.rowDimensionCount) {
+        const targetKey = payload.column_keys?.[cell.column - cell.table.rowDimensionCount] || [];
+        if (sameImmediateHierarchyParent(drag.sourceKey, targetKey)) {
+          drag.targetIndex = cell.column;
+          const cellLeft = cell.table.left + cell.column * cell.table.columnWidth;
+          drag.after = cell.point.x >= cellLeft + cell.table.columnWidth / 2;
+        }
+      } else if (drag.mode === 'row' && cell.kind === 'row') {
+        if (cell.row >= drag.parent.start && cell.row < drag.parent.end) {
+          drag.targetIndex = cell.row;
+          const target = hierarchyRange(payload.rows, cell.row, drag.depth);
+          const bodyTop = cell.table.top + cell.table.headerBands * cell.table.rowHeight;
+          const after = cell.point.y >= bodyTop + cell.row * cell.table.rowHeight + cell.table.rowHeight / 2;
+          drag.targetBoundary = after ? Math.min(target.end, drag.parent.end) : Math.max(target.start, drag.parent.start);
+        }
+      }
+      draw(canvas, payload);
+      stopEvent(event);
+    });
+    const finish = event => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      const payload = models.get(canvas), completed = drag;
+      drag = null;
+      tableDragStates.delete(canvas);
+      canvas.releasePointerCapture?.(event.pointerId);
+      canvas.classList.remove('is-table-reordering');
+      canvas.style.cursor = '';
+      if (event.type === 'pointerup' && payload?.dynamic) {
+        if (completed.mode === 'column') {
+          const destination = completed.targetIndex + (completed.after ? 1 : 0);
+          if (destination !== completed.sourceIndex && destination !== completed.sourceIndex + 1) {
+            moveArrayItem(payload.headers, completed.sourceIndex, destination);
+            payload.rows.forEach(row => moveArrayItem(row, completed.sourceIndex, destination));
+            if (Array.isArray(payload.column_keys) && payload.column_keys.length) {
+              moveArrayItem(payload.column_keys, completed.sourceKeyIndex, destination - completed.sourceIndex + completed.sourceKeyIndex);
+            }
+          }
+        } else {
+          const insideSource = completed.targetBoundary >= completed.source.start
+            && completed.targetBoundary <= completed.source.end;
+          if (!insideSource) {
+            const moved = payload.rows.splice(completed.source.start, completed.source.end - completed.source.start);
+            let destination = completed.targetBoundary;
+            if (destination > completed.source.start) destination -= moved.length;
+            payload.rows.splice(Math.max(0, destination), 0, ...moved);
+          }
+        }
+        canvas.dispatchEvent(new CustomEvent('dashboardtableorderchange', {detail: {
+          headers: [...payload.headers], rows: payload.rows.map(row => [...row]),
+        }}));
+      }
+      draw(canvas, payload);
+      stopEvent(event);
+    };
+    canvas.addEventListener('pointerup', finish);
+    canvas.addEventListener('pointercancel', finish);
+    canvas.addEventListener('pointerleave', () => { if (!drag) canvas.style.cursor = ''; });
   }
 
   function setChartZoom(canvas, requestedZoom) {
@@ -964,7 +1143,7 @@
   }) : null;
 
   globalThis.renderDashboardChart = (canvas, payload) => {
-    models.set(canvas, payload); draw(canvas, payload); attachTooltip(canvas); attachPan(canvas);
+    models.set(canvas, payload); draw(canvas, payload); attachTooltip(canvas); attachTableReordering(canvas); attachPan(canvas);
     if (resizeObserver && !observed.has(canvas)) { observed.add(canvas); resizeObserver.observe(canvas); }
   };
   globalThis.getDashboardChartHits = canvas => structuredClone(renderStates.get(canvas)?.hits || []);

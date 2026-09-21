@@ -1602,6 +1602,15 @@ class Repository:
                 'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
                 ('calculated_dimensions_initialized', '1'),
             )
+            # Persist the rebuild marker in the same transaction as the
+            # definitions.  Besides making the update crash-safe, this avoids
+            # a second Workspace write racing the materialization worker after
+            # a Save and Materialize request has already queued it.
+            conn.execute(
+                'INSERT INTO workspace_state (key, value) VALUES (?, ?) '
+                'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+                ('calculated_dimensions_need_materialization', '1'),
+            )
 
     def drop_reporting_table(self, dataset_kind: str) -> None:
         table_name = self.reporting_rows_table_name(dataset_kind)

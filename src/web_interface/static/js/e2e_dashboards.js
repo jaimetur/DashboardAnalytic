@@ -1794,8 +1794,8 @@
   bind('ds-viewer-refresh', async () => {
     if (!prepared?.token) return;
     const accepted = await window.showConfirmDialog(
-      'Invalidate the rendered chart cache and render every chart in this Dashboard again?',
-      {title: 'Refresh Dashboard charts?', confirmLabel: 'Refresh Charts', tone: 'warning'},
+      'Reload the current Report Template, rebuild its slides and render every chart in this Dashboard again?',
+      {title: 'Refresh Dashboard?', confirmLabel: 'Refresh Dashboard', tone: 'warning'},
     );
     if (!accepted) return;
     let token = prepared.token;
@@ -1805,18 +1805,16 @@
     setPreparationState('preparing', 'rendering');
     status('Rendering every Dashboard chart again…');
     try {
-      try {
-        await api(`/charts/${encodeURIComponent(token)}/refresh`, 'POST');
-      } catch (error) {
-        if (error.status !== 410 && !error.message.includes('expired')) throw error;
-        status('Restoring the expired Dashboard preview…');
-        forgetPreparedToken(token);
-        prepared = null;
-        if (!await restorePrepared(activeId)) await prepare();
-        token = prepared?.token || '';
-        if (!token) throw new Error('The Dashboard preview could not be restored. Reopen the Dashboard and try again.');
-        await api(`/charts/${encodeURIComponent(token)}/refresh`, 'POST');
-      }
+      forgetPrepared();
+      prepared = null;
+      appliedFilterState = '';
+      ++backgroundChartPreloadRequest;
+      chartPayloads.clear();
+      renderedChartPayloads.clear();
+      await prepare();
+      token = prepared?.token || '';
+      if (!token) throw new Error('The Dashboard preview could not be rebuilt. Reopen the Dashboard and try again.');
+      await api(`/charts/${encodeURIComponent(token)}/refresh`, 'POST');
       if (prepared?.token !== token) return;
       chartPayloads.clear();
       renderedChartPayloads.clear();
@@ -1844,8 +1842,16 @@
     if (item) await queueDashboardPptExport(activeId, item);
   });
   bind('ds-view', openActiveDashboardViewer);
+  const chartPayloadUrl = chart => chart.payload_url || `/api/e2e-dashboards/chart/${prepared.token}/${chart.index}`;
+  const rememberRenderedChartPayload = (chart, payload) => {
+    const url = chartPayloadUrl(chart);
+    renderedChartPayloads.set(url, payload);
+    chartPayloads.set(url, Promise.resolve(payload));
+    while (renderedChartPayloads.size > 160) renderedChartPayloads.delete(renderedChartPayloads.keys().next().value);
+    while (chartPayloads.size > 160) chartPayloads.delete(chartPayloads.keys().next().value);
+  };
   function loadChartPayload(chart, priority = 'high') {
-    const url = chart.payload_url || `/api/e2e-dashboards/chart/${prepared.token}/${chart.index}`;
+    const url = chartPayloadUrl(chart);
     const rendered = renderedChartPayloads.get(url);
     if (rendered) return Promise.resolve(rendered);
     let request = chartPayloads.get(url);
@@ -2063,6 +2069,7 @@
   let expandedChartFilterToken = '';
   let expandedChartFilterIndex = -1;
   let expandedChartFilterContextPath = '';
+  let expandedChartFilterLoadRequest = 0;
   const expandedTemplateUpdate = node('button', 'Update Template', 'danger-button');
   expandedTemplateUpdate.id = 'ds-chart-filter-update';
   expandedTemplateUpdate.hidden = true;
@@ -2112,7 +2119,8 @@
         ['legend', 'Legend'], ['legend_position', 'Legend Position'],
       ],
       textFields: {chart_title: true}, editableGroupingInputs: true,
-      chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
+      chartTypes: ['100% Stacked Vertical Bars', 'Count Stacked Horizontal Bars', 'CDF Line', 'Multi KPI CDF Lines', 'Scatter', 'Table', 'Dynamic Table', 'Distribution Stacked Vertical Bars', 'Threshold Stacked Vertical Bars', 'Average Vertical Bars', 'Median Vertical Bars', 'Map'],
+      legendPositions: ['', 'Top', 'Bottom', 'Left', 'Right'],
       menuContainer: expandedOverlayHost,
       onSourceChange: next => {
         const source = sourceKey(next.cdr_source);
@@ -2124,12 +2132,13 @@
     const fields = $('ds-chart-filter-fields');
     if ((!prepared?.token && expandedChartMode !== 'ppt') || !expandedChart) return;
     const chart = expandedChart;
+    const request = ++expandedChartFilterLoadRequest;
     fields.textContent = 'Loading filters…';
     expandedChartFilterContextPath = expandedChartMode === 'ppt'
       ? `/ppt-jobs/${encodeURIComponent(dashboardPptChartsJobId)}/charts/${chart.index}/filter-context`
       : `/chart/${encodeURIComponent(prepared.token)}/${chart.index}/filter-context`;
     const context = await api(expandedChartFilterContextPath);
-    if (chart !== expandedChart) return;
+    if (chart !== expandedChart || request !== expandedChartFilterLoadRequest) return;
     expandedChartFilterToken = String(context.token || prepared?.token || '');
     expandedChartFilterIndex = Number.isInteger(context.chart_index) ? context.chart_index : chart.index;
     expandedChartFilterControls = createExpandedChartFilterControls(context);
@@ -2140,7 +2149,20 @@
     setExpandedChartFiltersOpen(open);
     if (open && !expandedChartFilterControls) await loadExpandedChartFilters();
   });
-  $('ds-chart-filter-close').onclick = () => setExpandedChartFiltersOpen(false);
+  const discardExpandedChartDefinitionDraft = () => {
+    expandedChartFilterLoadRequest += 1;
+    expandedChartFilterControls = null;
+    expandedChartFilterToken = '';
+    expandedChartFilterIndex = -1;
+    expandedChartFilterContextPath = '';
+    $('ds-chart-filter-fields').replaceChildren();
+    expandedTemplateUpdate.hidden = true;
+    setExpandedChartFiltersOpen(false);
+    $('ds-chart-filter-toggle').focus();
+  };
+  // An explicit Close means discard. Automatic/click-outside collapsing uses
+  // setExpandedChartFiltersOpen(false) directly and retains the draft.
+  $('ds-chart-filter-close').onclick = discardExpandedChartDefinitionDraft;
   const renderExpandedChartDefinition = async ({closePanel = true} = {}) => {
     const chart = expandedChart;
     if (!chart || !expandedChartFilterControls) return null;
@@ -2156,13 +2178,26 @@
         expandedChartFilterIndex = Number(preparedContext.chart_index);
       }
       if (!expandedChartFilterToken) throw new Error('The chart dataset could not be restored.');
-      const payload = await api(`/chart/${encodeURIComponent(expandedChartFilterToken)}/${expandedChartFilterIndex}/filter-preview`, 'POST', previewDefinition);
+      let payload = await api(`/chart/${encodeURIComponent(expandedChartFilterToken)}/${expandedChartFilterIndex}/filter-preview?background=true`, 'POST', previewDefinition);
+      while (payload?.state === 'processing' && payload.job_id) {
+        await new Promise(resolve => window.setTimeout(resolve, 400));
+        payload = await api(`/chart-preview-jobs/${encodeURIComponent(payload.job_id)}`);
+      }
       if (chart !== expandedChart) return null;
       setExpandedChartHeader({...chart, chart_type: previewDefinition.chart_type, cdr_source: previewDefinition.cdr_source}, payload.title);
       expandedZoom.reset();
       canvas.hidden = false;
       globalThis.renderDashboardChart(canvas, payload);
       message.hidden = true;
+      // Applying a temporary Chart Definition changes the current viewer
+      // session, not only the enlarged canvas. Reuse that exact payload for
+      // the chart card and repaint its slide behind the overlay so closing the
+      // enlarged view reveals the applied chart immediately.
+      rememberRenderedChartPayload(chart, payload);
+      chart.title = payload.title || previewDefinition.chart_title || chart.title;
+      chart.chart_type = previewDefinition.chart_type || chart.chart_type;
+      chart.cdr_source = previewDefinition.cdr_source || chart.cdr_source;
+      if (expandedChartSlide(chart) === prepared?.slides[slideIndex]) renderSlide();
       if (closePanel) setExpandedChartFiltersOpen(false);
       return {previewDefinition, payload};
     } catch (error) {
@@ -2183,7 +2218,8 @@
       const rendered = await renderExpandedChartDefinition({closePanel: false});
       if (!rendered) return;
       expandedTemplateUpdate.textContent = 'Updating…';
-      await api(`/chart/${encodeURIComponent(expandedChartFilterToken)}/${expandedChartFilterIndex}/update-template`, 'POST', rendered.previewDefinition);
+      const updated = await api(`/chart/${encodeURIComponent(expandedChartFilterToken)}/${expandedChartFilterIndex}/update-template`, 'POST', rendered.previewDefinition);
+      refreshEmbeddedTemplateEditor(updated, expandedChart?.focus_row);
       setExpandedChartFiltersOpen(false);
       window.showInfoDialog('The current Chart Definition values were saved to the Report Template.', {title: 'Template updated'});
     } finally {
@@ -2275,6 +2311,20 @@
   const templateEditorBaseUrl = (sourceDefinition = definition) => sourceDefinition
     ? `/admin/report-templates/${encodeURIComponent(sourceDefinition.template_technology)}/${encodeURIComponent(sourceDefinition.template)}/editor`
     : '';
+  function refreshEmbeddedTemplateEditor(updatedTemplate, focusRow) {
+    const sourceDefinition = {
+      template: updatedTemplate?.template,
+      template_technology: updatedTemplate?.technology,
+    };
+    const url = templateEditorBaseUrl(sourceDefinition);
+    const frame = $('ds-editor-frame');
+    if (!url || frame.dataset.editorUrl !== url) return;
+    if (Number.isInteger(focusRow)) frame.dataset.editorFocusRow = String(focusRow);
+    const parameters = new URLSearchParams();
+    if (Number.isInteger(focusRow)) parameters.set('focus_row', String(focusRow));
+    if (updatedTemplate?.updated_at) parameters.set('template_revision', String(updatedTemplate.updated_at));
+    frame.src = `${url}${parameters.size ? `?${parameters}` : ''}`;
+  }
   const focusTemplateEditorRow = row => {
     const frame = $('ds-editor-frame');
     frame.dataset.editorFocusRow = String(row);
@@ -2309,7 +2359,15 @@
     // Keep the already initialized editor alive. Recreating its iframe makes
     // every reopening parse the template and rebuild the complete table.
     overlay('ds-editor-overlay', false); templateEditorSaved = false;
-    if (templateChanged && expandedChartMode !== 'ppt') await prepare();
+    if (templateChanged && expandedChartMode !== 'ppt') {
+      forgetPrepared();
+      prepared = null;
+      appliedFilterState = '';
+      ++backgroundChartPreloadRequest;
+      chartPayloads.clear();
+      renderedChartPayloads.clear();
+      await prepare();
+    }
     return true;
   };
   const openTemplateEditor = (focusRow, sourceDefinition = definition) => {
@@ -2394,6 +2452,7 @@
     const message = $('ds-chart-expanded-message');
     expandedChart = chart;
     expandedChartMode = mode;
+    expandedChartFilterLoadRequest += 1;
     expandedChartFilterControls = null;
     expandedChartFilterToken = '';
     expandedChartFilterIndex = -1;

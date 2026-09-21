@@ -54,7 +54,7 @@ from src.modules.analytics import build_analysis
 from src.modules.background_scheduler import BackgroundTaskScheduler
 from src.modules.auth import SessionUser, verify_password
 from src.modules.column_names import MAIN_CDR_FIELDS, PREVIEW_METADATA_FIELDS, VENDOR_FIELD_IDENTITIES, clean_column_name, column_identity, resolve_column_name
-from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, normalise_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer
+from src.modules.cdr_reporting import CATALOG_HEADERS, CHART_TYPES, HOVER_TARGETS_VERSION, STRUCTURAL_SLIDE_TYPES, TEMPLATE_NAMES, CatalogEntry, _legend_dimensions, active_catalog_path, assign_cdr_vendors, calculated_dimensions_json, catalog_chart_hover_targets, catalog_chart_payload, catalog_kpi_fields, catalogue_csv, classify_sessions, convert_catalog_csv, ensure_vendor_group, enrich_multivendor, is_empty_catalog_chart, load_catalog_csv, materialize_calculated_dimensions, normalise_operator_aliases, parse_calculated_dimensions, parse_catalog_csv, parse_catalog_filters, parse_catalog_grouping, parse_legend_position, prepare_catalog_chart_preview_frame, preview_catalog_chart_data, render_catalog_chart_preview, render_catalog_chart_preview_with_hover, render_cdr_report, render_unavailable_source_chart, report_chart_renderer_name, reset_dashboard_canvas_renderer
 from src.modules.exports import POWERPOINT_EXPORT_VERSION, export_powerpoint_report, export_word_report
 from src.modules.ingestion import CDR_IGNORED_SHEET_KEYS, add_three_gcid_column, add_vfuk_gcid_column, apply_operator_mappings, ensure_fixed_cdr_fields, get_dataset_source_columns, get_excel_sheet_columns, infer_dataset_kind, load_dataset, summarise_dataset
 from src.modules.repository import Repository, WORKSPACE_REGISTRY_TABLE, workspace_write_lock
@@ -814,11 +814,7 @@ def workspace_template_kpi_columns(task_repository: Repository, kind: str) -> li
             for entry in entries:
                 if entry.source_kind != kind:
                     continue
-                requested.extend(
-                    part.strip(' `')
-                    for part in re.split(r'\s+vs\s+|\s*\|\s*', entry.kpi, flags=re.IGNORECASE)
-                    if part.strip(' `')
-                )
+                requested.extend(catalog_kpi_fields(entry.kpi))
     return list(dict.fromkeys(requested))
 
 
@@ -1079,6 +1075,7 @@ def _run_auto_calculated_field_job(job_id: str, workspace: Workspace) -> None:
 def start_auto_calculated_field_job(
     workspace: Workspace, previous: Iterable[Any], current: Iterable[Any],
     renames: dict[str, str], username: str, *, background: bool = True,
+    before_submit: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Queue materialization so the web request and UI remain responsive."""
     job_id = uuid4().hex
@@ -1103,20 +1100,29 @@ def start_auto_calculated_field_job(
         ]:
             AUTO_CALCULATED_FIELD_JOBS.pop(stale_id, None)
         AUTO_CALCULATED_FIELD_JOBS[job_id] = job
+    if before_submit:
+        try:
+            before_submit(job)
+        except Exception:
+            with AUTO_CALCULATED_FIELD_JOBS_LOCK:
+                AUTO_CALCULATED_FIELD_JOBS.pop(job_id, None)
+            raise
     if not job['affected_sources']:
         job.update(
             status='ready', message='No CDR tables required changes',
             finished_at=datetime.now(timezone.utc).timestamp(),
         )
         return job
-    # Keep a recoverable pending marker until the worker actually starts. If
-    # the process exits first, opening this workspace queues the rebuild again.
+    # replace_calculated_dimensions() stores the recoverable pending marker in
+    # the same transaction as the definitions.  Do not write it again here:
+    # the worker can acquire the Workspace write lock as soon as the job is
+    # registered, and a redundant write would then hold this web request until
+    # a potentially long materialization finishes.
     pending_repository = Repository(
         workspace.database_path,
         global_db_path=repository.global_db_path,
         workspace_registry_db_path=workspace_registry.registry_path,
     )
-    pending_repository.set_workspace_state('calculated_dimensions_need_materialization', '1')
     if background:
         _dataset_processing_executor(pending_repository).submit(
             _run_auto_calculated_field_job, job_id, workspace,
@@ -1559,7 +1565,7 @@ def catalogue_editor_payload(technology: str | None, catalogue_id: str | None) -
         'suggestions': {
             'layouts': catalogue_layout_names(technology),
             'chart_types': sorted(CHART_TYPES | STRUCTURAL_SLIDE_TYPES, key=str.casefold),
-            'legend_positions': ['Top', 'Bottom', 'Left', 'Right'],
+            'legend_positions': ['', 'Top', 'Bottom', 'Left', 'Right'],
             'columns': columns,
         },
     }
@@ -3662,7 +3668,12 @@ ARCHIVE_KIND_COMPONENTS = {
     'auto-calculated-fields': ('workspace_components',),
     'dashboards': ('workspace_components',),
     'operator-mappings': ('workspace_components',),
+    'bundle': (),
 }
+WORKSPACE_ELEMENT_EXPORT_TARGETS = frozenset({
+    'slides-templates', 'auto-calculated-fields', 'dashboards', 'operator-mappings',
+})
+STATIC_EXPORT_TARGETS = frozenset({'config', 'config-with-templates', 'full-environment'})
 UNCOMPRESSED_ARCHIVE_SUFFIXES = frozenset({
     '.7z', '.avi', '.docx', '.gif', '.gz', '.jpeg', '.jpg', '.mp3', '.mp4', '.pdf', '.png', '.pptx', '.rar',
     '.tar', '.tgz', '.webp', '.xlsx', '.xlsm', '.zip',
@@ -3722,6 +3733,45 @@ def archive_restore_components(manifest: dict[str, Any]) -> list[str]:
         if component == 'app_database'
     ]
     return [*selected, *archive_workspace_components(manifest)]
+
+
+def normalize_export_targets(targets: str | Iterable[str]) -> list[str]:
+    """Apply the export selector's containment rules on the server as well as in the browser."""
+    raw_targets = [targets] if isinstance(targets, str) else list(targets)
+    selected = list(dict.fromkeys(str(target).strip() for target in raw_targets if str(target).strip()))
+    if not selected:
+        raise ValueError('Select at least one export option.')
+    invalid = [
+        target for target in selected
+        if target not in STATIC_EXPORT_TARGETS
+        and target not in WORKSPACE_ELEMENT_EXPORT_TARGETS
+        and not target.startswith('workspace:')
+    ]
+    if invalid:
+        raise ValueError('Select a valid export option.')
+    if 'full-environment' in selected:
+        return ['full-environment']
+    if any(target.startswith('workspace:') for target in selected):
+        selected = [target for target in selected if target not in WORKSPACE_ELEMENT_EXPORT_TARGETS]
+    return selected
+
+
+def export_target_archive_kind(target: str) -> str:
+    if target.startswith('workspace:'):
+        return 'workspace'
+    if target in {'config', 'config-with-templates'}:
+        return 'config'
+    return target
+
+
+def manifest_requires_destination_workspaces(manifest: dict[str, Any]) -> bool:
+    kind = str(manifest.get('kind') or '')
+    if kind in WORKSPACE_ELEMENT_EXPORT_TARGETS:
+        return True
+    if kind != 'bundle':
+        return False
+    targets = manifest.get('targets')
+    return isinstance(targets, list) and any(str(target) in WORKSPACE_ELEMENT_EXPORT_TARGETS for target in targets)
 
 
 def full_workspace_archive_components(*, include_input_files: bool = True, include_generated_outputs: bool = True) -> list[str]:
@@ -4615,10 +4665,14 @@ def _archive_workspace(
         _archive_tree(archive, workspace.output_dir, f'{archive_prefix}/output', progress_callback=progress_callback)
 
 
-def export_archive_filename(target: str) -> str:
+def export_archive_filename(target: str | Iterable[str]) -> str:
     # The generated package is unique on the server, but a static download
     # filename makes it too easy to re-import an older browser download.
     # Include seconds so each visible download can be identified unambiguously.
+    targets = normalize_export_targets(target)
+    if len(targets) > 1:
+        return f'dashboard-analytic-selection_{datetime.now().strftime("%Y%m%d-%H%M%S")}.zip'
+    target = targets[0]
     generated_at = datetime.now().strftime('%Y%m%d-%H%M%S')
     if target == 'config':
         return f'dashboard-analytic-config_{generated_at}.zip'
@@ -4657,7 +4711,7 @@ def _selected_export_workspaces(workspace_ids: Iterable[str] | None) -> list[Wor
     return [available[workspace_id] for workspace_id in selected_ids]
 
 
-def build_export_archive_file(
+def _build_single_export_archive_file(
     target: str, destination: Path, workspace_ids: Iterable[str] | None = None,
     progress_callback: Callable[[int], None] | None = None, include_generated_outputs: bool = True,
 ) -> str:
@@ -4813,6 +4867,65 @@ def build_export_archive_file(
     return filename
 
 
+def build_export_archive_file(
+    target: str | Iterable[str], destination: Path, workspace_ids: Iterable[str] | None = None,
+    progress_callback: Callable[[int], None] | None = None, include_generated_outputs: bool = True,
+) -> str:
+    """Create one export archive, wrapping multiple selections in an importable bundle."""
+    targets = normalize_export_targets(target)
+    if len(targets) == 1:
+        return _build_single_export_archive_file(
+            targets[0], destination, workspace_ids, progress_callback,
+            include_generated_outputs=include_generated_outputs,
+        )
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    package_entries: list[dict[str, Any]] = []
+    components: list[str] = []
+    workspace_components: list[str] = []
+    workspaces: list[dict[str, Any]] = []
+    source_workspace: dict[str, Any] | None = None
+    with tempfile.TemporaryDirectory(prefix='dashboard-analytic-bundle-', dir=destination.parent) as temporary_dir:
+        temporary_root = Path(temporary_dir)
+        for index, selected_target in enumerate(targets, start=1):
+            package_path = temporary_root / f'{index:03d}.zip'
+            package_workspace_ids = workspace_ids
+            if selected_target in WORKSPACE_ELEMENT_EXPORT_TARGETS and active_workspace:
+                package_workspace_ids = [active_workspace.id]
+            nested_filename = _build_single_export_archive_file(
+                selected_target, package_path, package_workspace_ids, progress_callback,
+                include_generated_outputs=include_generated_outputs,
+            )
+            nested_manifest = read_import_manifest(package_path)
+            archive_path = f'packages/{index:03d}-{Path(nested_filename).name}'
+            package_entries.append({
+                'target': selected_target,
+                'kind': str(nested_manifest.get('kind') or ''),
+                'archive_path': archive_path,
+                'filename': Path(nested_filename).name,
+            })
+            components.extend(archive_manifest_components(nested_manifest))
+            workspace_components.extend(archive_workspace_components(nested_manifest))
+            if isinstance(nested_manifest.get('workspace'), dict):
+                workspaces.append(dict(nested_manifest['workspace']))
+            if isinstance(nested_manifest.get('workspaces'), list):
+                workspaces.extend(entry for entry in nested_manifest['workspaces'] if isinstance(entry, dict))
+            if source_workspace is None and isinstance(nested_manifest.get('source_workspace'), dict):
+                source_workspace = dict(nested_manifest['source_workspace'])
+
+        manifest = archive_manifest(
+            'bundle', components=components, workspace_components=workspace_components,
+            targets=targets, packages=package_entries, workspaces=workspaces,
+            source_workspace=source_workspace,
+        )
+        with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=1, allowZip64=True) as archive:
+            archive.writestr('manifest.json', json.dumps(manifest, indent=2, sort_keys=True))
+            for index, entry in enumerate(package_entries, start=1):
+                package_path = temporary_root / f'{index:03d}.zip'
+                _archive_file(archive, package_path, str(entry['archive_path']))
+    return export_archive_filename(targets)
+
+
 def build_export_archive(target: str) -> tuple[bytes, str]:
     """Compatibility helper for small programmatic exports and tests."""
     with tempfile.TemporaryDirectory(prefix='dashboard-analytic-export-') as temporary_dir:
@@ -4843,9 +4956,16 @@ def _tree_size(source: Path, *, exclude_slides_templates: bool = False) -> int:
 
 
 def estimate_export_bytes(
-    target: str, workspace_ids: Iterable[str] | None = None, include_generated_outputs: bool = True,
+    target: str | Iterable[str], workspace_ids: Iterable[str] | None = None, include_generated_outputs: bool = True,
 ) -> int:
     """Estimate input bytes so the UI can show meaningful export progress."""
+    targets = normalize_export_targets(target)
+    if len(targets) > 1:
+        return sum(
+            estimate_export_bytes(selected_target, workspace_ids, include_generated_outputs)
+            for selected_target in targets
+        )
+    target = targets[0]
     total = _file_size(application_config_dir / 'application.db')
     if target in {'config', 'config-with-templates', 'full-environment'}:
         for path in application_config_dir.iterdir():
@@ -4953,6 +5073,12 @@ def _cleanup_expired_export_packages() -> None:
 
 def _recovered_transfer_details(manifest: dict[str, Any]) -> tuple[str, list[str]]:
     kind = str(manifest.get('kind') or '')
+    if kind == 'bundle':
+        targets = manifest.get('targets') if isinstance(manifest.get('targets'), list) else []
+        labels = [_transfer_content_label(str(target)) for target in targets]
+        entries = manifest.get('workspaces')
+        workspaces = [str(entry.get('name') or '') for entry in entries if isinstance(entry, dict) and entry.get('name')] if isinstance(entries, list) else []
+        return (' + '.join(labels) or 'Export selection', list(dict.fromkeys(workspaces)))
     if kind == 'config':
         return ('Config + Report Templates' if manifest.get('includes_slides_templates') else 'Config', [])
     if kind == 'slides-templates':
@@ -5003,7 +5129,7 @@ def _recover_unimported_transfer_packages() -> None:
             kind = str(manifest.get('kind') or '')
             if kind not in {
                 'config', 'workspace', 'full-environment', 'slides-templates',
-                'auto-calculated-fields', 'dashboards', 'operator-mappings', 'database-backup',
+                'auto-calculated-fields', 'dashboards', 'operator-mappings', 'database-backup', 'bundle',
             }:
                 raise ValueError('Unsupported transfer package.')
         except (OSError, ValueError, zipfile.BadZipFile):
@@ -5049,7 +5175,7 @@ def recovered_transfer_packages() -> list[dict[str, Any]]:
         ], key=lambda offer: offer['created_at'] or '', reverse=True)
 
 
-def _run_export_job(job_id: str, target: str, workspace_ids: list[str] | None, include_generated_outputs: bool) -> None:
+def _run_export_job(job_id: str, targets: list[str], workspace_ids: list[str] | None, include_generated_outputs: bool) -> None:
     with EXPORT_JOBS_LOCK:
         job = EXPORT_JOBS.get(job_id)
         if not job or job.get('status') != 'queued':
@@ -5057,7 +5183,7 @@ def _run_export_job(job_id: str, target: str, workspace_ids: list[str] | None, i
         job.update(status='processing', started_at=datetime.now(timezone.utc).timestamp())
     destination = Path(str(job['path']))
     partial_path = destination.with_suffix('.part')
-    bytes_total = estimate_export_bytes(target, workspace_ids, include_generated_outputs)
+    bytes_total = estimate_export_bytes(targets, workspace_ids, include_generated_outputs)
     bytes_done = 0
 
     def stop_if_cancelled() -> None:
@@ -5078,7 +5204,7 @@ def _run_export_job(job_id: str, target: str, workspace_ids: list[str] | None, i
     try:
         stop_if_cancelled()
         filename = build_export_archive_file(
-            target, partial_path, workspace_ids, progress_callback,
+            targets, partial_path, workspace_ids, progress_callback,
             include_generated_outputs=include_generated_outputs,
         )
         stop_if_cancelled()
@@ -5098,31 +5224,36 @@ def _run_export_job(job_id: str, target: str, workspace_ids: list[str] | None, i
 
 
 def start_export_job(
-    target: str, workspace_ids: Iterable[str] | None = None, include_generated_outputs: bool = True,
+    target: str | Iterable[str], workspace_ids: Iterable[str] | None = None, include_generated_outputs: bool = True,
     owner: str = '',
 ) -> dict[str, Any]:
     """Start a disk-backed ZIP build that continues independently of the page."""
-    filename = export_archive_filename(target)
+    targets = normalize_export_targets(target)
+    filename = export_archive_filename(targets)
     _cleanup_expired_export_packages()
     package_dir = export_package_dir()
     package_dir.mkdir(parents=True, exist_ok=True)
     job_id = uuid4().hex
     destination = package_dir / f'{job_id}.zip'
     selected_workspace_ids = list(workspace_ids) if workspace_ids is not None else None
-    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'}:
+    if any(selected_target in WORKSPACE_ELEMENT_EXPORT_TARGETS for selected_target in targets):
         if not active_workspace:
             raise ValueError('Open a workspace before exporting workspace templates or fields.')
-        if target == 'auto-calculated-fields':
+        if 'auto-calculated-fields' in targets:
             load_workspace_calculated_dimensions()
         selected_workspace_ids = [active_workspace.id]
-    elif target.startswith('workspace:'):
-        selected_workspace_ids = [target.removeprefix('workspace:')]
-    if target == 'full-environment':
+    elif any(selected_target.startswith('workspace:') for selected_target in targets):
+        selected_workspace_ids = [
+            selected_target.removeprefix('workspace:')
+            for selected_target in targets if selected_target.startswith('workspace:')
+        ]
+    if targets == ['full-environment']:
         _selected_export_workspaces(selected_workspace_ids)
     job = {
         'id': job_id,
         'owner': owner,
-        'target': target,
+        'target': targets[0] if len(targets) == 1 else 'bundle',
+        'targets': targets,
         'status': 'queued',
         'filename': filename,
         'path': str(destination),
@@ -5132,7 +5263,7 @@ def start_export_job(
     }
     with EXPORT_JOBS_LOCK:
         EXPORT_JOBS[job_id] = job
-    submit_background_task(_run_export_job, job_id, target, selected_workspace_ids, include_generated_outputs)
+    submit_background_task(_run_export_job, job_id, targets, selected_workspace_ids, include_generated_outputs)
     return job
 
 
@@ -5504,7 +5635,7 @@ def read_import_manifest(source: bytes | Path) -> dict[str, Any]:
 
 def import_workspace_collisions(manifest: dict[str, Any]) -> list[str]:
     kind = manifest.get('kind')
-    entries = [manifest.get('workspace')] if kind == 'workspace' else manifest.get('workspaces') if kind == 'full-environment' else []
+    entries = [manifest.get('workspace')] if kind == 'workspace' else manifest.get('workspaces') if kind in {'full-environment', 'bundle'} else []
     if not isinstance(entries, list):
         entries = [entries]
     existing_names = {workspace.name.casefold(): workspace.name for workspace in workspace_registry.list()}
@@ -5580,6 +5711,38 @@ def _apply_import_archive(
 
         if progress_callback:
             progress_callback('validating', 0.0)
+        if kind == 'bundle':
+            packages = manifest.get('packages')
+            if not isinstance(packages, list) or not packages:
+                raise ValueError('The selected bundle has no export packages.')
+            notices: list[str] = []
+            for index, entry in enumerate(packages):
+                member = str(entry.get('archive_path') or '') if isinstance(entry, dict) else ''
+                if not re.fullmatch(r'packages/[^/]+\.zip', member) or member not in archive.namelist():
+                    raise ValueError('The selected bundle contains an invalid package entry.')
+                nested_path = staging_root / f'bundle-{index + 1}.zip'
+                with archive.open(member) as source, nested_path.open('wb') as output:
+                    shutil.copyfileobj(source, output, length=4 * 1024 * 1024)
+                nested_manifest = read_import_manifest(nested_path)
+                entry_target = str(entry.get('target') or '')
+                entry_kind = str(entry.get('kind') or '')
+                if (
+                    str(nested_manifest.get('kind') or '') != entry_kind
+                    or export_target_archive_kind(entry_target) != entry_kind
+                ):
+                    raise ValueError('A package in the selected bundle does not match its manifest.')
+                if progress_callback:
+                    progress_callback(
+                        f'importing package {index + 1} of {len(packages)}',
+                        5.0 + (index * 90.0 / len(packages)),
+                    )
+                notices.append(_apply_import_archive(
+                    nested_path, nested_manifest, None,
+                    destination_workspace_ids=destination_workspace_ids,
+                ))
+            if progress_callback:
+                progress_callback('finalising', 100.0)
+            return f'Import selection completed ({len(notices)} packages).'
         if kind == 'database-backup':
             components = _backup_archive_components(package_path)
             if progress_callback:
@@ -5833,16 +5996,25 @@ def _transfer_workspace_names(workspace_ids: list[str] | None) -> list[str]:
     return [available[workspace_id] for workspace_id in workspace_ids if workspace_id in available]
 
 
-def _transfer_offer_workspace_names(target: str, workspace_ids: list[str] | None) -> list[str]:
-    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'}:
+def _transfer_offer_workspace_names(target: str | Iterable[str], workspace_ids: list[str] | None) -> list[str]:
+    targets = normalize_export_targets(target)
+    if any(selected_target in WORKSPACE_ELEMENT_EXPORT_TARGETS for selected_target in targets):
         return _transfer_workspace_names(workspace_ids)
-    if target.startswith('workspace:'):
-        workspace = workspace_registry.get(target.removeprefix('workspace:'))
-        return [workspace.name] if workspace else []
+    if any(selected_target.startswith('workspace:') for selected_target in targets):
+        return [
+            workspace.name
+            for selected_target in targets
+            if selected_target.startswith('workspace:')
+            and (workspace := workspace_registry.get(selected_target.removeprefix('workspace:')))
+        ]
     return _transfer_workspace_names(workspace_ids)
 
 
-def _transfer_content_label(target: str) -> str:
+def _transfer_content_label(target: str | Iterable[str]) -> str:
+    targets = normalize_export_targets(target)
+    if len(targets) > 1:
+        return ' + '.join(_transfer_content_label(selected_target) for selected_target in targets)
+    target = targets[0]
     labels = {
         'config': 'Config',
         'slides-templates': 'Report Templates',
@@ -5943,7 +6115,7 @@ def _run_transfer_job(job_id: str) -> None:
             return
         job.update(status='connecting', started_at=datetime.now(timezone.utc).timestamp())
         destination = str(job['destination'])
-        target = str(job['target'])
+        targets = [str(target) for target in job.get('targets') or [job['target']]]
         workspace_ids = job.get('workspace_ids')
         include_generated_outputs = bool(job.get('include_generated_outputs', True))
         package_path = Path(str(job['path']))
@@ -5960,12 +6132,23 @@ def _run_transfer_job(job_id: str) -> None:
 
     try:
         with httpx.Client(timeout=httpx.Timeout(65.0, connect=5.0), follow_redirects=False) as client:
-            archive_kind = 'full-environment' if target == 'full-environment' else 'workspace' if target.startswith('workspace:') else 'config' if target in {'config', 'config-with-templates'} else target
-            offered_workspace_components = archive_workspace_components_for_target(
-                target, include_generated_outputs=include_generated_outputs,
-            )
+            target = targets[0]
+            archive_kind = 'bundle' if len(targets) > 1 else 'full-environment' if target == 'full-environment' else 'workspace' if target.startswith('workspace:') else 'config' if target in {'config', 'config-with-templates'} else target
+            offered_components: list[str] = []
+            offered_workspace_components: list[str] = []
+            for selected_target in targets:
+                selected_kind = 'workspace' if selected_target.startswith('workspace:') else 'config' if selected_target in {'config', 'config-with-templates'} else selected_target
+                selected_manifest = archive_manifest(
+                    selected_kind,
+                    workspace_components=archive_workspace_components_for_target(
+                        selected_target, include_generated_outputs=include_generated_outputs,
+                    ),
+                )
+                offered_components.extend(archive_manifest_components(selected_manifest))
+                offered_workspace_components.extend(archive_workspace_components(selected_manifest))
             offer_manifest = archive_manifest(
-                archive_kind, workspace_components=offered_workspace_components,
+                archive_kind, components=offered_components,
+                workspace_components=offered_workspace_components, targets=targets,
             )
             offer_payload = {
                 'source': __app_name__,
@@ -5973,8 +6156,10 @@ def _run_transfer_job(job_id: str) -> None:
                 'kind': archive_kind,
                 'components': archive_manifest_components(offer_manifest),
                 'workspace_components': archive_workspace_components(offer_manifest),
-                'content': _transfer_content_label(target),
-                'workspaces': _transfer_offer_workspace_names(target, workspace_ids),
+                'targets': targets,
+                'content': _transfer_content_label(targets),
+                'workspaces': _transfer_offer_workspace_names(targets, workspace_ids),
+                'requires_destination_workspaces': manifest_requires_destination_workspaces(offer_manifest),
             }
             # Retry a transient first connection (for example while a remote
             # container wakes up). The offer endpoint is idempotent for this
@@ -6035,7 +6220,7 @@ def _run_transfer_job(job_id: str) -> None:
             with TRANSFER_LOCK:
                 job.update({
                     'status': 'exporting',
-                    'export_total': estimate_export_bytes(target, workspace_ids, include_generated_outputs),
+                    'export_total': estimate_export_bytes(targets, workspace_ids, include_generated_outputs),
                     'exported_bytes': 0,
                     'progress': 0.0,
                 })
@@ -6049,7 +6234,7 @@ def _run_transfer_job(job_id: str) -> None:
                     job['progress'] = round(min(100.0, job['exported_bytes'] * 100.0 / total), 1)
 
             filename = build_export_archive_file(
-                target, package_path, workspace_ids, update_export_progress,
+                targets, package_path, workspace_ids, update_export_progress,
                 include_generated_outputs=include_generated_outputs,
             )
             package_size = package_path.stat().st_size
@@ -6145,25 +6330,28 @@ def _run_transfer_job(job_id: str) -> None:
 
 
 def start_transfer_job(
-    destination_url: str, destination_port: int | None, target: str, workspace_ids: Iterable[str] | None,
+    destination_url: str, destination_port: int | None, target: str | Iterable[str], workspace_ids: Iterable[str] | None,
     user: SessionUser, include_generated_outputs: bool = True,
 ) -> dict[str, Any]:
-    require_export_permission(user, target)
+    targets = require_export_targets_permission(user, target)
     destination = normalize_transfer_destination(destination_url, destination_port)
     _cleanup_expired_export_packages()
     selected_workspace_ids = list(workspace_ids) if workspace_ids is not None else None
-    if target in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'}:
+    if any(selected_target in WORKSPACE_ELEMENT_EXPORT_TARGETS for selected_target in targets):
         if not active_workspace:
             raise ValueError('Open a workspace before transferring workspace templates or fields.')
-        if target == 'auto-calculated-fields':
+        if 'auto-calculated-fields' in targets:
             load_workspace_calculated_dimensions()
         selected_workspace_ids = [active_workspace.id]
-    elif target.startswith('workspace:'):
-        selected_workspace_ids = [target.removeprefix('workspace:')]
-    if target == 'full-environment':
+    elif any(selected_target.startswith('workspace:') for selected_target in targets):
+        selected_workspace_ids = [
+            selected_target.removeprefix('workspace:')
+            for selected_target in targets if selected_target.startswith('workspace:')
+        ]
+    if targets == ['full-environment']:
         _selected_export_workspaces(selected_workspace_ids)
     else:
-        export_archive_filename(target)
+        export_archive_filename(targets)
     package_dir = export_package_dir()
     package_dir.mkdir(parents=True, exist_ok=True)
     job_id = uuid4().hex
@@ -6171,7 +6359,8 @@ def start_transfer_job(
         'id': job_id,
         'owner': user.username,
         'destination': destination,
-        'target': target,
+        'target': targets[0] if len(targets) == 1 else 'bundle',
+        'targets': targets,
         'workspace_ids': selected_workspace_ids,
         'include_generated_outputs': include_generated_outputs,
         'path': str(package_dir / f'transfer-{job_id}.zip'),
@@ -6204,6 +6393,27 @@ def require_import_export_permission(user: SessionUser, target: str) -> None:
         status_code=status.HTTP_403_FORBIDDEN,
         detail='Only super-admins can import or export configuration and workspaces.',
     )
+
+
+def require_export_targets_permission(user: SessionUser, targets: str | Iterable[str]) -> list[str]:
+    normalized = normalize_export_targets(targets)
+    for target in normalized:
+        require_export_permission(user, target)
+    return normalized
+
+
+def require_import_manifest_permission(user: SessionUser, manifest: dict[str, Any]) -> None:
+    if str(manifest.get('kind') or '') != 'bundle':
+        require_import_export_permission(user, str(manifest.get('kind') or ''))
+        return
+    targets = manifest.get('targets')
+    if not isinstance(targets, list):
+        raise HTTPException(status_code=400, detail='The export bundle has no valid content selection.')
+    for target in normalize_export_targets([str(value) for value in targets]):
+        require_import_export_permission(
+            user,
+            'workspace' if target.startswith('workspace:') else 'config' if target == 'config-with-templates' else target,
+        )
 
 
 def require_export_permission(user: SessionUser, target: str) -> None:
@@ -9021,11 +9231,7 @@ def reporting_query_columns(dataset_kind: str, catalog_entries: list[Any], multi
         # Scatter and Map KPIs declare their two coordinates as
         # ``latitude vs longitude``. They are physical CDR columns, not one
         # combined column name.
-        requested.update(
-            part.strip(' `')
-            for part in re.split(r'\s+vs\s+|\s*\|\s*', entry.kpi, flags=re.IGNORECASE)
-            if part.strip()
-        )
+        requested.update(catalog_kpi_fields(entry.kpi))
         requested.update(_legend_dimensions(entry.legend))
         requested.update(parse_catalog_grouping(entry.grouping_rows).dimensions)
         requested.update(parse_catalog_grouping(entry.grouping_columns).dimensions)
@@ -9369,7 +9575,8 @@ def _temporary_chart_definition_changes(editable: dict[str, Any]) -> dict[str, s
     }
     changes = {key: str(value or '') for key, value in editable.items() if key in allowed}
     if 'legend_position' in changes:
-        changes['legend_position'] = parse_legend_position(changes['legend_position'])
+        raw_position = changes['legend_position'].strip()
+        changes['legend_position'] = parse_legend_position(raw_position) if raw_position else ''
     return changes
 
 
@@ -10023,7 +10230,10 @@ def _chart_builder_context(payload: dict[str, Any]) -> tuple[pd.DataFrame, Catal
         kpi=str(definition.get('kpi') or ''), chart_type=str(definition.get('chart_type') or '100% Stacked Vertical Bars'),
         legend=str(definition.get('legend') or ''), filters=str(definition.get('filters') or ''),
         grouping_rows=str(definition.get('grouping_rows') or ''), grouping_columns=str(definition.get('grouping_columns') or ''),
-        legend_position=parse_legend_position(str(definition.get('legend_position') or 'Top')),
+        legend_position=(
+            parse_legend_position(str(definition.get('legend_position')).strip())
+            if str(definition.get('legend_position') or '').strip() else ''
+        ),
     )
     frame_key = _chart_preview_cache_key('chart-builder-source-frame', {
         'dataset_ids': sorted(selected_ids),
@@ -12228,21 +12438,37 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
     kind = str(payload.get('kind') or '')
     if kind not in {
         'config', 'workspace', 'full-environment', 'slides-templates',
-        'auto-calculated-fields', 'dashboards', 'operator-mappings', 'database-backup',
+        'auto-calculated-fields', 'dashboards', 'operator-mappings', 'database-backup', 'bundle',
     }:
         raise HTTPException(status_code=400, detail='The offered export type is not supported.')
     if payload.get('archive_version') != ARCHIVE_VERSION:
         raise HTTPException(status_code=409, detail='The source server uses an incompatible export package version.')
     components = archive_manifest_components(payload)
     workspace_components = archive_workspace_components(payload)
+    try:
+        targets = normalize_export_targets(payload.get('targets') or [kind]) if kind == 'bundle' else [kind]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if kind == 'bundle' and len(targets) < 2:
+        raise HTTPException(status_code=400, detail='The offered export bundle has no valid multi-selection.')
+    expected_components_source: list[str] = []
+    expected_workspace_source: list[str] = []
+    for target in targets:
+        target_kind = 'workspace' if target.startswith('workspace:') else 'config' if target in {'config', 'config-with-templates'} else target
+        target_manifest = archive_manifest(
+            target_kind,
+            workspace_components=archive_workspace_components_for_target(target),
+        )
+        expected_components_source.extend(archive_manifest_components(target_manifest))
+        expected_workspace_source.extend(archive_workspace_components(target_manifest))
     expected_manifest = archive_manifest(
-        kind,
-        workspace_components=archive_workspace_components_for_target(kind),
+        kind, components=expected_components_source,
+        workspace_components=expected_workspace_source,
     )
     expected_components = archive_manifest_components(expected_manifest)
     expected_workspace_components = archive_workspace_components(expected_manifest)
     valid_workspace_components = set(WORKSPACE_ARCHIVE_COMPONENTS)
-    if kind in {'workspace', 'full-environment'}:
+    if kind in {'workspace', 'full-environment'} or any(target.startswith('workspace:') for target in targets):
         required_workspace_components = {'workspace_database', 'input', 'report_templates', 'auto_calculated_fields'}
         workspace_components_valid = (
             required_workspace_components <= set(workspace_components)
@@ -12305,6 +12531,8 @@ async def receive_transfer_offer(request: Request) -> JSONResponse:
         'kind': kind,
         'components': components,
         'workspace_components': workspace_components,
+        'targets': targets,
+        'requires_destination_workspaces': any(target in WORKSPACE_ELEMENT_EXPORT_TARGETS for target in targets),
         'content': content,
         'workspaces': workspaces,
         'secret_hash': secret_hash,
@@ -12425,7 +12653,7 @@ def list_pending_transfer_offers(user: SessionUser = Depends(super_admin_user)) 
     with TRANSFER_LOCK:
         _refresh_persisted_transfer_offers()
         offers = [
-            {key: offer.get(key) for key in ('id', 'source', 'source_address', 'kind', 'content', 'workspaces', 'created_at')}
+            {key: offer.get(key) for key in ('id', 'source', 'source_address', 'kind', 'targets', 'content', 'workspaces', 'created_at', 'requires_destination_workspaces')}
             for offer in TRANSFER_OFFERS.values()
             if offer.get('status') == 'pending'
         ]
@@ -12509,9 +12737,7 @@ async def accept_transfer_offer(
         if not offer:
             raise HTTPException(status_code=404, detail='The pending transfer offer no longer exists.')
         if offer.get('status') == 'pending':
-            if offer.get('kind') in {
-                'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings',
-            }:
+            if offer.get('requires_destination_workspaces') or offer.get('kind') in WORKSPACE_ELEMENT_EXPORT_TARGETS:
                 workspaces = workspace_registry.list()
                 available = {workspace.id for workspace in workspaces}
                 # The browser normally opens the destination picker. Retain a
@@ -12562,18 +12788,18 @@ def reject_transfer_offer(offer_id: str, user: SessionUser = Depends(super_admin
 def create_admin_transfer_job(
     destination_url: str = Form(...),
     destination_port: int | None = Form(None),
-    export_target: str = Form(...),
+    export_target: list[str] = Form(...),
     workspace_ids: list[str] | None = Form(None),
     include_generated_outputs: bool = Form(True),
     user: SessionUser = Depends(admin_user),
 ) -> JSONResponse:
-    require_export_permission(user, export_target)
+    targets = require_export_targets_permission(user, export_target)
     try:
         job = start_transfer_job(
             destination_url,
             destination_port,
-            export_target,
-            workspace_ids if export_target == 'full-environment' else None,
+            targets,
+            workspace_ids if targets == ['full-environment'] else None,
             user,
             include_generated_outputs=include_generated_outputs,
         )
@@ -12633,15 +12859,15 @@ def export_admin_package(
 
 @app.post('/admin/import-export/export/jobs')
 def create_admin_export_job(
-    export_target: str = Form(...),
+    export_target: list[str] = Form(...),
     workspace_ids: list[str] | None = Form(None),
     include_generated_outputs: bool = Form(True),
     user: SessionUser = Depends(admin_user),
 ) -> JSONResponse:
-    require_export_permission(user, export_target)
+    targets = require_export_targets_permission(user, export_target)
     try:
         job = start_export_job(
-            export_target, workspace_ids if export_target == 'full-environment' else None,
+            targets, workspace_ids if targets == ['full-environment'] else None,
             include_generated_outputs=include_generated_outputs,
             owner=user.username,
         )
@@ -12658,7 +12884,7 @@ def create_admin_export_job(
 def get_admin_export_job(job_id: str, user: SessionUser = Depends(admin_user)) -> JSONResponse:
     if not (payload := export_job_payload(job_id)):
         raise HTTPException(status_code=404, detail='The export job no longer exists. Start a new export.')
-    require_export_permission(user, str(payload['target']))
+    require_export_targets_permission(user, payload.get('targets') or [str(payload['target'])])
     return JSONResponse(payload)
 
 
@@ -12666,7 +12892,7 @@ def get_admin_export_job(job_id: str, user: SessionUser = Depends(admin_user)) -
 def download_admin_export_job(job_id: str, user: SessionUser = Depends(admin_user)) -> FileResponse:
     if not (payload := export_job_payload(job_id)):
         raise HTTPException(status_code=404, detail='The export job no longer exists. Start a new export.')
-    require_export_permission(user, str(payload['target']))
+    require_export_targets_permission(user, payload.get('targets') or [str(payload['target'])])
     if payload['status'] != 'ready':
         raise HTTPException(status_code=409, detail='The export package is still being prepared.')
     with EXPORT_JOBS_LOCK:
@@ -12713,10 +12939,10 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
     kind = str(manifest.get('kind') or '')
     if kind not in {
         'config', 'workspace', 'full-environment', 'slides-templates',
-        'auto-calculated-fields', 'dashboards', 'operator-mappings', 'database-backup',
+        'auto-calculated-fields', 'dashboards', 'operator-mappings', 'database-backup', 'bundle',
     }:
         raise ValueError('The export package type is not supported.')
-    require_import_export_permission(user, kind)
+    require_import_manifest_permission(user, manifest)
     with IMPORT_JOBS_LOCK:
         IMPORT_UPLOADS[upload_id] = {
             'path': str(package_path),
@@ -12730,7 +12956,8 @@ def _retain_import_upload(upload_id: str, package_path: Path, user: SessionUser)
         'includes_slides_templates': bool(manifest.get('includes_slides_templates')),
         'workspace_collisions': import_workspace_collisions(manifest),
     }
-    if kind in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'}:
+    if manifest_requires_destination_workspaces(manifest):
+        response_payload['requires_destination_workspaces'] = True
         response_payload['selected_workspace_ids'] = matching_template_workspaces(manifest, accessible_workspaces(user))
         response_payload['destination_workspaces'] = [
             {'id': workspace.id, 'name': workspace.name} for workspace in accessible_workspaces(user)
@@ -12798,10 +13025,10 @@ def create_admin_import_job(
         if not upload or upload.get('owner') != user.username:
             raise HTTPException(status_code=404, detail='The uploaded package is no longer available. Select it again.')
         kind = str(upload['manifest'].get('kind') or '')
-    require_import_export_permission(user, kind)
+    require_import_manifest_permission(user, upload['manifest'])
     selected_workspaces = list(dict.fromkeys(workspace_ids or []))
-    if kind in {'auto-calculated-fields', 'slides-templates', 'dashboards', 'operator-mappings'}:
-        if not selected_workspaces and kind in {'slides-templates', 'dashboards', 'operator-mappings'}:
+    if manifest_requires_destination_workspaces(upload['manifest']):
+        if not selected_workspaces and kind != 'auto-calculated-fields':
             selected_workspaces = matching_template_workspaces(upload['manifest'], accessible_workspaces(user))
         allowed = {workspace.id for workspace in accessible_workspaces(user)}
         if not selected_workspaces:
@@ -12840,9 +13067,9 @@ async def import_admin_package(
         manifest = read_import_manifest(package_path)
         if not confirmed_import:
             raise ValueError('Confirm the import warning before applying this package.')
-        require_import_export_permission(user, str(manifest.get('kind')))
+        require_import_manifest_permission(user, manifest)
         destinations = []
-        if manifest.get('kind') in {'slides-templates', 'dashboards', 'operator-mappings'}:
+        if manifest_requires_destination_workspaces(manifest):
             destinations = matching_template_workspaces(manifest, accessible_workspaces(user))
             if not destinations:
                 raise ValueError('Select destination workspaces using the Import / Export / Transfer panel.')
@@ -13916,24 +14143,38 @@ def report_catalogue_copy_options(user: SessionUser = Depends(admin_user)) -> JS
 async def _save_workspace_dimensions(request: Request, user: SessionUser) -> JSONResponse:
     if not active_workspace:
         raise HTTPException(status_code=400, detail='Open a workspace before managing auto-calculated fields.')
+    workspace = active_workspace
     try:
         payload = await request.json()
-        previous = load_workspace_calculated_dimensions()
-        dimensions = write_workspace_calculated_dimensions(payload.get('dimensions'))
-        affected_sources = affected_calculated_dimension_sources(previous, dimensions)
-        renames = calculated_dimension_rename_map(payload, previous, dimensions)
-        renamed_templates = rename_calculated_dimension_template_references(renames)
-        job = start_auto_calculated_field_job(
-            active_workspace, previous, dimensions, renames, user.username,
-        )
+
+        def save_and_queue() -> tuple[Any, set[str], int, dict[str, Any]]:
+            previous = load_workspace_calculated_dimensions()
+            dimensions = write_workspace_calculated_dimensions(payload.get('dimensions'))
+            affected_sources = affected_calculated_dimension_sources(previous, dimensions)
+            renames = calculated_dimension_rename_map(payload, previous, dimensions)
+            renamed_templates = rename_calculated_dimension_template_references(renames)
+
+            def record_save(job: dict[str, Any]) -> None:
+                repository.add_log(user.username, 'save_workspace_calculated_dimensions', json.dumps({
+                    'workspace': workspace.id, 'count': len(dimensions),
+                    'materialization_job': job['id'], 'renamed_templates': renamed_templates,
+                    'affected_sources': sorted(affected_sources),
+                }))
+
+            job = start_auto_calculated_field_job(
+                workspace, previous, dimensions, renames, user.username,
+                before_submit=record_save,
+            )
+            return dimensions, affected_sources, renamed_templates, job
+
+        # Workspace writes may briefly wait for a large CDR transaction. Keep
+        # that wait away from the ASGI event loop so the rest of the Dashboard
+        # API remains responsive instead of surfacing unrelated 504 errors.
+        dimensions, affected_sources, renamed_templates, job = await run_in_threadpool(save_and_queue)
     except (ValueError, TypeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (OSError, sqlite3.Error) as exc:
         raise HTTPException(status_code=503, detail=f'Unable to save auto-calculated fields: {exc}') from exc
-    repository.add_log(user.username, 'save_workspace_calculated_dimensions', json.dumps({
-        'workspace': active_workspace.id, 'count': len(dimensions), 'materialization_job': job['id'],
-        'renamed_templates': renamed_templates, 'affected_sources': sorted(affected_sources),
-    }))
     return JSONResponse({
         'dimensions': calculated_dimensions_json(dimensions),
         'materialization_job': job['id'],
@@ -14035,10 +14276,13 @@ def rematerialize_workspace_auto_calculated_fields(
     current = list(load_workspace_calculated_dimensions())
     job = start_auto_calculated_field_job(
         active_workspace, (), current, {}, user.username,
+        before_submit=lambda pending_job: repository.add_log(
+            user.username, 'rematerialize_workspace_auto_calculated_fields', json.dumps({
+                'workspace': active_workspace.id, 'count': len(current),
+                'materialization_job': pending_job['id'],
+            }),
+        ),
     )
-    repository.add_log(user.username, 'rematerialize_workspace_auto_calculated_fields', json.dumps({
-        'workspace': active_workspace.id, 'count': len(current), 'materialization_job': job['id'],
-    }))
     return JSONResponse({
         'materialization_job': job['id'],
         'materialization_status_url': f'/api/workspace/auto-calculated-fields/materialization/{job["id"]}',
@@ -14085,12 +14329,14 @@ async def import_workspace_calculated_dimensions(
         affected_sources = affected_calculated_dimension_sources(previous, saved)
         job = start_auto_calculated_field_job(
             active_workspace, previous, saved, {}, user.username,
+            before_submit=lambda _pending_job: repository.add_log(
+                user.username, 'import_workspace_calculated_dimensions', json.dumps({
+                    'workspace': active_workspace.id, 'imported': len(imported), 'count': len(saved),
+                }),
+            ),
         )
     except (UnicodeDecodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
         return RedirectResponse(f'/workspace?{urlencode({"workspace_error": str(exc)})}#calculated-dimensions', status_code=303)
-    repository.add_log(user.username, 'import_workspace_calculated_dimensions', json.dumps({
-        'workspace': active_workspace.id, 'imported': len(imported), 'count': len(saved),
-    }))
     notice = (
         f'Imported {len(imported)} auto-calculated fields. Applicable CDR tables are being updated '
         'in the background; you can continue working.'
