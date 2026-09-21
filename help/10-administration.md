@@ -147,9 +147,9 @@ Automated rows support:
 
 Choose a KPI and at least one Rows or Column Aggregation dimension. `CDF Line` creates one curve per complete aggregation combination. Count charts retain empty combinations where required so comparisons remain aligned.
 
-CDF ranges are visual settings, not data filters. For example, `Axis X Range: [0.01,]` starts the horizontal axis at `0.01` while retaining its automatically calculated maximum; `[,30]` retains the automatic minimum and fixes the maximum at `30`. Empty range cells preserve the existing automatic behaviour. The range columns must remain empty for non-CDF charts.
+CDF ranges are visual settings, not data filters. For example, `Axis X Range: [0.01,]` starts the horizontal axis at `0.01` while retaining its automatically calculated maximum; `[,30]` retains the automatic minimum and fixes the maximum at `30`. Empty range cells preserve the existing automatic behaviour. The editor enables these columns only for CDF charts and clears them automatically if the chart type changes to another family.
 
-`Label` overrides value-label placement only for bar charts. `None` hides values, `Top` places them outside the bar, and `Up`, `Middle` and `Down` place them inside near the leading edge, centre or origin edge. For horizontal bars those directions map respectively to outside-right, inside-right, centre and inside-left. An empty cell preserves each renderer's existing fit-aware behaviour.
+`Label` overrides value-label placement only for bar charts. `None` hides values, `Top` places them outside the bar, and `Up`, `Middle` and `Down` place them inside near the leading edge, centre or origin edge. For horizontal bars those directions map respectively to outside-right, inside-right, centre and inside-left. An empty cell preserves each renderer's existing fit-aware behaviour; the editor disables and clears this field for non-bar charts.
 
 ### Chart recipes
 

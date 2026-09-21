@@ -601,6 +601,22 @@ def test_catalogue_bar_label_position_is_validated_and_serialised() -> None:
     assert b',Down,,' in catalogue_csv([entry])
 
 
+def test_catalogue_rejects_visual_settings_for_incompatible_chart_types() -> None:
+    non_cdf_range = (
+        ','.join(CATALOG_HEADERS)
+        + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Data,Metric,Average Vertical Bars,,Operator,,,Top,,"[0.01,]",\n'
+    )
+    with pytest.raises(ValueError, match='Axis ranges are supported only by CDF charts'):
+        parse_catalog_csv(non_cdf_range, 'nsa')
+
+    non_bar_label = (
+        ','.join(CATALOG_HEADERS)
+        + '\n8,Quality,,Title and 1 column + Comments,Quality,CDR-Data,Metric,CDF Line,,Operator,,,Top,Down,,\n'
+    )
+    with pytest.raises(ValueError, match='Label is supported only by bar charts'):
+        parse_catalog_csv(non_bar_label, 'nsa')
+
+
 def test_chart_payload_applies_cdf_ranges_and_bar_label_override() -> None:
     frame = pd.DataFrame({'Operator': ['A'] * 4, 'Metric': [0.0, 1.0, 2.0, 3.0]})
     base = dict(

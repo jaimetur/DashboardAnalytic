@@ -48,6 +48,24 @@ def test_dashboard_filter_panel_state_is_scoped_to_the_authenticated_session():
     assert 'await openDashboard(last, {showFilters: rememberedFiltersOpen()});' in dashboard_script
 
 
+def test_template_visual_controls_follow_the_selected_chart_type():
+    root = Path(__file__).parents[1]
+    app_script = (root / 'src/web_interface/static/js/app.js').read_text(encoding='utf-8')
+    reporting_template = (root / 'src/web_interface/templates/reporting.html').read_text(encoding='utf-8')
+
+    assert 'const syncConditionalVisualCells = (row, {clear = true} = {}) =>' in app_script
+    assert "'Axis X Range': chartType.includes('cdf')" in app_script
+    assert "Label: chartType.includes('bars')" in app_script
+    assert "cell.contentEditable = enabled ? 'true' : 'false';" in app_script
+    assert "if (!enabled && clear && cell.textContent.trim()) cell.textContent = '';" in app_script
+    assert 'const syncConditionalVisualControls = () =>' in app_script
+    assert "axis_x_range: chartType.includes('cdf')" in app_script
+    assert "label_position: chartType.includes('bars')" in app_script
+    assert "if (control.name === 'chart_type') syncConditionalVisualControls();" in app_script
+    assert "['axis_x_range', 'Axis X Range']" in reporting_template
+    assert "['label_position', 'Label']" in reporting_template
+
+
 def test_compact_landscape_dashboard_comments_are_docked_to_the_bottom():
     stylesheet = (Path(__file__).parents[1] / 'src/web_interface/static/css/e2e_dashboards.css').read_text(encoding='utf-8')
 

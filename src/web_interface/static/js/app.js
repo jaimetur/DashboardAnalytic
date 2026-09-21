@@ -2441,6 +2441,12 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
     });
   };
   const selectCell = (cell) => {
+    if (cell.getAttribute('aria-disabled') === 'true') {
+      if (activeCell) activeCell.classList.remove('is-selected');
+      activeCell = null;
+      hideCellAssistance();
+      return;
+    }
     if (activeCell) activeCell.classList.remove('is-selected');
     activeCell = cell;
     activeCell.classList.add('is-selected');
@@ -2572,6 +2578,25 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       ?? '';
     return field === 'Filters' ? canonicalFilterValue(value) : value;
   };
+  const syncConditionalVisualCells = (row, {clear = true} = {}) => {
+    if (!row) return;
+    const chartType = rowValue(row, 'Chart type').toLocaleLowerCase();
+    const applicability = {
+      'Axis X Range': chartType.includes('cdf'),
+      'Axis Y Range': chartType.includes('cdf'),
+      Label: chartType.includes('bars'),
+    };
+    Object.entries(applicability).forEach(([field, enabled]) => {
+      const cell = row.querySelector(`[data-catalogue-field="${field}"]`);
+      if (!cell) return;
+      if (!enabled && clear && cell.textContent.trim()) cell.textContent = '';
+      cell.contentEditable = enabled ? 'true' : 'false';
+      cell.setAttribute('aria-disabled', String(!enabled));
+      cell.classList.toggle('is-inapplicable', !enabled);
+      cell.title = enabled ? '' : `${field} is not available for this chart type.`;
+      refreshCellEditedState(cell);
+    });
+  };
   const rowValues = (row) => {
     const values = Object.fromEntries(catalogueHeaders.map((header) => [header, rowValue(row, header)]));
     values.__editedFields = Array.from(row.querySelectorAll('[data-catalogue-field].is-edited'))
@@ -2648,6 +2673,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       if (source.__editedFields?.includes(header)) cell.classList.add('is-edited');
       row.append(cell);
     });
+    syncConditionalVisualCells(row);
     return row;
   };
   const sortCatalogueRows = (rows) => rows.map((row, position) => {
@@ -2894,6 +2920,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
         else { cell.replaceChildren(); renderAddedText(cell, value, cell.dataset.originalValue || ''); }
       }
     });
+    syncConditionalVisualCells(chartPreviewRow);
     showInfoDialog('The current preview values have been applied to this template row. Save the template to persist them.', {title: 'Template updated'});
   });
   chartPreviewData?.addEventListener('click', async () => {
@@ -3232,6 +3259,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
   table.addEventListener('input', (event) => {
     const cell = event.target.closest?.('[data-catalogue-field]');
     refreshCellEditedState(cell);
+    if (cell?.dataset.catalogueField === 'Chart type') syncConditionalVisualCells(cell.closest('tr'));
     if (cell?.dataset.catalogueField === 'Filters') refreshFilterValidationAlert();
   });
   document.addEventListener('pointerdown', (event) => {
@@ -3299,6 +3327,7 @@ document.querySelectorAll('[data-catalogue-editor]').forEach((editor) => {
       activeCell.textContent = [...retained, ...additions].join(' × ');
     }
     refreshCellEditedState(activeCell);
+    if (field === 'Chart type') syncConditionalVisualCells(activeCell.closest('tr'));
     if (activeCell.classList.contains('is-edited')) {
       const value = rowValue(activeCell.closest('tr'), field);
       if (field === 'Filters') renderFilterCell(activeCell, value, activeCell.dataset.originalValue || '');
@@ -5186,10 +5215,40 @@ function createInteractiveChartPreviewControls(fieldsElement, definition, option
     }
     return field;
   }));
+  const syncConditionalVisualControls = () => {
+    const chartType = String(fieldsElement.querySelector('[name="chart_type"]')?.value || '').toLocaleLowerCase();
+    const applicability = {
+      axis_x_range: chartType.includes('cdf'),
+      axis_y_range: chartType.includes('cdf'),
+      label_position: chartType.includes('bars'),
+    };
+    Object.entries(applicability).forEach(([name, enabled]) => {
+      const control = fieldsElement.querySelector(`[name="${name}"]`);
+      if (!control) return;
+      if (!enabled) {
+        control.value = '';
+        control.dataset.previewDisplay = '';
+      }
+      control.disabled = !enabled;
+      const field = control.closest('[data-preview-field]');
+      field?.classList.toggle('is-inapplicable', !enabled);
+      if (field) field.title = enabled ? '' : 'Not available for this chart type.';
+      const trigger = control.nextElementSibling?.querySelector('.report-chart-preview-select-trigger');
+      if (trigger) trigger.disabled = !enabled;
+    });
+  };
+  syncConditionalVisualControls();
   setupSelects();
+  syncConditionalVisualControls();
   fieldsElement.querySelector('[name="cdr_source"]')?.addEventListener('change', () => options.onSourceChange?.(currentDefinition()));
-  fieldsElement.querySelectorAll('[name]').forEach((control) => control.addEventListener('input', () => options.onChange?.(currentDefinition())));
-  fieldsElement.querySelectorAll('select[name]').forEach((control) => control.addEventListener('change', () => options.onChange?.(currentDefinition())));
+  fieldsElement.querySelectorAll('[name]').forEach((control) => control.addEventListener('input', () => {
+    if (control.name === 'chart_type') syncConditionalVisualControls();
+    options.onChange?.(currentDefinition());
+  }));
+  fieldsElement.querySelectorAll('select[name]').forEach((control) => control.addEventListener('change', () => {
+    if (control.name === 'chart_type') syncConditionalVisualControls();
+    options.onChange?.(currentDefinition());
+  }));
   const kpiAggregation = fieldsElement.querySelector('[data-preview-kpi-aggregation]');
   kpiAggregation?.addEventListener('input', () => options.onChange?.(currentDefinition()));
   kpiAggregation?.addEventListener('change', () => options.onChange?.(currentDefinition()));
